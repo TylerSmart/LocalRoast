@@ -47,6 +47,13 @@ export const routes: Routes = [
           ),
       },
       {
+        path: 'matcher',
+        loadComponent: () =>
+          import('./features/recipes/fridge-matcher/fridge-matcher.component').then(
+            (m) => m.FridgeMatcherComponent,
+          ),
+      },
+      {
         path: 'catalog',
         loadComponent: () =>
           import('./features/food-catalog/food-catalog/food-catalog.component').then(

@@ -131,4 +131,65 @@ public sealed class RecipesController(IRecipeService recipeService) : Controller
             );
         }
     }
+
+    [HttpPut("{id:guid}/organization")]
+    [ProducesResponseType(typeof(RecipeDetailDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> UpdateRecipeOrganization(
+        Guid id,
+        [FromBody] UpdateRecipeOrganizationRequest request,
+        CancellationToken cancellationToken
+    )
+    {
+        try
+        {
+            var updated = await recipeService.UpdateRecipeOrganizationAsync(
+                id,
+                request,
+                cancellationToken
+            );
+            return updated is not null ? Ok(updated) : NotFound();
+        }
+        catch (DomainValidationException ex)
+        {
+            return BadRequest(
+                new ProblemDetails
+                {
+                    Status = StatusCodes.Status400BadRequest,
+                    Title = ex.Title,
+                    Detail = ex.Message,
+                }
+            );
+        }
+    }
+
+    [HttpPost("match-ingredients")]
+    [ProducesResponseType(typeof(IReadOnlyList<IngredientMatchResultDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> MatchRecipesByIngredients(
+        [FromBody] IngredientMatchRequest request,
+        CancellationToken cancellationToken
+    )
+    {
+        try
+        {
+            var results = await recipeService.MatchRecipesByIngredientsAsync(
+                request,
+                cancellationToken
+            );
+            return Ok(results);
+        }
+        catch (DomainValidationException ex)
+        {
+            return BadRequest(
+                new ProblemDetails
+                {
+                    Status = StatusCodes.Status400BadRequest,
+                    Title = ex.Title,
+                    Detail = ex.Message,
+                }
+            );
+        }
+    }
 }

@@ -7,6 +7,7 @@ namespace App.Client.E2ETests;
 public sealed class PlaywrightServerFixture : IAsyncDisposable
 {
     private Process? _process;
+    private string? _tempUploadsPath;
 
     public string ServerUrl { get; private set; } = string.Empty;
 
@@ -41,12 +42,17 @@ public sealed class PlaywrightServerFixture : IAsyncDisposable
         }
 
         var inMemoryDbName = $"E2E_Test_{Guid.NewGuid():N}";
+        _tempUploadsPath = Path.Combine(
+            Path.GetTempPath(),
+            $"LocalRoast_E2E_Uploads_{Guid.NewGuid():N}"
+        );
+        Directory.CreateDirectory(_tempUploadsPath);
 
         var psi = new ProcessStartInfo
         {
             FileName = "dotnet",
             Arguments =
-                $"exec \"{apiDllPath}\" --urls \"{ServerUrl}\" --environment Testing --UseInMemoryDatabase=true --InMemoryDatabaseName={inMemoryDbName} --webroot \"{webRootPath}\" --Jwt:SecretKey=super-secret-key-that-is-at-least-32-bytes-long-for-tests --Jwt:Issuer=App --Jwt:Audience=App",
+                $"exec \"{apiDllPath}\" --urls \"{ServerUrl}\" --environment Testing --UseInMemoryDatabase=true --InMemoryDatabaseName={inMemoryDbName} --webroot \"{webRootPath}\" --Jwt:SecretKey=super-secret-key-that-is-at-least-32-bytes-long-for-tests --Jwt:Issuer=App --Jwt:Audience=App --MediaStorage:UploadsPath=\"{_tempUploadsPath}\"",
             WorkingDirectory = Path.Combine(solutionDir, "API"),
             UseShellExecute = false,
             CreateNoWindow = true,
@@ -57,6 +63,7 @@ public sealed class PlaywrightServerFixture : IAsyncDisposable
         psi.EnvironmentVariables["ASPNETCORE_ENVIRONMENT"] = "Testing";
         psi.EnvironmentVariables["UseInMemoryDatabase"] = "true";
         psi.EnvironmentVariables["InMemoryDatabaseName"] = inMemoryDbName;
+        psi.EnvironmentVariables["MediaStorage__UploadsPath"] = _tempUploadsPath;
 
         _process = new Process { StartInfo = psi };
         _process.OutputDataReceived += (_, _) => { };
@@ -154,6 +161,18 @@ public sealed class PlaywrightServerFixture : IAsyncDisposable
             {
                 _process.Dispose();
                 _process = null;
+            }
+        }
+
+        if (!string.IsNullOrEmpty(_tempUploadsPath) && Directory.Exists(_tempUploadsPath))
+        {
+            try
+            {
+                Directory.Delete(_tempUploadsPath, recursive: true);
+            }
+            catch
+            {
+                // Best-effort cleanup
             }
         }
     }

@@ -11,15 +11,21 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSelectModule } from '@angular/material/select';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatTooltipModule } from '@angular/material/tooltip';
-import { RouterLink } from '@angular/router';
+import { ActivatedRoute, RouterLink } from '@angular/router';
 import {
   RecipeDifficulty,
   RecipeQueryParameters,
   RecipeStatus,
   RecipeSummaryDto,
 } from '../../../core/models/recipe.models';
+import { CollectionDto, TagCategory, TagDto } from '../../../core/models/taxonomy.models';
 import { RecipeService } from '../../../core/services/recipe/recipe.service';
+import { TaxonomyService } from '../../../core/services/taxonomy/taxonomy.service';
 import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialog/confirm-dialog.component';
+import {
+  CollectionDialogComponent,
+  CollectionDialogData,
+} from '../collection-dialog/collection-dialog.component';
 
 @Component({
   imports: [
@@ -41,22 +47,51 @@ import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialo
 })
 export class RecipeListComponent implements OnInit {
   private readonly recipeService = inject(RecipeService);
+  private readonly taxonomyService = inject(TaxonomyService);
   private readonly dialog = inject(MatDialog);
   private readonly snackBar = inject(MatSnackBar);
+  private readonly route = inject(ActivatedRoute);
 
   protected readonly recipes = signal<RecipeSummaryDto[]>([]);
+  protected readonly collections = signal<CollectionDto[]>([]);
+  protected readonly tags = signal<TagDto[]>([]);
+
   protected readonly searchQuery = signal<string>('');
   protected readonly selectedStatus = signal<RecipeStatus | 'All'>('Published');
   protected readonly selectedDifficulty = signal<RecipeDifficulty | 'All'>('All');
   protected readonly maxTimeMinutes = signal<number | null>(null);
+  protected readonly selectedCollectionId = signal<string | null>(null);
+  protected readonly selectedTagIds = signal<string[]>([]);
+
   protected readonly isLoading = signal<boolean>(false);
   protected readonly errorMessage = signal<string | null>(null);
+
+  protected readonly tagCategories: TagCategory[] = [
+    'Course',
+    'Cuisine',
+    'Dietary',
+    'Equipment',
+    'Custom',
+  ];
+
+  protected readonly hasActiveFilters = computed(() => {
+    return (
+      this.searchQuery().trim() !== '' ||
+      this.selectedStatus() !== 'Published' ||
+      this.selectedDifficulty() !== 'All' ||
+      this.maxTimeMinutes() !== null ||
+      this.selectedCollectionId() !== null ||
+      this.selectedTagIds().length > 0
+    );
+  });
 
   protected readonly filteredRecipes = computed(() => {
     const query = this.searchQuery().toLowerCase().trim();
     const status = this.selectedStatus();
     const difficulty = this.selectedDifficulty();
     const maxTime = this.maxTimeMinutes();
+    const collectionId = this.selectedCollectionId();
+    const tagIds = this.selectedTagIds();
 
     return this.recipes().filter((r) => {
       if (status !== 'All' && r.status !== status) {
@@ -68,28 +103,58 @@ export class RecipeListComponent implements OnInit {
       if (maxTime !== null && (r.totalTimeMinutes === null || r.totalTimeMinutes > maxTime)) {
         return false;
       }
+      if (collectionId !== null && !r.collections.some((c) => c.id === collectionId)) {
+        return false;
+      }
+      if (tagIds.length > 0 && !tagIds.every((tid) => r.tags.some((t) => t.id === tid))) {
+        return false;
+      }
       if (!query) {
         return true;
       }
       const matchTitle = r.title.toLowerCase().includes(query);
       const matchDesc = (r.description || '').toLowerCase().includes(query);
       const matchSource = (r.sourceName || '').toLowerCase().includes(query);
-      return matchTitle || matchDesc || matchSource;
+      const matchColl = r.collections.some((c) => c.name.toLowerCase().includes(query));
+      const matchTag = r.tags.some((t) => t.name.toLowerCase().includes(query));
+      return matchTitle || matchDesc || matchSource || matchColl || matchTag;
     });
   });
 
   ngOnInit(): void {
-    this.loadRecipes();
+    this.loadTaxonomy();
+
+    this.route.queryParamMap.subscribe((params) => {
+      const colId = params.get('collectionId');
+      if (colId) {
+        this.selectedCollectionId.set(colId);
+      }
+      this.loadRecipes();
+    });
+  }
+
+  loadTaxonomy(): void {
+    this.taxonomyService.getCollections().subscribe({
+      next: (colls) => this.collections.set(colls),
+    });
+    this.taxonomyService.getTags().subscribe({
+      next: (tgs) => this.tags.set(tgs),
+    });
   }
 
   loadRecipes(): void {
     this.isLoading.set(true);
     this.errorMessage.set(null);
 
-    // Request non-archived or all based on query
     const params: RecipeQueryParameters = {};
     if (this.selectedStatus() !== 'All') {
       params.status = this.selectedStatus() as RecipeStatus;
+    }
+    if (this.selectedCollectionId()) {
+      params.collectionId = this.selectedCollectionId();
+    }
+    if (this.selectedTagIds().length > 0) {
+      params.tagIds = this.selectedTagIds();
     }
 
     this.recipeService.getRecipes(params).subscribe({
@@ -97,12 +162,49 @@ export class RecipeListComponent implements OnInit {
         this.recipes.set(list);
         this.isLoading.set(false);
       },
-      error: (err) => {
+      error: (err: { error?: { detail?: string; title?: string } }) => {
         this.isLoading.set(false);
         this.errorMessage.set(
           err?.error?.detail || err?.error?.title || 'Failed to load cookbook recipes.',
         );
       },
+    });
+  }
+
+  selectCollection(id: string | null): void {
+    this.selectedCollectionId.set(id);
+    this.loadRecipes();
+  }
+
+  onTagSelectionChange(tags: string[]): void {
+    this.selectedTagIds.set(tags);
+    this.loadRecipes();
+  }
+
+  tagsByCategory(category: TagCategory): TagDto[] {
+    return this.tags().filter((t) => t.category === category);
+  }
+
+  clearFilters(): void {
+    this.searchQuery.set('');
+    this.selectedStatus.set('Published');
+    this.selectedDifficulty.set('All');
+    this.maxTimeMinutes.set(null);
+    this.selectedCollectionId.set(null);
+    this.selectedTagIds.set([]);
+    this.loadRecipes();
+  }
+
+  openNewCollectionDialog(): void {
+    const ref = this.dialog.open<CollectionDialogComponent, CollectionDialogData, CollectionDto>(
+      CollectionDialogComponent,
+      { width: '420px', data: {} },
+    );
+    ref.afterClosed().subscribe((created) => {
+      if (created) {
+        this.collections.update((prev) => [...prev, created]);
+        this.selectCollection(created.id);
+      }
     });
   }
 
@@ -134,7 +236,7 @@ export class RecipeListComponent implements OnInit {
           this.recipes.update((list) => list.filter((r) => r.id !== recipe.id));
           this.snackBar.open(`Deleted "${recipe.title}"`, 'Close', { duration: 3000 });
         },
-        error: (err) => {
+        error: (err: { error?: { detail?: string; title?: string } }) => {
           this.snackBar.open(
             err?.error?.detail || err?.error?.title || 'Cannot delete recipe.',
             'Close',

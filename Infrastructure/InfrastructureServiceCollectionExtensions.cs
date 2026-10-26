@@ -1,5 +1,7 @@
 using App.Core.Authentication;
+using App.Core.Media;
 using App.Infrastructure.Authentication;
+using App.Infrastructure.Media;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -20,6 +22,11 @@ public static class InfrastructureServiceCollectionExtensions
 
         services.Configure<OidcOptions>(configuration.GetSection(OidcOptions.SectionName));
         services.AddHttpClient<IOidcService, OidcService>();
+
+        services.Configure<MediaStorageOptions>(
+            configuration.GetSection(MediaStorageOptions.SectionName)
+        );
+        services.AddScoped<IMediaStorageService, LocalFileMediaStorageService>();
 
         return services;
     }

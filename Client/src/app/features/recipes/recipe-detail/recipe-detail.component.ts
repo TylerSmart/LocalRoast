@@ -27,6 +27,10 @@ import {
   scaleAndConvert,
 } from '../../../core/utils/culinary-math';
 import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialog/confirm-dialog.component';
+import {
+  RecipeOrganizationDialogComponent,
+  RecipeOrganizationDialogData,
+} from '../recipe-organization-dialog/recipe-organization-dialog.component';
 
 export interface ScaledIngredientItem {
   ingredient: RecipeIngredientDto;
@@ -213,12 +217,40 @@ export class RecipeDetailComponent implements OnInit {
         this.targetServings.set(detail.baseServings);
         this.isLoading.set(false);
       },
-      error: (err) => {
+      error: (err: { error?: { detail?: string; title?: string } }) => {
         this.isLoading.set(false);
         this.errorMessage.set(
           err?.error?.detail || err?.error?.title || 'Failed to load recipe details.',
         );
       },
+    });
+  }
+
+  openOrganizeDialog(): void {
+    const r = this.recipe();
+    if (!r) {
+      return;
+    }
+
+    const ref = this.dialog.open<
+      RecipeOrganizationDialogComponent,
+      RecipeOrganizationDialogData,
+      RecipeDetailDto
+    >(RecipeOrganizationDialogComponent, {
+      width: '520px',
+      data: {
+        recipeId: r.id,
+        recipeTitle: r.title,
+        initialCollectionIds: r.collections.map((c) => c.id),
+        initialTagIds: r.tags.map((t) => t.id),
+      },
+    });
+
+    ref.afterClosed().subscribe((updated) => {
+      if (updated) {
+        this.recipe.set(updated);
+        this.snackBar.open('Recipe collections & tags updated!', 'Close', { duration: 3000 });
+      }
     });
   }
 
@@ -279,7 +311,7 @@ export class RecipeDetailComponent implements OnInit {
           this.snackBar.open(`Deleted "${r.title}"`, 'Close', { duration: 3000 });
           this.router.navigate(['/recipes']);
         },
-        error: (err) => {
+        error: (err: { error?: { detail?: string; title?: string } }) => {
           this.snackBar.open(
             err?.error?.detail || err?.error?.title || 'Cannot delete recipe.',
             'Close',

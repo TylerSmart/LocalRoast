@@ -26,8 +26,81 @@
     font-size: 0.95rem;
     color: var(--mat-sys-on-surface-variant, #49454f);
   }
+
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+  }
 }
 
+/* Collections Pill Strip */
+.collections-strip {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  overflow-x: auto;
+  padding: 0.25rem 0;
+  scrollbar-width: thin;
+
+  &::-webkit-scrollbar {
+    height: 4px;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background-color: var(--mat-sys-outline-variant, #cac4d0);
+    border-radius: 4px;
+  }
+}
+
+.collection-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.85rem;
+  border-radius: 9999px;
+  border: 1px solid var(--mat-sys-outline-variant, #cac4d0);
+  background-color: var(--mat-sys-surface, #ffffff);
+  color: var(--mat-sys-on-surface-variant, #49454f);
+  font-size: 0.85rem;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+
+  &:hover {
+    background-color: var(--mat-sys-surface-container-high, #ece6f0);
+    color: var(--mat-sys-on-surface, #1d1b20);
+  }
+
+  &.active {
+    background-color: var(--mat-sys-secondary-container, #e8def8);
+    color: var(--mat-sys-on-secondary-container, #1d192b);
+    border-color: var(--mat-sys-primary, #6750a4);
+    font-weight: 600;
+  }
+
+  .count-badge {
+    font-size: 0.75rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 9999px;
+    background-color: var(--mat-sys-surface-container-highest, #e6e0e9);
+    color: var(--mat-sys-outline, #79747e);
+  }
+
+  &.add-collection-pill {
+    border-style: dashed;
+
+    mat-icon {
+      font-size: 16px;
+      width: 16px;
+      height: 16px;
+    }
+  }
+}
+
+/* Filter Card */
 .filter-card {
   padding: 1rem;
 }
@@ -41,12 +114,22 @@
 
 .search-field {
   flex: 2;
-  min-width: 260px;
+  min-width: 240px;
 }
 
 .filter-field {
   flex: 1;
-  min-width: 140px;
+  min-width: 130px;
+}
+
+.tag-filter-field {
+  min-width: 150px;
+}
+
+.clear-filters-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
 }
 
 .recipe-error-banner {
@@ -85,7 +168,7 @@
 }
 
 .recipe-card {
-  padding: 1.25rem;
+  overflow: hidden;
   border: 1px solid var(--mat-sys-outline-variant, #cac4d0);
   background-color: var(--mat-sys-surface, #fff);
   box-shadow: none !important;
@@ -103,7 +186,15 @@
   }
 }
 
+.recipe-card-thumb {
+  width: 100%;
+  height: 180px;
+  object-fit: cover;
+  display: block;
+}
+
 .recipe-card-body {
+  padding: 1.25rem;
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
@@ -170,6 +261,39 @@
   line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+/* Badges Row for Collections & Tags */
+.card-badges-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.collection-badge-chip {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  background-color: var(--mat-sys-tertiary-container, #ffd8e4);
+  color: var(--mat-sys-on-tertiary-container, #31111d);
+}
+
+.tag-badge-chip {
+  font-size: 0.72rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  background-color: var(--mat-sys-surface-container-high, #ece6f0);
+  color: var(--mat-sys-on-surface-variant, #49454f);
+
+  &.cat-dietary {
+    background-color: var(--app-success-container, #c4eed0);
+    color: var(--app-on-success-container, #072711);
+  }
+  &.cat-equipment {
+    background-color: var(--mat-sys-secondary-container, #e8def8);
+    color: var(--mat-sys-on-secondary-container, #1d192b);
+  }
 }
 
 .card-meta-row {
@@ -242,5 +366,9 @@
   .search-field,
   .filter-field {
     width: 100%;
+  }
+
+  .recipe-card-body {
+    padding: 1rem;
   }
 }

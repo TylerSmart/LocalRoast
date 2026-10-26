@@ -1,0 +1,107 @@
+<h2 mat-dialog-title>Organize Recipe: {{ data.recipeTitle }}</h2>
+
+<mat-dialog-content>
+  @if (errorMessage()) {
+    <div class="error-banner" role="alert">
+      <mat-icon>error</mat-icon>
+      <span>{{ errorMessage() }}</span>
+    </div>
+  }
+
+  @if (isLoading()) {
+    <div class="loading-state">
+      <mat-spinner diameter="32"></mat-spinner>
+      <span>Loading collections and tags...</span>
+    </div>
+  } @else {
+    <!-- Collections Section -->
+    <section class="org-section">
+      <div class="section-header">
+        <h3 class="section-title">
+          <mat-icon>collections_bookmark</mat-icon>
+          Collections
+        </h3>
+        <button
+          type="button"
+          mat-button
+          color="primary"
+          class="add-taxonomy-btn"
+          (click)="openNewCollection()"
+        >
+          <mat-icon>add</mat-icon>
+          New Collection
+        </button>
+      </div>
+
+      <div class="chip-container">
+        @for (coll of collections(); track coll.id) {
+          <mat-chip-option
+            [selected]="selectedCollectionIds().has(coll.id)"
+            (click)="toggleCollection(coll.id)"
+          >
+            {{ coll.name }}
+          </mat-chip-option>
+        }
+        @if (collections().length === 0) {
+          <span class="empty-hint">No collections created yet.</span>
+        }
+      </div>
+    </section>
+
+    <!-- Tags Section -->
+    <section class="org-section">
+      <div class="section-header">
+        <h3 class="section-title">
+          <mat-icon>label</mat-icon>
+          Tags
+        </h3>
+        <button
+          type="button"
+          mat-button
+          color="primary"
+          class="add-taxonomy-btn"
+          (click)="openNewTag()"
+        >
+          <mat-icon>add</mat-icon>
+          New Tag
+        </button>
+      </div>
+
+      @for (cat of tagCategories; track cat) {
+        @if (tagsByCategory()[cat]?.length) {
+          <div class="category-block">
+            <span class="category-name">{{ cat }}</span>
+            <div class="chip-container">
+              @for (tag of tagsByCategory()[cat]; track tag.id) {
+                <mat-chip-option
+                  [selected]="selectedTagIds().has(tag.id)"
+                  (click)="toggleTag(tag.id)"
+                >
+                  {{ tag.name }}
+                </mat-chip-option>
+              }
+            </div>
+          </div>
+        }
+      }
+      @if (tags().length === 0) {
+        <span class="empty-hint">No tags created yet.</span>
+      }
+    </section>
+  }
+</mat-dialog-content>
+
+<mat-dialog-actions align="end">
+  <button mat-button mat-dialog-close [disabled]="isSubmitting()">Cancel</button>
+  <button
+    mat-flat-button
+    color="primary"
+    (click)="onSave()"
+    [disabled]="isSubmitting() || isLoading()"
+  >
+    @if (isSubmitting()) {
+      <mat-spinner diameter="18" class="btn-spinner"></mat-spinner>
+    }
+    Save
+  </button>
+</mat-dialog-actions>

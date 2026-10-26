@@ -1,0 +1,60 @@
+<div class="search-dialog-container">
+  <div class="search-input-wrapper">
+    <mat-icon class="search-icon">search</mat-icon>
+    <input
+      #searchInput
+      type="text"
+      class="dialog-search-input"
+      [formControl]="searchControl"
+      placeholder="Search recipes, collections, actions..."
+      aria-label="Search recipes, collections, actions"
+      cdkFocusInitial
+    />
+    @if (isSearching()) {
+      <mat-spinner diameter="20" class="search-spinner"></mat-spinner>
+    }
+  </div>
+
+  <div class="results-list" role="listbox" aria-label="Search results">
+    @for (item of searchResults(); track item.id; let idx = $index) {
+      <div
+        class="result-item"
+        [class.active]="idx === activeIndex()"
+        role="option"
+        tabindex="0"
+        [attr.aria-selected]="idx === activeIndex()"
+        (mouseenter)="activeIndex.set(idx)"
+        (click)="selectResult(item)"
+        (keydown.enter)="selectResult(item)"
+      >
+        <div class="item-icon-wrapper" [class]="'type-' + item.type">
+          <mat-icon>{{ item.icon }}</mat-icon>
+        </div>
+        <div class="item-content">
+          <span class="item-title">{{ item.title }}</span>
+          @if (item.subtitle) {
+            <span class="item-subtitle">{{ item.subtitle }}</span>
+          }
+        </div>
+        <div class="item-type-badge">
+          {{ item.type }}
+        </div>
+      </div>
+    }
+
+    @if (searchResults().length === 0 && !isSearching()) {
+      <div class="empty-state">
+        <mat-icon class="empty-icon">search_off</mat-icon>
+        <p>No results found for "{{ searchQuery() }}"</p>
+      </div>
+    }
+  </div>
+
+  <footer class="dialog-footer">
+    <div class="shortcut-hints">
+      <span class="hint-item"><kbd>↑</kbd><kbd>↓</kbd> Navigate</span>
+      <span class="hint-item"><kbd>↵</kbd> Select</span>
+      <span class="hint-item"><kbd>esc</kbd> Close</span>
+    </div>
+  </footer>
+</div>

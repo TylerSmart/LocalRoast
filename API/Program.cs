@@ -6,8 +6,11 @@ using App.Core.Authentication;
 using App.Data;
 using App.Data.Seeding;
 using App.Infrastructure;
+using App.Infrastructure.Media;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.OpenApi;
 using Scalar.AspNetCore;
 using Serilog;
@@ -213,6 +216,34 @@ if (hasHttpsUrl)
 {
     app.UseHttpsRedirection();
 }
+
+var uploadsRoot = MediaStorageOptions.ResolveUploadsRoot(
+    builder.Configuration["MediaStorage:UploadsPath"],
+    app.Environment.ContentRootPath
+);
+Directory.CreateDirectory(uploadsRoot);
+
+var uploadsContentTypeProvider = new FileExtensionContentTypeProvider();
+uploadsContentTypeProvider.Mappings[".webp"] = "image/webp";
+uploadsContentTypeProvider.Mappings[".jpg"] = "image/jpeg";
+uploadsContentTypeProvider.Mappings[".jpeg"] = "image/jpeg";
+uploadsContentTypeProvider.Mappings[".png"] = "image/png";
+uploadsContentTypeProvider.Mappings[".gif"] = "image/gif";
+uploadsContentTypeProvider.Mappings[".pdf"] = "application/pdf";
+
+app.UseStaticFiles(
+    new StaticFileOptions
+    {
+        FileProvider = new PhysicalFileProvider(uploadsRoot),
+        RequestPath = "/api/uploads",
+        ContentTypeProvider = uploadsContentTypeProvider,
+        OnPrepareResponse = ctx =>
+        {
+            ctx.Context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+            ctx.Context.Response.Headers.CacheControl = "public, max-age=31536000, immutable";
+        },
+    }
+);
 
 var serveSpa = SpaHosting.HasIndexHtml(app.Environment.WebRootPath);
 if (serveSpa)

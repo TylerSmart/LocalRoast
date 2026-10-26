@@ -21,12 +21,14 @@
   position: sticky;
   top: 0;
   z-index: 100;
+  gap: 1rem;
 }
 
 .brand-section {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  flex-shrink: 0;
 }
 
 .brand-icon {
@@ -67,6 +69,42 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.search-trigger-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0.75rem;
+  border-radius: 9999px;
+  background-color: var(--mat-sys-surface, #fef7ff);
+  border: 1px solid var(--mat-sys-outline-variant, #cac4d0);
+  color: var(--mat-sys-on-surface-variant, #49454f);
+  font-size: 0.85rem;
+  height: 36px;
+  line-height: 36px;
+
+  mat-icon {
+    font-size: 1.1rem;
+    width: 1.1rem;
+    height: 1.1rem;
+    color: var(--mat-sys-outline, #79747e);
+  }
+
+  .shortcut-kbd {
+    padding: 1px 5px;
+    font-size: 0.7rem;
+    font-family: inherit;
+    background-color: var(--mat-sys-surface-container, #f3ede4);
+    border: 1px solid var(--mat-sys-outline-variant, #cac4d0);
+    border-radius: 4px;
+    color: var(--mat-sys-outline, #79747e);
+  }
+}
+
+.mobile-search-btn {
+  display: none;
 }
 
 .user-profile-btn {
@@ -121,10 +159,22 @@
 /* Mobile responsive layout (360px to 768px) */
 @media (max-width: 768px) {
   .top-bar {
-    padding: 0.5rem 1rem;
+    padding: 0.5rem 0.75rem;
   }
 
   .desktop-nav {
+    display: none;
+  }
+
+  .desktop-search-btn {
+    display: none;
+  }
+
+  .mobile-search-btn {
+    display: inline-flex;
+  }
+
+  .user-name {
     display: none;
   }
 
@@ -155,9 +205,10 @@
       font-size: 0.75rem;
       font-weight: 500;
       gap: 0.2rem;
-      padding: 0.35rem 1rem;
+      padding: 0.35rem 0.75rem;
       border-radius: 1rem;
       transition: background-color 0.15s ease;
+      min-width: 64px;
 
       mat-icon {
         font-size: 1.5rem;

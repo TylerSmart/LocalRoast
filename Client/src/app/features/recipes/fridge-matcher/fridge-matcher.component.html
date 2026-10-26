@@ -1,0 +1,213 @@
+<div class="matcher-container">
+  <header class="matcher-header">
+    <div class="header-text">
+      <h1 class="page-title">Use Up Ingredients</h1>
+      <p class="page-subtitle">
+        Tell us what's in your fridge or pantry, and we'll find recipes you can make right now.
+      </p>
+    </div>
+  </header>
+
+  @if (errorMessage()) {
+    <div class="error-banner" role="alert">
+      <mat-icon>error</mat-icon>
+      <span>{{ errorMessage() }}</span>
+    </div>
+  }
+
+  <!-- Selection Card -->
+  <mat-card class="picker-card" appearance="outlined">
+    <mat-card-header>
+      <mat-card-title>What do you have on hand?</mat-card-title>
+    </mat-card-header>
+    <mat-card-content>
+      <!-- Autocomplete Input -->
+      <mat-form-field appearance="outline" class="search-field">
+        <mat-label>Search ingredients...</mat-label>
+        <mat-icon matPrefix>search</mat-icon>
+        <input
+          matInput
+          [formControl]="searchControl"
+          [matAutocomplete]="auto"
+          placeholder="e.g. Chicken, Lime, Eggs..."
+          aria-label="Search ingredients to match"
+        />
+        <mat-autocomplete #auto="matAutocomplete" (optionSelected)="onOptionSelected($event)">
+          @for (item of filteredFoodItems(); track item.id) {
+            <mat-option [value]="item">
+              <span class="option-name">{{ item.name }}</span>
+              @if (item.aliases.length > 0) {
+                <span class="option-aliases">({{ item.aliases.join(', ') }})</span>
+              }
+            </mat-option>
+          }
+        </mat-autocomplete>
+      </mat-form-field>
+
+      <!-- Selected Chips -->
+      @if (selectedFoodItems().length > 0) {
+        <div class="selected-section">
+          <div class="selected-header">
+            <span class="section-label"
+              >Selected Ingredients ({{ selectedFoodItems().length }}):</span
+            >
+            <button mat-button color="warn" class="clear-btn" (click)="clearSelected()">
+              Clear All
+            </button>
+          </div>
+          <mat-chip-set aria-label="Selected ingredients">
+            @for (item of selectedFoodItems(); track item.id) {
+              <mat-chip-row (removed)="removeFoodItem(item)">
+                {{ item.name }}
+                <button matChipRemove aria-label="Remove ingredient">
+                  <mat-icon>cancel</mat-icon>
+                </button>
+              </mat-chip-row>
+            }
+          </mat-chip-set>
+        </div>
+      }
+
+      <!-- Suggested Items -->
+      @if (suggestedFoodItems().length > 0) {
+        <div class="suggested-section">
+          <span class="section-label">Popular Suggestions:</span>
+          <div class="suggested-chips">
+            @for (item of suggestedFoodItems(); track item.id) {
+              <button type="button" class="suggestion-pill" (click)="addFoodItem(item)">
+                <mat-icon class="pill-icon">add</mat-icon>
+                <span>{{ item.name }}</span>
+              </button>
+            }
+          </div>
+        </div>
+      }
+    </mat-card-content>
+  </mat-card>
+
+  <!-- Results Section -->
+  <section class="results-section" aria-label="Matching recipes">
+    @if (isMatching()) {
+      <div class="loading-state">
+        <mat-spinner diameter="36"></mat-spinner>
+        <span>Matching recipes against your ingredients...</span>
+      </div>
+    } @else if (selectedFoodItems().length > 0 && matchResults().length === 0) {
+      <div class="empty-results">
+        <mat-icon class="empty-icon">kitchen</mat-icon>
+        <h3>No matching recipes found</h3>
+        <p>Try adding more ingredients or adjusting your selections.</p>
+      </div>
+    } @else if (matchResults().length > 0) {
+      <div class="results-header">
+        <h2 class="results-count">
+          Found {{ matchResults().length }} matching
+          {{ matchResults().length === 1 ? 'recipe' : 'recipes' }}
+        </h2>
+      </div>
+
+      <div class="results-list">
+        @for (result of matchResults(); track result.recipe.id) {
+          <mat-card
+            class="matcher-result-card"
+            appearance="outlined"
+            (click)="navigateToRecipe(result.recipe.id)"
+          >
+            <div class="card-inner">
+              @if (result.recipe.thumbnailImagePath) {
+                <img
+                  [src]="result.recipe.thumbnailImagePath"
+                  [alt]="result.recipe.title"
+                  class="result-thumb"
+                  loading="lazy"
+                />
+              }
+
+              <div class="result-details">
+                <div class="result-top-row">
+                  <h3 class="recipe-title">{{ result.recipe.title }}</h3>
+                  <div class="badges-row">
+                    <span class="match-badge">
+                      {{ result.matchedCount }} of {{ result.selectedOnHandCount }} matched
+                    </span>
+                    @if (result.additionalNonStapleCount === 0) {
+                      <span class="readiness-badge ready">
+                        <mat-icon>check_circle</mat-icon>
+                        Ready to cook!
+                      </span>
+                    } @else {
+                      <span class="readiness-badge needs-more">
+                        Needs {{ result.additionalNonStapleCount }} more
+                      </span>
+                    }
+                  </div>
+                </div>
+
+                @if (result.recipe.description) {
+                  <p class="recipe-desc">{{ result.recipe.description }}</p>
+                }
+
+                <div class="ingredients-breakdown">
+                  @if (result.matchedIngredientNames.length > 0) {
+                    <div class="breakdown-group matched">
+                      <span class="breakdown-label">You have:</span>
+                      <div class="tag-row">
+                        @for (name of result.matchedIngredientNames; track name) {
+                          <span class="ing-tag matched-tag">{{ name }}</span>
+                        }
+                      </div>
+                    </div>
+                  }
+
+                  @if (result.missingNonStapleNames.length > 0) {
+                    <div class="breakdown-group missing">
+                      <span class="breakdown-label">You still need:</span>
+                      <div class="tag-row">
+                        @for (name of result.missingNonStapleNames; track name) {
+                          <span class="ing-tag missing-tag">{{ name }}</span>
+                        }
+                      </div>
+                    </div>
+                  }
+
+                  @if (result.pantryStaplesUsedCount > 0) {
+                    <div class="pantry-note">
+                      <mat-icon>inventory_2</mat-icon>
+                      <span
+                        >+ {{ result.pantryStaplesUsedCount }} pantry staple{{
+                          result.pantryStaplesUsedCount === 1 ? '' : 's'
+                        }}
+                        assumed on hand</span
+                      >
+                    </div>
+                  }
+                </div>
+
+                <div class="meta-row">
+                  @if (result.recipe.totalTimeMinutes) {
+                    <span class="meta-item">
+                      <mat-icon>schedule</mat-icon>
+                      {{ result.recipe.totalTimeMinutes }} min
+                    </span>
+                  }
+                  @if (result.recipe.difficulty) {
+                    <span class="meta-item">
+                      <mat-icon>signal_cellular_alt</mat-icon>
+                      {{ result.recipe.difficulty }}
+                    </span>
+                  }
+                </div>
+              </div>
+            </div>
+          </mat-card>
+        }
+      </div>
+    } @else {
+      <div class="matcher-placeholder">
+        <mat-icon class="placeholder-icon">blender</mat-icon>
+        <h3>Ready to match</h3>
+        <p>Select at least one ingredient above to see what you can cook.</p>
+      </div>
+    }
+  </section>
+</div>

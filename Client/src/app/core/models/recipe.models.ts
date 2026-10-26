@@ -1,3 +1,5 @@
+import { RecipeCollectionBadgeDto, RecipeTagBadgeDto } from './taxonomy.models';
+
 export type RecipeStatus = 'DraftReview' | 'Published' | 'Archived';
 
 export type RecipeDifficulty = 'Easy' | 'Medium' | 'Project';
@@ -47,6 +49,8 @@ export interface RecipeSummaryDto {
   averageRating: number | null;
   createdAt: string;
   modifiedAt: string;
+  collections: RecipeCollectionBadgeDto[];
+  tags: RecipeTagBadgeDto[];
 }
 
 export interface RecipeIngredientDto {
@@ -125,6 +129,8 @@ export interface RecipeDetailDto {
   createdBy: string;
   modifiedAt: string;
   modifiedBy: string;
+  collections: RecipeCollectionBadgeDto[];
+  tags: RecipeTagBadgeDto[];
 }
 
 export interface RecipeQueryParameters {
@@ -133,6 +139,8 @@ export interface RecipeQueryParameters {
   difficulty?: RecipeDifficulty | null;
   maxTotalTimeMinutes?: number | null;
   foodItemId?: string | null;
+  collectionId?: string | null;
+  tagIds?: string[] | null;
 }
 
 export interface RecipeIngredientInput {
@@ -159,6 +167,7 @@ export interface RecipeStepInput {
   instruction: string;
   ingredientIndices?: number[] | null;
   timers?: RecipeStepTimerInput[] | null;
+  imagePath?: string | null;
 }
 
 export interface UpsertRecipeRequest {
@@ -178,4 +187,27 @@ export interface UpsertRecipeRequest {
   sourceBookPage?: number | null;
   ingredients?: RecipeIngredientInput[] | null;
   steps?: RecipeStepInput[] | null;
+  coverImagePath?: string | null;
+  thumbnailImagePath?: string | null;
+  collectionIds?: string[] | null;
+  tagIds?: string[] | null;
+}
+
+export interface UpdateRecipeOrganizationRequest {
+  collectionIds?: string[] | null;
+  tagIds?: string[] | null;
+}
+
+export interface IngredientMatchRequest {
+  foodItemIds: string[];
+}
+
+export interface IngredientMatchResultDto {
+  recipe: RecipeSummaryDto;
+  matchedCount: number;
+  selectedOnHandCount: number;
+  additionalNonStapleCount: number;
+  pantryStaplesUsedCount: number;
+  matchedIngredientNames: string[];
+  missingNonStapleNames: string[];
 }

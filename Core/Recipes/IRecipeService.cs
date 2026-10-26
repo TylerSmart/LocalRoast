@@ -24,4 +24,15 @@ public interface IRecipeService
     );
 
     Task<bool> DeleteRecipeAsync(Guid id, CancellationToken cancellationToken = default);
+
+    Task<RecipeDetailDto?> UpdateRecipeOrganizationAsync(
+        Guid id,
+        UpdateRecipeOrganizationRequest request,
+        CancellationToken cancellationToken = default
+    );
+
+    Task<IReadOnlyList<IngredientMatchResultDto>> MatchRecipesByIngredientsAsync(
+        IngredientMatchRequest request,
+        CancellationToken cancellationToken = default
+    );
 }

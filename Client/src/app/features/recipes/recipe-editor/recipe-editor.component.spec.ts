@@ -5,8 +5,11 @@ import { provideRouter } from '@angular/router';
 import { of } from 'rxjs';
 import { FoodItemDto } from '../../../core/models/food-catalog.models';
 import { RecipeDetailDto, RecipeSummaryDto } from '../../../core/models/recipe.models';
+import { CollectionDto, TagDto } from '../../../core/models/taxonomy.models';
 import { FoodCatalogService } from '../../../core/services/food-catalog/food-catalog.service';
+import { MediaService } from '../../../core/services/media/media.service';
 import { RecipeService } from '../../../core/services/recipe/recipe.service';
+import { TaxonomyService } from '../../../core/services/taxonomy/taxonomy.service';
 import { RecipeEditorComponent } from './recipe-editor.component';
 
 describe('RecipeEditorComponent', () => {
@@ -24,6 +27,16 @@ describe('RecipeEditorComponent', () => {
     getFoodItems: vi.fn().mockReturnValue(of([] as FoodItemDto[])),
   };
 
+  const mockMediaService = {
+    uploadRecipeCover: vi.fn(),
+    uploadStepImage: vi.fn(),
+  };
+
+  const mockTaxonomyService = {
+    getCollections: vi.fn().mockReturnValue(of([] as CollectionDto[])),
+    getTags: vi.fn().mockReturnValue(of([] as TagDto[])),
+  };
+
   const mockDialog = {
     open: vi.fn(),
   };
@@ -39,6 +52,8 @@ describe('RecipeEditorComponent', () => {
         provideRouter([{ path: 'recipes/:id', component: class DummyComponent {} }]),
         { provide: RecipeService, useValue: mockRecipeService },
         { provide: FoodCatalogService, useValue: mockCatalogService },
+        { provide: MediaService, useValue: mockMediaService },
+        { provide: TaxonomyService, useValue: mockTaxonomyService },
         { provide: MatDialog, useValue: mockDialog },
         { provide: MatSnackBar, useValue: mockSnackBar },
       ],
@@ -90,6 +105,8 @@ describe('RecipeEditorComponent', () => {
       ingredients: [],
       steps: [],
       linkedSubRecipes: [],
+      collections: [],
+      tags: [],
       createdAt: '2026-01-01T00:00:00Z',
       createdBy: 'user',
       modifiedAt: '2026-01-01T00:00:00Z',

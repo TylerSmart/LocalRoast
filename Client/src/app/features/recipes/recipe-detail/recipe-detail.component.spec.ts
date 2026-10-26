@@ -92,6 +92,8 @@ describe('RecipeDetailComponent', () => {
       },
     ],
     linkedSubRecipes: [],
+    collections: [{ id: 'c1', name: 'Weeknight Staples', slug: 'weeknight-staples' }],
+    tags: [{ id: 't1', name: 'Sheet Pan', slug: 'equipment-sheet-pan', category: 'Equipment' }],
     createdAt: '2026-01-01T00:00:00Z',
     createdBy: 'test-user',
     modifiedAt: '2026-01-01T00:00:00Z',
@@ -104,7 +106,7 @@ describe('RecipeDetailComponent', () => {
   };
 
   const mockDialog = {
-    open: vi.fn(),
+    open: vi.fn().mockReturnValue({ afterClosed: () => of(null) }),
   };
 
   const mockSnackBar = {
@@ -128,14 +130,21 @@ describe('RecipeDetailComponent', () => {
     fixture.detectChanges();
   });
 
-  it('renders recipe title, ingredients, step instruction and timer', () => {
+  it('renders recipe title, collections, tags, ingredients, and step instructions', () => {
     expect(component).toBeTruthy();
     const text = fixture.nativeElement.textContent;
     expect(text).toContain('Homemade Chicken Noodle Soup');
+    expect(text).toContain('Weeknight Staples');
+    expect(text).toContain('Sheet Pan');
     expect(text).toContain('Egg Noodles');
     expect(text).toContain('Chicken Broth');
     expect(text).toContain('Bring broth to a boil and stir in noodles.');
     expect(text).toContain('8 min');
+  });
+
+  it('opens organize dialog on openOrganizeDialog()', () => {
+    component.openOrganizeDialog();
+    expect(mockDialog.open).toHaveBeenCalled();
   });
 
   it('scales quantities when 2x multiplier is selected', () => {

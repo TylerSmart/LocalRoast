@@ -12,6 +12,10 @@
         <mat-icon>menu_book</mat-icon>
         <span>Cookbook</span>
       </a>
+      <a mat-button routerLink="/matcher" routerLinkActive="active-nav-link" class="nav-link">
+        <mat-icon>blender</mat-icon>
+        <span>Matcher</span>
+      </a>
       <a mat-button routerLink="/catalog" routerLinkActive="active-nav-link" class="nav-link">
         <mat-icon>kitchen</mat-icon>
         <span>Food Catalog</span>
@@ -19,6 +23,29 @@
     </nav>
 
     <div class="top-actions">
+      <!-- Quick Search Trigger -->
+      <button
+        type="button"
+        mat-button
+        class="search-trigger-btn desktop-search-btn"
+        (click)="openGlobalSearch()"
+        aria-label="Open quick search"
+      >
+        <mat-icon>search</mat-icon>
+        <span class="search-label">Search...</span>
+        <kbd class="shortcut-kbd">Ctrl+K</kbd>
+      </button>
+
+      <button
+        type="button"
+        mat-icon-button
+        class="mobile-search-btn"
+        (click)="openGlobalSearch()"
+        aria-label="Open quick search"
+      >
+        <mat-icon>search</mat-icon>
+      </button>
+
       <!-- Theme Switcher -->
       <button
         mat-icon-button
@@ -86,6 +113,10 @@
     <a routerLink="/recipes" routerLinkActive="active-tab" class="mobile-tab" aria-label="Cookbook">
       <mat-icon>menu_book</mat-icon>
       <span>Cookbook</span>
+    </a>
+    <a routerLink="/matcher" routerLinkActive="active-tab" class="mobile-tab" aria-label="Matcher">
+      <mat-icon>blender</mat-icon>
+      <span>Matcher</span>
     </a>
     <a
       routerLink="/catalog"

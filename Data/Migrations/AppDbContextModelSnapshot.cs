@@ -22,6 +22,63 @@ namespace App.Data.Migrations
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
 
+            modelBuilder.Entity("App.Data.Entities.Collection", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<bool>("IsSystemSeeded")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTimeOffset>("ModifiedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("ModifiedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("NormalizedName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("Slug")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("nvarchar(120)");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("NormalizedName")
+                        .IsUnique();
+
+                    b.HasIndex("Slug")
+                        .IsUnique();
+
+                    b.ToTable("Collections", (string)null);
+                });
+
             modelBuilder.Entity("App.Data.Entities.FoodItem", b =>
                 {
                     b.Property<Guid>("Id")
@@ -226,6 +283,43 @@ namespace App.Data.Migrations
                     b.HasIndex("Title");
 
                     b.ToTable("Recipes", (string)null);
+                });
+
+            modelBuilder.Entity("App.Data.Entities.RecipeCollection", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("CollectionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<DateTimeOffset>("ModifiedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("ModifiedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<Guid>("RecipeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CollectionId");
+
+                    b.HasIndex("RecipeId", "CollectionId")
+                        .IsUnique();
+
+                    b.ToTable("RecipeCollections", (string)null);
                 });
 
             modelBuilder.Entity("App.Data.Entities.RecipeIngredient", b =>
@@ -439,6 +533,43 @@ namespace App.Data.Migrations
                     b.ToTable("RecipeStepTimers", (string)null);
                 });
 
+            modelBuilder.Entity("App.Data.Entities.RecipeTag", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<DateTimeOffset>("ModifiedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("ModifiedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<Guid>("RecipeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TagId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TagId");
+
+                    b.HasIndex("RecipeId", "TagId")
+                        .IsUnique();
+
+                    b.ToTable("RecipeTags", (string)null);
+                });
+
             modelBuilder.Entity("App.Data.Entities.StoreAisle", b =>
                 {
                     b.Property<Guid>("Id")
@@ -485,6 +616,62 @@ namespace App.Data.Migrations
                     b.HasIndex("SortOrder");
 
                     b.ToTable("StoreAisles", (string)null);
+                });
+
+            modelBuilder.Entity("App.Data.Entities.Tag", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Category")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<bool>("IsSystemSeeded")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTimeOffset>("ModifiedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("ModifiedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)");
+
+                    b.Property<string>("NormalizedName")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)");
+
+                    b.Property<string>("Slug")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Slug")
+                        .IsUnique();
+
+                    b.HasIndex("Category", "NormalizedName")
+                        .IsUnique();
+
+                    b.ToTable("Tags", (string)null);
                 });
 
             modelBuilder.Entity("App.Data.Entities.User", b =>
@@ -579,6 +766,25 @@ namespace App.Data.Migrations
                     b.Navigation("FoodItem");
                 });
 
+            modelBuilder.Entity("App.Data.Entities.RecipeCollection", b =>
+                {
+                    b.HasOne("App.Data.Entities.Collection", "Collection")
+                        .WithMany("RecipeCollections")
+                        .HasForeignKey("CollectionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("App.Data.Entities.Recipe", "Recipe")
+                        .WithMany("RecipeCollections")
+                        .HasForeignKey("RecipeId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Collection");
+
+                    b.Navigation("Recipe");
+                });
+
             modelBuilder.Entity("App.Data.Entities.RecipeIngredient", b =>
                 {
                     b.HasOne("App.Data.Entities.FoodItem", "FoodItem")
@@ -645,6 +851,30 @@ namespace App.Data.Migrations
                     b.Navigation("RecipeStep");
                 });
 
+            modelBuilder.Entity("App.Data.Entities.RecipeTag", b =>
+                {
+                    b.HasOne("App.Data.Entities.Recipe", "Recipe")
+                        .WithMany("RecipeTags")
+                        .HasForeignKey("RecipeId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("App.Data.Entities.Tag", "Tag")
+                        .WithMany("RecipeTags")
+                        .HasForeignKey("TagId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Recipe");
+
+                    b.Navigation("Tag");
+                });
+
+            modelBuilder.Entity("App.Data.Entities.Collection", b =>
+                {
+                    b.Navigation("RecipeCollections");
+                });
+
             modelBuilder.Entity("App.Data.Entities.FoodItem", b =>
                 {
                     b.Navigation("Aliases");
@@ -655,6 +885,10 @@ namespace App.Data.Migrations
             modelBuilder.Entity("App.Data.Entities.Recipe", b =>
                 {
                     b.Navigation("Ingredients");
+
+                    b.Navigation("RecipeCollections");
+
+                    b.Navigation("RecipeTags");
 
                     b.Navigation("ReferencedAsSubRecipeIn");
 
@@ -676,6 +910,11 @@ namespace App.Data.Migrations
             modelBuilder.Entity("App.Data.Entities.StoreAisle", b =>
                 {
                     b.Navigation("FoodItems");
+                });
+
+            modelBuilder.Entity("App.Data.Entities.Tag", b =>
+                {
+                    b.Navigation("RecipeTags");
                 });
 #pragma warning restore 612, 618
         }

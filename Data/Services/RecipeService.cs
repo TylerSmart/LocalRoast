@@ -1,12 +1,16 @@
 using System.Text.RegularExpressions;
 using App.Core.Exceptions;
+using App.Core.Media;
 using App.Core.Recipes;
 using App.Data.Entities;
 using Microsoft.EntityFrameworkCore;
 
 namespace App.Data.Services;
 
-public sealed partial class RecipeService(AppDbContext dbContext) : IRecipeService
+public sealed partial class RecipeService(
+    AppDbContext dbContext,
+    IMediaStorageService mediaStorageService
+) : IRecipeService
 {
     public async Task<IReadOnlyList<RecipeSummaryDto>> GetRecipesAsync(
         RecipeQueryParameters query,
@@ -41,6 +45,22 @@ public sealed partial class RecipeService(AppDbContext dbContext) : IRecipeServi
             q = q.Where(r => r.Ingredients.Any(i => i.FoodItemId == query.FoodItemId.Value));
         }
 
+        if (query.CollectionId.HasValue)
+        {
+            q = q.Where(r =>
+                r.RecipeCollections.Any(rc => rc.CollectionId == query.CollectionId.Value)
+            );
+        }
+
+        if (query.TagIds is { Length: > 0 })
+        {
+            foreach (var tagId in query.TagIds.Distinct())
+            {
+                var currentTagId = tagId;
+                q = q.Where(r => r.RecipeTags.Any(rt => rt.TagId == currentTagId));
+            }
+        }
+
         if (!string.IsNullOrWhiteSpace(query.Search))
         {
             var norm = query.Search.Trim().ToLowerInvariant();
@@ -50,6 +70,8 @@ public sealed partial class RecipeService(AppDbContext dbContext) : IRecipeServi
                 || (r.SourceName != null && r.SourceName.ToLower().Contains(norm))
                 || (r.SourceAuthor != null && r.SourceAuthor.ToLower().Contains(norm))
                 || (r.SourceBookTitle != null && r.SourceBookTitle.ToLower().Contains(norm))
+                || r.RecipeCollections.Any(rc => rc.Collection.NormalizedName.Contains(norm))
+                || r.RecipeTags.Any(rt => rt.Tag.NormalizedName.Contains(norm))
                 || r.Ingredients.Any(i =>
                     i.DisplayName.ToLower().Contains(norm)
                     || (
@@ -83,7 +105,25 @@ public sealed partial class RecipeService(AppDbContext dbContext) : IRecipeServi
                 r.TimesCooked,
                 r.AverageRating,
                 r.CreatedAt,
-                r.ModifiedAt
+                r.ModifiedAt,
+                r.RecipeCollections.OrderBy(rc => rc.Collection.SortOrder)
+                    .ThenBy(rc => rc.Collection.Name)
+                    .Select(rc => new RecipeCollectionBadgeDto(
+                        rc.Collection.Id,
+                        rc.Collection.Name,
+                        rc.Collection.Slug
+                    ))
+                    .ToList(),
+                r.RecipeTags.OrderBy(rt => rt.Tag.Category)
+                    .ThenBy(rt => rt.Tag.SortOrder)
+                    .ThenBy(rt => rt.Tag.Name)
+                    .Select(rt => new RecipeTagBadgeDto(
+                        rt.Tag.Id,
+                        rt.Tag.Name,
+                        rt.Tag.Slug,
+                        rt.Tag.Category
+                    ))
+                    .ToList()
             ))
             .ToListAsync(cancellationToken);
     }
@@ -103,6 +143,10 @@ public sealed partial class RecipeService(AppDbContext dbContext) : IRecipeServi
                 .ThenInclude(s => s.IngredientReferences)
             .Include(r => r.Steps)
                 .ThenInclude(s => s.Timers)
+            .Include(r => r.RecipeCollections)
+                .ThenInclude(rc => rc.Collection)
+            .Include(r => r.RecipeTags)
+                .ThenInclude(rt => rt.Tag)
             .FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
 
         if (recipe is null)
@@ -155,6 +199,28 @@ public sealed partial class RecipeService(AppDbContext dbContext) : IRecipeServi
 
         var orderedSteps = recipe.Steps.OrderBy(s => s.StepNumber).Select(MapStepDto).ToList();
 
+        var collections = recipe
+            .RecipeCollections.OrderBy(rc => rc.Collection.SortOrder)
+            .ThenBy(rc => rc.Collection.Name)
+            .Select(rc => new RecipeCollectionBadgeDto(
+                rc.Collection.Id,
+                rc.Collection.Name,
+                rc.Collection.Slug
+            ))
+            .ToList();
+
+        var tags = recipe
+            .RecipeTags.OrderBy(rt => rt.Tag.Category)
+            .ThenBy(rt => rt.Tag.SortOrder)
+            .ThenBy(rt => rt.Tag.Name)
+            .Select(rt => new RecipeTagBadgeDto(
+                rt.Tag.Id,
+                rt.Tag.Name,
+                rt.Tag.Slug,
+                rt.Tag.Category
+            ))
+            .ToList();
+
         return new RecipeDetailDto(
             recipe.Id,
             recipe.Title,
@@ -183,7 +249,9 @@ public sealed partial class RecipeService(AppDbContext dbContext) : IRecipeServi
             recipe.CreatedAt,
             recipe.CreatedBy,
             recipe.ModifiedAt,
-            recipe.ModifiedBy
+            recipe.ModifiedBy,
+            collections,
+            tags
         );
     }
 
@@ -252,6 +320,8 @@ public sealed partial class RecipeService(AppDbContext dbContext) : IRecipeServi
             SourceAuthor = request.SourceAuthor?.Trim(),
             SourceBookTitle = request.SourceBookTitle?.Trim(),
             SourceBookPage = request.SourceBookPage,
+            CoverImagePath = ValidateAndNormalizeMediaPath(request.CoverImagePath),
+            ThumbnailImagePath = ValidateAndNormalizeMediaPath(request.ThumbnailImagePath),
         };
 
         await ValidateAndBuildGraphAsync(recipe, request, cancellationToken);
@@ -259,20 +329,7 @@ public sealed partial class RecipeService(AppDbContext dbContext) : IRecipeServi
         dbContext.Recipes.Add(recipe);
         try
         {
-            try
-            {
-                await dbContext.SaveChangesAsync(cancellationToken);
-            }
-            catch (DbUpdateConcurrencyException ex)
-            {
-                var entries = ex.Entries.Select(e =>
-                    $"{e.Entity.GetType().Name} (State: {e.State})"
-                );
-                throw new InvalidOperationException(
-                    $"Recipe Update Concurrency failed on: {string.Join(", ", entries)}",
-                    ex
-                );
-            }
+            await dbContext.SaveChangesAsync(cancellationToken);
         }
         catch (DbUpdateConcurrencyException ex)
         {
@@ -300,12 +357,21 @@ public sealed partial class RecipeService(AppDbContext dbContext) : IRecipeServi
                 .ThenInclude(s => s.IngredientReferences)
             .Include(r => r.Steps)
                 .ThenInclude(s => s.Timers)
+            .Include(r => r.RecipeCollections)
+            .Include(r => r.RecipeTags)
             .FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
 
         if (recipe is null)
         {
             return null;
         }
+
+        var oldCover = recipe.CoverImagePath;
+        var oldThumb = recipe.ThumbnailImagePath;
+        var oldStepImages = recipe
+            .Steps.Where(s => !string.IsNullOrEmpty(s.ImagePath))
+            .Select(s => s.ImagePath!)
+            .ToList();
 
         var slug = recipe.Slug;
         if (
@@ -343,8 +409,58 @@ public sealed partial class RecipeService(AppDbContext dbContext) : IRecipeServi
         recipe.SourceAuthor = request.SourceAuthor?.Trim();
         recipe.SourceBookTitle = request.SourceBookTitle?.Trim();
         recipe.SourceBookPage = request.SourceBookPage;
+        recipe.CoverImagePath = ValidateAndNormalizeMediaPath(request.CoverImagePath);
+        recipe.ThumbnailImagePath = ValidateAndNormalizeMediaPath(request.ThumbnailImagePath);
 
         await ValidateAndBuildGraphAsync(recipe, request, cancellationToken);
+
+        if (request.CollectionIds is not null)
+        {
+            var distinctCollIds = request.CollectionIds.Distinct().ToList();
+            if (distinctCollIds.Count > 0)
+            {
+                var existingCount = await dbContext.Collections.CountAsync(
+                    c => distinctCollIds.Contains(c.Id),
+                    cancellationToken
+                );
+                if (existingCount != distinctCollIds.Count)
+                {
+                    throw new DomainValidationException(
+                        "One or more referenced collections do not exist."
+                    );
+                }
+            }
+            dbContext.RecipeCollections.RemoveRange(recipe.RecipeCollections);
+            foreach (var collId in distinctCollIds)
+            {
+                dbContext.RecipeCollections.Add(
+                    new RecipeCollection { RecipeId = recipe.Id, CollectionId = collId }
+                );
+            }
+        }
+
+        if (request.TagIds is not null)
+        {
+            var distinctTagIds = request.TagIds.Distinct().ToList();
+            if (distinctTagIds.Count > 0)
+            {
+                var existingCount = await dbContext.Tags.CountAsync(
+                    t => distinctTagIds.Contains(t.Id),
+                    cancellationToken
+                );
+                if (existingCount != distinctTagIds.Count)
+                {
+                    throw new DomainValidationException(
+                        "One or more referenced tags do not exist."
+                    );
+                }
+            }
+            dbContext.RecipeTags.RemoveRange(recipe.RecipeTags);
+            foreach (var tagId in distinctTagIds)
+            {
+                dbContext.RecipeTags.Add(new RecipeTag { RecipeId = recipe.Id, TagId = tagId });
+            }
+        }
 
         try
         {
@@ -357,6 +473,27 @@ public sealed partial class RecipeService(AppDbContext dbContext) : IRecipeServi
                 $"Recipe Update Concurrency failed on: {string.Join(", ", entries)}",
                 ex
             );
+        }
+
+        // Clean up media files removed
+        if (!string.IsNullOrEmpty(oldCover) && oldCover != recipe.CoverImagePath)
+        {
+            await mediaStorageService.DeleteMediaFileAsync(oldCover, cancellationToken);
+        }
+        if (!string.IsNullOrEmpty(oldThumb) && oldThumb != recipe.ThumbnailImagePath)
+        {
+            await mediaStorageService.DeleteMediaFileAsync(oldThumb, cancellationToken);
+        }
+        var newStepImages = (request.Steps ?? [])
+            .Where(s => !string.IsNullOrEmpty(s.ImagePath))
+            .Select(s => s.ImagePath!)
+            .ToHashSet();
+        foreach (var oldStepImg in oldStepImages)
+        {
+            if (!newStepImages.Contains(oldStepImg))
+            {
+                await mediaStorageService.DeleteMediaFileAsync(oldStepImg, cancellationToken);
+            }
         }
 
         return await GetRecipeByIdAsync(id, cancellationToken);
@@ -388,6 +525,13 @@ public sealed partial class RecipeService(AppDbContext dbContext) : IRecipeServi
             );
         }
 
+        var cover = recipe.CoverImagePath;
+        var thumb = recipe.ThumbnailImagePath;
+        var stepImages = recipe
+            .Steps.Where(s => !string.IsNullOrEmpty(s.ImagePath))
+            .Select(s => s.ImagePath!)
+            .ToList();
+
         dbContext.RecipeStepIngredients.RemoveRange(
             recipe.Steps.SelectMany(s => s.IngredientReferences)
         );
@@ -395,20 +539,7 @@ public sealed partial class RecipeService(AppDbContext dbContext) : IRecipeServi
         dbContext.Recipes.Remove(recipe);
         try
         {
-            try
-            {
-                await dbContext.SaveChangesAsync(cancellationToken);
-            }
-            catch (DbUpdateConcurrencyException ex)
-            {
-                var entries = ex.Entries.Select(e =>
-                    $"{e.Entity.GetType().Name} (State: {e.State})"
-                );
-                throw new InvalidOperationException(
-                    $"Recipe Update Concurrency failed on: {string.Join(", ", entries)}",
-                    ex
-                );
-            }
+            await dbContext.SaveChangesAsync(cancellationToken);
         }
         catch (DbUpdateConcurrencyException ex)
         {
@@ -418,7 +549,253 @@ public sealed partial class RecipeService(AppDbContext dbContext) : IRecipeServi
                 ex
             );
         }
+
+        await mediaStorageService.DeleteMediaFileAsync(cover, cancellationToken);
+        await mediaStorageService.DeleteMediaFileAsync(thumb, cancellationToken);
+        foreach (var stepImg in stepImages)
+        {
+            await mediaStorageService.DeleteMediaFileAsync(stepImg, cancellationToken);
+        }
+
         return true;
+    }
+
+    public async Task<RecipeDetailDto?> UpdateRecipeOrganizationAsync(
+        Guid id,
+        UpdateRecipeOrganizationRequest request,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var recipe = await dbContext
+            .Recipes.Include(r => r.RecipeCollections)
+            .Include(r => r.RecipeTags)
+            .FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
+
+        if (recipe is null)
+        {
+            return null;
+        }
+
+        if (request.CollectionIds is not null)
+        {
+            var distinctCollIds = request.CollectionIds.Distinct().ToList();
+            if (distinctCollIds.Count > 0)
+            {
+                var existingCount = await dbContext.Collections.CountAsync(
+                    c => distinctCollIds.Contains(c.Id),
+                    cancellationToken
+                );
+                if (existingCount != distinctCollIds.Count)
+                {
+                    throw new DomainValidationException(
+                        "One or more referenced collections do not exist."
+                    );
+                }
+            }
+            dbContext.RecipeCollections.RemoveRange(recipe.RecipeCollections);
+            foreach (var collId in distinctCollIds)
+            {
+                dbContext.RecipeCollections.Add(
+                    new RecipeCollection { RecipeId = recipe.Id, CollectionId = collId }
+                );
+            }
+        }
+
+        if (request.TagIds is not null)
+        {
+            var distinctTagIds = request.TagIds.Distinct().ToList();
+            if (distinctTagIds.Count > 0)
+            {
+                var existingCount = await dbContext.Tags.CountAsync(
+                    t => distinctTagIds.Contains(t.Id),
+                    cancellationToken
+                );
+                if (existingCount != distinctTagIds.Count)
+                {
+                    throw new DomainValidationException(
+                        "One or more referenced tags do not exist."
+                    );
+                }
+            }
+            dbContext.RecipeTags.RemoveRange(recipe.RecipeTags);
+            foreach (var tagId in distinctTagIds)
+            {
+                dbContext.RecipeTags.Add(new RecipeTag { RecipeId = recipe.Id, TagId = tagId });
+            }
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return await GetRecipeByIdAsync(id, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<IngredientMatchResultDto>> MatchRecipesByIngredientsAsync(
+        IngredientMatchRequest request,
+        CancellationToken cancellationToken = default
+    )
+    {
+        if (
+            request.FoodItemIds is null
+            || request.FoodItemIds.Count == 0
+            || request.FoodItemIds.Count > 20
+        )
+        {
+            throw new DomainValidationException("Provide between 1 and 20 on-hand food item IDs.");
+        }
+
+        var distinctFoodItemIds = request.FoodItemIds.Distinct().ToList();
+        var onHandFoodItems = await dbContext
+            .FoodItems.AsNoTracking()
+            .Where(f => distinctFoodItemIds.Contains(f.Id))
+            .Include(f => f.Aliases)
+            .ToListAsync(cancellationToken);
+
+        if (onHandFoodItems.Count == 0)
+        {
+            throw new DomainValidationException(
+                "None of the specified food items were found in the catalog."
+            );
+        }
+
+        var onHandMatchables = onHandFoodItems
+            .Select(f => new MatchableOnHandItem(
+                f.Id,
+                f.Name,
+                f.NormalizedName,
+                f.Aliases.Select(a => a.NormalizedAlias).ToList()
+            ))
+            .ToList();
+
+        var publishedRecipes = await dbContext
+            .Recipes.AsNoTracking()
+            .Where(r => r.Status == RecipeStatus.Published)
+            .Include(r => r.Ingredients)
+                .ThenInclude(i => i.FoodItem)
+            .Include(r => r.RecipeCollections)
+                .ThenInclude(rc => rc.Collection)
+            .Include(r => r.RecipeTags)
+                .ThenInclude(rt => rt.Tag)
+            .ToListAsync(cancellationToken);
+
+        var subRecipeIds = publishedRecipes
+            .SelectMany(r => r.Ingredients)
+            .Where(i => i.LinkedRecipeId.HasValue)
+            .Select(i => i.LinkedRecipeId!.Value)
+            .Distinct()
+            .ToList();
+
+        var subRecipeMap =
+            subRecipeIds.Count > 0
+                ? await dbContext
+                    .Recipes.AsNoTracking()
+                    .Where(r => subRecipeIds.Contains(r.Id))
+                    .Include(r => r.Ingredients)
+                        .ThenInclude(i => i.FoodItem)
+                    .ToDictionaryAsync(r => r.Id, cancellationToken)
+                : new Dictionary<Guid, Recipe>();
+
+        var candidates = new List<MatchableRecipeCandidate>();
+
+        foreach (var r in publishedRecipes)
+        {
+            var summary = new RecipeSummaryDto(
+                r.Id,
+                r.Title,
+                r.Slug,
+                r.Description,
+                r.Status,
+                r.BaseServings,
+                r.YieldDisplay,
+                r.PrepTimeMinutes,
+                r.CookTimeMinutes,
+                r.TotalTimeMinutes,
+                r.Difficulty,
+                r.SourceName,
+                r.ThumbnailImagePath,
+                r.Ingredients.Count,
+                r.Steps.Count,
+                r.TimesCooked,
+                r.AverageRating,
+                r.CreatedAt,
+                r.ModifiedAt,
+                r.RecipeCollections.OrderBy(rc => rc.Collection.SortOrder)
+                    .ThenBy(rc => rc.Collection.Name)
+                    .Select(rc => new RecipeCollectionBadgeDto(
+                        rc.Collection.Id,
+                        rc.Collection.Name,
+                        rc.Collection.Slug
+                    ))
+                    .ToList(),
+                r.RecipeTags.OrderBy(rt => rt.Tag.Category)
+                    .ThenBy(rt => rt.Tag.SortOrder)
+                    .ThenBy(rt => rt.Tag.Name)
+                    .Select(rt => new RecipeTagBadgeDto(
+                        rt.Tag.Id,
+                        rt.Tag.Name,
+                        rt.Tag.Slug,
+                        rt.Tag.Category
+                    ))
+                    .ToList()
+            );
+
+            var matchableIngredients = new List<MatchableRecipeIngredient>();
+            foreach (var ing in r.Ingredients)
+            {
+                if (
+                    ing.LinkedRecipeId.HasValue
+                    && subRecipeMap.TryGetValue(ing.LinkedRecipeId.Value, out var subRecipe)
+                )
+                {
+                    foreach (var subIng in subRecipe.Ingredients)
+                    {
+                        matchableIngredients.Add(
+                            new MatchableRecipeIngredient(
+                                subIng.FoodItemId,
+                                subIng.DisplayName,
+                                subIng.IsOptional,
+                                subIng.FoodItem?.IsPantryStaple ?? false
+                            )
+                        );
+                    }
+                }
+                else
+                {
+                    matchableIngredients.Add(
+                        new MatchableRecipeIngredient(
+                            ing.FoodItemId,
+                            ing.DisplayName,
+                            ing.IsOptional,
+                            ing.FoodItem?.IsPantryStaple ?? false
+                        )
+                    );
+                }
+            }
+
+            candidates.Add(new MatchableRecipeCandidate(summary, matchableIngredients));
+        }
+
+        return IngredientMatcher.RankRecipes(candidates, onHandMatchables);
+    }
+
+    private static string? ValidateAndNormalizeMediaPath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return null;
+        }
+
+        var trimmed = path.Trim();
+        if (
+            !trimmed.StartsWith("/api/uploads/", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Contains("..")
+            || trimmed.Contains('\\')
+        )
+        {
+            throw new DomainValidationException(
+                "Invalid media path. Uploaded media paths must start with '/api/uploads/'."
+            );
+        }
+
+        return trimmed;
     }
 
     private static void ValidateUpsertRequest(UpsertRecipeRequest request)
@@ -632,6 +1009,7 @@ public sealed partial class RecipeService(AppDbContext dbContext) : IRecipeServi
                 StepNumber = s + 1,
                 SectionName = sInput.SectionName?.Trim(),
                 Instruction = sInput.Instruction.Trim(),
+                ImagePath = ValidateAndNormalizeMediaPath(sInput.ImagePath),
             };
 
             if (sInput.IngredientIndices is not null)
@@ -670,6 +1048,44 @@ public sealed partial class RecipeService(AppDbContext dbContext) : IRecipeServi
             }
 
             dbContext.RecipeSteps.Add(stepEntity);
+        }
+
+        if (request.CollectionIds is { Count: > 0 })
+        {
+            var distinctCollIds = request.CollectionIds.Distinct().ToList();
+            var existingCount = await dbContext.Collections.CountAsync(
+                c => distinctCollIds.Contains(c.Id),
+                cancellationToken
+            );
+            if (existingCount != distinctCollIds.Count)
+            {
+                throw new DomainValidationException(
+                    "One or more referenced collections do not exist."
+                );
+            }
+            foreach (var collId in distinctCollIds)
+            {
+                dbContext.RecipeCollections.Add(
+                    new RecipeCollection { RecipeId = recipe.Id, CollectionId = collId }
+                );
+            }
+        }
+
+        if (request.TagIds is { Count: > 0 })
+        {
+            var distinctTagIds = request.TagIds.Distinct().ToList();
+            var existingCount = await dbContext.Tags.CountAsync(
+                t => distinctTagIds.Contains(t.Id),
+                cancellationToken
+            );
+            if (existingCount != distinctTagIds.Count)
+            {
+                throw new DomainValidationException("One or more referenced tags do not exist.");
+            }
+            foreach (var tagId in distinctTagIds)
+            {
+                dbContext.RecipeTags.Add(new RecipeTag { RecipeId = recipe.Id, TagId = tagId });
+            }
         }
     }
 

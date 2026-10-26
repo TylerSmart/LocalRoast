@@ -1,4 +1,4 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { FormArray, FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { MatAutocompleteModule } from '@angular/material/autocomplete';
 import { MatButtonModule } from '@angular/material/button';
@@ -27,9 +27,17 @@ import {
   RecipeSummaryDto,
   UpsertRecipeRequest,
 } from '../../../core/models/recipe.models';
+import { CollectionDto, TagCategory, TagDto } from '../../../core/models/taxonomy.models';
 import { FoodCatalogService } from '../../../core/services/food-catalog/food-catalog.service';
+import { MediaService } from '../../../core/services/media/media.service';
 import { RecipeService } from '../../../core/services/recipe/recipe.service';
+import { TaxonomyService } from '../../../core/services/taxonomy/taxonomy.service';
 import { FoodItemDialogComponent } from '../../food-catalog/food-item-dialog/food-item-dialog.component';
+import {
+  CollectionDialogComponent,
+  CollectionDialogData,
+} from '../collection-dialog/collection-dialog.component';
+import { TagDialogComponent, TagDialogData } from '../tag-dialog/tag-dialog.component';
 
 interface IngredientFormValue {
   id?: string | null;
@@ -56,6 +64,7 @@ interface StepFormValue {
   id?: string | null;
   sectionName?: string | null;
   instruction: string;
+  imagePath?: string | null;
   ingredientIndices?: number[];
   timers?: TimerFormValue[];
 }
@@ -112,6 +121,8 @@ export class RecipeEditorComponent implements OnInit {
   private readonly router = inject(Router);
   private readonly recipeService = inject(RecipeService);
   private readonly catalogService = inject(FoodCatalogService);
+  private readonly mediaService = inject(MediaService);
+  private readonly taxonomyService = inject(TaxonomyService);
   private readonly dialog = inject(MatDialog);
   private readonly snackBar = inject(MatSnackBar);
 
@@ -124,6 +135,26 @@ export class RecipeEditorComponent implements OnInit {
 
   protected readonly foodItems = signal<FoodItemDto[]>([]);
   protected readonly availableSubRecipes = signal<RecipeSummaryDto[]>([]);
+
+  // Media signals
+  protected readonly coverImagePath = signal<string | null>(null);
+  protected readonly thumbnailImagePath = signal<string | null>(null);
+  protected readonly isUploadingCover = signal<boolean>(false);
+  protected readonly stepUploadingMap = signal<Record<number, boolean>>({});
+
+  // Taxonomy signals
+  protected readonly collections = signal<CollectionDto[]>([]);
+  protected readonly tags = signal<TagDto[]>([]);
+  protected readonly selectedCollectionIds = signal<Set<string>>(new Set());
+  protected readonly selectedTagIds = signal<Set<string>>(new Set());
+
+  protected readonly tagCategories: TagCategory[] = [
+    'Course',
+    'Cuisine',
+    'Dietary',
+    'Equipment',
+    'Custom',
+  ];
 
   // Main Form
   protected readonly form = this.fb.group({
@@ -156,6 +187,7 @@ export class RecipeEditorComponent implements OnInit {
   ngOnInit(): void {
     this.loadCatalogItems();
     this.loadSubRecipes();
+    this.loadTaxonomy();
 
     this.route.paramMap.subscribe((params) => {
       const id = params.get('id');
@@ -187,6 +219,15 @@ export class RecipeEditorComponent implements OnInit {
     });
   }
 
+  loadTaxonomy(): void {
+    this.taxonomyService.getCollections().subscribe({
+      next: (colls) => this.collections.set(colls),
+    });
+    this.taxonomyService.getTags().subscribe({
+      next: (tgs) => this.tags.set(tgs),
+    });
+  }
+
   loadRecipe(id: string): void {
     this.isLoading.set(true);
     this.errorMessage.set(null);
@@ -204,6 +245,11 @@ export class RecipeEditorComponent implements OnInit {
   }
 
   populateForm(detail: RecipeDetailDto): void {
+    this.coverImagePath.set(detail.coverImagePath ?? null);
+    this.thumbnailImagePath.set(detail.thumbnailImagePath ?? null);
+    this.selectedCollectionIds.set(new Set(detail.collections.map((c) => c.id)));
+    this.selectedTagIds.set(new Set(detail.tags.map((t) => t.id)));
+
     this.form.patchValue({
       title: detail.title,
       status: detail.status,
@@ -267,11 +313,137 @@ export class RecipeEditorComponent implements OnInit {
         id: [step.id],
         sectionName: [step.sectionName ?? '', Validators.maxLength(150)],
         instruction: [step.instruction, [Validators.required, Validators.maxLength(4000)]],
+        imagePath: [step.imagePath ?? null],
         ingredientIndices: [selectedIndices],
         timers: timersArray,
       });
 
       this.stepsArray.push(stepGroup);
+    });
+  }
+
+  // --- Cover Photo Methods ---
+  onCoverFileSelected(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    this.isUploadingCover.set(true);
+    this.mediaService.uploadRecipeCover(file).subscribe({
+      next: (dto) => {
+        this.coverImagePath.set(dto.coverImagePath);
+        this.thumbnailImagePath.set(dto.thumbnailImagePath);
+        this.isUploadingCover.set(false);
+        this.snackBar.open('Cover photo uploaded successfully!', 'Close', { duration: 3000 });
+      },
+      error: (err: { error?: { detail?: string; title?: string } }) => {
+        this.isUploadingCover.set(false);
+        this.snackBar.open(
+          err?.error?.detail || err?.error?.title || 'Failed to upload cover photo.',
+          'Close',
+          { duration: 4000 },
+        );
+      },
+    });
+  }
+
+  removeCoverPhoto(): void {
+    this.coverImagePath.set(null);
+    this.thumbnailImagePath.set(null);
+  }
+
+  // --- Step Photo Methods ---
+  onStepFileSelected(stepIndex: number, event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    this.stepUploadingMap.update((m) => ({ ...m, [stepIndex]: true }));
+    this.mediaService.uploadStepImage(file).subscribe({
+      next: (dto) => {
+        this.stepsArray.at(stepIndex).patchValue({ imagePath: dto.imagePath });
+        this.stepUploadingMap.update((m) => ({ ...m, [stepIndex]: false }));
+        this.snackBar.open('Step photo uploaded!', 'Close', { duration: 2500 });
+      },
+      error: (err: { error?: { detail?: string; title?: string } }) => {
+        this.stepUploadingMap.update((m) => ({ ...m, [stepIndex]: false }));
+        this.snackBar.open(
+          err?.error?.detail || err?.error?.title || 'Failed to upload step photo.',
+          'Close',
+          { duration: 4000 },
+        );
+      },
+    });
+  }
+
+  removeStepPhoto(stepIndex: number): void {
+    this.stepsArray.at(stepIndex).patchValue({ imagePath: null });
+  }
+
+  // --- Taxonomy Methods ---
+  toggleCollection(id: string): void {
+    const next = new Set(this.selectedCollectionIds());
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
+    }
+    this.selectedCollectionIds.set(next);
+  }
+
+  toggleTag(id: string): void {
+    const next = new Set(this.selectedTagIds());
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
+    }
+    this.selectedTagIds.set(next);
+  }
+
+  protected readonly tagsByCategory = computed(() => {
+    const map: Record<TagCategory, TagDto[]> = {
+      Course: [],
+      Cuisine: [],
+      Dietary: [],
+      Equipment: [],
+      Custom: [],
+    };
+    for (const t of this.tags()) {
+      if (map[t.category]) {
+        map[t.category].push(t);
+      }
+    }
+    return map;
+  });
+
+  openNewCollectionDialog(): void {
+    const ref = this.dialog.open<CollectionDialogComponent, CollectionDialogData, CollectionDto>(
+      CollectionDialogComponent,
+      { width: '420px', data: {} },
+    );
+    ref.afterClosed().subscribe((created) => {
+      if (created) {
+        this.collections.update((prev) => [...prev, created]);
+        this.toggleCollection(created.id);
+      }
+    });
+  }
+
+  openNewTagDialog(defaultCategory: TagCategory = 'Custom'): void {
+    const ref = this.dialog.open<TagDialogComponent, TagDialogData, TagDto>(TagDialogComponent, {
+      width: '420px',
+      data: { defaultCategory },
+    });
+    ref.afterClosed().subscribe((created) => {
+      if (created) {
+        this.tags.update((prev) => [...prev, created]);
+        this.toggleTag(created.id);
+      }
     });
   }
 
@@ -359,6 +531,7 @@ export class RecipeEditorComponent implements OnInit {
       id: [null],
       sectionName: ['', Validators.maxLength(150)],
       instruction: ['', [Validators.required, Validators.maxLength(4000)]],
+      imagePath: [null as string | null],
       ingredientIndices: [[] as number[]],
       timers: this.fb.array<FormGroup>([]),
     });
@@ -461,6 +634,7 @@ export class RecipeEditorComponent implements OnInit {
       return {
         sectionName: s.sectionName?.trim() || null,
         instruction: s.instruction.trim(),
+        imagePath: s.imagePath?.trim() || null,
         ingredientIndices: s.ingredientIndices || [],
         timers,
       };
@@ -481,6 +655,10 @@ export class RecipeEditorComponent implements OnInit {
       sourceUrl: val.sourceUrl?.trim() || null,
       sourceBookTitle: val.sourceBookTitle?.trim() || null,
       sourceBookPage: val.sourceBookPage != null ? Number(val.sourceBookPage) : null,
+      coverImagePath: this.coverImagePath(),
+      thumbnailImagePath: this.thumbnailImagePath(),
+      collectionIds: Array.from(this.selectedCollectionIds()),
+      tagIds: Array.from(this.selectedTagIds()),
       ingredients: mappedIngredients,
       steps: mappedSteps,
     };
@@ -499,7 +677,7 @@ export class RecipeEditorComponent implements OnInit {
         this.snackBar.open(`Recipe "${saved.title}" saved!`, 'Close', { duration: 3000 });
         this.router.navigate(['/recipes', saved.id]);
       },
-      error: (err) => {
+      error: (err: { error?: { detail?: string; title?: string } }) => {
         this.isSaving.set(false);
         this.errorMessage.set(err?.error?.detail || err?.error?.title || 'Failed to save recipe.');
       },

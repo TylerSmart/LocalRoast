@@ -3,9 +3,12 @@ import { Service, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { apiUrl } from '../../api/api-url';
 import {
+  IngredientMatchRequest,
+  IngredientMatchResultDto,
   RecipeDetailDto,
   RecipeQueryParameters,
   RecipeSummaryDto,
+  UpdateRecipeOrganizationRequest,
   UpsertRecipeRequest,
 } from '../../models/recipe.models';
 
@@ -30,6 +33,14 @@ export class RecipeService {
     if (query?.foodItemId) {
       params = params.set('foodItemId', query.foodItemId);
     }
+    if (query?.collectionId) {
+      params = params.set('collectionId', query.collectionId);
+    }
+    if (query?.tagIds && query.tagIds.length > 0) {
+      for (const tagId of query.tagIds) {
+        params = params.append('tagIds', tagId);
+      }
+    }
 
     return this.http.get<RecipeSummaryDto[]>(apiUrl('/recipes'), { params });
   }
@@ -48,5 +59,21 @@ export class RecipeService {
 
   deleteRecipe(id: string): Observable<void> {
     return this.http.delete<void>(apiUrl(`/recipes/${id}`));
+  }
+
+  updateRecipeOrganization(
+    id: string,
+    request: UpdateRecipeOrganizationRequest,
+  ): Observable<RecipeDetailDto> {
+    return this.http.put<RecipeDetailDto>(apiUrl(`/recipes/${id}/organization`), request);
+  }
+
+  matchRecipesByIngredients(
+    request: IngredientMatchRequest,
+  ): Observable<IngredientMatchResultDto[]> {
+    return this.http.post<IngredientMatchResultDto[]>(
+      apiUrl('/recipes/match-ingredients'),
+      request,
+    );
   }
 }

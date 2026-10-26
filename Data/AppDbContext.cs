@@ -23,6 +23,14 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
 
     public DbSet<RecipeStepTimer> RecipeStepTimers => Set<RecipeStepTimer>();
 
+    public DbSet<Collection> Collections => Set<Collection>();
+
+    public DbSet<RecipeCollection> RecipeCollections => Set<RecipeCollection>();
+
+    public DbSet<Tag> Tags => Set<Tag>();
+
+    public DbSet<RecipeTag> RecipeTags => Set<RecipeTag>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);

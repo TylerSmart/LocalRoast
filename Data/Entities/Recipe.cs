@@ -60,4 +60,9 @@ public sealed class Recipe : IAuditable
         new List<RecipeIngredient>();
 
     public ICollection<RecipeStep> Steps { get; set; } = new List<RecipeStep>();
+
+    public ICollection<RecipeCollection> RecipeCollections { get; set; } =
+        new List<RecipeCollection>();
+
+    public ICollection<RecipeTag> RecipeTags { get; set; } = new List<RecipeTag>();
 }

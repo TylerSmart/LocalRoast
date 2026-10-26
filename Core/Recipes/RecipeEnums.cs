@@ -19,6 +19,16 @@ public enum RecipeDifficulty
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
+public enum TagCategory
+{
+    Course = 0,
+    Cuisine = 1,
+    Dietary = 2,
+    Equipment = 3,
+    Custom = 4,
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum MeasurementUnit
 {
     // Volume - US Customary

@@ -192,6 +192,139 @@
         </mat-expansion-panel>
       </mat-card>
 
+      <!-- Cover Photo Card -->
+      <mat-card class="editor-section-card cover-photo-card">
+        <h2 class="card-section-title">
+          <mat-icon>image</mat-icon>
+          <span>Cover Photo</span>
+        </h2>
+
+        @if (coverImagePath()) {
+          <div class="cover-preview-wrapper">
+            <img [src]="coverImagePath()!" alt="Recipe cover photo" class="cover-preview-img" />
+            <button
+              mat-stroked-button
+              color="warn"
+              type="button"
+              (click)="removeCoverPhoto()"
+              class="remove-cover-btn"
+            >
+              <mat-icon>delete</mat-icon>
+              <span>Remove Cover Photo</span>
+            </button>
+          </div>
+        } @else {
+          <div class="cover-upload-wrapper">
+            <input
+              type="file"
+              #coverFileInput
+              class="cover-file-input"
+              (change)="onCoverFileSelected($event)"
+              accept="image/jpeg,image/png,image/webp,image/gif"
+              style="display: none"
+            />
+            <button
+              mat-stroked-button
+              type="button"
+              (click)="coverFileInput.click()"
+              [disabled]="isUploadingCover()"
+              class="upload-cover-btn"
+            >
+              @if (isUploadingCover()) {
+                <mat-spinner diameter="18"></mat-spinner>
+                <span>Uploading...</span>
+              } @else {
+                <span class="btn-inner">
+                  <mat-icon>upload</mat-icon>
+                  <span>Upload Cover Photo</span>
+                </span>
+              }
+            </button>
+            <span class="cover-upload-hint"
+              >JPEG, PNG, WebP or GIF up to 15 MB. Resized and converted to responsive WebP.</span
+            >
+          </div>
+        }
+      </mat-card>
+
+      <!-- Collections & Tags Card -->
+      <mat-card class="editor-section-card taxonomy-card">
+        <h2 class="card-section-title">
+          <mat-icon>collections_bookmark</mat-icon>
+          <span>Collections & Tags</span>
+        </h2>
+
+        <div class="taxonomy-editor-content">
+          <!-- Collections -->
+          <div class="taxonomy-group">
+            <div class="taxonomy-group-header">
+              <span class="taxonomy-group-title">Collections</span>
+              <button
+                mat-button
+                color="primary"
+                type="button"
+                (click)="openNewCollectionDialog()"
+                class="add-taxonomy-btn"
+              >
+                <mat-icon>add</mat-icon>
+                <span>New Collection</span>
+              </button>
+            </div>
+            <div class="chip-container">
+              @for (coll of collections(); track coll.id) {
+                <mat-chip-option
+                  [selected]="selectedCollectionIds().has(coll.id)"
+                  (click)="toggleCollection(coll.id)"
+                >
+                  {{ coll.name }}
+                </mat-chip-option>
+              }
+              @if (collections().length === 0) {
+                <span class="empty-hint">No collections created yet.</span>
+              }
+            </div>
+          </div>
+
+          <!-- Tags -->
+          <div class="taxonomy-group">
+            <div class="taxonomy-group-header">
+              <span class="taxonomy-group-title">Tags</span>
+              <button
+                mat-button
+                color="primary"
+                type="button"
+                (click)="openNewTagDialog()"
+                class="add-taxonomy-btn"
+              >
+                <mat-icon>add</mat-icon>
+                <span>New Tag</span>
+              </button>
+            </div>
+
+            @for (cat of tagCategories; track cat) {
+              @if (tagsByCategory()[cat]?.length) {
+                <div class="tag-category-row">
+                  <span class="tag-cat-name">{{ cat }}</span>
+                  <div class="chip-container">
+                    @for (tag of tagsByCategory()[cat]; track tag.id) {
+                      <mat-chip-option
+                        [selected]="selectedTagIds().has(tag.id)"
+                        (click)="toggleTag(tag.id)"
+                      >
+                        {{ tag.name }}
+                      </mat-chip-option>
+                    }
+                  </div>
+                </div>
+              }
+            }
+            @if (tags().length === 0) {
+              <span class="empty-hint">No tags created yet.</span>
+            }
+          </div>
+        </div>
+      </mat-card>
+
       <!-- SECTION 2: Ingredients Builder Card -->
       <mat-card class="editor-section-card">
         <div class="card-section-header">
@@ -249,148 +382,124 @@
                 </div>
               </div>
 
-              <!-- Main Row: Quantity, Unit, Food/SubRecipe Item, Display Name -->
-              <div class="ingredient-fields-grid">
-                <!-- Section Name -->
-                <mat-form-field appearance="outline" class="field-section">
-                  <mat-label>Section (Optional)</mat-label>
-                  <input matInput formControlName="sectionName" placeholder="e.g. Sauce, Crust" />
+              <!-- Section header override -->
+              <mat-form-field appearance="outline" class="full-width">
+                <mat-label>Section (e.g. Sauce, Crust - Optional)</mat-label>
+                <input
+                  matInput
+                  formControlName="sectionName"
+                  placeholder="Leave empty for main recipe"
+                />
+              </mat-form-field>
+
+              <div class="ingredient-row-fields">
+                <!-- Quantity & Range -->
+                <mat-form-field appearance="outline" class="field-qty">
+                  <mat-label>Qty</mat-label>
+                  <input matInput type="number" step="any" min="0" formControlName="quantity" />
                 </mat-form-field>
 
-                <!-- Quantity -->
                 <mat-form-field appearance="outline" class="field-qty">
-                  <mat-label>Quantity</mat-label>
-                  <input
-                    matInput
-                    type="number"
-                    step="0.125"
-                    min="0"
-                    formControlName="quantity"
-                    placeholder="e.g. 1.5"
-                  />
-                </mat-form-field>
-
-                <!-- Max Quantity (Optional range) -->
-                <mat-form-field appearance="outline" class="field-qty">
-                  <mat-label>Max Qty (Range)</mat-label>
-                  <input
-                    matInput
-                    type="number"
-                    step="0.125"
-                    min="0"
-                    formControlName="maxQuantity"
-                    placeholder="e.g. 2"
-                  />
+                  <mat-label>Max (opt)</mat-label>
+                  <input matInput type="number" step="any" min="0" formControlName="maxQuantity" />
                 </mat-form-field>
 
                 <!-- Unit -->
                 <mat-form-field appearance="outline" class="field-unit">
                   <mat-label>Unit</mat-label>
                   <mat-select formControlName="unit">
-                    <mat-option [value]="null">-- None / Count --</mat-option>
+                    <mat-option [value]="null">None / Unitless</mat-option>
                     @for (u of measurementUnits; track u.value) {
                       <mat-option [value]="u.value">{{ u.label }}</mat-option>
                     }
                   </mat-select>
                 </mat-form-field>
 
-                <!-- Custom Unit Name if Unit is Custom -->
                 @if (ingGroup.get('unit')?.value === 'Custom') {
                   <mat-form-field appearance="outline" class="field-custom-unit">
-                    <mat-label>Custom Unit Name</mat-label>
-                    <input
-                      matInput
-                      formControlName="customUnitName"
-                      placeholder="e.g. can, bunch"
-                      required
-                    />
+                    <mat-label>Custom Unit</mat-label>
+                    <input matInput formControlName="customUnitName" placeholder="e.g. stalk" />
                   </mat-form-field>
                 }
 
-                <!-- Food Item Link (when NOT Sub-Recipe) -->
-                @if (!ingGroup.get('isSubRecipe')?.value) {
-                  <mat-form-field appearance="outline" class="field-food-link">
-                    <mat-label>Link to Food Catalog Item</mat-label>
-                    <mat-select
-                      formControlName="foodItemId"
-                      (selectionChange)="onFoodItemSelected($index, $event.value)"
-                    >
-                      <mat-option [value]="null">-- Not Linked --</mat-option>
-                      @for (food of foodItems(); track food.id) {
-                        <mat-option [value]="food.id">{{ food.name }}</mat-option>
-                      }
-                    </mat-select>
-                  </mat-form-field>
-                } @else {
-                  <!-- Sub-Recipe Link (when Sub-Recipe) -->
-                  <mat-form-field appearance="outline" class="field-food-link">
-                    <mat-label>Select Sub-Recipe</mat-label>
+                <!-- Linked Entity / Display Name -->
+                @if (ingGroup.get('isSubRecipe')?.value) {
+                  <!-- Sub-Recipe Selector -->
+                  <mat-form-field appearance="outline" class="field-display-name">
+                    <mat-label>Select Linked Sub-Recipe</mat-label>
                     <mat-select
                       formControlName="linkedRecipeId"
                       (selectionChange)="onSubRecipeSelected($index, $event.value)"
                     >
-                      <mat-option [value]="null">-- Select Sub-Recipe --</mat-option>
                       @for (sub of availableSubRecipes(); track sub.id) {
                         <mat-option [value]="sub.id">{{ sub.title }}</mat-option>
                       }
                     </mat-select>
                   </mat-form-field>
+                } @else {
+                  <!-- Food Item Autocomplete / Display Name -->
+                  <mat-form-field appearance="outline" class="field-display-name">
+                    <mat-label>Ingredient Name / Food Item</mat-label>
+                    <input
+                      matInput
+                      formControlName="displayName"
+                      [matAutocomplete]="foodAuto"
+                      placeholder="e.g. All-Purpose Flour"
+                      required
+                    />
+                    <mat-autocomplete
+                      #foodAuto="matAutocomplete"
+                      (optionSelected)="onFoodItemSelected($index, $event.option.value)"
+                    >
+                      @for (item of foodItems(); track item.id) {
+                        <mat-option [value]="item.id">
+                          <span class="auto-item-name">{{ item.name }}</span>
+                          @if (item.aliases.length > 0) {
+                            <span class="auto-item-alias">({{ item.aliases.join(', ') }})</span>
+                          }
+                        </mat-option>
+                      }
+                    </mat-autocomplete>
+                  </mat-form-field>
+
+                  <!-- Quick Catalog Creator Trigger -->
+                  <button
+                    mat-icon-button
+                    type="button"
+                    (click)="
+                      openCreateFoodItemForIngredient(
+                        $index,
+                        ingGroup.get('displayName')?.value || ''
+                      )
+                    "
+                    matTooltip="Add to Food Catalog"
+                    class="create-catalog-btn"
+                  >
+                    <mat-icon>add_shopping_cart</mat-icon>
+                  </button>
                 }
 
-                <!-- Display Name -->
-                <mat-form-field appearance="outline" class="field-display-name">
-                  <mat-label>Display Name</mat-label>
-                  <input
-                    matInput
-                    formControlName="displayName"
-                    placeholder="e.g. Yellow Onion"
-                    required
-                  />
-                  @if (
-                    !ingGroup.get('foodItemId')?.value &&
-                    !ingGroup.get('isSubRecipe')?.value &&
-                    ingGroup.get('displayName')?.value
-                  ) {
-                    <button
-                      mat-button
-                      matSuffix
-                      type="button"
-                      class="create-inline-btn"
-                      (click)="
-                        openCreateFoodItemForIngredient($index, ingGroup.get('displayName')?.value)
-                      "
-                      matTooltip="Add to Food Catalog"
-                    >
-                      + Catalog
-                    </button>
-                  }
-                </mat-form-field>
-
                 <!-- Preparation Note -->
-                <mat-form-field appearance="outline" class="field-prep">
-                  <mat-label>Preparation Note</mat-label>
-                  <input
-                    matInput
-                    formControlName="preparationNote"
-                    placeholder="e.g. diced finely, toasted"
-                  />
+                <mat-form-field appearance="outline" class="field-note">
+                  <mat-label>Prep Note (e.g. minced, room temp)</mat-label>
+                  <input matInput formControlName="preparationNote" />
                 </mat-form-field>
 
-                <!-- Optional Checkbox -->
-                <div class="field-optional">
-                  <mat-checkbox formControlName="isOptional">Optional</mat-checkbox>
-                </div>
+                <!-- Optional Toggle -->
+                <mat-checkbox formControlName="isOptional" class="field-opt">
+                  Optional
+                </mat-checkbox>
               </div>
             </div>
           }
         </div>
       </mat-card>
 
-      <!-- SECTION 3: Steps Builder Card -->
+      <!-- SECTION 3: Instructions & Steps Builder Card -->
       <mat-card class="editor-section-card">
         <div class="card-section-header">
           <h2 class="card-section-title">
-            <mat-icon>menu_book</mat-icon>
+            <mat-icon>directions</mat-icon>
             <span>Instructions & Steps ({{ stepsArray.length }})</span>
           </h2>
 
@@ -455,6 +564,56 @@
                   required
                 ></textarea>
               </mat-form-field>
+
+              <!-- Step Photo Controls -->
+              <div class="step-photo-section">
+                @if (stepGroup.get('imagePath')?.value) {
+                  <div class="step-image-preview-wrapper">
+                    <img
+                      [src]="stepGroup.get('imagePath')!.value"
+                      alt="Step photo"
+                      class="step-preview-img"
+                    />
+                    <button
+                      mat-stroked-button
+                      color="warn"
+                      type="button"
+                      class="remove-step-photo-btn"
+                      (click)="removeStepPhoto($index)"
+                      aria-label="Remove step photo"
+                    >
+                      <mat-icon>delete</mat-icon>
+                      <span>Remove Step Photo</span>
+                    </button>
+                  </div>
+                } @else {
+                  <input
+                    type="file"
+                    #stepFileInput
+                    class="step-file-input"
+                    (change)="onStepFileSelected($index, $event)"
+                    accept="image/jpeg,image/png,image/webp,image/gif"
+                    style="display: none"
+                  />
+                  <button
+                    mat-button
+                    type="button"
+                    (click)="stepFileInput.click()"
+                    [disabled]="stepUploadingMap()[$index]"
+                    class="add-step-photo-btn"
+                  >
+                    @if (stepUploadingMap()[$index]) {
+                      <mat-spinner diameter="18"></mat-spinner>
+                      <span>Uploading...</span>
+                    } @else {
+                      <span class="btn-inner">
+                        <mat-icon>add_photo_alternate</mat-icon>
+                        <span>Add Step Photo</span>
+                      </span>
+                    }
+                  </button>
+                }
+              </div>
 
               <!-- Step Ingredients Callout Selector -->
               @if (ingredientsArray.length > 0) {

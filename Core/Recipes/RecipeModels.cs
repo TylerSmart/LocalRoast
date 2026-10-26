@@ -2,6 +2,10 @@ using System.ComponentModel.DataAnnotations;
 
 namespace App.Core.Recipes;
 
+public record RecipeCollectionBadgeDto(Guid Id, string Name, string Slug);
+
+public record RecipeTagBadgeDto(Guid Id, string Name, string Slug, TagCategory Category);
+
 public record RecipeSummaryDto(
     Guid Id,
     string Title,
@@ -21,8 +25,14 @@ public record RecipeSummaryDto(
     int TimesCooked,
     decimal? AverageRating,
     DateTimeOffset CreatedAt,
-    DateTimeOffset ModifiedAt
-);
+    DateTimeOffset ModifiedAt,
+    IReadOnlyList<RecipeCollectionBadgeDto>? Collections = null,
+    IReadOnlyList<RecipeTagBadgeDto>? Tags = null
+)
+{
+    public IReadOnlyList<RecipeCollectionBadgeDto> Collections { get; init; } = Collections ?? [];
+    public IReadOnlyList<RecipeTagBadgeDto> Tags { get; init; } = Tags ?? [];
+}
 
 public record SubRecipePreviewDto(
     Guid Id,
@@ -94,15 +104,23 @@ public record RecipeDetailDto(
     DateTimeOffset CreatedAt,
     string CreatedBy,
     DateTimeOffset ModifiedAt,
-    string ModifiedBy
-);
+    string ModifiedBy,
+    IReadOnlyList<RecipeCollectionBadgeDto>? Collections = null,
+    IReadOnlyList<RecipeTagBadgeDto>? Tags = null
+)
+{
+    public IReadOnlyList<RecipeCollectionBadgeDto> Collections { get; init; } = Collections ?? [];
+    public IReadOnlyList<RecipeTagBadgeDto> Tags { get; init; } = Tags ?? [];
+}
 
 public record RecipeQueryParameters(
     string? Search = null,
     RecipeStatus? Status = null,
     RecipeDifficulty? Difficulty = null,
     int? MaxTotalTimeMinutes = null,
-    Guid? FoodItemId = null
+    Guid? FoodItemId = null,
+    Guid? CollectionId = null,
+    Guid[]? TagIds = null
 );
 
 public record RecipeIngredientInput(
@@ -128,7 +146,8 @@ public record RecipeStepInput(
     [MaxLength(150)] string? SectionName = null,
     [Required, MaxLength(4000)] string Instruction = "",
     IReadOnlyList<int>? IngredientIndices = null,
-    IReadOnlyList<RecipeStepTimerInput>? Timers = null
+    IReadOnlyList<RecipeStepTimerInput>? Timers = null,
+    [MaxLength(500)] string? ImagePath = null
 );
 
 public record UpsertRecipeRequest(
@@ -147,5 +166,26 @@ public record UpsertRecipeRequest(
     [MaxLength(200)] string? SourceBookTitle = null,
     [Range(1, 10000)] int? SourceBookPage = null,
     IReadOnlyList<RecipeIngredientInput>? Ingredients = null,
-    IReadOnlyList<RecipeStepInput>? Steps = null
+    IReadOnlyList<RecipeStepInput>? Steps = null,
+    [MaxLength(500)] string? CoverImagePath = null,
+    [MaxLength(500)] string? ThumbnailImagePath = null,
+    IReadOnlyList<Guid>? CollectionIds = null,
+    IReadOnlyList<Guid>? TagIds = null
+);
+
+public record UpdateRecipeOrganizationRequest(
+    IReadOnlyList<Guid>? CollectionIds = null,
+    IReadOnlyList<Guid>? TagIds = null
+);
+
+public record IngredientMatchRequest([Required] IReadOnlyList<Guid> FoodItemIds);
+
+public record IngredientMatchResultDto(
+    RecipeSummaryDto Recipe,
+    int MatchedCount,
+    int SelectedOnHandCount,
+    int AdditionalNonStapleCount,
+    int PantryStaplesUsedCount,
+    IReadOnlyList<string> MatchedIngredientNames,
+    IReadOnlyList<string> MissingNonStapleNames
 );

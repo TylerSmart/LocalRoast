@@ -8,6 +8,15 @@
       </p>
     </div>
     <div class="header-actions">
+      <a
+        mat-stroked-button
+        routerLink="/matcher"
+        class="matcher-btn"
+        aria-label="Use up ingredients"
+      >
+        <mat-icon>blender</mat-icon>
+        <span>Use Up Ingredients</span>
+      </a>
       <a mat-flat-button color="primary" routerLink="/recipes/new" aria-label="Create new recipe">
         <mat-icon>add</mat-icon>
         <span>New Recipe</span>
@@ -15,18 +24,50 @@
     </div>
   </div>
 
+  <!-- Collections Strip -->
+  <div class="collections-strip" role="tablist" aria-label="Recipe Collections">
+    <button
+      type="button"
+      class="collection-pill"
+      [class.active]="selectedCollectionId() === null"
+      (click)="selectCollection(null)"
+    >
+      All Cookbooks
+    </button>
+    @for (c of collections(); track c.id) {
+      <button
+        type="button"
+        class="collection-pill"
+        [class.active]="selectedCollectionId() === c.id"
+        (click)="selectCollection(c.id)"
+      >
+        <span>{{ c.name }}</span>
+        <span class="count-badge">{{ c.recipeCount }}</span>
+      </button>
+    }
+    <button
+      type="button"
+      class="collection-pill add-collection-pill"
+      (click)="openNewCollectionDialog()"
+      aria-label="Create new collection"
+    >
+      <mat-icon>add</mat-icon>
+      <span>New Collection</span>
+    </button>
+  </div>
+
   <!-- Search & Filter Controls -->
   <mat-card class="filter-card">
     <div class="filter-row">
       <!-- Search Input -->
       <mat-form-field appearance="outline" class="search-field" subscriptSizing="dynamic">
-        <mat-label>Search recipes, ingredients, sources...</mat-label>
+        <mat-label>Search recipes, ingredients, sources, tags...</mat-label>
         <mat-icon matPrefix>search</mat-icon>
         <input
           matInput
           [ngModel]="searchQuery()"
           (ngModelChange)="searchQuery.set($event)"
-          placeholder="e.g. Lasagna, Kenji Lopez-Alt"
+          placeholder="e.g. Lasagna, Vegetarian, Sheet Pan"
           autocomplete="off"
         />
         @if (searchQuery()) {
@@ -67,10 +108,44 @@
         <mat-select [ngModel]="maxTimeMinutes()" (ngModelChange)="maxTimeMinutes.set($event)">
           <mat-option [value]="null">Any Duration</mat-option>
           <mat-option [value]="30">Under 30 min</mat-option>
+          <mat-option [value]="45">Under 45 min</mat-option>
           <mat-option [value]="60">Under 60 min</mat-option>
           <mat-option [value]="120">Under 2 hours</mat-option>
         </mat-select>
       </mat-form-field>
+
+      <!-- Tags Multi-Select -->
+      <mat-form-field
+        appearance="outline"
+        class="filter-field tag-filter-field"
+        subscriptSizing="dynamic"
+      >
+        <mat-label>Tags</mat-label>
+        <mat-select
+          [ngModel]="selectedTagIds()"
+          (ngModelChange)="onTagSelectionChange($event)"
+          multiple
+          placeholder="Filter by tags"
+        >
+          @for (cat of tagCategories; track cat) {
+            @if (tagsByCategory(cat).length > 0) {
+              <mat-optgroup [label]="cat">
+                @for (t of tagsByCategory(cat); track t.id) {
+                  <mat-option [value]="t.id">{{ t.name }}</mat-option>
+                }
+              </mat-optgroup>
+            }
+          }
+        </mat-select>
+      </mat-form-field>
+
+      <!-- Clear Filters -->
+      @if (hasActiveFilters()) {
+        <button mat-button color="warn" (click)="clearFilters()" class="clear-filters-btn">
+          <mat-icon>clear_all</mat-icon>
+          <span>Clear Filters</span>
+        </button>
+      }
     </div>
   </mat-card>
 
@@ -96,7 +171,7 @@
         <mat-icon class="empty-icon">menu_book</mat-icon>
         <h3>No recipes found</h3>
         <p>
-          @if (searchQuery() || selectedDifficulty() !== 'All' || maxTimeMinutes() !== null) {
+          @if (hasActiveFilters()) {
             Try adjusting your search query or filters.
           } @else {
             Start creating delicious meals by adding your first structured recipe!
@@ -118,6 +193,15 @@
             role="button"
             [attr.aria-label]="recipe.title"
           >
+            @if (recipe.thumbnailImagePath) {
+              <img
+                [src]="recipe.thumbnailImagePath"
+                [alt]="recipe.title"
+                class="recipe-card-thumb"
+                loading="lazy"
+              />
+            }
+
             <div class="recipe-card-body">
               <div class="card-top-row">
                 <div class="status-and-diff">
@@ -159,6 +243,20 @@
 
               @if (recipe.description) {
                 <p class="recipe-card-desc">{{ recipe.description }}</p>
+              }
+
+              <!-- Collections and Tags Badges -->
+              @if (recipe.collections.length > 0 || recipe.tags.length > 0) {
+                <div class="card-badges-row">
+                  @for (c of recipe.collections; track c.id) {
+                    <span class="collection-badge-chip">{{ c.name }}</span>
+                  }
+                  @for (t of recipe.tags; track t.id) {
+                    <span class="tag-badge-chip" [class]="'cat-' + t.category.toLowerCase()">
+                      {{ t.name }}
+                    </span>
+                  }
+                </div>
               }
 
               <!-- Meta specs row -->

@@ -1,0 +1,65 @@
+<h2 mat-dialog-title>
+  {{ isEdit() ? 'Edit Collection' : 'New Collection' }}
+</h2>
+
+<mat-dialog-content>
+  @if (errorMessage()) {
+    <div class="error-banner" role="alert">
+      <mat-icon>error</mat-icon>
+      <span>{{ errorMessage() }}</span>
+    </div>
+  }
+
+  <form [formGroup]="form" class="collection-form" (ngSubmit)="onSave()">
+    <mat-form-field appearance="outline" class="full-width">
+      <mat-label>Collection Name</mat-label>
+      <input
+        matInput
+        formControlName="name"
+        placeholder="e.g. Weeknight Dinners"
+        maxlength="100"
+        required
+      />
+      @if (form.controls.name.hasError('required')) {
+        <mat-error>Name is required</mat-error>
+      }
+      @if (form.controls.name.hasError('maxlength')) {
+        <mat-error>Name cannot exceed 100 characters</mat-error>
+      }
+    </mat-form-field>
+
+    <mat-form-field appearance="outline" class="full-width">
+      <mat-label>Description (Optional)</mat-label>
+      <textarea
+        matInput
+        formControlName="description"
+        rows="3"
+        placeholder="Brief description of this collection..."
+        maxlength="500"
+      ></textarea>
+      @if (form.controls.description.hasError('maxlength')) {
+        <mat-error>Description cannot exceed 500 characters</mat-error>
+      }
+    </mat-form-field>
+
+    <mat-form-field appearance="outline" class="full-width">
+      <mat-label>Display Order</mat-label>
+      <input matInput type="number" formControlName="sortOrder" placeholder="0" />
+    </mat-form-field>
+  </form>
+</mat-dialog-content>
+
+<mat-dialog-actions align="end">
+  <button mat-button mat-dialog-close [disabled]="isSubmitting()">Cancel</button>
+  <button
+    mat-flat-button
+    color="primary"
+    (click)="onSave()"
+    [disabled]="isSubmitting() || form.invalid"
+  >
+    @if (isSubmitting()) {
+      <mat-spinner diameter="18" class="btn-spinner"></mat-spinner>
+    }
+    {{ isEdit() ? 'Save Changes' : 'Create Collection' }}
+  </button>
+</mat-dialog-actions>

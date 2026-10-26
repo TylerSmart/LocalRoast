@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+using App.Core.Recipes;
 using App.Data.Entities;
 using Microsoft.EntityFrameworkCore;
 
@@ -120,5 +122,115 @@ public static class HouseholdCatalogSeeder
 
             await db.SaveChangesAsync(cancellationToken);
         }
+
+        var hasCollections = await db.Collections.AnyAsync(cancellationToken);
+        if (!hasCollections)
+        {
+            var starterCollections = new (string Name, string Description, int SortOrder)[]
+            {
+                ("Weeknight Staples", "Reliable 30–45 minute dinners for busy evenings.", 10),
+                (
+                    "Weekend Projects",
+                    "Slow braises, homemade pasta, sourdough, and showstoppers.",
+                    20
+                ),
+                (
+                    "Holiday & Hosting",
+                    "Crowd-pleasers and make-ahead dishes for family gatherings.",
+                    30
+                ),
+                (
+                    "Sauces & Components",
+                    "Reusable dressings, marinades, pickles, and spice blends.",
+                    40
+                ),
+            };
+
+            foreach (var (name, description, sortOrder) in starterCollections)
+            {
+                db.Collections.Add(
+                    new Collection
+                    {
+                        Name = name,
+                        NormalizedName = name.Trim().ToLowerInvariant(),
+                        Slug = ToKebabCase(name),
+                        Description = description,
+                        SortOrder = sortOrder,
+                        IsSystemSeeded = true,
+                    }
+                );
+            }
+
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        var hasTags = await db.Tags.AnyAsync(cancellationToken);
+        if (!hasTags)
+        {
+            var starterTags = new (string Name, TagCategory Category, int SortOrder)[]
+            {
+                // Course
+                ("Main", TagCategory.Course, 10),
+                ("Side", TagCategory.Course, 20),
+                ("Breakfast", TagCategory.Course, 30),
+                ("Lunch", TagCategory.Course, 40),
+                ("Dessert", TagCategory.Course, 50),
+                ("Appetizer", TagCategory.Course, 60),
+                ("Sauce / Component", TagCategory.Course, 70),
+                // Cuisine
+                ("American", TagCategory.Cuisine, 10),
+                ("Italian", TagCategory.Cuisine, 20),
+                ("Mexican", TagCategory.Cuisine, 30),
+                ("Thai", TagCategory.Cuisine, 40),
+                ("Japanese", TagCategory.Cuisine, 50),
+                ("Indian", TagCategory.Cuisine, 60),
+                ("Mediterranean", TagCategory.Cuisine, 70),
+                // Dietary
+                ("Vegetarian", TagCategory.Dietary, 10),
+                ("Vegan", TagCategory.Dietary, 20),
+                ("Gluten-Free", TagCategory.Dietary, 30),
+                ("Dairy-Free", TagCategory.Dietary, 40),
+                // Equipment
+                ("Sheet Pan", TagCategory.Equipment, 10),
+                ("One-Pot", TagCategory.Equipment, 20),
+                ("Instant Pot", TagCategory.Equipment, 30),
+                ("Air Fryer", TagCategory.Equipment, 40),
+                ("Dutch Oven", TagCategory.Equipment, 50),
+                ("Grill", TagCategory.Equipment, 60),
+                ("Slow Cooker", TagCategory.Equipment, 70),
+            };
+
+            foreach (var (name, category, sortOrder) in starterTags)
+            {
+                var catSlug = category.ToString().ToLowerInvariant();
+                var nameSlug = ToKebabCase(name);
+                db.Tags.Add(
+                    new Tag
+                    {
+                        Name = name,
+                        NormalizedName = name.Trim().ToLowerInvariant(),
+                        Slug = $"{catSlug}-{nameSlug}",
+                        Category = category,
+                        SortOrder = sortOrder,
+                        IsSystemSeeded = true,
+                    }
+                );
+            }
+
+            await db.SaveChangesAsync(cancellationToken);
+        }
+    }
+
+    private static string ToKebabCase(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var lower = value.Trim().ToLowerInvariant();
+        var clean = Regex.Replace(lower, @"[^a-z0-9\s-]", "");
+        var hyphens = Regex.Replace(clean, @"[\s-]+", "-");
+        return hyphens.Trim('-');
     }
 }

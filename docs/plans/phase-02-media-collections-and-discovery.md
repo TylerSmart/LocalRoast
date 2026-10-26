@@ -1,7 +1,7 @@
 # Phase 02: Local WebP Media Pipeline, Collections & Typed Tags, and Smart Cookbook Discovery
 
 > **Branch:** `feature/phase-02-media-collections-and-discovery`
-> **Status:** `[ ]` Not Started
+> **Status:** `[x]` Completed
 > **PRD Reference:** `docs/prd.md` — Sections 2, 3, 4.1.1, 4.1.4, 4.7.1, 4.7.2, 5, and 6 (Milestone 1, Slice 2)
 > **Target Execution:** Run `/execute-phase` to execute this plan step-by-step.
 
@@ -495,7 +495,7 @@ Create `Tests/Client.E2ETests/DiscoveryAndMediaE2ETests.cs` inheriting from `E2E
 
 ## 6. Step-by-Step Execution Checklist (For Implementation Agent)
 
-- [ ] **Task 1: Backend Core, Media Infrastructure & Data Layer**
+- [x] **Task 1: Backend Core, Media Infrastructure & Data Layer**
   - Add `SixLabors.ImageSharp` (`3.1.12`) to `Infrastructure/App.Infrastructure.csproj`.
   - Create `Core/Media/MediaModels.cs`, `Core/Media/IMediaStorageService.cs`, `Infrastructure/Media/MediaStorageOptions.cs`, and `Infrastructure/Media/LocalFileMediaStorageService.cs`; register in `InfrastructureServiceCollectionExtensions.cs`.
   - Update `Core/Recipes/RecipeEnums.cs`, `Core/Recipes/RecipeModels.cs`, `Core/Recipes/IRecipeService.cs`, and create `Core/Recipes/TaxonomyModels.cs`, `Core/Recipes/ITaxonomyService.cs`, and `Core/Recipes/IngredientMatcher.cs`.
@@ -513,7 +513,7 @@ Create `Tests/Client.E2ETests/DiscoveryAndMediaE2ETests.cs` inheriting from `E2E
     dotnet test --project Tests/Infrastructure.UnitTests/App.Infrastructure.UnitTests.csproj
     ```
 
-- [ ] **Task 2: API Controllers, Static Uploads Hosting & Integration Tests**
+- [x] **Task 2: API Controllers, Static Uploads Hosting & Integration Tests**
   - Update `API/appsettings.json`, `API/appsettings.Development.json`, `API/Dockerfile`, and `API/Program.cs` (`/api/uploads` static file serving).
   - Create `API/Controllers/MediaController.cs`, `API/Controllers/CollectionsController.cs`, `API/Controllers/TagsController.cs`, and add `PUT {id:guid}/organization` + `POST match-ingredients` to `API/Controllers/RecipesController.cs`.
   - Update `AppWebApplicationFactory.cs` (isolated temp `MediaStorage:UploadsPath` + cleanup) and `OpenApiIntegrationTests.cs`.
@@ -523,7 +523,7 @@ Create `Tests/Client.E2ETests/DiscoveryAndMediaE2ETests.cs` inheriting from `E2E
     dotnet test --project Tests/API.IntegrationTests/App.API.IntegrationTests.csproj
     ```
 
-- [ ] **Task 3: Angular Client & Frontend Unit Tests**
+- [x] **Task 3: Angular Client & Frontend Unit Tests**
   - Create `media.models.ts`, `taxonomy.models.ts`, `MediaService` (+ `.spec.ts`), `TaxonomyService` (+ `.spec.ts`), and update `recipe.models.ts` and `RecipeService` (+ `.spec.ts`).
   - Create dedicated component folders (`collection-dialog/`, `tag-dialog/`, `recipe-organization-dialog/`, `fridge-matcher/`, `global-search-dialog/`) with external `.ts`, `.html`, `.scss`, and `.spec.ts` files.
   - Update `app.routes.ts`, `app-shell/`, `recipe-editor/`, `recipe-list/`, and `recipe-detail/` (including updating mock DTOs in existing `.spec.ts` files).
@@ -535,7 +535,7 @@ Create `Tests/Client.E2ETests/DiscoveryAndMediaE2ETests.cs` inheriting from `E2E
     npm test -- --watch=false
     ```
 
-- [ ] **Task 4: Playwright E2E Verification & Final Formatting**
+- [x] **Task 4: Playwright E2E Verification & Final Formatting**
   - Update `Tests/Client.E2ETests/PlaywrightServerFixture.cs` with isolated temp `MediaStorage__UploadsPath` cleanup and create `Tests/Client.E2ETests/DiscoveryAndMediaE2ETests.cs` implementing all scenarios in Section 5.
   - Build solution & Angular production bundle, then run Playwright E2E tests until 100% green:
     ```powershell

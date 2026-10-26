@@ -8,6 +8,14 @@
 
     @if (recipe()) {
       <div class="detail-top-actions">
+        <button
+          mat-stroked-button
+          (click)="openOrganizeDialog()"
+          aria-label="Organize collections and tags"
+        >
+          <mat-icon>label</mat-icon>
+          <span>Organize</span>
+        </button>
         <a
           mat-stroked-button
           [routerLink]="['/recipes', recipe()!.id, 'edit']"
@@ -39,6 +47,10 @@
   } @else if (recipe()) {
     <!-- Recipe Hero / Header -->
     <header class="recipe-hero">
+      @if (recipe()!.coverImagePath) {
+        <img [src]="recipe()!.coverImagePath!" [alt]="recipe()!.title" class="recipe-hero-image" />
+      }
+
       <div class="hero-header-row">
         <h1 class="recipe-title">{{ recipe()!.title }}</h1>
         <div class="hero-badges">
@@ -54,6 +66,23 @@
           }
         </div>
       </div>
+
+      <!-- Collections & Tags Badges in Hero -->
+      @if (recipe()!.collections.length > 0 || recipe()!.tags.length > 0) {
+        <div class="hero-taxonomy-strip">
+          @for (c of recipe()!.collections; track c.id) {
+            <span class="hero-collection-badge">
+              <mat-icon>collections_bookmark</mat-icon>
+              <span>{{ c.name }}</span>
+            </span>
+          }
+          @for (t of recipe()!.tags; track t.id) {
+            <span class="hero-tag-badge" [class]="'cat-' + t.category.toLowerCase()">
+              {{ t.name }}
+            </span>
+          }
+        </div>
+      }
 
       @if (recipe()!.description) {
         <p class="recipe-description">{{ recipe()!.description }}</p>
@@ -100,12 +129,18 @@
                   @if (recipe()!.sourceBookPage) {
                     (p. {{ recipe()!.sourceBookPage }})
                   }
+                  <mat-icon class="external-icon">open_in_new</mat-icon>
                 </a>
               } @else {
-                {{ recipe()!.sourceName }}
-                @if (recipe()!.sourceBookPage) {
-                  (p. {{ recipe()!.sourceBookPage }})
-                }
+                <span>
+                  {{ recipe()!.sourceName }}
+                  @if (recipe()!.sourceBookTitle) {
+                    · <em>{{ recipe()!.sourceBookTitle }}</em>
+                  }
+                  @if (recipe()!.sourceBookPage) {
+                    (p. {{ recipe()!.sourceBookPage }})
+                  }
+                </span>
               }
             </span>
           </div>
@@ -113,59 +148,13 @@
       </div>
     </header>
 
-    <!-- Interactive Culinary Controls Bar -->
-    <mat-card class="culinary-controls-card">
-      <div class="controls-container">
-        <!-- Servings Stepper & Multipliers -->
-        <div class="servings-group">
-          <span class="controls-label">Servings / Scaling:</span>
-
-          <!-- Quick Multiplier Chips -->
-          <div class="multiplier-chips">
-            <button
-              mat-button
-              class="mult-chip"
-              [class.mult-active]="scaleFactor() === 0.5"
-              (click)="setMultiplier(0.5)"
-            >
-              0.5x
-            </button>
-            <button
-              mat-button
-              class="mult-chip"
-              [class.mult-active]="scaleFactor() === 1"
-              (click)="setMultiplier(1)"
-            >
-              1x
-            </button>
-            <button
-              mat-button
-              class="mult-chip"
-              [class.mult-active]="scaleFactor() === 1.5"
-              (click)="setMultiplier(1.5)"
-            >
-              1.5x
-            </button>
-            <button
-              mat-button
-              class="mult-chip"
-              [class.mult-active]="scaleFactor() === 2"
-              (click)="setMultiplier(2)"
-            >
-              2x
-            </button>
-            <button
-              mat-button
-              class="mult-chip"
-              [class.mult-active]="scaleFactor() === 3"
-              (click)="setMultiplier(3)"
-            >
-              3x
-            </button>
-          </div>
-
-          <!-- Stepper -->
-          <div class="stepper-box">
+    <!-- Culinary Scaling & Converter Toolbar Card -->
+    <mat-card class="scaling-toolbar-card">
+      <div class="scaling-toolbar">
+        <!-- Servings Stepper -->
+        <div class="servings-stepper">
+          <span class="toolbar-label">Servings:</span>
+          <div class="stepper-controls">
             <button
               mat-icon-button
               (click)="adjustServings(-1)"
@@ -174,24 +163,61 @@
             >
               <mat-icon>remove</mat-icon>
             </button>
-            <span class="servings-count">{{ targetServings() }}</span>
+            <span class="servings-display">{{ targetServings() }}</span>
             <button mat-icon-button (click)="adjustServings(1)" aria-label="Increase servings">
               <mat-icon>add</mat-icon>
             </button>
           </div>
         </div>
 
-        <!-- Unit System Switcher -->
-        <div class="units-group">
-          <span class="controls-label">Units:</span>
+        <!-- Quick Multipliers -->
+        <div class="multiplier-chips">
+          <button
+            type="button"
+            class="mult-chip"
+            [class.active-mult]="scaleFactor() === 0.5"
+            (click)="setMultiplier(0.5)"
+          >
+            0.5x
+          </button>
+          <button
+            type="button"
+            class="mult-chip"
+            [class.active-mult]="scaleFactor() === 1"
+            (click)="setMultiplier(1)"
+          >
+            1x
+          </button>
+          <button
+            type="button"
+            class="mult-chip"
+            [class.active-mult]="scaleFactor() === 2"
+            (click)="setMultiplier(2)"
+          >
+            2x
+          </button>
+          <button
+            type="button"
+            class="mult-chip"
+            [class.active-mult]="scaleFactor() === 3"
+            (click)="setMultiplier(3)"
+          >
+            3x
+          </button>
+        </div>
+
+        <div class="toolbar-divider"></div>
+
+        <!-- Unit Converter Toggle -->
+        <div class="unit-system-toggle">
+          <span class="toolbar-label">Units:</span>
           <mat-button-toggle-group
             [ngModel]="targetSystem()"
             (ngModelChange)="targetSystem.set($event)"
-            aria-label="Unit system"
-            class="unit-toggle-group"
+            aria-label="Measurement Unit System"
           >
             <mat-button-toggle value="Original">Original</mat-button-toggle>
-            <mat-button-toggle value="UsCustomary">US</mat-button-toggle>
+            <mat-button-toggle value="USCustomary">US</mat-button-toggle>
             <mat-button-toggle value="Metric">Metric</mat-button-toggle>
           </mat-button-toggle-group>
         </div>
@@ -302,6 +328,18 @@
                     <span class="step-number-circle">{{ stepItem.step.stepNumber }}</span>
                     <p class="step-instruction-text">{{ stepItem.step.instruction }}</p>
                   </div>
+
+                  <!-- Step Reference Photo -->
+                  @if (stepItem.step.imagePath) {
+                    <div class="step-reference-wrapper">
+                      <img
+                        [src]="stepItem.step.imagePath"
+                        [alt]="'Step ' + stepItem.step.stepNumber + ' reference photo'"
+                        class="step-reference-image"
+                        loading="lazy"
+                      />
+                    </div>
+                  }
 
                   <!-- Inline Scaled Ingredient Callouts -->
                   @if (stepItem.ingredientCallouts.length > 0) {

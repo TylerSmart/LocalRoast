@@ -26,6 +26,7 @@ WORKDIR /app
 COPY --from=api-build /app/publish .
 # Copy client build to wwwroot
 COPY --from=client-build /src/Client/dist/App.Client/browser ./wwwroot
+RUN mkdir -p /data/uploads
 
 EXPOSE 8080
 ENTRYPOINT ["dotnet", "App.API.dll"]
