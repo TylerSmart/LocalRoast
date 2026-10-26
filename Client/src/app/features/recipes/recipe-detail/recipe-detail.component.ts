@@ -31,6 +31,10 @@ import {
   RecipeOrganizationDialogComponent,
   RecipeOrganizationDialogData,
 } from '../recipe-organization-dialog/recipe-organization-dialog.component';
+import {
+  RecipeShareDialogComponent,
+  RecipeShareDialogData,
+} from '../recipe-share-dialog/recipe-share-dialog.component';
 
 export interface ScaledIngredientItem {
   ingredient: RecipeIngredientDto;
@@ -252,6 +256,31 @@ export class RecipeDetailComponent implements OnInit {
         this.snackBar.open('Recipe collections & tags updated!', 'Close', { duration: 3000 });
       }
     });
+  }
+
+  openShareDialog(): void {
+    const r = this.recipe();
+    if (!r) {
+      return;
+    }
+
+    this.dialog.open<RecipeShareDialogComponent, RecipeShareDialogData>(
+      RecipeShareDialogComponent,
+      {
+        width: '560px',
+        data: {
+          recipeId: r.id,
+          recipeTitle: r.title,
+          recipeStatus: r.status,
+        },
+      },
+    );
+  }
+
+  printRecipe(): void {
+    if (typeof globalThis !== 'undefined' && globalThis.print) {
+      globalThis.print();
+    }
   }
 
   setMultiplier(mult: number): void {

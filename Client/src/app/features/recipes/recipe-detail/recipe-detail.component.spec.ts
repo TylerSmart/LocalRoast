@@ -5,6 +5,7 @@ import { provideRouter } from '@angular/router';
 import { of } from 'rxjs';
 import { RecipeDetailDto } from '../../../core/models/recipe.models';
 import { RecipeService } from '../../../core/services/recipe/recipe.service';
+import { RecipeShareDialogComponent } from '../recipe-share-dialog/recipe-share-dialog.component';
 import { RecipeDetailComponent } from './recipe-detail.component';
 
 describe('RecipeDetailComponent', () => {
@@ -147,6 +148,28 @@ describe('RecipeDetailComponent', () => {
     expect(mockDialog.open).toHaveBeenCalled();
   });
 
+  it('opens share dialog on openShareDialog()', () => {
+    component.openShareDialog();
+    expect(mockDialog.open).toHaveBeenCalledWith(
+      RecipeShareDialogComponent,
+      expect.objectContaining({
+        width: '560px',
+        data: {
+          recipeId: 'r-1',
+          recipeTitle: 'Homemade Chicken Noodle Soup',
+          recipeStatus: 'Published',
+        },
+      }),
+    );
+  });
+
+  it('triggers globalThis.print on printRecipe()', () => {
+    const printSpy = vi.spyOn(globalThis, 'print').mockImplementation(() => undefined);
+    component.printRecipe();
+    expect(printSpy).toHaveBeenCalled();
+    printSpy.mockRestore();
+  });
+
   it('scales quantities when 2x multiplier is selected', () => {
     component.setMultiplier(2);
     fixture.detectChanges();
@@ -156,6 +179,13 @@ describe('RecipeDetailComponent', () => {
     const noodles = map.get('i-1');
     expect(noodles?.scaled.quantity).toBe(4);
     expect(noodles?.displayQuantityAndUnit).toBe('4 cups');
+  });
+
+  it('scales quantities when 1.5x multiplier is selected', () => {
+    component.setMultiplier(1.5);
+    fixture.detectChanges();
+    expect(component['targetServings']()).toBe(6);
+    expect(component['scaleFactor']()).toBe(1.5);
   });
 
   it('switches units to metric when metric is selected', () => {

@@ -124,3 +124,40 @@ textarea,
     max-width: 96vw !important;
   }
 }
+
+/* Global Print Stylesheet */
+@media print {
+  @page {
+    margin: 12mm 14mm;
+  }
+
+  html,
+  body {
+    color-scheme: light !important;
+    background: #ffffff !important;
+    color: #111111 !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    font-size: 10pt;
+  }
+
+  .no-print,
+  .cdk-overlay-container,
+  app-shell .top-bar,
+  app-shell .mobile-bottom-nav {
+    display: none !important;
+  }
+
+  app-shell,
+  app-shell .shell-layout,
+  app-shell .main-content {
+    display: block !important;
+    min-height: 0 !important;
+    max-width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    background: #ffffff !important;
+    color: #111111 !important;
+  }
+}

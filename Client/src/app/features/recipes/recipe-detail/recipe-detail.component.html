@@ -1,6 +1,6 @@
 <div class="recipe-detail-page">
   <!-- Top Navigation & Actions Bar -->
-  <div class="detail-nav-bar">
+  <div class="detail-nav-bar no-print">
     <a mat-button routerLink="/recipes" class="back-link">
       <mat-icon>arrow_back</mat-icon>
       <span>Cookbook</span>
@@ -15,6 +15,14 @@
         >
           <mat-icon>label</mat-icon>
           <span>Organize</span>
+        </button>
+        <button mat-stroked-button (click)="openShareDialog()" aria-label="Share recipe">
+          <mat-icon>share</mat-icon>
+          <span>Share</span>
+        </button>
+        <button mat-stroked-button (click)="printRecipe()" aria-label="Print recipe">
+          <mat-icon>print</mat-icon>
+          <span>Print</span>
         </button>
         <a
           mat-stroked-button
@@ -146,10 +154,24 @@
           </div>
         }
       </div>
+
+      <!-- Print-only metadata line (hidden on screen, visible in @media print) -->
+      <div class="print-only-meta-line" aria-hidden="true">
+        <span>Scaled Yield: {{ targetServings() }} servings</span>
+        @if (targetSystem() !== 'Original') {
+          <span>· Units: {{ targetSystem() === 'UsCustomary' ? 'US' : 'Metric' }}</span>
+        }
+        @if (recipe()!.totalTimeMinutes) {
+          <span>· Total Time: {{ recipe()!.totalTimeMinutes }} min</span>
+        }
+        @if (recipe()!.sourceName) {
+          <span>· Source: {{ recipe()!.sourceName }}</span>
+        }
+      </div>
     </header>
 
     <!-- Culinary Scaling & Converter Toolbar Card -->
-    <mat-card class="scaling-toolbar-card">
+    <mat-card class="scaling-toolbar-card no-print">
       <div class="scaling-toolbar">
         <!-- Servings Stepper -->
         <div class="servings-stepper">
@@ -191,6 +213,14 @@
           <button
             type="button"
             class="mult-chip"
+            [class.active-mult]="scaleFactor() === 1.5"
+            (click)="setMultiplier(1.5)"
+          >
+            1.5x
+          </button>
+          <button
+            type="button"
+            class="mult-chip"
             [class.active-mult]="scaleFactor() === 2"
             (click)="setMultiplier(2)"
           >
@@ -217,7 +247,7 @@
             aria-label="Measurement Unit System"
           >
             <mat-button-toggle value="Original">Original</mat-button-toggle>
-            <mat-button-toggle value="USCustomary">US</mat-button-toggle>
+            <mat-button-toggle value="UsCustomary">US</mat-button-toggle>
             <mat-button-toggle value="Metric">Metric</mat-button-toggle>
           </mat-button-toggle-group>
         </div>
@@ -279,7 +309,7 @@
                         </mat-expansion-panel-header>
 
                         <div class="sub-recipe-content">
-                          <p class="sub-recipe-link-bar">
+                          <p class="sub-recipe-link-bar no-print">
                             <a [routerLink]="['/recipes', subRecipe.id]" class="view-sub-link">
                               View standalone recipe <mat-icon>open_in_new</mat-icon>
                             </a>

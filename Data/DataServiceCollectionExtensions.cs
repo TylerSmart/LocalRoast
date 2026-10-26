@@ -26,6 +26,7 @@ public static class DataServiceCollectionExtensions
         services.AddScoped<IFoodCatalogService, FoodCatalogService>();
         services.AddScoped<IRecipeService, RecipeService>();
         services.AddScoped<ITaxonomyService, TaxonomyService>();
+        services.AddScoped<IShareLinkService, ShareLinkService>();
 
         if (
             string.Equals(

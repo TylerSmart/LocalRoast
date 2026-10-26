@@ -8,6 +8,13 @@ export const routes: Routes = [
     canActivate: [guestGuard],
   },
   {
+    path: 'share/:token',
+    loadComponent: () =>
+      import('./features/recipes/public-shared-recipe/public-shared-recipe.component').then(
+        (m) => m.PublicSharedRecipeComponent,
+      ),
+  },
+  {
     path: '',
     loadComponent: () =>
       import('./features/shell/app-shell/app-shell.component').then((m) => m.AppShellComponent),

@@ -1,7 +1,7 @@
 # Phase 03: Print-Friendly Recipe Cards & Revocable Read-Only Share Links
 
 > **Branch:** `feature/phase-03-print-and-share-links`
-> **Status:** `[ ]` Planned (`[ ]` Not Started | `[~]` In Progress | `[x]` Completed)
+> **Status:** `[x]` Completed (`[ ]` Not Started | `[~]` In Progress | `[x]` Completed)
 > **PRD Reference:** `docs/prd.md` — Sections 2, 3, 4.1.5, 4.7.3, 5, and 6 (Milestone 1, Slice 3 — Completes Milestone 1)
 > **Target Execution:** Run `/execute-phase` to execute this plan step-by-step.
 
@@ -455,7 +455,7 @@ Create `public sealed class PrintAndShareE2ETests : E2ETestBase` in `Tests/Clien
 
 ## 6. Step-by-Step Execution Checklist (For Implementation Agent)
 
-- [ ] **Task 1: Backend Core & Data Layer**
+- [x] **Task 1: Backend Core & Data Layer**
   - Create `Core/Recipes/ShareTokenGenerator.cs`, `Core/Recipes/ShareLinkModels.cs`, and `Core/Recipes/IShareLinkService.cs`.
   - Create `Data/Entities/ShareLink.cs` and `Data/Configurations/ShareLinkConfiguration.cs`; update `Data/Entities/Recipe.cs`, `Data/AppDbContext.cs`, `Data/Services/RecipeService.cs` (`DeleteRecipeAsync`), and `Data/DataServiceCollectionExtensions.cs`.
   - Implement `Data/Services/ShareLinkService.cs` enforcing published-only sharing, ordinal token matching, expiration/revocation checks, view counting, and zero-leakage `PublicSharedRecipeDto` projection.
@@ -472,7 +472,7 @@ Create `public sealed class PrintAndShareE2ETests : E2ETestBase` in `Tests/Clien
     dotnet test --project Tests/Infrastructure.UnitTests/App.Infrastructure.UnitTests.csproj
     ```
 
-- [ ] **Task 2: API Controllers & Integration Tests**
+- [x] **Task 2: API Controllers & Integration Tests**
   - Create `API/Controllers/RecipeSharesController.cs` and `API/Controllers/PublicSharesController.cs` (with `Cache-Control: no-store` and `X-Robots-Tag: noindex, nofollow`).
   - Update `Tests/API.IntegrationTests/OpenApiIntegrationTests.cs` and create `Tests/API.IntegrationTests/ShareLinkIntegrationTests.cs` covering:
     - Creating, listing, revoking, and deleting share links (`201`, `200`, `204`, `401` unauthenticated).
@@ -484,7 +484,7 @@ Create `public sealed class PrintAndShareE2ETests : E2ETestBase` in `Tests/Clien
     dotnet test --project Tests/API.IntegrationTests/App.API.IntegrationTests.csproj
     ```
 
-- [ ] **Task 3: Angular Client, Print Stylesheet & Unit Tests**
+- [x] **Task 3: Angular Client, Print Stylesheet & Unit Tests**
   - Create `Client/src/app/core/models/share-link.models.ts` and `Client/src/app/core/services/share-link/share-link.service.ts` (+ `.spec.ts`).
   - Create `Client/src/app/features/recipes/recipe-share-dialog/` (`.ts`, `.html`, `.scss`, `.spec.ts`) and `Client/src/app/features/recipes/public-shared-recipe/` (`.ts`, `.html`, `.scss`, `.spec.ts`).
   - Update `Client/src/app/app.routes.ts`, `Client/src/styles.scss`, and `Client/src/app/features/recipes/recipe-detail/` (`.ts`, `.html`, `.scss`, `.spec.ts`).
@@ -495,7 +495,7 @@ Create `public sealed class PrintAndShareE2ETests : E2ETestBase` in `Tests/Clien
     npm test -- --watch=false
     ```
 
-- [ ] **Task 4: Playwright E2E Verification & Final Formatting**
+- [x] **Task 4: Playwright E2E Verification & Final Formatting**
   - Create `Tests/Client.E2ETests/PrintAndShareE2ETests.cs` implementing all three scenarios from Section 5.
   - Build Angular production bundle (in `Client/`: `npm run build:production`) and run Playwright E2E tests:
     ```powershell

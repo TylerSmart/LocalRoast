@@ -570,6 +570,65 @@ namespace App.Data.Migrations
                     b.ToTable("RecipeTags", (string)null);
                 });
 
+            modelBuilder.Entity("App.Data.Entities.ShareLink", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTimeOffset?>("ExpiresAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<bool>("IncludeCookLogs")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Label")
+                        .HasMaxLength(120)
+                        .HasColumnType("nvarchar(120)");
+
+                    b.Property<DateTimeOffset?>("LastAccessedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset>("ModifiedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("ModifiedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<Guid>("RecipeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset?>("RevokedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Token")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<int>("ViewCount")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RecipeId");
+
+                    b.HasIndex("Token")
+                        .IsUnique();
+
+                    b.ToTable("ShareLinks", (string)null);
+                });
+
             modelBuilder.Entity("App.Data.Entities.StoreAisle", b =>
                 {
                     b.Property<Guid>("Id")
@@ -870,6 +929,17 @@ namespace App.Data.Migrations
                     b.Navigation("Tag");
                 });
 
+            modelBuilder.Entity("App.Data.Entities.ShareLink", b =>
+                {
+                    b.HasOne("App.Data.Entities.Recipe", "Recipe")
+                        .WithMany("ShareLinks")
+                        .HasForeignKey("RecipeId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Recipe");
+                });
+
             modelBuilder.Entity("App.Data.Entities.Collection", b =>
                 {
                     b.Navigation("RecipeCollections");
@@ -891,6 +961,8 @@ namespace App.Data.Migrations
                     b.Navigation("RecipeTags");
 
                     b.Navigation("ReferencedAsSubRecipeIn");
+
+                    b.Navigation("ShareLinks");
 
                     b.Navigation("Steps");
                 });

@@ -536,6 +536,11 @@ public sealed partial class RecipeService(
             recipe.Steps.SelectMany(s => s.IngredientReferences)
         );
 
+        var shareLinks = await dbContext
+            .ShareLinks.Where(s => s.RecipeId == id)
+            .ToListAsync(cancellationToken);
+        dbContext.ShareLinks.RemoveRange(shareLinks);
+
         dbContext.Recipes.Remove(recipe);
         try
         {

@@ -43,6 +43,8 @@ public sealed class OpenApiIntegrationTests
         StringAssert.Contains(content, "/collections");
         StringAssert.Contains(content, "/tags");
         StringAssert.Contains(content, "/media");
+        StringAssert.Contains(content, "/public/shares");
+        StringAssert.Contains(content, "/shares");
         StringAssert.Contains(content, "/auth");
         StringAssert.Contains(content, "securitySchemes");
         StringAssert.Contains(content, "Bearer");

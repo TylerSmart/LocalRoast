@@ -1,0 +1,214 @@
+<div class="share-dialog-header">
+  <div class="header-left">
+    <mat-icon class="header-icon">share</mat-icon>
+    <div class="header-titles">
+      <h2 mat-dialog-title class="dialog-title">Share Recipe</h2>
+      <span class="recipe-subtitle">{{ data.recipeTitle }}</span>
+    </div>
+  </div>
+  <button mat-icon-button (click)="close()" aria-label="Close share dialog">
+    <mat-icon>close</mat-icon>
+  </button>
+</div>
+
+<mat-dialog-content class="share-dialog-content">
+  @if (data.recipeStatus !== 'Published') {
+    <div class="status-warning-banner" role="status">
+      <mat-icon>info</mat-icon>
+      <div>
+        <strong>Recipe is not published</strong>
+        <p>
+          Only published recipes can be shared externally. Change this recipe's status to Published
+          in the editor before creating share links.
+        </p>
+      </div>
+    </div>
+  } @else {
+    <!-- Create Link Card / Form -->
+    <section class="create-share-section" aria-label="Create new share link">
+      <h3 class="section-title">
+        <mat-icon>add_link</mat-icon>
+        <span>Create Public Link</span>
+      </h3>
+
+      <form [formGroup]="form" (ngSubmit)="onCreateShareLink()" class="share-form">
+        <div class="form-row">
+          <mat-form-field appearance="outline" class="flex-field">
+            <mat-label>Label (Optional)</mat-label>
+            <input
+              matInput
+              formControlName="label"
+              placeholder="e.g. Aunt Maria, Potluck Group"
+              maxlength="120"
+            />
+            <mat-hint align="end">{{ form.controls.label.value.length }}/120</mat-hint>
+          </mat-form-field>
+
+          <mat-form-field appearance="outline" class="preset-field">
+            <mat-label>Expires In</mat-label>
+            <mat-select formControlName="expirationPreset">
+              <mat-option value="never">Never</mat-option>
+              <mat-option value="24h">24 hours</mat-option>
+              <mat-option value="7d">7 days</mat-option>
+              <mat-option value="30d">30 days</mat-option>
+            </mat-select>
+          </mat-form-field>
+        </div>
+
+        <div class="cook-logs-row">
+          <mat-checkbox formControlName="includeCookLogs">
+            <span>Include household cook notes & ratings</span>
+          </mat-checkbox>
+        </div>
+
+        <div class="create-action-row">
+          <button
+            mat-flat-button
+            type="submit"
+            [disabled]="isSubmitting() || form.invalid"
+            aria-label="Create share link"
+          >
+            @if (isSubmitting()) {
+              <span class="btn-spinner-wrap">
+                <mat-spinner diameter="18"></mat-spinner>
+                <span>Creating...</span>
+              </span>
+            } @else {
+              <span class="btn-spinner-wrap">
+                <mat-icon>link</mat-icon>
+                <span>Create Share Link</span>
+              </span>
+            }
+          </button>
+        </div>
+      </form>
+    </section>
+  }
+
+  <mat-divider></mat-divider>
+
+  <!-- Existing Links List -->
+  <section class="existing-links-section" aria-label="Existing share links">
+    <div class="existing-links-header">
+      <h3 class="section-title">
+        <mat-icon>link</mat-icon>
+        <span>Active & Past Links</span>
+      </h3>
+      @if (isLoading()) {
+        <mat-spinner diameter="18"></mat-spinner>
+      }
+    </div>
+
+    @if (errorMessage()) {
+      <div class="error-banner" role="alert">
+        <mat-icon>error</mat-icon>
+        <span>{{ errorMessage() }}</span>
+      </div>
+    } @else if (!isLoading() && shareLinks().length === 0) {
+      <div class="empty-links-state">
+        <mat-icon class="empty-icon">link_off</mat-icon>
+        <p>No share links have been created yet.</p>
+      </div>
+    } @else {
+      <div class="links-list">
+        @for (link of shareLinks(); track link.id) {
+          <div class="link-card" [class.link-inactive]="!link.isActive">
+            <div class="link-main-info">
+              <div class="link-title-row">
+                <span class="link-label">{{ link.label || 'Public Share Link' }}</span>
+                @if (link.revokedAt) {
+                  <span class="badge badge-revoked">Revoked</span>
+                } @else if (link.expiresAt && !link.isActive) {
+                  <span class="badge badge-expired">Expired</span>
+                } @else {
+                  <span class="badge badge-active">Active</span>
+                }
+              </div>
+
+              <div class="link-url-row">
+                <span class="link-url-preview">{{ buildShareUrl(link.token) }}</span>
+              </div>
+
+              <div class="link-meta-row">
+                <span class="meta-item">
+                  <mat-icon>visibility</mat-icon>
+                  <span>{{ link.viewCount }} {{ link.viewCount === 1 ? 'view' : 'views' }}</span>
+                </span>
+                <span class="meta-item">
+                  <mat-icon>calendar_today</mat-icon>
+                  <span>Created {{ link.createdAt | date: 'shortDate' }}</span>
+                </span>
+                @if (link.expiresAt) {
+                  <span class="meta-item">
+                    <mat-icon>schedule</mat-icon>
+                    <span>Expires {{ link.expiresAt | date: 'shortDate' }}</span>
+                  </span>
+                }
+                @if (link.includeCookLogs) {
+                  <span class="meta-item cook-notes-meta">
+                    <mat-icon>notes</mat-icon>
+                    <span>Cook Notes</span>
+                  </span>
+                }
+              </div>
+            </div>
+
+            <div class="link-actions">
+              @if (link.isActive) {
+                <button
+                  mat-stroked-button
+                  class="action-btn"
+                  (click)="copyLink(link.token)"
+                  aria-label="Copy share link to clipboard"
+                  matTooltip="Copy Link"
+                >
+                  <mat-icon>content_copy</mat-icon>
+                  <span class="btn-text">Copy</span>
+                </button>
+                <a
+                  mat-stroked-button
+                  class="action-btn"
+                  [href]="buildShareUrl(link.token)"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="Open public view in new tab"
+                  matTooltip="Preview Public Page"
+                >
+                  <mat-icon>open_in_new</mat-icon>
+                  <span class="btn-text">Open</span>
+                </a>
+                <button
+                  mat-button
+                  color="warn"
+                  class="action-btn"
+                  (click)="onRevoke(link)"
+                  aria-label="Revoke share link"
+                  matTooltip="Revoke Link"
+                >
+                  <mat-icon>block</mat-icon>
+                  <span class="btn-text">Revoke</span>
+                </button>
+              } @else {
+                <button
+                  mat-button
+                  color="warn"
+                  class="action-btn"
+                  (click)="onDelete(link)"
+                  aria-label="Delete share link"
+                  matTooltip="Delete Link"
+                >
+                  <mat-icon>delete</mat-icon>
+                  <span class="btn-text">Delete</span>
+                </button>
+              }
+            </div>
+          </div>
+        }
+      </div>
+    }
+  </section>
+</mat-dialog-content>
+
+<mat-dialog-actions align="end" class="share-dialog-actions">
+  <button mat-button (click)="close()" aria-label="Close dialog">Close</button>
+</mat-dialog-actions>
