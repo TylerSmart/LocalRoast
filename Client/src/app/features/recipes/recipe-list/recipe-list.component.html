@@ -10,6 +10,15 @@
     <div class="header-actions">
       <a
         mat-stroked-button
+        routerLink="/ingest"
+        class="import-btn"
+        aria-label="Import recipe from web or text"
+      >
+        <mat-icon>move_to_inbox</mat-icon>
+        <span>Import Recipe</span>
+      </a>
+      <a
+        mat-stroked-button
         routerLink="/matcher"
         class="matcher-btn"
         aria-label="Use up ingredients"

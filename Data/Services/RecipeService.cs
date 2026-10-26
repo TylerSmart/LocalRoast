@@ -541,6 +541,14 @@ public sealed partial class RecipeService(
             .ToListAsync(cancellationToken);
         dbContext.ShareLinks.RemoveRange(shareLinks);
 
+        var linkedJobs = await dbContext
+            .IngestionJobs.Where(j => j.ResultingRecipeId == id)
+            .ToListAsync(cancellationToken);
+        foreach (var job in linkedJobs)
+        {
+            job.ResultingRecipeId = null;
+        }
+
         dbContext.Recipes.Remove(recipe);
         try
         {

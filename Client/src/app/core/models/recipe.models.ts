@@ -27,6 +27,30 @@ export type MeasurementUnit =
   | 'Whole'
   | 'Custom';
 
+export const MEASUREMENT_UNITS: { value: MeasurementUnit; label: string }[] = [
+  { value: 'Tsp', label: 'Teaspoon (tsp)' },
+  { value: 'Tbsp', label: 'Tablespoon (tbsp)' },
+  { value: 'FlOz', label: 'Fluid Ounce (fl oz)' },
+  { value: 'Cup', label: 'Cup (cup)' },
+  { value: 'Pt', label: 'Pint (pt)' },
+  { value: 'Qt', label: 'Quart (qt)' },
+  { value: 'Gal', label: 'Gallon (gal)' },
+  { value: 'Ml', label: 'Milliliter (ml)' },
+  { value: 'L', label: 'Liter (l)' },
+  { value: 'Oz', label: 'Ounce (oz)' },
+  { value: 'Lb', label: 'Pound (lb)' },
+  { value: 'G', label: 'Gram (g)' },
+  { value: 'Kg', label: 'Kilogram (kg)' },
+  { value: 'Pinch', label: 'Pinch' },
+  { value: 'Dash', label: 'Dash' },
+  { value: 'Clove', label: 'Clove' },
+  { value: 'Can', label: 'Can' },
+  { value: 'Bunch', label: 'Bunch' },
+  { value: 'Slice', label: 'Slice' },
+  { value: 'Whole', label: 'Whole' },
+  { value: 'Custom', label: 'Custom Unit...' },
+];
+
 export type UnitSystem = 'Original' | 'UsCustomary' | 'Metric';
 
 export interface RecipeSummaryDto {

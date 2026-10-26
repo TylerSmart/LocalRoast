@@ -25,6 +25,7 @@ public class AppWebApplicationFactory : WebApplicationFactory<Program>
         builder.UseSetting("Authentication:Jwt:Audience", "App");
         builder.UseSetting("Authentication:Oidc:Enabled", "true");
         builder.UseSetting("Authentication:Oidc:ProviderName", "TestOIDC");
+        builder.UseSetting("Llm:EnableBackgroundWorker", "false");
     }
 
     protected override void Dispose(bool disposing)

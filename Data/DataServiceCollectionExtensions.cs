@@ -1,6 +1,7 @@
 using App.Core.Account;
 using App.Core.Authentication;
 using App.Core.FoodCatalog;
+using App.Core.Ingestion;
 using App.Core.Recipes;
 using App.Data.Auditing;
 using App.Data.Services;
@@ -27,6 +28,9 @@ public static class DataServiceCollectionExtensions
         services.AddScoped<IRecipeService, RecipeService>();
         services.AddScoped<ITaxonomyService, TaxonomyService>();
         services.AddScoped<IShareLinkService, ShareLinkService>();
+        services.AddScoped<ILlmSettingsService, LlmSettingsService>();
+        services.AddScoped<IIngestionProcessor, IngestionProcessor>();
+        services.AddScoped<IIngestionService, IngestionService>();
 
         if (
             string.Equals(

@@ -1,7 +1,7 @@
 # Phase 04: Local LLM Provider Settings, Async Ingestion Queue & Side-by-Side Review Inbox
 
 > **Branch:** `feature/phase-04-llm-ingestion-and-review-inbox`
-> **Status:** `[ ]` Planned (`[ ]` Not Started | `[~]` In Progress | `[x]` Completed)
+> **Status:** `[x]` Completed (`[ ]` Not Started | `[~]` In Progress | `[x]` Completed)
 > **PRD Reference:** `docs/prd.md` — Sections 1, 2, 3, 4.1.1–4.1.4, 4.2.1–4.2.4, 5, and 6 (Milestone 2, Slice 1 of 3)
 > **Target Execution:** Run `/execute-phase` to execute this plan step-by-step.
 
@@ -1013,7 +1013,7 @@ Implement these required `[TestMethod]` scenarios:
 
 ## 6. Step-by-Step Execution Checklist (For Implementation Agent)
 
-- [ ] **Task 1: Backend Core, Infrastructure & Data Layer + EF Migration**
+- [x] **Task 1: Backend Core, Infrastructure & Data Layer + EF Migration**
   - Create `Core/Ingestion/` enums, `LlmHostUnavailableException`, options/DTOs, `StepTimerExtractor`, `RecipeDraftNormalizer`, and service interfaces (`ILlmSettingsService`, `ILlmExtractionClient`, `IWebRecipeScraper`, `IIngestionQueueSignal`, `IIngestionProcessor`, `IIngestionService`).
   - Create `Data/Entities/HouseholdLlmSettings.cs` and `Data/Entities/IngestionJob.cs`, update `Data/Entities/Recipe.cs`, `Data/AppDbContext.cs`, `Data/Configurations/`, `Data/Seeding/HouseholdCatalogSeeder.cs`, `Data/Services/RecipeService.cs`, and implement `LlmSettingsService`, `IngestionService`, and `IngestionProcessor` in `Data/Services/`. Register in `DataServiceCollectionExtensions.cs`.
   - Implement `IngestionQueueSignal`, `WebRecipeScraper`, `LlmExtractionClient`, and `IngestionBackgroundWorker` in `Infrastructure/Ingestion/`, register in `InfrastructureServiceCollectionExtensions.cs`, and add `"Llm"` defaults to `API/appsettings.json` and `API/appsettings.Development.json`.
@@ -1030,7 +1030,7 @@ Implement these required `[TestMethod]` scenarios:
     dotnet test --project Tests/Infrastructure.UnitTests/App.Infrastructure.UnitTests.csproj
     ```
 
-- [ ] **Task 2: API Controllers & Integration Tests**
+- [x] **Task 2: API Controllers & Integration Tests**
   - Create thin HTTP controllers `API/Controllers/LlmSettingsController.cs` and `API/Controllers/IngestionJobsController.cs`.
   - Update `Tests/API.IntegrationTests/AppWebApplicationFactory.cs` and `Tests/API.IntegrationTests/OpenApiIntegrationTests.cs`.
   - Write comprehensive integration tests in `Tests/API.IntegrationTests/LlmSettingsIntegrationTests.cs` (API key masking, preservation, clear, Ollama + OpenAI `/v1` connection probe, validation errors) and `Tests/API.IntegrationTests/IngestionIntegrationTests.cs` (URL batch + raw text enqueue, `WaitingForLlmHost` offline transition & retry, `ReadyForReview` draft save & approve creating new `FoodItem`s + `Recipe`, `AutoPublishHighConfidenceText` flow, discard cleanup, and auth boundaries).
@@ -1039,7 +1039,7 @@ Implement these required `[TestMethod]` scenarios:
     dotnet test --project Tests/API.IntegrationTests/App.API.IntegrationTests.csproj
     ```
 
-- [ ] **Task 3: Angular Client & Unit Tests**
+- [x] **Task 3: Angular Client & Unit Tests**
   - Create `Client/src/app/core/models/ingestion.models.ts`, `LlmSettingsService` (+ `.spec.ts`), and `IngestionService` (+ `.spec.ts`).
   - Create dedicated per-component directories (`llm-settings-dialog/`, `ingestion-hub/`, `ingestion-review/`) under `Client/src/app/features/ingestion/` with strictly separate `.ts`, `.html`, `.scss`, and `.spec.ts` files.
   - Update `AppShellComponent` (+ `.html`, `.scss`, `.spec.ts`), `RecipeListComponent` (+ `.html`, `.scss`), and `app.routes.ts`.
@@ -1051,7 +1051,7 @@ Implement these required `[TestMethod]` scenarios:
     npm test -- --watch=false
     ```
 
-- [ ] **Task 4: Playwright E2E Verification & Final Formatting**
+- [x] **Task 4: Playwright E2E Verification & Final Formatting**
   - Implement `Tests/Client.E2ETests/LlmIngestionE2ETests.cs` covering all 3 scenarios in Section 5 using an in-process loopback mock LLM + Recipe Blog server.
   - Build `Client/` (`npm run build:production`) and `App.slnx` (`dotnet build App.slnx`), then run Playwright E2E tests:
     ```powershell

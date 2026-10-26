@@ -33,6 +33,10 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
 
     public DbSet<ShareLink> ShareLinks => Set<ShareLink>();
 
+    public DbSet<HouseholdLlmSettings> HouseholdLlmSettings => Set<HouseholdLlmSettings>();
+
+    public DbSet<IngestionJob> IngestionJobs => Set<IngestionJob>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);

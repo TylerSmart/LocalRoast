@@ -1,6 +1,8 @@
 using App.Core.Authentication;
+using App.Core.Ingestion;
 using App.Core.Media;
 using App.Infrastructure.Authentication;
+using App.Infrastructure.Ingestion;
 using App.Infrastructure.Media;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -27,6 +29,14 @@ public static class InfrastructureServiceCollectionExtensions
             configuration.GetSection(MediaStorageOptions.SectionName)
         );
         services.AddScoped<IMediaStorageService, LocalFileMediaStorageService>();
+
+        services.Configure<LlmDefaultsOptions>(
+            configuration.GetSection(LlmDefaultsOptions.SectionName)
+        );
+        services.AddSingleton<IIngestionQueueSignal, IngestionQueueSignal>();
+        services.AddHttpClient<IWebRecipeScraper, WebRecipeScraper>();
+        services.AddHttpClient<ILlmExtractionClient, LlmExtractionClient>();
+        services.AddHostedService<IngestionBackgroundWorker>();
 
         return services;
     }

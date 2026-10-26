@@ -1,0 +1,348 @@
+<div class="ingestion-hub-page">
+  <!-- Header Bar -->
+  <div class="page-header">
+    <div class="header-titles">
+      <h1 class="page-title">Recipe Ingestion & Review Inbox</h1>
+      <p class="page-subtitle">
+        Import recipes from web URLs or pasted text, powered by local LLM extraction.
+      </p>
+    </div>
+    <div class="header-actions">
+      <button
+        mat-stroked-button
+        type="button"
+        (click)="openLlmSettings()"
+        class="llm-settings-btn"
+        aria-label="Open LLM provider settings"
+      >
+        <mat-icon>smart_toy</mat-icon>
+        <span>LLM Settings</span>
+      </button>
+    </div>
+  </div>
+
+  @if (feedbackMessage()) {
+    <div class="alert-banner info-banner" role="status">
+      <mat-icon>info</mat-icon>
+      <span>{{ feedbackMessage() }}</span>
+    </div>
+  }
+
+  @if (errorMessage()) {
+    <div class="alert-banner error-banner" role="alert">
+      <mat-icon>error_outline</mat-icon>
+      <span>{{ errorMessage() }}</span>
+    </div>
+  }
+
+  <!-- Quick Capture Card -->
+  <mat-card class="capture-card">
+    <div class="capture-card-header">
+      <div class="channel-toggle-strip" role="tablist" aria-label="Ingestion Channel">
+        <button
+          type="button"
+          class="tab-pill"
+          [class.active]="activeTab() === 'urls'"
+          (click)="setActiveTab('urls')"
+          role="tab"
+          [attr.aria-selected]="activeTab() === 'urls'"
+        >
+          <mat-icon>link</mat-icon>
+          <span>Web Recipe URLs</span>
+        </button>
+        <button
+          type="button"
+          class="tab-pill"
+          [class.active]="activeTab() === 'text'"
+          (click)="setActiveTab('text')"
+          role="tab"
+          [attr.aria-selected]="activeTab() === 'text'"
+        >
+          <mat-icon>description</mat-icon>
+          <span>Paste Raw Text / Markdown</span>
+        </button>
+      </div>
+    </div>
+
+    <mat-card-content class="capture-card-content">
+      @if (activeTab() === 'urls') {
+        <form [formGroup]="urlForm" (ngSubmit)="submitWebUrls()" class="capture-form">
+          <mat-form-field appearance="outline" class="form-field full-width">
+            <mat-label>Web Recipe URLs (1–20, one per line)</mat-label>
+            <textarea
+              matInput
+              formControlName="urlsText"
+              rows="3"
+              placeholder="https://cooking.nytimes.com/...&#10;https://seriouseats.com/..."
+              required
+            ></textarea>
+            <mat-hint>
+              Pastes HTML / JSON-LD schema.org/Recipe data and downloads recipe photo locally.
+            </mat-hint>
+          </mat-form-field>
+
+          <div class="form-actions">
+            <button
+              mat-flat-button
+              color="primary"
+              type="submit"
+              [disabled]="urlForm.invalid || isSubmitting()"
+              aria-label="Queue recipe URLs"
+            >
+              @if (isSubmitting()) {
+                <mat-spinner diameter="18" class="inline-spinner"></mat-spinner>
+              } @else {
+                <mat-icon>add_link</mat-icon>
+              }
+              <span>{{ isSubmitting() ? 'Queueing...' : 'Queue URL(s)' }}</span>
+            </button>
+          </div>
+        </form>
+      } @else {
+        <form [formGroup]="textForm" (ngSubmit)="submitRawText()" class="capture-form">
+          <mat-form-field appearance="outline" class="form-field full-width title-hint-field">
+            <mat-label>Recipe Title Hint (Optional)</mat-label>
+            <input matInput formControlName="titleHint" placeholder="e.g. Grandma's Meatballs" />
+          </mat-form-field>
+
+          <mat-form-field appearance="outline" class="form-field full-width">
+            <mat-label>Recipe Text or Markdown</mat-label>
+            <textarea
+              matInput
+              formControlName="rawText"
+              rows="6"
+              placeholder="Paste raw ingredients, steps, family recipe notes, or chat LLM transcript here..."
+              required
+            ></textarea>
+            <mat-hint
+              >Local LLM will structure ingredients, units, timers, and aisle mappings.</mat-hint
+            >
+          </mat-form-field>
+
+          <div class="form-actions">
+            <button
+              mat-flat-button
+              color="primary"
+              type="submit"
+              [disabled]="textForm.invalid || isSubmitting()"
+              aria-label="Queue raw text recipe"
+            >
+              @if (isSubmitting()) {
+                <mat-spinner diameter="18" class="inline-spinner"></mat-spinner>
+              } @else {
+                <mat-icon>auto_fix_high</mat-icon>
+              }
+              <span>{{ isSubmitting() ? 'Queueing...' : 'Extract Recipe' }}</span>
+            </button>
+          </div>
+        </form>
+      }
+    </mat-card-content>
+  </mat-card>
+
+  <!-- Offline Host Resilience Banner -->
+  @if (waitingJobs().length > 0) {
+    <div class="waiting-host-banner" role="status">
+      <div class="banner-icon-content">
+        <mat-icon class="banner-icon">power_off</mat-icon>
+        <div class="banner-text">
+          <h3 class="banner-title">
+            {{ waitingJobs().length }} recipe(s) waiting for local LLM host
+          </h3>
+          <p class="banner-description">
+            Your web pages and recipe photos are safely downloaded on this server. When your GPU
+            workstation or local Ollama/LM Studio host is online, extraction will automatically
+            resume.
+          </p>
+        </div>
+      </div>
+      <div class="banner-actions">
+        <button mat-stroked-button type="button" (click)="openLlmSettings()">
+          <mat-icon>settings</mat-icon>
+          <span>LLM Settings</span>
+        </button>
+        <button
+          mat-flat-button
+          color="primary"
+          type="button"
+          (click)="retryAllWaiting()"
+          [disabled]="isRetryingAll()"
+          aria-label="Retry all waiting jobs"
+        >
+          @if (isRetryingAll()) {
+            <mat-spinner diameter="18" class="inline-spinner"></mat-spinner>
+          } @else {
+            <mat-icon>refresh</mat-icon>
+          }
+          <span>{{ isRetryingAll() ? 'Retrying...' : 'Retry All Waiting Jobs' }}</span>
+        </button>
+      </div>
+    </div>
+  }
+
+  <!-- Queue & Inbox Filter Strip -->
+  <div class="filter-strip" role="tablist" aria-label="Ingestion Queue Filters">
+    <button
+      type="button"
+      class="filter-pill"
+      [class.active]="filter() === 'All'"
+      (click)="setFilter('All')"
+    >
+      <span>All</span>
+      <span class="count-badge">{{ jobs().length }}</span>
+    </button>
+    <button
+      type="button"
+      class="filter-pill review-pill"
+      [class.active]="filter() === 'ReadyForReview'"
+      (click)="setFilter('ReadyForReview')"
+    >
+      <span>Review Inbox</span>
+      <span class="count-badge review-badge">{{ reviewCount() }}</span>
+    </button>
+    <button
+      type="button"
+      class="filter-pill"
+      [class.active]="filter() === 'ActiveWaiting'"
+      (click)="setFilter('ActiveWaiting')"
+    >
+      <span>Active & Waiting</span>
+      <span class="count-badge">{{ activeJobs().length }}</span>
+    </button>
+    <button
+      type="button"
+      class="filter-pill"
+      [class.active]="filter() === 'Published'"
+      (click)="setFilter('Published')"
+    >
+      <span>Published</span>
+      <span class="count-badge">{{ publishedCount() }}</span>
+    </button>
+    <button
+      type="button"
+      class="filter-pill"
+      [class.active]="filter() === 'Failed'"
+      (click)="setFilter('Failed')"
+    >
+      <span>Failed</span>
+      <span class="count-badge">{{ failedCount() }}</span>
+    </button>
+  </div>
+
+  <!-- Job List -->
+  @if (isLoading()) {
+    <div class="loading-state">
+      <mat-spinner diameter="40"></mat-spinner>
+      <p>Loading ingestion queue...</p>
+    </div>
+  } @else if (filteredJobs().length === 0) {
+    <div class="empty-state">
+      <mat-icon class="empty-icon">inbox</mat-icon>
+      <h3>No ingestion jobs in this view</h3>
+      <p>Submit a recipe URL or paste recipe text above to start structured extraction.</p>
+    </div>
+  } @else {
+    <div class="job-list">
+      @for (job of filteredJobs(); track job.id) {
+        <mat-card class="job-card">
+          <div class="job-card-inner">
+            <!-- Channel / Image Thumbnail -->
+            <div class="job-media">
+              @if (job.thumbnailImagePath) {
+                <img [src]="job.thumbnailImagePath" [alt]="job.displayTitle" class="job-thumb" />
+              } @else {
+                <div class="channel-placeholder">
+                  <mat-icon>{{ getChannelIcon(job.channel) }}</mat-icon>
+                </div>
+              }
+            </div>
+
+            <!-- Job Main Content -->
+            <div class="job-body">
+              <div class="job-header-row">
+                <h3 class="job-title">{{ job.displayTitle }}</h3>
+                <div class="job-badges">
+                  @if (job.confidenceScore !== null) {
+                    <span class="confidence-chip" [matTooltip]="'LLM extraction confidence'">
+                      {{ (job.confidenceScore * 100).toFixed(0) }}% conf
+                    </span>
+                  }
+                  <span class="status-badge" [class]="getStatusClass(job.status)">
+                    {{ getStatusLabel(job.status) }}
+                  </span>
+                </div>
+              </div>
+
+              @if (job.sourceUrl) {
+                <a
+                  [href]="job.sourceUrl"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="source-url-link"
+                >
+                  <mat-icon class="link-icon">open_in_new</mat-icon>
+                  <span>{{ job.sourceUrl }}</span>
+                </a>
+              }
+
+              @if (job.statusDetail) {
+                <p class="job-detail-text">{{ job.statusDetail }}</p>
+              }
+            </div>
+
+            <!-- Job Actions -->
+            <div class="job-actions">
+              @if (job.status === 'ReadyForReview') {
+                <a
+                  mat-flat-button
+                  color="primary"
+                  [routerLink]="['/ingest/review', job.id]"
+                  class="review-action-btn"
+                >
+                  <mat-icon>rate_review</mat-icon>
+                  <span>Review Side-by-Side</span>
+                </a>
+              }
+
+              @if (job.status === 'Published' && job.resultingRecipeId) {
+                <a
+                  mat-stroked-button
+                  [routerLink]="['/recipes', job.resultingRecipeId]"
+                  class="open-recipe-btn"
+                >
+                  <mat-icon>menu_book</mat-icon>
+                  <span>Open Recipe</span>
+                </a>
+              }
+
+              @if (job.status === 'WaitingForLlmHost' || job.status === 'Failed') {
+                <button
+                  mat-stroked-button
+                  type="button"
+                  (click)="retryJob(job)"
+                  aria-label="Retry extraction"
+                >
+                  <mat-icon>refresh</mat-icon>
+                  <span>Retry</span>
+                </button>
+              }
+
+              @if (job.status !== 'Published') {
+                <button
+                  mat-icon-button
+                  type="button"
+                  (click)="discardJob(job)"
+                  class="discard-btn"
+                  [attr.aria-label]="'Discard ' + job.displayTitle"
+                  matTooltip="Discard job"
+                >
+                  <mat-icon>delete_outline</mat-icon>
+                </button>
+              }
+            </div>
+          </div>
+        </mat-card>
+      }
+    </div>
+  }
+</div>

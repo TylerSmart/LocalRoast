@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using App.Core.Ingestion;
 using App.Core.Recipes;
 using App.Data.Entities;
 using Microsoft.EntityFrameworkCore;
@@ -216,6 +217,27 @@ public static class HouseholdCatalogSeeder
                     }
                 );
             }
+
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        var hasLlmSettings = await db.HouseholdLlmSettings.AnyAsync(cancellationToken);
+        if (!hasLlmSettings)
+        {
+            db.HouseholdLlmSettings.Add(
+                new HouseholdLlmSettings
+                {
+                    SingletonKey = HouseholdLlmSettings.DefaultSingletonKey,
+                    Provider = LlmProvider.Ollama,
+                    BaseUrl = "http://localhost:11434",
+                    ApiKey = null,
+                    TextModel = null,
+                    VisionModel = null,
+                    OllamaKeepAlive = "5m",
+                    RequestTimeoutSeconds = 120,
+                    AutoPublishHighConfidenceText = false,
+                }
+            );
 
             await db.SaveChangesAsync(cancellationToken);
         }

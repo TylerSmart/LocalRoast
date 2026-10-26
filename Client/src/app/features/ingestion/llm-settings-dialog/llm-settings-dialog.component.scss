@@ -1,0 +1,198 @@
+.llm-settings-dialog-container {
+  display: flex;
+  flex-direction: column;
+  max-height: 85vh;
+}
+
+.dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.25rem 1.5rem 0.5rem;
+
+  .header-icon-title {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+
+    .header-icon {
+      color: var(--mat-sys-primary, #6b5e43);
+      font-size: 1.75rem;
+      width: 1.75rem;
+      height: 1.75rem;
+    }
+
+    .dialog-title {
+      margin: 0;
+      font-size: 1.25rem;
+      font-weight: 600;
+    }
+  }
+
+  .close-button {
+    color: var(--mat-sys-on-surface-variant, #49454f);
+  }
+}
+
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem 1.5rem;
+  gap: 1rem;
+  color: var(--mat-sys-on-surface-variant, #49454f);
+}
+
+.dialog-content {
+  padding: 0.5rem 1.5rem 1rem;
+  overflow-y: auto;
+}
+
+.dialog-description {
+  margin: 0 0 1rem;
+  color: var(--mat-sys-on-surface-variant, #49454f);
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.error-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  border-radius: 8px;
+  background-color: var(--mat-sys-error-container, #ffdad6);
+  color: var(--mat-sys-on-error-container, #410002);
+  font-size: 0.875rem;
+}
+
+.settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.form-row {
+  display: flex;
+  gap: 1rem;
+
+  &.two-cols {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  &.api-key-row {
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .form-field {
+    width: 100%;
+  }
+}
+
+.clear-key-checkbox {
+  margin-top: -0.5rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.test-connection-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin: 0.25rem 0 1rem;
+
+  .test-btn {
+    align-self: flex-start;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+
+    .btn-inner {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+  }
+}
+
+.connection-status-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  font-size: 0.875rem;
+
+  mat-icon {
+    font-size: 1.25rem;
+    width: 1.25rem;
+    height: 1.25rem;
+    flex-shrink: 0;
+  }
+
+  .status-text {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+
+  &.status-success {
+    background-color: var(--mat-sys-tertiary-container, #e8f5e9);
+    color: var(--mat-sys-on-tertiary-container, #1b5e20);
+  }
+
+  &.status-error {
+    background-color: var(--mat-sys-error-container, #ffebee);
+    color: var(--mat-sys-on-error-container, #b71c1c);
+  }
+}
+
+.toggle-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.75rem;
+  background-color: var(--mat-sys-surface-variant, #f4efe6);
+  border-radius: 8px;
+
+  .toggle-hint {
+    font-size: 0.8rem;
+    color: var(--mat-sys-on-surface-variant, #49454f);
+    padding-left: 2.75rem;
+  }
+}
+
+.dialog-actions {
+  padding: 0.75rem 1.5rem 1.25rem;
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+}
+
+.inline-spinner {
+  display: inline-block;
+  margin-right: 0.35rem;
+}
+
+@media (max-width: 600px) {
+  .form-row.two-cols {
+    grid-template-columns: 1fr;
+    gap: 0.25rem;
+  }
+
+  .dialog-header {
+    padding: 1rem 1rem 0.5rem;
+  }
+
+  .dialog-content {
+    padding: 0.5rem 1rem 1rem;
+  }
+
+  .dialog-actions {
+    padding: 0.5rem 1rem 1rem;
+  }
+}

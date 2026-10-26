@@ -12,6 +12,15 @@
         <mat-icon>menu_book</mat-icon>
         <span>Cookbook</span>
       </a>
+      <a mat-button routerLink="/ingest" routerLinkActive="active-nav-link" class="nav-link">
+        <mat-icon>move_to_inbox</mat-icon>
+        <span>Ingest</span>
+        @if (ingestionService.reviewInboxCount() > 0) {
+          <span class="inbox-count-badge" aria-label="Review Inbox count">
+            {{ ingestionService.reviewInboxCount() }}
+          </span>
+        }
+      </a>
       <a mat-button routerLink="/matcher" routerLinkActive="active-nav-link" class="nav-link">
         <mat-icon>blender</mat-icon>
         <span>Matcher</span>
@@ -91,6 +100,10 @@
           <span class="user-menu-email">{{ authService.currentUser()?.email }}</span>
         </div>
         <mat-divider></mat-divider>
+        <button mat-menu-item (click)="llmSettingsService.openLlmSettingsDialog()">
+          <mat-icon>smart_toy</mat-icon>
+          <span>LLM Provider Settings</span>
+        </button>
         <button mat-menu-item (click)="accountService.openAccountSettingsDialog()">
           <mat-icon>manage_accounts</mat-icon>
           <span>Account Settings</span>
@@ -113,6 +126,15 @@
     <a routerLink="/recipes" routerLinkActive="active-tab" class="mobile-tab" aria-label="Cookbook">
       <mat-icon>menu_book</mat-icon>
       <span>Cookbook</span>
+    </a>
+    <a routerLink="/ingest" routerLinkActive="active-tab" class="mobile-tab" aria-label="Ingest">
+      <mat-icon>move_to_inbox</mat-icon>
+      <span>Ingest</span>
+      @if (ingestionService.reviewInboxCount() > 0) {
+        <span class="inbox-count-badge mobile-badge" aria-label="Review Inbox count">
+          {{ ingestionService.reviewInboxCount() }}
+        </span>
+      }
     </a>
     <a routerLink="/matcher" routerLinkActive="active-tab" class="mobile-tab" aria-label="Matcher">
       <mat-icon>blender</mat-icon>

@@ -54,6 +54,20 @@ export const routes: Routes = [
           ),
       },
       {
+        path: 'ingest',
+        loadComponent: () =>
+          import('./features/ingestion/ingestion-hub/ingestion-hub.component').then(
+            (m) => m.IngestionHubComponent,
+          ),
+      },
+      {
+        path: 'ingest/review/:id',
+        loadComponent: () =>
+          import('./features/ingestion/ingestion-review/ingestion-review.component').then(
+            (m) => m.IngestionReviewComponent,
+          ),
+      },
+      {
         path: 'matcher',
         loadComponent: () =>
           import('./features/recipes/fridge-matcher/fridge-matcher.component').then(
