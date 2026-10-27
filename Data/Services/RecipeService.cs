@@ -342,6 +342,7 @@ public sealed partial class RecipeService(
         };
 
         await ValidateAndBuildGraphAsync(recipe, request, cancellationToken);
+        await SyncTaxonomyAsync(recipe, request.CollectionIds, request.TagIds, cancellationToken);
 
         dbContext.Recipes.Add(recipe);
         try
@@ -405,11 +406,11 @@ public sealed partial class RecipeService(
         var totalTime = ComputeTotalTime(request);
 
         dbContext.RecipeStepIngredients.RemoveRange(
-            recipe.Steps.SelectMany(s => s.IngredientReferences)
+            recipe.Steps.SelectMany(s => s.IngredientReferences).ToList()
         );
-        dbContext.RecipeStepTimers.RemoveRange(recipe.Steps.SelectMany(s => s.Timers));
-        dbContext.RecipeSteps.RemoveRange(recipe.Steps);
-        dbContext.RecipeIngredients.RemoveRange(recipe.Ingredients);
+        dbContext.RecipeStepTimers.RemoveRange(recipe.Steps.SelectMany(s => s.Timers).ToList());
+        dbContext.RecipeSteps.RemoveRange(recipe.Steps.ToList());
+        dbContext.RecipeIngredients.RemoveRange(recipe.Ingredients.ToList());
 
         recipe.Title = request.Title.Trim();
         recipe.Slug = slug;
@@ -430,54 +431,7 @@ public sealed partial class RecipeService(
         recipe.ThumbnailImagePath = ValidateAndNormalizeMediaPath(request.ThumbnailImagePath);
 
         await ValidateAndBuildGraphAsync(recipe, request, cancellationToken);
-
-        if (request.CollectionIds is not null)
-        {
-            var distinctCollIds = request.CollectionIds.Distinct().ToList();
-            if (distinctCollIds.Count > 0)
-            {
-                var existingCount = await dbContext.Collections.CountAsync(
-                    c => distinctCollIds.Contains(c.Id),
-                    cancellationToken
-                );
-                if (existingCount != distinctCollIds.Count)
-                {
-                    throw new DomainValidationException(
-                        "One or more referenced collections do not exist."
-                    );
-                }
-            }
-            dbContext.RecipeCollections.RemoveRange(recipe.RecipeCollections);
-            foreach (var collId in distinctCollIds)
-            {
-                dbContext.RecipeCollections.Add(
-                    new RecipeCollection { RecipeId = recipe.Id, CollectionId = collId }
-                );
-            }
-        }
-
-        if (request.TagIds is not null)
-        {
-            var distinctTagIds = request.TagIds.Distinct().ToList();
-            if (distinctTagIds.Count > 0)
-            {
-                var existingCount = await dbContext.Tags.CountAsync(
-                    t => distinctTagIds.Contains(t.Id),
-                    cancellationToken
-                );
-                if (existingCount != distinctTagIds.Count)
-                {
-                    throw new DomainValidationException(
-                        "One or more referenced tags do not exist."
-                    );
-                }
-            }
-            dbContext.RecipeTags.RemoveRange(recipe.RecipeTags);
-            foreach (var tagId in distinctTagIds)
-            {
-                dbContext.RecipeTags.Add(new RecipeTag { RecipeId = recipe.Id, TagId = tagId });
-            }
-        }
+        await SyncTaxonomyAsync(recipe, request.CollectionIds, request.TagIds, cancellationToken);
 
         try
         {
@@ -552,7 +506,7 @@ public sealed partial class RecipeService(
         var attachmentFiles = recipe.Attachments.Select(a => a.MediaUrlPath).ToList();
 
         dbContext.RecipeStepIngredients.RemoveRange(
-            recipe.Steps.SelectMany(s => s.IngredientReferences)
+            recipe.Steps.SelectMany(s => s.IngredientReferences).ToList()
         );
 
         var shareLinks = await dbContext
@@ -612,53 +566,7 @@ public sealed partial class RecipeService(
             return null;
         }
 
-        if (request.CollectionIds is not null)
-        {
-            var distinctCollIds = request.CollectionIds.Distinct().ToList();
-            if (distinctCollIds.Count > 0)
-            {
-                var existingCount = await dbContext.Collections.CountAsync(
-                    c => distinctCollIds.Contains(c.Id),
-                    cancellationToken
-                );
-                if (existingCount != distinctCollIds.Count)
-                {
-                    throw new DomainValidationException(
-                        "One or more referenced collections do not exist."
-                    );
-                }
-            }
-            dbContext.RecipeCollections.RemoveRange(recipe.RecipeCollections);
-            foreach (var collId in distinctCollIds)
-            {
-                dbContext.RecipeCollections.Add(
-                    new RecipeCollection { RecipeId = recipe.Id, CollectionId = collId }
-                );
-            }
-        }
-
-        if (request.TagIds is not null)
-        {
-            var distinctTagIds = request.TagIds.Distinct().ToList();
-            if (distinctTagIds.Count > 0)
-            {
-                var existingCount = await dbContext.Tags.CountAsync(
-                    t => distinctTagIds.Contains(t.Id),
-                    cancellationToken
-                );
-                if (existingCount != distinctTagIds.Count)
-                {
-                    throw new DomainValidationException(
-                        "One or more referenced tags do not exist."
-                    );
-                }
-            }
-            dbContext.RecipeTags.RemoveRange(recipe.RecipeTags);
-            foreach (var tagId in distinctTagIds)
-            {
-                dbContext.RecipeTags.Add(new RecipeTag { RecipeId = recipe.Id, TagId = tagId });
-            }
-        }
+        await SyncTaxonomyAsync(recipe, request.CollectionIds, request.TagIds, cancellationToken);
 
         await dbContext.SaveChangesAsync(cancellationToken);
         return await GetRecipeByIdAsync(id, cancellationToken);
@@ -1085,42 +993,80 @@ public sealed partial class RecipeService(
 
             dbContext.RecipeSteps.Add(stepEntity);
         }
+    }
 
-        if (request.CollectionIds is { Count: > 0 })
+    private async Task SyncTaxonomyAsync(
+        Recipe recipe,
+        IReadOnlyList<Guid>? collectionIds,
+        IReadOnlyList<Guid>? tagIds,
+        CancellationToken cancellationToken
+    )
+    {
+        if (collectionIds is not null)
         {
-            var distinctCollIds = request.CollectionIds.Distinct().ToList();
-            var existingCount = await dbContext.Collections.CountAsync(
-                c => distinctCollIds.Contains(c.Id),
-                cancellationToken
-            );
-            if (existingCount != distinctCollIds.Count)
+            var distinctCollIds = collectionIds.Distinct().ToList();
+            if (distinctCollIds.Count > 0)
             {
-                throw new DomainValidationException(
-                    "One or more referenced collections do not exist."
+                var existingCount = await dbContext.Collections.CountAsync(
+                    c => distinctCollIds.Contains(c.Id),
+                    cancellationToken
                 );
+                if (existingCount != distinctCollIds.Count)
+                {
+                    throw new DomainValidationException(
+                        "One or more referenced collections do not exist."
+                    );
+                }
             }
+
+            var existingColls = recipe.RecipeCollections.ToList();
+            var collsToRemove = existingColls
+                .Where(rc => !distinctCollIds.Contains(rc.CollectionId))
+                .ToList();
+            dbContext.RecipeCollections.RemoveRange(collsToRemove);
+
+            var existingCollIds = existingColls.Select(rc => rc.CollectionId).ToHashSet();
             foreach (var collId in distinctCollIds)
             {
-                dbContext.RecipeCollections.Add(
-                    new RecipeCollection { RecipeId = recipe.Id, CollectionId = collId }
-                );
+                if (!existingCollIds.Contains(collId))
+                {
+                    dbContext.RecipeCollections.Add(
+                        new RecipeCollection { RecipeId = recipe.Id, CollectionId = collId }
+                    );
+                }
             }
         }
 
-        if (request.TagIds is { Count: > 0 })
+        if (tagIds is not null)
         {
-            var distinctTagIds = request.TagIds.Distinct().ToList();
-            var existingCount = await dbContext.Tags.CountAsync(
-                t => distinctTagIds.Contains(t.Id),
-                cancellationToken
-            );
-            if (existingCount != distinctTagIds.Count)
+            var distinctTagIds = tagIds.Distinct().ToList();
+            if (distinctTagIds.Count > 0)
             {
-                throw new DomainValidationException("One or more referenced tags do not exist.");
+                var existingCount = await dbContext.Tags.CountAsync(
+                    t => distinctTagIds.Contains(t.Id),
+                    cancellationToken
+                );
+                if (existingCount != distinctTagIds.Count)
+                {
+                    throw new DomainValidationException(
+                        "One or more referenced tags do not exist."
+                    );
+                }
             }
+
+            var existingTags = recipe.RecipeTags.ToList();
+            var tagsToRemove = existingTags
+                .Where(rt => !distinctTagIds.Contains(rt.TagId))
+                .ToList();
+            dbContext.RecipeTags.RemoveRange(tagsToRemove);
+
+            var existingTagIds = existingTags.Select(rt => rt.TagId).ToHashSet();
             foreach (var tagId in distinctTagIds)
             {
-                dbContext.RecipeTags.Add(new RecipeTag { RecipeId = recipe.Id, TagId = tagId });
+                if (!existingTagIds.Contains(tagId))
+                {
+                    dbContext.RecipeTags.Add(new RecipeTag { RecipeId = recipe.Id, TagId = tagId });
+                }
             }
         }
     }

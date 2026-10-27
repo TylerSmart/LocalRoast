@@ -183,11 +183,17 @@
   .field-display-name {
     flex: 2 1 200px;
   }
-  .field-prep {
+  .field-prep,
+  .field-note {
     flex: 2 1 160px;
   }
-  .field-optional {
-    padding-top: 0.25rem;
+  .field-optional,
+  .field-opt {
+    display: inline-flex;
+    align-items: center;
+  }
+  .create-catalog-btn {
+    align-self: center;
   }
 }
 
@@ -282,7 +288,37 @@
 .btn-inner {
   display: inline-flex;
   align-items: center;
-  gap: 0.25rem;
+  justify-content: center;
+  vertical-align: middle;
+  gap: 0.375rem;
+  line-height: 1;
+
+  mat-icon {
+    font-size: 1.25rem;
+    width: 1.25rem;
+    height: 1.25rem;
+    line-height: 1.25rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    vertical-align: middle;
+  }
+
+  span {
+    display: inline-flex;
+    align-items: center;
+    line-height: 1;
+  }
+}
+
+button[mat-flat-button],
+button[mat-stroked-button] {
+  ::ng-deep .mdc-button__label {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    vertical-align: middle;
+  }
 }
 
 @media (max-width: 600px) {

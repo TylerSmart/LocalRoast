@@ -101,19 +101,19 @@
         @if (recipe()!.prepTimeMinutes) {
           <div class="stat-pill">
             <span class="stat-label">Prep Time</span>
-            <span class="stat-value">{{ recipe()!.prepTimeMinutes }} min</span>
+            <span class="stat-value">{{ formatMinutes(recipe()!.prepTimeMinutes) }}</span>
           </div>
         }
         @if (recipe()!.cookTimeMinutes) {
           <div class="stat-pill">
             <span class="stat-label">Cook Time</span>
-            <span class="stat-value">{{ recipe()!.cookTimeMinutes }} min</span>
+            <span class="stat-value">{{ formatMinutes(recipe()!.cookTimeMinutes) }}</span>
           </div>
         }
         @if (recipe()!.totalTimeMinutes) {
           <div class="stat-pill stat-highlight">
             <span class="stat-label">Total Time</span>
-            <span class="stat-value">{{ recipe()!.totalTimeMinutes }} min</span>
+            <span class="stat-value">{{ formatMinutes(recipe()!.totalTimeMinutes) }}</span>
           </div>
         }
         <div class="stat-pill">
@@ -162,7 +162,7 @@
           <span>· Units: {{ targetSystem() === 'UsCustomary' ? 'US' : 'Metric' }}</span>
         }
         @if (recipe()!.totalTimeMinutes) {
-          <span>· Total Time: {{ recipe()!.totalTimeMinutes }} min</span>
+          <span>· Total Time: {{ formatMinutes(recipe()!.totalTimeMinutes) }}</span>
         }
         @if (recipe()!.sourceName) {
           <span>· Source: {{ recipe()!.sourceName }}</span>

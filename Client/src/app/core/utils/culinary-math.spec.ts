@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   formatAmount,
   formatDuration,
+  formatMinutes,
   formatNumber,
   getUnitLabel,
   scaleAndConvert,
@@ -62,6 +63,29 @@ describe('culinary-math', () => {
       expect(formatDuration(3600)).toBe('1 hr');
       expect(formatDuration(5400)).toBe('1 hr 30 min');
       expect(formatDuration(7200)).toBe('2 hr');
+    });
+  });
+
+  describe('formatMinutes', () => {
+    it('should return empty string for null, undefined, or negative values', () => {
+      expect(formatMinutes(null)).toBe('');
+      expect(formatMinutes(undefined)).toBe('');
+      expect(formatMinutes(-5)).toBe('');
+    });
+
+    it('should format minutes under 1 hour', () => {
+      expect(formatMinutes(0)).toBe('0 min');
+      expect(formatMinutes(15)).toBe('15 min');
+      expect(formatMinutes(45)).toBe('45 min');
+      expect(formatMinutes(59)).toBe('59 min');
+    });
+
+    it('should format times of 1 hour or more into hours and minutes', () => {
+      expect(formatMinutes(60)).toBe('1 hr');
+      expect(formatMinutes(90)).toBe('1 hr 30 min');
+      expect(formatMinutes(120)).toBe('2 hr');
+      expect(formatMinutes(140)).toBe('2 hr 20 min');
+      expect(formatMinutes(465)).toBe('7 hr 45 min');
     });
   });
 

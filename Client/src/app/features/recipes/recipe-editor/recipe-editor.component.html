@@ -392,20 +392,20 @@
                 />
               </mat-form-field>
 
-              <div class="ingredient-row-fields">
+              <div class="ingredient-fields-grid">
                 <!-- Quantity & Range -->
-                <mat-form-field appearance="outline" class="field-qty">
+                <mat-form-field appearance="outline" class="field-qty" subscriptSizing="dynamic">
                   <mat-label>Qty</mat-label>
                   <input matInput type="number" step="any" min="0" formControlName="quantity" />
                 </mat-form-field>
 
-                <mat-form-field appearance="outline" class="field-qty">
+                <mat-form-field appearance="outline" class="field-qty" subscriptSizing="dynamic">
                   <mat-label>Max (opt)</mat-label>
                   <input matInput type="number" step="any" min="0" formControlName="maxQuantity" />
                 </mat-form-field>
 
                 <!-- Unit -->
-                <mat-form-field appearance="outline" class="field-unit">
+                <mat-form-field appearance="outline" class="field-unit" subscriptSizing="dynamic">
                   <mat-label>Unit</mat-label>
                   <mat-select formControlName="unit">
                     <mat-option [value]="null">None / Unitless</mat-option>
@@ -416,7 +416,11 @@
                 </mat-form-field>
 
                 @if (ingGroup.get('unit')?.value === 'Custom') {
-                  <mat-form-field appearance="outline" class="field-custom-unit">
+                  <mat-form-field
+                    appearance="outline"
+                    class="field-custom-unit"
+                    subscriptSizing="dynamic"
+                  >
                     <mat-label>Custom Unit</mat-label>
                     <input matInput formControlName="customUnitName" placeholder="e.g. stalk" />
                   </mat-form-field>
@@ -425,7 +429,11 @@
                 <!-- Linked Entity / Display Name -->
                 @if (ingGroup.get('isSubRecipe')?.value) {
                   <!-- Sub-Recipe Selector -->
-                  <mat-form-field appearance="outline" class="field-display-name">
+                  <mat-form-field
+                    appearance="outline"
+                    class="field-display-name"
+                    subscriptSizing="dynamic"
+                  >
                     <mat-label>Select Linked Sub-Recipe</mat-label>
                     <mat-select
                       formControlName="linkedRecipeId"
@@ -438,7 +446,11 @@
                   </mat-form-field>
                 } @else {
                   <!-- Food Item Autocomplete / Display Name -->
-                  <mat-form-field appearance="outline" class="field-display-name">
+                  <mat-form-field
+                    appearance="outline"
+                    class="field-display-name"
+                    subscriptSizing="dynamic"
+                  >
                     <mat-label>Ingredient Name / Food Item</mat-label>
                     <input
                       matInput
@@ -480,13 +492,17 @@
                 }
 
                 <!-- Preparation Note -->
-                <mat-form-field appearance="outline" class="field-note">
+                <mat-form-field
+                  appearance="outline"
+                  class="field-prep field-note"
+                  subscriptSizing="dynamic"
+                >
                   <mat-label>Prep Note (e.g. minced, room temp)</mat-label>
                   <input matInput formControlName="preparationNote" />
                 </mat-form-field>
 
                 <!-- Optional Toggle -->
-                <mat-checkbox formControlName="isOptional" class="field-opt">
+                <mat-checkbox formControlName="isOptional" class="field-opt field-optional">
                   Optional
                 </mat-checkbox>
               </div>

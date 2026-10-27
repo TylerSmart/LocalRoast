@@ -16,6 +16,7 @@ import { FoodItemDto } from '../../../core/models/food-catalog.models';
 import { IngredientMatchResultDto } from '../../../core/models/recipe.models';
 import { FoodCatalogService } from '../../../core/services/food-catalog/food-catalog.service';
 import { RecipeService } from '../../../core/services/recipe/recipe.service';
+import { formatMinutes } from '../../../core/utils/culinary-math';
 
 @Component({
   imports: [
@@ -47,6 +48,7 @@ export class FridgeMatcherComponent implements OnInit {
   protected readonly isLoadingCatalog = signal<boolean>(false);
   protected readonly isMatching = signal<boolean>(false);
   protected readonly errorMessage = signal<string | null>(null);
+  protected readonly formatMinutes = formatMinutes;
 
   protected readonly filteredFoodItems = computed(() => {
     const query = this.searchControl.value.trim().toLowerCase();

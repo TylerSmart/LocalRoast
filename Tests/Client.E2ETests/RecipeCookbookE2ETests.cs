@@ -142,4 +142,72 @@ public sealed class RecipeCookbookE2ETests : E2ETestBase
         await Expect(Page.Locator(".recipe-card", new() { HasText = draftTitle }))
             .Not.ToBeVisibleAsync();
     }
+
+    [TestMethod]
+    public async Task Recipe_EditExistingRecipe_UpdatesSuccessfullyAndRendersDetail()
+    {
+        await RegisterAndLoginAsync();
+
+        // 1. Create a new recipe
+        await Page.Locator("a[routerlink='/recipes/new']").First.ClickAsync();
+        await Expect(Page).ToHaveURLAsync(new Regex(".*/recipes/new.*"));
+
+        var initialTitle = $"Original Skillet Cornbread {Guid.NewGuid():N}"[..28];
+        await Page.Locator("input[formcontrolname='title']").FillAsync(initialTitle);
+        await Page.Locator("input[formcontrolname='baseServings']").FillAsync("4");
+        await Page.Locator("input[formcontrolname='yieldDisplay']").FillAsync("4 wedges");
+        await Page.Locator("textarea[formcontrolname='description']")
+            .FillAsync("Initial cornbread description before edit.");
+
+        // First Ingredient
+        await Page.Locator("input[formcontrolname='displayName']")
+            .First.FillAsync("Yellow Cornmeal");
+        await Page.Locator("input[formcontrolname='quantity']").First.FillAsync("1.5");
+        await Page.Locator("mat-select[formcontrolname='unit']").First.ClickAsync();
+        await Page.Locator("mat-option", new() { HasText = "Cup" }).First.ClickAsync();
+
+        // First Step
+        await Page.Locator("textarea[formcontrolname='instruction']")
+            .First.FillAsync("Whisk cornmeal with dry ingredients.");
+
+        // Save
+        await Page.Locator("button[type='submit']", new() { HasText = "Save Recipe" })
+            .First.ClickAsync();
+
+        // 2. Verify Detail Page
+        await Expect(Page).ToHaveURLAsync(new Regex(".*/recipes/[a-f0-9-]+$"));
+        await Expect(Page.Locator(".recipe-title")).ToContainTextAsync(initialTitle);
+        await Expect(Page.Locator(".ingredient-row")).ToContainTextAsync("Yellow Cornmeal");
+
+        // 3. Click Edit
+        await Page.Locator("a[aria-label='Edit recipe']").ClickAsync();
+        await Expect(Page).ToHaveURLAsync(new Regex(".*/recipes/[a-f0-9-]+/edit$"));
+        await Expect(Page.Locator(".page-title")).ToContainTextAsync("Edit Recipe");
+
+        // 4. Modify Title and Servings
+        var updatedTitle = $"Crispy Cast-Iron Gluten-Free Cornbreadd {Guid.NewGuid():N}"[..38];
+        await Page.Locator("input[formcontrolname='title']").FillAsync(updatedTitle);
+        await Page.Locator("input[formcontrolname='baseServings']").FillAsync("8");
+        await Page.Locator("input[formcontrolname='yieldDisplay']").FillAsync("8 wedges");
+
+        // Add a second ingredient
+        await Page.Locator("button", new() { HasText = "Add Ingredient" }).ClickAsync();
+        await Page.Locator("input[formcontrolname='displayName']").Nth(1).FillAsync("Buttermilk");
+        await Page.Locator("input[formcontrolname='quantity']").Nth(1).FillAsync("1.25");
+        await Page.Locator("mat-select[formcontrolname='unit']").Nth(1).ClickAsync();
+        await Page.Locator("mat-option", new() { HasText = "Cup" }).First.ClickAsync();
+
+        // 5. Save Edited Recipe
+        await Page.Locator("button[type='submit']", new() { HasText = "Save Recipe" })
+            .First.ClickAsync();
+
+        // 6. Verify Updated Detail Page
+        await Expect(Page).ToHaveURLAsync(new Regex(".*/recipes/[a-f0-9-]+$"));
+        await Expect(Page.Locator(".recipe-title")).ToContainTextAsync(updatedTitle);
+        await Expect(Page.Locator(".recipe-stats-strip")).ToContainTextAsync("8 wedges");
+        await Expect(Page.Locator(".ingredient-row", new() { HasText = "Yellow Cornmeal" }))
+            .ToBeVisibleAsync();
+        await Expect(Page.Locator(".ingredient-row", new() { HasText = "Buttermilk" }))
+            .ToBeVisibleAsync();
+    }
 }

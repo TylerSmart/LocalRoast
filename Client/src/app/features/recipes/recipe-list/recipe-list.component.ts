@@ -21,6 +21,7 @@ import {
 import { CollectionDto, TagCategory, TagDto } from '../../../core/models/taxonomy.models';
 import { RecipeService } from '../../../core/services/recipe/recipe.service';
 import { TaxonomyService } from '../../../core/services/taxonomy/taxonomy.service';
+import { formatMinutes } from '../../../core/utils/culinary-math';
 import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialog/confirm-dialog.component';
 import {
   CollectionDialogComponent,
@@ -65,6 +66,7 @@ export class RecipeListComponent implements OnInit {
 
   protected readonly isLoading = signal<boolean>(false);
   protected readonly errorMessage = signal<string | null>(null);
+  protected readonly formatMinutes = formatMinutes;
 
   protected readonly tagCategories: TagCategory[] = [
     'Course',

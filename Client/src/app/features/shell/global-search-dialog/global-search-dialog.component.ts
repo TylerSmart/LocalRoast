@@ -10,6 +10,7 @@ import { RecipeSummaryDto } from '../../../core/models/recipe.models';
 import { CollectionDto } from '../../../core/models/taxonomy.models';
 import { RecipeService } from '../../../core/services/recipe/recipe.service';
 import { TaxonomyService } from '../../../core/services/taxonomy/taxonomy.service';
+import { formatMinutes } from '../../../core/utils/culinary-math';
 
 export interface SearchResultItem {
   id: string;
@@ -120,7 +121,7 @@ export class GlobalSearchDialogComponent implements OnInit {
       title: r.title,
       subtitle: r.description
         ? r.description
-        : `${r.difficulty} • ${r.totalTimeMinutes ?? '--'} min`,
+        : `${r.difficulty} • ${formatMinutes(r.totalTimeMinutes) || '--'}`,
       icon: 'restaurant_menu',
       route: `/recipes/${r.id}`,
     }));

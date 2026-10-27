@@ -187,7 +187,7 @@
                   @if (result.recipe.totalTimeMinutes) {
                     <span class="meta-item">
                       <mat-icon>schedule</mat-icon>
-                      {{ result.recipe.totalTimeMinutes }} min
+                      {{ formatMinutes(result.recipe.totalTimeMinutes) }}
                     </span>
                   }
                   @if (result.recipe.difficulty) {

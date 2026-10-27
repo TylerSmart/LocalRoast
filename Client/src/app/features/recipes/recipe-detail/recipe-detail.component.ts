@@ -26,6 +26,7 @@ import { RecipeService } from '../../../core/services/recipe/recipe.service';
 import {
   FormattedQuantityResult,
   formatDuration,
+  formatMinutes,
   scaleAndConvert,
 } from '../../../core/utils/culinary-math';
 import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialog/confirm-dialog.component';
@@ -94,6 +95,7 @@ export class RecipeDetailComponent implements OnInit {
   protected readonly targetSystem = signal<UnitSystem>('Original');
   protected readonly checkedIngredients = signal<Record<string, boolean>>({});
   protected readonly isUploadingAttachment = signal<boolean>(false);
+  protected readonly formatMinutes = formatMinutes;
 
   protected readonly scaleFactor = computed(() => {
     const r = this.recipe();

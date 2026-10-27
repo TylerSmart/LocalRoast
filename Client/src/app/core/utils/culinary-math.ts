@@ -200,6 +200,20 @@ export function formatDuration(durationSeconds: number): string {
   return remMins > 0 ? `${hrs} hr ${remMins} min` : `${hrs} hr`;
 }
 
+export function formatMinutes(minutes: number | null | undefined): string {
+  if (minutes === null || minutes === undefined || isNaN(minutes) || minutes < 0) {
+    return '';
+  }
+
+  if (minutes < 60) {
+    return `${minutes} min`;
+  }
+
+  const hrs = Math.floor(minutes / 60);
+  const remMins = minutes % 60;
+  return remMins > 0 ? `${hrs} hr ${remMins} min` : `${hrs} hr`;
+}
+
 function convertUnit(
   qty: number,
   maxQty: number | null | undefined,

@@ -170,4 +170,18 @@ public sealed class CulinaryMathTests
         Assert.AreEqual("1 hr", CulinaryMath.FormatDuration(3600));
         Assert.AreEqual("1 hr 30 min", CulinaryMath.FormatDuration(5400));
     }
+
+    [TestMethod]
+    public void FormatMinutes_FormatsExpectedStrings()
+    {
+        Assert.AreEqual(string.Empty, CulinaryMath.FormatMinutes(null));
+        Assert.AreEqual(string.Empty, CulinaryMath.FormatMinutes(-5));
+        Assert.AreEqual("0 min", CulinaryMath.FormatMinutes(0));
+        Assert.AreEqual("15 min", CulinaryMath.FormatMinutes(15));
+        Assert.AreEqual("59 min", CulinaryMath.FormatMinutes(59));
+        Assert.AreEqual("1 hr", CulinaryMath.FormatMinutes(60));
+        Assert.AreEqual("1 hr 15 min", CulinaryMath.FormatMinutes(75));
+        Assert.AreEqual("2 hr", CulinaryMath.FormatMinutes(120));
+        Assert.AreEqual("7 hr 45 min", CulinaryMath.FormatMinutes(465));
+    }
 }

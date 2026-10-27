@@ -441,4 +441,134 @@ public sealed class RecipesIntegrationTests
         Assert.IsNotNull(updated);
         Assert.AreEqual("Household Lasagna (Extra Cheese)", updated.Title);
     }
+
+    [TestMethod]
+    public async Task UpdateRecipe_WithTagsAndCollections_SucceedsWithoutCollectionModifiedError()
+    {
+        await RegisterAndAuthenticateAsync(_client, "edit_test_chef@example.com", "edittestchef");
+
+        // Fetch tags and collections
+        var tags = await (await _client.GetAsync("/api/tags")).Content.ReadFromJsonAsync<
+            IReadOnlyList<TagDto>
+        >();
+        Assert.IsNotNull(tags);
+        Assert.IsTrue(tags.Count >= 3);
+
+        var collections = await (
+            await _client.GetAsync("/api/collections")
+        ).Content.ReadFromJsonAsync<IReadOnlyList<CollectionDto>>();
+        Assert.IsNotNull(collections);
+        Assert.IsTrue(collections.Count >= 2);
+
+        var initialTagIds = tags.Take(3).Select(t => t.Id).ToList();
+        var initialCollectionIds = collections.Take(2).Select(c => c.Id).ToList();
+
+        // 1. Create recipe with multiple tags, multiple collections, 2 ingredients, 1 step with timer
+        var createReq = new UpsertRecipeRequest(
+            Title: "Crispy Cast-Iron Gluten-Free Cornbread",
+            Description: "Initial description",
+            BaseServings: 8m,
+            YieldDisplay: "8 wedges",
+            PrepTimeMinutes: 10,
+            CookTimeMinutes: 25,
+            TotalTimeMinutes: 35,
+            Difficulty: RecipeDifficulty.Easy,
+            TagIds: initialTagIds,
+            CollectionIds: initialCollectionIds,
+            Ingredients:
+            [
+                new RecipeIngredientInput(
+                    SectionName: "Dry Ingredients",
+                    Quantity: 1.5m,
+                    Unit: MeasurementUnit.Cup,
+                    DisplayName: "yellow cornmeal"
+                ),
+                new RecipeIngredientInput(
+                    SectionName: "Dry Ingredients",
+                    Quantity: 1m,
+                    Unit: MeasurementUnit.Cup,
+                    DisplayName: "gluten-free flour"
+                ),
+            ],
+            Steps:
+            [
+                new RecipeStepInput(
+                    SectionName: "Bake",
+                    Instruction: "Bake in hot skillet.",
+                    IngredientIndices: [0, 1],
+                    Timers: [new RecipeStepTimerInput(1500, "Bake timer")]
+                ),
+            ]
+        );
+
+        var createRes = await _client.PostAsJsonAsync("/api/recipes", createReq);
+        Assert.AreEqual(HttpStatusCode.Created, createRes.StatusCode);
+        var created = await createRes.Content.ReadFromJsonAsync<RecipeDetailDto>();
+        Assert.IsNotNull(created);
+        Assert.AreEqual(3, created.Tags.Count);
+        Assert.AreEqual(2, created.Collections.Count);
+        Assert.AreEqual(2, created.Ingredients.Count);
+
+        // 2. Update the recipe: change title, keep 2 tags and replace 1 tag, keep 1 collection and remove 1 collection, add an ingredient
+        var updatedTagIds = new List<Guid> { initialTagIds[0], initialTagIds[1] };
+        if (tags.Count > 3)
+        {
+            updatedTagIds.Add(tags[3].Id);
+        }
+        var updatedCollectionIds = new List<Guid> { initialCollectionIds[0] };
+
+        var updateReq = new UpsertRecipeRequest(
+            Title: "Crispy Cast-Iron Gluten-Free Cornbreadd",
+            Description: "Updated description with tender buttermilk crumb.",
+            BaseServings: 8m,
+            YieldDisplay: "8 wedges",
+            PrepTimeMinutes: 10,
+            CookTimeMinutes: 25,
+            TotalTimeMinutes: 35,
+            Difficulty: RecipeDifficulty.Easy,
+            TagIds: updatedTagIds,
+            CollectionIds: updatedCollectionIds,
+            Ingredients:
+            [
+                new RecipeIngredientInput(
+                    SectionName: "Dry Ingredients",
+                    Quantity: 1.5m,
+                    Unit: MeasurementUnit.Cup,
+                    DisplayName: "yellow cornmeal"
+                ),
+                new RecipeIngredientInput(
+                    SectionName: "Dry Ingredients",
+                    Quantity: 1m,
+                    Unit: MeasurementUnit.Cup,
+                    DisplayName: "gluten-free flour"
+                ),
+                new RecipeIngredientInput(
+                    SectionName: "Wet Ingredients",
+                    Quantity: 1.25m,
+                    Unit: MeasurementUnit.Cup,
+                    DisplayName: "buttermilk"
+                ),
+            ],
+            Steps:
+            [
+                new RecipeStepInput(
+                    SectionName: "Bake",
+                    Instruction: "Bake in hot skillet until crust is deep golden.",
+                    IngredientIndices: [0, 1, 2],
+                    Timers: [new RecipeStepTimerInput(1500, "Bake timer")]
+                ),
+            ]
+        );
+
+        var updateRes = await _client.PutAsJsonAsync($"/api/recipes/{created.Id}", updateReq);
+        Assert.AreEqual(HttpStatusCode.OK, updateRes.StatusCode);
+
+        var updated = await updateRes.Content.ReadFromJsonAsync<RecipeDetailDto>();
+        Assert.IsNotNull(updated);
+        Assert.AreEqual("Crispy Cast-Iron Gluten-Free Cornbreadd", updated.Title);
+        Assert.AreEqual("crispy-cast-iron-gluten-free-cornbreadd", updated.Slug);
+        Assert.AreEqual(3, updated.Ingredients.Count);
+        Assert.AreEqual(updatedTagIds.Count, updated.Tags.Count);
+        Assert.AreEqual(1, updated.Collections.Count);
+    }
 }

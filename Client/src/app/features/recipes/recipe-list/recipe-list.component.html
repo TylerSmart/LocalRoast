@@ -273,7 +273,7 @@
                 @if (recipe.totalTimeMinutes) {
                   <span class="meta-item">
                     <mat-icon class="meta-icon">schedule</mat-icon>
-                    <span>{{ recipe.totalTimeMinutes }} min</span>
+                    <span>{{ formatMinutes(recipe.totalTimeMinutes) }}</span>
                   </span>
                 }
                 <span class="meta-item">

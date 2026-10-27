@@ -21,6 +21,7 @@ describe('PersonalAccessTokenService', () => {
     expiresAt: null,
     lastUsedAt: null,
     revokedAt: null,
+    isActive: true,
     isRevoked: false,
     isExpired: false,
   };

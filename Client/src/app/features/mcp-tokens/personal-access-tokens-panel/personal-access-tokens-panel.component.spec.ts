@@ -30,6 +30,7 @@ describe('PersonalAccessTokensPanelComponent', () => {
     expiresAt: null,
     lastUsedAt: null,
     revokedAt: null,
+    isActive: true,
     isRevoked: false,
     isExpired: false,
   };
@@ -82,6 +83,7 @@ describe('PersonalAccessTokensPanelComponent', () => {
         expiresAt: '2026-11-27T01:00:00Z',
         lastUsedAt: null,
         revokedAt: null,
+        isActive: true,
         isRevoked: false,
         isExpired: false,
       },

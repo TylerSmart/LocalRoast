@@ -338,4 +338,21 @@ public static class CulinaryMath
         var remMins = (durationSeconds % 3600) / 60;
         return remMins > 0 ? $"{hrs} hr {remMins} min" : $"{hrs} hr";
     }
+
+    public static string FormatMinutes(int? minutes)
+    {
+        if (!minutes.HasValue || minutes.Value < 0)
+        {
+            return string.Empty;
+        }
+
+        if (minutes.Value < 60)
+        {
+            return $"{minutes.Value} min";
+        }
+
+        var hrs = minutes.Value / 60;
+        var remMins = minutes.Value % 60;
+        return remMins > 0 ? $"{hrs} hr {remMins} min" : $"{hrs} hr";
+    }
 }
