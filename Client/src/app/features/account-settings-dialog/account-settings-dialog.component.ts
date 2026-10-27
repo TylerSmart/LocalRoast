@@ -16,7 +16,7 @@ import {
   Validators,
 } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
-import { MatDialogModule, MatDialogRef } from '@angular/material/dialog';
+import { MAT_DIALOG_DATA, MatDialogModule, MatDialogRef } from '@angular/material/dialog';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
@@ -24,8 +24,13 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatTabsModule } from '@angular/material/tabs';
 import { AccountDto } from '../../core/models/account.models';
-import { AccountService } from '../../core/services/account/account.service';
+import { AccountService, AccountSettingsTab } from '../../core/services/account/account.service';
 import { AuthService } from '../../core/services/auth/auth.service';
+import { PersonalAccessTokensPanelComponent } from '../mcp-tokens/personal-access-tokens-panel/personal-access-tokens-panel.component';
+
+export interface AccountSettingsDialogData {
+  initialTab?: AccountSettingsTab;
+}
 
 function passwordsMatchValidator(group: AbstractControl): ValidationErrors | null {
   const newPassword = group.get('newPassword')?.value as string | undefined;
@@ -47,6 +52,7 @@ function passwordsMatchValidator(group: AbstractControl): ValidationErrors | nul
     MatIconModule,
     MatTabsModule,
     MatProgressSpinnerModule,
+    PersonalAccessTokensPanelComponent,
   ],
   templateUrl: './account-settings-dialog.component.html',
   styleUrl: './account-settings-dialog.component.scss',
@@ -59,6 +65,13 @@ export class AccountSettingsDialogComponent implements OnInit {
   private readonly authService = inject(AuthService);
   private readonly snackBar = inject(MatSnackBar);
   private readonly dialogRef = inject(MatDialogRef<AccountSettingsDialogComponent>);
+  private readonly dialogData = inject<AccountSettingsDialogData | null>(MAT_DIALOG_DATA, {
+    optional: true,
+  });
+
+  protected readonly selectedTabIndex = signal<number>(
+    this.getInitialTabIndex(this.dialogData?.initialTab),
+  );
 
   protected readonly account = signal<AccountDto | null>(null);
   protected readonly isLoadingAccount = signal<boolean>(true);
@@ -284,6 +297,18 @@ export class AccountSettingsDialogComponent implements OnInit {
       emailCtrl.enable({ emitEvent: false });
     } else {
       emailCtrl.disable({ emitEvent: false });
+    }
+  }
+
+  private getInitialTabIndex(tab?: AccountSettingsTab): number {
+    switch (tab) {
+      case 'password':
+        return 1;
+      case 'tokens':
+        return 2;
+      case 'profile':
+      default:
+        return 0;
     }
   }
 }

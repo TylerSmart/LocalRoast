@@ -1,12 +1,17 @@
+import { provideAnimationsAsync } from '@angular/platform-browser/animations/async';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { MatDialogRef } from '@angular/material/dialog';
+import { MAT_DIALOG_DATA, MatDialogRef } from '@angular/material/dialog';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { of, throwError } from 'rxjs';
 import { AccountDto } from '../../core/models/account.models';
 import { AuthResponse } from '../../core/models/auth.models';
 import { AccountService } from '../../core/services/account/account.service';
 import { AuthService } from '../../core/services/auth/auth.service';
-import { AccountSettingsDialogComponent } from './account-settings-dialog.component';
+import { PersonalAccessTokenService } from '../../core/services/personal-access-token/personal-access-token.service';
+import {
+  AccountSettingsDialogComponent,
+  AccountSettingsDialogData,
+} from './account-settings-dialog.component';
 
 describe('AccountSettingsDialogComponent', () => {
   let component: AccountSettingsDialogComponent;
@@ -23,6 +28,13 @@ describe('AccountSettingsDialogComponent', () => {
     setSession: ReturnType<typeof vi.fn>;
   };
 
+  let mockTokenService: {
+    getTokens: ReturnType<typeof vi.fn>;
+    createToken: ReturnType<typeof vi.fn>;
+    revokeToken: ReturnType<typeof vi.fn>;
+    deleteToken: ReturnType<typeof vi.fn>;
+  };
+
   let mockSnackBar: {
     open: ReturnType<typeof vi.fn>;
   };
@@ -30,6 +42,8 @@ describe('AccountSettingsDialogComponent', () => {
   let mockDialogRef: {
     close: ReturnType<typeof vi.fn>;
   };
+
+  let dialogData: AccountSettingsDialogData | null = null;
 
   const defaultAccount: AccountDto = {
     id: 'u-1',
@@ -40,6 +54,7 @@ describe('AccountSettingsDialogComponent', () => {
   };
 
   beforeEach(async () => {
+    dialogData = null;
     mockAccountService = {
       getAccount: vi.fn().mockReturnValue(of(defaultAccount)),
       updateProfile: vi.fn(),
@@ -55,6 +70,13 @@ describe('AccountSettingsDialogComponent', () => {
       setSession: vi.fn(),
     };
 
+    mockTokenService = {
+      getTokens: vi.fn().mockReturnValue(of([])),
+      createToken: vi.fn(),
+      revokeToken: vi.fn(),
+      deleteToken: vi.fn(),
+    };
+
     mockSnackBar = {
       open: vi.fn(),
     };
@@ -66,10 +88,13 @@ describe('AccountSettingsDialogComponent', () => {
     await TestBed.configureTestingModule({
       imports: [AccountSettingsDialogComponent],
       providers: [
+        provideAnimationsAsync(),
         { provide: AccountService, useValue: mockAccountService },
         { provide: AuthService, useValue: mockAuthService },
+        { provide: PersonalAccessTokenService, useValue: mockTokenService },
         { provide: MatSnackBar, useValue: mockSnackBar },
         { provide: MatDialogRef, useValue: mockDialogRef },
+        { provide: MAT_DIALOG_DATA, useFactory: () => dialogData },
       ],
     }).compileComponents();
   });
@@ -80,13 +105,28 @@ describe('AccountSettingsDialogComponent', () => {
     fixture.detectChanges();
   }
 
-  it('loads account details and populates profile form', () => {
+  it('loads account details and populates profile form with default profile tab selected', () => {
     createComponent();
 
     expect(mockAccountService.getAccount).toHaveBeenCalledTimes(1);
     expect(component.profileForm.getRawValue().username).toBe('alice');
     expect(component.profileForm.getRawValue().email).toBe('alice@example.com');
     expect(component['requiresPasswordForEmail']()).toBe(false);
+    expect(component['selectedTabIndex']()).toBe(0);
+  });
+
+  it('initializes on tokens tab when MAT_DIALOG_DATA specifies tokens', () => {
+    dialogData = { initialTab: 'tokens' };
+    createComponent();
+
+    expect(component['selectedTabIndex']()).toBe(2);
+  });
+
+  it('initializes on password tab when MAT_DIALOG_DATA specifies password', () => {
+    dialogData = { initialTab: 'password' };
+    createComponent();
+
+    expect(component['selectedTabIndex']()).toBe(1);
   });
 
   it('updates username without requiring current password and refreshes session', () => {

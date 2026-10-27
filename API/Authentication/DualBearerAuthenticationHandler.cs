@@ -48,6 +48,18 @@ public sealed class DualBearerAuthenticationHandler(
             return AuthenticateResult.NoResult();
         }
 
+        if (
+            token.StartsWith(
+                PersonalAccessTokenGenerator.Prefix,
+                StringComparison.OrdinalIgnoreCase
+            )
+        )
+        {
+            return AuthenticateResult.Fail(
+                "Personal access tokens are only valid on the /api/mcp endpoint."
+            );
+        }
+
         // 1. Try local application JWT first
         if (TokenHandler.CanReadToken(token))
         {

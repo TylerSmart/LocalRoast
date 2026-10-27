@@ -6,7 +6,9 @@
       </div>
       <div>
         <h2 class="dialog-title">Account Settings</h2>
-        <p class="dialog-subtitle">Update your profile details and password.</p>
+        <p class="dialog-subtitle">
+          Manage your profile, password, and MCP personal access tokens.
+        </p>
       </div>
     </div>
     <button mat-icon-button type="button" aria-label="Close account settings" (click)="close()">
@@ -27,7 +29,13 @@
         <button mat-button type="button" (click)="loadAccount()">Retry</button>
       </div>
     } @else {
-      <mat-tab-group animationDuration="150ms" [dynamicHeight]="true" class="account-tabs">
+      <mat-tab-group
+        animationDuration="150ms"
+        [dynamicHeight]="true"
+        class="account-tabs"
+        [selectedIndex]="selectedTabIndex()"
+        (selectedIndexChange)="selectedTabIndex.set($event)"
+      >
         <!-- Profile Tab -->
         <mat-tab label="Profile">
           <form class="tab-form" [formGroup]="profileForm" (ngSubmit)="saveProfile()">
@@ -217,6 +225,11 @@
               </button>
             </div>
           </form>
+        </mat-tab>
+
+        <!-- MCP Tokens Tab -->
+        <mat-tab label="MCP Tokens">
+          <app-personal-access-tokens-panel />
         </mat-tab>
       </mat-tab-group>
     }

@@ -1,0 +1,252 @@
+<div class="tokens-panel-container">
+  <div class="panel-intro">
+    <p>
+      Personal access tokens allow AI agents (such as Antigravity, Claude Desktop, or Open WebUI) to
+      securely search, query, and ingest recipes via the Model Context Protocol (MCP).
+    </p>
+  </div>
+
+  <!-- One-Time Secret Reveal Banner -->
+  @if (newlyCreatedToken(); as created) {
+    <div class="secret-reveal-banner" role="alert">
+      <div class="banner-header">
+        <mat-icon class="warning-icon" aria-hidden="true">key</mat-icon>
+        <div class="banner-text">
+          <strong class="banner-title">Personal Access Token Generated</strong>
+          <span class="banner-subtitle">
+            Make sure to copy your personal access token now. You won't be able to see it again!
+          </span>
+        </div>
+        <button
+          mat-icon-button
+          type="button"
+          aria-label="Dismiss secret banner"
+          class="dismiss-btn"
+          (click)="dismissSecretBanner()"
+        >
+          <mat-icon>close</mat-icon>
+        </button>
+      </div>
+
+      <div class="secret-value-wrapper">
+        <code class="pat-secret-value">{{ created.plaintextToken }}</code>
+        <button
+          mat-stroked-button
+          type="button"
+          class="copy-secret-btn"
+          aria-label="Copy personal access token"
+          (click)="copyPlaintextToken()"
+        >
+          <mat-icon>content_copy</mat-icon>
+          <span>Copy Token</span>
+        </button>
+      </div>
+    </div>
+  }
+
+  <!-- Generate Token Form -->
+  <section class="create-token-section">
+    <h3 class="section-title">Generate New Token</h3>
+
+    @if (createError()) {
+      <div class="alert-banner alert-error" role="alert">
+        <mat-icon aria-hidden="true">error_outline</mat-icon>
+        <span>{{ createError() }}</span>
+      </div>
+    }
+
+    <form [formGroup]="tokenForm" (ngSubmit)="createToken()" class="create-form">
+      <mat-form-field appearance="outline" class="field-name">
+        <mat-label>Token Name</mat-label>
+        <mat-icon matPrefix aria-hidden="true">label</mat-icon>
+        <input
+          matInput
+          formControlName="name"
+          placeholder="e.g. Antigravity Kitchen Assistant"
+          maxlength="100"
+        />
+        @if (tokenForm.controls.name.hasError('required')) {
+          <mat-error>Token name is required</mat-error>
+        } @else if (tokenForm.controls.name.hasError('minlength')) {
+          <mat-error>Name must be at least 2 characters</mat-error>
+        }
+      </mat-form-field>
+
+      <mat-form-field appearance="outline" class="field-expiration">
+        <mat-label>Expiration</mat-label>
+        <mat-icon matPrefix aria-hidden="true">schedule</mat-icon>
+        <mat-select formControlName="expirationDays">
+          @for (option of expirationOptions; track option.days) {
+            <mat-option [value]="option.days">{{ option.label }}</mat-option>
+          }
+        </mat-select>
+      </mat-form-field>
+
+      <div class="form-actions">
+        <button
+          mat-flat-button
+          color="primary"
+          type="submit"
+          class="generate-btn"
+          [disabled]="isCreating() || tokenForm.invalid"
+        >
+          @if (isCreating()) {
+            <mat-spinner diameter="18"></mat-spinner>
+          }
+          @if (isCreating()) {
+            <span>Generating...</span>
+          }
+          @if (!isCreating()) {
+            <mat-icon>add_moderator</mat-icon>
+          }
+          @if (!isCreating()) {
+            <span>Generate Token</span>
+          }
+        </button>
+      </div>
+    </form>
+  </section>
+
+  <!-- MCP Configuration Snippet Card -->
+  <section class="mcp-config-card">
+    <div class="card-header">
+      <div class="card-title-group">
+        <mat-icon class="card-icon" aria-hidden="true">terminal</mat-icon>
+        <div>
+          <h3 class="section-title">MCP Client Setup</h3>
+          <p class="section-subtitle">
+            Configure Claude Desktop, Antigravity, or other MCP clients with Streamable HTTP.
+          </p>
+        </div>
+      </div>
+      <button
+        mat-stroked-button
+        type="button"
+        class="copy-config-btn"
+        aria-label="Copy MCP JSON configuration"
+        (click)="copyMcpConfig()"
+      >
+        <mat-icon>content_copy</mat-icon>
+        <span>Copy MCP Config</span>
+      </button>
+    </div>
+
+    <div class="endpoint-row">
+      <span class="endpoint-label">Endpoint URL:</span>
+      <code class="endpoint-url">{{ mcpEndpointUrl() }}</code>
+      <button
+        mat-icon-button
+        type="button"
+        aria-label="Copy MCP endpoint URL"
+        (click)="copyEndpointUrl()"
+      >
+        <mat-icon>content_copy</mat-icon>
+      </button>
+    </div>
+
+    <div class="snippet-wrapper">
+      <pre class="snippet-pre"><code class="mcp-config-code">{{ mcpConfigSnippet() }}</code></pre>
+    </div>
+  </section>
+
+  <!-- Token Inventory Section -->
+  <section class="tokens-inventory-section">
+    <div class="inventory-header">
+      <h3 class="section-title">Your Tokens</h3>
+      @if (isLoading()) {
+        <mat-spinner diameter="18"></mat-spinner>
+      }
+    </div>
+
+    @if (loadError()) {
+      <div class="alert-banner alert-error" role="alert">
+        <mat-icon aria-hidden="true">error_outline</mat-icon>
+        <span>{{ loadError() }}</span>
+        <button mat-button type="button" (click)="loadTokens()">Retry</button>
+      </div>
+    } @else if (!isLoading() && tokens().length === 0) {
+      <div class="empty-tokens-state">
+        <mat-icon class="empty-icon" aria-hidden="true">key_off</mat-icon>
+        <p class="empty-text">No personal access tokens generated yet.</p>
+        <p class="empty-subtext">Generate your first token above to connect MCP tools.</p>
+      </div>
+    } @else {
+      <div class="tokens-list">
+        @for (token of tokens(); track token.id) {
+          <div
+            class="token-item"
+            [class.is-revoked]="token.isRevoked || !!token.revokedAt"
+            [class.is-expired]="token.isExpired && !token.isRevoked && !token.revokedAt"
+          >
+            <div class="token-main-col">
+              <div class="token-name-row">
+                <span class="token-name">{{ token.name }}</span>
+                <code class="token-prefix">{{ token.tokenPrefix }}...</code>
+
+                @if (token.isRevoked || token.revokedAt) {
+                  <span class="status-badge badge-revoked">Revoked</span>
+                } @else if (token.isExpired) {
+                  <span class="status-badge badge-expired">Expired</span>
+                } @else {
+                  <span class="status-badge badge-active">Active</span>
+                }
+              </div>
+
+              <div class="token-meta-row">
+                <span class="meta-item">
+                  <span class="meta-label">Created:</span>
+                  {{ token.createdAt | date: 'mediumDate' }}
+                </span>
+                <span class="meta-separator">&bull;</span>
+                <span class="meta-item">
+                  <span class="meta-label">Expires:</span>
+                  @if (token.expiresAt) {
+                    {{ token.expiresAt | date: 'mediumDate' }}
+                  } @else {
+                    Never
+                  }
+                </span>
+                <span class="meta-separator">&bull;</span>
+                <span class="meta-item last-used-meta">
+                  <span class="meta-label">Last used:</span>
+                  @if (token.lastUsedAt) {
+                    <span class="last-used-value">{{ token.lastUsedAt | date: 'short' }}</span>
+                  } @else {
+                    <span class="last-used-never">Never used</span>
+                  }
+                </span>
+              </div>
+            </div>
+
+            <div class="token-actions-col">
+              @if (!token.isRevoked && !token.revokedAt && !token.isExpired) {
+                <button
+                  mat-stroked-button
+                  color="warn"
+                  type="button"
+                  class="revoke-btn"
+                  aria-label="Revoke token"
+                  [disabled]="busyTokenId() === token.id"
+                  (click)="revokeToken(token)"
+                >
+                  Revoke
+                </button>
+              }
+
+              <button
+                mat-icon-button
+                type="button"
+                class="delete-btn"
+                aria-label="Delete token"
+                [disabled]="busyTokenId() === token.id"
+                (click)="deleteToken(token)"
+              >
+                <mat-icon>delete_outline</mat-icon>
+              </button>
+            </div>
+          </div>
+        }
+      </div>
+    }
+  </section>
+</div>

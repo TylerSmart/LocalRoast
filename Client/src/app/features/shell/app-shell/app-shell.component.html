@@ -104,6 +104,10 @@
           <mat-icon>smart_toy</mat-icon>
           <span>LLM Provider Settings</span>
         </button>
+        <button mat-menu-item (click)="accountService.openAccountSettingsDialog('tokens')">
+          <mat-icon>hub</mat-icon>
+          <span>MCP &amp; API Tokens</span>
+        </button>
         <button mat-menu-item (click)="accountService.openAccountSettingsDialog()">
           <mat-icon>manage_accounts</mat-icon>
           <span>Account Settings</span>

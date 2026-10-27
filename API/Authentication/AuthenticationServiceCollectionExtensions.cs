@@ -8,6 +8,8 @@ namespace App.API.Authentication;
 public static class AuthenticationServiceCollectionExtensions
 {
     public const string LocalJwtScheme = JwtBearerDefaults.AuthenticationScheme;
+    public const string McpPatScheme = "McpPat";
+    public const string McpAuthorizationPolicy = "McpPersonalAccessTokenPolicy";
 
     public static IServiceCollection AddAppAuthentication(
         this IServiceCollection services,
@@ -32,9 +34,19 @@ public static class AuthenticationServiceCollectionExtensions
             .AddScheme<AuthenticationSchemeOptions, DualBearerAuthenticationHandler>(
                 LocalJwtScheme,
                 _ => { }
+            )
+            .AddScheme<AuthenticationSchemeOptions, PersonalAccessTokenAuthenticationHandler>(
+                McpPatScheme,
+                _ => { }
             );
 
-        services.AddAuthorization();
+        services.AddAuthorization(options =>
+        {
+            options.AddPolicy(
+                McpAuthorizationPolicy,
+                policy => policy.AddAuthenticationSchemes(McpPatScheme).RequireAuthenticatedUser()
+            );
+        });
 
         return services;
     }

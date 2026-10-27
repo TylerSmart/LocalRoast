@@ -355,6 +355,65 @@ namespace App.Data.Migrations
                     b.ToTable("IngestionJobs", (string)null);
                 });
 
+            modelBuilder.Entity("App.Data.Entities.PersonalAccessToken", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<DateTimeOffset?>("ExpiresAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset?>("LastUsedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset>("ModifiedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("ModifiedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTimeOffset?>("RevokedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("TokenPrefix")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("nvarchar(24)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.HasIndex("UserId", "CreatedAt");
+
+                    b.ToTable("PersonalAccessTokens", (string)null);
+                });
+
             modelBuilder.Entity("App.Data.Entities.Recipe", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1073,6 +1132,17 @@ namespace App.Data.Migrations
                     b.Navigation("ResultingRecipe");
                 });
 
+            modelBuilder.Entity("App.Data.Entities.PersonalAccessToken", b =>
+                {
+                    b.HasOne("App.Data.Entities.User", "User")
+                        .WithMany("PersonalAccessTokens")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("App.Data.Entities.RecipeAttachment", b =>
                 {
                     b.HasOne("App.Data.Entities.Recipe", "Recipe")
@@ -1250,6 +1320,11 @@ namespace App.Data.Migrations
             modelBuilder.Entity("App.Data.Entities.Tag", b =>
                 {
                     b.Navigation("RecipeTags");
+                });
+
+            modelBuilder.Entity("App.Data.Entities.User", b =>
+                {
+                    b.Navigation("PersonalAccessTokens");
                 });
 #pragma warning restore 612, 618
         }

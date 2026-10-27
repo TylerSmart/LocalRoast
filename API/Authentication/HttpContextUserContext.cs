@@ -13,7 +13,9 @@ public sealed class HttpContextUserContext(IHttpContextAccessor httpContextAcces
             var userId =
                 user?.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? user?.FindFirst("sub")?.Value;
 
-            return userId ?? throw new InvalidOperationException("User is not authenticated.");
+            return userId
+                ?? McpUserContextAccessor.CurrentUserId
+                ?? throw new InvalidOperationException("User is not authenticated.");
         }
     }
 }

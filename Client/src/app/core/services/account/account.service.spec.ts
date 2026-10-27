@@ -93,8 +93,25 @@ describe('AccountService', () => {
     await expect(promise).resolves.toEqual(authRes);
   });
 
-  it('opens AccountSettingsDialogComponent via MatDialog', async () => {
+  it('opens AccountSettingsDialogComponent via MatDialog with default initialTab', async () => {
     await service.openAccountSettingsDialog();
-    expect(mockDialog.open).toHaveBeenCalledTimes(1);
+    expect(mockDialog.open).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        data: { initialTab: 'profile' },
+        width: '640px',
+      }),
+    );
+  });
+
+  it('opens AccountSettingsDialogComponent via MatDialog with specific initialTab', async () => {
+    await service.openAccountSettingsDialog('tokens');
+    expect(mockDialog.open).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        data: { initialTab: 'tokens' },
+        width: '640px',
+      }),
+    );
   });
 });

@@ -1,7 +1,7 @@
 # Phase 06: Personal Access Tokens (`lr_pat_...`) & Embedded MCP Server (`/api/mcp` — Cookbook & Ingestion Tools)
 
 > **Branch:** `feature/phase-06-pat-and-mcp-server`
-> **Status:** `[ ]` Not Started (`[ ]` Not Started | `[~]` In Progress | `[x]` Completed)
+> **Status:** `[x]` Completed (`[ ]` Not Started | `[~]` In Progress | `[x]` Completed)
 > **PRD Reference:** `docs/prd.md` — Sections 1, 2, 3, 4.3 (4.3.1 & 4.3.2), 5, and 6 (Milestone 2, Slice 3 of 3)
 > **Target Execution:** Run `/execute-phase` to execute this plan step-by-step.
 
@@ -631,7 +631,7 @@ Create `Tests/Client.E2ETests/McpAndPatE2ETests.cs` inheriting from `E2ETestBase
 
 ## 6. Step-by-Step Execution Checklist (For Implementation Agent)
 
-- [ ] **Task 1: Backend Core, Data Layer & EF Migration**
+- [x] **Task 1: Backend Core, Data Layer & EF Migration**
   - Create `Core/Authentication/PersonalAccessTokenGenerator.cs`, `PersonalAccessTokenModels.cs`, `IPersonalAccessTokenService.cs`, `Core/Mcp/McpModels.cs`, and `IMcpCookbookService.cs`.
   - Create `Data/Entities/PersonalAccessToken.cs` and `Data/Configurations/PersonalAccessTokenConfiguration.cs`; update `Data/Entities/User.cs`, `Data/AppDbContext.cs`, and `Data/DataServiceCollectionExtensions.cs`.
   - Implement `Data/Services/PersonalAccessTokenService.cs` and `Data/Services/McpCookbookService.cs`.
@@ -648,7 +648,7 @@ Create `Tests/Client.E2ETests/McpAndPatE2ETests.cs` inheriting from `E2ETestBase
     dotnet test --project Tests/Infrastructure.UnitTests/App.Infrastructure.UnitTests.csproj
     ```
 
-- [ ] **Task 2: Authentication Handlers, PAT Controller, Embedded `/api/mcp` Server & Integration Tests**
+- [x] **Task 2: Authentication Handlers, PAT Controller, Embedded `/api/mcp` Server & Integration Tests**
   - Add `ModelContextProtocol.AspNetCore` (`2.3.0`) to `API/App.API.csproj`.
   - Create `API/Authentication/McpUserContextAccessor.cs` and `PersonalAccessTokenAuthenticationHandler.cs`; update `HttpContextUserContext.cs`, `DualBearerAuthenticationHandler.cs`, and `AuthenticationServiceCollectionExtensions.cs`.
   - Create thin controller `API/Controllers/PersonalAccessTokensController.cs`.
@@ -659,7 +659,7 @@ Create `Tests/Client.E2ETests/McpAndPatE2ETests.cs` inheriting from `E2ETestBase
     dotnet test --project Tests/API.IntegrationTests/App.API.IntegrationTests.csproj
     ```
 
-- [ ] **Task 3: Angular Client & Unit Tests**
+- [x] **Task 3: Angular Client & Unit Tests**
   - Create `Client/src/app/core/models/personal-access-token.models.ts` and `Client/src/app/core/services/personal-access-token/personal-access-token.service.ts` (+ `.spec.ts`).
   - Create dedicated `PersonalAccessTokensPanelComponent` in `Client/src/app/features/mcp-tokens/personal-access-tokens-panel/` with separate `.ts`, `.html`, `.scss`, and `.spec.ts` files.
   - Update `AccountService`, `AccountSettingsDialogComponent`, and `AppShellComponent` (+ `.spec.ts` unit tests).
@@ -671,7 +671,7 @@ Create `Tests/Client.E2ETests/McpAndPatE2ETests.cs` inheriting from `E2ETestBase
     npm test -- --watch=false
     ```
 
-- [ ] **Task 4: Playwright E2E Verification & Final Formatting**
+- [x] **Task 4: Playwright E2E Verification & Final Formatting**
   - Add `ModelContextProtocol` (`2.3.0`) to `Tests/Client.E2ETests/App.Client.E2ETests.csproj` and implement `Tests/Client.E2ETests/McpAndPatE2ETests.cs` covering all 3 scenarios from Section 5.
   - Rebuild Angular production bundle (`npm run build:production` in `Client/`) and run Playwright E2E tests:
     ```powershell

@@ -1,6 +1,7 @@
 using App.API.Authentication;
 using App.API.Hosting;
 using App.API.Http;
+using App.API.Mcp;
 using App.Core;
 using App.Core.Authentication;
 using App.Data;
@@ -157,6 +158,8 @@ builder.Services.AddDataServices(builder.Configuration);
 
 builder.Services.AddAppAuthentication(builder.Configuration);
 
+builder.Services.AddAppMcpServer();
+
 // Every other Angular asset is content-hashed and safe to cache forever, but index.html keeps its
 // name across deploys. Without this it can be served from cache and reference a previous deploy's
 // bundle. Applies to UseStaticFiles and MapFallbackToFile, which both read these options.
@@ -292,6 +295,12 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapGroup("/api").MapControllers();
+
+app.MapMcp("/api/mcp")
+    .RequireAuthorization(
+        App.API.Authentication.AuthenticationServiceCollectionExtensions.McpAuthorizationPolicy
+    )
+    .ExcludeFromDescription();
 
 if (serveSpa)
 {

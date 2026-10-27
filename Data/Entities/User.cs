@@ -27,4 +27,7 @@ public sealed class User : IAuditable
     public DateTimeOffset ModifiedAt { get; set; }
 
     public string ModifiedBy { get; set; } = "System";
+
+    public ICollection<PersonalAccessToken> PersonalAccessTokens { get; set; } =
+        new List<PersonalAccessToken>();
 }

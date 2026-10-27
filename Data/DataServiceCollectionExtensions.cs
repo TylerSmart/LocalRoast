@@ -2,6 +2,7 @@ using App.Core.Account;
 using App.Core.Authentication;
 using App.Core.FoodCatalog;
 using App.Core.Ingestion;
+using App.Core.Mcp;
 using App.Core.Recipes;
 using App.Data.Auditing;
 using App.Data.Services;
@@ -24,6 +25,7 @@ public static class DataServiceCollectionExtensions
         services.AddScoped<AuditSaveChangesInterceptor>();
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IAccountService, AccountService>();
+        services.AddScoped<IPersonalAccessTokenService, PersonalAccessTokenService>();
         services.AddScoped<IFoodCatalogService, FoodCatalogService>();
         services.AddScoped<IRecipeService, RecipeService>();
         services.AddScoped<ITaxonomyService, TaxonomyService>();
@@ -31,6 +33,7 @@ public static class DataServiceCollectionExtensions
         services.AddScoped<ILlmSettingsService, LlmSettingsService>();
         services.AddScoped<IIngestionProcessor, IngestionProcessor>();
         services.AddScoped<IIngestionService, IngestionService>();
+        services.AddScoped<IMcpCookbookService, McpCookbookService>();
 
         if (
             string.Equals(
