@@ -3,6 +3,7 @@ import { MatButtonModule } from '@angular/material/button';
 import { MAT_DIALOG_DATA, MatDialogModule, MatDialogRef } from '@angular/material/dialog';
 import { MatIconModule } from '@angular/material/icon';
 import { MatTooltipModule } from '@angular/material/tooltip';
+import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
 import type { RecipeAttachmentDto } from '../../../core/models/recipe.models';
 
 export interface RecipeAttachmentViewerDialogData {
@@ -20,6 +21,7 @@ export interface RecipeAttachmentViewerDialogData {
 export class RecipeAttachmentViewerDialogComponent {
   readonly data = inject<RecipeAttachmentViewerDialogData>(MAT_DIALOG_DATA);
   readonly dialogRef = inject(MatDialogRef<RecipeAttachmentViewerDialogComponent>);
+  private readonly sanitizer = inject(DomSanitizer);
 
   readonly activeIndex = signal<number>(this.data.initialIndex ?? 0);
   readonly zoomLevel = signal<number>(1.0);
@@ -42,6 +44,12 @@ export class RecipeAttachmentViewerDialogComponent {
       att.fileName.toLowerCase().endsWith('.pdf') ||
       att.mediaUrlPath.toLowerCase().endsWith('.pdf')
     );
+  });
+
+  readonly safePdfUrl = computed<SafeResourceUrl | null>(() => {
+    const att = this.currentAttachment();
+    if (!att || !this.isPdf()) return null;
+    return this.sanitizer.bypassSecurityTrustResourceUrl(att.mediaUrlPath);
   });
 
   readonly transformStyle = computed<string>(() => {

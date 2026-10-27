@@ -373,3 +373,5 @@ FodyWeavers.xsd
 logs/
 !Client/src/app/features/admin/logs/
 !Client/src/app/features/admin/logs/**
+
+API/App_Data/

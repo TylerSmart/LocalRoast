@@ -187,6 +187,44 @@
   }
 }
 
+.pdf-viewer-pane {
+  flex: 1;
+  height: 100%;
+  width: 100%;
+  min-height: 400px;
+  background: var(--mat-sys-surface, #fff);
+
+  .pdf-embed {
+    width: 100%;
+    height: 100%;
+    min-height: 400px;
+    border: none;
+    display: block;
+  }
+
+  .pdf-fallback {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    gap: 12px;
+    color: var(--mat-sys-on-surface-variant, #888);
+    padding: 24px;
+    text-align: center;
+
+    p {
+      margin: 0;
+      font-size: 14px;
+    }
+  }
+}
+
+.pdf-link-action {
+  display: flex;
+  align-items: center;
+}
+
 .digital-text-view {
   flex: 1;
   padding: 16px;

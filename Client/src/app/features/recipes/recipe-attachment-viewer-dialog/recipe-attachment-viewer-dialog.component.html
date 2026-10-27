@@ -93,13 +93,9 @@
 
     <div class="attachment-content">
       @if (currentAttachment()) {
-        @if (isPdf()) {
+        @if (isPdf() && safePdfUrl()) {
           <div class="pdf-viewer-pane">
-            <object
-              [data]="currentAttachment()!.mediaUrlPath"
-              type="application/pdf"
-              class="pdf-embed"
-            >
+            <object [data]="safePdfUrl()!" type="application/pdf" class="pdf-embed">
               <div class="pdf-fallback">
                 <p>This browser does not support inline PDF viewing.</p>
                 <a

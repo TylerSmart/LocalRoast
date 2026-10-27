@@ -1,9 +1,18 @@
-import { ChangeDetectionStrategy, Component, computed, input, output, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  inject,
+  input,
+  output,
+  signal,
+} from '@angular/core';
 import { MatButtonModule } from '@angular/material/button';
 import { MatButtonToggleModule } from '@angular/material/button-toggle';
 import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatTooltipModule } from '@angular/material/tooltip';
+import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
 import type {
   IngestionSourceFileDto,
   PdfInspectionSummaryDto,
@@ -23,6 +32,8 @@ import type {
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class SourceViewerComponent {
+  private readonly sanitizer = inject(DomSanitizer);
+
   readonly sourceFiles = input<IngestionSourceFileDto[]>([]);
   readonly pdfInspection = input<PdfInspectionSummaryDto | null | undefined>(null);
   readonly rawText = input<string | null | undefined>(null);
@@ -34,23 +45,56 @@ export class SourceViewerComponent {
   readonly activePageIndex = signal<number>(0);
   readonly zoomLevel = signal<number>(1.0);
   readonly rotationDegrees = signal<number>(0);
-  readonly viewMode = signal<'vision' | 'text'>('vision');
+  readonly viewMode = signal<'vision' | 'text' | 'pdf'>('vision');
   readonly panOffset = signal<{ x: number; y: number }>({ x: 0, y: 0 });
   readonly isDragging = signal<boolean>(false);
   private dragStart = { x: 0, y: 0 };
   private panStart = { x: 0, y: 0 };
 
+  readonly originalPdfFile = computed<IngestionSourceFileDto | null>(() => {
+    return (
+      this.sourceFiles().find(
+        (f) =>
+          f.contentType === 'application/pdf' ||
+          f.urlPath.toLowerCase().endsWith('.pdf') ||
+          f.originalFileName.toLowerCase().endsWith('.pdf'),
+      ) ?? null
+    );
+  });
+
+  readonly safePdfUrl = computed<SafeResourceUrl | null>(() => {
+    const pdf = this.originalPdfFile();
+    if (!pdf) return null;
+    return this.sanitizer.bypassSecurityTrustResourceUrl(pdf.urlPath);
+  });
+
   readonly pages = computed<IngestionSourceFileDto[]>(() => {
-    const direct = this.sourceFiles();
-    if (direct && direct.length > 0) {
-      return direct;
-    }
     const pdf = this.pdfInspection();
-    if (pdf && pdf.renderedPageImages && pdf.renderedPageImages.length > 0) {
+    if (pdf?.renderedPageImages && pdf.renderedPageImages.length > 0) {
       return pdf.renderedPageImages;
     }
-    return [];
+    const direct = this.sourceFiles();
+    return direct.filter((f) => this.isImageFile(f));
   });
+
+  readonly effectiveViewMode = computed<'vision' | 'text' | 'pdf'>(() => {
+    const mode = this.viewMode();
+    if (mode === 'vision' && this.pages().length === 0) {
+      if (this.hasDigitalText()) return 'text';
+      if (this.originalPdfFile()) return 'pdf';
+    }
+    return mode;
+  });
+
+  private isImageFile(file: IngestionSourceFileDto): boolean {
+    if (file.contentType?.startsWith('image/')) return true;
+    const url = (file.urlPath || '').toLowerCase();
+    const name = (file.originalFileName || '').toLowerCase();
+    return (
+      /\.(jpe?g|png|webp|gif|bmp|avif)$/i.test(url) ||
+      /\.(jpe?g|png|webp|gif|bmp|avif)$/i.test(name)
+    );
+  }
 
   readonly currentPage = computed<IngestionSourceFileDto | null>(() => {
     const list = this.pages();
@@ -122,7 +166,7 @@ export class SourceViewerComponent {
     }
   }
 
-  toggleViewMode(mode: 'vision' | 'text'): void {
+  toggleViewMode(mode: 'vision' | 'text' | 'pdf'): void {
     this.viewMode.set(mode);
   }
 

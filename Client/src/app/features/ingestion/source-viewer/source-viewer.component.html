@@ -1,28 +1,41 @@
 <div class="source-viewer-container">
   <!-- Top Toolbar -->
   <div class="source-viewer-toolbar">
-    <!-- View Mode Toggle (for digital PDFs with raster preview) -->
-    @if (hasDigitalText() && pages().length > 0) {
+    <!-- View Mode Toggle -->
+    @if (
+      (hasDigitalText() || originalPdfFile()) &&
+      (pages().length > 0 || (hasDigitalText() && originalPdfFile()))
+    ) {
       <div class="view-mode-toggle">
         <mat-button-toggle-group
-          [value]="viewMode()"
+          [value]="effectiveViewMode()"
           (change)="toggleViewMode($event.value)"
           aria-label="Source View Mode"
         >
-          <mat-button-toggle value="vision">
-            <mat-icon>image</mat-icon>
-            <span class="toggle-label">Scan Page</span>
-          </mat-button-toggle>
-          <mat-button-toggle value="text">
-            <mat-icon>description</mat-icon>
-            <span class="toggle-label">Digital Text</span>
-          </mat-button-toggle>
+          @if (pages().length > 0) {
+            <mat-button-toggle value="vision">
+              <mat-icon>image</mat-icon>
+              <span class="toggle-label">Scan Page</span>
+            </mat-button-toggle>
+          }
+          @if (hasDigitalText()) {
+            <mat-button-toggle value="text">
+              <mat-icon>description</mat-icon>
+              <span class="toggle-label">Digital Text</span>
+            </mat-button-toggle>
+          }
+          @if (originalPdfFile()) {
+            <mat-button-toggle value="pdf">
+              <mat-icon>picture_as_pdf</mat-icon>
+              <span class="toggle-label">PDF Document</span>
+            </mat-button-toggle>
+          }
         </mat-button-toggle-group>
       </div>
     }
 
     <!-- Zoom & Rotation Controls (Vision Mode) -->
-    @if (viewMode() === 'vision' && currentPage()) {
+    @if (effectiveViewMode() === 'vision' && currentPage()) {
       <div class="transform-controls">
         <button
           mat-icon-button
@@ -117,11 +130,26 @@
         }
       </div>
     }
+
+    <!-- Open Original PDF Link -->
+    @if (originalPdfFile()) {
+      <div class="pdf-link-action">
+        <a
+          mat-icon-button
+          [href]="originalPdfFile()!.urlPath"
+          target="_blank"
+          matTooltip="Open original PDF in new tab"
+          aria-label="Open original PDF in new tab"
+        >
+          <mat-icon>open_in_new</mat-icon>
+        </a>
+      </div>
+    }
   </div>
 
   <!-- Content Stage -->
   <div class="source-stage">
-    @if (viewMode() === 'vision' && currentPage()) {
+    @if (effectiveViewMode() === 'vision' && currentPage()) {
       <div
         class="viewport-canvas"
         [class.is-draggable]="zoomLevel() > 1.0"
@@ -157,7 +185,20 @@
           }
         </div>
       }
-    } @else if (viewMode() === 'text' || (!currentPage() && rawText())) {
+    } @else if (effectiveViewMode() === 'pdf' && originalPdfFile() && safePdfUrl()) {
+      <!-- Inline PDF Document -->
+      <div class="pdf-viewer-pane">
+        <object [data]="safePdfUrl()!" type="application/pdf" class="pdf-embed">
+          <div class="pdf-fallback">
+            <p>This browser does not support inline PDF viewing.</p>
+            <a mat-flat-button color="primary" [href]="originalPdfFile()!.urlPath" target="_blank">
+              <mat-icon>open_in_new</mat-icon>
+              <span>Open PDF Document</span>
+            </a>
+          </div>
+        </object>
+      </div>
+    } @else if (effectiveViewMode() === 'text' || (!currentPage() && rawText())) {
       <!-- Digital Text View -->
       <div class="digital-text-view">
         <pre class="digital-text-content">{{ rawText() }}</pre>
@@ -166,7 +207,7 @@
       <!-- Empty state -->
       <div class="empty-viewer">
         <mat-icon class="empty-icon">image_not_supported</mat-icon>
-        <p>No preview images available for this source.</p>
+        <p>No preview available for this source.</p>
       </div>
     }
   </div>

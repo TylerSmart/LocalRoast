@@ -9,6 +9,24 @@ namespace App.Infrastructure.Ingestion;
 
 public sealed class LlmExtractionClient(HttpClient httpClient) : ILlmExtractionClient
 {
+    private readonly bool _ = ConfigureHttpClient(httpClient);
+
+    private static bool ConfigureHttpClient(HttpClient client)
+    {
+        try
+        {
+            if (client.Timeout != Timeout.InfiniteTimeSpan)
+            {
+                client.Timeout = Timeout.InfiniteTimeSpan;
+            }
+        }
+        catch (InvalidOperationException)
+        {
+            // Ignore if HttpClient was already started
+        }
+        return true;
+    }
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -156,6 +174,7 @@ public sealed class LlmExtractionClient(HttpClient httpClient) : ILlmExtractionC
         var normalizedBase = NormalizeBaseUrl(config.Provider, config.BaseUrl);
         var systemPrompt = BuildExtractionSystemPrompt(context);
         var timeout = TimeSpan.FromSeconds(Math.Max(15, config.RequestTimeoutSeconds));
+        var sw = Stopwatch.StartNew();
 
         using var cts = new CancellationTokenSource(timeout);
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
@@ -195,8 +214,7 @@ public sealed class LlmExtractionClient(HttpClient httpClient) : ILlmExtractionC
                 };
 
                 using var response = await httpClient.SendAsync(request, linkedCts.Token);
-                CheckTransientStatus(response);
-                response.EnsureSuccessStatusCode();
+                await EnsureSuccessfulLlmResponseAsync(response, linkedCts.Token);
 
                 var rawResponse = await response.Content.ReadAsStringAsync(linkedCts.Token);
                 using var doc = JsonDocument.Parse(rawResponse);
@@ -205,7 +223,8 @@ public sealed class LlmExtractionClient(HttpClient httpClient) : ILlmExtractionC
             }
             else // OpenAiCompatible
             {
-                var schemaString = JsonSerializer.Serialize(GetRecipeExtractionJsonSchema());
+                var schemaObj = GetRecipeExtractionJsonSchema();
+                var schemaString = JsonSerializer.Serialize(schemaObj);
                 var systemWithSchema =
                     $"{systemPrompt}\n\nStrict Output Rule: You MUST respond strictly in valid JSON matching this schema:\n{schemaString}";
 
@@ -214,7 +233,16 @@ public sealed class LlmExtractionClient(HttpClient httpClient) : ILlmExtractionC
                     model = config.TextModel.Trim(),
                     stream = false,
                     temperature = 0.1,
-                    response_format = new { type = "json_object" },
+                    response_format = new
+                    {
+                        type = "json_schema",
+                        json_schema = new
+                        {
+                            name = "recipe_extraction",
+                            strict = true,
+                            schema = schemaObj,
+                        },
+                    },
                     messages = new object[]
                     {
                         new { role = "system", content = systemWithSchema },
@@ -240,8 +268,7 @@ public sealed class LlmExtractionClient(HttpClient httpClient) : ILlmExtractionC
                 }
 
                 using var response = await httpClient.SendAsync(request, linkedCts.Token);
-                CheckTransientStatus(response);
-                response.EnsureSuccessStatusCode();
+                await EnsureSuccessfulLlmResponseAsync(response, linkedCts.Token);
 
                 var rawResponse = await response.Content.ReadAsStringAsync(linkedCts.Token);
                 using var doc = JsonDocument.Parse(rawResponse);
@@ -259,8 +286,10 @@ public sealed class LlmExtractionClient(HttpClient httpClient) : ILlmExtractionC
         }
         catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
+            sw.Stop();
+            var elapsed = Math.Max(1, (int)sw.Elapsed.TotalSeconds);
             throw new LlmHostUnavailableException(
-                $"LLM extraction request timed out after {config.RequestTimeoutSeconds}s.",
+                $"LLM extraction request timed out after {elapsed}s (configured timeout: {config.RequestTimeoutSeconds}s).",
                 ex
             );
         }
@@ -310,6 +339,7 @@ public sealed class LlmExtractionClient(HttpClient httpClient) : ILlmExtractionC
         var normalizedBase = NormalizeBaseUrl(config.Provider, config.BaseUrl);
         var systemPrompt = BuildVisionExtractionSystemPrompt(context);
         var timeout = TimeSpan.FromSeconds(Math.Max(20, config.RequestTimeoutSeconds));
+        var sw = Stopwatch.StartNew();
 
         using var cts = new CancellationTokenSource(timeout);
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
@@ -362,8 +392,7 @@ public sealed class LlmExtractionClient(HttpClient httpClient) : ILlmExtractionC
                 };
 
                 using var response = await httpClient.SendAsync(request, linkedCts.Token);
-                CheckTransientStatus(response);
-                response.EnsureSuccessStatusCode();
+                await EnsureSuccessfulLlmResponseAsync(response, linkedCts.Token);
 
                 var rawResponse = await response.Content.ReadAsStringAsync(linkedCts.Token);
                 using var doc = JsonDocument.Parse(rawResponse);
@@ -372,7 +401,8 @@ public sealed class LlmExtractionClient(HttpClient httpClient) : ILlmExtractionC
             }
             else // OpenAiCompatible
             {
-                var schemaString = JsonSerializer.Serialize(GetRecipeExtractionJsonSchema());
+                var schemaObj = GetRecipeExtractionJsonSchema();
+                var schemaString = JsonSerializer.Serialize(schemaObj);
                 var systemWithSchema =
                     $"{systemPrompt}\n\nStrict Output Rule: You MUST respond strictly in valid JSON matching this schema:\n{schemaString}";
 
@@ -397,7 +427,16 @@ public sealed class LlmExtractionClient(HttpClient httpClient) : ILlmExtractionC
                     model = config.VisionModel.Trim(),
                     stream = false,
                     temperature = 0.1,
-                    response_format = new { type = "json_object" },
+                    response_format = new
+                    {
+                        type = "json_schema",
+                        json_schema = new
+                        {
+                            name = "recipe_extraction",
+                            strict = true,
+                            schema = schemaObj,
+                        },
+                    },
                     messages = new object[]
                     {
                         new { role = "system", content = systemWithSchema },
@@ -423,8 +462,7 @@ public sealed class LlmExtractionClient(HttpClient httpClient) : ILlmExtractionC
                 }
 
                 using var response = await httpClient.SendAsync(request, linkedCts.Token);
-                CheckTransientStatus(response);
-                response.EnsureSuccessStatusCode();
+                await EnsureSuccessfulLlmResponseAsync(response, linkedCts.Token);
 
                 var rawResponse = await response.Content.ReadAsStringAsync(linkedCts.Token);
                 using var doc = JsonDocument.Parse(rawResponse);
@@ -442,8 +480,10 @@ public sealed class LlmExtractionClient(HttpClient httpClient) : ILlmExtractionC
         }
         catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
+            sw.Stop();
+            var elapsed = Math.Max(1, (int)sw.Elapsed.TotalSeconds);
             throw new LlmHostUnavailableException(
-                $"LLM vision extraction request timed out after {config.RequestTimeoutSeconds}s.",
+                $"LLM vision extraction request timed out after {elapsed}s (configured timeout: {config.RequestTimeoutSeconds}s).",
                 ex
             );
         }
@@ -468,6 +508,22 @@ public sealed class LlmExtractionClient(HttpClient httpClient) : ILlmExtractionC
         {
             throw new DomainValidationException(
                 $"Failed to parse recipe extraction JSON output from LLM: {ex.Message}"
+            );
+        }
+    }
+
+    private static async Task EnsureSuccessfulLlmResponseAsync(
+        HttpResponseMessage response,
+        CancellationToken cancellationToken
+    )
+    {
+        CheckTransientStatus(response);
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+            var detail = !string.IsNullOrWhiteSpace(errorBody) ? $": {errorBody}" : "";
+            throw new HttpRequestException(
+                $"Response status code does not indicate success: {(int)response.StatusCode} ({response.ReasonPhrase}){detail}"
             );
         }
     }

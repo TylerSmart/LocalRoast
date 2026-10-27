@@ -107,4 +107,58 @@ describe('SourceViewerComponent', () => {
     component.toggleViewMode('vision');
     expect(component.viewMode()).toBe('vision');
   });
+
+  it('uses renderedPageImages for PDF channels and supports PDF document view', () => {
+    const pdfSourceFile: IngestionSourceFileDto = {
+      pageNumber: 1,
+      originalFileName: 'holiday-cookbook.pdf',
+      urlPath: '/api/uploads/ingestion/holiday-cookbook.pdf',
+      contentType: 'application/pdf',
+      fileSizeBytes: 524288,
+    };
+
+    const renderedPages: IngestionSourceFileDto[] = [
+      {
+        pageNumber: 1,
+        originalFileName: 'Page 1',
+        urlPath: '/api/uploads/ingestion/page_1.webp',
+        contentType: 'image/webp',
+        fileSizeBytes: 80000,
+      },
+      {
+        pageNumber: 2,
+        originalFileName: 'Page 2',
+        urlPath: '/api/uploads/ingestion/page_2.webp',
+        contentType: 'image/webp',
+        fileSizeBytes: 85000,
+      },
+    ];
+
+    fixture.componentRef.setInput('sourceFiles', [pdfSourceFile]);
+    fixture.componentRef.setInput('pdfInspection', {
+      totalPageCount: 2,
+      totalExtractedCharacters: 1500,
+      extractionMode: 'VisionRaster',
+      renderedPageImages: renderedPages,
+    });
+    fixture.detectChanges();
+
+    expect(component.originalPdfFile()?.originalFileName).toBe('holiday-cookbook.pdf');
+    expect(component.safePdfUrl()).toBeTruthy();
+    expect(component.totalPages()).toBe(2);
+    expect(component.currentPage()?.urlPath).toBe('/api/uploads/ingestion/page_1.webp');
+
+    // In vision mode, image is rendered
+    const imgEl = fixture.nativeElement.querySelector('img.stage-image');
+    expect(imgEl).toBeTruthy();
+    expect(imgEl.getAttribute('src')).toBe('/api/uploads/ingestion/page_1.webp');
+
+    // Switch to PDF mode
+    component.toggleViewMode('pdf');
+    fixture.detectChanges();
+
+    expect(component.effectiveViewMode()).toBe('pdf');
+    const pdfObject = fixture.nativeElement.querySelector('object.pdf-embed');
+    expect(pdfObject).toBeTruthy();
+  });
 });

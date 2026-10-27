@@ -337,4 +337,68 @@ public sealed class LlmExtractionClientTests
         Assert.AreEqual("Bread Craft", result.SourceBookTitle);
         Assert.AreEqual(108, result.SourceBookPage);
     }
+
+    [TestMethod]
+    public async Task ExtractRecipeFromTextAsync_OpenAiCompatible_SendsJsonSchemaFormatAndExtractsRecipe()
+    {
+        var rawRecipeJson = """
+            {
+                "title": "Mango Tango Tacos",
+                "description": "Flavorful beef tacos with fresh mango.",
+                "baseServings": 4,
+                "ingredients": [
+                    { "displayName": "1 lb ground beef", "canonicalFoodName": "ground beef", "quantity": 1, "unit": "lb" }
+                ],
+                "steps": [
+                    { "instruction": "Brown beef in a skillet." }
+                ]
+            }
+            """;
+
+        var openAiResponse = System.Text.Json.JsonSerializer.Serialize(
+            new
+            {
+                choices = new[]
+                {
+                    new { message = new { role = "assistant", content = rawRecipeJson } },
+                },
+            }
+        );
+
+        var handler = new MockHttpMessageHandler(req =>
+        {
+            Assert.AreEqual("/v1/chat/completions", req.RequestUri!.AbsolutePath);
+            var body = req.Content!.ReadAsStringAsync().Result;
+            StringAssert.Contains(body, "\"json_schema\"");
+            StringAssert.Contains(body, "\"recipe_extraction\"");
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(openAiResponse, Encoding.UTF8, "application/json"),
+            };
+        });
+
+        var client = new LlmExtractionClient(new HttpClient(handler));
+        var config = new EffectiveLlmConnectionConfig(
+            Provider: LlmProvider.OpenAiCompatible,
+            BaseUrl: "http://localhost:1234",
+            ApiKey: null,
+            TextModel: "google/gemma-4-12b",
+            VisionModel: null,
+            OllamaKeepAlive: "5m",
+            RequestTimeoutSeconds: 30,
+            AutoPublishHighConfidenceText: false
+        );
+
+        var context = new LlmExtractionContext(
+            SourceContent: "Title: Mango Tango Tacos\nIngredients: 1 lb ground beef",
+            AvailableAisleNames: ["Meat & Seafood"],
+            AvailableTagNames: ["Mexican"]
+        );
+
+        var result = await client.ExtractRecipeFromTextAsync(config, context);
+
+        Assert.AreEqual("Mango Tango Tacos", result.Title);
+        Assert.AreEqual(4, result.BaseServings);
+        Assert.AreEqual(1, result.Ingredients?.Count);
+    }
 }

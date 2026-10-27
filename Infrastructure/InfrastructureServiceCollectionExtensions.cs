@@ -36,7 +36,10 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<IIngestionQueueSignal, IngestionQueueSignal>();
         services.AddScoped<IPdfIngestionInspector, PdfIngestionInspector>();
         services.AddHttpClient<IWebRecipeScraper, WebRecipeScraper>();
-        services.AddHttpClient<ILlmExtractionClient, LlmExtractionClient>();
+        services.AddHttpClient<ILlmExtractionClient, LlmExtractionClient>(client =>
+        {
+            client.Timeout = Timeout.InfiniteTimeSpan;
+        });
         services.AddHostedService<IngestionBackgroundWorker>();
 
         return services;

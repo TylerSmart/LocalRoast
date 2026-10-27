@@ -64,15 +64,25 @@ describe('RecipeAttachmentViewerDialogComponent', () => {
     expect(component.isPdf()).toBe(false);
   });
 
-  it('navigates next and recognizes PDF', () => {
+  it('navigates next and renders sanitized PDF embed without error', () => {
     component.next();
+    fixture.detectChanges();
+
     expect(component.activeIndex()).toBe(1);
     expect(component.currentAttachment()?.id).toBe('att-2');
     expect(component.isPdf()).toBe(true);
+    expect(component.safePdfUrl()).toBeTruthy();
+
+    const pdfObject = fixture.nativeElement.querySelector('object.pdf-embed');
+    expect(pdfObject).toBeTruthy();
 
     component.prev();
+    fixture.detectChanges();
+
     expect(component.activeIndex()).toBe(0);
     expect(component.isPdf()).toBe(false);
+    const imgEl = fixture.nativeElement.querySelector('img.attachment-image');
+    expect(imgEl).toBeTruthy();
   });
 
   it('zooms and rotates image attachments', () => {
