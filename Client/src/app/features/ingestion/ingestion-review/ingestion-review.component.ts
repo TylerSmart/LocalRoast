@@ -1,3 +1,4 @@
+import { SourceViewerComponent } from '../source-viewer/source-viewer.component';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -66,6 +67,7 @@ import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialo
     MatProgressSpinnerModule,
     MatSelectModule,
     MatTooltipModule,
+    SourceViewerComponent,
   ],
   templateUrl: './ingestion-review.component.html',
   styleUrl: './ingestion-review.component.scss',
@@ -90,6 +92,7 @@ export class IngestionReviewComponent implements OnInit {
   readonly isPublishing = signal<boolean>(false);
   readonly errorMessage = signal<string | null>(null);
   readonly mobilePane = signal<'source' | 'draft'>('draft');
+  readonly isPromotingCover = signal<boolean>(false);
 
   readonly storeAisles = signal<StoreAisleDto[]>([]);
   readonly foodItems = signal<FoodItemDto[]>([]);
@@ -112,6 +115,9 @@ export class IngestionReviewComponent implements OnInit {
     sourceUrl: ['', [Validators.maxLength(2048)]],
     coverImagePath: [null as string | null],
     thumbnailImagePath: [null as string | null],
+    sourceBookTitle: ['', [Validators.maxLength(200)]],
+    sourceBookPage: [null as number | null, [Validators.min(1), Validators.max(10000)]],
+    retainSourceAttachments: [true],
     ingredients: this.fb.array<FormGroup>([]),
     steps: this.fb.array<FormGroup>([]),
   });
@@ -211,6 +217,9 @@ export class IngestionReviewComponent implements OnInit {
       sourceUrl: draft.sourceUrl ?? jobDetail.sourceUrl ?? '',
       coverImagePath: draft.coverImagePath ?? jobDetail.downloadedCoverImagePath,
       thumbnailImagePath: draft.thumbnailImagePath ?? jobDetail.downloadedThumbnailImagePath,
+      sourceBookTitle: draft.sourceBookTitle ?? jobDetail.sourceBookTitle ?? '',
+      sourceBookPage: draft.sourceBookPage ?? jobDetail.sourceBookPage ?? null,
+      retainSourceAttachments: draft.retainSourceAttachments ?? true,
     });
 
     if (draft.suggestedCollectionIds && draft.suggestedCollectionIds.length > 0) {
@@ -442,12 +451,49 @@ export class IngestionReviewComponent implements OnInit {
       sourceAuthor: raw.sourceAuthor?.trim() || null,
       coverImagePath: raw.coverImagePath || null,
       thumbnailImagePath: raw.thumbnailImagePath || null,
+      sourceBookTitle: raw.sourceBookTitle?.trim() || null,
+      sourceBookPage:
+        raw.sourceBookPage !== null && raw.sourceBookPage !== undefined
+          ? Number(raw.sourceBookPage)
+          : null,
+      retainSourceAttachments: Boolean(raw.retainSourceAttachments),
       suggestedCollectionIds: Array.from(this.selectedCollectionIds()),
       suggestedTagIds: Array.from(this.selectedTagIds()),
       ingredients,
       steps,
       confidenceScore: this.job()?.confidenceScore ?? 0.8,
     };
+  }
+
+  onPromotePageToCover(pageNumber: number): void {
+    const currentJob = this.job();
+    if (!currentJob || this.isPromotingCover()) return;
+
+    this.isPromotingCover.set(true);
+    this.ingestionService
+      .promotePageToCover(currentJob.id, pageNumber)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (updatedJob) => {
+          this.job.set(updatedJob);
+          if (updatedJob.downloadedCoverImagePath) {
+            this.form.patchValue({
+              coverImagePath: updatedJob.downloadedCoverImagePath,
+              thumbnailImagePath: updatedJob.downloadedThumbnailImagePath,
+            });
+          }
+          this.isPromotingCover.set(false);
+          this.snackBar.open(`Page ${pageNumber} promoted to recipe cover!`, 'Close', {
+            duration: 3000,
+          });
+        },
+        error: (err) => {
+          this.isPromotingCover.set(false);
+          this.snackBar.open(err?.error?.detail || 'Failed to promote page to cover.', 'Close', {
+            duration: 4000,
+          });
+        },
+      });
   }
 
   saveDraft(): void {

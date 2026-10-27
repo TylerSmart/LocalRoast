@@ -1,0 +1,245 @@
+:host {
+  display: block;
+  height: 100%;
+  width: 100%;
+}
+
+.source-viewer-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  background: var(--mat-sys-surface-container-low, #f9f9fb);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.source-viewer-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--mat-sys-surface-container, #f0f0f4);
+  border-bottom: 1px solid var(--mat-sys-outline-variant, #e0e0e0);
+  z-index: 10;
+}
+
+.view-mode-toggle {
+  mat-button-toggle-group {
+    height: 36px;
+    align-items: center;
+
+    .mat-button-toggle {
+      font-size: 13px;
+
+      mat-icon {
+        font-size: 18px;
+        width: 18px;
+        height: 18px;
+        margin-right: 4px;
+        vertical-align: middle;
+      }
+    }
+  }
+}
+
+.transform-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+
+  .zoom-badge {
+    min-width: 48px;
+    padding: 0 6px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+}
+
+.pagination-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+
+  .page-badge {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--mat-sys-on-surface-variant, #555);
+    white-space: nowrap;
+  }
+}
+
+.cover-action {
+  button {
+    font-size: 13px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+
+    mat-icon {
+      font-size: 18px;
+      width: 18px;
+      height: 18px;
+    }
+  }
+
+  .cover-selected-btn {
+    opacity: 0.9;
+  }
+}
+
+.source-stage {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+  min-height: 320px;
+}
+
+.viewport-canvas {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+  background: #1a1a1e;
+  cursor: default;
+  touch-action: none;
+  user-select: none;
+
+  &.is-draggable {
+    cursor: grab;
+  }
+
+  &.is-dragging {
+    cursor: grabbing;
+  }
+
+  .stage-image {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    transition: transform 0.1s ease-out;
+    transform-origin: center center;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    pointer-events: none;
+  }
+}
+
+.thumbnails-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--mat-sys-surface-container, #222228);
+  overflow-x: auto;
+  scrollbar-width: thin;
+  flex-shrink: 0;
+
+  .thumbnail-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    background: transparent;
+    border: 2px solid transparent;
+    border-radius: 6px;
+    padding: 4px;
+    cursor: pointer;
+    transition: all 0.2s ease-in-out;
+
+    img {
+      width: 48px;
+      height: 64px;
+      object-fit: cover;
+      border-radius: 4px;
+      background: #333;
+    }
+
+    .thumbnail-label {
+      font-size: 11px;
+      color: #aaa;
+      white-space: nowrap;
+    }
+
+    &:hover {
+      border-color: rgba(255, 255, 255, 0.4);
+      .thumbnail-label {
+        color: #fff;
+      }
+    }
+
+    &.active {
+      border-color: var(--mat-sys-primary, #6750a4);
+      background: rgba(103, 80, 164, 0.15);
+
+      .thumbnail-label {
+        color: #fff;
+        font-weight: 600;
+      }
+    }
+  }
+}
+
+.digital-text-view {
+  flex: 1;
+  padding: 16px;
+  overflow-y: auto;
+  background: var(--mat-sys-surface, #fff);
+
+  .digital-text-content {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--mat-sys-on-surface, #222);
+    white-space: pre-wrap;
+    word-break: break-word;
+    margin: 0;
+  }
+}
+
+.empty-viewer {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--mat-sys-on-surface-variant, #888);
+
+  .empty-icon {
+    font-size: 48px;
+    width: 48px;
+    height: 48px;
+    opacity: 0.5;
+  }
+
+  p {
+    margin: 0;
+    font-size: 14px;
+  }
+}
+
+@media (max-width: 600px) {
+  .source-viewer-toolbar {
+    padding: 6px 8px;
+    gap: 6px;
+  }
+
+  .view-mode-toggle mat-button-toggle-group .mat-button-toggle {
+    font-size: 12px;
+    .toggle-label {
+      display: none;
+    }
+  }
+
+  .cover-action button span {
+    display: none;
+  }
+}

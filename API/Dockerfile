@@ -22,6 +22,7 @@ RUN dotnet publish -c Release -o /app/publish
 
 # Stage 3: Final Runtime
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
+RUN apt-get update && apt-get install -y --no-install-recommends libfontconfig1 libheif1 libde265-0 && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=api-build /app/publish .
 # Copy client build to wwwroot

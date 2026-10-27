@@ -124,6 +124,17 @@ export interface SubRecipePreviewDto {
   steps: RecipeStepDto[];
 }
 
+export interface RecipeAttachmentDto {
+  id: string;
+  sortOrder: number;
+  fileName: string;
+  mediaUrlPath: string;
+  contentType: string;
+  fileSizeBytes: number;
+  label: string | null;
+  createdAt: string;
+}
+
 export interface RecipeDetailDto {
   id: string;
   title: string;
@@ -155,6 +166,7 @@ export interface RecipeDetailDto {
   modifiedBy: string;
   collections: RecipeCollectionBadgeDto[];
   tags: RecipeTagBadgeDto[];
+  attachments?: RecipeAttachmentDto[];
 }
 
 export interface RecipeQueryParameters {

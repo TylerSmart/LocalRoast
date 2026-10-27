@@ -1,3 +1,28 @@
+export type PdfExtractionMode = 'DigitalText' | 'VisionRaster';
+
+export interface IngestionSourceFileDto {
+  pageNumber: number;
+  originalFileName: string;
+  urlPath: string;
+  contentType: string;
+  fileSizeBytes: number;
+  width?: number | null;
+  height?: number | null;
+}
+
+export interface PdfInspectionSummaryDto {
+  totalPageCount: number;
+  processedPageCount: number;
+  totalExtractedCharacters: number;
+  averageCharactersPerPage: number;
+  extractionMode: PdfExtractionMode;
+  renderedPageImages: IngestionSourceFileDto[];
+}
+
+export interface PromotePageToCoverRequest {
+  pageNumber: number;
+}
+
 import { MeasurementUnit, RecipeDifficulty, RecipeStepTimerInput } from './recipe.models';
 
 export type LlmProvider = 'Ollama' | 'OpenAiCompatible';
@@ -119,6 +144,9 @@ export interface IngestionExtractedDraftDto {
   ingredients: IngestionDraftIngredientDto[];
   steps: IngestionDraftStepDto[];
   confidenceScore: number;
+  sourceBookTitle?: string | null;
+  sourceBookPage?: number | null;
+  retainSourceAttachments?: boolean;
 }
 
 export interface EnqueueWebUrlIngestionRequest {
@@ -153,6 +181,7 @@ export interface IngestionJobSummaryDto {
   submittedByUsername: string | null;
   createdAt: string;
   modifiedAt: string;
+  sourceFileCount?: number;
 }
 
 export interface IngestionJobDetailDto {
@@ -177,6 +206,10 @@ export interface IngestionJobDetailDto {
   submittedByUsername: string | null;
   createdAt: string;
   modifiedAt: string;
+  sourceFiles?: IngestionSourceFileDto[];
+  pdfInspection?: PdfInspectionSummaryDto | null;
+  sourceBookTitle?: string | null;
+  sourceBookPage?: number | null;
 }
 
 export interface RetryWaitingJobsResultDto {

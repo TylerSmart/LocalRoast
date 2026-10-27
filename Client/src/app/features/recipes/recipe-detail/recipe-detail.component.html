@@ -407,5 +407,91 @@
         }
       </section>
     </div>
+
+    <!-- Recipe Attachments Section (Interactive, suppressed during print) -->
+    <section class="attachments-section no-print" aria-label="Source Attachments">
+      <mat-card class="attachments-card">
+        <div class="attachments-card-header">
+          <div class="title-with-badge">
+            <mat-icon class="section-icon">photo_library</mat-icon>
+            <h2 class="section-title">Source Scans & Documents</h2>
+            <span class="attachment-count-badge">
+              {{ recipe()?.attachments?.length || 0 }}
+            </span>
+          </div>
+
+          <div class="attachment-actions">
+            <input
+              #attachmentFileInput
+              type="file"
+              accept="image/*,application/pdf"
+              (change)="onAttachmentSelected($event)"
+              class="hidden-file-input"
+            />
+            <button
+              mat-stroked-button
+              type="button"
+              (click)="attachmentFileInput.click()"
+              [disabled]="isUploadingAttachment()"
+              aria-label="Add recipe attachment"
+            >
+              @if (isUploadingAttachment()) {
+                <mat-spinner diameter="16" class="inline-spinner"></mat-spinner>
+              } @else {
+                <mat-icon>add</mat-icon>
+              }
+              <span>Add Attachment</span>
+            </button>
+          </div>
+        </div>
+
+        <mat-card-content class="attachments-card-content">
+          @if (recipe()?.attachments && recipe()!.attachments!.length > 0) {
+            <div class="attachments-grid">
+              @for (att of recipe()!.attachments!; track att.id; let i = $index) {
+                <div class="attachment-item-card">
+                  <button
+                    type="button"
+                    class="item-clickable-area"
+                    (click)="openAttachmentViewer(i)"
+                  >
+                    <div class="item-preview">
+                      @if (att.contentType === 'application/pdf' || att.fileName.endsWith('.pdf')) {
+                        <div class="pdf-thumb-placeholder">
+                          <mat-icon>picture_as_pdf</mat-icon>
+                        </div>
+                      } @else {
+                        <img [src]="att.mediaUrlPath" [alt]="att.fileName" loading="lazy" />
+                      }
+                    </div>
+                    <div class="item-meta">
+                      <span class="item-title" [matTooltip]="att.label || att.fileName">
+                        {{ att.label || att.fileName }}
+                      </span>
+                      <span class="item-size">
+                        {{ (att.fileSizeBytes / 1024).toFixed(0) }} KB
+                      </span>
+                    </div>
+                  </button>
+                  <button
+                    mat-icon-button
+                    type="button"
+                    class="delete-attachment-btn"
+                    (click)="deleteAttachment(att.id, $event)"
+                    matTooltip="Delete Attachment"
+                  >
+                    <mat-icon>delete_outline</mat-icon>
+                  </button>
+                </div>
+              }
+            </div>
+          } @else {
+            <p class="empty-attachments-text">
+              No scanned cookbook pages or PDF documents attached to this recipe.
+            </p>
+          }
+        </mat-card-content>
+      </mat-card>
+    </section>
   }
 </div>

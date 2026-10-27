@@ -2,6 +2,7 @@ using System.Text.Json;
 using App.Core.Exceptions;
 using App.Core.FoodCatalog;
 using App.Core.Ingestion;
+using App.Core.Media;
 using App.Core.Recipes;
 using App.Data.Entities;
 using Microsoft.EntityFrameworkCore;
@@ -15,6 +16,8 @@ public sealed class IngestionProcessor(
     ILlmExtractionClient llmClient,
     IWebRecipeScraper scraper,
     IRecipeService recipeService,
+    IMediaStorageService mediaStorageService,
+    IPdfIngestionInspector pdfInspector,
     IIngestionQueueSignal queueSignal,
     ILogger<IngestionProcessor> logger
 ) : IIngestionProcessor
@@ -150,6 +153,63 @@ public sealed class IngestionProcessor(
                     await dbContext.SaveChangesAsync(cancellationToken);
                 }
             }
+            else if (job.Channel == IngestionChannel.Pdf)
+            {
+                if (string.IsNullOrWhiteSpace(job.PdfInspectionJson))
+                {
+                    string? pdfUrl = null;
+                    if (!string.IsNullOrWhiteSpace(job.SourceFilesJson))
+                    {
+                        try
+                        {
+                            var sourceFiles = JsonSerializer.Deserialize<
+                                List<IngestionSourceFileDto>
+                            >(job.SourceFilesJson, JsonOptions);
+                            pdfUrl = sourceFiles?.FirstOrDefault()?.UrlPath;
+                        }
+                        catch
+                        {
+                            // ignore
+                        }
+                    }
+
+                    if (string.IsNullOrWhiteSpace(pdfUrl))
+                    {
+                        throw new DomainValidationException(
+                            "PDF job does not have a valid source file path."
+                        );
+                    }
+
+                    var jobToken = job.Id.ToString("N");
+                    var inspection = await pdfInspector.InspectAndPrepareAsync(
+                        pdfUrl,
+                        jobToken,
+                        cancellationToken
+                    );
+
+                    job.PdfInspectionJson = JsonSerializer.Serialize(
+                        inspection.Summary,
+                        JsonOptions
+                    );
+
+                    if (inspection.Summary.ExtractionMode == PdfExtractionMode.DigitalText)
+                    {
+                        job.NormalizedSourceText = inspection.NormalizedDigitalText;
+                    }
+                    else if (inspection.Summary.RenderedPageImages.Count > 0)
+                    {
+                        job.DownloadedCoverImagePath = inspection
+                            .Summary
+                            .RenderedPageImages[0]
+                            .UrlPath;
+                        job.DownloadedThumbnailImagePath =
+                            inspection.GeneratedThumbnailImagePath
+                            ?? inspection.Summary.RenderedPageImages[0].UrlPath;
+                    }
+
+                    await dbContext.SaveChangesAsync(cancellationToken);
+                }
+            }
 
             // Step 2: Extracting
             job.Status = IngestionJobStatus.Extracting;
@@ -157,12 +217,6 @@ public sealed class IngestionProcessor(
             await dbContext.SaveChangesAsync(cancellationToken);
 
             var config = await llmSettingsService.GetEffectiveConfigAsync(cancellationToken);
-            if (string.IsNullOrWhiteSpace(config.TextModel))
-            {
-                throw new LlmHostUnavailableException(
-                    "No Text LLM model is configured in LLM Settings. Please select a Text Model and retry."
-                );
-            }
 
             var aisles = await dbContext
                 .StoreAisles.AsNoTracking()
@@ -187,17 +241,146 @@ public sealed class IngestionProcessor(
                 ))
                 .ToListAsync(cancellationToken);
 
-            var extractionContext = new LlmExtractionContext(
-                SourceContent: job.NormalizedSourceText ?? job.RawText ?? "",
-                AvailableAisleNames: aisles.Select(a => a.Name).ToList(),
-                AvailableTagNames: tags.Select(t => t.Name).ToList()
-            );
+            var aisleNames = aisles.Select(a => a.Name).ToList();
+            var tagNames = tags.Select(t => t.Name).ToList();
 
-            var rawExtracted = await llmClient.ExtractRecipeFromTextAsync(
-                config,
-                extractionContext,
-                cancellationToken
-            );
+            // Determine if Vision or Text pipeline is needed
+            var requiresVision = job.Channel == IngestionChannel.Images;
+            if (
+                job.Channel == IngestionChannel.Pdf
+                && !string.IsNullOrWhiteSpace(job.PdfInspectionJson)
+            )
+            {
+                try
+                {
+                    var insp = JsonSerializer.Deserialize<PdfInspectionSummaryDto>(
+                        job.PdfInspectionJson,
+                        JsonOptions
+                    );
+                    if (insp?.ExtractionMode == PdfExtractionMode.VisionRaster)
+                    {
+                        requiresVision = true;
+                    }
+                }
+                catch
+                {
+                    // ignore
+                }
+            }
+
+            LlmExtractedRecipePayload rawExtracted;
+
+            if (requiresVision)
+            {
+                if (string.IsNullOrWhiteSpace(config.VisionModel))
+                {
+                    throw new LlmHostUnavailableException(
+                        "No Vision LLM model is configured in LLM Settings. Please select a Vision Model and retry."
+                    );
+                }
+
+                var imageInputs = new List<LlmVisionImageInput>();
+
+                if (
+                    job.Channel == IngestionChannel.Images
+                    && !string.IsNullOrWhiteSpace(job.SourceFilesJson)
+                )
+                {
+                    var sourceFiles =
+                        JsonSerializer.Deserialize<List<IngestionSourceFileDto>>(
+                            job.SourceFilesJson,
+                            JsonOptions
+                        ) ?? [];
+
+                    foreach (var sf in sourceFiles)
+                    {
+                        var jpegBytes = await mediaStorageService.EncodeMediaImageAsVisionJpegAsync(
+                            sf.UrlPath,
+                            1568,
+                            cancellationToken
+                        );
+                        var base64 = Convert.ToBase64String(jpegBytes);
+                        imageInputs.Add(
+                            new LlmVisionImageInput(sf.PageNumber, "image/jpeg", base64)
+                        );
+                    }
+                }
+                else if (
+                    job.Channel == IngestionChannel.Pdf
+                    && !string.IsNullOrWhiteSpace(job.PdfInspectionJson)
+                )
+                {
+                    var insp = JsonSerializer.Deserialize<PdfInspectionSummaryDto>(
+                        job.PdfInspectionJson,
+                        JsonOptions
+                    );
+                    if (insp?.RenderedPageImages is { Count: > 0 })
+                    {
+                        foreach (var page in insp.RenderedPageImages)
+                        {
+                            var jpegBytes =
+                                await mediaStorageService.EncodeMediaImageAsVisionJpegAsync(
+                                    page.UrlPath,
+                                    1568,
+                                    cancellationToken
+                                );
+                            var base64 = Convert.ToBase64String(jpegBytes);
+                            imageInputs.Add(
+                                new LlmVisionImageInput(page.PageNumber, "image/jpeg", base64)
+                            );
+                        }
+                    }
+                }
+
+                if (imageInputs.Count == 0)
+                {
+                    throw new DomainValidationException(
+                        "No images were available to send to the Vision LLM."
+                    );
+                }
+
+                string? hintText = null;
+                if (!string.IsNullOrWhiteSpace(job.SourceBookTitle))
+                {
+                    hintText = job.SourceBookPage.HasValue
+                        ? $"Book: {job.SourceBookTitle}, Page: {job.SourceBookPage.Value}"
+                        : $"Book: {job.SourceBookTitle}";
+                }
+
+                var visionContext = new LlmVisionExtractionContext(
+                    Images: imageInputs,
+                    SupplementalHintText: hintText,
+                    AvailableAisleNames: aisleNames,
+                    AvailableTagNames: tagNames
+                );
+
+                rawExtracted = await llmClient.ExtractRecipeFromImagesAsync(
+                    config,
+                    visionContext,
+                    cancellationToken
+                );
+            }
+            else
+            {
+                if (string.IsNullOrWhiteSpace(config.TextModel))
+                {
+                    throw new LlmHostUnavailableException(
+                        "No Text LLM model is configured in LLM Settings. Please select a Text Model and retry."
+                    );
+                }
+
+                var extractionContext = new LlmExtractionContext(
+                    SourceContent: job.NormalizedSourceText ?? job.RawText ?? "",
+                    AvailableAisleNames: aisleNames,
+                    AvailableTagNames: tagNames
+                );
+
+                rawExtracted = await llmClient.ExtractRecipeFromTextAsync(
+                    config,
+                    extractionContext,
+                    cancellationToken
+                );
+            }
 
             string? fallbackSourceName = null;
             string? fallbackSourceAuthor = null;
@@ -227,8 +410,25 @@ public sealed class IngestionProcessor(
                 fallbackSourceName: fallbackSourceName,
                 fallbackSourceAuthor: fallbackSourceAuthor,
                 coverImagePath: job.DownloadedCoverImagePath,
-                thumbnailImagePath: job.DownloadedThumbnailImagePath
+                thumbnailImagePath: job.DownloadedThumbnailImagePath,
+                fallbackSourceBookTitle: job.SourceBookTitle,
+                fallbackSourceBookPage: job.SourceBookPage,
+                retainSourceAttachments: job.Channel
+                    is IngestionChannel.Images
+                        or IngestionChannel.Pdf
             );
+
+            if (
+                string.IsNullOrWhiteSpace(job.SourceBookTitle)
+                && !string.IsNullOrWhiteSpace(draft.SourceBookTitle)
+            )
+            {
+                job.SourceBookTitle = draft.SourceBookTitle;
+            }
+            if (!job.SourceBookPage.HasValue && draft.SourceBookPage.HasValue)
+            {
+                job.SourceBookPage = draft.SourceBookPage;
+            }
 
             // Auto-Publish check
             var canAutoPublish =
@@ -322,20 +522,55 @@ public sealed class IngestionProcessor(
         var probeResult = await llmClient.ProbeAndListModelsAsync(config, 10, cancellationToken);
         if (probeResult.IsReachable)
         {
+            var promotedCount = 0;
             foreach (var job in waitingJobs)
             {
-                job.Status = IngestionJobStatus.Queued;
-                job.NextRetryAt = null;
-                job.StatusDetail = "LLM host is online; queued for extraction.";
+                var isVisionJob = job.Channel == IngestionChannel.Images;
+                if (
+                    job.Channel == IngestionChannel.Pdf
+                    && !string.IsNullOrWhiteSpace(job.PdfInspectionJson)
+                )
+                {
+                    try
+                    {
+                        var insp = JsonSerializer.Deserialize<PdfInspectionSummaryDto>(
+                            job.PdfInspectionJson,
+                            JsonOptions
+                        );
+                        if (insp?.ExtractionMode == PdfExtractionMode.VisionRaster)
+                        {
+                            isVisionJob = true;
+                        }
+                    }
+                    catch
+                    {
+                        // ignore
+                    }
+                }
+
+                var canPromote = isVisionJob
+                    ? !string.IsNullOrWhiteSpace(config.VisionModel)
+                    : !string.IsNullOrWhiteSpace(config.TextModel);
+
+                if (canPromote)
+                {
+                    job.Status = IngestionJobStatus.Queued;
+                    job.NextRetryAt = null;
+                    job.StatusDetail = "LLM host is online; queued for extraction.";
+                    promotedCount++;
+                }
             }
 
-            await dbContext.SaveChangesAsync(cancellationToken);
-            queueSignal.NotifyWorkAvailable();
-            logger.LogInformation(
-                "LLM host is back online; promoted {Count} waiting job(s) to Queued.",
-                waitingJobs.Count
-            );
-            return waitingJobs.Count;
+            if (promotedCount > 0)
+            {
+                await dbContext.SaveChangesAsync(cancellationToken);
+                queueSignal.NotifyWorkAvailable();
+                logger.LogInformation(
+                    "LLM host is back online; promoted {Count} waiting job(s) to Queued.",
+                    promotedCount
+                );
+                return promotedCount;
+            }
         }
 
         // Host still down; increment backoff

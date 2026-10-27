@@ -69,4 +69,6 @@ public sealed class Recipe : IAuditable
     public ICollection<ShareLink> ShareLinks { get; set; } = new List<ShareLink>();
 
     public ICollection<IngestionJob> IngestionJobs { get; set; } = new List<IngestionJob>();
+
+    public ICollection<RecipeAttachment> Attachments { get; set; } = new List<RecipeAttachment>();
 }

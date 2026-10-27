@@ -1,0 +1,143 @@
+<div class="attachment-dialog-container">
+  <!-- Dialog Header -->
+  <div class="dialog-header">
+    <div class="header-left">
+      <mat-icon class="header-icon">{{ isPdf() ? 'picture_as_pdf' : 'image' }}</mat-icon>
+      <div class="header-titles">
+        <h2 class="dialog-title">
+          {{ currentAttachment()?.label || currentAttachment()?.fileName || 'Recipe Attachment' }}
+        </h2>
+        @if (totalCount() > 1) {
+          <span class="page-indicator">
+            Attachment {{ activeIndex() + 1 }} of {{ totalCount() }}
+          </span>
+        }
+      </div>
+    </div>
+
+    <!-- Header Actions -->
+    <div class="header-actions">
+      @if (!isPdf()) {
+        <button
+          mat-icon-button
+          type="button"
+          (click)="zoomOut()"
+          [disabled]="zoomLevel() <= 0.5"
+          matTooltip="Zoom Out"
+        >
+          <mat-icon>zoom_out</mat-icon>
+        </button>
+
+        <button
+          mat-button
+          type="button"
+          class="zoom-badge"
+          (click)="resetZoom()"
+          matTooltip="Reset Zoom"
+        >
+          {{ (zoomLevel() * 100).toFixed(0) }}%
+        </button>
+
+        <button
+          mat-icon-button
+          type="button"
+          (click)="zoomIn()"
+          [disabled]="zoomLevel() >= 3.0"
+          matTooltip="Zoom In"
+        >
+          <mat-icon>zoom_in</mat-icon>
+        </button>
+
+        <button
+          mat-icon-button
+          type="button"
+          (click)="rotateClockwise()"
+          matTooltip="Rotate 90° Clockwise"
+        >
+          <mat-icon>rotate_right</mat-icon>
+        </button>
+      }
+
+      @if (currentAttachment()) {
+        <a
+          mat-icon-button
+          [href]="currentAttachment()!.mediaUrlPath"
+          download
+          target="_blank"
+          matTooltip="Download File"
+        >
+          <mat-icon>download</mat-icon>
+        </a>
+      }
+
+      <button mat-icon-button type="button" (click)="close()" matTooltip="Close Viewer">
+        <mat-icon>close</mat-icon>
+      </button>
+    </div>
+  </div>
+
+  <!-- Stage -->
+  <div class="stage-container">
+    @if (totalCount() > 1) {
+      <button
+        mat-icon-button
+        type="button"
+        class="nav-btn nav-prev"
+        [disabled]="activeIndex() === 0"
+        (click)="prev()"
+        matTooltip="Previous Attachment"
+      >
+        <mat-icon>chevron_left</mat-icon>
+      </button>
+    }
+
+    <div class="attachment-content">
+      @if (currentAttachment()) {
+        @if (isPdf()) {
+          <div class="pdf-viewer-pane">
+            <object
+              [data]="currentAttachment()!.mediaUrlPath"
+              type="application/pdf"
+              class="pdf-embed"
+            >
+              <div class="pdf-fallback">
+                <p>This browser does not support inline PDF viewing.</p>
+                <a
+                  mat-flat-button
+                  color="primary"
+                  [href]="currentAttachment()!.mediaUrlPath"
+                  target="_blank"
+                >
+                  <mat-icon>open_in_new</mat-icon>
+                  <span>Open PDF Document</span>
+                </a>
+              </div>
+            </object>
+          </div>
+        } @else {
+          <div class="image-viewer-pane">
+            <img
+              [src]="currentAttachment()!.mediaUrlPath"
+              [alt]="currentAttachment()!.fileName"
+              class="attachment-image"
+              [style.transform]="transformStyle()"
+            />
+          </div>
+        }
+      }
+    </div>
+
+    @if (totalCount() > 1) {
+      <button
+        mat-icon-button
+        type="button"
+        class="nav-btn nav-next"
+        [disabled]="activeIndex() >= totalCount() - 1"
+        (click)="next()"
+        matTooltip="Next Attachment"
+      >
+        <mat-icon>chevron_right</mat-icon>
+      </button>
+    }
+  </div>
+</div>

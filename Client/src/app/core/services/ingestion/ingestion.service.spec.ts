@@ -278,4 +278,109 @@ describe('IngestionService', () => {
 
     await discardPromise;
   });
+  it('enqueues images and refreshes summary', async () => {
+    const file1 = new File(['content1'], 'page1.png', { type: 'image/png' });
+    const file2 = new File(['content2'], 'page2.png', { type: 'image/png' });
+
+    const promise = firstValueFrom(
+      service.enqueueImages([file1, file2], {
+        sourceBookTitle: 'Pastry Basics',
+        sourceBookPage: 50,
+      }),
+    );
+
+    const req = httpMock.expectOne('/api/ingestion/jobs/images');
+    expect(req.request.method).toBe('POST');
+    expect(req.request.body instanceof FormData).toBe(true);
+
+    req.flush({
+      id: 'job-images-1',
+      channel: 'Images',
+      status: 'Queued',
+      displayTitle: 'Photo: Pastry Basics (p. 50)',
+      sourceUrl: null,
+      thumbnailImagePath: '/api/uploads/ingestion/thumb.webp',
+      confidenceScore: null,
+      statusDetail: 'Queued for vision extraction.',
+      attemptCount: 0,
+      nextRetryAt: null,
+      resultingRecipeId: null,
+      resultingRecipeSlug: null,
+      submittedByUsername: null,
+      createdAt: '2026-10-26T12:00:00Z',
+      modifiedAt: '2026-10-26T12:00:00Z',
+      sourceFileCount: 2,
+    });
+
+    httpMock.expectOne('/api/ingestion/jobs/summary').flush({
+      readyForReviewCount: 0,
+      activeProcessingCount: 1,
+      waitingForLlmHostCount: 0,
+      failedCount: 0,
+    });
+
+    const result = await promise;
+    expect(result.id).toBe('job-images-1');
+    expect(result.channel).toBe('Images');
+  });
+
+  it('enqueues PDF and refreshes summary', async () => {
+    const pdfFile = new File(['%PDF-1.4'], 'book.pdf', { type: 'application/pdf' });
+
+    const promise = firstValueFrom(
+      service.enqueuePdf(pdfFile, {
+        sourceBookTitle: 'Artisan Bread',
+      }),
+    );
+
+    const req = httpMock.expectOne('/api/ingestion/jobs/pdf');
+    expect(req.request.method).toBe('POST');
+    expect(req.request.body instanceof FormData).toBe(true);
+
+    req.flush({
+      id: 'job-pdf-1',
+      channel: 'Pdf',
+      status: 'Queued',
+      displayTitle: 'PDF: Artisan Bread',
+      sourceUrl: null,
+      thumbnailImagePath: null,
+      confidenceScore: null,
+      statusDetail: 'Queued',
+      attemptCount: 0,
+      nextRetryAt: null,
+      resultingRecipeId: null,
+      resultingRecipeSlug: null,
+      submittedByUsername: null,
+      createdAt: '2026-10-26T12:00:00Z',
+      modifiedAt: '2026-10-26T12:00:00Z',
+      sourceFileCount: 1,
+    });
+
+    httpMock.expectOne('/api/ingestion/jobs/summary').flush({
+      readyForReviewCount: 0,
+      activeProcessingCount: 1,
+      waitingForLlmHostCount: 0,
+      failedCount: 0,
+    });
+
+    const result = await promise;
+    expect(result.id).toBe('job-pdf-1');
+    expect(result.channel).toBe('Pdf');
+  });
+
+  it('promotes page to cover via POST /api/ingestion/jobs/:id/cover-from-page', async () => {
+    const promise = firstValueFrom(service.promotePageToCover('job-1', 2));
+    const req = httpMock.expectOne('/api/ingestion/jobs/job-1/cover-from-page');
+    expect(req.request.method).toBe('POST');
+    expect(req.request.body).toEqual({ pageNumber: 2 });
+
+    req.flush({
+      id: 'job-1',
+      downloadedCoverImagePath: '/api/uploads/recipes/cover-2.webp',
+      downloadedThumbnailImagePath: '/api/uploads/recipes/thumb-2.webp',
+    } as IngestionJobDetailDto);
+
+    const result = await promise;
+    expect(result.downloadedCoverImagePath).toBe('/api/uploads/recipes/cover-2.webp');
+  });
 });

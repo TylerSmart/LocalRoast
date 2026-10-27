@@ -210,4 +210,131 @@ public sealed class LlmExtractionClientTests
             await client.ExtractRecipeFromTextAsync(config, context);
         });
     }
+
+    [TestMethod]
+    public async Task ExtractRecipeFromImagesAsync_Ollama_SendsImagesArrayAndExtractsBookMetadata()
+    {
+        var rawRecipeJson = """
+            {
+                "title": "Grandma's Blueberry Scones",
+                "sourceBookTitle": "Family Heirlooms",
+                "sourceBookPage": 42,
+                "confidenceScore": 0.95,
+                "ingredients": [
+                    { "displayName": "2 cups flour", "canonicalFoodName": "all-purpose flour", "quantity": 2, "unit": "cup" }
+                ],
+                "steps": [
+                    { "instruction": "Whisk flour and sugar." }
+                ]
+            }
+            """;
+
+        var ollamaResponse = System.Text.Json.JsonSerializer.Serialize(
+            new { message = new { role = "assistant", content = rawRecipeJson } }
+        );
+
+        var handler = new MockHttpMessageHandler(req =>
+        {
+            Assert.AreEqual("/api/chat", req.RequestUri!.AbsolutePath);
+            var body = req.Content!.ReadAsStringAsync().Result;
+            StringAssert.Contains(body, "\"images\":");
+            StringAssert.Contains(body, "bW9ja2Jhc2U2NA==");
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(ollamaResponse, Encoding.UTF8, "application/json"),
+            };
+        });
+
+        var client = new LlmExtractionClient(new HttpClient(handler));
+        var config = new EffectiveLlmConnectionConfig(
+            Provider: LlmProvider.Ollama,
+            BaseUrl: "http://localhost:11434",
+            ApiKey: null,
+            TextModel: "qwen2.5:14b",
+            VisionModel: "qwen2.5vl:7b",
+            OllamaKeepAlive: "5m",
+            RequestTimeoutSeconds: 30,
+            AutoPublishHighConfidenceText: false
+        );
+
+        var context = new LlmVisionExtractionContext(
+            Images: [new LlmVisionImageInput(1, "image/jpeg", "bW9ja2Jhc2U2NA==")],
+            SupplementalHintText: "Book: Family Heirlooms",
+            AvailableAisleNames: ["Baking"],
+            AvailableTagNames: ["Breakfast"]
+        );
+
+        var result = await client.ExtractRecipeFromImagesAsync(config, context);
+
+        Assert.AreEqual("Grandma's Blueberry Scones", result.Title);
+        Assert.AreEqual("Family Heirlooms", result.SourceBookTitle);
+        Assert.AreEqual(42, result.SourceBookPage);
+        Assert.AreEqual(1, result.Ingredients?.Count);
+    }
+
+    [TestMethod]
+    public async Task ExtractRecipeFromImagesAsync_OpenAiCompatible_SendsImageUrlBlock()
+    {
+        var rawRecipeJson = """
+            {
+                "title": "Rustic Sourdough",
+                "sourceBookTitle": "Bread Craft",
+                "sourceBookPage": 108,
+                "confidenceScore": 0.92,
+                "ingredients": [
+                    { "displayName": "500g bread flour", "canonicalFoodName": "bread flour", "quantity": 500, "unit": "g" }
+                ],
+                "steps": [
+                    { "instruction": "Mix starter and water." }
+                ]
+            }
+            """;
+
+        var openAiResponse = System.Text.Json.JsonSerializer.Serialize(
+            new
+            {
+                choices = new[]
+                {
+                    new { message = new { role = "assistant", content = rawRecipeJson } },
+                },
+            }
+        );
+
+        var handler = new MockHttpMessageHandler(req =>
+        {
+            Assert.AreEqual("/v1/chat/completions", req.RequestUri!.AbsolutePath);
+            var body = req.Content!.ReadAsStringAsync().Result;
+            StringAssert.Contains(body, "image_url");
+            StringAssert.Contains(body, "data:image/jpeg;base64,bW9ja2Jhc2U2NA==");
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(openAiResponse, Encoding.UTF8, "application/json"),
+            };
+        });
+
+        var client = new LlmExtractionClient(new HttpClient(handler));
+        var config = new EffectiveLlmConnectionConfig(
+            Provider: LlmProvider.OpenAiCompatible,
+            BaseUrl: "http://192.168.1.50:1234",
+            ApiKey: "key-xyz",
+            TextModel: "meta-llama-3-8b",
+            VisionModel: "meta-llama-3.2-11b-vision",
+            OllamaKeepAlive: "5m",
+            RequestTimeoutSeconds: 30,
+            AutoPublishHighConfidenceText: false
+        );
+
+        var context = new LlmVisionExtractionContext(
+            Images: [new LlmVisionImageInput(1, "image/jpeg", "bW9ja2Jhc2U2NA==")],
+            SupplementalHintText: null,
+            AvailableAisleNames: ["Baking"],
+            AvailableTagNames: ["Breads"]
+        );
+
+        var result = await client.ExtractRecipeFromImagesAsync(config, context);
+
+        Assert.AreEqual("Rustic Sourdough", result.Title);
+        Assert.AreEqual("Bread Craft", result.SourceBookTitle);
+        Assert.AreEqual(108, result.SourceBookPage);
+    }
 }

@@ -147,6 +147,7 @@ public sealed partial class RecipeService(
                 .ThenInclude(rc => rc.Collection)
             .Include(r => r.RecipeTags)
                 .ThenInclude(rt => rt.Tag)
+            .Include(r => r.Attachments)
             .FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
 
         if (recipe is null)
@@ -221,6 +222,21 @@ public sealed partial class RecipeService(
             ))
             .ToList();
 
+        var attachments = recipe
+            .Attachments.OrderBy(a => a.SortOrder)
+            .ThenBy(a => a.CreatedAt)
+            .Select(a => new RecipeAttachmentDto(
+                a.Id,
+                a.SortOrder,
+                a.FileName,
+                a.MediaUrlPath,
+                a.ContentType,
+                a.FileSizeBytes,
+                a.Label,
+                a.CreatedAt
+            ))
+            .ToList();
+
         return new RecipeDetailDto(
             recipe.Id,
             recipe.Title,
@@ -251,7 +267,8 @@ public sealed partial class RecipeService(
             recipe.ModifiedAt,
             recipe.ModifiedBy,
             collections,
-            tags
+            tags,
+            attachments
         );
     }
 
@@ -507,6 +524,7 @@ public sealed partial class RecipeService(
         var recipe = await dbContext
             .Recipes.Include(r => r.Steps)
                 .ThenInclude(s => s.IngredientReferences)
+            .Include(r => r.Attachments)
             .FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
 
         if (recipe is null)
@@ -531,6 +549,7 @@ public sealed partial class RecipeService(
             .Steps.Where(s => !string.IsNullOrEmpty(s.ImagePath))
             .Select(s => s.ImagePath!)
             .ToList();
+        var attachmentFiles = recipe.Attachments.Select(a => a.MediaUrlPath).ToList();
 
         dbContext.RecipeStepIngredients.RemoveRange(
             recipe.Steps.SelectMany(s => s.IngredientReferences)
@@ -568,6 +587,10 @@ public sealed partial class RecipeService(
         foreach (var stepImg in stepImages)
         {
             await mediaStorageService.DeleteMediaFileAsync(stepImg, cancellationToken);
+        }
+        foreach (var attachmentFile in attachmentFiles)
+        {
+            await mediaStorageService.DeleteMediaFileAsync(attachmentFile, cancellationToken);
         }
 
         return true;
@@ -1207,5 +1230,89 @@ public sealed partial class RecipeService(
         var clean = Regex.Replace(lower, @"[^a-z0-9\s-]", "");
         var hyphens = Regex.Replace(clean, @"[\s-]+", "-");
         return hyphens.Trim('-');
+    }
+
+    public async Task<RecipeAttachmentDto?> AddRecipeAttachmentAsync(
+        Guid recipeId,
+        Stream content,
+        string originalFileName,
+        string? contentType,
+        long contentLength,
+        string? label = null,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var recipeExists = await dbContext.Recipes.AnyAsync(
+            r => r.Id == recipeId,
+            cancellationToken
+        );
+        if (!recipeExists)
+        {
+            return null;
+        }
+
+        var maxSortOrder =
+            await dbContext
+                .RecipeAttachments.Where(a => a.RecipeId == recipeId)
+                .Select(a => (int?)a.SortOrder)
+                .MaxAsync(cancellationToken)
+            ?? 0;
+
+        var saved = await mediaStorageService.SaveDirectRecipeAttachmentAsync(
+            content,
+            originalFileName,
+            contentType,
+            contentLength,
+            cancellationToken
+        );
+
+        var attachment = new RecipeAttachment
+        {
+            Id = Guid.NewGuid(),
+            RecipeId = recipeId,
+            SortOrder = maxSortOrder + 1,
+            FileName = Path.GetFileName(originalFileName),
+            MediaUrlPath = saved.MediaUrlPath,
+            ContentType = saved.ContentType,
+            FileSizeBytes = saved.FileSizeBytes,
+            Label = string.IsNullOrWhiteSpace(label) ? null : label.Trim(),
+        };
+
+        dbContext.RecipeAttachments.Add(attachment);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return new RecipeAttachmentDto(
+            attachment.Id,
+            attachment.SortOrder,
+            attachment.FileName,
+            attachment.MediaUrlPath,
+            attachment.ContentType,
+            attachment.FileSizeBytes,
+            attachment.Label,
+            attachment.CreatedAt
+        );
+    }
+
+    public async Task<bool> DeleteRecipeAttachmentAsync(
+        Guid recipeId,
+        Guid attachmentId,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var attachment = await dbContext.RecipeAttachments.FirstOrDefaultAsync(
+            a => a.RecipeId == recipeId && a.Id == attachmentId,
+            cancellationToken
+        );
+
+        if (attachment is null)
+        {
+            return false;
+        }
+
+        dbContext.RecipeAttachments.Remove(attachment);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        await mediaStorageService.DeleteMediaFileAsync(attachment.MediaUrlPath, cancellationToken);
+        return true;
     }
 }

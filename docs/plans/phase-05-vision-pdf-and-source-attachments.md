@@ -1,7 +1,7 @@
 # Phase 05: Multi-Image / Camera Scan Ingestion, PDF Text & Vision Pipeline, Zoomable Source Viewer & Recipe Source Attachments
 
 > **Branch:** `feature/phase-05-vision-pdf-and-source-attachments`
-> **Status:** `[ ]` Not Started (`[ ]` Not Started | `[~]` In Progress | `[x]` Completed)
+> **Status:** `[x]` Completed (`[ ]` Not Started | `[~]` In Progress | `[x]` Completed)
 > **PRD Reference:** `docs/prd.md` — Sections 1, 2, 3, 4.1.1, 4.2.1–4.2.4, 5, and 6 (Milestone 2, Slice 2 of 3)
 > **Target Execution:** Run `/execute-phase` to execute this plan step-by-step.
 
@@ -480,7 +480,7 @@ Create `Tests/Client.E2ETests/VisionAndPdfIngestionE2ETests.cs` inheriting from 
 
 ## 6. Step-by-Step Execution Checklist (For Implementation Agent)
 
-- [ ] **Task 1: Backend Core, Data, PDF/Vision Infrastructure & EF Migration**
+- [x] **Task 1: Backend Core, Data, PDF/Vision Infrastructure & EF Migration**
   - Add `PdfPig`, `PDFtoImage`, and `Magick.NET-Q8-AnyCPU` to `Infrastructure/App.Infrastructure.csproj` and update `API/Dockerfile` runtime packages (`libfontconfig1 libheif1 libde265-0`).
   - Update `Core/Media/`, `Core/Ingestion/`, and `Core/Recipes/` models, enums, interfaces, and `RecipeDraftNormalizer`.
   - Create `RecipeAttachment` + `RecipeAttachmentConfiguration`, update `Recipe`, `IngestionJob`, `IngestionJobConfiguration`, and `AppDbContext`.
@@ -499,7 +499,7 @@ Create `Tests/Client.E2ETests/VisionAndPdfIngestionE2ETests.cs` inheriting from 
     dotnet test --project Tests/Infrastructure.UnitTests/App.Infrastructure.UnitTests.csproj
     ```
 
-- [ ] **Task 2: API Controllers & Integration Tests**
+- [x] **Task 2: API Controllers & Integration Tests**
   - Add `POST /api/ingestion/jobs/images`, `POST /api/ingestion/jobs/pdf`, and `POST /api/ingestion/jobs/{id:guid}/cover-from-page` to `API/Controllers/IngestionJobsController.cs`.
   - Add `POST /api/recipes/{id:guid}/attachments` and `DELETE /api/recipes/{id:guid}/attachments/{attachmentId:guid}` to `API/Controllers/RecipesController.cs`.
   - Update `Tests/API.IntegrationTests/OpenApiIntegrationTests.cs` and create `Tests/API.IntegrationTests/VisionAndPdfIngestionIntegrationTests.cs` covering:
@@ -513,7 +513,7 @@ Create `Tests/Client.E2ETests/VisionAndPdfIngestionE2ETests.cs` inheriting from 
     dotnet test --project Tests/API.IntegrationTests/App.API.IntegrationTests.csproj
     ```
 
-- [ ] **Task 3: Angular Client & Unit Tests**
+- [x] **Task 3: Angular Client & Unit Tests**
   - Update `ingestion.models.ts`, `recipe.models.ts`, `ingestion.service.ts` (+ `.spec.ts`), and `recipe.service.ts` (+ `.spec.ts`).
   - Create dedicated `SourceViewerComponent` (`features/ingestion/source-viewer/`) and `RecipeAttachmentViewerDialogComponent` (`features/recipes/recipe-attachment-viewer-dialog/`) with strictly separate `.ts`, `.html`, `.scss`, and `.spec.ts` files.
   - Update `IngestionHubComponent`, `IngestionReviewComponent`, and `RecipeDetailComponent` (+ `.spec.ts` tests).
@@ -525,7 +525,7 @@ Create `Tests/Client.E2ETests/VisionAndPdfIngestionE2ETests.cs` inheriting from 
     npm test -- --watch=false
     ```
 
-- [ ] **Task 4: Playwright E2E Verification & Final Formatting**
+- [x] **Task 4: Playwright E2E Verification & Final Formatting**
   - Implement `Tests/Client.E2ETests/VisionAndPdfIngestionE2ETests.cs` covering all 4 scenarios in Section 5.
   - Rebuild Angular production bundle (`npm run build:production` in `Client/`) and run Playwright E2E tests:
     ```powershell

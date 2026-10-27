@@ -5,6 +5,7 @@ import { firstValueFrom } from 'rxjs';
 import {
   IngredientMatchRequest,
   IngredientMatchResultDto,
+  RecipeAttachmentDto,
   RecipeDetailDto,
   RecipeSummaryDto,
   UpdateRecipeOrganizationRequest,
@@ -193,6 +194,39 @@ describe('RecipeService', () => {
   it('deletes recipe via DELETE /api/recipes/:id', async () => {
     const promise = firstValueFrom(service.deleteRecipe('r-1'));
     const req = httpMock.expectOne('/api/recipes/r-1');
+    expect(req.request.method).toBe('DELETE');
+    req.flush(null);
+
+    await promise;
+  });
+  it('adds attachment via POST /api/recipes/:id/attachments', async () => {
+    const file = new File(['content'], 'card.pdf', { type: 'application/pdf' });
+    const promise = firstValueFrom(service.addRecipeAttachment('r-1', file, 'Scanned Recipe'));
+
+    const req = httpMock.expectOne('/api/recipes/r-1/attachments');
+    expect(req.request.method).toBe('POST');
+    expect(req.request.body instanceof FormData).toBe(true);
+
+    const mockAttachment: RecipeAttachmentDto = {
+      id: 'att-1',
+      sortOrder: 1,
+      fileName: 'card.pdf',
+      mediaUrlPath: '/api/uploads/attachments/att-1.pdf',
+      contentType: 'application/pdf',
+      fileSizeBytes: 1024,
+      label: 'Scanned Recipe',
+      createdAt: '2026-10-26T12:00:00Z',
+    };
+    req.flush(mockAttachment);
+
+    const result = await promise;
+    expect(result.id).toBe('att-1');
+    expect(result.label).toBe('Scanned Recipe');
+  });
+
+  it('deletes attachment via DELETE /api/recipes/:id/attachments/:attachmentId', async () => {
+    const promise = firstValueFrom(service.deleteRecipeAttachment('r-1', 'att-1'));
+    const req = httpMock.expectOne('/api/recipes/r-1/attachments/att-1');
     expect(req.request.method).toBe('DELETE');
     req.flush(null);
 

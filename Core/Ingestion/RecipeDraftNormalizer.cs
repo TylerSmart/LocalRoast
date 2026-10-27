@@ -67,7 +67,10 @@ public static class RecipeDraftNormalizer
         string? fallbackSourceName,
         string? fallbackSourceAuthor,
         string? coverImagePath,
-        string? thumbnailImagePath
+        string? thumbnailImagePath,
+        string? fallbackSourceBookTitle = null,
+        int? fallbackSourceBookPage = null,
+        bool retainSourceAttachments = true
     )
     {
         var title = string.IsNullOrWhiteSpace(raw.Title) ? "Untitled Recipe" : raw.Title.Trim();
@@ -96,6 +99,13 @@ public static class RecipeDraftNormalizer
         var sourceAuthor = !string.IsNullOrWhiteSpace(raw.SourceAuthor)
             ? raw.SourceAuthor.Trim()
             : fallbackSourceAuthor;
+
+        var sourceBookTitle = !string.IsNullOrWhiteSpace(raw.SourceBookTitle)
+            ? raw.SourceBookTitle.Trim()
+            : fallbackSourceBookTitle;
+        var sourceBookPage = raw.SourceBookPage is >= 1 and <= 10000
+            ? raw.SourceBookPage
+            : fallbackSourceBookPage;
 
         // Find "Other" aisle as fallback
         var otherAisle = aisles.FirstOrDefault(a => a.NormalizedName == "other");
@@ -276,7 +286,10 @@ public static class RecipeDraftNormalizer
             SuggestedTagIds: suggestedTagIds,
             Ingredients: normalizedIngredients,
             Steps: normalizedSteps,
-            ConfidenceScore: confidence
+            ConfidenceScore: confidence,
+            SourceBookTitle: sourceBookTitle,
+            SourceBookPage: sourceBookPage,
+            RetainSourceAttachments: retainSourceAttachments
         );
     }
 

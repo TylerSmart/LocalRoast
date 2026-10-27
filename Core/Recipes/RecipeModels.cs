@@ -76,6 +76,17 @@ public record RecipeStepDto(
     IReadOnlyList<RecipeStepTimerDto> Timers
 );
 
+public record RecipeAttachmentDto(
+    Guid Id,
+    int SortOrder,
+    string FileName,
+    string MediaUrlPath,
+    string ContentType,
+    long FileSizeBytes,
+    string? Label,
+    DateTimeOffset CreatedAt
+);
+
 public record RecipeDetailDto(
     Guid Id,
     string Title,
@@ -106,11 +117,13 @@ public record RecipeDetailDto(
     DateTimeOffset ModifiedAt,
     string ModifiedBy,
     IReadOnlyList<RecipeCollectionBadgeDto>? Collections = null,
-    IReadOnlyList<RecipeTagBadgeDto>? Tags = null
+    IReadOnlyList<RecipeTagBadgeDto>? Tags = null,
+    IReadOnlyList<RecipeAttachmentDto>? Attachments = null
 )
 {
     public IReadOnlyList<RecipeCollectionBadgeDto> Collections { get; init; } = Collections ?? [];
     public IReadOnlyList<RecipeTagBadgeDto> Tags { get; init; } = Tags ?? [];
+    public IReadOnlyList<RecipeAttachmentDto> Attachments { get; init; } = Attachments ?? [];
 }
 
 public record RecipeQueryParameters(

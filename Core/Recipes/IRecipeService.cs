@@ -35,4 +35,20 @@ public interface IRecipeService
         IngredientMatchRequest request,
         CancellationToken cancellationToken = default
     );
+
+    Task<RecipeAttachmentDto?> AddRecipeAttachmentAsync(
+        Guid recipeId,
+        Stream content,
+        string originalFileName,
+        string? contentType,
+        long contentLength,
+        string? label = null,
+        CancellationToken cancellationToken = default
+    );
+
+    Task<bool> DeleteRecipeAttachmentAsync(
+        Guid recipeId,
+        Guid attachmentId,
+        CancellationToken cancellationToken = default
+    );
 }

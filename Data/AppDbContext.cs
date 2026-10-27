@@ -37,6 +37,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
 
     public DbSet<IngestionJob> IngestionJobs => Set<IngestionJob>();
 
+    public DbSet<RecipeAttachment> RecipeAttachments => Set<RecipeAttachment>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);

@@ -108,86 +108,97 @@
         [class.pane-hidden-mobile]="mobilePane() !== 'source'"
         aria-label="Original recipe source provenance"
       >
-        <mat-card class="source-card">
-          <div class="source-card-header">
-            <h2 class="source-card-title">
-              <mat-icon>menu_book</mat-icon>
-              <span>Original Source</span>
-            </h2>
-            @if (job()?.confidenceScore !== null && job()?.confidenceScore !== undefined) {
-              <span class="confidence-badge">
-                {{ ((job()?.confidenceScore || 0) * 100).toFixed(0) }}% LLM Confidence
-              </span>
-            }
-          </div>
-
-          <mat-card-content class="source-card-content">
-            <!-- Cover Photo Preview -->
-            @if (job()?.downloadedCoverImagePath) {
-              <div class="cover-preview-wrapper">
-                <img
-                  [src]="job()?.downloadedCoverImagePath"
-                  alt="Scraped recipe cover"
-                  class="source-cover-img"
-                />
-              </div>
-            }
-
-            <!-- Provenance Metadata -->
-            <div class="source-meta">
-              @if (job()?.sourceUrl) {
-                <div class="meta-row">
-                  <mat-icon class="meta-icon">link</mat-icon>
-                  <a
-                    [href]="job()?.sourceUrl"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="meta-link"
-                  >
-                    {{ job()?.sourceUrl }}
-                  </a>
-                </div>
-              }
-              @if (job()?.scrapedPage?.siteName) {
-                <div class="meta-row">
-                  <mat-icon class="meta-icon">public</mat-icon>
-                  <span>{{ job()?.scrapedPage?.siteName }}</span>
-                </div>
-              }
-              @if (job()?.scrapedPage?.author) {
-                <div class="meta-row">
-                  <mat-icon class="meta-icon">person</mat-icon>
-                  <span>{{ job()?.scrapedPage?.author }}</span>
-                </div>
+        @if (job()?.channel === 'Images' || job()?.channel === 'Pdf') {
+          <app-source-viewer
+            [sourceFiles]="job()?.sourceFiles || []"
+            [pdfInspection]="job()?.pdfInspection"
+            [rawText]="job()?.rawText || job()?.normalizedSourceText"
+            [currentCoverImagePath]="form.get('coverImagePath')?.value"
+            [isPromoting]="isPromotingCover()"
+            (promoteCoverRequested)="onPromotePageToCover($event)"
+          ></app-source-viewer>
+        } @else {
+          <mat-card class="source-card">
+            <div class="source-card-header">
+              <h2 class="source-card-title">
+                <mat-icon>menu_book</mat-icon>
+                <span>Original Source</span>
+              </h2>
+              @if (job()?.confidenceScore !== null && job()?.confidenceScore !== undefined) {
+                <span class="confidence-badge">
+                  {{ ((job()?.confidenceScore || 0) * 100).toFixed(0) }}% LLM Confidence
+                </span>
               }
             </div>
 
-            <mat-divider></mat-divider>
+            <mat-card-content class="source-card-content">
+              <!-- Cover Photo Preview -->
+              @if (job()?.downloadedCoverImagePath) {
+                <div class="cover-preview-wrapper">
+                  <img
+                    [src]="job()?.downloadedCoverImagePath"
+                    alt="Scraped recipe cover"
+                    class="source-cover-img"
+                  />
+                </div>
+              }
 
-            <!-- Scraped Raw Ingredient Lines -->
-            @if (job()?.scrapedPage?.rawIngredientLines?.length) {
-              <div class="raw-ingredients-section">
-                <h3 class="section-subtitle">Scraped Ingredient Lines</h3>
-                <ul class="raw-lines-list">
-                  @for (line of job()?.scrapedPage?.rawIngredientLines; track line) {
-                    <li>{{ line }}</li>
-                  }
-                </ul>
+              <!-- Provenance Metadata -->
+              <div class="source-meta">
+                @if (job()?.sourceUrl) {
+                  <div class="meta-row">
+                    <mat-icon class="meta-icon">link</mat-icon>
+                    <a
+                      [href]="job()?.sourceUrl"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="meta-link"
+                    >
+                      {{ job()?.sourceUrl }}
+                    </a>
+                  </div>
+                }
+                @if (job()?.scrapedPage?.siteName) {
+                  <div class="meta-row">
+                    <mat-icon class="meta-icon">public</mat-icon>
+                    <span>{{ job()?.scrapedPage?.siteName }}</span>
+                  </div>
+                }
+                @if (job()?.scrapedPage?.author) {
+                  <div class="meta-row">
+                    <mat-icon class="meta-icon">person</mat-icon>
+                    <span>{{ job()?.scrapedPage?.author }}</span>
+                  </div>
+                }
               </div>
+
               <mat-divider></mat-divider>
-            }
 
-            <!-- Cleaned Source / Body Text -->
-            <div class="raw-text-section">
-              <h3 class="section-subtitle">Cleaned Source Text</h3>
-              <div class="raw-text-viewer">
-                <pre class="raw-text-content">{{
-                  job()?.normalizedSourceText || job()?.rawText || 'No source text available.'
-                }}</pre>
+              <!-- Scraped Raw Ingredient Lines -->
+              @if (job()?.scrapedPage?.rawIngredientLines?.length) {
+                <div class="raw-ingredients-section">
+                  <h3 class="section-subtitle">Scraped Ingredient Lines</h3>
+                  <ul class="raw-lines-list">
+                    @for (line of job()?.scrapedPage?.rawIngredientLines; track line) {
+                      <li>{{ line }}</li>
+                    }
+                  </ul>
+                </div>
+                <mat-divider></mat-divider>
+              }
+
+              <!-- Cleaned Source / Body Text -->
+              <div class="raw-text-section">
+                <h3 class="section-subtitle">Cleaned Source Text</h3>
+                <div class="raw-text-viewer">
+                  <pre class="raw-text-content">{{
+                    job()?.normalizedSourceText || job()?.rawText || 'No source text available.'
+                  }}</pre>
+                </div>
               </div>
-            </div>
-          </mat-card-content>
-        </mat-card>
+            </mat-card-content>
+          </mat-card>
+        }
       </section>
 
       <!-- Right Pane: Structured Recipe Draft Editor -->
@@ -219,6 +230,41 @@
                   placeholder="Summary or tips..."
                 ></textarea>
               </mat-form-field>
+
+              <!-- Provenance Row -->
+              <div class="form-row three-cols">
+                <mat-form-field appearance="outline" class="form-field">
+                  <mat-label>Cookbook Title</mat-label>
+                  <input
+                    matInput
+                    formControlName="sourceBookTitle"
+                    placeholder="e.g. Master Class"
+                  />
+                </mat-form-field>
+
+                <mat-form-field appearance="outline" class="form-field">
+                  <mat-label>Cookbook Page #</mat-label>
+                  <input
+                    matInput
+                    type="number"
+                    formControlName="sourceBookPage"
+                    placeholder="e.g. 102"
+                  />
+                </mat-form-field>
+
+                <mat-form-field appearance="outline" class="form-field">
+                  <mat-label>Author / Source</mat-label>
+                  <input matInput formControlName="sourceAuthor" placeholder="e.g. Julia Child" />
+                </mat-form-field>
+              </div>
+
+              @if (job()?.channel === 'Images' || job()?.channel === 'Pdf') {
+                <div class="attachment-retention-row">
+                  <mat-checkbox formControlName="retainSourceAttachments">
+                    <span>Retain source scans/PDF as recipe attachments upon publishing</span>
+                  </mat-checkbox>
+                </div>
+              }
 
               <!-- Yield & Timing Row -->
               <div class="form-row three-cols">

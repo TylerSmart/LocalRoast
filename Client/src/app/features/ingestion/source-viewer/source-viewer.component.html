@@ -1,0 +1,173 @@
+<div class="source-viewer-container">
+  <!-- Top Toolbar -->
+  <div class="source-viewer-toolbar">
+    <!-- View Mode Toggle (for digital PDFs with raster preview) -->
+    @if (hasDigitalText() && pages().length > 0) {
+      <div class="view-mode-toggle">
+        <mat-button-toggle-group
+          [value]="viewMode()"
+          (change)="toggleViewMode($event.value)"
+          aria-label="Source View Mode"
+        >
+          <mat-button-toggle value="vision">
+            <mat-icon>image</mat-icon>
+            <span class="toggle-label">Scan Page</span>
+          </mat-button-toggle>
+          <mat-button-toggle value="text">
+            <mat-icon>description</mat-icon>
+            <span class="toggle-label">Digital Text</span>
+          </mat-button-toggle>
+        </mat-button-toggle-group>
+      </div>
+    }
+
+    <!-- Zoom & Rotation Controls (Vision Mode) -->
+    @if (viewMode() === 'vision' && currentPage()) {
+      <div class="transform-controls">
+        <button
+          mat-icon-button
+          type="button"
+          (click)="zoomOut()"
+          [disabled]="zoomLevel() <= 0.5"
+          matTooltip="Zoom Out"
+        >
+          <mat-icon>zoom_out</mat-icon>
+        </button>
+
+        <button
+          mat-button
+          type="button"
+          class="zoom-badge"
+          (click)="resetZoom()"
+          matTooltip="Reset Zoom"
+        >
+          {{ (zoomLevel() * 100).toFixed(0) }}%
+        </button>
+
+        <button
+          mat-icon-button
+          type="button"
+          (click)="zoomIn()"
+          [disabled]="zoomLevel() >= 3.0"
+          matTooltip="Zoom In"
+        >
+          <mat-icon>zoom_in</mat-icon>
+        </button>
+
+        <button
+          mat-icon-button
+          type="button"
+          (click)="rotateClockwise()"
+          matTooltip="Rotate 90° Clockwise"
+        >
+          <mat-icon>rotate_right</mat-icon>
+        </button>
+      </div>
+
+      <!-- Page Pagination -->
+      @if (hasMultiplePages()) {
+        <div class="pagination-controls">
+          <button
+            mat-icon-button
+            type="button"
+            (click)="prevPage()"
+            [disabled]="activePageIndex() === 0"
+            matTooltip="Previous Page"
+          >
+            <mat-icon>chevron_left</mat-icon>
+          </button>
+
+          <span class="page-badge"> {{ activePageIndex() + 1 }} / {{ totalPages() }} </span>
+
+          <button
+            mat-icon-button
+            type="button"
+            (click)="nextPage()"
+            [disabled]="activePageIndex() >= totalPages() - 1"
+            matTooltip="Next Page"
+          >
+            <mat-icon>chevron_right</mat-icon>
+          </button>
+        </div>
+      }
+
+      <!-- Cover Promotion Button -->
+      <div class="cover-action">
+        @if (isCurrentPageCover()) {
+          <button mat-flat-button color="accent" disabled class="cover-selected-btn">
+            <mat-icon>check_circle</mat-icon>
+            <span>Recipe Cover</span>
+          </button>
+        } @else {
+          <button
+            mat-stroked-button
+            type="button"
+            (click)="onPromoteCover()"
+            [disabled]="isPromoting()"
+            class="promote-cover-btn"
+            matTooltip="Use this page as the recipe's cover & thumbnail image"
+          >
+            @if (isPromoting()) {
+              <mat-spinner diameter="18"></mat-spinner>
+            } @else {
+              <mat-icon>add_photo_alternate</mat-icon>
+            }
+            <span>Use as Cover</span>
+          </button>
+        }
+      </div>
+    }
+  </div>
+
+  <!-- Content Stage -->
+  <div class="source-stage">
+    @if (viewMode() === 'vision' && currentPage()) {
+      <div
+        class="viewport-canvas"
+        [class.is-draggable]="zoomLevel() > 1.0"
+        [class.is-dragging]="isDragging()"
+        (pointerdown)="onPointerDown($event)"
+        (pointermove)="onPointerMove($event)"
+        (pointerup)="onPointerUp($event)"
+        (pointercancel)="onPointerUp($event)"
+      >
+        <img
+          [src]="currentPage()!.urlPath"
+          [alt]="currentPage()!.originalFileName"
+          class="stage-image"
+          [style.transform]="transformStyle()"
+          draggable="false"
+        />
+      </div>
+
+      <!-- Bottom Thumbnail Carousel -->
+      @if (hasMultiplePages()) {
+        <div class="thumbnails-strip" role="tablist" aria-label="Source pages">
+          @for (page of pages(); track page.pageNumber; let i = $index) {
+            <button
+              type="button"
+              class="thumbnail-item"
+              [class.active]="i === activePageIndex()"
+              (click)="selectPage(i)"
+              [attr.aria-selected]="i === activePageIndex()"
+            >
+              <img [src]="page.urlPath" [alt]="page.originalFileName" loading="lazy" />
+              <span class="thumbnail-label">Page {{ page.pageNumber }}</span>
+            </button>
+          }
+        </div>
+      }
+    } @else if (viewMode() === 'text' || (!currentPage() && rawText())) {
+      <!-- Digital Text View -->
+      <div class="digital-text-view">
+        <pre class="digital-text-content">{{ rawText() }}</pre>
+      </div>
+    } @else {
+      <!-- Empty state -->
+      <div class="empty-viewer">
+        <mat-icon class="empty-icon">image_not_supported</mat-icon>
+        <p>No preview images available for this source.</p>
+      </div>
+    }
+  </div>
+</div>

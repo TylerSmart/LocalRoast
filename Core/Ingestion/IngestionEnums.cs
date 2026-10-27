@@ -30,3 +30,10 @@ public enum IngestionJobStatus
     Failed = 6,
     Discarded = 7,
 }
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum PdfExtractionMode
+{
+    DigitalText = 0,
+    VisionRaster = 1,
+}

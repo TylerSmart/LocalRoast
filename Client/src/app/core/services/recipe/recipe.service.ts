@@ -5,6 +5,7 @@ import { apiUrl } from '../../api/api-url';
 import {
   IngredientMatchRequest,
   IngredientMatchResultDto,
+  RecipeAttachmentDto,
   RecipeDetailDto,
   RecipeQueryParameters,
   RecipeSummaryDto,
@@ -75,5 +76,24 @@ export class RecipeService {
       apiUrl('/recipes/match-ingredients'),
       request,
     );
+  }
+  addRecipeAttachment(
+    recipeId: string,
+    file: File,
+    label?: string,
+  ): Observable<RecipeAttachmentDto> {
+    const formData = new FormData();
+    formData.append('file', file, file.name);
+    if (label) {
+      formData.append('label', label);
+    }
+    return this.http.post<RecipeAttachmentDto>(
+      apiUrl(`/recipes/${recipeId}/attachments`),
+      formData,
+    );
+  }
+
+  deleteRecipeAttachment(recipeId: string, attachmentId: string): Observable<void> {
+    return this.http.delete<void>(apiUrl(`/recipes/${recipeId}/attachments/${attachmentId}`));
   }
 }

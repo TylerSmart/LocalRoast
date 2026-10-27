@@ -192,4 +192,76 @@ public sealed class RecipesController(IRecipeService recipeService) : Controller
             );
         }
     }
+
+    [HttpPost("{id:guid}/attachments")]
+    [Consumes("multipart/form-data")]
+    [RequestSizeLimit(28_311_552)]
+    [ProducesResponseType(typeof(RecipeAttachmentDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> AddRecipeAttachment(
+        Guid id,
+        [FromForm] IFormFile file,
+        [FromForm] string? label,
+        CancellationToken cancellationToken
+    )
+    {
+        if (file is null || file.Length == 0)
+        {
+            return BadRequest(
+                new ProblemDetails
+                {
+                    Status = StatusCodes.Status400BadRequest,
+                    Title = "Validation Failed",
+                    Detail = "An attachment file is required.",
+                }
+            );
+        }
+
+        try
+        {
+            var attachment = await recipeService.AddRecipeAttachmentAsync(
+                id,
+                file.OpenReadStream(),
+                file.FileName,
+                file.ContentType,
+                file.Length,
+                label,
+                cancellationToken
+            );
+
+            return attachment is not null
+                ? CreatedAtAction(nameof(GetRecipeById), new { id }, attachment)
+                : NotFound();
+        }
+        catch (DomainValidationException ex)
+        {
+            return BadRequest(
+                new ProblemDetails
+                {
+                    Status = StatusCodes.Status400BadRequest,
+                    Title = ex.Title,
+                    Detail = ex.Message,
+                }
+            );
+        }
+    }
+
+    [HttpDelete("{id:guid}/attachments/{attachmentId:guid}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DeleteRecipeAttachment(
+        Guid id,
+        Guid attachmentId,
+        CancellationToken cancellationToken
+    )
+    {
+        var deleted = await recipeService.DeleteRecipeAttachmentAsync(
+            id,
+            attachmentId,
+            cancellationToken
+        );
+
+        return deleted ? NoContent() : NotFound();
+    }
 }

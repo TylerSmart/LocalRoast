@@ -55,7 +55,7 @@ export class IngestionHubComponent implements OnInit {
   private readonly ingestionService = inject(IngestionService);
   private readonly llmSettingsService = inject(LlmSettingsService);
 
-  readonly activeTab = signal<'urls' | 'text'>('urls');
+  readonly activeTab = signal<'urls' | 'text' | 'images' | 'pdf'>('urls');
   readonly filter = signal<IngestionFilter>('All');
   readonly jobs = signal<IngestionJobSummaryDto[]>([]);
   readonly isLoading = signal<boolean>(true);
@@ -72,6 +72,21 @@ export class IngestionHubComponent implements OnInit {
     titleHint: this.fb.nonNullable.control<string>(''),
     rawText: this.fb.nonNullable.control<string>('', [Validators.required]),
   });
+
+  readonly imagesForm = this.fb.group({
+    titleHint: this.fb.control<string>(''),
+    sourceBookTitle: this.fb.control<string>(''),
+    sourceBookPage: this.fb.control<number | null>(null),
+  });
+
+  readonly pdfForm = this.fb.group({
+    titleHint: this.fb.control<string>(''),
+    sourceBookTitle: this.fb.control<string>(''),
+    sourceBookPage: this.fb.control<number | null>(null),
+  });
+
+  readonly selectedImages = signal<{ file: File; previewUrl: string }[]>([]);
+  readonly selectedPdf = signal<File | null>(null);
 
   readonly reviewCount = computed(
     () => this.jobs().filter((j) => j.status === 'ReadyForReview').length,
@@ -158,12 +173,132 @@ export class IngestionHubComponent implements OnInit {
     this.filter.set(filter);
   }
 
-  setActiveTab(tab: 'urls' | 'text'): void {
+  setActiveTab(tab: 'urls' | 'text' | 'images' | 'pdf'): void {
     this.activeTab.set(tab);
   }
 
   openLlmSettings(): void {
     this.llmSettingsService.openLlmSettingsDialog();
+  }
+
+  onImagesSelected(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    if (!input.files || input.files.length === 0) return;
+
+    const current = [...this.selectedImages()];
+    const remainingSlots = 6 - current.length;
+
+    if (remainingSlots <= 0) {
+      this.errorMessage.set('Maximum 6 images can be uploaded per recipe scan.');
+      return;
+    }
+
+    const filesToAdd = Array.from(input.files).slice(0, remainingSlots);
+    for (const f of filesToAdd) {
+      current.push({
+        file: f,
+        previewUrl: URL.createObjectURL(f),
+      });
+    }
+
+    this.selectedImages.set(current);
+    input.value = '';
+  }
+
+  removeSelectedImage(index: number): void {
+    const current = [...this.selectedImages()];
+    if (index >= 0 && index < current.length) {
+      URL.revokeObjectURL(current[index].previewUrl);
+      current.splice(index, 1);
+      this.selectedImages.set(current);
+    }
+  }
+
+  submitImages(): void {
+    const images = this.selectedImages();
+    if (images.length === 0 || this.isSubmitting()) return;
+
+    this.isSubmitting.set(true);
+    this.errorMessage.set(null);
+    this.feedbackMessage.set(null);
+
+    const files = images.map((img) => img.file);
+    const formVal = this.imagesForm.value;
+
+    this.ingestionService
+      .enqueueImages(files, {
+        titleHint: formVal.titleHint || undefined,
+        sourceBookTitle: formVal.sourceBookTitle || undefined,
+        sourceBookPage: formVal.sourceBookPage || undefined,
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (job) => {
+          for (const img of this.selectedImages()) {
+            URL.revokeObjectURL(img.previewUrl);
+          }
+          this.selectedImages.set([]);
+          this.imagesForm.reset();
+          this.isSubmitting.set(false);
+          this.feedbackMessage.set(`Enqueued photo scan job "${job.displayTitle}".`);
+          this.loadJobs();
+        },
+        error: (err) => {
+          this.errorMessage.set(err?.error?.detail || 'Failed to enqueue image scan.');
+          this.isSubmitting.set(false);
+        },
+      });
+  }
+
+  onPdfSelected(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    if (!input.files || input.files.length === 0) return;
+
+    const file = input.files[0];
+    if (file.size > 25 * 1024 * 1024) {
+      this.errorMessage.set('PDF file exceeds the maximum allowed size of 25 MB.');
+      input.value = '';
+      return;
+    }
+
+    this.selectedPdf.set(file);
+    input.value = '';
+  }
+
+  clearSelectedPdf(): void {
+    this.selectedPdf.set(null);
+  }
+
+  submitPdf(): void {
+    const pdf = this.selectedPdf();
+    if (!pdf || this.isSubmitting()) return;
+
+    this.isSubmitting.set(true);
+    this.errorMessage.set(null);
+    this.feedbackMessage.set(null);
+
+    const formVal = this.pdfForm.value;
+
+    this.ingestionService
+      .enqueuePdf(pdf, {
+        titleHint: formVal.titleHint || undefined,
+        sourceBookTitle: formVal.sourceBookTitle || undefined,
+        sourceBookPage: formVal.sourceBookPage || undefined,
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (job) => {
+          this.selectedPdf.set(null);
+          this.pdfForm.reset();
+          this.isSubmitting.set(false);
+          this.feedbackMessage.set(`Enqueued PDF document job "${job.displayTitle}".`);
+          this.loadJobs();
+        },
+        error: (err) => {
+          this.errorMessage.set(err?.error?.detail || 'Failed to enqueue PDF document.');
+          this.isSubmitting.set(false);
+        },
+      });
   }
 
   submitWebUrls(): void {

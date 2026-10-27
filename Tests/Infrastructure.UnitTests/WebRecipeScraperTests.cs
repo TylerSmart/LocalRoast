@@ -57,6 +57,85 @@ public sealed class WebRecipeScraperTests
         {
             return Task.CompletedTask;
         }
+
+        public Task<SavedIngestionImageDto> SaveIngestionPageImageAsync(
+            Stream content,
+            string originalFileName,
+            long contentLength,
+            string jobToken,
+            int pageNumber,
+            bool generateThumbnail,
+            CancellationToken cancellationToken = default
+        ) =>
+            Task.FromResult(
+                new SavedIngestionImageDto(
+                    "/api/uploads/ingestion/test.webp",
+                    "/api/uploads/ingestion/test-thumb.webp",
+                    100,
+                    100,
+                    contentLength
+                )
+            );
+
+        public Task<SavedIngestionPdfDto> SaveIngestionPdfAsync(
+            Stream content,
+            string originalFileName,
+            long contentLength,
+            string jobToken,
+            CancellationToken cancellationToken = default
+        ) =>
+            Task.FromResult(
+                new SavedIngestionPdfDto("/api/uploads/ingestion/test.pdf", contentLength)
+            );
+
+        public Task<Stream> OpenMediaReadStreamAsync(
+            string mediaUrlPath,
+            CancellationToken cancellationToken = default
+        ) => Task.FromResult<Stream>(new MemoryStream());
+
+        public Task<byte[]> EncodeMediaImageAsVisionJpegAsync(
+            string mediaUrlPath,
+            int maxDimensionPx = 1568,
+            CancellationToken cancellationToken = default
+        ) => Task.FromResult(Array.Empty<byte>());
+
+        public Task<UploadedRecipeCoverDto> PromoteIngestionImageToRecipeCoverAsync(
+            string sourceMediaUrlPath,
+            CancellationToken cancellationToken = default
+        ) =>
+            Task.FromResult(
+                new UploadedRecipeCoverDto(
+                    "/api/uploads/recipes/test-cover.webp",
+                    "/api/uploads/recipes/test-thumb.webp"
+                )
+            );
+
+        public Task<SavedRecipeAttachmentFileDto> PromoteIngestionFileToAttachmentAsync(
+            string sourceMediaUrlPath,
+            CancellationToken cancellationToken = default
+        ) =>
+            Task.FromResult(
+                new SavedRecipeAttachmentFileDto(
+                    "/api/uploads/attachments/test.pdf",
+                    "application/pdf",
+                    100
+                )
+            );
+
+        public Task<SavedRecipeAttachmentFileDto> SaveDirectRecipeAttachmentAsync(
+            Stream content,
+            string originalFileName,
+            string? contentType,
+            long contentLength,
+            CancellationToken cancellationToken = default
+        ) =>
+            Task.FromResult(
+                new SavedRecipeAttachmentFileDto(
+                    "/api/uploads/attachments/test.pdf",
+                    contentType ?? "application/pdf",
+                    contentLength
+                )
+            );
     }
 
     [TestMethod]

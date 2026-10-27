@@ -29,7 +29,7 @@ public record WebScrapeResult(
     string? DownloadedThumbnailImagePath
 );
 
-// Raw JSON contract returned by Ollama / OpenAI-compatible Text LLM
+// Raw JSON contract returned by Ollama / OpenAI-compatible Text/Vision LLM
 public record LlmExtractedTimerItem(int DurationSeconds, string Label);
 
 public record LlmExtractedIngredientItem(
@@ -67,7 +67,9 @@ public record LlmExtractedRecipePayload(
     decimal? ConfidenceScore,
     IReadOnlyList<string>? SuggestedTagNames,
     IReadOnlyList<LlmExtractedIngredientItem>? Ingredients,
-    IReadOnlyList<LlmExtractedStepItem>? Steps
+    IReadOnlyList<LlmExtractedStepItem>? Steps,
+    string? SourceBookTitle = null,
+    int? SourceBookPage = null
 );
 
 // Normalized structured draft stored in IngestionJob.ExtractedDraftJson & edited in Review Inbox
@@ -116,7 +118,10 @@ public record IngestionExtractedDraftDto(
     IReadOnlyList<Guid>? SuggestedTagIds = null,
     IReadOnlyList<IngestionDraftIngredientDto>? Ingredients = null,
     IReadOnlyList<IngestionDraftStepDto>? Steps = null,
-    decimal ConfidenceScore = 0.8m
+    decimal ConfidenceScore = 0.8m,
+    [MaxLength(200)] string? SourceBookTitle = null,
+    [Range(1, 10000)] int? SourceBookPage = null,
+    bool RetainSourceAttachments = true
 );
 
 public record EnqueueWebUrlIngestionRequest([Required] IReadOnlyList<string> Urls);
@@ -124,6 +129,46 @@ public record EnqueueWebUrlIngestionRequest([Required] IReadOnlyList<string> Url
 public record EnqueueRawTextIngestionRequest(
     [Required, MaxLength(100000)] string RawText,
     [MaxLength(200)] string? TitleHint = null
+);
+
+public sealed record IngestionUploadFileStream(
+    Stream Content,
+    string OriginalFileName,
+    string ContentType,
+    long ContentLength
+);
+
+public record EnqueueImageIngestionMetadata(
+    [MaxLength(200)] string? TitleHint = null,
+    [MaxLength(200)] string? SourceBookTitle = null,
+    [Range(1, 10000)] int? SourceBookPage = null
+);
+
+public record EnqueuePdfIngestionMetadata(
+    [MaxLength(200)] string? TitleHint = null,
+    [MaxLength(200)] string? SourceBookTitle = null,
+    [Range(1, 10000)] int? SourceBookPage = null
+);
+
+public record PromotePageToCoverRequest([Range(1, 50)] int PageNumber = 1);
+
+public record IngestionSourceFileDto(
+    int PageNumber,
+    string OriginalFileName,
+    string UrlPath,
+    string ContentType,
+    long FileSizeBytes,
+    int? Width = null,
+    int? Height = null
+);
+
+public record PdfInspectionSummaryDto(
+    int TotalPageCount,
+    int ProcessedPageCount,
+    int TotalExtractedCharacters,
+    double AverageCharactersPerPage,
+    PdfExtractionMode ExtractionMode,
+    IReadOnlyList<IngestionSourceFileDto> RenderedPageImages
 );
 
 public record IngestionQueueSummaryDto(
@@ -148,7 +193,8 @@ public record IngestionJobSummaryDto(
     string? ResultingRecipeSlug,
     string? SubmittedByUsername,
     DateTimeOffset CreatedAt,
-    DateTimeOffset ModifiedAt
+    DateTimeOffset ModifiedAt,
+    int SourceFileCount = 0
 );
 
 public record IngestionJobDetailDto(
@@ -172,7 +218,14 @@ public record IngestionJobDetailDto(
     string? ResultingRecipeSlug,
     string? SubmittedByUsername,
     DateTimeOffset CreatedAt,
-    DateTimeOffset ModifiedAt
-);
+    DateTimeOffset ModifiedAt,
+    IReadOnlyList<IngestionSourceFileDto>? SourceFiles = null,
+    PdfInspectionSummaryDto? PdfInspection = null,
+    string? SourceBookTitle = null,
+    int? SourceBookPage = null
+)
+{
+    public IReadOnlyList<IngestionSourceFileDto> SourceFiles { get; init; } = SourceFiles ?? [];
+}
 
 public record RetryWaitingJobsResultDto(int RequeuedCount);

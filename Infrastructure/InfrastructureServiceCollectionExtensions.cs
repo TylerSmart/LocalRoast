@@ -34,6 +34,7 @@ public static class InfrastructureServiceCollectionExtensions
             configuration.GetSection(LlmDefaultsOptions.SectionName)
         );
         services.AddSingleton<IIngestionQueueSignal, IngestionQueueSignal>();
+        services.AddScoped<IPdfIngestionInspector, PdfIngestionInspector>();
         services.AddHttpClient<IWebRecipeScraper, WebRecipeScraper>();
         services.AddHttpClient<ILlmExtractionClient, LlmExtractionClient>();
         services.AddHostedService<IngestionBackgroundWorker>();

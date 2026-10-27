@@ -94,4 +94,51 @@ export class IngestionService {
       .delete<void>(apiUrl(`/ingestion/jobs/${id}`))
       .pipe(tap(() => this.refreshSummary()));
   }
+  enqueueImages(
+    files: File[],
+    metadata?: { titleHint?: string; sourceBookTitle?: string; sourceBookPage?: number },
+  ): Observable<IngestionJobSummaryDto> {
+    const formData = new FormData();
+    for (const file of files) {
+      formData.append('files', file, file.name);
+    }
+    if (metadata?.titleHint) {
+      formData.append('titleHint', metadata.titleHint);
+    }
+    if (metadata?.sourceBookTitle) {
+      formData.append('sourceBookTitle', metadata.sourceBookTitle);
+    }
+    if (metadata?.sourceBookPage !== undefined && metadata?.sourceBookPage !== null) {
+      formData.append('sourceBookPage', metadata.sourceBookPage.toString());
+    }
+    return this.http
+      .post<IngestionJobSummaryDto>(apiUrl('/ingestion/jobs/images'), formData)
+      .pipe(tap(() => this.refreshSummary()));
+  }
+
+  enqueuePdf(
+    file: File,
+    metadata?: { titleHint?: string; sourceBookTitle?: string; sourceBookPage?: number },
+  ): Observable<IngestionJobSummaryDto> {
+    const formData = new FormData();
+    formData.append('file', file, file.name);
+    if (metadata?.titleHint) {
+      formData.append('titleHint', metadata.titleHint);
+    }
+    if (metadata?.sourceBookTitle) {
+      formData.append('sourceBookTitle', metadata.sourceBookTitle);
+    }
+    if (metadata?.sourceBookPage !== undefined && metadata?.sourceBookPage !== null) {
+      formData.append('sourceBookPage', metadata.sourceBookPage.toString());
+    }
+    return this.http
+      .post<IngestionJobSummaryDto>(apiUrl('/ingestion/jobs/pdf'), formData)
+      .pipe(tap(() => this.refreshSummary()));
+  }
+
+  promotePageToCover(id: string, pageNumber: number): Observable<IngestionJobDetailDto> {
+    return this.http.post<IngestionJobDetailDto>(apiUrl(`/ingestion/jobs/${id}/cover-from-page`), {
+      pageNumber,
+    });
+  }
 }

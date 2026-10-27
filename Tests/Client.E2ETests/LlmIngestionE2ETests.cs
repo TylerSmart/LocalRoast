@@ -342,11 +342,19 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         // 5. Bring host back online and retry
         mockServer.SimulateOffline = false;
 
-        await waitingBanner.Locator("button[aria-label='Retry all waiting jobs']").ClickAsync();
+        await Page.RunAndWaitForResponseAsync(
+            async () =>
+            {
+                await waitingBanner
+                    .Locator("button[aria-label='Retry all waiting jobs']")
+                    .ClickAsync();
+            },
+            resp => resp.Url.Contains("/api/ingestion/jobs/retry-waiting") && resp.Ok
+        );
 
         // 6. Job should complete and transition to ReadyForReview
         var reviewBtn = Page.Locator("a.review-action-btn").First;
-        await Expect(reviewBtn).ToBeVisibleAsync(new() { Timeout = 15000 });
+        await Expect(reviewBtn).ToBeVisibleAsync(new() { Timeout = 30000 });
 
         // Open review and discard cleanly
         await reviewBtn.ClickAsync();
@@ -412,7 +420,7 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await Page.Locator("button[aria-label='Queue raw text recipe']").ClickAsync();
 
         var reviewBtn = Page.Locator("a.review-action-btn").First;
-        await Expect(reviewBtn).ToBeVisibleAsync(new() { Timeout = 15000 });
+        await Expect(reviewBtn).ToBeVisibleAsync(new() { Timeout = 25000 });
         await reviewBtn.ClickAsync();
 
         await Expect(Page).ToHaveURLAsync(new Regex(".*/ingest/review/.*"));

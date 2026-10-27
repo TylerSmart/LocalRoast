@@ -300,6 +300,10 @@ namespace App.Data.Migrations
                         .HasMaxLength(100000)
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("PdfInspectionJson")
+                        .HasMaxLength(200000)
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<DateTimeOffset?>("ProcessedAt")
                         .HasColumnType("datetimeoffset");
 
@@ -311,6 +315,17 @@ namespace App.Data.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("ScrapedPageJson")
+                        .HasMaxLength(200000)
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int?>("SourceBookPage")
+                        .HasColumnType("int");
+
+                    b.Property<string>("SourceBookTitle")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("SourceFilesJson")
                         .HasMaxLength(200000)
                         .HasColumnType("nvarchar(max)");
 
@@ -449,6 +464,63 @@ namespace App.Data.Migrations
                     b.HasIndex("Title");
 
                     b.ToTable("Recipes", (string)null);
+                });
+
+            modelBuilder.Entity("App.Data.Entities.RecipeAttachment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<long>("FileSizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Label")
+                        .HasMaxLength(150)
+                        .HasColumnType("nvarchar(150)");
+
+                    b.Property<string>("MediaUrlPath")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTimeOffset>("ModifiedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("ModifiedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<Guid>("RecipeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RecipeId", "SortOrder");
+
+                    b.ToTable("RecipeAttachments", (string)null);
                 });
 
             modelBuilder.Entity("App.Data.Entities.RecipeCollection", b =>
@@ -1001,6 +1073,17 @@ namespace App.Data.Migrations
                     b.Navigation("ResultingRecipe");
                 });
 
+            modelBuilder.Entity("App.Data.Entities.RecipeAttachment", b =>
+                {
+                    b.HasOne("App.Data.Entities.Recipe", "Recipe")
+                        .WithMany("Attachments")
+                        .HasForeignKey("RecipeId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Recipe");
+                });
+
             modelBuilder.Entity("App.Data.Entities.RecipeCollection", b =>
                 {
                     b.HasOne("App.Data.Entities.Collection", "Collection")
@@ -1130,6 +1213,8 @@ namespace App.Data.Migrations
 
             modelBuilder.Entity("App.Data.Entities.Recipe", b =>
                 {
+                    b.Navigation("Attachments");
+
                     b.Navigation("IngestionJobs");
 
                     b.Navigation("Ingredients");

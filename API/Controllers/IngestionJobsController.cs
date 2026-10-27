@@ -94,6 +94,172 @@ public sealed class IngestionJobsController(IIngestionService ingestionService) 
         }
     }
 
+    [HttpPost("images")]
+    [Consumes("multipart/form-data")]
+    [RequestSizeLimit(67_108_864)]
+    [ProducesResponseType(typeof(IngestionJobSummaryDto), StatusCodes.Status202Accepted)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> EnqueueImages(
+        [FromForm] IFormFileCollection files,
+        [FromForm] string? titleHint,
+        [FromForm] string? sourceBookTitle,
+        [FromForm] int? sourceBookPage,
+        CancellationToken cancellationToken
+    )
+    {
+        if (files is null || files.Count == 0)
+        {
+            return BadRequest(
+                new ProblemDetails
+                {
+                    Status = StatusCodes.Status400BadRequest,
+                    Title = "Validation Failed",
+                    Detail = "At least one image file is required.",
+                }
+            );
+        }
+
+        try
+        {
+            var uploadStreams = files
+                .Select(f => new IngestionUploadFileStream(
+                    f.OpenReadStream(),
+                    f.FileName,
+                    f.ContentType,
+                    f.Length
+                ))
+                .ToList();
+
+            var metadata = new EnqueueImageIngestionMetadata(
+                TitleHint: titleHint,
+                SourceBookTitle: sourceBookTitle,
+                SourceBookPage: sourceBookPage
+            );
+
+            var job = await ingestionService.EnqueueImagesAsync(
+                uploadStreams,
+                metadata,
+                cancellationToken
+            );
+            return AcceptedAtAction(nameof(GetJobById), new { id = job.Id }, job);
+        }
+        catch (DomainValidationException ex)
+        {
+            return BadRequest(
+                new ProblemDetails
+                {
+                    Status = StatusCodes.Status400BadRequest,
+                    Title = ex.Title,
+                    Detail = ex.Message,
+                }
+            );
+        }
+    }
+
+    [HttpPost("pdf")]
+    [Consumes("multipart/form-data")]
+    [RequestSizeLimit(28_311_552)]
+    [ProducesResponseType(typeof(IngestionJobSummaryDto), StatusCodes.Status202Accepted)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> EnqueuePdf(
+        [FromForm] IFormFile file,
+        [FromForm] string? titleHint,
+        [FromForm] string? sourceBookTitle,
+        [FromForm] int? sourceBookPage,
+        CancellationToken cancellationToken
+    )
+    {
+        if (file is null || file.Length == 0)
+        {
+            return BadRequest(
+                new ProblemDetails
+                {
+                    Status = StatusCodes.Status400BadRequest,
+                    Title = "Validation Failed",
+                    Detail = "A valid PDF file is required.",
+                }
+            );
+        }
+
+        try
+        {
+            var uploadStream = new IngestionUploadFileStream(
+                file.OpenReadStream(),
+                file.FileName,
+                file.ContentType,
+                file.Length
+            );
+
+            var metadata = new EnqueuePdfIngestionMetadata(
+                TitleHint: titleHint,
+                SourceBookTitle: sourceBookTitle,
+                SourceBookPage: sourceBookPage
+            );
+
+            var job = await ingestionService.EnqueuePdfAsync(
+                uploadStream,
+                metadata,
+                cancellationToken
+            );
+            return AcceptedAtAction(nameof(GetJobById), new { id = job.Id }, job);
+        }
+        catch (DomainValidationException ex)
+        {
+            return BadRequest(
+                new ProblemDetails
+                {
+                    Status = StatusCodes.Status400BadRequest,
+                    Title = ex.Title,
+                    Detail = ex.Message,
+                }
+            );
+        }
+    }
+
+    [HttpPost("{id:guid}/cover-from-page")]
+    [ProducesResponseType(typeof(IngestionJobDetailDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> PromoteSourcePageToCover(
+        Guid id,
+        [FromBody] PromotePageToCoverRequest request,
+        CancellationToken cancellationToken
+    )
+    {
+        try
+        {
+            var updated = await ingestionService.PromoteSourcePageToCoverAsync(
+                id,
+                request.PageNumber,
+                cancellationToken
+            );
+            return updated is not null ? Ok(updated) : NotFound();
+        }
+        catch (DomainValidationException ex)
+        {
+            return BadRequest(
+                new ProblemDetails
+                {
+                    Status = StatusCodes.Status400BadRequest,
+                    Title = ex.Title,
+                    Detail = ex.Message,
+                }
+            );
+        }
+        catch (ConflictException ex)
+        {
+            return Conflict(
+                new ProblemDetails
+                {
+                    Status = StatusCodes.Status409Conflict,
+                    Title = ex.Title,
+                    Detail = ex.Message,
+                }
+            );
+        }
+    }
+
     [HttpPut("{id:guid}/draft")]
     [ProducesResponseType(typeof(IngestionJobDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]

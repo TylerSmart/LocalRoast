@@ -26,6 +26,24 @@ public interface IIngestionService
         CancellationToken cancellationToken = default
     );
 
+    Task<IngestionJobSummaryDto> EnqueueImagesAsync(
+        IReadOnlyList<IngestionUploadFileStream> files,
+        EnqueueImageIngestionMetadata metadata,
+        CancellationToken cancellationToken = default
+    );
+
+    Task<IngestionJobSummaryDto> EnqueuePdfAsync(
+        IngestionUploadFileStream file,
+        EnqueuePdfIngestionMetadata metadata,
+        CancellationToken cancellationToken = default
+    );
+
+    Task<IngestionJobDetailDto?> PromoteSourcePageToCoverAsync(
+        Guid id,
+        int pageNumber,
+        CancellationToken cancellationToken = default
+    );
+
     Task<IngestionJobDetailDto?> SaveDraftAsync(
         Guid id,
         IngestionExtractedDraftDto draft,

@@ -61,6 +61,28 @@
           <mat-icon>description</mat-icon>
           <span>Paste Raw Text / Markdown</span>
         </button>
+        <button
+          type="button"
+          class="tab-pill"
+          [class.active]="activeTab() === 'images'"
+          (click)="setActiveTab('images')"
+          role="tab"
+          [attr.aria-selected]="activeTab() === 'images'"
+        >
+          <mat-icon>photo_camera</mat-icon>
+          <span>Photos / Camera Scan</span>
+        </button>
+        <button
+          type="button"
+          class="tab-pill"
+          [class.active]="activeTab() === 'pdf'"
+          (click)="setActiveTab('pdf')"
+          role="tab"
+          [attr.aria-selected]="activeTab() === 'pdf'"
+        >
+          <mat-icon>picture_as_pdf</mat-icon>
+          <span>PDF Document</span>
+        </button>
       </div>
     </div>
 
@@ -98,7 +120,7 @@
             </button>
           </div>
         </form>
-      } @else {
+      } @else if (activeTab() === 'text') {
         <form [formGroup]="textForm" (ngSubmit)="submitRawText()" class="capture-form">
           <mat-form-field appearance="outline" class="form-field full-width title-hint-field">
             <mat-label>Recipe Title Hint (Optional)</mat-label>
@@ -133,6 +155,209 @@
                 <mat-icon>auto_fix_high</mat-icon>
               }
               <span>{{ isSubmitting() ? 'Queueing...' : 'Extract Recipe' }}</span>
+            </button>
+          </div>
+        </form>
+      } @else if (activeTab() === 'images') {
+        <form [formGroup]="imagesForm" (ngSubmit)="submitImages()" class="capture-form">
+          <div class="provenance-row">
+            <mat-form-field appearance="outline" class="form-field flex-2">
+              <mat-label>Cookbook / Book Title (Optional)</mat-label>
+              <input
+                matInput
+                formControlName="sourceBookTitle"
+                placeholder="e.g. The Joy of Cooking"
+              />
+            </mat-form-field>
+
+            <mat-form-field appearance="outline" class="form-field flex-1">
+              <mat-label>Page #</mat-label>
+              <input
+                matInput
+                type="number"
+                formControlName="sourceBookPage"
+                placeholder="e.g. 142"
+              />
+            </mat-form-field>
+
+            <mat-form-field appearance="outline" class="form-field flex-2">
+              <mat-label>Title Hint (Optional)</mat-label>
+              <input matInput formControlName="titleHint" placeholder="e.g. Lemon Meringue Pie" />
+            </mat-form-field>
+          </div>
+
+          <!-- File Pickers Strip -->
+          <div class="upload-dropzone">
+            <input
+              #photoFileInput
+              type="file"
+              multiple
+              accept="image/png,image/jpeg,image/webp,image/heic,image/heif"
+              (change)="onImagesSelected($event)"
+              class="hidden-file-input"
+            />
+            <input
+              #cameraFileInput
+              type="file"
+              accept="image/*"
+              capture="environment"
+              (change)="onImagesSelected($event)"
+              class="hidden-file-input"
+            />
+
+            <div class="dropzone-actions">
+              <button
+                mat-stroked-button
+                type="button"
+                (click)="photoFileInput.click()"
+                [disabled]="selectedImages().length >= 6"
+              >
+                <mat-icon>add_photo_alternate</mat-icon>
+                <span>Select Photos (1–6)</span>
+              </button>
+
+              <button
+                mat-stroked-button
+                type="button"
+                (click)="cameraFileInput.click()"
+                [disabled]="selectedImages().length >= 6"
+                class="camera-btn"
+              >
+                <mat-icon>photo_camera</mat-icon>
+                <span>Take Photo / Scan</span>
+              </button>
+
+              <span class="slots-indicator"> {{ selectedImages().length }} of 6 selected </span>
+            </div>
+
+            <!-- Selected Images Preview Strip -->
+            @if (selectedImages().length > 0) {
+              <div class="selected-previews-strip">
+                @for (item of selectedImages(); track $index; let i = $index) {
+                  <div class="preview-card">
+                    <img [src]="item.previewUrl" [alt]="item.file.name" />
+                    <span class="preview-page-tag">Page {{ i + 1 }}</span>
+                    <button
+                      mat-icon-button
+                      type="button"
+                      class="remove-preview-btn"
+                      (click)="removeSelectedImage(i)"
+                      matTooltip="Remove"
+                    >
+                      <mat-icon>close</mat-icon>
+                    </button>
+                  </div>
+                }
+              </div>
+            }
+          </div>
+
+          <div class="form-actions">
+            <button
+              mat-flat-button
+              color="primary"
+              type="submit"
+              [disabled]="selectedImages().length === 0 || isSubmitting()"
+              aria-label="Queue photo scan recipe"
+            >
+              @if (isSubmitting()) {
+                <mat-spinner diameter="18" class="inline-spinner"></mat-spinner>
+              } @else {
+                <mat-icon>document_scanner</mat-icon>
+              }
+              <span>{{
+                isSubmitting()
+                  ? 'Uploading & Queueing...'
+                  : 'Extract Recipe from ' + selectedImages().length + ' Photo(s)'
+              }}</span>
+            </button>
+          </div>
+        </form>
+      } @else if (activeTab() === 'pdf') {
+        <form [formGroup]="pdfForm" (ngSubmit)="submitPdf()" class="capture-form">
+          <div class="provenance-row">
+            <mat-form-field appearance="outline" class="form-field flex-2">
+              <mat-label>Cookbook / Book Title (Optional)</mat-label>
+              <input
+                matInput
+                formControlName="sourceBookTitle"
+                placeholder="e.g. Baking Illustrated"
+              />
+            </mat-form-field>
+
+            <mat-form-field appearance="outline" class="form-field flex-1">
+              <mat-label>Page #</mat-label>
+              <input
+                matInput
+                type="number"
+                formControlName="sourceBookPage"
+                placeholder="e.g. 88"
+              />
+            </mat-form-field>
+
+            <mat-form-field appearance="outline" class="form-field flex-2">
+              <mat-label>Title Hint (Optional)</mat-label>
+              <input matInput formControlName="titleHint" placeholder="e.g. Focaccia" />
+            </mat-form-field>
+          </div>
+
+          <div class="upload-dropzone">
+            <input
+              #pdfFileInput
+              type="file"
+              accept="application/pdf"
+              (change)="onPdfSelected($event)"
+              class="hidden-file-input"
+            />
+
+            @if (!selectedPdf()) {
+              <div class="pdf-picker-area">
+                <button mat-stroked-button type="button" (click)="pdfFileInput.click()">
+                  <mat-icon>upload_file</mat-icon>
+                  <span>Select PDF Recipe Document (up to 25 MB)</span>
+                </button>
+                <p class="dropzone-hint">
+                  Supports digital text PDFs (instant extraction) or scanned cookbook pages (visual
+                  OCR pipeline).
+                </p>
+              </div>
+            } @else {
+              <div class="selected-pdf-badge">
+                <mat-icon class="pdf-icon">picture_as_pdf</mat-icon>
+                <div class="pdf-details">
+                  <span class="pdf-name">{{ selectedPdf()!.name }}</span>
+                  <span class="pdf-size"
+                    >{{ (selectedPdf()!.size / (1024 * 1024)).toFixed(2) }} MB</span
+                  >
+                </div>
+                <button
+                  mat-icon-button
+                  type="button"
+                  (click)="clearSelectedPdf()"
+                  matTooltip="Remove PDF"
+                >
+                  <mat-icon>close</mat-icon>
+                </button>
+              </div>
+            }
+          </div>
+
+          <div class="form-actions">
+            <button
+              mat-flat-button
+              color="primary"
+              type="submit"
+              [disabled]="!selectedPdf() || isSubmitting()"
+              aria-label="Queue PDF recipe"
+            >
+              @if (isSubmitting()) {
+                <mat-spinner diameter="18" class="inline-spinner"></mat-spinner>
+              } @else {
+                <mat-icon>auto_fix_high</mat-icon>
+              }
+              <span>{{
+                isSubmitting() ? 'Uploading & Queueing...' : 'Extract Recipe from PDF'
+              }}</span>
             </button>
           </div>
         </form>

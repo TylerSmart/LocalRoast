@@ -24,6 +24,14 @@ public sealed class IngestionJob : IAuditable
 
     public string? DownloadedThumbnailImagePath { get; set; }
 
+    public string? SourceFilesJson { get; set; }
+
+    public string? PdfInspectionJson { get; set; }
+
+    public string? SourceBookTitle { get; set; }
+
+    public int? SourceBookPage { get; set; }
+
     public string? ExtractedDraftJson { get; set; }
 
     public decimal? ConfidenceScore { get; set; }
