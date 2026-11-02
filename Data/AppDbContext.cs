@@ -41,6 +41,12 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
 
     public DbSet<PersonalAccessToken> PersonalAccessTokens => Set<PersonalAccessToken>();
 
+    public DbSet<MealPlanEntry> MealPlanEntries => Set<MealPlanEntry>();
+
+    public DbSet<MealPlanTemplate> MealPlanTemplates => Set<MealPlanTemplate>();
+
+    public DbSet<MealPlanTemplateItem> MealPlanTemplateItems => Set<MealPlanTemplateItem>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);

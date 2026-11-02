@@ -198,4 +198,9 @@ describe('RecipeDetailComponent', () => {
     expect(noodles?.scaled.unit).toBe('Ml');
     expect(noodles?.scaled.unitLabel).toBe('ml');
   });
+
+  it('opens meal plan entry dialog on openPlanMealDialog()', () => {
+    component.openPlanMealDialog();
+    expect(mockDialog.open).toHaveBeenCalled();
+  });
 });

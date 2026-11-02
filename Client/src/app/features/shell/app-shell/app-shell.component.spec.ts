@@ -71,6 +71,7 @@ describe('AppShellComponent', () => {
     const text = fixture.nativeElement.textContent;
     expect(text).toContain(APP_NAME);
     expect(text).toContain('Cookbook');
+    expect(text).toContain('Meal Plan');
     expect(text).toContain('Ingest');
     expect(text).toContain('Matcher');
     expect(text).toContain('Food Catalog');

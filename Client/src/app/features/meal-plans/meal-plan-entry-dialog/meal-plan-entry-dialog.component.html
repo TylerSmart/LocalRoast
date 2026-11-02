@@ -1,0 +1,229 @@
+<div class="meal-entry-dialog-container">
+  <h2 mat-dialog-title>
+    <mat-icon class="title-icon">{{ isEdit ? 'edit_calendar' : 'add_circle' }}</mat-icon>
+    <span>{{ isEdit ? 'Edit Planned Meal' : 'Plan a Meal' }}</span>
+  </h2>
+
+  <mat-dialog-content>
+    @if (errorMessage()) {
+      <div class="error-banner" role="alert">
+        <mat-icon>error</mat-icon>
+        <span>{{ errorMessage() }}</span>
+      </div>
+    }
+
+    <form [formGroup]="form" class="entry-form">
+      <!-- Entry Type Selector -->
+      <div class="form-section">
+        <span class="section-label">Meal Type</span>
+        <mat-button-toggle-group
+          formControlName="entryType"
+          aria-label="Select meal type"
+          class="full-width-toggle"
+        >
+          <mat-button-toggle value="Recipe">
+            <mat-icon>restaurant_menu</mat-icon>
+            <span>Recipe</span>
+          </mat-button-toggle>
+          <mat-button-toggle value="Leftovers">
+            <mat-icon>takeout_dining</mat-icon>
+            <span>Leftovers</span>
+          </mat-button-toggle>
+          <mat-button-toggle value="FreeformNote">
+            <mat-icon>edit_note</mat-icon>
+            <span>Note / Out</span>
+          </mat-button-toggle>
+        </mat-button-toggle-group>
+      </div>
+
+      <!-- Placement: Scheduled Slot vs On-Deck -->
+      <div class="form-section">
+        <span class="section-label">Placement</span>
+        <mat-button-toggle-group
+          formControlName="placement"
+          aria-label="Select placement"
+          class="full-width-toggle placement-toggle"
+        >
+          <mat-button-toggle value="scheduled">
+            <mat-icon>calendar_today</mat-icon>
+            <span>Specific Day &amp; Slot</span>
+          </mat-button-toggle>
+          <mat-button-toggle value="ondeck">
+            <mat-icon>view_sidebar</mat-icon>
+            <span>On-Deck This Week</span>
+          </mat-button-toggle>
+        </mat-button-toggle-group>
+      </div>
+
+      @if (form.controls.placement.value === 'scheduled') {
+        <div class="scheduled-row">
+          <mat-form-field appearance="outline" class="flex-1">
+            <mat-label>Date</mat-label>
+            <input matInput type="date" formControlName="scheduledDate" />
+          </mat-form-field>
+
+          <mat-form-field appearance="outline" class="flex-1">
+            <mat-label>Meal Slot</mat-label>
+            <mat-select formControlName="slot">
+              @for (slot of mealSlots; track slot.value) {
+                <mat-option [value]="slot.value">
+                  <div class="slot-option">
+                    <mat-icon class="slot-option-icon">{{ slot.icon }}</mat-icon>
+                    <span>{{ slot.label }}</span>
+                  </div>
+                </mat-option>
+              }
+            </mat-select>
+          </mat-form-field>
+        </div>
+      }
+
+      <!-- Entry Type Specific Fields -->
+      @switch (form.controls.entryType.value) {
+        @case ('Recipe') {
+          <div class="recipe-selection-section">
+            <mat-form-field appearance="outline" class="full-width">
+              <mat-label>Select Recipe</mat-label>
+              <mat-select
+                formControlName="recipeId"
+                (selectionChange)="onRecipeSelected($event.value)"
+              >
+                @if (isLoadingRecipes()) {
+                  <mat-option disabled>Loading recipes...</mat-option>
+                }
+                @for (r of recipes(); track r.id) {
+                  <mat-option [value]="r.id">
+                    <div class="recipe-option">
+                      <span class="recipe-option-title">{{ r.title }}</span>
+                      <span class="recipe-option-servings">({{ r.baseServings }} servings)</span>
+                    </div>
+                  </mat-option>
+                }
+              </mat-select>
+            </mat-form-field>
+
+            <div class="servings-stepper-row">
+              <span class="stepper-label">Target Servings:</span>
+              <div class="stepper-controls">
+                <button
+                  type="button"
+                  mat-icon-button
+                  (click)="adjustServings(-1)"
+                  aria-label="Decrease servings"
+                  [disabled]="(form.controls.targetServings.value ?? 4) <= 0.5"
+                >
+                  <mat-icon>remove</mat-icon>
+                </button>
+                <mat-form-field appearance="outline" class="servings-input-field">
+                  <input
+                    matInput
+                    type="number"
+                    formControlName="targetServings"
+                    min="0.25"
+                    max="999"
+                    step="0.5"
+                    aria-label="Servings number"
+                  />
+                </mat-form-field>
+                <button
+                  type="button"
+                  mat-icon-button
+                  (click)="adjustServings(1)"
+                  aria-label="Increase servings"
+                >
+                  <mat-icon>add</mat-icon>
+                </button>
+              </div>
+            </div>
+          </div>
+        }
+
+        @case ('Leftovers') {
+          <div class="leftovers-section">
+            <div class="leftovers-info-banner">
+              <mat-icon>info</mat-icon>
+              <span
+                >Leftovers meals display on your calendar but contribute
+                <strong>zero</strong> grocery ingredients to shopping lists.</span
+              >
+            </div>
+
+            @if (data.weekScheduledEntries && data.weekScheduledEntries.length > 0) {
+              <mat-form-field appearance="outline" class="full-width">
+                <mat-label>Link from Planned Meal</mat-label>
+                <mat-select
+                  formControlName="sourceMealPlanEntryId"
+                  (selectionChange)="onLeftoverSourceSelected($event.value)"
+                >
+                  <mat-option [value]="null">-- None / Standalone Leftovers --</mat-option>
+                  @for (se of data.weekScheduledEntries; track se.id) {
+                    <mat-option [value]="se.id">
+                      {{ se.displayTitle }} ({{ se.scheduledDate }})
+                    </mat-option>
+                  }
+                </mat-select>
+              </mat-form-field>
+            }
+
+            <mat-form-field appearance="outline" class="full-width">
+              <mat-label>Display Label</mat-label>
+              <input
+                matInput
+                formControlName="customTitle"
+                placeholder="e.g. Leftovers: Sunday Chili"
+              />
+            </mat-form-field>
+          </div>
+        }
+
+        @case ('FreeformNote') {
+          <div class="note-section">
+            <mat-form-field appearance="outline" class="full-width">
+              <mat-label>Note Title</mat-label>
+              <input
+                matInput
+                formControlName="customTitle"
+                placeholder="e.g. Date Night, Takeout, Pizza"
+              />
+            </mat-form-field>
+
+            <div class="quick-chips-row">
+              <span class="chips-label">Quick Suggestions:</span>
+              <mat-chip-set aria-label="Quick note suggestions">
+                @for (chip of quickNoteChips; track chip) {
+                  <mat-chip (click)="selectQuickNote(chip)">{{ chip }}</mat-chip>
+                }
+              </mat-chip-set>
+            </div>
+          </div>
+        }
+      }
+
+      <!-- Optional Notes field for any type -->
+      <mat-form-field appearance="outline" class="full-width notes-field">
+        <mat-label>Cook's Notes / Reminders (Optional)</mat-label>
+        <textarea
+          matInput
+          formControlName="notes"
+          rows="2"
+          placeholder="e.g. Thaw beef the night before; double the garlic"
+        ></textarea>
+      </mat-form-field>
+    </form>
+  </mat-dialog-content>
+
+  <mat-dialog-actions align="end">
+    <button mat-button (click)="onCancel()" [disabled]="isSubmitting()">Cancel</button>
+    <button
+      mat-flat-button
+      color="primary"
+      (click)="onSubmit()"
+      [disabled]="isSubmitting() || isFormInvalid()"
+    >
+      @if (isSubmitting()) {
+        <mat-spinner diameter="18" class="inline-spinner"></mat-spinner>
+      }
+      <span>{{ isEdit ? 'Save Changes' : 'Plan Meal' }}</span>
+    </button>
+  </mat-dialog-actions>
+</div>

@@ -355,6 +355,197 @@ namespace App.Data.Migrations
                     b.ToTable("IngestionJobs", (string)null);
                 });
 
+            modelBuilder.Entity("App.Data.Entities.MealPlanEntry", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("CustomTitle")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("EntryType")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<bool>("IsLeftovers")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsOnDeck")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTimeOffset>("ModifiedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("ModifiedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<Guid?>("RecipeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateOnly?>("ScheduledDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("Slot")
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("SourceMealPlanEntryId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("TargetServings")
+                        .HasPrecision(8, 2)
+                        .HasColumnType("decimal(8,2)");
+
+                    b.Property<DateOnly>("WeekStartDate")
+                        .HasColumnType("date");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RecipeId");
+
+                    b.HasIndex("SourceMealPlanEntryId");
+
+                    b.HasIndex("ScheduledDate", "Slot", "SortOrder");
+
+                    b.HasIndex("WeekStartDate", "IsOnDeck", "SortOrder");
+
+                    b.ToTable("MealPlanEntries", (string)null);
+                });
+
+            modelBuilder.Entity("App.Data.Entities.MealPlanTemplate", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTimeOffset>("ModifiedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("ModifiedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("nvarchar(120)");
+
+                    b.Property<string>("NormalizedName")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("nvarchar(120)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("NormalizedName")
+                        .IsUnique();
+
+                    b.ToTable("MealPlanTemplates", (string)null);
+                });
+
+            modelBuilder.Entity("App.Data.Entities.MealPlanTemplateItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("CustomTitle")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int?>("DayOffset")
+                        .HasColumnType("int");
+
+                    b.Property<string>("EntryType")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<bool>("IsLeftovers")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsOnDeck")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTimeOffset>("ModifiedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("ModifiedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<Guid?>("RecipeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Slot")
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int");
+
+                    b.Property<decimal?>("TargetServings")
+                        .HasPrecision(8, 2)
+                        .HasColumnType("decimal(8,2)");
+
+                    b.Property<Guid>("TemplateId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RecipeId");
+
+                    b.HasIndex("TemplateId", "IsOnDeck", "DayOffset", "Slot", "SortOrder");
+
+                    b.ToTable("MealPlanTemplateItems", (string)null);
+                });
+
             modelBuilder.Entity("App.Data.Entities.PersonalAccessToken", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1132,6 +1323,41 @@ namespace App.Data.Migrations
                     b.Navigation("ResultingRecipe");
                 });
 
+            modelBuilder.Entity("App.Data.Entities.MealPlanEntry", b =>
+                {
+                    b.HasOne("App.Data.Entities.Recipe", "Recipe")
+                        .WithMany("MealPlanEntries")
+                        .HasForeignKey("RecipeId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("App.Data.Entities.MealPlanEntry", "SourceMealPlanEntry")
+                        .WithMany("DerivedLeftoverEntries")
+                        .HasForeignKey("SourceMealPlanEntryId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Recipe");
+
+                    b.Navigation("SourceMealPlanEntry");
+                });
+
+            modelBuilder.Entity("App.Data.Entities.MealPlanTemplateItem", b =>
+                {
+                    b.HasOne("App.Data.Entities.Recipe", "Recipe")
+                        .WithMany("MealPlanTemplateItems")
+                        .HasForeignKey("RecipeId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("App.Data.Entities.MealPlanTemplate", "Template")
+                        .WithMany("Items")
+                        .HasForeignKey("TemplateId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Recipe");
+
+                    b.Navigation("Template");
+                });
+
             modelBuilder.Entity("App.Data.Entities.PersonalAccessToken", b =>
                 {
                     b.HasOne("App.Data.Entities.User", "User")
@@ -1281,6 +1507,16 @@ namespace App.Data.Migrations
                     b.Navigation("RecipeIngredients");
                 });
 
+            modelBuilder.Entity("App.Data.Entities.MealPlanEntry", b =>
+                {
+                    b.Navigation("DerivedLeftoverEntries");
+                });
+
+            modelBuilder.Entity("App.Data.Entities.MealPlanTemplate", b =>
+                {
+                    b.Navigation("Items");
+                });
+
             modelBuilder.Entity("App.Data.Entities.Recipe", b =>
                 {
                     b.Navigation("Attachments");
@@ -1288,6 +1524,10 @@ namespace App.Data.Migrations
                     b.Navigation("IngestionJobs");
 
                     b.Navigation("Ingredients");
+
+                    b.Navigation("MealPlanEntries");
+
+                    b.Navigation("MealPlanTemplateItems");
 
                     b.Navigation("RecipeCollections");
 

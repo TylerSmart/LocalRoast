@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using App.Core.Exceptions;
+using App.Core.MealPlans;
 using App.Core.Media;
 using App.Core.Recipes;
 using App.Data.Entities;
@@ -520,6 +521,38 @@ public sealed partial class RecipeService(
         foreach (var job in linkedJobs)
         {
             job.ResultingRecipeId = null;
+        }
+
+        var linkedMealEntries = await dbContext
+            .MealPlanEntries.Where(e => e.RecipeId == id)
+            .ToListAsync(cancellationToken);
+        foreach (var entry in linkedMealEntries)
+        {
+            entry.RecipeId = null;
+            if (string.IsNullOrWhiteSpace(entry.CustomTitle))
+            {
+                entry.CustomTitle = entry.IsLeftovers ? $"Leftovers: {recipe.Title}" : recipe.Title;
+            }
+            if (!entry.IsLeftovers)
+            {
+                entry.EntryType = MealPlanEntryType.FreeformNote;
+            }
+        }
+
+        var linkedTemplateItems = await dbContext
+            .MealPlanTemplateItems.Where(i => i.RecipeId == id)
+            .ToListAsync(cancellationToken);
+        foreach (var item in linkedTemplateItems)
+        {
+            item.RecipeId = null;
+            if (string.IsNullOrWhiteSpace(item.CustomTitle))
+            {
+                item.CustomTitle = item.IsLeftovers ? $"Leftovers: {recipe.Title}" : recipe.Title;
+            }
+            if (!item.IsLeftovers)
+            {
+                item.EntryType = MealPlanEntryType.FreeformNote;
+            }
         }
 
         dbContext.Recipes.Remove(recipe);

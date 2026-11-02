@@ -1,7 +1,7 @@
 # Phase 07: Meal Planning Calendar, "On-Deck" Weekly Tray & Reusable Week Templates
 
 > **Branch:** `feature/phase-07-meal-plan-calendar-and-templates`
-> **Status:** `[ ]` Not Started (`[ ]` Not Started | `[~]` In Progress | `[x]` Completed)
+> **Status:** `[x]` Completed (`[ ]` Not Started | `[~]` In Progress | `[x]` Completed)
 > **PRD Reference:** `docs/prd.md` — Sections 1, 2, 3, 4.4 (4.4.1–4.4.4), 5, and 6 (Milestone 3, Slice 1 of 3)
 > **Target Execution:** Run `/execute-phase` to execute this plan step-by-step.
 
@@ -765,7 +765,7 @@ Create `Tests/Client.E2ETests/MealPlanE2ETests.cs` inheriting from `E2ETestBase`
 
 ## 6. Step-by-Step Execution Checklist (For Implementation Agent)
 
-- [ ] **Task 1: Backend Core & Data Layer**
+- [x] **Task 1: Backend Core & Data Layer**
   - Create `Core/MealPlans/` enums, `MealPlanDateHelper`, DTOs/requests, `IMealPlanService`, and `IMealPlanTemplateService`.
   - Create `Data/Entities/MealPlanEntry.cs`, `MealPlanTemplate.cs`, `MealPlanTemplateItem.cs`, EF configurations in `Data/Configurations/`, update `Recipe.cs`, `AppDbContext.cs`, `RecipeService.DeleteRecipeAsync`, and implement `MealPlanService` + `MealPlanTemplateService`.
   - Register `IMealPlanService` and `IMealPlanTemplateService` in `DataServiceCollectionExtensions.cs`.
@@ -781,7 +781,7 @@ Create `Tests/Client.E2ETests/MealPlanE2ETests.cs` inheriting from `E2ETestBase`
     dotnet test --project Tests/Core.UnitTests/App.Core.UnitTests.csproj
     ```
 
-- [ ] **Task 2: API Controllers & Integration Tests**
+- [x] **Task 2: API Controllers & Integration Tests**
   - Create thin HTTP controllers `API/Controllers/MealPlansController.cs` and `API/Controllers/MealPlanTemplatesController.cs`.
   - Update `Tests/API.IntegrationTests/OpenApiIntegrationTests.cs` and create `Tests/API.IntegrationTests/MealPlansIntegrationTests.cs` (covering week & range queries, On-Deck tray, multi-dish ordering, `move` & `cook-tonight`, `Leftovers` `IsLeftovers = true` & source-entry deletion safety, recipe deletion detachment safety, template creation/snapshot/duplicate `409`, `Merge` vs `Replace` stamping, validation `400`s, and unauthenticated `401`s).
   - Run integration tests until 100% green:
@@ -789,7 +789,7 @@ Create `Tests/Client.E2ETests/MealPlanE2ETests.cs` inheriting from `E2ETestBase`
     dotnet test --project Tests/API.IntegrationTests/App.API.IntegrationTests.csproj
     ```
 
-- [ ] **Task 3: Angular Client & Unit Tests**
+- [x] **Task 3: Angular Client & Unit Tests**
   - Create `meal-plan.models.ts`, `meal-plan-date.ts` (+ `.spec.ts`), and `@Service()` `MealPlanService` (+ `.spec.ts`).
   - Create dedicated per-component folders `meal-plan-calendar/`, `meal-plan-entry-dialog/`, and `meal-plan-templates-dialog/` under `Client/src/app/features/meal-plans/` (each with external `.ts`, `.html`, `.scss`, and `.spec.ts` files).
   - Wire `/meal-plan` route in `app.routes.ts`, add `Meal Plan` navigation item in `AppShellComponent` (+ `.spec.ts`), and add **"Plan Meal"** button in `RecipeDetailComponent` (+ `.spec.ts`).
@@ -801,7 +801,7 @@ Create `Tests/Client.E2ETests/MealPlanE2ETests.cs` inheriting from `E2ETestBase`
     npm test -- --watch=false
     ```
 
-- [ ] **Task 4: Playwright E2E Verification & Final Formatting**
+- [x] **Task 4: Playwright E2E Verification & Final Formatting**
   - Implement `Tests/Client.E2ETests/MealPlanE2ETests.cs` covering all scenarios in Section 5 (and verify `NavigationAndThemeE2ETests` still passes at `360px` width).
   - Build production Angular bundle (`npm run build:production` in `Client/`) and run Playwright E2E tests:
     ```powershell

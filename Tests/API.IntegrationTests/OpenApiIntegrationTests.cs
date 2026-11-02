@@ -49,6 +49,8 @@ public sealed class OpenApiIntegrationTests
         StringAssert.Contains(content, "/llm-settings");
         StringAssert.Contains(content, "/ingestion/jobs");
         StringAssert.Contains(content, "/account/tokens");
+        StringAssert.Contains(content, "/meal-plans");
+        StringAssert.Contains(content, "/meal-plan-templates");
         Assert.DoesNotContain("/api/mcp", content);
         StringAssert.Contains(content, "securitySchemes");
         StringAssert.Contains(content, "Bearer");

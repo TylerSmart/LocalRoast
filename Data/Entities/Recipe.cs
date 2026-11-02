@@ -71,4 +71,9 @@ public sealed class Recipe : IAuditable
     public ICollection<IngestionJob> IngestionJobs { get; set; } = new List<IngestionJob>();
 
     public ICollection<RecipeAttachment> Attachments { get; set; } = new List<RecipeAttachment>();
+
+    public ICollection<MealPlanEntry> MealPlanEntries { get; set; } = new List<MealPlanEntry>();
+
+    public ICollection<MealPlanTemplateItem> MealPlanTemplateItems { get; set; } =
+        new List<MealPlanTemplateItem>();
 }

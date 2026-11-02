@@ -3,6 +3,7 @@ using App.Core.Authentication;
 using App.Core.FoodCatalog;
 using App.Core.Ingestion;
 using App.Core.Mcp;
+using App.Core.MealPlans;
 using App.Core.Recipes;
 using App.Data.Auditing;
 using App.Data.Services;
@@ -34,6 +35,8 @@ public static class DataServiceCollectionExtensions
         services.AddScoped<IIngestionProcessor, IngestionProcessor>();
         services.AddScoped<IIngestionService, IngestionService>();
         services.AddScoped<IMcpCookbookService, McpCookbookService>();
+        services.AddScoped<IMealPlanService, MealPlanService>();
+        services.AddScoped<IMealPlanTemplateService, MealPlanTemplateService>();
 
         if (
             string.Equals(

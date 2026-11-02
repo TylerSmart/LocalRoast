@@ -1,0 +1,517 @@
+<div class="meal-plan-page">
+  <!-- Top Navigation & Actions Bar -->
+  <header class="calendar-top-bar">
+    <div class="title-and-views">
+      <h1 class="page-title">Meal Plan</h1>
+      <mat-button-toggle-group
+        [value]="viewMode()"
+        (change)="setViewMode($event.value)"
+        aria-label="View mode"
+        class="view-toggle"
+      >
+        <mat-button-toggle value="week">
+          <mat-icon>view_week</mat-icon>
+          <span class="view-btn-label">Week</span>
+        </mat-button-toggle>
+        <mat-button-toggle value="month">
+          <mat-icon>calendar_view_month</mat-icon>
+          <span class="view-btn-label">Month</span>
+        </mat-button-toggle>
+      </mat-button-toggle-group>
+    </div>
+
+    <!-- Period Navigator -->
+    <div class="period-navigator">
+      <button
+        type="button"
+        mat-icon-button
+        (click)="navigatePeriod(-1)"
+        aria-label="Previous period"
+      >
+        <mat-icon>chevron_left</mat-icon>
+      </button>
+
+      <button
+        type="button"
+        mat-button
+        (click)="goToToday()"
+        class="today-btn"
+        aria-label="Jump to current week or month"
+      >
+        Today
+      </button>
+
+      <span class="period-label">{{ periodTitle() }}</span>
+
+      <button type="button" mat-icon-button (click)="navigatePeriod(1)" aria-label="Next period">
+        <mat-icon>chevron_right</mat-icon>
+      </button>
+    </div>
+
+    <!-- Actions (Templates, Clear, Add) -->
+    <div class="calendar-top-actions">
+      @if (viewMode() === 'week') {
+        <button
+          type="button"
+          mat-stroked-button
+          (click)="openTemplatesDialog()"
+          class="template-action-btn"
+          aria-label="Manage reusable week templates"
+        >
+          <mat-icon>auto_awesome_motion</mat-icon>
+          <span class="btn-text">Templates</span>
+        </button>
+
+        @if (totalWeekMealsCount() > 0) {
+          <button
+            type="button"
+            mat-button
+            color="warn"
+            (click)="clearCurrentWeek()"
+            class="clear-week-btn"
+            aria-label="Clear all scheduled meals for this week"
+          >
+            <mat-icon>delete_sweep</mat-icon>
+            <span class="btn-text">Clear Week</span>
+          </button>
+        }
+      }
+
+      <button
+        type="button"
+        mat-flat-button
+        color="primary"
+        (click)="openAddEntryDialog()"
+        class="add-meal-primary-btn"
+        aria-label="Add a meal to your plan"
+      >
+        <mat-icon>add</mat-icon>
+        <span>Add Meal</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Loading State -->
+  @if (isLoading()) {
+    <div class="loading-state">
+      <mat-spinner diameter="40"></mat-spinner>
+      <p>Loading meal plan...</p>
+    </div>
+  } @else {
+    <!-- WEEKLY BOARD VIEW -->
+    @if (viewMode() === 'week' && weekData()) {
+      <div cdkDropListGroup class="week-view-wrapper">
+        <!-- Mobile-Only On-Deck Drawer Toggle (Visible <= 900px) -->
+        <div class="mobile-ondeck-card">
+          <button
+            type="button"
+            class="mobile-ondeck-header"
+            (click)="toggleMobileOnDeck()"
+            [attr.aria-expanded]="mobileOnDeckOpen()"
+            aria-label="Toggle On-Deck tray"
+          >
+            <div class="mobile-ondeck-title-group">
+              <mat-icon class="ondeck-icon">view_sidebar</mat-icon>
+              <span class="mobile-ondeck-title">On-Deck This Week</span>
+              <span class="ondeck-count-chip">{{ weekData()!.onDeckEntries.length }}</span>
+            </div>
+            <mat-icon class="ondeck-chevron">{{
+              mobileOnDeckOpen() ? 'expand_less' : 'expand_more'
+            }}</mat-icon>
+          </button>
+
+          @if (mobileOnDeckOpen()) {
+            <div
+              cdkDropList
+              [cdkDropListData]="{ isOnDeck: true, weekStartDate: activeWeekStart() }"
+              (cdkDropListDropped)="onDrop($event)"
+              class="mobile-ondeck-body"
+            >
+              @if (weekData()!.onDeckEntries.length === 0) {
+                <p class="ondeck-empty-hint">
+                  Drop meals here you plan to make this week without picking a night yet!
+                </p>
+              } @else {
+                <div class="mobile-ondeck-items">
+                  @for (entry of weekData()!.onDeckEntries; track entry.id) {
+                    <div
+                      cdkDrag
+                      [cdkDragData]="entry"
+                      class="meal-entry-card ondeck-item ondeck-card"
+                    >
+                      <div class="meal-card-content">
+                        <div class="meal-title-row">
+                          @if (entry.recipe) {
+                            <a [routerLink]="['/recipes', entry.recipe.id]" class="meal-title-link">
+                              {{ entry.displayTitle }}
+                            </a>
+                          } @else {
+                            <span class="meal-title-text">{{ entry.displayTitle }}</span>
+                          }
+                          <div class="meal-card-actions">
+                            <button
+                              type="button"
+                              mat-icon-button
+                              [matMenuTriggerFor]="entryMenu"
+                              class="entry-menu-btn"
+                              aria-label="Meal options"
+                            >
+                              <mat-icon>more_vert</mat-icon>
+                            </button>
+                            <mat-menu #entryMenu="matMenu">
+                              <button mat-menu-item (click)="cookTonight(entry)">
+                                <mat-icon>dinner_dining</mat-icon>
+                                <span>Cook Tonight (Dinner)</span>
+                              </button>
+                              <button mat-menu-item (click)="editEntry(entry)">
+                                <mat-icon>edit</mat-icon>
+                                <span>Edit Meal</span>
+                              </button>
+                              <button mat-menu-item (click)="deleteEntry(entry)">
+                                <mat-icon>delete</mat-icon>
+                                <span>Remove</span>
+                              </button>
+                            </mat-menu>
+                          </div>
+                        </div>
+
+                        <div class="meal-badges-row">
+                          @if (entry.entryType === 'Recipe' && entry.targetServings) {
+                            <span class="badge servings-badge">{{ entry.targetServings }} srv</span>
+                          }
+                          @if (entry.isLeftovers) {
+                            <span class="badge leftovers-badge">Leftovers</span>
+                          }
+                        </div>
+
+                        <!-- 1-Tap Cook Tonight Button on On-Deck card -->
+                        <button
+                          type="button"
+                          mat-stroked-button
+                          color="primary"
+                          class="cook-tonight-btn"
+                          (click)="cookTonight(entry)"
+                          aria-label="Schedule for tonight's dinner"
+                        >
+                          <mat-icon>local_fire_department</mat-icon>
+                          <span>Cook Tonight</span>
+                        </button>
+                      </div>
+                    </div>
+                  }
+                </div>
+              }
+
+              <button
+                type="button"
+                mat-button
+                class="add-to-ondeck-btn"
+                (click)="openAddEntryDialog({ isOnDeck: true })"
+                aria-label="Add meal to On-Deck tray"
+              >
+                <mat-icon>add</mat-icon>
+                <span>Add to On-Deck</span>
+              </button>
+            </div>
+          }
+        </div>
+
+        <div class="week-board-container">
+          <!-- 7-Day Board Grid (Mon - Sun) -->
+          <div class="week-days-grid">
+            @for (day of weekData()!.days; track day.date) {
+              @let header = getDayHeader(day.date);
+              <div class="day-column" [class.is-today]="header.isToday">
+                <div class="day-header">
+                  <div class="day-title-group">
+                    <span class="day-name">{{ header.dayShort }}</span>
+                    <span class="day-number" [class.today-badge]="header.isToday">
+                      {{ header.dateNum }}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    mat-icon-button
+                    class="quick-add-day-btn"
+                    (click)="openAddEntryDialog({ date: day.date, slot: 'Dinner' })"
+                    [attr.aria-label]="'Add meal to ' + header.dayLong"
+                  >
+                    <mat-icon>add</mat-icon>
+                  </button>
+                </div>
+
+                <!-- 4 Ordered Slots -->
+                <div class="day-slots-list">
+                  @for (slot of mealSlots; track slot.value) {
+                    @let slotEntries = getSlotEntries(day, slot.value);
+                    <div
+                      cdkDropList
+                      [cdkDropListData]="{ isOnDeck: false, date: day.date, slot: slot.value }"
+                      (cdkDropListDropped)="onDrop($event)"
+                      class="slot-bucket"
+                      [class.has-entries]="slotEntries.length > 0"
+                    >
+                      <div class="slot-bucket-header">
+                        <span class="slot-label">{{ slot.shortLabel }}</span>
+                        <button
+                          type="button"
+                          mat-icon-button
+                          class="slot-add-btn"
+                          (click)="openAddEntryDialog({ date: day.date, slot: slot.value })"
+                          [attr.aria-label]="'Add to ' + header.dayShort + ' ' + slot.label"
+                        >
+                          <mat-icon>add</mat-icon>
+                        </button>
+                      </div>
+
+                      <div class="slot-items">
+                        @for (entry of slotEntries; track entry.id) {
+                          <div cdkDrag [cdkDragData]="entry" class="meal-entry-card">
+                            <div class="meal-card-content">
+                              <div class="meal-title-row">
+                                @if (entry.recipe) {
+                                  <a
+                                    [routerLink]="['/recipes', entry.recipe.id]"
+                                    class="meal-title-link"
+                                  >
+                                    {{ entry.displayTitle }}
+                                  </a>
+                                } @else {
+                                  <span class="meal-title-text">{{ entry.displayTitle }}</span>
+                                }
+                                <div class="meal-card-actions">
+                                  <button
+                                    type="button"
+                                    mat-icon-button
+                                    [matMenuTriggerFor]="slotEntryMenu"
+                                    class="entry-menu-btn"
+                                    aria-label="Meal options"
+                                  >
+                                    <mat-icon>more_vert</mat-icon>
+                                  </button>
+                                  <mat-menu #slotEntryMenu="matMenu">
+                                    <button mat-menu-item (click)="editEntry(entry)">
+                                      <mat-icon>edit</mat-icon>
+                                      <span>Edit Meal</span>
+                                    </button>
+                                    <button mat-menu-item (click)="scheduleLeftoversFrom(entry)">
+                                      <mat-icon>takeout_dining</mat-icon>
+                                      <span>Schedule Leftovers (+1 Day)</span>
+                                    </button>
+                                    <button mat-menu-item (click)="moveToOnDeck(entry)">
+                                      <mat-icon>view_sidebar</mat-icon>
+                                      <span>Move to On-Deck</span>
+                                    </button>
+                                    <button mat-menu-item (click)="deleteEntry(entry)">
+                                      <mat-icon>delete</mat-icon>
+                                      <span>Remove</span>
+                                    </button>
+                                  </mat-menu>
+                                </div>
+                              </div>
+
+                              <div class="meal-badges-row">
+                                @if (entry.entryType === 'Recipe' && entry.targetServings) {
+                                  <span class="badge servings-badge"
+                                    >{{ entry.targetServings }} srv</span
+                                  >
+                                }
+                                @if (entry.isLeftovers) {
+                                  <span class="badge leftovers-badge">Leftovers</span>
+                                }
+                                @if (entry.entryType === 'FreeformNote') {
+                                  <span class="badge note-badge">Note</span>
+                                }
+                              </div>
+
+                              @if (entry.notes) {
+                                <p class="meal-notes-snippet">{{ entry.notes }}</p>
+                              }
+                            </div>
+                          </div>
+                        }
+                      </div>
+                    </div>
+                  }
+                </div>
+              </div>
+            }
+          </div>
+
+          <!-- Desktop Persistent On-Deck Sidebar (> 900px) -->
+          <aside class="ondeck-sidebar">
+            <div class="ondeck-sidebar-header">
+              <div class="ondeck-sidebar-title-group">
+                <mat-icon class="ondeck-icon">view_sidebar</mat-icon>
+                <span class="ondeck-sidebar-title">On-Deck This Week</span>
+                <span class="ondeck-count-chip">{{ weekData()!.onDeckEntries.length }}</span>
+              </div>
+              <button
+                type="button"
+                mat-icon-button
+                (click)="openAddEntryDialog({ isOnDeck: true })"
+                aria-label="Add meal to On-Deck tray"
+              >
+                <mat-icon>add</mat-icon>
+              </button>
+            </div>
+
+            <p class="ondeck-sidebar-hint">
+              Flexible dinners planned for this week. Drag onto any night or tap
+              <strong>Cook Tonight</strong>!
+            </p>
+
+            <div
+              cdkDropList
+              [cdkDropListData]="{ isOnDeck: true, weekStartDate: activeWeekStart() }"
+              (cdkDropListDropped)="onDrop($event)"
+              class="ondeck-drop-zone"
+            >
+              @if (weekData()!.onDeckEntries.length === 0) {
+                <div class="ondeck-empty-box">
+                  <mat-icon class="empty-tray-icon">soup_kitchen</mat-icon>
+                  <p>No meals on deck</p>
+                  <button
+                    type="button"
+                    mat-stroked-button
+                    (click)="openAddEntryDialog({ isOnDeck: true })"
+                  >
+                    Add On-Deck Meal
+                  </button>
+                </div>
+              } @else {
+                <div class="ondeck-items-list">
+                  @for (entry of weekData()!.onDeckEntries; track entry.id) {
+                    <div
+                      cdkDrag
+                      [cdkDragData]="entry"
+                      class="meal-entry-card ondeck-item ondeck-card"
+                    >
+                      <div class="meal-card-content">
+                        <div class="meal-title-row">
+                          @if (entry.recipe) {
+                            <a [routerLink]="['/recipes', entry.recipe.id]" class="meal-title-link">
+                              {{ entry.displayTitle }}
+                            </a>
+                          } @else {
+                            <span class="meal-title-text">{{ entry.displayTitle }}</span>
+                          }
+                          <div class="meal-card-actions">
+                            <button
+                              type="button"
+                              mat-icon-button
+                              [matMenuTriggerFor]="desktopOndeckMenu"
+                              class="entry-menu-btn"
+                              aria-label="Meal options"
+                            >
+                              <mat-icon>more_vert</mat-icon>
+                            </button>
+                            <mat-menu #desktopOndeckMenu="matMenu">
+                              <button mat-menu-item (click)="cookTonight(entry)">
+                                <mat-icon>dinner_dining</mat-icon>
+                                <span>Cook Tonight (Dinner)</span>
+                              </button>
+                              <button mat-menu-item (click)="editEntry(entry)">
+                                <mat-icon>edit</mat-icon>
+                                <span>Edit Meal</span>
+                              </button>
+                              <button mat-menu-item (click)="deleteEntry(entry)">
+                                <mat-icon>delete</mat-icon>
+                                <span>Remove</span>
+                              </button>
+                            </mat-menu>
+                          </div>
+                        </div>
+
+                        <div class="meal-badges-row">
+                          @if (entry.entryType === 'Recipe' && entry.targetServings) {
+                            <span class="badge servings-badge">{{ entry.targetServings }} srv</span>
+                          }
+                          @if (entry.isLeftovers) {
+                            <span class="badge leftovers-badge">Leftovers</span>
+                          }
+                        </div>
+
+                        <button
+                          type="button"
+                          mat-stroked-button
+                          color="primary"
+                          class="cook-tonight-btn"
+                          (click)="cookTonight(entry)"
+                          aria-label="Schedule for tonight's dinner"
+                        >
+                          <mat-icon>local_fire_department</mat-icon>
+                          <span>Cook Tonight</span>
+                        </button>
+                      </div>
+                    </div>
+                  }
+                </div>
+              }
+            </div>
+          </aside>
+        </div>
+      </div>
+    }
+
+    <!-- MONTHLY OVERVIEW VIEW -->
+    @if (viewMode() === 'month') {
+      <div class="month-view-container">
+        <!-- Weekday Headers -->
+        <div class="month-weekdays-row">
+          @for (dayName of dayNamesShort; track dayName) {
+            <span class="month-col-header">{{ dayName }}</span>
+          }
+        </div>
+
+        <!-- Month Day Cells -->
+        <div class="month-days-grid">
+          @for (cell of monthGridDays(); track cell.iso) {
+            @let cellEntries = monthEntriesMap().get(cell.iso) || [];
+            <div
+              class="month-cell"
+              [class.not-current-month]="!cell.inCurrentMonth"
+              [class.is-today]="cell.isToday"
+              (click)="selectMonthDay(cell.iso)"
+              (keydown.enter)="selectMonthDay(cell.iso)"
+              tabindex="0"
+              role="button"
+              [attr.aria-label]="'View week of ' + cell.iso"
+            >
+              <div class="month-cell-header">
+                <span class="month-date-number" [class.today-badge]="cell.isToday">
+                  {{ cell.dateNum }}
+                </span>
+                <button
+                  type="button"
+                  mat-icon-button
+                  class="month-quick-add"
+                  (click)="$event.stopPropagation(); openAddEntryDialog({ date: cell.iso })"
+                  [attr.aria-label]="'Add meal to ' + cell.iso"
+                >
+                  <mat-icon>add</mat-icon>
+                </button>
+              </div>
+
+              <div class="month-cell-entries">
+                @for (entry of cellEntries.slice(0, 3); track entry.id) {
+                  <span
+                    class="month-meal-pill"
+                    [class.is-leftover]="entry.isLeftovers"
+                    [class.is-note]="entry.entryType === 'FreeformNote'"
+                    [title]="entry.displayTitle"
+                  >
+                    {{ entry.displayTitle }}
+                  </span>
+                }
+                @if (cellEntries.length > 3) {
+                  <span class="month-more-badge">+{{ cellEntries.length - 3 }} more</span>
+                }
+              </div>
+            </div>
+          }
+        </div>
+      </div>
+    }
+  }
+</div>

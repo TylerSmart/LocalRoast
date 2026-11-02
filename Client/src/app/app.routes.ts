@@ -54,6 +54,13 @@ export const routes: Routes = [
           ),
       },
       {
+        path: 'meal-plan',
+        loadComponent: () =>
+          import('./features/meal-plans/meal-plan-calendar/meal-plan-calendar.component').then(
+            (m) => m.MealPlanCalendarComponent,
+          ),
+      },
+      {
         path: 'ingest',
         loadComponent: () =>
           import('./features/ingestion/ingestion-hub/ingestion-hub.component').then(

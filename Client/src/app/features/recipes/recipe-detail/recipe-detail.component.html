@@ -8,6 +8,10 @@
 
     @if (recipe()) {
       <div class="detail-top-actions">
+        <button mat-stroked-button (click)="openPlanMealDialog()" aria-label="Plan meal">
+          <mat-icon>calendar_month</mat-icon>
+          <span>Plan Meal</span>
+        </button>
         <button
           mat-stroked-button
           (click)="openOrganizeDialog()"

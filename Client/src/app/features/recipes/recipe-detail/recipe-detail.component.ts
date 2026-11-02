@@ -14,6 +14,7 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { MealPlanEntryDto } from '../../../core/models/meal-plan.models';
 import {
   RecipeAttachmentDto,
   RecipeDetailDto,
@@ -29,7 +30,12 @@ import {
   formatMinutes,
   scaleAndConvert,
 } from '../../../core/utils/culinary-math';
+import { getTodayIsoLocal } from '../../../core/utils/meal-plan-date';
 import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialog/confirm-dialog.component';
+import {
+  MealPlanEntryDialogComponent,
+  MealPlanEntryDialogData,
+} from '../../meal-plans/meal-plan-entry-dialog/meal-plan-entry-dialog.component';
 import {
   RecipeOrganizationDialogComponent,
   RecipeOrganizationDialogData,
@@ -232,6 +238,47 @@ export class RecipeDetailComponent implements OnInit {
           err?.error?.detail || err?.error?.title || 'Failed to load recipe details.',
         );
       },
+    });
+  }
+
+  openPlanMealDialog(): void {
+    const r = this.recipe();
+    if (!r) {
+      return;
+    }
+
+    const ref = this.dialog.open<
+      MealPlanEntryDialogComponent,
+      MealPlanEntryDialogData,
+      MealPlanEntryDto
+    >(MealPlanEntryDialogComponent, {
+      width: '540px',
+      maxWidth: '95vw',
+      data: {
+        initialDate: getTodayIsoLocal(),
+        initialSlot: 'Dinner',
+        initialIsOnDeck: false,
+        preselectedRecipe: {
+          id: r.id,
+          title: r.title,
+          baseServings: r.baseServings,
+          thumbnailImagePath: r.thumbnailImagePath,
+        },
+        initialTargetServings: this.targetServings(),
+      },
+    });
+
+    ref.afterClosed().subscribe((created) => {
+      if (created) {
+        const snackRef = this.snackBar.open(
+          `Planned "${r.title}" for meal plan!`,
+          'View Meal Plan',
+          { duration: 5000 },
+        );
+        snackRef.onAction().subscribe(() => {
+          this.router.navigate(['/meal-plan']);
+        });
+      }
     });
   }
 

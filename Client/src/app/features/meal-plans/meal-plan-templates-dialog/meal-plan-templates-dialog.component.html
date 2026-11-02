@@ -1,0 +1,212 @@
+<div class="templates-dialog-container">
+  <h2 mat-dialog-title>
+    <mat-icon class="title-icon">auto_awesome_motion</mat-icon>
+    <span>Meal Plan Templates</span>
+  </h2>
+
+  <mat-dialog-content>
+    @if (errorMessage()) {
+      <div class="error-banner" role="alert">
+        <mat-icon>error</mat-icon>
+        <span>{{ errorMessage() }}</span>
+      </div>
+    }
+
+    <mat-tab-group animationDuration="150ms">
+      <!-- Tab 1: Saved Templates -->
+      <mat-tab label="Saved Templates">
+        <div class="tab-content">
+          <div class="apply-target-strip">
+            <span class="target-label">Target Week:</span>
+            <span class="target-week-badge">{{ data.currentWeekLabel }}</span>
+          </div>
+
+          <div class="mode-selector-row">
+            <span class="mode-label">Stamp Mode:</span>
+            <mat-button-toggle-group
+              [value]="applyMode()"
+              (change)="applyMode.set($event.value)"
+              aria-label="Stamp mode"
+              class="compact-toggle"
+            >
+              <mat-button-toggle value="Merge">
+                <span>Merge (Keep existing)</span>
+              </mat-button-toggle>
+              <mat-button-toggle value="Replace">
+                <span>Replace (Clear week first)</span>
+              </mat-button-toggle>
+            </mat-button-toggle-group>
+          </div>
+
+          @if (isLoading()) {
+            <div class="loading-state">
+              <mat-spinner diameter="32"></mat-spinner>
+              <span>Loading templates...</span>
+            </div>
+          } @else if (templates().length === 0) {
+            <div class="empty-state">
+              <mat-icon class="empty-icon">view_timeline</mat-icon>
+              <p class="empty-title">No Saved Week Templates</p>
+              <p class="empty-hint">
+                Plan a great week of meals, then use the <strong>"Save Current Week"</strong> tab to
+                save it for future re-use!
+              </p>
+            </div>
+          } @else {
+            <div class="template-list">
+              @for (t of templates(); track t.id) {
+                <div class="template-card">
+                  <div class="template-header">
+                    <div class="template-info">
+                      <span class="template-name">{{ t.name }}</span>
+                      @if (t.description) {
+                        <span class="template-desc">{{ t.description }}</span>
+                      }
+                      <div class="template-badges">
+                        <span class="item-badge">{{ t.itemCount }} total meals</span>
+                        <span class="item-badge scheduled"
+                          >{{ t.scheduledItemCount }} scheduled</span
+                        >
+                        @if (t.onDeckItemCount > 0) {
+                          <span class="item-badge ondeck">{{ t.onDeckItemCount }} on-deck</span>
+                        }
+                      </div>
+                    </div>
+
+                    <div class="template-actions">
+                      <button
+                        type="button"
+                        mat-button
+                        (click)="previewTemplate(t.id)"
+                        aria-label="Preview template items"
+                      >
+                        <mat-icon>{{
+                          selectedTemplateDetail()?.id === t.id ? 'expand_less' : 'visibility'
+                        }}</mat-icon>
+                        <span>Preview</span>
+                      </button>
+                      <button
+                        type="button"
+                        mat-flat-button
+                        color="primary"
+                        (click)="applyTemplate(t.id)"
+                        [disabled]="isApplying()"
+                        class="apply-btn"
+                        aria-label="Apply template to target week"
+                      >
+                        <mat-icon>file_download</mat-icon>
+                        <span>Apply to Week</span>
+                      </button>
+                      <button
+                        type="button"
+                        mat-icon-button
+                        color="warn"
+                        (click)="deleteTemplate(t)"
+                        aria-label="Delete template"
+                      >
+                        <mat-icon>delete</mat-icon>
+                      </button>
+                    </div>
+                  </div>
+
+                  <!-- Expanded Preview -->
+                  @if (selectedTemplateDetail()?.id === t.id) {
+                    <div class="template-preview-tray">
+                      <span class="preview-title">Template Meals:</span>
+                      <div class="preview-items-list">
+                        @for (item of selectedTemplateDetail()!.items; track item.id) {
+                          <div class="preview-item-row">
+                            <span class="preview-day-slot">
+                              @if (item.isOnDeck) {
+                                <strong>On-Deck</strong>
+                              } @else {
+                                <strong>Day +{{ item.dayOffset }}</strong> ({{ item.slot }})
+                              }
+                            </span>
+                            <span class="preview-item-title">{{ item.displayTitle }}</span>
+                            @if (item.isLeftovers) {
+                              <span class="leftover-chip">Leftovers</span>
+                            }
+                          </div>
+                        }
+                      </div>
+                    </div>
+                  }
+                </div>
+              }
+            </div>
+          }
+        </div>
+      </mat-tab>
+
+      <!-- Tab 2: Save Current Week -->
+      <mat-tab label="Save Current Week">
+        <div class="tab-content">
+          @if (data.currentWeekEntryCount === 0) {
+            <div class="empty-state">
+              <mat-icon class="empty-icon">event_busy</mat-icon>
+              <p class="empty-title">Current Week is Empty</p>
+              <p class="empty-hint">
+                Add some recipes, leftovers, or meals to
+                <strong>{{ data.currentWeekLabel }}</strong> before saving it as a template.
+              </p>
+            </div>
+          } @else {
+            <form
+              [formGroup]="saveForm"
+              (ngSubmit)="onSaveCurrentWeek()"
+              class="save-template-form"
+            >
+              <p class="save-desc">
+                Snapshot all <strong>{{ data.currentWeekEntryCount }}</strong> meal entries from
+                <strong>{{ data.currentWeekLabel }}</strong> into a reusable template.
+              </p>
+
+              <mat-form-field appearance="outline" class="full-width">
+                <mat-label>Template Name</mat-label>
+                <input
+                  matInput
+                  formControlName="name"
+                  placeholder="e.g. Standard Busy Fall Week, Sourdough Weekend"
+                  required
+                />
+              </mat-form-field>
+
+              <mat-form-field appearance="outline" class="full-width">
+                <mat-label>Description (Optional)</mat-label>
+                <textarea
+                  matInput
+                  formControlName="description"
+                  rows="2"
+                  placeholder="e.g. 4 quick 30-min weeknight dinners + Sunday meal prep"
+                ></textarea>
+              </mat-form-field>
+
+              <mat-checkbox formControlName="includeOnDeck" class="include-ondeck-check">
+                <span>Include "On-Deck This Week" items in this template</span>
+              </mat-checkbox>
+
+              <div class="save-action-row">
+                <button
+                  type="submit"
+                  mat-flat-button
+                  color="primary"
+                  [disabled]="isSaving() || saveForm.invalid"
+                >
+                  @if (isSaving()) {
+                    <mat-spinner diameter="18" class="inline-spinner"></mat-spinner>
+                  }
+                  <span>Save as Template</span>
+                </button>
+              </div>
+            </form>
+          }
+        </div>
+      </mat-tab>
+    </mat-tab-group>
+  </mat-dialog-content>
+
+  <mat-dialog-actions align="end">
+    <button mat-button (click)="onCancel()">Close</button>
+  </mat-dialog-actions>
+</div>
