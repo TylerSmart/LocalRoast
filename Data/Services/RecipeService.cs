@@ -1,4 +1,4 @@
-﻿using System.Text.RegularExpressions;
+using System.Text.RegularExpressions;
 using App.Core.Exceptions;
 using App.Core.MealPlans;
 using App.Core.Media;
@@ -580,6 +580,14 @@ public sealed partial class RecipeService(
         foreach (var job in linkedJobs)
         {
             job.ResultingRecipeId = null;
+            if (!string.IsNullOrEmpty(cover) && job.DownloadedCoverImagePath == cover)
+            {
+                job.DownloadedCoverImagePath = null;
+            }
+            if (!string.IsNullOrEmpty(thumb) && job.DownloadedThumbnailImagePath == thumb)
+            {
+                job.DownloadedThumbnailImagePath = null;
+            }
         }
 
         var linkedMealEntries = await dbContext

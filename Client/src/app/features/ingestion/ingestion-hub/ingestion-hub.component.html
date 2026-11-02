@@ -473,8 +473,13 @@
           <div class="job-card-inner">
             <!-- Channel / Image Thumbnail -->
             <div class="job-media">
-              @if (job.thumbnailImagePath) {
-                <img [src]="job.thumbnailImagePath" [alt]="job.displayTitle" class="job-thumb" />
+              @if (job.thumbnailImagePath && !failedThumbJobIds().has(job.id)) {
+                <img
+                  [src]="job.thumbnailImagePath"
+                  [alt]="job.displayTitle"
+                  class="job-thumb"
+                  (error)="onJobThumbError(job.id)"
+                />
               } @else {
                 <div class="channel-placeholder">
                   <mat-icon>{{ getChannelIcon(job.channel) }}</mat-icon>

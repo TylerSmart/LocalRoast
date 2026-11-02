@@ -57,14 +57,27 @@
 
       @if (form.controls.placement.value === 'scheduled') {
         <div class="scheduled-row">
-          <mat-form-field appearance="outline" class="flex-1">
+          <mat-form-field appearance="outline" class="flex-1" subscriptSizing="dynamic">
             <mat-label>Date</mat-label>
-            <input matInput type="date" formControlName="scheduledDate" />
+            <input matInput [matDatepicker]="scheduledDatePicker" formControlName="scheduledDate" />
+            <mat-datepicker-toggle
+              matIconSuffix
+              [for]="scheduledDatePicker"
+            ></mat-datepicker-toggle>
+            <mat-datepicker #scheduledDatePicker [touchUi]="useTouchDatepicker"></mat-datepicker>
           </mat-form-field>
 
-          <mat-form-field appearance="outline" class="flex-1">
+          <mat-form-field appearance="outline" class="flex-1" subscriptSizing="dynamic">
             <mat-label>Meal Slot</mat-label>
             <mat-select formControlName="slot">
+              <mat-select-trigger>
+                @if (getSelectedSlotMeta(); as selectedSlot) {
+                  <span class="slot-option">
+                    <mat-icon class="slot-option-icon">{{ selectedSlot.icon }}</mat-icon>
+                    <span>{{ selectedSlot.label }}</span>
+                  </span>
+                }
+              </mat-select-trigger>
               @for (slot of mealSlots; track slot.value) {
                 <mat-option [value]="slot.value">
                   <div class="slot-option">
@@ -82,7 +95,7 @@
       @switch (form.controls.entryType.value) {
         @case ('Recipe') {
           <div class="recipe-selection-section">
-            <mat-form-field appearance="outline" class="full-width">
+            <mat-form-field appearance="outline" class="full-width" subscriptSizing="dynamic">
               <mat-label>Select Recipe</mat-label>
               <mat-select
                 formControlName="recipeId"
@@ -114,7 +127,11 @@
                 >
                   <mat-icon>remove</mat-icon>
                 </button>
-                <mat-form-field appearance="outline" class="servings-input-field">
+                <mat-form-field
+                  appearance="outline"
+                  class="servings-input-field"
+                  subscriptSizing="dynamic"
+                >
                   <input
                     matInput
                     type="number"
@@ -200,7 +217,7 @@
       }
 
       <!-- Optional Notes field for any type -->
-      <mat-form-field appearance="outline" class="full-width notes-field">
+      <mat-form-field appearance="outline" class="full-width notes-field" subscriptSizing="dynamic">
         <mat-label>Cook's Notes / Reminders (Optional)</mat-label>
         <textarea
           matInput

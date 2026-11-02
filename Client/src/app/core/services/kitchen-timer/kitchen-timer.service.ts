@@ -14,25 +14,33 @@ export interface ActiveKitchenTimer {
   state: KitchenTimerState;
 }
 
+let sharedAudioCtx: AudioContext | null = null;
+
 function playChime(): void {
   try {
     const AudioCtx =
       window.AudioContext ||
       (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!AudioCtx) return;
-    const ctx = new AudioCtx();
-    const notes = [523.25, 659.25, 783.99]; // C5, E5, G5
+    if (!sharedAudioCtx || sharedAudioCtx.state === 'closed') {
+      sharedAudioCtx = new AudioCtx();
+    }
+    const ctx = sharedAudioCtx;
+    if (ctx.state === 'suspended') {
+      void ctx.resume();
+    }
+    const notes = [523.25, 659.25, 783.99, 1046.5]; // C5, E5, G5, C6
     notes.forEach((freq, index) => {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.type = 'sine';
-      osc.frequency.setValueAtTime(freq, ctx.currentTime + index * 0.15);
-      gain.gain.setValueAtTime(0.15, ctx.currentTime + index * 0.15);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + index * 0.15 + 0.4);
+      osc.frequency.setValueAtTime(freq, ctx.currentTime + index * 0.14);
+      gain.gain.setValueAtTime(0.18, ctx.currentTime + index * 0.14);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + index * 0.14 + 0.35);
       osc.connect(gain);
       gain.connect(ctx.destination);
-      osc.start(ctx.currentTime + index * 0.15);
-      osc.stop(ctx.currentTime + index * 0.15 + 0.45);
+      osc.start(ctx.currentTime + index * 0.14);
+      osc.stop(ctx.currentTime + index * 0.14 + 0.4);
     });
   } catch {
     // AudioContext blocked or unsupported in headless environments
@@ -55,6 +63,7 @@ function showNotification(timer: ActiveKitchenTimer): void {
 @Service()
 export class KitchenTimerService {
   private tickerId: ReturnType<typeof setInterval> | null = null;
+  private alarmLoopId: ReturnType<typeof setInterval> | null = null;
   private readonly _timers = signal<ActiveKitchenTimer[]>([]);
   readonly timers = this._timers.asReadonly();
 
@@ -133,6 +142,7 @@ export class KitchenTimerService {
         };
       }),
     );
+    this.syncAlarmLoop();
     this.ensureTicker();
   }
 
@@ -148,15 +158,18 @@ export class KitchenTimerService {
         };
       }),
     );
+    this.syncAlarmLoop();
   }
 
   dismissTimer(id: string): void {
     this._timers.update((timers) => timers.filter((t) => t.id !== id));
+    this.syncAlarmLoop();
   }
 
   clearAll(): void {
     this._timers.set([]);
     this.stopTicker();
+    this.stopAlarmLoop();
   }
 
   private ensureTicker(): void {
@@ -171,9 +184,34 @@ export class KitchenTimerService {
     }
   }
 
+  private syncAlarmLoop(): void {
+    const anyCompleted = this._timers().some((t) => t.state === 'completed');
+    if (anyCompleted) {
+      if (this.alarmLoopId === null) {
+        this.alarmLoopId = setInterval(() => {
+          if (this._timers().some((t) => t.state === 'completed')) {
+            playChime();
+          } else {
+            this.stopAlarmLoop();
+          }
+        }, 1800);
+      }
+    } else {
+      this.stopAlarmLoop();
+    }
+  }
+
+  private stopAlarmLoop(): void {
+    if (this.alarmLoopId !== null) {
+      clearInterval(this.alarmLoopId);
+      this.alarmLoopId = null;
+    }
+  }
+
   private readonly tick = (): void => {
     const now = Date.now();
     let hasRunning = false;
+    let newlyCompleted = false;
     this._timers.update((timers) => {
       return timers.map((timer) => {
         if (timer.state !== 'running' || timer.endsAtMs === null) {
@@ -182,6 +220,7 @@ export class KitchenTimerService {
 
         const remainingMs = timer.endsAtMs - now;
         if (remainingMs <= 0) {
+          newlyCompleted = true;
           playChime();
           showNotification(timer);
           return {
@@ -199,6 +238,10 @@ export class KitchenTimerService {
         };
       });
     });
+
+    if (newlyCompleted) {
+      this.syncAlarmLoop();
+    }
 
     if (!hasRunning) {
       this.stopTicker();

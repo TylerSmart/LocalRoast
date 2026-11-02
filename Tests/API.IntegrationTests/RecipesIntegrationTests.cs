@@ -447,12 +447,21 @@ public sealed class RecipesIntegrationTests
     {
         await RegisterAndAuthenticateAsync(_client, "edit_test_chef@example.com", "edittestchef");
 
-        // Fetch tags and collections
+        // Fetch tags and create two test collections
         var tags = await (await _client.GetAsync("/api/tags")).Content.ReadFromJsonAsync<
             IReadOnlyList<TagDto>
         >();
         Assert.IsNotNull(tags);
         Assert.IsTrue(tags.Count >= 3);
+
+        await _client.PostAsJsonAsync(
+            "/api/collections",
+            new UpsertCollectionRequest("Weeknight Favorites", "Quick meals", 10)
+        );
+        await _client.PostAsJsonAsync(
+            "/api/collections",
+            new UpsertCollectionRequest("Cast Iron Classics", "Skillet meals", 20)
+        );
 
         var collections = await (
             await _client.GetAsync("/api/collections")

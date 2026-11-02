@@ -31,7 +31,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
+  gap: 0.75rem;
   padding: 0.75rem 1.5rem;
   background-color: var(--mat-sys-surface-container);
   border-bottom: 1px solid var(--mat-sys-outline-variant);
@@ -64,8 +64,15 @@
   .top-bar-controls {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
+    gap: 0.65rem;
     flex-shrink: 0;
+    flex-wrap: wrap;
+  }
+
+  .log-cook-btn {
+    flex-shrink: 0;
+    white-space: nowrap;
+    padding: 0 1rem !important;
   }
 }
 
@@ -81,6 +88,7 @@
   font-size: 0.8rem;
   font-weight: 500;
   user-select: none;
+  flex-shrink: 0;
 
   .wake-icon {
     font-size: 18px;
@@ -106,16 +114,25 @@
   background-color: var(--mat-sys-surface-container-high);
   border-radius: 9999px;
   padding: 0.1rem 0.3rem;
+  flex-shrink: 0;
 
   .step-btn {
     width: 32px;
     height: 32px;
-    line-height: 32px;
+    padding: 0 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
 
     mat-icon {
       font-size: 18px;
       width: 18px;
       height: 18px;
+      line-height: 18px;
+      margin: 0 !important;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
     }
   }
 
@@ -124,6 +141,7 @@
     font-weight: 600;
     min-width: 46px;
     text-align: center;
+    white-space: nowrap;
   }
 }
 
@@ -132,6 +150,7 @@
   display: flex;
   align-items: center;
   gap: 0.25rem;
+  flex-shrink: 0;
 
   .mult-chip {
     min-width: 36px;
@@ -156,6 +175,7 @@
 /* Unit Toggle */
 .unit-toggle {
   height: 36px;
+  flex-shrink: 0;
 }
 
 /* 2. Latest Tweak Callout */
@@ -208,10 +228,17 @@
     flex-shrink: 0;
     width: 28px;
     height: 28px;
-    line-height: 28px;
+    padding: 0 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
 
     mat-icon {
       font-size: 18px;
+      width: 18px;
+      height: 18px;
+      line-height: 18px;
+      margin: 0 !important;
     }
   }
 }
@@ -307,9 +334,9 @@
 
   .ingredient-item {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 0.5rem;
-    padding: 0.35rem 0.5rem;
+    padding: 0.4rem 0.5rem;
     border-radius: 8px;
     cursor: pointer;
     user-select: none;
@@ -319,9 +346,22 @@
       background-color: var(--mat-sys-surface-container-high);
     }
 
+    mat-checkbox {
+      margin-top: -4px;
+      flex-shrink: 0;
+    }
+
+    .ingredient-text {
+      flex: 1;
+      min-width: 0;
+      line-height: 1.45;
+      font-size: 0.95rem;
+    }
+
     &.is-checked {
       opacity: 0.5;
 
+      .ingredient-text,
       .item-name,
       .item-qty {
         text-decoration: line-through;
@@ -329,29 +369,32 @@
     }
 
     .item-qty {
-      font-weight: 600;
+      font-weight: 700;
       color: var(--mat-sys-primary);
-      white-space: nowrap;
+      margin-right: 0.35rem;
     }
 
     .item-name {
-      flex: 1;
+      font-weight: 500;
     }
 
     .item-prep {
       color: var(--mat-sys-on-surface-variant);
-      font-size: 0.85rem;
+      font-size: 0.875rem;
+      font-style: italic;
+      margin-left: 0.25rem;
     }
 
     .cook-substitute-btn {
       width: 28px;
       height: 28px;
-      padding: 0;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
+      padding: 0 !important;
+      display: inline-flex !important;
+      align-items: center !important;
+      justify-content: center !important;
       color: var(--mat-sys-primary);
       opacity: 0.7;
+      flex-shrink: 0;
       transition:
         opacity 0.15s ease,
         transform 0.15s ease;
@@ -366,6 +409,8 @@
         font-size: 18px;
         width: 18px;
         height: 18px;
+        line-height: 18px;
+        margin: 0 !important;
       }
     }
   }
@@ -392,6 +437,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
+  flex-wrap: wrap;
 
   .step-counter {
     font-size: 1.1rem;
@@ -463,6 +509,7 @@
     .step-checkbox {
       margin-top: 0.25rem;
       transform: scale(1.3);
+      flex-shrink: 0;
     }
 
     .instruction-text {
@@ -590,10 +637,25 @@
     font-size: 1.1rem;
     font-weight: 700;
     border-radius: 14px;
-    display: flex;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 0.5rem;
+
+    .step-btn-content {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      line-height: 1;
+
+      mat-icon {
+        font-size: 20px;
+        width: 20px;
+        height: 20px;
+        line-height: 20px;
+        margin: 0;
+      }
+    }
   }
 }
 
@@ -661,7 +723,8 @@
     display: flex;
     gap: 0.75rem;
     overflow-x: auto;
-    padding-top: 0.75rem;
+    padding: 0.75rem 0.5rem 0.5rem;
+    margin: 0 -0.5rem -0.25rem;
 
     .timer-card {
       background-color: var(--mat-sys-surface-container);
@@ -707,24 +770,33 @@
       .timer-actions {
         display: flex;
         align-items: center;
-        gap: 0.2rem;
+        gap: 0.25rem;
 
         .timer-action-btn {
           width: 32px;
           height: 32px;
-          line-height: 32px;
+          padding: 0 !important;
+          display: inline-flex !important;
+          align-items: center !important;
+          justify-content: center !important;
 
           mat-icon {
             font-size: 18px;
             width: 18px;
             height: 18px;
+            line-height: 18px;
+            margin: 0 !important;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
           }
 
           &.bump-btn {
             font-size: 0.8rem;
             font-weight: 700;
             min-width: 36px;
-            padding: 0 4px;
+            width: auto;
+            padding: 0 6px !important;
           }
         }
       }
@@ -737,7 +809,7 @@
     transform: scale(1);
   }
   50% {
-    transform: scale(1.03);
+    transform: scale(1.02);
   }
   100% {
     transform: scale(1);
@@ -796,14 +868,21 @@
 /* Mobile Responsiveness (Verified down to 360px) */
 @media (max-width: 900px) {
   .cook-top-bar {
-    padding: 0.5rem 1rem;
+    padding: 0.65rem 1rem;
     flex-wrap: wrap;
+    gap: 0.5rem;
+
+    .top-bar-left {
+      width: 100%;
+      flex: 1 1 100%;
+    }
 
     .top-bar-controls {
       width: 100%;
-      justify-content: space-between;
+      justify-content: flex-start;
+      flex-wrap: wrap;
       gap: 0.5rem;
-      overflow-x: auto;
+      overflow-x: visible;
     }
   }
 
@@ -840,5 +919,14 @@
 
   .wake-lock-pill .wake-text {
     display: none;
+  }
+
+  .step-nav-buttons {
+    gap: 0.5rem;
+
+    .nav-step-btn {
+      font-size: 0.95rem;
+      padding: 0 0.75rem;
+    }
   }
 }

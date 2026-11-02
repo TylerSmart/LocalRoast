@@ -53,12 +53,22 @@ public sealed class RecipeDiscoveryIntegrationTests
     {
         await RegisterAndAuthenticateAsync(_client, "disc1@example.com", "disc1");
 
-        // Fetch seeded collections and tags
-        var collRes = await _client.GetAsync("/api/collections");
-        var collections = await collRes.Content.ReadFromJsonAsync<IReadOnlyList<CollectionDto>>();
-        Assert.IsNotNull(collections);
-        var weeknightColl = collections.First(c => c.Name == "Weeknight Staples");
-        var projectsColl = collections.First(c => c.Name == "Weekend Projects");
+        // Create test collections
+        var weeknightRes = await _client.PostAsJsonAsync(
+            "/api/collections",
+            new UpsertCollectionRequest("Weeknight Staples", "Quick dinners", 10)
+        );
+        Assert.AreEqual(HttpStatusCode.Created, weeknightRes.StatusCode);
+        var weeknightColl = await weeknightRes.Content.ReadFromJsonAsync<CollectionDto>();
+        Assert.IsNotNull(weeknightColl);
+
+        var projectsRes = await _client.PostAsJsonAsync(
+            "/api/collections",
+            new UpsertCollectionRequest("Weekend Projects", "Slow braises", 20)
+        );
+        Assert.AreEqual(HttpStatusCode.Created, projectsRes.StatusCode);
+        var projectsColl = await projectsRes.Content.ReadFromJsonAsync<CollectionDto>();
+        Assert.IsNotNull(projectsColl);
 
         var tagRes = await _client.GetAsync("/api/tags");
         var tags = await tagRes.Content.ReadFromJsonAsync<IReadOnlyList<TagDto>>();
@@ -142,10 +152,13 @@ public sealed class RecipeDiscoveryIntegrationTests
     {
         await RegisterAndAuthenticateAsync(_client, "disc2@example.com", "disc2");
 
-        var collRes = await _client.GetAsync("/api/collections");
-        var collections = await collRes.Content.ReadFromJsonAsync<IReadOnlyList<CollectionDto>>();
-        Assert.IsNotNull(collections);
-        var holidayColl = collections.First(c => c.Name == "Holiday & Hosting");
+        var holidayRes = await _client.PostAsJsonAsync(
+            "/api/collections",
+            new UpsertCollectionRequest("Holiday & Hosting", "Crowd-pleasers", 30)
+        );
+        Assert.AreEqual(HttpStatusCode.Created, holidayRes.StatusCode);
+        var holidayColl = await holidayRes.Content.ReadFromJsonAsync<CollectionDto>();
+        Assert.IsNotNull(holidayColl);
 
         var createReq = new UpsertRecipeRequest(Title: "Holiday Ham");
         var createRes = await _client.PostAsJsonAsync("/api/recipes", createReq);

@@ -849,11 +849,6 @@ public sealed class ShoppingListService(
             shoppingListId,
             updatedDetail
         );
-        await BroadcastChangeAsync(
-            ShoppingRealtimeEventType.ItemsGenerated,
-            shoppingListId,
-            updatedDetail
-        );
 
         return new ShoppingListGenerationResultDto(
             updatedDetail,
@@ -942,6 +937,11 @@ public sealed class ShoppingListService(
         await dbContext.SaveChangesAsync(cancellationToken);
 
         var updatedDetail = (await GetShoppingListByIdAsync(shoppingListId, cancellationToken))!;
+        await BroadcastChangeAsync(
+            ShoppingRealtimeEventType.ItemsGenerated,
+            shoppingListId,
+            updatedDetail
+        );
 
         return new ShoppingListGenerationResultDto(
             updatedDetail,

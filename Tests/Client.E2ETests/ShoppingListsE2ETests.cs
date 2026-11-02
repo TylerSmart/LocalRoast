@@ -320,6 +320,7 @@ public sealed class ShoppingListsE2ETests : E2ETestBase
         // 2. On Recipe Detail: scale servings to 8 via 2x multiplier and click "Add to List"
         await Page.Locator("button.mult-chip", new() { HasText = "2x" }).ClickAsync();
 
+        await Page.Locator("button.recipe-actions-menu-btn").ClickAsync();
         var addToListBtn = Page.Locator("button[aria-label='Add ingredients to shopping list']");
         await Expect(addToListBtn).ToBeVisibleAsync();
         await addToListBtn.ClickAsync();

@@ -44,15 +44,35 @@
       All Cookbooks
     </button>
     @for (c of collections(); track c.id) {
-      <button
-        type="button"
-        class="collection-pill"
-        [class.active]="selectedCollectionId() === c.id"
-        (click)="selectCollection(c.id)"
-      >
-        <span>{{ c.name }}</span>
-        <span class="count-badge">{{ c.recipeCount }}</span>
-      </button>
+      <div class="collection-pill-group" [class.active]="selectedCollectionId() === c.id">
+        <button
+          type="button"
+          class="collection-pill"
+          [class.active]="selectedCollectionId() === c.id"
+          (click)="selectCollection(c.id)"
+        >
+          <span>{{ c.name }}</span>
+          <span class="count-badge">{{ c.recipeCount }}</span>
+        </button>
+        <button
+          type="button"
+          class="collection-pill-action edit-collection-btn"
+          (click)="openEditCollectionDialog(c, $event)"
+          [attr.aria-label]="'Edit collection ' + c.name"
+          matTooltip="Edit collection"
+        >
+          <mat-icon>edit</mat-icon>
+        </button>
+        <button
+          type="button"
+          class="collection-pill-action delete-collection-btn"
+          (click)="deleteCollection(c, $event)"
+          [attr.aria-label]="'Delete collection ' + c.name"
+          matTooltip="Delete collection"
+        >
+          <mat-icon>delete_outline</mat-icon>
+        </button>
+      </div>
     }
     <button
       type="button"
@@ -65,9 +85,9 @@
     </button>
   </div>
 
-  <!-- Search & Filter Controls -->
+  <!-- Search & Expandable Filter Controls -->
   <mat-card class="filter-card">
-    <div class="filter-row">
+    <div class="search-and-filter-bar">
       <!-- Search Input -->
       <mat-form-field appearance="outline" class="search-field" subscriptSizing="dynamic">
         <mat-label>Search recipes, ingredients, sources, tags...</mat-label>
@@ -86,99 +106,217 @@
         }
       </mat-form-field>
 
-      <!-- Status Filter -->
-      <mat-form-field appearance="outline" class="filter-field" subscriptSizing="dynamic">
-        <mat-label>Status</mat-label>
-        <mat-select [ngModel]="selectedStatus()" (ngModelChange)="onStatusChange($event)">
-          <mat-option value="Published">Published</mat-option>
-          <mat-option value="DraftReview">Draft / Review</mat-option>
-          <mat-option value="Archived">Archived</mat-option>
-          <mat-option value="All">All Recipes</mat-option>
-        </mat-select>
-      </mat-form-field>
-
-      <!-- Difficulty Filter -->
-      <mat-form-field appearance="outline" class="filter-field" subscriptSizing="dynamic">
-        <mat-label>Difficulty</mat-label>
-        <mat-select
-          [ngModel]="selectedDifficulty()"
-          (ngModelChange)="selectedDifficulty.set($event)"
+      <div class="filter-bar-actions">
+        <button
+          type="button"
+          mat-stroked-button
+          class="filter-toggle-btn"
+          [class.has-active]="activeDrawerFilterCount() > 0"
+          [class.is-open]="filtersExpanded()"
+          (click)="toggleFiltersExpanded()"
+          [attr.aria-expanded]="filtersExpanded()"
+          aria-label="Toggle recipe filters"
         >
-          <mat-option value="All">All Difficulties</mat-option>
-          <mat-option value="Easy">Easy</mat-option>
-          <mat-option value="Medium">Medium</mat-option>
-          <mat-option value="Project">Project</mat-option>
-        </mat-select>
-      </mat-form-field>
-
-      <!-- Max Total Time Filter -->
-      <mat-form-field appearance="outline" class="filter-field" subscriptSizing="dynamic">
-        <mat-label>Max Time</mat-label>
-        <mat-select [ngModel]="maxTimeMinutes()" (ngModelChange)="maxTimeMinutes.set($event)">
-          <mat-option [value]="null">Any Duration</mat-option>
-          <mat-option [value]="30">Under 30 min</mat-option>
-          <mat-option [value]="45">Under 45 min</mat-option>
-          <mat-option [value]="60">Under 60 min</mat-option>
-          <mat-option [value]="120">Under 2 hours</mat-option>
-        </mat-select>
-      </mat-form-field>
-
-      <!-- Tags Multi-Select -->
-      <mat-form-field
-        appearance="outline"
-        class="filter-field tag-filter-field"
-        subscriptSizing="dynamic"
-      >
-        <mat-label>Tags</mat-label>
-        <mat-select
-          [ngModel]="selectedTagIds()"
-          (ngModelChange)="onTagSelectionChange($event)"
-          multiple
-          placeholder="Filter by tags"
-        >
-          @for (cat of tagCategories; track cat) {
-            @if (tagsByCategory(cat).length > 0) {
-              <mat-optgroup [label]="cat">
-                @for (t of tagsByCategory(cat); track t.id) {
-                  <mat-option [value]="t.id">{{ t.name }}</mat-option>
-                }
-              </mat-optgroup>
-            }
+          <mat-icon>tune</mat-icon>
+          <span>Filters</span>
+          @if (activeDrawerFilterCount() > 0) {
+            <span class="filter-count-badge">{{ activeDrawerFilterCount() }}</span>
           }
-        </mat-select>
-      </mat-form-field>
-
-      <!-- Forgotten Favorites Toggle Pill -->
-      <button
-        type="button"
-        class="forgotten-favorites-pill"
-        [class.is-active]="forgottenFavoritesOnly()"
-        (click)="toggleForgottenFavorites()"
-        aria-label="Filter by forgotten favorites"
-      >
-        <mat-icon>favorite</mat-icon>
-        <span>Forgotten Favorites</span>
-      </button>
-
-      <!-- Min Rating Filter -->
-      <mat-form-field appearance="outline" class="filter-field" subscriptSizing="dynamic">
-        <mat-label>Rating</mat-label>
-        <mat-select [ngModel]="minRating()" (ngModelChange)="onMinRatingChange($event)">
-          <mat-option [value]="null">Any Rating</mat-option>
-          <mat-option [value]="4">★ 4+ Stars</mat-option>
-          <mat-option [value]="4.5">★ 4.5+ Stars</mat-option>
-          <mat-option [value]="5">★ 5 Stars</mat-option>
-        </mat-select>
-      </mat-form-field>
-
-      <!-- Clear Filters -->
-      @if (hasActiveFilters()) {
-        <button mat-button color="warn" (click)="clearFilters()" class="clear-filters-btn">
-          <mat-icon>clear_all</mat-icon>
-          <span>Clear Filters</span>
         </button>
-      }
+
+        <button
+          type="button"
+          mat-stroked-button
+          class="manage-tags-toggle-btn"
+          [class.is-open]="tagsManagerExpanded()"
+          (click)="toggleTagsManagerExpanded()"
+          [attr.aria-expanded]="tagsManagerExpanded()"
+          aria-label="Manage tags"
+        >
+          <mat-icon>label</mat-icon>
+          <span>Manage Tags</span>
+        </button>
+
+        @if (hasActiveFilters()) {
+          <button
+            type="button"
+            mat-button
+            color="warn"
+            (click)="clearFilters()"
+            class="clear-filters-btn"
+          >
+            <mat-icon>clear_all</mat-icon>
+            <span>Clear Filters</span>
+          </button>
+        }
+      </div>
     </div>
+
+    <!-- Expandable Tag Manager Panel -->
+    @if (tagsManagerExpanded()) {
+      <div class="tags-manager-panel" role="region" aria-label="Manage Tags">
+        <div class="tags-manager-header">
+          <div class="tags-manager-title">
+            <mat-icon>label</mat-icon>
+            <span>Household Tags</span>
+          </div>
+          <button
+            type="button"
+            mat-stroked-button
+            color="primary"
+            class="new-tag-btn"
+            (click)="openNewTagDialog()"
+            aria-label="Create new tag"
+          >
+            <mat-icon>add</mat-icon>
+            <span>New Tag</span>
+          </button>
+        </div>
+
+        @if (tags().length === 0) {
+          <p class="empty-tags-hint">
+            No tags created yet. Click "New Tag" to create your first tag.
+          </p>
+        } @else {
+          <div class="tags-manager-categories">
+            @for (cat of tagCategories; track cat) {
+              @if (tagsByCategory(cat).length > 0) {
+                <div class="tag-cat-group">
+                  <span class="tag-cat-label">{{ cat }}</span>
+                  <div class="tag-pills-wrap">
+                    @for (t of tagsByCategory(cat); track t.id) {
+                      <div class="tag-pill-group">
+                        <span class="tag-pill-name">{{ t.name }}</span>
+                        <button
+                          type="button"
+                          class="tag-pill-action edit-tag-btn"
+                          (click)="openEditTagDialog(t, $event)"
+                          [attr.aria-label]="'Edit tag ' + t.name"
+                          matTooltip="Edit tag"
+                        >
+                          <mat-icon>edit</mat-icon>
+                        </button>
+                        <button
+                          type="button"
+                          class="tag-pill-action delete-tag-btn"
+                          (click)="deleteTag(t, $event)"
+                          [attr.aria-label]="'Delete tag ' + t.name"
+                          matTooltip="Delete tag"
+                        >
+                          <mat-icon>delete_outline</mat-icon>
+                        </button>
+                      </div>
+                    }
+                  </div>
+                </div>
+              }
+            }
+          </div>
+        }
+      </div>
+    }
+
+    <!-- Expandable Filters Stack (Each input & toggle on its own dedicated line) -->
+    @if (filtersExpanded()) {
+      <div class="expanded-filters-stack" role="region" aria-label="Recipe Filters">
+        <!-- Line 1: Status Filter -->
+        <div class="filter-line">
+          <mat-form-field appearance="outline" class="filter-field" subscriptSizing="dynamic">
+            <mat-label>Status</mat-label>
+            <mat-select [ngModel]="selectedStatus()" (ngModelChange)="onStatusChange($event)">
+              <mat-option value="Published">Published</mat-option>
+              <mat-option value="DraftReview">Draft / Review</mat-option>
+              <mat-option value="Archived">Archived</mat-option>
+              <mat-option value="All">All Recipes</mat-option>
+            </mat-select>
+          </mat-form-field>
+        </div>
+
+        <!-- Line 2: Difficulty Filter -->
+        <div class="filter-line">
+          <mat-form-field appearance="outline" class="filter-field" subscriptSizing="dynamic">
+            <mat-label>Difficulty</mat-label>
+            <mat-select
+              [ngModel]="selectedDifficulty()"
+              (ngModelChange)="selectedDifficulty.set($event)"
+            >
+              <mat-option value="All">All Difficulties</mat-option>
+              <mat-option value="Easy">Easy</mat-option>
+              <mat-option value="Medium">Medium</mat-option>
+              <mat-option value="Project">Project</mat-option>
+            </mat-select>
+          </mat-form-field>
+        </div>
+
+        <!-- Line 3: Max Total Time Filter -->
+        <div class="filter-line">
+          <mat-form-field appearance="outline" class="filter-field" subscriptSizing="dynamic">
+            <mat-label>Max Time</mat-label>
+            <mat-select [ngModel]="maxTimeMinutes()" (ngModelChange)="maxTimeMinutes.set($event)">
+              <mat-option [value]="null">Any Duration</mat-option>
+              <mat-option [value]="30">Under 30 min</mat-option>
+              <mat-option [value]="45">Under 45 min</mat-option>
+              <mat-option [value]="60">Under 60 min</mat-option>
+              <mat-option [value]="120">Under 2 hours</mat-option>
+            </mat-select>
+          </mat-form-field>
+        </div>
+
+        <!-- Line 4: Min Rating Filter -->
+        <div class="filter-line">
+          <mat-form-field appearance="outline" class="filter-field" subscriptSizing="dynamic">
+            <mat-label>Rating</mat-label>
+            <mat-select [ngModel]="minRating()" (ngModelChange)="onMinRatingChange($event)">
+              <mat-option [value]="null">Any Rating</mat-option>
+              <mat-option [value]="4">★ 4+ Stars</mat-option>
+              <mat-option [value]="4.5">★ 4.5+ Stars</mat-option>
+              <mat-option [value]="5">★ 5 Stars</mat-option>
+            </mat-select>
+          </mat-form-field>
+        </div>
+
+        <!-- Line 5: Tags Multi-Select -->
+        <div class="filter-line">
+          <mat-form-field
+            appearance="outline"
+            class="filter-field tag-filter-field"
+            subscriptSizing="dynamic"
+          >
+            <mat-label>Tags</mat-label>
+            <mat-select
+              [ngModel]="selectedTagIds()"
+              (ngModelChange)="onTagSelectionChange($event)"
+              multiple
+              placeholder="Filter by tags"
+            >
+              @for (cat of tagCategories; track cat) {
+                @if (tagsByCategory(cat).length > 0) {
+                  <mat-optgroup [label]="cat">
+                    @for (t of tagsByCategory(cat); track t.id) {
+                      <mat-option [value]="t.id">{{ t.name }}</mat-option>
+                    }
+                  </mat-optgroup>
+                }
+              }
+            </mat-select>
+          </mat-form-field>
+        </div>
+
+        <!-- Line 6: Forgotten Favorites Toggle Pill -->
+        <div class="filter-line filter-toggle-line">
+          <button
+            type="button"
+            class="forgotten-favorites-pill"
+            [class.is-active]="forgottenFavoritesOnly()"
+            (click)="toggleForgottenFavorites()"
+            aria-label="Filter by forgotten favorites"
+          >
+            <mat-icon>favorite</mat-icon>
+            <span>Forgotten Favorites (High-rated or cooked 2+ times, not made recently)</span>
+          </button>
+        </div>
+      </div>
+    }
   </mat-card>
 
   <!-- Error Message Banner -->

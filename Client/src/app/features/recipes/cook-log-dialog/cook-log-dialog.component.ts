@@ -1,6 +1,8 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
+import { provideNativeDateAdapter } from '@angular/material/core';
+import { MatDatepickerModule } from '@angular/material/datepicker';
 import { MAT_DIALOG_DATA, MatDialogModule, MatDialogRef } from '@angular/material/dialog';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
@@ -15,6 +17,11 @@ import {
 } from '../../../core/models/recipe.models';
 import { MediaService } from '../../../core/services/media/media.service';
 import { RecipeService } from '../../../core/services/recipe/recipe.service';
+import {
+  coerceToDateLocal,
+  coerceToIsoDateLocal,
+  shouldUseTouchDatepicker,
+} from '../../../core/utils/meal-plan-date';
 
 export interface CookLogDialogData {
   recipeId: string;
@@ -28,12 +35,14 @@ export interface CookLogDialogData {
     ReactiveFormsModule,
     MatDialogModule,
     MatButtonModule,
+    MatDatepickerModule,
     MatIconModule,
     MatFormFieldModule,
     MatInputModule,
     MatTooltipModule,
     MatProgressSpinnerModule,
   ],
+  providers: [provideNativeDateAdapter()],
   selector: 'app-cook-log-dialog',
   templateUrl: './cook-log-dialog.component.html',
   styleUrl: './cook-log-dialog.component.scss',
@@ -51,13 +60,14 @@ export class CookLogDialogComponent implements OnInit {
   protected readonly isSubmitting = signal<boolean>(false);
   protected readonly isUploadingPhoto = signal<boolean>(false);
   protected readonly errorMessage = signal<string | null>(null);
+  protected readonly useTouchDatepicker = shouldUseTouchDatepicker();
 
   protected readonly selectedRating = signal<number | null>(null);
   protected readonly photoPreviewUrl = signal<string | null>(null);
   protected readonly photoThumbnailUrl = signal<string | null>(null);
 
   protected readonly form = this.fb.nonNullable.group({
-    cookedDate: [new Date().toISOString().substring(0, 10), [Validators.required]],
+    cookedDate: [coerceToDateLocal(new Date()), [Validators.required]],
     servingsMade: [
       this.data.targetServings ?? 4,
       [Validators.required, Validators.min(0.25), Validators.max(999)],
@@ -68,11 +78,9 @@ export class CookLogDialogComponent implements OnInit {
   ngOnInit(): void {
     if (this.data.logToEdit) {
       const log = this.data.logToEdit;
-      const dateStr = log.cookedAt
-        ? log.cookedAt.substring(0, 10)
-        : new Date().toISOString().substring(0, 10);
+      const dateVal = coerceToDateLocal(log.cookedAt ? log.cookedAt.substring(0, 10) : new Date());
       this.form.patchValue({
-        cookedDate: dateStr,
+        cookedDate: dateVal,
         servingsMade: log.servingsMade ?? this.data.targetServings ?? 4,
         notes: log.notes ?? '',
       });
@@ -129,7 +137,8 @@ export class CookLogDialogComponent implements OnInit {
     this.errorMessage.set(null);
 
     const val = this.form.getRawValue();
-    const cookedAtIso = new Date(val.cookedDate + 'T12:00:00Z').toISOString();
+    const dateStr = coerceToIsoDateLocal(val.cookedDate);
+    const cookedAtIso = new Date(dateStr + 'T12:00:00Z').toISOString();
 
     const request: UpsertCookLogRequest = {
       cookedAt: cookedAtIso,

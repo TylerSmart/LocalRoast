@@ -132,6 +132,7 @@ public sealed class IngestionProcessor(
                         !string.IsNullOrWhiteSpace(payload.PageTitle)
                         && (
                             string.IsNullOrWhiteSpace(job.DisplayTitle)
+                            || job.DisplayTitle.Contains('/')
                             || job.DisplayTitle.StartsWith(
                                 "http",
                                 StringComparison.OrdinalIgnoreCase
@@ -139,7 +140,10 @@ public sealed class IngestionProcessor(
                         )
                     )
                     {
-                        job.DisplayTitle = payload.PageTitle.Trim();
+                        job.DisplayTitle =
+                            payload.PageTitle.Trim().Length > 200
+                                ? payload.PageTitle.Trim()[..200]
+                                : payload.PageTitle.Trim();
                     }
 
                     await dbContext.SaveChangesAsync(cancellationToken);

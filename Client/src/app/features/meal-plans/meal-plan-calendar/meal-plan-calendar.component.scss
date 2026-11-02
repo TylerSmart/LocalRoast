@@ -153,16 +153,17 @@
 }
 
 .week-board-container {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 280px;
-  gap: 1rem;
-  align-items: start;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  width: 100%;
 }
 
 .week-days-grid {
   display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 0.5rem;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1rem;
+  align-items: start;
 }
 
 .day-column {
@@ -170,9 +171,9 @@
   flex-direction: column;
   background-color: var(--mat-sys-surface, #fef7ff);
   border: 1px solid var(--mat-sys-outline-variant, #cac4d0);
-  border-radius: 10px;
+  border-radius: 12px;
   overflow: hidden;
-  min-height: 520px;
+  height: auto;
 
   &.is-today {
     border-color: var(--mat-sys-primary, #6b5e43);
@@ -184,18 +185,18 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.5rem 0.5rem 0.5rem 0.75rem;
+  padding: 0.6rem 0.65rem 0.6rem 0.85rem;
   background-color: var(--mat-sys-surface-container, #f3ede4);
   border-bottom: 1px solid var(--mat-sys-outline-variant, #cac4d0);
 
   .day-title-group {
     display: flex;
-    align-items: baseline;
-    gap: 0.35rem;
+    align-items: center;
+    gap: 0.45rem;
 
     .day-name {
       font-weight: 700;
-      font-size: 0.85rem;
+      font-size: 0.9rem;
       text-transform: uppercase;
       letter-spacing: 0.04em;
     }
@@ -203,13 +204,13 @@
     .day-number {
       font-size: 0.95rem;
       font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
 
       &.today-badge {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 1.5rem;
-        height: 1.5rem;
+        width: 1.6rem;
+        height: 1.6rem;
         border-radius: 50%;
         background-color: var(--mat-sys-primary, #6b5e43);
         color: var(--mat-sys-on-primary, #ffffff);
@@ -218,14 +219,17 @@
   }
 
   .quick-add-day-btn {
-    width: 28px;
-    height: 28px;
-    line-height: 28px;
+    width: 30px;
+    height: 30px;
+    padding: 0 !important;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 
     mat-icon {
-      font-size: 1rem;
-      width: 1rem;
-      height: 1rem;
+      font-size: 1.1rem;
+      width: 1.1rem;
+      height: 1.1rem;
     }
   }
 }
@@ -233,16 +237,18 @@
 .day-slots-list {
   display: flex;
   flex-direction: column;
-  flex: 1;
+  height: auto;
 }
 
 .slot-bucket {
   display: flex;
   flex-direction: column;
   border-bottom: 1px dashed var(--mat-sys-outline-variant, #cac4d0);
-  padding: 0.35rem;
-  min-height: 85px;
-  flex: 1;
+  padding: 0.5rem 0.65rem;
+  min-height: 68px;
+  height: auto;
+  flex: 0 0 auto;
+  box-sizing: border-box;
 
   &:last-child {
     border-bottom: none;
@@ -257,10 +263,10 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 0.25rem;
+  margin-bottom: 0.35rem;
 
   .slot-label {
-    font-size: 0.65rem;
+    font-size: 0.7rem;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -268,19 +274,22 @@
   }
 
   .slot-add-btn {
-    width: 20px;
-    height: 20px;
-    line-height: 20px;
-    opacity: 0.6;
+    width: 24px;
+    height: 24px;
+    padding: 0 !important;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.65;
 
     &:hover {
       opacity: 1;
     }
 
     mat-icon {
-      font-size: 0.85rem;
-      width: 0.85rem;
-      height: 0.85rem;
+      font-size: 0.95rem;
+      width: 0.95rem;
+      height: 0.95rem;
     }
   }
 }
@@ -288,7 +297,8 @@
 .slot-items {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: 0.45rem;
+  height: auto;
 }
 
 /* MEAL ENTRY CARD */
@@ -296,10 +306,12 @@
   background-color: var(--mat-sys-surface-container-high, #ece6de);
   border: 1px solid var(--mat-sys-outline-variant, #cac4d0);
   border-radius: 8px;
-  padding: 0.45rem 0.5rem;
+  padding: 0.6rem 0.7rem;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
   cursor: grab;
   transition: box-shadow 0.15s ease;
+  height: auto;
+  box-sizing: border-box;
 
   &:hover {
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
@@ -318,23 +330,25 @@
 .meal-card-content {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 0.4rem;
 }
 
 .meal-title-row {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 0.25rem;
+  gap: 0.4rem;
 
   .meal-title-link,
   .meal-title-text {
-    font-size: 0.825rem;
+    font-size: 0.9rem;
     font-weight: 600;
-    line-height: 1.25;
+    line-height: 1.35;
     word-break: break-word;
     color: var(--mat-sys-on-surface, #1c1b1f);
     text-decoration: none;
+    flex: 1;
+    min-width: 0;
   }
 
   .meal-title-link:hover {
@@ -343,16 +357,21 @@
   }
 
   .meal-card-actions {
+    flex-shrink: 0;
+
     .entry-menu-btn {
-      width: 22px;
-      height: 22px;
-      line-height: 22px;
-      margin: -4px -4px 0 0;
+      width: 26px;
+      height: 26px;
+      padding: 0 !important;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin: -2px -4px 0 0;
 
       mat-icon {
-        font-size: 1rem;
-        width: 1rem;
-        height: 1rem;
+        font-size: 1.1rem;
+        width: 1.1rem;
+        height: 1.1rem;
       }
     }
   }
@@ -360,14 +379,22 @@
 
 .meal-badges-row {
   display: flex;
-  gap: 0.25rem;
+  align-items: center;
+  gap: 0.4rem;
   flex-wrap: wrap;
 
   .badge {
-    font-size: 0.65rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 24px;
+    line-height: 1;
+    font-size: 0.72rem;
     font-weight: 600;
-    padding: 0.1rem 0.3rem;
-    border-radius: 4px;
+    padding: 0 0.5rem;
+    border-radius: 6px;
+    white-space: nowrap;
+    box-sizing: border-box;
 
     &.servings-badge {
       background-color: var(--mat-sys-surface-container-highest, #e6e0e9);
@@ -387,7 +414,7 @@
 }
 
 .meal-notes-snippet {
-  font-size: 0.725rem;
+  font-size: 0.775rem;
   color: var(--mat-sys-on-surface-variant, #49454f);
   margin: 0;
   font-style: italic;
@@ -397,31 +424,34 @@
 }
 
 .cook-tonight-btn {
-  font-size: 0.75rem;
-  height: 28px;
-  line-height: 28px;
-  padding: 0 0.5rem;
-  margin-top: 0.25rem;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.25rem;
+  font-size: 0.8rem !important;
+  height: 32px !important;
+  padding: 0 0.85rem !important;
+  margin-top: 0.15rem;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 0.3rem;
+  white-space: nowrap !important;
+  width: fit-content;
 
   mat-icon {
-    font-size: 0.95rem;
-    width: 0.95rem;
-    height: 0.95rem;
+    font-size: 1rem !important;
+    width: 1rem !important;
+    height: 1rem !important;
+    margin-right: 0.25rem !important;
   }
 }
 
-/* PERSISTENT ON-DECK SIDEBAR (Desktop) */
+/* PERSISTENT ON-DECK TRAY (Desktop) */
 .ondeck-sidebar {
+  order: -1;
   border: 1px solid var(--mat-sys-outline-variant, #cac4d0);
-  border-radius: 10px;
+  border-radius: 12px;
   background-color: var(--mat-sys-surface, #fef7ff);
   display: flex;
   flex-direction: column;
-  padding: 0.75rem;
+  padding: 0.85rem 1rem;
   gap: 0.5rem;
 
   .ondeck-sidebar-header {
@@ -432,7 +462,7 @@
     .ondeck-sidebar-title-group {
       display: flex;
       align-items: center;
-      gap: 0.35rem;
+      gap: 0.4rem;
 
       .ondeck-icon {
         color: var(--mat-sys-primary, #6b5e43);
@@ -440,19 +470,19 @@
 
       .ondeck-sidebar-title {
         font-weight: 700;
-        font-size: 0.9rem;
+        font-size: 0.95rem;
       }
     }
   }
 
   .ondeck-sidebar-hint {
-    font-size: 0.75rem;
+    font-size: 0.8rem;
     color: var(--mat-sys-on-surface-variant, #49454f);
     margin: 0;
   }
 
   .ondeck-drop-zone {
-    min-height: 380px;
+    min-height: 72px;
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
@@ -460,29 +490,34 @@
 
   .ondeck-empty-box {
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     align-items: center;
     justify-content: center;
-    padding: 3rem 1rem;
+    flex-wrap: wrap;
+    padding: 1rem;
     text-align: center;
     border: 2px dashed var(--mat-sys-outline-variant, #cac4d0);
     border-radius: 8px;
-    gap: 0.5rem;
+    gap: 0.75rem;
     color: var(--mat-sys-outline, #79747e);
     font-size: 0.85rem;
 
+    p {
+      margin: 0;
+    }
+
     .empty-tray-icon {
-      font-size: 2rem;
-      width: 2rem;
-      height: 2rem;
-      opacity: 0.5;
+      font-size: 1.5rem;
+      width: 1.5rem;
+      height: 1.5rem;
+      opacity: 0.6;
     }
   }
 
   .ondeck-items-list {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 0.75rem;
   }
 }
 
@@ -692,17 +727,24 @@
 }
 
 .start-cooking-meal-btn {
-  height: 32px;
-  line-height: 32px;
-  font-size: 0.8rem;
-  font-weight: 700;
-  padding: 0 0.6rem;
-  margin-right: 0.25rem;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  height: 32px !important;
+  min-height: 32px !important;
+  line-height: 1 !important;
+  font-size: 0.8rem !important;
+  font-weight: 700 !important;
+  padding: 0 0.85rem !important;
+  border-radius: 9999px !important;
+  white-space: nowrap !important;
+  flex-shrink: 0 !important;
 
   mat-icon {
-    font-size: 16px;
-    width: 16px;
-    height: 16px;
-    margin-right: 2px;
+    font-size: 16px !important;
+    width: 16px !important;
+    height: 16px !important;
+    margin-right: 0.35rem !important;
+    flex-shrink: 0 !important;
   }
 }

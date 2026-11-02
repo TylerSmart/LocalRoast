@@ -180,11 +180,15 @@
                       (change)="toggleIngredient(item.ingredient.id)"
                       [attr.aria-label]="item.ingredient.displayName"
                     ></mat-checkbox>
-                    <span class="item-qty">{{ item.displayQuantityAndUnit }}</span>
-                    <span class="item-name">{{ item.ingredient.displayName }}</span>
-                    @if (item.ingredient.preparationNote) {
-                      <span class="item-prep">({{ item.ingredient.preparationNote }})</span>
-                    }
+                    <span class="ingredient-text">
+                      @if (item.displayQuantityAndUnit) {
+                        <strong class="item-qty">{{ item.displayQuantityAndUnit }}</strong>
+                      }
+                      <span class="item-name">{{ item.ingredient.displayName }}</span>
+                      @if (item.ingredient.preparationNote) {
+                        <span class="item-prep">({{ item.ingredient.preparationNote }})</span>
+                      }
+                    </span>
                     @if (aiHelper.isAvailable() && !item.ingredient.linkedRecipeId) {
                       <button
                         type="button"
@@ -216,10 +220,14 @@
                     <ul class="ingredient-list sub-list">
                       @for (subIng of sub.ingredients; track subIng.id) {
                         <li class="ingredient-item">
-                          <span class="item-qty"
-                            >{{ subIng.quantity }} {{ subIng.customUnitName || '' }}</span
-                          >
-                          <span class="item-name">{{ subIng.displayName }}</span>
+                          <span class="ingredient-text">
+                            @if (subIng.quantity || subIng.customUnitName) {
+                              <strong class="item-qty"
+                                >{{ subIng.quantity }} {{ subIng.customUnitName || '' }}</strong
+                              >
+                            }
+                            <span class="item-name">{{ subIng.displayName }}</span>
+                          </span>
                         </li>
                       }
                     </ul>
@@ -338,8 +346,10 @@
             (click)="prevStep()"
             [disabled]="activeStepIndex() === 0"
           >
-            <mat-icon>arrow_back</mat-icon>
-            <span>Previous Step</span>
+            <span class="step-btn-content">
+              <mat-icon>arrow_back</mat-icon>
+              <span>Previous Step</span>
+            </span>
           </button>
 
           <button
@@ -348,17 +358,15 @@
             class="nav-step-btn next-btn"
             (click)="nextStep()"
           >
-            @if (activeStepIndex() < totalStepsCount() - 1) {
-              <ng-container>
+            <span class="step-btn-content">
+              @if (activeStepIndex() < totalStepsCount() - 1) {
                 <span>Next Step</span>
-                <mat-icon iconPositionEnd>arrow_forward</mat-icon>
-              </ng-container>
-            } @else {
-              <ng-container>
+                <mat-icon>arrow_forward</mat-icon>
+              } @else {
                 <mat-icon>check_circle</mat-icon>
                 <span>Finish &amp; Log Cook</span>
-              </ng-container>
-            }
+              }
+            </span>
           </button>
         </nav>
       </main>
@@ -373,8 +381,8 @@
         </div>
 
         <button mat-button class="custom-timer-toggle-btn" (click)="toggleCustomTimerForm()">
-          <mat-icon>add</mat-icon>
-          <span>{{ showCustomTimerForm() ? 'Close' : '+ Custom Timer' }}</span>
+          <mat-icon>{{ showCustomTimerForm() ? 'close' : 'add' }}</mat-icon>
+          <span>{{ showCustomTimerForm() ? 'Close' : 'Custom Timer' }}</span>
         </button>
       </div>
 
@@ -518,8 +526,15 @@
                       (click)="$event.stopPropagation()"
                       (change)="toggleIngredient(item.ingredient.id)"
                     ></mat-checkbox>
-                    <span class="item-qty">{{ item.displayQuantityAndUnit }}</span>
-                    <span class="item-name">{{ item.ingredient.displayName }}</span>
+                    <span class="ingredient-text">
+                      @if (item.displayQuantityAndUnit) {
+                        <strong class="item-qty">{{ item.displayQuantityAndUnit }}</strong>
+                      }
+                      <span class="item-name">{{ item.ingredient.displayName }}</span>
+                      @if (item.ingredient.preparationNote) {
+                        <span class="item-prep">({{ item.ingredient.preparationNote }})</span>
+                      }
+                    </span>
                     @if (aiHelper.isAvailable() && !item.ingredient.linkedRecipeId) {
                       <button
                         type="button"

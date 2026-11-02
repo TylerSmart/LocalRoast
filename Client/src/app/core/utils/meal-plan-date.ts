@@ -21,8 +21,49 @@ export function formatIsoDateLocal(date: Date): string {
   return `${y}-${m}-${d}`;
 }
 
+export function coerceToDateLocal(value: Date | string | null | undefined): Date {
+  if (value instanceof Date && !isNaN(value.getTime())) {
+    return value;
+  }
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}/.test(value)) {
+    return parseIsoDateLocal(value.substring(0, 10));
+  }
+  return new Date();
+}
+
+export function coerceToIsoDateLocal(value: Date | string | null | undefined): string {
+  if (!value) {
+    return getTodayIsoLocal();
+  }
+  if (value instanceof Date && !isNaN(value.getTime())) {
+    return formatIsoDateLocal(value);
+  }
+  if (typeof value === 'string') {
+    if (/^\d{4}-\d{2}-\d{2}/.test(value)) {
+      return value.substring(0, 10);
+    }
+    const parsed = new Date(value);
+    if (!isNaN(parsed.getTime())) {
+      return formatIsoDateLocal(parsed);
+    }
+  }
+  return getTodayIsoLocal();
+}
+
 export function getTodayIsoLocal(): string {
   return formatIsoDateLocal(new Date());
+}
+
+export function shouldUseTouchDatepicker(): boolean {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+  const hasCoarsePointer =
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(pointer: coarse), (hover: none)').matches;
+  const hasTouchPoints = typeof navigator !== 'undefined' && (navigator.maxTouchPoints ?? 0) > 0;
+  const isSmallViewport = window.innerWidth <= 900;
+  return hasCoarsePointer || hasTouchPoints || isSmallViewport;
 }
 
 export function normalizeToMondayIso(isoDate: string): string {

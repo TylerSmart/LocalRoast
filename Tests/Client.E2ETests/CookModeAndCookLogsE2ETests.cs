@@ -361,6 +361,7 @@ public sealed class CookModeAndCookLogsE2ETests : E2ETestBase
         await Expect(Page).ToHaveURLAsync(new Regex(".*/recipes.*"));
 
         // Toggle Forgotten Favorites pill
+        await Page.Locator("button.filter-toggle-btn").ClickAsync();
         var forgottenPill = Page.Locator("button.forgotten-favorites-pill");
         await Expect(forgottenPill).ToBeVisibleAsync();
         await forgottenPill.ClickAsync();
@@ -384,6 +385,7 @@ public sealed class CookModeAndCookLogsE2ETests : E2ETestBase
 
         // 5. Schedule Quesadillas onto Meal Plan and Launch Cook Mode with pre-scaled servings
         await Page.GotoAsync($"{ServerUrl}/recipes/{recipeBId}");
+        await Page.Locator("button.recipe-actions-menu-btn").ClickAsync();
         await Page.Locator("button[aria-label='Plan meal']").ClickAsync();
 
         var planDialog = Page.Locator("mat-dialog-container");
@@ -419,6 +421,7 @@ public sealed class CookModeAndCookLogsE2ETests : E2ETestBase
         await Page.GotoAsync($"{ServerUrl}/recipes/{recipeAId}");
 
         // Create share link WITHOUT cook logs
+        await Page.Locator("button.recipe-actions-menu-btn").ClickAsync();
         await Page.Locator("button[aria-label='Share recipe']").ClickAsync();
         var shareDialog = Page.Locator("app-recipe-share-dialog");
         await Expect(shareDialog).ToBeVisibleAsync();

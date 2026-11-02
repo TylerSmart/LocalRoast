@@ -248,7 +248,8 @@
   background-color: var(--mat-sys-surface-container-low, #fafafa);
   border-radius: 12px;
   border: 1px solid var(--mat-sys-outline-variant, #e0e0e0);
-  padding: 0.5rem;
+  padding: 0;
+  overflow: hidden;
   margin-bottom: 1.5rem;
 }
 
@@ -294,8 +295,8 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.6rem 0.5rem;
-  border-radius: 8px;
+  padding: 0.65rem 0.85rem;
+  border-radius: 0;
   min-height: 48px;
   box-sizing: border-box;
   transition: background-color 0.15s ease;
@@ -305,7 +306,7 @@
   }
 
   & + .shopping-item-row {
-    border-top: 1px solid var(--mat-sys-outline-variant, #f0f0f0);
+    border-top: 1px solid var(--mat-sys-outline-variant, #e0e0e0);
   }
 
   .item-checkbox {
@@ -510,7 +511,7 @@
   }
 
   .checked-items-list {
-    padding: 0.25rem 0.5rem;
+    padding: 0;
   }
 }
 

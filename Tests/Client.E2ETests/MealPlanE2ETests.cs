@@ -38,6 +38,7 @@ public sealed class MealPlanE2ETests : E2ETestBase
         await CreateRecipeAsync(chiliTitle, 4);
 
         // 2. Click "Plan Meal" directly on Recipe Detail
+        await Page.Locator("button.recipe-actions-menu-btn").ClickAsync();
         var planMealBtn = Page.Locator("button[aria-label='Plan meal']");
         await planMealBtn.ClickAsync();
 

@@ -32,7 +32,7 @@
       </div>
 
       <div class="prompt-box">
-        <mat-form-field appearance="outline" class="w-full">
+        <mat-form-field appearance="outline" class="w-full" subscriptSizing="dynamic">
           <mat-label>Plan preferences or dietary prompt</mat-label>
           <textarea
             matInput
@@ -46,7 +46,7 @@
       </div>
 
       <div class="form-row-params">
-        <mat-form-field appearance="outline" class="meal-count-field">
+        <mat-form-field appearance="outline" class="meal-count-field" subscriptSizing="dynamic">
           <mat-label>Meals</mat-label>
           <mat-select [ngModel]="mealCount()" (ngModelChange)="mealCount.set($event)">
             <mat-option [value]="1">1 meal</mat-option>
@@ -59,11 +59,11 @@
           </mat-select>
         </mat-form-field>
 
-        <mat-form-field appearance="outline" class="default-slot-field">
+        <mat-form-field appearance="outline" class="default-slot-field" subscriptSizing="dynamic">
           <mat-label>Default Slot</mat-label>
           <mat-select [ngModel]="defaultSlot()" (ngModelChange)="defaultSlot.set($event)">
-            @for (slot of slots; track slot) {
-              <mat-option [value]="slot">{{ slot }}</mat-option>
+            @for (slot of slots; track slot.value) {
+              <mat-option [value]="slot.value">{{ slot.label }}</mat-option>
             }
           </mat-select>
         </mat-form-field>
@@ -160,14 +160,29 @@
                 <div class="candidate-schedule-controls">
                   @if (!item.isOnDeck) {
                     <div class="control-item">
-                      <label class="control-label" [for]="'date-' + item.id">Date</label>
-                      <input
-                        type="date"
-                        [id]="'date-' + item.id"
-                        class="candidate-date-input"
-                        [value]="item.scheduledDate"
-                        (input)="updateScheduledDate(item.id, $any($event.target).value)"
-                      />
+                      <mat-form-field
+                        appearance="outline"
+                        class="candidate-date-field"
+                        subscriptSizing="dynamic"
+                      >
+                        <mat-label>Date</mat-label>
+                        <input
+                          matInput
+                          [matDatepicker]="candidateDatePicker"
+                          [id]="'date-' + item.id"
+                          class="candidate-date-input"
+                          [ngModel]="coerceToDateLocal(item.scheduledDate)"
+                          (dateChange)="updateScheduledDate(item.id, $event.value)"
+                        />
+                        <mat-datepicker-toggle
+                          matIconSuffix
+                          [for]="candidateDatePicker"
+                        ></mat-datepicker-toggle>
+                        <mat-datepicker
+                          #candidateDatePicker
+                          [touchUi]="useTouchDatepicker"
+                        ></mat-datepicker>
+                      </mat-form-field>
                     </div>
 
                     <div class="control-item">
@@ -178,8 +193,8 @@
                         [value]="item.slot"
                         (change)="updateSlot(item.id, $any($event.target).value)"
                       >
-                        @for (slot of slots; track slot) {
-                          <option [value]="slot">{{ slot }}</option>
+                        @for (slot of slots; track slot.value) {
+                          <option [value]="slot.value">{{ slot.label }}</option>
                         }
                       </select>
                     </div>

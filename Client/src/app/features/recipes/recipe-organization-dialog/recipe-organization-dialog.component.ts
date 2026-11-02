@@ -5,16 +5,19 @@ import {
   MAT_DIALOG_DATA,
   MatDialog,
   MatDialogActions,
+  MatDialogClose,
   MatDialogContent,
   MatDialogRef,
   MatDialogTitle,
 } from '@angular/material/dialog';
 import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import { RecipeDetailDto } from '../../../core/models/recipe.models';
 import { CollectionDto, TagCategory, TagDto } from '../../../core/models/taxonomy.models';
 import { RecipeService } from '../../../core/services/recipe/recipe.service';
 import { TaxonomyService } from '../../../core/services/taxonomy/taxonomy.service';
+import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialog/confirm-dialog.component';
 import {
   CollectionDialogComponent,
   CollectionDialogData,
@@ -33,10 +36,12 @@ export interface RecipeOrganizationDialogData {
     MatDialogTitle,
     MatDialogContent,
     MatDialogActions,
+    MatDialogClose,
     MatButtonModule,
     MatChipsModule,
     MatIconModule,
     MatProgressSpinnerModule,
+    MatTooltipModule,
   ],
   selector: 'app-recipe-organization-dialog',
   templateUrl: './recipe-organization-dialog.component.html',
@@ -158,6 +163,47 @@ export class RecipeOrganizationDialogComponent implements OnInit {
     });
   }
 
+  openEditCollection(collection: CollectionDto, event: Event): void {
+    event.stopPropagation();
+    const ref = this.dialog.open<CollectionDialogComponent, CollectionDialogData, CollectionDto>(
+      CollectionDialogComponent,
+      { width: '420px', data: { collection } },
+    );
+    ref.afterClosed().subscribe((updated) => {
+      if (updated) {
+        this.collections.update((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+      }
+    });
+  }
+
+  deleteCollection(collection: CollectionDto, event: Event): void {
+    event.stopPropagation();
+    const confirmRef = this.dialog.open(ConfirmDialogComponent, {
+      data: {
+        title: 'Delete Collection',
+        message: `Are you sure you want to delete "${collection.name}"? Recipes in this collection will not be deleted.`,
+        confirmText: 'Delete',
+        isDestructive: true,
+      },
+    });
+    confirmRef.afterClosed().subscribe((confirmed: boolean) => {
+      if (!confirmed) return;
+      this.taxonomyService.deleteCollection(collection.id).subscribe({
+        next: () => {
+          this.collections.update((prev) => prev.filter((c) => c.id !== collection.id));
+          const nextSelected = new Set(this.selectedCollectionIds());
+          nextSelected.delete(collection.id);
+          this.selectedCollectionIds.set(nextSelected);
+        },
+        error: (err: { error?: { detail?: string; title?: string } }) => {
+          this.errorMessage.set(
+            err?.error?.detail || err?.error?.title || 'Failed to delete collection.',
+          );
+        },
+      });
+    });
+  }
+
   openNewTag(defaultCategory: TagCategory = 'Custom'): void {
     const ref = this.dialog.open<TagDialogComponent, TagDialogData, TagDto>(TagDialogComponent, {
       width: '420px',
@@ -168,6 +214,45 @@ export class RecipeOrganizationDialogComponent implements OnInit {
         this.tags.update((prev) => [...prev, created]);
         this.toggleTag(created.id);
       }
+    });
+  }
+
+  openEditTag(tag: TagDto, event: Event): void {
+    event.stopPropagation();
+    const ref = this.dialog.open<TagDialogComponent, TagDialogData, TagDto>(TagDialogComponent, {
+      width: '420px',
+      data: { tag },
+    });
+    ref.afterClosed().subscribe((updated) => {
+      if (updated) {
+        this.tags.update((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+      }
+    });
+  }
+
+  deleteTag(tag: TagDto, event: Event): void {
+    event.stopPropagation();
+    const confirmRef = this.dialog.open(ConfirmDialogComponent, {
+      data: {
+        title: 'Delete Tag',
+        message: `Are you sure you want to delete the tag "${tag.name}"? It will be removed from all recipes.`,
+        confirmText: 'Delete',
+        isDestructive: true,
+      },
+    });
+    confirmRef.afterClosed().subscribe((confirmed: boolean) => {
+      if (!confirmed) return;
+      this.taxonomyService.deleteTag(tag.id).subscribe({
+        next: () => {
+          this.tags.update((prev) => prev.filter((t) => t.id !== tag.id));
+          const nextSelected = new Set(this.selectedTagIds());
+          nextSelected.delete(tag.id);
+          this.selectedTagIds.set(nextSelected);
+        },
+        error: (err: { error?: { detail?: string; title?: string } }) => {
+          this.errorMessage.set(err?.error?.detail || err?.error?.title || 'Failed to delete tag.');
+        },
+      });
     });
   }
 

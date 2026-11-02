@@ -87,6 +87,15 @@ export class IngestionHubComponent implements OnInit {
 
   readonly selectedImages = signal<{ file: File; previewUrl: string }[]>([]);
   readonly selectedPdf = signal<File | null>(null);
+  readonly failedThumbJobIds = signal<Set<string>>(new Set());
+
+  onJobThumbError(jobId: string): void {
+    this.failedThumbJobIds.update((prev) => {
+      const next = new Set(prev);
+      next.add(jobId);
+      return next;
+    });
+  }
 
   readonly reviewCount = computed(
     () => this.jobs().filter((j) => j.status === 'ReadyForReview').length,

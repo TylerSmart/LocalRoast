@@ -1075,22 +1075,23 @@ public sealed class IngestionService(
 
         job.Status = IngestionJobStatus.Discarded;
         job.StatusDetail = "Job discarded by user.";
+        var oldCover = job.DownloadedCoverImagePath;
+        var oldThumb = job.DownloadedThumbnailImagePath;
+        if (job.ResultingRecipeId == null)
+        {
+            job.DownloadedCoverImagePath = null;
+            job.DownloadedThumbnailImagePath = null;
+        }
 
         if (job.ResultingRecipeId == null)
         {
-            if (!string.IsNullOrWhiteSpace(job.DownloadedCoverImagePath))
+            if (!string.IsNullOrWhiteSpace(oldCover))
             {
-                await mediaStorageService.DeleteMediaFileAsync(
-                    job.DownloadedCoverImagePath,
-                    cancellationToken
-                );
+                await mediaStorageService.DeleteMediaFileAsync(oldCover, cancellationToken);
             }
-            if (!string.IsNullOrWhiteSpace(job.DownloadedThumbnailImagePath))
+            if (!string.IsNullOrWhiteSpace(oldThumb))
             {
-                await mediaStorageService.DeleteMediaFileAsync(
-                    job.DownloadedThumbnailImagePath,
-                    cancellationToken
-                );
+                await mediaStorageService.DeleteMediaFileAsync(oldThumb, cancellationToken);
             }
             if (!string.IsNullOrWhiteSpace(job.SourceFilesJson))
             {

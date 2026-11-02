@@ -124,44 +124,12 @@ public static class HouseholdCatalogSeeder
             await db.SaveChangesAsync(cancellationToken);
         }
 
-        var hasCollections = await db.Collections.AnyAsync(cancellationToken);
-        if (!hasCollections)
+        var unusedSeededCollections = await db
+            .Collections.Where(c => c.IsSystemSeeded && !c.RecipeCollections.Any())
+            .ToListAsync(cancellationToken);
+        if (unusedSeededCollections.Count > 0)
         {
-            var starterCollections = new (string Name, string Description, int SortOrder)[]
-            {
-                ("Weeknight Staples", "Reliable 30–45 minute dinners for busy evenings.", 10),
-                (
-                    "Weekend Projects",
-                    "Slow braises, homemade pasta, sourdough, and showstoppers.",
-                    20
-                ),
-                (
-                    "Holiday & Hosting",
-                    "Crowd-pleasers and make-ahead dishes for family gatherings.",
-                    30
-                ),
-                (
-                    "Sauces & Components",
-                    "Reusable dressings, marinades, pickles, and spice blends.",
-                    40
-                ),
-            };
-
-            foreach (var (name, description, sortOrder) in starterCollections)
-            {
-                db.Collections.Add(
-                    new Collection
-                    {
-                        Name = name,
-                        NormalizedName = name.Trim().ToLowerInvariant(),
-                        Slug = ToKebabCase(name),
-                        Description = description,
-                        SortOrder = sortOrder,
-                        IsSystemSeeded = true,
-                    }
-                );
-            }
-
+            db.Collections.RemoveRange(unusedSeededCollections);
             await db.SaveChangesAsync(cancellationToken);
         }
 

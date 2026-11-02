@@ -52,13 +52,12 @@ public sealed class TaxonomyIntegrationTests
     {
         await RegisterAndAuthenticateAsync(_client, "tax1@example.com", "tax1");
 
-        // Seeded collections
+        // Collections start empty (no starter collections seeded)
         var collRes = await _client.GetAsync("/api/collections");
         Assert.AreEqual(HttpStatusCode.OK, collRes.StatusCode);
         var collections = await collRes.Content.ReadFromJsonAsync<IReadOnlyList<CollectionDto>>();
         Assert.IsNotNull(collections);
-        Assert.IsTrue(collections.Count >= 4);
-        Assert.IsTrue(collections.Any(c => c.Name == "Weeknight Staples"));
+        Assert.IsFalse(collections.Any(c => c.IsSystemSeeded));
 
         // Seeded tags
         var tagRes = await _client.GetAsync("/api/tags");

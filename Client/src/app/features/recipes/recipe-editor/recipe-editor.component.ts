@@ -32,6 +32,7 @@ import { FoodCatalogService } from '../../../core/services/food-catalog/food-cat
 import { MediaService } from '../../../core/services/media/media.service';
 import { RecipeService } from '../../../core/services/recipe/recipe.service';
 import { TaxonomyService } from '../../../core/services/taxonomy/taxonomy.service';
+import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialog/confirm-dialog.component';
 import { FoodItemDialogComponent } from '../../food-catalog/food-item-dialog/food-item-dialog.component';
 import {
   CollectionDialogComponent,
@@ -434,6 +435,52 @@ export class RecipeEditorComponent implements OnInit {
     });
   }
 
+  openEditCollectionDialog(collection: CollectionDto, event: Event): void {
+    event.stopPropagation();
+    const ref = this.dialog.open<CollectionDialogComponent, CollectionDialogData, CollectionDto>(
+      CollectionDialogComponent,
+      { width: '420px', data: { collection } },
+    );
+    ref.afterClosed().subscribe((updated) => {
+      if (updated) {
+        this.collections.update((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+      }
+    });
+  }
+
+  deleteCollection(collection: CollectionDto, event: Event): void {
+    event.stopPropagation();
+    const confirmRef = this.dialog.open(ConfirmDialogComponent, {
+      data: {
+        title: 'Delete Collection',
+        message: `Are you sure you want to delete "${collection.name}"? Recipes in this collection will not be deleted.`,
+        confirmText: 'Delete',
+        isDestructive: true,
+      },
+    });
+    confirmRef.afterClosed().subscribe((confirmed: boolean) => {
+      if (!confirmed) return;
+      this.taxonomyService.deleteCollection(collection.id).subscribe({
+        next: () => {
+          this.collections.update((prev) => prev.filter((c) => c.id !== collection.id));
+          const nextSelected = new Set(this.selectedCollectionIds());
+          nextSelected.delete(collection.id);
+          this.selectedCollectionIds.set(nextSelected);
+          this.snackBar.open(`Deleted collection "${collection.name}"`, 'Close', {
+            duration: 3000,
+          });
+        },
+        error: (err: { error?: { detail?: string; title?: string } }) => {
+          this.snackBar.open(
+            err?.error?.detail || err?.error?.title || 'Failed to delete collection.',
+            'Close',
+            { duration: 4000 },
+          );
+        },
+      });
+    });
+  }
+
   openNewTagDialog(defaultCategory: TagCategory = 'Custom'): void {
     const ref = this.dialog.open<TagDialogComponent, TagDialogData, TagDto>(TagDialogComponent, {
       width: '420px',
@@ -444,6 +491,50 @@ export class RecipeEditorComponent implements OnInit {
         this.tags.update((prev) => [...prev, created]);
         this.toggleTag(created.id);
       }
+    });
+  }
+
+  openEditTagDialog(tag: TagDto, event: Event): void {
+    event.stopPropagation();
+    const ref = this.dialog.open<TagDialogComponent, TagDialogData, TagDto>(TagDialogComponent, {
+      width: '420px',
+      data: { tag },
+    });
+    ref.afterClosed().subscribe((updated) => {
+      if (updated) {
+        this.tags.update((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+      }
+    });
+  }
+
+  deleteTag(tag: TagDto, event: Event): void {
+    event.stopPropagation();
+    const confirmRef = this.dialog.open(ConfirmDialogComponent, {
+      data: {
+        title: 'Delete Tag',
+        message: `Are you sure you want to delete the tag "${tag.name}"? It will be removed from all recipes.`,
+        confirmText: 'Delete',
+        isDestructive: true,
+      },
+    });
+    confirmRef.afterClosed().subscribe((confirmed: boolean) => {
+      if (!confirmed) return;
+      this.taxonomyService.deleteTag(tag.id).subscribe({
+        next: () => {
+          this.tags.update((prev) => prev.filter((t) => t.id !== tag.id));
+          const nextSelected = new Set(this.selectedTagIds());
+          nextSelected.delete(tag.id);
+          this.selectedTagIds.set(nextSelected);
+          this.snackBar.open(`Deleted tag "${tag.name}"`, 'Close', { duration: 3000 });
+        },
+        error: (err: { error?: { detail?: string; title?: string } }) => {
+          this.snackBar.open(
+            err?.error?.detail || err?.error?.title || 'Failed to delete tag.',
+            'Close',
+            { duration: 4000 },
+          );
+        },
+      });
     });
   }
 

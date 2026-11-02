@@ -11,6 +11,7 @@ import { MatDialog } from '@angular/material/dialog';
 import { MatDividerModule } from '@angular/material/divider';
 import { MatExpansionModule } from '@angular/material/expansion';
 import { MatIconModule } from '@angular/material/icon';
+import { MatMenuModule } from '@angular/material/menu';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatTooltipModule } from '@angular/material/tooltip';
@@ -87,6 +88,7 @@ export interface StepSectionGroup {
     MatDividerModule,
     MatCheckboxModule,
     MatExpansionModule,
+    MatMenuModule,
     MatTooltipModule,
     MatProgressSpinnerModule,
   ],

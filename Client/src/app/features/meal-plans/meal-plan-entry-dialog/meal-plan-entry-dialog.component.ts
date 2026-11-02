@@ -3,6 +3,8 @@ import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatButtonToggleModule } from '@angular/material/button-toggle';
 import { MatChipsModule } from '@angular/material/chips';
+import { provideNativeDateAdapter } from '@angular/material/core';
+import { MatDatepickerModule } from '@angular/material/datepicker';
 import { MAT_DIALOG_DATA, MatDialogModule, MatDialogRef } from '@angular/material/dialog';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
@@ -20,7 +22,13 @@ import {
 import { RecipeSummaryDto } from '../../../core/models/recipe.models';
 import { MealPlanService } from '../../../core/services/meal-plan/meal-plan.service';
 import { RecipeService } from '../../../core/services/recipe/recipe.service';
-import { getTodayIsoLocal, normalizeToMondayIso } from '../../../core/utils/meal-plan-date';
+import {
+  coerceToDateLocal,
+  coerceToIsoDateLocal,
+  getTodayIsoLocal,
+  normalizeToMondayIso,
+  shouldUseTouchDatepicker,
+} from '../../../core/utils/meal-plan-date';
 
 export interface MealPlanEntryDialogData {
   entry?: MealPlanEntryDto;
@@ -44,6 +52,7 @@ export interface MealPlanEntryDialogData {
     ReactiveFormsModule,
     MatDialogModule,
     MatButtonModule,
+    MatDatepickerModule,
     MatIconModule,
     MatFormFieldModule,
     MatInputModule,
@@ -52,6 +61,7 @@ export interface MealPlanEntryDialogData {
     MatProgressSpinnerModule,
     MatChipsModule,
   ],
+  providers: [provideNativeDateAdapter()],
   selector: 'app-meal-plan-entry-dialog',
   templateUrl: './meal-plan-entry-dialog.component.html',
   styleUrl: './meal-plan-entry-dialog.component.scss',
@@ -64,6 +74,7 @@ export class MealPlanEntryDialogComponent implements OnInit {
   private readonly recipeService = inject(RecipeService);
 
   protected readonly mealSlots = MEAL_SLOTS;
+  protected readonly useTouchDatepicker = shouldUseTouchDatepicker();
   protected readonly isEdit = !!this.data.entry;
   protected readonly isSubmitting = signal(false);
   protected readonly isLoadingRecipes = signal(false);
@@ -82,7 +93,9 @@ export class MealPlanEntryDialogComponent implements OnInit {
   protected readonly form = this.fb.group({
     entryType: this.fb.control<MealPlanEntryType>('Recipe', { nonNullable: true }),
     placement: this.fb.control<'scheduled' | 'ondeck'>('scheduled', { nonNullable: true }),
-    scheduledDate: this.fb.control<string>(getTodayIsoLocal(), { nonNullable: true }),
+    scheduledDate: this.fb.control<Date | string>(coerceToDateLocal(getTodayIsoLocal()), {
+      nonNullable: true,
+    }),
     slot: this.fb.control<MealSlot>('Dinner', { nonNullable: true }),
     weekStartDate: this.fb.control<string>(normalizeToMondayIso(getTodayIsoLocal()), {
       nonNullable: true,
@@ -99,13 +112,18 @@ export class MealPlanEntryDialogComponent implements OnInit {
     this.loadRecipes();
   }
 
+  protected getSelectedSlotMeta(): { value: MealSlot; label: string; icon: string } {
+    const current = this.form.controls.slot.value;
+    return this.mealSlots.find((s) => s.value === current) ?? this.mealSlots[2];
+  }
+
   private initFormValues(): void {
     if (this.data.entry) {
       const e = this.data.entry;
       this.form.patchValue({
         entryType: e.entryType,
         placement: e.isOnDeck ? 'ondeck' : 'scheduled',
-        scheduledDate: e.scheduledDate ?? getTodayIsoLocal(),
+        scheduledDate: coerceToDateLocal(e.scheduledDate ?? getTodayIsoLocal()),
         slot: e.slot ?? 'Dinner',
         weekStartDate: e.weekStartDate,
         recipeId: e.recipe?.id ?? null,
@@ -123,7 +141,7 @@ export class MealPlanEntryDialogComponent implements OnInit {
       this.form.patchValue({
         entryType: initialEntryType,
         placement: initialPlacement,
-        scheduledDate: initialDate,
+        scheduledDate: coerceToDateLocal(initialDate),
         slot: this.data.initialSlot ?? 'Dinner',
         weekStartDate: initialWeekStart,
         recipeId: this.data.preselectedRecipe?.id ?? null,
@@ -202,16 +220,17 @@ export class MealPlanEntryDialogComponent implements OnInit {
 
     const val = this.form.getRawValue();
     const isOnDeck = val.placement === 'ondeck';
+    const scheduledDateStr = coerceToIsoDateLocal(val.scheduledDate);
     const weekStartDate = isOnDeck
-      ? normalizeToMondayIso(val.weekStartDate || val.scheduledDate)
-      : normalizeToMondayIso(val.scheduledDate);
+      ? normalizeToMondayIso(val.weekStartDate || scheduledDateStr)
+      : normalizeToMondayIso(scheduledDateStr);
 
     if (this.data.entry) {
       const updateReq: UpdateMealPlanEntryRequest = {
         entryType: val.entryType,
         isOnDeck,
         weekStartDate,
-        scheduledDate: isOnDeck ? null : val.scheduledDate,
+        scheduledDate: isOnDeck ? null : scheduledDateStr,
         slot: isOnDeck ? null : val.slot,
         recipeId: val.entryType === 'FreeformNote' ? null : val.recipeId,
         targetServings: val.entryType === 'FreeformNote' ? null : val.targetServings,
@@ -237,7 +256,7 @@ export class MealPlanEntryDialogComponent implements OnInit {
         entryType: val.entryType,
         isOnDeck,
         weekStartDate,
-        scheduledDate: isOnDeck ? null : val.scheduledDate,
+        scheduledDate: isOnDeck ? null : scheduledDateStr,
         slot: isOnDeck ? null : val.slot,
         recipeId: val.entryType === 'FreeformNote' ? null : val.recipeId,
         targetServings: val.entryType === 'FreeformNote' ? null : val.targetServings,

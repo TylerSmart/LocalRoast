@@ -47,6 +47,10 @@ import {
   selector: 'app-shopping-workspace',
   templateUrl: './shopping-workspace.component.html',
   styleUrl: './shopping-workspace.component.scss',
+  host: {
+    '(window:focus)': 'onWindowFocus()',
+    '(document:visibilitychange)': 'onVisibilityChange()',
+  },
 })
 export class ShoppingWorkspaceComponent implements OnInit, OnDestroy {
   private readonly shoppingService = inject(ShoppingService);
@@ -111,6 +115,40 @@ export class ShoppingWorkspaceComponent implements OnInit, OnDestroy {
         this.loadLists(this.activeList()?.id);
       }),
     );
+
+    if (this.shoppingService.crossTabSync$) {
+      this.subscriptions.add(
+        this.shoppingService.crossTabSync$.subscribe((evt) => {
+          this.silentRefreshListsAndActive(evt.listId);
+        }),
+      );
+    }
+  }
+
+  onWindowFocus(): void {
+    this.silentRefreshListsAndActive();
+  }
+
+  onVisibilityChange(): void {
+    if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+      this.silentRefreshListsAndActive();
+    }
+  }
+
+  private silentRefreshListsAndActive(targetListId?: string): void {
+    this.shoppingService.getShoppingLists().subscribe({
+      next: (lists) => {
+        this.lists.set(lists);
+        const currentId = this.activeList()?.id ?? targetListId;
+        if (currentId && lists.some((l) => l.id === currentId)) {
+          this.shoppingService.getShoppingListById(currentId).subscribe({
+            next: (detail) => this.reconcileActiveListWithPendingToggles(detail),
+          });
+        } else if (!this.activeList() && lists.length > 0) {
+          this.selectList(lists[0].id, false);
+        }
+      },
+    });
   }
 
   ngOnDestroy(): void {

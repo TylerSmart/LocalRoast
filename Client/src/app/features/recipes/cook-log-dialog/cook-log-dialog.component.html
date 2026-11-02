@@ -47,12 +47,14 @@
 
     <!-- Date & Servings Made Row -->
     <div class="form-row">
-      <mat-form-field appearance="outline" class="form-field">
+      <mat-form-field appearance="outline" class="form-field" subscriptSizing="dynamic">
         <mat-label>Cook Date</mat-label>
-        <input matInput type="date" formControlName="cookedDate" required />
+        <input matInput [matDatepicker]="cookDatePicker" formControlName="cookedDate" required />
+        <mat-datepicker-toggle matIconSuffix [for]="cookDatePicker"></mat-datepicker-toggle>
+        <mat-datepicker #cookDatePicker [touchUi]="useTouchDatepicker"></mat-datepicker>
       </mat-form-field>
 
-      <mat-form-field appearance="outline" class="form-field">
+      <mat-form-field appearance="outline" class="form-field" subscriptSizing="dynamic">
         <mat-label>Servings Made</mat-label>
         <input
           matInput
@@ -72,7 +74,7 @@
       <textarea
         matInput
         formControlName="notes"
-        rows="3"
+        rows="2"
         maxlength="2000"
         placeholder="e.g. Added smoked paprika, reduced bake time by 5 minutes..."
       ></textarea>
@@ -98,8 +100,10 @@
             (click)="removePhoto()"
             [disabled]="isSubmitting()"
           >
-            <mat-icon>delete</mat-icon>
-            Remove Photo
+            <span class="btn-content">
+              <mat-icon>delete</mat-icon>
+              <span>Remove Photo</span>
+            </span>
           </button>
         </div>
       } @else {
@@ -120,17 +124,15 @@
             [disabled]="isUploadingPhoto() || isSubmitting()"
             aria-labelledby="photo-label"
           >
-            @if (isUploadingPhoto()) {
-              <ng-container>
+            <span class="btn-content">
+              @if (isUploadingPhoto()) {
                 <mat-spinner diameter="18"></mat-spinner>
                 <span>Uploading...</span>
-              </ng-container>
-            } @else {
-              <ng-container>
+              } @else {
                 <mat-icon>add_a_photo</mat-icon>
                 <span>Upload Dish Photo</span>
-              </ng-container>
-            }
+              }
+            </span>
           </button>
         </div>
       }
@@ -148,16 +150,14 @@
     (click)="onSubmit()"
     [disabled]="form.invalid || isSubmitting() || isUploadingPhoto()"
   >
-    @if (isSubmitting()) {
-      <ng-container>
+    <span class="btn-content">
+      @if (isSubmitting()) {
         <mat-spinner diameter="18"></mat-spinner>
         <span>Saving...</span>
-      </ng-container>
-    } @else {
-      <ng-container>
+      } @else {
         <mat-icon>check</mat-icon>
         <span>{{ data.logToEdit ? 'Save Changes' : 'Log Cook' }}</span>
-      </ng-container>
-    }
+      }
+    </span>
   </button>
 </mat-dialog-actions>

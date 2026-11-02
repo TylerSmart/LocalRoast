@@ -1,4 +1,4 @@
-﻿import { Component, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
@@ -27,6 +27,7 @@ import {
   CollectionDialogComponent,
   CollectionDialogData,
 } from '../collection-dialog/collection-dialog.component';
+import { TagDialogComponent, TagDialogData } from '../tag-dialog/tag-dialog.component';
 
 @Component({
   imports: [
@@ -65,6 +66,8 @@ export class RecipeListComponent implements OnInit {
   protected readonly selectedTagIds = signal<string[]>([]);
   protected readonly forgottenFavoritesOnly = signal<boolean>(false);
   protected readonly minRating = signal<number | null>(null);
+  protected readonly filtersExpanded = signal<boolean>(false);
+  protected readonly tagsManagerExpanded = signal<boolean>(false);
   private searchTimer: ReturnType<typeof setTimeout> | null = null;
 
   protected readonly isLoading = signal<boolean>(false);
@@ -78,6 +81,17 @@ export class RecipeListComponent implements OnInit {
     'Equipment',
     'Custom',
   ];
+
+  protected readonly activeDrawerFilterCount = computed(() => {
+    let count = 0;
+    if (this.selectedStatus() !== 'Published') count++;
+    if (this.selectedDifficulty() !== 'All') count++;
+    if (this.maxTimeMinutes() !== null) count++;
+    if (this.selectedTagIds().length > 0) count++;
+    if (this.forgottenFavoritesOnly()) count++;
+    if (this.minRating() !== null) count++;
+    return count;
+  });
 
   protected readonly hasActiveFilters = computed(() => {
     return (
@@ -255,6 +269,130 @@ export class RecipeListComponent implements OnInit {
         this.collections.update((prev) => [...prev, created]);
         this.selectCollection(created.id);
       }
+    });
+  }
+
+  openEditCollectionDialog(collection: CollectionDto, event: Event): void {
+    event.stopPropagation();
+    const ref = this.dialog.open<CollectionDialogComponent, CollectionDialogData, CollectionDto>(
+      CollectionDialogComponent,
+      { width: '420px', data: { collection } },
+    );
+    ref.afterClosed().subscribe((updated) => {
+      if (updated) {
+        this.collections.update((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+        this.loadRecipes();
+      }
+    });
+  }
+
+  deleteCollection(collection: CollectionDto, event: Event): void {
+    event.stopPropagation();
+    const confirmRef = this.dialog.open(ConfirmDialogComponent, {
+      data: {
+        title: 'Delete Collection',
+        message: `Are you sure you want to delete the collection "${collection.name}"? Recipes inside it will not be deleted.`,
+        confirmText: 'Delete',
+        isDestructive: true,
+      },
+    });
+
+    confirmRef.afterClosed().subscribe((confirmed: boolean) => {
+      if (!confirmed) {
+        return;
+      }
+
+      this.taxonomyService.deleteCollection(collection.id).subscribe({
+        next: () => {
+          this.collections.update((prev) => prev.filter((c) => c.id !== collection.id));
+          if (this.selectedCollectionId() === collection.id) {
+            this.selectedCollectionId.set(null);
+          }
+          this.loadRecipes();
+          this.snackBar.open(`Deleted collection "${collection.name}"`, 'Close', {
+            duration: 3000,
+          });
+        },
+        error: (err: { error?: { detail?: string; title?: string } }) => {
+          this.snackBar.open(
+            err?.error?.detail || err?.error?.title || 'Failed to delete collection.',
+            'Close',
+            { duration: 4000 },
+          );
+        },
+      });
+    });
+  }
+
+  toggleFiltersExpanded(): void {
+    this.filtersExpanded.update((v) => !v);
+  }
+
+  toggleTagsManagerExpanded(): void {
+    this.tagsManagerExpanded.update((v) => !v);
+  }
+
+  openNewTagDialog(defaultCategory: TagCategory = 'Custom'): void {
+    const ref = this.dialog.open<TagDialogComponent, TagDialogData, TagDto>(TagDialogComponent, {
+      width: '420px',
+      data: { defaultCategory },
+    });
+    ref.afterClosed().subscribe((created) => {
+      if (created) {
+        this.tags.update((prev) => [...prev, created]);
+      }
+    });
+  }
+
+  openEditTagDialog(tag: TagDto, event: Event): void {
+    event.stopPropagation();
+    const ref = this.dialog.open<TagDialogComponent, TagDialogData, TagDto>(TagDialogComponent, {
+      width: '420px',
+      data: { tag },
+    });
+    ref.afterClosed().subscribe((updated) => {
+      if (updated) {
+        this.tags.update((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+        this.loadRecipes();
+      }
+    });
+  }
+
+  deleteTag(tag: TagDto, event: Event): void {
+    event.stopPropagation();
+    const confirmRef = this.dialog.open(ConfirmDialogComponent, {
+      data: {
+        title: 'Delete Tag',
+        message: `Are you sure you want to delete the tag "${tag.name}"? It will be removed from all recipes.`,
+        confirmText: 'Delete',
+        isDestructive: true,
+      },
+    });
+
+    confirmRef.afterClosed().subscribe((confirmed: boolean) => {
+      if (!confirmed) {
+        return;
+      }
+
+      this.taxonomyService.deleteTag(tag.id).subscribe({
+        next: () => {
+          this.tags.update((prev) => prev.filter((t) => t.id !== tag.id));
+          if (this.selectedTagIds().includes(tag.id)) {
+            this.selectedTagIds.update((ids) => ids.filter((id) => id !== tag.id));
+          }
+          this.loadRecipes();
+          this.snackBar.open(`Deleted tag "${tag.name}"`, 'Close', {
+            duration: 3000,
+          });
+        },
+        error: (err: { error?: { detail?: string; title?: string } }) => {
+          this.snackBar.open(
+            err?.error?.detail || err?.error?.title || 'Failed to delete tag.',
+            'Close',
+            { duration: 4000 },
+          );
+        },
+      });
     });
   }
 

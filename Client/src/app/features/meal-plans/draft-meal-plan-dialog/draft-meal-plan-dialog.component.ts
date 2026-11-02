@@ -3,6 +3,8 @@ import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCheckboxModule } from '@angular/material/checkbox';
 import { MatChipsModule } from '@angular/material/chips';
+import { provideNativeDateAdapter } from '@angular/material/core';
+import { MatDatepickerModule } from '@angular/material/datepicker';
 import { MAT_DIALOG_DATA, MatDialogModule, MatDialogRef } from '@angular/material/dialog';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
@@ -19,6 +21,11 @@ import {
 } from '../../../core/models/meal-plan.models';
 import { AiKitchenHelperService } from '../../../core/services/ai-helpers/ai-kitchen-helper.service';
 import { MealPlanService } from '../../../core/services/meal-plan/meal-plan.service';
+import {
+  coerceToDateLocal,
+  coerceToIsoDateLocal,
+  shouldUseTouchDatepicker,
+} from '../../../core/utils/meal-plan-date';
 
 export interface DraftMealPlanDialogData {
   weekStartDate: string;
@@ -38,10 +45,12 @@ export interface DraftMealCandidateFormItem {
 
 @Component({
   selector: 'app-draft-meal-plan-dialog',
+  providers: [provideNativeDateAdapter()],
   imports: [
     FormsModule,
     MatDialogModule,
     MatButtonModule,
+    MatDatepickerModule,
     MatIconModule,
     MatFormFieldModule,
     MatInputModule,
@@ -61,6 +70,8 @@ export class DraftMealPlanDialogComponent {
   private readonly snackBar = inject(MatSnackBar);
 
   readonly slots = MEAL_SLOTS;
+  readonly coerceToDateLocal = coerceToDateLocal;
+  readonly useTouchDatepicker = shouldUseTouchDatepicker();
   readonly presets = [
     'Quick weeknight dinners (<30 min)',
     'High-protein family meals',
@@ -135,9 +146,11 @@ export class DraftMealPlanDialogComponent {
     );
   }
 
-  updateScheduledDate(id: string, date: string): void {
+  updateScheduledDate(id: string, date: Date | string | null): void {
+    const iso = coerceToIsoDateLocal(date);
+    if (!iso) return;
     this.candidateItems.update((items) =>
-      items.map((item) => (item.id === id ? { ...item, scheduledDate: date } : item)),
+      items.map((item) => (item.id === id ? { ...item, scheduledDate: iso } : item)),
     );
   }
 

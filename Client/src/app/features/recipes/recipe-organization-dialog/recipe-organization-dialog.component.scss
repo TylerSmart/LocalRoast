@@ -1,3 +1,16 @@
+.org-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-right: 0.75rem;
+
+  h2[mat-dialog-title] {
+    margin: 0;
+    flex: 1;
+    min-width: 0;
+  }
+}
+
 .org-section {
   margin-bottom: 24px;
 }
@@ -44,6 +57,81 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.collection-chip-item {
+  display: inline-flex;
+  align-items: center;
+  height: 34px;
+  padding: 0 0.25rem 0 0;
+  border-radius: 9999px;
+  background-color: var(--mat-sys-surface-container-low, #f7f2fa);
+  border: 1px solid var(--mat-sys-outline-variant, #cac4d0);
+  overflow: hidden;
+  box-sizing: border-box;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease;
+
+  &.is-selected {
+    background-color: var(--mat-sys-secondary-container, #e8def8);
+    border-color: var(--mat-sys-primary, #6750a4);
+  }
+
+  ::ng-deep mat-chip-option.mat-mdc-chip {
+    height: 32px !important;
+    margin: 0 !important;
+    border: none !important;
+    border-radius: 0 !important;
+    background-color: transparent !important;
+    --mdc-chip-outline-width: 0px !important;
+    --mdc-chip-flat-selected-outline-width: 0px !important;
+    --mdc-chip-elevated-container-color: transparent !important;
+    --mdc-chip-flat-selected-container-color: transparent !important;
+    --mat-chip-outline-width: 0px !important;
+    --mat-chip-flat-selected-outline-width: 0px !important;
+    --mat-chip-elevated-container-color: transparent !important;
+    --mat-chip-flat-selected-container-color: transparent !important;
+
+    .mdc-evolution-chip__action--primary::before {
+      border: none !important;
+    }
+  }
+
+  .chip-manage-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--mat-sys-on-surface-variant, #49454f);
+    cursor: pointer;
+    flex-shrink: 0;
+    transition:
+      background-color 0.15s ease,
+      color 0.15s ease;
+
+    mat-icon {
+      font-size: 14px;
+      width: 14px;
+      height: 14px;
+      line-height: 14px;
+    }
+
+    &:hover {
+      background-color: var(--mat-sys-surface-container-highest, #e6e0e9);
+      color: var(--mat-sys-on-surface, #1d1b20);
+    }
+
+    &.delete-btn:hover {
+      background-color: var(--mat-sys-error-container, #ffdad6);
+      color: var(--mat-sys-error, #b3261e);
+    }
+  }
 }
 
 .empty-hint {

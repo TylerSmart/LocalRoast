@@ -3,6 +3,8 @@ import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatButtonToggleModule } from '@angular/material/button-toggle';
 import { MatCheckboxModule } from '@angular/material/checkbox';
+import { provideNativeDateAdapter } from '@angular/material/core';
+import { MatDatepickerModule } from '@angular/material/datepicker';
 import { MAT_DIALOG_DATA, MatDialogModule, MatDialogRef } from '@angular/material/dialog';
 import { MatExpansionModule } from '@angular/material/expansion';
 import { MatFormFieldModule } from '@angular/material/form-field';
@@ -20,8 +22,11 @@ import {
 import { ShoppingService } from '../../../core/services/shopping/shopping.service';
 import {
   addDaysIso,
+  coerceToDateLocal,
+  coerceToIsoDateLocal,
   getTodayIsoLocal,
   normalizeToMondayIso,
+  shouldUseTouchDatepicker,
 } from '../../../core/utils/meal-plan-date';
 
 export interface GenerateShoppingListDialogData {
@@ -34,10 +39,12 @@ export interface GenerateShoppingListDialogData {
   selector: 'app-generate-shopping-list-dialog',
   templateUrl: './generate-shopping-list-dialog.component.html',
   styleUrl: './generate-shopping-list-dialog.component.scss',
+  providers: [provideNativeDateAdapter()],
   imports: [
     ReactiveFormsModule,
     MatDialogModule,
     MatButtonModule,
+    MatDatepickerModule,
     MatIconModule,
     MatFormFieldModule,
     MatInputModule,
@@ -56,6 +63,7 @@ export class GenerateShoppingListDialogComponent implements OnInit {
   private readonly shoppingService = inject(ShoppingService);
 
   readonly shoppingLists = signal<ShoppingListSummaryDto[]>([]);
+  readonly useTouchDatepicker = shouldUseTouchDatepicker();
   readonly preview = signal<ShoppingListGenerationPreviewDto | null>(null);
   readonly isLoadingLists = signal(true);
   readonly isPreviewing = signal(false);
@@ -66,8 +74,8 @@ export class GenerateShoppingListDialogComponent implements OnInit {
 
   readonly form = this.fb.nonNullable.group({
     targetShoppingListId: ['', [Validators.required]],
-    startDate: ['', [Validators.required]],
-    endDate: ['', [Validators.required]],
+    startDate: [coerceToDateLocal(getTodayIsoLocal()) as Date | string, [Validators.required]],
+    endDate: [coerceToDateLocal(getTodayIsoLocal()) as Date | string, [Validators.required]],
     includeOnDeck: [true],
     includeSubRecipes: [true],
     includeOptionalIngredients: [true],
@@ -80,8 +88,8 @@ export class GenerateShoppingListDialogComponent implements OnInit {
     const sunday = this.data?.endDate || addDaysIso(monday, 6);
 
     this.form.patchValue({
-      startDate: monday,
-      endDate: sunday,
+      startDate: coerceToDateLocal(monday),
+      endDate: coerceToDateLocal(sunday),
     });
 
     this.loadLists();
@@ -118,7 +126,9 @@ export class GenerateShoppingListDialogComponent implements OnInit {
 
   refreshPreview(): void {
     const val = this.form.getRawValue();
-    if (!val.targetShoppingListId || !val.startDate || !val.endDate) {
+    const startDateStr = coerceToIsoDateLocal(val.startDate);
+    const endDateStr = coerceToIsoDateLocal(val.endDate);
+    if (!val.targetShoppingListId || !startDateStr || !endDateStr) {
       return;
     }
 
@@ -126,8 +136,8 @@ export class GenerateShoppingListDialogComponent implements OnInit {
     this.errorMessage.set(null);
 
     const request: GenerateFromMealPlanRequest = {
-      startDate: val.startDate,
-      endDate: val.endDate,
+      startDate: startDateStr,
+      endDate: endDateStr,
       includeOnDeck: val.includeOnDeck ?? true,
       includeSubRecipes: val.includeSubRecipes ?? true,
       includeOptionalIngredients: val.includeOptionalIngredients ?? true,
@@ -176,8 +186,8 @@ export class GenerateShoppingListDialogComponent implements OnInit {
     this.errorMessage.set(null);
 
     const request: GenerateFromMealPlanRequest = {
-      startDate: val.startDate,
-      endDate: val.endDate,
+      startDate: coerceToIsoDateLocal(val.startDate),
+      endDate: coerceToIsoDateLocal(val.endDate),
       includeOnDeck: val.includeOnDeck ?? true,
       includeSubRecipes: val.includeSubRecipes ?? true,
       includeOptionalIngredients: val.includeOptionalIngredients ?? true,

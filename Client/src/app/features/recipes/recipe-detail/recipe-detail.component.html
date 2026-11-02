@@ -27,46 +27,65 @@
           <mat-icon>rate_review</mat-icon>
           <span>I Made This!</span>
         </button>
-        <button mat-stroked-button (click)="openPlanMealDialog()" aria-label="Plan meal">
-          <mat-icon>calendar_month</mat-icon>
-          <span>Plan Meal</span>
-        </button>
         <button
+          type="button"
           mat-stroked-button
-          (click)="openAddToShoppingListDialog()"
-          aria-label="Add ingredients to shopping list"
+          [matMenuTriggerFor]="recipeActionsMenu"
+          class="recipe-actions-menu-btn"
+          aria-label="More recipe actions"
         >
-          <mat-icon>add_shopping_cart</mat-icon>
-          <span>Add to List</span>
+          <mat-icon>more_horiz</mat-icon>
+          <span>Actions</span>
         </button>
-        <button
-          mat-stroked-button
-          (click)="openOrganizeDialog()"
-          aria-label="Organize collections and tags"
-        >
-          <mat-icon>label</mat-icon>
-          <span>Organize</span>
-        </button>
-        <button mat-stroked-button (click)="openShareDialog()" aria-label="Share recipe">
-          <mat-icon>share</mat-icon>
-          <span>Share</span>
-        </button>
-        <button mat-stroked-button (click)="printRecipe()" aria-label="Print recipe">
-          <mat-icon>print</mat-icon>
-          <span>Print</span>
-        </button>
-        <a
-          mat-stroked-button
-          [routerLink]="['/recipes', recipe()!.id, 'edit']"
-          aria-label="Edit recipe"
-        >
-          <mat-icon>edit</mat-icon>
-          <span>Edit</span>
-        </a>
-        <button mat-button color="warn" (click)="deleteRecipe()" aria-label="Delete recipe">
-          <mat-icon>delete</mat-icon>
-          <span>Delete</span>
-        </button>
+
+        <mat-menu #recipeActionsMenu="matMenu" xPosition="before">
+          <button mat-menu-item (click)="openPlanMealDialog()" aria-label="Plan meal">
+            <mat-icon>calendar_month</mat-icon>
+            <span>Plan Meal</span>
+          </button>
+          <button
+            mat-menu-item
+            (click)="openAddToShoppingListDialog()"
+            aria-label="Add ingredients to shopping list"
+          >
+            <mat-icon>add_shopping_cart</mat-icon>
+            <span>Add to List</span>
+          </button>
+          <button
+            mat-menu-item
+            (click)="openOrganizeDialog()"
+            aria-label="Organize collections and tags"
+          >
+            <mat-icon>label</mat-icon>
+            <span>Organize Collections & Tags</span>
+          </button>
+          <button mat-menu-item (click)="openShareDialog()" aria-label="Share recipe">
+            <mat-icon>share</mat-icon>
+            <span>Share Recipe</span>
+          </button>
+          <button mat-menu-item (click)="printRecipe()" aria-label="Print recipe">
+            <mat-icon>print</mat-icon>
+            <span>Print Recipe</span>
+          </button>
+          <mat-divider></mat-divider>
+          <a
+            mat-menu-item
+            [routerLink]="['/recipes', recipe()!.id, 'edit']"
+            aria-label="Edit recipe"
+          >
+            <mat-icon>edit</mat-icon>
+            <span>Edit Recipe</span>
+          </a>
+          <button
+            mat-menu-item
+            class="delete-recipe-menu-item"
+            (click)="deleteRecipe()"
+            aria-label="Delete recipe"
+          >
+            <mat-icon color="warn">delete</mat-icon>
+            <span>Delete Recipe</span>
+          </button>
+        </mat-menu>
       </div>
     }
   </div>

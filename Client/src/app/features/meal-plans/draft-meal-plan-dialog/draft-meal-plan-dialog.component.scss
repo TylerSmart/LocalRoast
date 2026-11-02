@@ -118,7 +118,6 @@
       .deck-toggle-wrap {
         display: flex;
         align-items: center;
-        padding-top: 4px;
       }
 
       .draft-submit-btn {
@@ -309,10 +308,13 @@
               color: var(--mat-sys-on-surface-variant);
             }
 
-            .candidate-date-input,
+            .candidate-date-field {
+              width: 155px;
+            }
+
             .candidate-slot-select,
             .candidate-servings-input {
-              height: 30px;
+              height: 36px;
               padding: 0 0.4rem;
               border-radius: 6px;
               border: 1px solid var(--mat-sys-outline-variant);
@@ -322,7 +324,7 @@
             }
 
             .candidate-servings-input {
-              width: 50px;
+              width: 54px;
             }
           }
 
