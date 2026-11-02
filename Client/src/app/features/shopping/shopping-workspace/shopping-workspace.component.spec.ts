@@ -1,14 +1,19 @@
+import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { MatDialog } from '@angular/material/dialog';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { provideAnimationsAsync } from '@angular/platform-browser/animations/async';
 import { ActivatedRoute, Router } from '@angular/router';
-import { of } from 'rxjs';
+import { Subject, of } from 'rxjs';
 import {
+  RealtimeSyncState,
   ShoppingListDetailDto,
   ShoppingListItemDto,
+  ShoppingListRealtimeEventDto,
   ShoppingListSummaryDto,
+  ShoppingListsCatalogChangedDto,
 } from '../../../core/models/shopping.models';
+import { ShoppingRealtimeService } from '../../../core/services/shopping/shopping-realtime.service';
 import { ShoppingService } from '../../../core/services/shopping/shopping.service';
 import { ShoppingWorkspaceComponent } from './shopping-workspace.component';
 
@@ -30,6 +35,21 @@ describe('ShoppingWorkspaceComponent', () => {
     clearCheckedItems: vi.fn(),
     generateFromMealPlan: vi.fn(),
     addRecipeToList: vi.fn(),
+  };
+
+  const mockRealtimeSyncState = signal<RealtimeSyncState>('live');
+  const mockListUpdated$ = new Subject<ShoppingListRealtimeEventDto>();
+  const mockCatalogChanged$ = new Subject<ShoppingListsCatalogChangedDto>();
+  const mockReconnected$ = new Subject<void>();
+
+  const mockRealtimeService = {
+    syncState: mockRealtimeSyncState,
+    listUpdated$: mockListUpdated$,
+    catalogChanged$: mockCatalogChanged$,
+    reconnected$: mockReconnected$,
+    connect: vi.fn().mockReturnValue(Promise.resolve()),
+    disconnect: vi.fn().mockReturnValue(Promise.resolve()),
+    watchList: vi.fn().mockReturnValue(Promise.resolve()),
   };
 
   const mockDialog = {
@@ -167,6 +187,10 @@ describe('ShoppingWorkspaceComponent', () => {
     mockShoppingService.promotePantryStaple.mockReset();
     mockShoppingService.clearCheckedItems.mockReset();
     mockShoppingService.deleteItem.mockReset();
+    mockRealtimeService.connect.mockReset().mockReturnValue(Promise.resolve());
+    mockRealtimeService.disconnect.mockReset().mockReturnValue(Promise.resolve());
+    mockRealtimeService.watchList.mockReset().mockReturnValue(Promise.resolve());
+    mockRealtimeSyncState.set('live');
     mockDialog.open.mockReset();
     mockSnackBar.open.mockReset();
     mockRouter.navigate.mockReset();
@@ -176,6 +200,7 @@ describe('ShoppingWorkspaceComponent', () => {
       providers: [
         provideAnimationsAsync(),
         { provide: ShoppingService, useValue: mockShoppingService },
+        { provide: ShoppingRealtimeService, useValue: mockRealtimeService },
         { provide: MatDialog, useValue: mockDialog },
         { provide: MatSnackBar, useValue: mockSnackBar },
         { provide: Router, useValue: mockRouter },
@@ -193,12 +218,19 @@ describe('ShoppingWorkspaceComponent', () => {
     fixture.detectChanges();
   });
 
-  it('should create and load shopping lists', () => {
+  it('should create and load shopping lists and connect realtime', () => {
     expect(component).toBeTruthy();
+    expect(mockRealtimeService.connect).toHaveBeenCalled();
     expect(mockShoppingService.getShoppingLists).toHaveBeenCalled();
     expect(mockShoppingService.getShoppingListById).toHaveBeenCalledWith('list-1');
+    expect(mockRealtimeService.watchList).toHaveBeenCalledWith('list-1');
     expect(component['lists']().length).toBe(2);
     expect(component['activeList']()?.name).toBe('Weekly Groceries');
+
+    const compiled = fixture.nativeElement as HTMLElement;
+    const syncPill = compiled.querySelector('.sync-status-pill.live');
+    expect(syncPill).toBeTruthy();
+    expect(syncPill?.textContent).toContain('Live Sync');
   });
 
   it('should quick-add an item and refresh the active list', () => {
@@ -266,5 +298,73 @@ describe('ShoppingWorkspaceComponent', () => {
     component.deleteItem(mockActiveItem);
 
     expect(mockShoppingService.deleteItem).toHaveBeenCalledWith('list-1', 'item-1');
+  });
+
+  it('reconciles active list when realtime listUpdated event arrives', () => {
+    const updatedDetail: ShoppingListDetailDto = {
+      ...mockDetail,
+      activeItems: [
+        mockActiveItem,
+        {
+          id: 'item-remote',
+          shoppingListId: 'list-1',
+          displayName: 'Organic Strawberries',
+          unitLabel: 'box',
+          formattedAmount: '2',
+          dimension: 'Discrete',
+          isPantryStapleExcluded: false,
+          isChecked: false,
+          sortOrder: 3,
+          sources: [],
+          createdAt: '2026-11-02T02:00:00Z',
+          modifiedAt: '2026-11-02T02:00:00Z',
+        },
+      ],
+    };
+
+    mockListUpdated$.next({
+      eventType: 'ItemAdded',
+      shoppingListId: 'list-1',
+      shoppingList: updatedDetail,
+      changedItem: updatedDetail.activeItems[1],
+      deletedItemId: null,
+      actorUserId: 'user-2',
+      actorDisplayName: 'Alex',
+      occurredAt: new Date().toISOString(),
+    });
+
+    expect(component['activeList']()?.activeItems.length).toBe(2);
+    expect(component['activeList']()?.activeItems[1].displayName).toBe('Organic Strawberries');
+  });
+
+  it('updates catalog when realtime catalogChanged event arrives', () => {
+    const nextCatalog: ShoppingListSummaryDto[] = [
+      ...mockLists,
+      {
+        id: 'list-3',
+        name: 'Target Trip',
+        isPinned: false,
+        activeUncheckedCount: 0,
+        checkedCount: 0,
+        excludedPantryCount: 0,
+        createdAt: '2026-11-02T03:00:00Z',
+        modifiedAt: '2026-11-02T03:00:00Z',
+      },
+    ];
+
+    mockCatalogChanged$.next({
+      eventType: 'ListCreated',
+      affectedShoppingListId: 'list-3',
+      lists: nextCatalog,
+      occurredAt: new Date().toISOString(),
+    });
+
+    expect(component['lists']().length).toBe(3);
+    expect(component['lists']()[2].name).toBe('Target Trip');
+  });
+
+  it('disconnects on component destroy', () => {
+    fixture.destroy();
+    expect(mockRealtimeService.disconnect).toHaveBeenCalled();
   });
 });

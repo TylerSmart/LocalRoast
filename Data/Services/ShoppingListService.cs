@@ -11,7 +11,8 @@ namespace App.Data.Services;
 public sealed class ShoppingListService(
     AppDbContext dbContext,
     IUserContext? userContext = null,
-    TimeProvider? timeProvider = null
+    TimeProvider? timeProvider = null,
+    IShoppingRealtimeNotifier? realtimeNotifier = null
 ) : IShoppingListService
 {
     public async Task<IReadOnlyList<ShoppingListSummaryDto>> GetShoppingListsAsync(
@@ -125,7 +126,9 @@ public sealed class ShoppingListService(
         dbContext.ShoppingLists.Add(list);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return (await GetShoppingListByIdAsync(list.Id, cancellationToken))!;
+        var created = (await GetShoppingListByIdAsync(list.Id, cancellationToken))!;
+        await BroadcastChangeAsync(ShoppingRealtimeEventType.ListCreated, list.Id, created);
+        return created;
     }
 
     public async Task<ShoppingListDetailDto?> UpdateShoppingListAsync(
@@ -174,7 +177,12 @@ public sealed class ShoppingListService(
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return await GetShoppingListByIdAsync(id, cancellationToken);
+        var updated = await GetShoppingListByIdAsync(id, cancellationToken);
+        if (updated is not null)
+        {
+            await BroadcastChangeAsync(ShoppingRealtimeEventType.ListUpdated, id, updated);
+        }
+        return updated;
     }
 
     public async Task<bool> DeleteShoppingListAsync(
@@ -193,6 +201,7 @@ public sealed class ShoppingListService(
 
         dbContext.ShoppingLists.Remove(list);
         await dbContext.SaveChangesAsync(cancellationToken);
+        await BroadcastChangeAsync(ShoppingRealtimeEventType.ListDeleted, id);
         return true;
     }
 
@@ -328,7 +337,13 @@ public sealed class ShoppingListService(
                     match.Notes = bucket.MergedNotes;
 
                     await dbContext.SaveChangesAsync(cancellationToken);
-                    return await GetItemDtoByIdAsync(match.Id, cancellationToken);
+                    var updatedExisting = await GetItemDtoByIdAsync(match.Id, cancellationToken);
+                    await BroadcastChangeAsync(
+                        ShoppingRealtimeEventType.ItemAdded,
+                        shoppingListId,
+                        changedItem: updatedExisting
+                    );
+                    return updatedExisting;
                 }
             }
         }
@@ -362,7 +377,13 @@ public sealed class ShoppingListService(
         dbContext.ShoppingListItems.Add(newItem);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return await GetItemDtoByIdAsync(newItem.Id, cancellationToken);
+        var createdItem = await GetItemDtoByIdAsync(newItem.Id, cancellationToken);
+        await BroadcastChangeAsync(
+            ShoppingRealtimeEventType.ItemAdded,
+            shoppingListId,
+            changedItem: createdItem
+        );
+        return createdItem;
     }
 
     public async Task<ShoppingListItemDto?> UpdateItemAsync(
@@ -421,7 +442,13 @@ public sealed class ShoppingListService(
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return MapItemDto(item);
+        var updatedDto = MapItemDto(item);
+        await BroadcastChangeAsync(
+            ShoppingRealtimeEventType.ItemUpdated,
+            shoppingListId,
+            changedItem: updatedDto
+        );
+        return updatedDto;
     }
 
     public async Task<ShoppingListItemDto?> SetItemCheckedAsync(
@@ -466,7 +493,13 @@ public sealed class ShoppingListService(
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return MapItemDto(item);
+        var checkedDto = MapItemDto(item);
+        await BroadcastChangeAsync(
+            ShoppingRealtimeEventType.ItemCheckedChanged,
+            shoppingListId,
+            changedItem: checkedDto
+        );
+        return checkedDto;
     }
 
     public async Task<ShoppingListItemDto?> PromotePantryStapleItemAsync(
@@ -592,7 +625,13 @@ public sealed class ShoppingListService(
                 dbContext.ShoppingListItems.Remove(item);
                 await dbContext.SaveChangesAsync(cancellationToken);
 
-                return MapItemDto(matchingActive);
+                var promotedMergedDto = MapItemDto(matchingActive);
+                await BroadcastChangeAsync(
+                    ShoppingRealtimeEventType.ItemPromoted,
+                    shoppingListId,
+                    changedItem: promotedMergedDto
+                );
+                return promotedMergedDto;
             }
         }
 
@@ -611,7 +650,13 @@ public sealed class ShoppingListService(
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return MapItemDto(item);
+        var promotedDto = MapItemDto(item);
+        await BroadcastChangeAsync(
+            ShoppingRealtimeEventType.ItemPromoted,
+            shoppingListId,
+            changedItem: promotedDto
+        );
+        return promotedDto;
     }
 
     public async Task<bool> DeleteItemAsync(
@@ -632,6 +677,11 @@ public sealed class ShoppingListService(
 
         dbContext.ShoppingListItems.Remove(item);
         await dbContext.SaveChangesAsync(cancellationToken);
+        await BroadcastChangeAsync(
+            ShoppingRealtimeEventType.ItemDeleted,
+            shoppingListId,
+            deletedItemId: itemId
+        );
         return true;
     }
 
@@ -658,6 +708,14 @@ public sealed class ShoppingListService(
         var count = checkedItems.Count;
         dbContext.ShoppingListItems.RemoveRange(checkedItems);
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        if (count > 0)
+        {
+            await BroadcastChangeAsync(
+                ShoppingRealtimeEventType.CheckedItemsCleared,
+                shoppingListId
+            );
+        }
 
         return new ClearCheckedItemsResultDto(count);
     }
@@ -786,6 +844,16 @@ public sealed class ShoppingListService(
         await dbContext.SaveChangesAsync(cancellationToken);
 
         var updatedDetail = (await GetShoppingListByIdAsync(shoppingListId, cancellationToken))!;
+        await BroadcastChangeAsync(
+            ShoppingRealtimeEventType.ItemsGenerated,
+            shoppingListId,
+            updatedDetail
+        );
+        await BroadcastChangeAsync(
+            ShoppingRealtimeEventType.ItemsGenerated,
+            shoppingListId,
+            updatedDetail
+        );
 
         return new ShoppingListGenerationResultDto(
             updatedDetail,
@@ -1420,5 +1488,59 @@ public sealed class ShoppingListService(
         }
 
         return (null, null);
+    }
+
+    private async Task BroadcastChangeAsync(
+        ShoppingRealtimeEventType eventType,
+        Guid shoppingListId,
+        ShoppingListDetailDto? detail = null,
+        ShoppingListItemDto? changedItem = null,
+        Guid? deletedItemId = null
+    )
+    {
+        if (realtimeNotifier is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var (actorUserId, actorDisplayName) = await ResolveActorAsync(CancellationToken.None);
+            if (detail is null && eventType != ShoppingRealtimeEventType.ListDeleted)
+            {
+                detail = await GetShoppingListByIdAsync(shoppingListId, CancellationToken.None);
+            }
+
+            var lists = await GetShoppingListsAsync(CancellationToken.None);
+            var occurredAt = (timeProvider ?? TimeProvider.System).GetUtcNow();
+
+            var listEvent = new ShoppingListRealtimeEventDto(
+                EventType: eventType,
+                ShoppingListId: shoppingListId,
+                ShoppingList: detail,
+                ChangedItem: changedItem,
+                DeletedItemId: deletedItemId,
+                ActorUserId: actorUserId,
+                ActorDisplayName: actorDisplayName,
+                OccurredAt: occurredAt
+            );
+
+            var catalogEvent = new ShoppingListsCatalogChangedDto(
+                EventType: eventType,
+                AffectedShoppingListId: shoppingListId,
+                Lists: lists,
+                OccurredAt: occurredAt
+            );
+
+            await realtimeNotifier.NotifyListChangedAsync(
+                listEvent,
+                catalogEvent,
+                CancellationToken.None
+            );
+        }
+        catch
+        {
+            // Best-effort safety: never fail persistence if realtime notification errors
+        }
     }
 }

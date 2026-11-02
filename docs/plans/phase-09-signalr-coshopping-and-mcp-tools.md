@@ -1,7 +1,7 @@
 # Phase 09: SignalR Real-Time Co-Shopping & Milestone 3 MCP Tools
 
 > **Branch:** `feature/phase-09-signalr-coshopping-and-mcp-tools`
-> **Status:** `[ ]` Not Started (`[ ]` Not Started | `[~]` In Progress | `[x]` Completed)
+> **Status:** `[x]` Completed (`[ ]` Not Started | `[~]` In Progress | `[x]` Completed)
 > **PRD Reference:** `docs/prd.md` — Sections 1, 2, 4.3 (Groups 3 & 4), 4.5.4, 5, and 6 (Milestone 3, Slice 3 of 3)
 > **Target Execution:** Run `/execute-phase` to execute this plan step-by-step.
 
@@ -534,7 +534,7 @@ Create `Tests/Client.E2ETests/SignalRCoShoppingAndMcpE2ETests.cs` extending `E2E
 
 ## 6. Step-by-Step Execution Checklist (For Implementation Agent)
 
-- [ ] **Task 1: Backend Core, Realtime Notifier Contract & Milestone 3 MCP Service**
+- [x] **Task 1: Backend Core, Realtime Notifier Contract & Milestone 3 MCP Service**
   - Update `Core/Shopping/ShoppingEnums.cs`, `Core/Shopping/ShoppingListModels.cs`, and create `Core/Shopping/IShoppingRealtimeNotifier.cs`.
   - Update `Data/Services/ShoppingListService.cs` to inject optional `IShoppingRealtimeNotifier? realtimeNotifier = null` and broadcast list + catalog updates after every mutating persistence call.
   - Update `Core/Mcp/McpModels.cs`, create `Core/Mcp/IMcpMealAndShoppingService.cs`, implement `Data/Services/McpMealAndShoppingService.cs`, and register `IMcpMealAndShoppingService` in `Data/DataServiceCollectionExtensions.cs`.
@@ -544,7 +544,7 @@ Create `Tests/Client.E2ETests/SignalRCoShoppingAndMcpE2ETests.cs` extending `E2E
     dotnet test --project Tests/Core.UnitTests/App.Core.UnitTests.csproj
     ```
 
-- [ ] **Task 2: SignalR Hub, MCP Tool Endpoints & API Integration Tests**
+- [x] **Task 2: SignalR Hub, MCP Tool Endpoints & API Integration Tests**
   - Create `API/Hubs/ShoppingHubGroups.cs`, `API/Hubs/IShoppingClient.cs`, `API/Hubs/ShoppingHub.cs`, and `API/Hubs/SignalRShoppingRealtimeNotifier.cs`.
   - Create `API/Mcp/MealPlanMcpTools.cs` and `API/Mcp/ShoppingMcpTools.cs`, and register them in `API/Mcp/McpServiceCollectionExtensions.cs`.
   - Update `API/Program.cs` to configure `AddSignalR()` (with `JsonStringEnumConverter`), register `IShoppingRealtimeNotifier`, and map `/api/hubs/shopping`.
@@ -555,7 +555,7 @@ Create `Tests/Client.E2ETests/SignalRCoShoppingAndMcpE2ETests.cs` extending `E2E
     dotnet test --project Tests/API.IntegrationTests/App.API.IntegrationTests.csproj
     ```
 
-- [ ] **Task 3: Angular SignalR Co-Shopping Client, Live Sync UI & Unit Tests**
+- [x] **Task 3: Angular SignalR Co-Shopping Client, Live Sync UI & Unit Tests**
   - Install `@microsoft/signalr` (`^10.0.11`) in `Client/`, update `Client/proxy.conf.json` with `/api/hubs` (`ws: true`), and extend `Client/src/app/core/models/shopping.models.ts`.
   - Create `Client/src/app/core/services/shopping/shopping-realtime.service.ts` (+ `.spec.ts`).
   - Update `ShoppingWorkspaceComponent` (`.ts`, `.html`, `.scss`, `.spec.ts`) with live SignalR subscription, list group switching, optimistic pending-toggle protection, reconnect reconciliation, and the accessible `.sync-status-pill` indicator.
@@ -568,7 +568,7 @@ Create `Tests/Client.E2ETests/SignalRCoShoppingAndMcpE2ETests.cs` extending `E2E
     npm test -- --watch=false
     ```
 
-- [ ] **Task 4: Playwright E2E Verification & Final Formatting**
+- [x] **Task 4: Playwright E2E Verification & Final Formatting**
   - Create `Tests/Client.E2ETests/SignalRCoShoppingAndMcpE2ETests.cs` implementing all 3 scenarios from Section 5.
   - Build backend + production Angular bundle and run Playwright E2E tests:
     ```powershell

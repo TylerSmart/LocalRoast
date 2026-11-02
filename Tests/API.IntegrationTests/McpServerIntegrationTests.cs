@@ -87,7 +87,7 @@ public sealed class McpServerIntegrationTests
     }
 
     [TestMethod]
-    public async Task McpClient_ListTools_AdvertisesAll6Milestone2Tools()
+    public async Task McpClient_ListTools_AdvertisesAll13Milestone2And3Tools()
     {
         await RegisterAndAuthorizeAsync("tooltester@example.com", "tooltester", "Password123!");
         var pat = await CreatePatAsync("Tool Tester");
@@ -113,6 +113,9 @@ public sealed class McpServerIntegrationTests
         Assert.IsNotNull(tools);
         var toolNames = tools.Select(t => t.Name).ToHashSet();
 
+        Assert.AreEqual(13, toolNames.Count, "Expected exactly 13 MCP tools");
+
+        // Milestone 2 tools
         Assert.IsTrue(toolNames.Contains("search_recipes"), "Missing search_recipes");
         Assert.IsTrue(toolNames.Contains("get_recipe"), "Missing get_recipe");
         Assert.IsTrue(
@@ -130,6 +133,27 @@ public sealed class McpServerIntegrationTests
         Assert.IsTrue(
             toolNames.Contains("save_structured_recipe"),
             "Missing save_structured_recipe"
+        );
+
+        // Milestone 3 tools
+        Assert.IsTrue(toolNames.Contains("get_meal_plan"), "Missing get_meal_plan");
+        Assert.IsTrue(toolNames.Contains("plan_meals"), "Missing plan_meals");
+        Assert.IsTrue(
+            toolNames.Contains("remove_meal_plan_entry"),
+            "Missing remove_meal_plan_entry"
+        );
+        Assert.IsTrue(toolNames.Contains("get_shopping_lists"), "Missing get_shopping_lists");
+        Assert.IsTrue(
+            toolNames.Contains("generate_shopping_list_from_meal_plan"),
+            "Missing generate_shopping_list_from_meal_plan"
+        );
+        Assert.IsTrue(
+            toolNames.Contains("upsert_shopping_list_items"),
+            "Missing upsert_shopping_list_items"
+        );
+        Assert.IsTrue(
+            toolNames.Contains("set_shopping_list_item_checked"),
+            "Missing set_shopping_list_item_checked"
         );
     }
 
@@ -270,6 +294,175 @@ public sealed class McpServerIntegrationTests
             );
             Assert.IsNotNull(tokenInDb?.LastUsedAt);
         }
+    }
+
+    [TestMethod]
+    public async Task McpClient_Milestone3Tools_PlanMeals_GenerateShoppingList_UpsertAndCheckItems_EndToEnd()
+    {
+        var auth = await RegisterAndAuthorizeAsync("m3chef@example.com", "m3chef", "Password123!");
+        var pat = await CreatePatAsync("M3 Assistant");
+
+        var testClient = _factory.CreateClient();
+        var transport = new HttpClientTransport(
+            new HttpClientTransportOptions
+            {
+                Endpoint = new Uri(testClient.BaseAddress!, "/api/mcp"),
+                TransportMode = HttpTransportMode.StreamableHttp,
+                AdditionalHeaders = new Dictionary<string, string>
+                {
+                    ["Authorization"] = $"Bearer {pat.PlaintextToken}",
+                },
+            },
+            httpClient: testClient,
+            ownsHttpClient: false
+        );
+
+        await using var mcpClient = await McpClient.CreateAsync(transport);
+
+        // 1. Save a structured recipe
+        var saveRes = await mcpClient.CallToolAsync(
+            "save_structured_recipe",
+            new Dictionary<string, object?>
+            {
+                ["title"] = "MCP Lemon Herb Chicken",
+                ["publishImmediately"] = true,
+                ["baseServings"] = 4,
+                ["ingredients"] = new object[]
+                {
+                    new Dictionary<string, object?>
+                    {
+                        ["displayName"] = "4 Chicken breasts",
+                        ["canonicalFoodName"] = "Chicken Breast",
+                        ["quantity"] = 4,
+                        ["unit"] = "whole",
+                    },
+                    new Dictionary<string, object?>
+                    {
+                        ["displayName"] = "1 tbsp Olive Oil",
+                        ["canonicalFoodName"] = "Extra-Virgin Olive Oil",
+                        ["quantity"] = 1,
+                        ["unit"] = "tbsp",
+                    },
+                },
+                ["steps"] = new object[]
+                {
+                    new Dictionary<string, object?>
+                    {
+                        ["instruction"] = "Sear chicken in olive oil.",
+                    },
+                },
+            }
+        );
+        Assert.IsNotNull(saveRes);
+        Assert.IsFalse(saveRes.IsError == true);
+
+        // 2. Plan meals: recipe on Monday, leftovers on Tuesday
+        var planRes = await mcpClient.CallToolAsync(
+            "plan_meals",
+            new Dictionary<string, object?>
+            {
+                ["entries"] = new object[]
+                {
+                    new Dictionary<string, object?>
+                    {
+                        ["entryType"] = "Recipe",
+                        ["scheduledDate"] = "2026-11-02",
+                        ["slot"] = "Dinner",
+                        ["recipeTitle"] = "MCP Lemon Herb Chicken",
+                        ["targetServings"] = 8,
+                    },
+                    new Dictionary<string, object?>
+                    {
+                        ["entryType"] = "Leftovers",
+                        ["scheduledDate"] = "2026-11-03",
+                        ["slot"] = "Lunch",
+                        ["customTitle"] = "Leftover Chicken",
+                    },
+                },
+            }
+        );
+        Assert.IsNotNull(planRes);
+        Assert.IsFalse(planRes.IsError == true);
+
+        // 3. Get meal plan
+        var getPlanRes = await mcpClient.CallToolAsync(
+            "get_meal_plan",
+            new Dictionary<string, object?>
+            {
+                ["startDate"] = "2026-11-02",
+                ["endDate"] = "2026-11-08",
+            }
+        );
+        Assert.IsNotNull(getPlanRes);
+        Assert.IsFalse(getPlanRes.IsError == true);
+        var planJson = ((TextContentBlock)getPlanRes.Content[0]).Text;
+        StringAssert.Contains(planJson, "MCP Lemon Herb Chicken");
+        StringAssert.Contains(planJson, "Leftover Chicken");
+
+        // 4. Generate shopping list from meal plan into "Weekly Groceries"
+        var genRes = await mcpClient.CallToolAsync(
+            "generate_shopping_list_from_meal_plan",
+            new Dictionary<string, object?>
+            {
+                ["startDate"] = "2026-11-02",
+                ["endDate"] = "2026-11-08",
+                ["listName"] = "Weekly Groceries",
+                ["createListIfMissing"] = true,
+            }
+        );
+        Assert.IsNotNull(genRes);
+        Assert.IsFalse(genRes.IsError == true);
+        var genJson = ((TextContentBlock)genRes.Content[0]).Text;
+        StringAssert.Contains(genJson, "Weekly Groceries");
+
+        // 5. Upsert items: add paper towels
+        var upsertRes = await mcpClient.CallToolAsync(
+            "upsert_shopping_list_items",
+            new Dictionary<string, object?>
+            {
+                ["listName"] = "Weekly Groceries",
+                ["items"] = new object[]
+                {
+                    new Dictionary<string, object?>
+                    {
+                        ["displayName"] = "Paper Towels",
+                        ["quantity"] = 2,
+                        ["unit"] = "whole",
+                    },
+                },
+            }
+        );
+        Assert.IsNotNull(upsertRes);
+        Assert.IsFalse(upsertRes.IsError == true);
+        var upsertJson = ((TextContentBlock)upsertRes.Content[0]).Text;
+        StringAssert.Contains(upsertJson, "Paper Towels");
+
+        // 6. Check item
+        var checkRes = await mcpClient.CallToolAsync(
+            "set_shopping_list_item_checked",
+            new Dictionary<string, object?>
+            {
+                ["listName"] = "Weekly Groceries",
+                ["itemName"] = "Paper Towels",
+                ["isChecked"] = true,
+            }
+        );
+        Assert.IsNotNull(checkRes);
+        Assert.IsFalse(checkRes.IsError == true);
+
+        // 7. Get shopping lists
+        var getListsRes = await mcpClient.CallToolAsync(
+            "get_shopping_lists",
+            new Dictionary<string, object?>
+            {
+                ["listName"] = "Weekly Groceries",
+                ["includeItems"] = true,
+            }
+        );
+        Assert.IsNotNull(getListsRes);
+        Assert.IsFalse(getListsRes.IsError == true);
+        var listsJson = ((TextContentBlock)getListsRes.Content[0]).Text;
+        StringAssert.Contains(listsJson, "Paper Towels");
     }
 
     private async Task<AuthResponse> RegisterAndAuthorizeAsync(

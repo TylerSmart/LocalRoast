@@ -39,6 +39,7 @@ public static class DataServiceCollectionExtensions
         services.AddScoped<IMealPlanService, MealPlanService>();
         services.AddScoped<IMealPlanTemplateService, MealPlanTemplateService>();
         services.AddScoped<IShoppingListService, ShoppingListService>();
+        services.AddScoped<IMcpMealAndShoppingService, McpMealAndShoppingService>();
 
         if (
             string.Equals(

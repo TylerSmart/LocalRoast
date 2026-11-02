@@ -164,3 +164,35 @@ export interface ShoppingListGenerationResultDto {
   activeItemsAffectedCount: number;
   excludedPantryItemsCount: number;
 }
+
+export type RealtimeSyncState = 'disconnected' | 'connecting' | 'live' | 'reconnecting';
+
+export type ShoppingRealtimeEventType =
+  | 'ListCreated'
+  | 'ListUpdated'
+  | 'ListDeleted'
+  | 'ItemAdded'
+  | 'ItemUpdated'
+  | 'ItemCheckedChanged'
+  | 'ItemPromoted'
+  | 'ItemDeleted'
+  | 'CheckedItemsCleared'
+  | 'ItemsGenerated';
+
+export interface ShoppingListRealtimeEventDto {
+  eventType: ShoppingRealtimeEventType;
+  shoppingListId: string;
+  shoppingList: ShoppingListDetailDto | null;
+  changedItem: ShoppingListItemDto | null;
+  deletedItemId: string | null;
+  actorUserId: string | null;
+  actorDisplayName: string | null;
+  occurredAt: string;
+}
+
+export interface ShoppingListsCatalogChangedDto {
+  eventType: ShoppingRealtimeEventType;
+  affectedShoppingListId: string;
+  lists: ShoppingListSummaryDto[];
+  occurredAt: string;
+}

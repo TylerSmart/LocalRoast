@@ -8,6 +8,30 @@
       </h1>
 
       <div class="header-action-buttons">
+        @if (syncState() === 'live') {
+          <span class="sync-status-pill live" role="status" aria-live="polite">
+            <span class="sync-dot"></span>
+            <span>Live Sync</span>
+          </span>
+        } @else if (syncState() === 'connecting' || syncState() === 'reconnecting') {
+          <span class="sync-status-pill reconnecting" role="status" aria-live="polite">
+            <mat-icon class="spin-icon">sync</mat-icon>
+            <span>Syncing…</span>
+          </span>
+        } @else {
+          <button
+            type="button"
+            class="sync-status-pill offline"
+            (click)="reconnectRealtime()"
+            role="status"
+            aria-live="polite"
+            aria-label="Reconnect live sync"
+          >
+            <mat-icon>cloud_off</mat-icon>
+            <span>Offline</span>
+          </button>
+        }
+
         <button
           type="button"
           mat-flat-button

@@ -1,9 +1,12 @@
+using System.Text.Json.Serialization;
 using App.API.Authentication;
 using App.API.Hosting;
 using App.API.Http;
+using App.API.Hubs;
 using App.API.Mcp;
 using App.Core;
 using App.Core.Authentication;
+using App.Core.Shopping;
 using App.Data;
 using App.Data.Seeding;
 using App.Infrastructure;
@@ -160,6 +163,15 @@ builder.Services.AddAppAuthentication(builder.Configuration);
 
 builder.Services.AddAppMcpServer();
 
+builder
+    .Services.AddSignalR()
+    .AddJsonProtocol(options =>
+    {
+        options.PayloadSerializerOptions.Converters.Add(new JsonStringEnumConverter());
+    });
+
+builder.Services.AddScoped<IShoppingRealtimeNotifier, SignalRShoppingRealtimeNotifier>();
+
 // Every other Angular asset is content-hashed and safe to cache forever, but index.html keeps its
 // name across deploys. Without this it can be served from cache and reference a previous deploy's
 // bundle. Applies to UseStaticFiles and MapFallbackToFile, which both read these options.
@@ -295,6 +307,8 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapGroup("/api").MapControllers();
+
+app.MapHub<ShoppingHub>("/api/hubs/shopping").RequireAuthorization().ExcludeFromDescription();
 
 app.MapMcp("/api/mcp")
     .RequireAuthorization(

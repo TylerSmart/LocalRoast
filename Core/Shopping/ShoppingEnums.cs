@@ -25,3 +25,18 @@ public enum DuplicateMealPolicy
     SkipAlreadyImported = 0,
     ReplaceAlreadyImported = 1,
 }
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum ShoppingRealtimeEventType
+{
+    ListCreated = 0,
+    ListUpdated = 1,
+    ListDeleted = 2,
+    ItemAdded = 3,
+    ItemUpdated = 4,
+    ItemCheckedChanged = 5,
+    ItemPromoted = 6,
+    ItemDeleted = 7,
+    CheckedItemsCleared = 8,
+    ItemsGenerated = 9,
+}

@@ -36,7 +36,80 @@
   .header-action-buttons {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 0.5rem;
+  }
+
+  .sync-status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.35rem 0.75rem;
+    border-radius: 9999px;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    line-height: 1;
+    border: 1px solid transparent;
+    user-select: none;
+    transition:
+      background-color 0.2s ease,
+      border-color 0.2s ease,
+      color 0.2s ease;
+
+    .sync-dot {
+      width: 0.5rem;
+      height: 0.5rem;
+      border-radius: 50%;
+      background-color: var(--app-success, #2e7d32);
+      display: inline-block;
+      flex-shrink: 0;
+    }
+
+    &.live {
+      background-color: var(--mat-sys-surface-container, #f1f5f9);
+      color: var(--app-success, #2e7d32);
+      border-color: var(--mat-sys-outline-variant, #e2e8f0);
+    }
+
+    &.reconnecting {
+      background-color: var(--mat-sys-surface-container, #fef3c7);
+      color: var(--mat-sys-on-surface-variant, #b45309);
+      border-color: var(--mat-sys-outline-variant, #fde68a);
+
+      .spin-icon {
+        font-size: 1rem;
+        width: 1rem;
+        height: 1rem;
+        animation: spin 1.2s linear infinite;
+      }
+    }
+
+    &.offline {
+      background-color: var(--mat-sys-surface-container-high, #fee2e2);
+      color: var(--mat-sys-error, #b91c1c);
+      border-color: var(--mat-sys-error, #fca5a5);
+      cursor: pointer;
+
+      mat-icon {
+        font-size: 1rem;
+        width: 1rem;
+        height: 1rem;
+        color: inherit;
+      }
+
+      &:hover {
+        background-color: var(--mat-sys-error-container, #fecaca);
+      }
+    }
+  }
+
+  @keyframes spin {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
   }
 }
 

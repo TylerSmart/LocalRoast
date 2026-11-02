@@ -1,6 +1,8 @@
 using System.ComponentModel.DataAnnotations;
 using App.Core.FoodCatalog;
+using App.Core.MealPlans;
 using App.Core.Recipes;
+using App.Core.Shopping;
 
 namespace App.Core.Mcp;
 
@@ -144,4 +146,102 @@ public sealed record McpSaveStructuredRecipeRequest(
     IReadOnlyList<McpStructuredStepInput>? Steps = null,
     IReadOnlyList<string>? Collections = null,
     IReadOnlyList<string>? Tags = null
+);
+
+public sealed record McpGetMealPlanRequest(
+    string? StartDate = null,
+    string? EndDate = null,
+    bool IncludeOnDeck = true
+);
+
+public sealed record McpPlanMealItemInput(
+    string? EntryType = "Recipe",
+    bool IsOnDeck = false,
+    string? ScheduledDate = null,
+    string? WeekStartDate = null,
+    string? Slot = null,
+    Guid? RecipeId = null,
+    [MaxLength(220)] string? RecipeSlug = null,
+    [MaxLength(200)] string? RecipeTitle = null,
+    [Range(typeof(decimal), "0.25", "999")] decimal? TargetServings = null,
+    Guid? SourceMealPlanEntryId = null,
+    [MaxLength(200)] string? CustomTitle = null,
+    [MaxLength(500)] string? Notes = null
+);
+
+public sealed record McpPlanMealsRequest(IReadOnlyList<McpPlanMealItemInput> Entries);
+
+public sealed record McpPlanMealsResultDto(
+    int PlannedCount,
+    IReadOnlyList<MealPlanEntryDto> Entries
+);
+
+public sealed record McpRemoveMealPlanEntryRequest(
+    Guid EntryId,
+    string? RescheduleToDate = null,
+    string? RescheduleToSlot = null,
+    bool MoveToOnDeck = false,
+    string? WeekStartDate = null
+);
+
+public sealed record McpRemoveOrRescheduleMealResultDto(
+    string Action,
+    Guid EntryId,
+    bool Removed,
+    MealPlanEntryDto? RescheduledEntry
+);
+
+public sealed record McpGetShoppingListsRequest(
+    Guid? ShoppingListId = null,
+    [MaxLength(150)] string? ListName = null,
+    bool IncludeItems = true
+);
+
+public sealed record McpShoppingListsResponseDto(
+    IReadOnlyList<ShoppingListSummaryDto> Summaries,
+    IReadOnlyList<ShoppingListDetailDto> Lists
+);
+
+public sealed record McpGenerateShoppingListRequest(
+    [Required] string StartDate,
+    [Required] string EndDate,
+    Guid? ShoppingListId = null,
+    [MaxLength(150)] string? ListName = null,
+    bool CreateListIfMissing = true,
+    bool IncludeOnDeck = true,
+    bool IncludeSubRecipes = true,
+    bool IncludeOptionalIngredients = true,
+    string DuplicatePolicy = "SkipAlreadyImported",
+    IReadOnlyList<Guid>? PromotePantryFoodItemIds = null
+);
+
+public sealed record McpShoppingListItemUpsertInput(
+    [Required, MaxLength(200)] string DisplayName,
+    Guid? ItemId = null,
+    decimal? Quantity = null,
+    decimal? MaxQuantity = null,
+    [MaxLength(60)] string? Unit = null,
+    Guid? FoodItemId = null,
+    [MaxLength(300)] string? Notes = null,
+    bool ConsolidateIfCompatible = true
+);
+
+public sealed record McpUpsertShoppingListItemsRequest(
+    IReadOnlyList<McpShoppingListItemUpsertInput> Items,
+    Guid? ShoppingListId = null,
+    [MaxLength(150)] string? ListName = null,
+    bool CreateListIfMissing = true
+);
+
+public sealed record McpUpsertShoppingItemsResultDto(
+    ShoppingListDetailDto ShoppingList,
+    IReadOnlyList<ShoppingListItemDto> UpsertedItems
+);
+
+public sealed record McpSetShoppingItemCheckedRequest(
+    bool IsChecked = true,
+    Guid? ShoppingListId = null,
+    [MaxLength(150)] string? ListName = null,
+    Guid? ItemId = null,
+    [MaxLength(200)] string? ItemName = null
 );

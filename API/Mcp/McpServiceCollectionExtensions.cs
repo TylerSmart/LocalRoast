@@ -20,7 +20,9 @@ public static class McpServiceCollectionExtensions
                 options.Stateless = true;
             })
             .WithTools<CookbookMcpTools>()
-            .WithTools<IngestionMcpTools>();
+            .WithTools<IngestionMcpTools>()
+            .WithTools<MealPlanMcpTools>()
+            .WithTools<ShoppingMcpTools>();
 
         return services;
     }

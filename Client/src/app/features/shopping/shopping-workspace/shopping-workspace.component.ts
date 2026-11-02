@@ -1,4 +1,4 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, inject, signal } from '@angular/core';
 import { ReactiveFormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCheckboxModule } from '@angular/material/checkbox';
@@ -12,6 +12,7 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSelectModule } from '@angular/material/select';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { Subscription } from 'rxjs';
 import {
   ClearCheckedItemsResultDto,
   CreateShoppingListItemRequest,
@@ -19,6 +20,7 @@ import {
   ShoppingListItemDto,
   ShoppingListSummaryDto,
 } from '../../../core/models/shopping.models';
+import { ShoppingRealtimeService } from '../../../core/services/shopping/shopping-realtime.service';
 import { ShoppingService } from '../../../core/services/shopping/shopping.service';
 import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialog/confirm-dialog.component';
 import { GenerateShoppingListDialogComponent } from '../generate-shopping-list-dialog/generate-shopping-list-dialog.component';
@@ -46,12 +48,16 @@ import {
   templateUrl: './shopping-workspace.component.html',
   styleUrl: './shopping-workspace.component.scss',
 })
-export class ShoppingWorkspaceComponent implements OnInit {
+export class ShoppingWorkspaceComponent implements OnInit, OnDestroy {
   private readonly shoppingService = inject(ShoppingService);
+  protected readonly shoppingRealtime = inject(ShoppingRealtimeService);
   private readonly dialog = inject(MatDialog);
   private readonly snackBar = inject(MatSnackBar);
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
+
+  private readonly subscriptions = new Subscription();
+  private readonly pendingCheckItemIds = new Map<string, boolean>();
 
   protected readonly lists = signal<ShoppingListSummaryDto[]>([]);
   protected readonly activeList = signal<ShoppingListDetailDto | null>(null);
@@ -59,14 +65,61 @@ export class ShoppingWorkspaceComponent implements OnInit {
   protected readonly isAddingItem = signal<boolean>(false);
   protected readonly pantryDrawerExpanded = signal<boolean>(false);
   protected readonly checkedSectionExpanded = signal<boolean>(true);
+  protected readonly syncState = this.shoppingRealtime.syncState;
 
   protected readonly quickAddName = signal<string>('');
 
   ngOnInit(): void {
-    this.route.queryParamMap.subscribe((params) => {
-      const listIdParam = params.get('listId');
-      this.loadLists(listIdParam);
-    });
+    void this.shoppingRealtime.connect();
+
+    this.subscriptions.add(
+      this.route.queryParamMap.subscribe((params) => {
+        const listIdParam = params.get('listId');
+        this.loadLists(listIdParam);
+      }),
+    );
+
+    this.subscriptions.add(
+      this.shoppingRealtime.listUpdated$.subscribe((event) => {
+        if (event.shoppingListId === this.activeList()?.id) {
+          if (event.shoppingList) {
+            this.reconcileActiveListWithPendingToggles(event.shoppingList);
+          }
+        }
+      }),
+    );
+
+    this.subscriptions.add(
+      this.shoppingRealtime.catalogChanged$.subscribe((event) => {
+        this.lists.set(event.lists);
+        const currentActive = this.activeList();
+        if (!currentActive && event.lists.length > 0) {
+          this.selectList(event.lists[0].id);
+        } else if (currentActive && !event.lists.some((l) => l.id === currentActive.id)) {
+          if (event.lists.length > 0) {
+            this.selectList(event.lists[0].id);
+          } else {
+            this.activeList.set(null);
+            void this.shoppingRealtime.watchList(null);
+          }
+        }
+      }),
+    );
+
+    this.subscriptions.add(
+      this.shoppingRealtime.reconnected$.subscribe(() => {
+        this.loadLists(this.activeList()?.id);
+      }),
+    );
+  }
+
+  ngOnDestroy(): void {
+    this.subscriptions.unsubscribe();
+    void this.shoppingRealtime.disconnect();
+  }
+
+  reconnectRealtime(): void {
+    void this.shoppingRealtime.connect();
   }
 
   loadLists(preferredListId?: string | null): void {
@@ -76,6 +129,7 @@ export class ShoppingWorkspaceComponent implements OnInit {
         this.lists.set(lists);
         if (lists.length === 0) {
           this.activeList.set(null);
+          void this.shoppingRealtime.watchList(null);
           this.isLoading.set(false);
           return;
         }
@@ -99,6 +153,8 @@ export class ShoppingWorkspaceComponent implements OnInit {
   }
 
   selectList(id: string, updateUrl = true): void {
+    void this.shoppingRealtime.watchList(id);
+
     if (updateUrl) {
       this.router.navigate([], {
         relativeTo: this.route,
@@ -188,8 +244,13 @@ export class ShoppingWorkspaceComponent implements OnInit {
       return;
     }
 
+    this.pendingCheckItemIds.set(item.id, isChecked);
+
     // Optimistic local update
     const previousState = { ...current };
+    const previousLists = [...this.lists()];
+    const activeId = current.id;
+
     const updatedItem: ShoppingListItemDto = {
       ...item,
       isChecked,
@@ -215,9 +276,21 @@ export class ShoppingWorkspaceComponent implements OnInit {
       checkedItems: nextChecked,
     });
 
+    // Optimistic pill count update
+    this.lists.update((currLists) =>
+      currLists.map((l) => {
+        if (l.id !== activeId) return l;
+        return {
+          ...l,
+          activeUncheckedCount: Math.max(0, l.activeUncheckedCount + (isChecked ? -1 : 1)),
+          checkedCount: Math.max(0, l.checkedCount + (isChecked ? 1 : -1)),
+        };
+      }),
+    );
+
     this.shoppingService.setItemChecked(current.id, item.id, isChecked).subscribe({
       next: (serverItem) => {
-        // Sync server updated item
+        this.pendingCheckItemIds.delete(item.id);
         const refreshed = this.activeList();
         if (refreshed) {
           if (isChecked) {
@@ -238,8 +311,9 @@ export class ShoppingWorkspaceComponent implements OnInit {
         }
       },
       error: (err) => {
-        // Revert on error
+        this.pendingCheckItemIds.delete(item.id);
         this.activeList.set(previousState);
+        this.lists.set(previousLists);
         this.snackBar.open(
           err?.error?.detail || err?.error?.title || 'Failed to update item status',
           'Close',
@@ -504,6 +578,33 @@ export class ShoppingWorkspaceComponent implements OnInit {
           { duration: 4000 },
         );
       },
+    });
+  }
+
+  private reconcileActiveListWithPendingToggles(incoming: ShoppingListDetailDto): void {
+    if (this.pendingCheckItemIds.size === 0) {
+      this.activeList.set(incoming);
+      return;
+    }
+
+    const allItems = [...incoming.activeItems, ...incoming.checkedItems];
+    const reconciledActive: ShoppingListItemDto[] = [];
+    const reconciledChecked: ShoppingListItemDto[] = [];
+
+    for (const item of allItems) {
+      const pendingChecked = this.pendingCheckItemIds.get(item.id);
+      const isChecked = pendingChecked !== undefined ? pendingChecked : item.isChecked;
+      if (isChecked) {
+        reconciledChecked.push({ ...item, isChecked: true });
+      } else {
+        reconciledActive.push({ ...item, isChecked: false });
+      }
+    }
+
+    this.activeList.set({
+      ...incoming,
+      activeItems: reconciledActive,
+      checkedItems: reconciledChecked,
     });
   }
 }

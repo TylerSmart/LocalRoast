@@ -157,3 +157,21 @@ public record ShoppingListGenerationResultDto(
     int ActiveItemsAffectedCount,
     int ExcludedPantryItemsCount
 );
+
+public record ShoppingListRealtimeEventDto(
+    ShoppingRealtimeEventType EventType,
+    Guid ShoppingListId,
+    ShoppingListDetailDto? ShoppingList,
+    ShoppingListItemDto? ChangedItem,
+    Guid? DeletedItemId,
+    Guid? ActorUserId,
+    string? ActorDisplayName,
+    DateTimeOffset OccurredAt
+);
+
+public record ShoppingListsCatalogChangedDto(
+    ShoppingRealtimeEventType EventType,
+    Guid AffectedShoppingListId,
+    IReadOnlyList<ShoppingListSummaryDto> Lists,
+    DateTimeOffset OccurredAt
+);
