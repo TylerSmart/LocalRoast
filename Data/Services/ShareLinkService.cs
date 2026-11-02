@@ -1,4 +1,4 @@
-using App.Core.Exceptions;
+﻿using App.Core.Exceptions;
 using App.Core.Recipes;
 using App.Data.Entities;
 using Microsoft.EntityFrameworkCore;
@@ -305,6 +305,35 @@ public sealed class ShareLinkService(AppDbContext dbContext, TimeProvider? timeP
             .Select(rt => new PublicRecipeTagBadgeDto(rt.Tag.Name, rt.Tag.Category))
             .ToList();
 
+        var publicCookLogs = new List<PublicCookLogDto>();
+        var timesCooked = 0;
+        decimal? averageRating = null;
+        var ratingCount = 0;
+
+        if (shareLink.IncludeCookLogs)
+        {
+            timesCooked = recipe.TimesCooked;
+            averageRating = recipe.AverageRating;
+            ratingCount = recipe.RatingCount;
+
+            var logs = await dbContext
+                .CookLogs.AsNoTracking()
+                .Where(c => c.RecipeId == recipe.Id)
+                .OrderByDescending(c => c.CookedAt)
+                .ThenByDescending(c => c.CreatedAt)
+                .Take(25)
+                .ToListAsync(cancellationToken);
+
+            publicCookLogs = logs.Select(l => new PublicCookLogDto(
+                    l.CookedAt,
+                    l.Rating,
+                    l.Notes,
+                    l.PhotoImagePath,
+                    l.PhotoThumbnailPath
+                ))
+                .ToList();
+        }
+
         return new PublicSharedRecipeDto(
             recipe.Title,
             recipe.Description,
@@ -325,7 +354,11 @@ public sealed class ShareLinkService(AppDbContext dbContext, TimeProvider? timeP
             orderedSteps,
             subRecipes,
             shareLink.IncludeCookLogs,
-            shareLink.ExpiresAt
+            shareLink.ExpiresAt,
+            timesCooked,
+            averageRating,
+            ratingCount,
+            publicCookLogs
         );
     }
 

@@ -2,7 +2,11 @@ import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { firstValueFrom } from 'rxjs';
-import { UploadedMediaDto, UploadedRecipeCoverDto } from '../../models/media.models';
+import {
+  UploadedCookLogPhotoDto,
+  UploadedMediaDto,
+  UploadedRecipeCoverDto,
+} from '../../models/media.models';
 import { MediaService } from './media.service';
 
 describe('MediaService', () => {
@@ -52,5 +56,22 @@ describe('MediaService', () => {
 
     const result = await promise;
     expect(result.imagePath).toBe('/api/uploads/steps/step-token.webp');
+  });
+
+  it('uploads cook log photo via POST /api/media/cook-log-photo', async () => {
+    const mockFile = new File(['dish photo content'], 'dish.png', { type: 'image/png' });
+    const responseData: UploadedCookLogPhotoDto = {
+      photoImagePath: '/api/uploads/cook-logs/dish-photo.webp',
+      photoThumbnailPath: '/api/uploads/cook-logs/dish-thumb.webp',
+    };
+
+    const promise = firstValueFrom(service.uploadCookLogPhoto(mockFile));
+    const req = httpMock.expectOne('/api/media/cook-log-photo');
+    expect(req.request.method).toBe('POST');
+    req.flush(responseData);
+
+    const result = await promise;
+    expect(result.photoImagePath).toBe('/api/uploads/cook-logs/dish-photo.webp');
+    expect(result.photoThumbnailPath).toBe('/api/uploads/cook-logs/dish-thumb.webp');
   });
 });

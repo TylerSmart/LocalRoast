@@ -157,4 +157,23 @@ describe('MealPlanCalendarComponent', () => {
       slot: 'Dinner',
     });
   });
+
+  it('navigates to cook mode on startCooking(entry)', () => {
+    const navSpy = vi.spyOn(component['router'], 'navigate').mockResolvedValue(true);
+    const entry = mockWeek.days[0].entries[0];
+    component['startCooking'](entry);
+
+    expect(navSpy).toHaveBeenCalledWith(['/recipes', 'r-1', 'cook'], {
+      queryParams: {
+        servings: 4,
+        from: 'meal-plan',
+      },
+    });
+  });
+
+  it('opens cook log dialog on logCook(entry)', () => {
+    const entry = mockWeek.days[0].entries[0];
+    component['logCook'](entry);
+    expect(mockDialog.open).toHaveBeenCalled();
+  });
 });

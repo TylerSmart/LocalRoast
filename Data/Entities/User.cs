@@ -30,4 +30,6 @@ public sealed class User : IAuditable
 
     public ICollection<PersonalAccessToken> PersonalAccessTokens { get; set; } =
         new List<PersonalAccessToken>();
+
+    public ICollection<CookLog> CookLogs { get; set; } = new List<CookLog>();
 }

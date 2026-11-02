@@ -585,6 +585,134 @@
   }
 }
 
+/* Public Cook Notes Section */
+.public-cook-notes-section {
+  margin-top: 2.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--mat-sys-outline-variant, #cac4d0);
+
+  .public-cook-notes-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 1.25rem;
+  }
+
+  .public-cook-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 1rem;
+    border-radius: 0.75rem;
+    background-color: var(--mat-sys-surface, #ffffff);
+    border: 1px solid var(--mat-sys-outline-variant, #cac4d0);
+
+    .card-meta-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.5rem;
+
+      .stars {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.1rem;
+
+        .star-icon {
+          font-size: 1.1rem;
+          width: 1.1rem;
+          height: 1.1rem;
+          color: var(--mat-sys-outline-variant, #cac4d0);
+
+          &.filled {
+            color: #f59e0b;
+          }
+        }
+      }
+
+      .cook-date {
+        font-size: 0.8rem;
+        color: var(--mat-sys-outline, #79747e);
+      }
+    }
+
+    .cook-note-body {
+      margin: 0;
+      font-size: 0.9rem;
+      line-height: 1.5;
+      color: var(--mat-sys-on-surface, #1c1b1f);
+      white-space: pre-line;
+    }
+
+    .cook-photo-wrapper {
+      margin-top: 0.5rem;
+
+      .cook-photo-thumb {
+        width: 100%;
+        max-height: 160px;
+        object-fit: cover;
+        border-radius: 0.5rem;
+        cursor: pointer;
+        border: 1px solid var(--mat-sys-outline-variant, #cac4d0);
+        transition: transform 0.15s ease;
+
+        &:hover {
+          transform: scale(1.02);
+        }
+      }
+    }
+  }
+}
+
+/* Lightbox Modal */
+.photo-lightbox-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+
+  .lightbox-backdrop-btn {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    background: transparent;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+  }
+
+  .photo-lightbox-content {
+    position: relative;
+    z-index: 1;
+    max-width: 90vw;
+    max-height: 90vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    .lightbox-img {
+      max-width: 100%;
+      max-height: 85vh;
+      object-fit: contain;
+      border-radius: 0.5rem;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    }
+
+    .lightbox-close-btn {
+      position: absolute;
+      top: -12px;
+      right: -12px;
+      background-color: var(--mat-sys-surface, #ffffff);
+      color: var(--mat-sys-on-surface, #1c1b1f);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    }
+  }
+}
+
 /* Mobile responsive layout <= 768px / 360px */
 @media (max-width: 768px) {
   .public-top-bar {
@@ -649,7 +777,8 @@
   .scaling-toolbar-card,
   .recipe-hero-image,
   .step-reference-wrapper,
-  .hero-taxonomy-strip {
+  .hero-taxonomy-strip,
+  .photo-lightbox-backdrop {
     display: none !important;
   }
 

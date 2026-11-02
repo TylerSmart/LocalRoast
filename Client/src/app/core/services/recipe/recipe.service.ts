@@ -3,6 +3,8 @@ import { Service, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { apiUrl } from '../../api/api-url';
 import {
+  CookLogDto,
+  CookLogMutationResultDto,
   IngredientMatchRequest,
   IngredientMatchResultDto,
   RecipeAttachmentDto,
@@ -10,6 +12,7 @@ import {
   RecipeQueryParameters,
   RecipeSummaryDto,
   UpdateRecipeOrganizationRequest,
+  UpsertCookLogRequest,
   UpsertRecipeRequest,
 } from '../../models/recipe.models';
 
@@ -41,6 +44,15 @@ export class RecipeService {
       for (const tagId of query.tagIds) {
         params = params.append('tagIds', tagId);
       }
+    }
+    if (query?.minRating !== undefined && query?.minRating !== null) {
+      params = params.set('minRating', query.minRating.toString());
+    }
+    if (query?.forgottenFavoritesOnly !== undefined && query?.forgottenFavoritesOnly !== null) {
+      params = params.set('forgottenFavoritesOnly', query.forgottenFavoritesOnly.toString());
+    }
+    if (query?.forgottenDaysThreshold !== undefined && query?.forgottenDaysThreshold !== null) {
+      params = params.set('forgottenDaysThreshold', query.forgottenDaysThreshold.toString());
     }
 
     return this.http.get<RecipeSummaryDto[]>(apiUrl('/recipes'), { params });
@@ -77,6 +89,7 @@ export class RecipeService {
       request,
     );
   }
+
   addRecipeAttachment(
     recipeId: string,
     file: File,
@@ -95,5 +108,34 @@ export class RecipeService {
 
   deleteRecipeAttachment(recipeId: string, attachmentId: string): Observable<void> {
     return this.http.delete<void>(apiUrl(`/recipes/${recipeId}/attachments/${attachmentId}`));
+  }
+
+  getCookLogs(recipeId: string): Observable<CookLogDto[]> {
+    return this.http.get<CookLogDto[]>(apiUrl(`/recipes/${recipeId}/cook-logs`));
+  }
+
+  createCookLog(
+    recipeId: string,
+    request: UpsertCookLogRequest,
+  ): Observable<CookLogMutationResultDto> {
+    return this.http.post<CookLogMutationResultDto>(
+      apiUrl(`/recipes/${recipeId}/cook-logs`),
+      request,
+    );
+  }
+
+  updateCookLog(
+    recipeId: string,
+    cookLogId: string,
+    request: UpsertCookLogRequest,
+  ): Observable<CookLogMutationResultDto> {
+    return this.http.put<CookLogMutationResultDto>(
+      apiUrl(`/recipes/${recipeId}/cook-logs/${cookLogId}`),
+      request,
+    );
+  }
+
+  deleteCookLog(recipeId: string, cookLogId: string): Observable<void> {
+    return this.http.delete<void>(apiUrl(`/recipes/${recipeId}/cook-logs/${cookLogId}`));
   }
 }

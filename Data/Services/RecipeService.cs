@@ -1,4 +1,4 @@
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
 using App.Core.Exceptions;
 using App.Core.MealPlans;
 using App.Core.Media;
@@ -10,9 +10,12 @@ namespace App.Data.Services;
 
 public sealed partial class RecipeService(
     AppDbContext dbContext,
-    IMediaStorageService mediaStorageService
+    IMediaStorageService mediaStorageService,
+    TimeProvider? timeProvider = null
 ) : IRecipeService
 {
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+
     public async Task<IReadOnlyList<RecipeSummaryDto>> GetRecipesAsync(
         RecipeQueryParameters query,
         CancellationToken cancellationToken = default
@@ -38,6 +41,22 @@ public sealed partial class RecipeService(
         {
             q = q.Where(r =>
                 r.TotalTimeMinutes != null && r.TotalTimeMinutes <= query.MaxTotalTimeMinutes.Value
+            );
+        }
+
+        if (query.MinRating.HasValue)
+        {
+            q = q.Where(r => r.AverageRating != null && r.AverageRating >= query.MinRating.Value);
+        }
+
+        if (query.ForgottenFavoritesOnly)
+        {
+            var days = Math.Clamp(query.ForgottenDaysThreshold, 1, 3650);
+            var cutoff = _timeProvider.GetUtcNow().AddDays(-days);
+
+            q = q.Where(r =>
+                ((r.AverageRating != null && r.AverageRating >= 4.0m) || r.TimesCooked >= 2)
+                && (r.LastCookedAt == null || r.LastCookedAt <= cutoff)
             );
         }
 
@@ -83,10 +102,18 @@ public sealed partial class RecipeService(
                         )
                     )
                 )
+                || r.CookLogs.Any(cl => cl.Notes != null && cl.Notes.ToLower().Contains(norm))
             );
         }
 
-        return await q.OrderByDescending(r => r.ModifiedAt)
+        var orderedQuery = query.ForgottenFavoritesOnly
+            ? q.OrderBy(r => r.LastCookedAt)
+                .ThenByDescending(r => r.AverageRating)
+                .ThenByDescending(r => r.TimesCooked)
+                .ThenByDescending(r => r.ModifiedAt)
+            : q.OrderByDescending(r => r.ModifiedAt);
+
+        return await orderedQuery
             .Select(r => new RecipeSummaryDto(
                 r.Id,
                 r.Title,
@@ -124,7 +151,14 @@ public sealed partial class RecipeService(
                         rt.Tag.Slug,
                         rt.Tag.Category
                     ))
-                    .ToList()
+                    .ToList(),
+                r.LastCookedAt,
+                r.RatingCount,
+                r.CookLogs.OrderByDescending(cl => cl.CookedAt)
+                    .ThenByDescending(cl => cl.CreatedAt)
+                    .Where(cl => cl.Notes != null && cl.Notes.Trim() != "")
+                    .Select(cl => cl.Notes)
+                    .FirstOrDefault()
             ))
             .ToListAsync(cancellationToken);
     }
@@ -149,6 +183,7 @@ public sealed partial class RecipeService(
             .Include(r => r.RecipeTags)
                 .ThenInclude(rt => rt.Tag)
             .Include(r => r.Attachments)
+            .Include(r => r.CookLogs)
             .FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
 
         if (recipe is null)
@@ -269,7 +304,26 @@ public sealed partial class RecipeService(
             recipe.ModifiedBy,
             collections,
             tags,
-            attachments
+            attachments,
+            recipe.RatingCount,
+            recipe
+                .CookLogs.OrderByDescending(c => c.CookedAt)
+                .ThenByDescending(c => c.CreatedAt)
+                .Select(c => new CookLogDto(
+                    c.Id,
+                    c.RecipeId,
+                    c.CookedByUserId,
+                    c.CookedByDisplayName,
+                    c.CookedAt,
+                    c.ServingsMade,
+                    c.Rating,
+                    c.Notes,
+                    c.PhotoImagePath,
+                    c.PhotoThumbnailPath,
+                    c.CreatedAt,
+                    c.ModifiedAt
+                ))
+                .ToList()
         );
     }
 
@@ -480,6 +534,7 @@ public sealed partial class RecipeService(
             .Recipes.Include(r => r.Steps)
                 .ThenInclude(s => s.IngredientReferences)
             .Include(r => r.Attachments)
+            .Include(r => r.CookLogs)
             .FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
 
         if (recipe is null)
@@ -505,6 +560,10 @@ public sealed partial class RecipeService(
             .Select(s => s.ImagePath!)
             .ToList();
         var attachmentFiles = recipe.Attachments.Select(a => a.MediaUrlPath).ToList();
+        var cookLogPhotos = await dbContext
+            .CookLogs.Where(c => c.RecipeId == id)
+            .Select(c => new { c.PhotoImagePath, c.PhotoThumbnailPath })
+            .ToListAsync(cancellationToken);
 
         dbContext.RecipeStepIngredients.RemoveRange(
             recipe.Steps.SelectMany(s => s.IngredientReferences).ToList()
@@ -578,6 +637,11 @@ public sealed partial class RecipeService(
         foreach (var attachmentFile in attachmentFiles)
         {
             await mediaStorageService.DeleteMediaFileAsync(attachmentFile, cancellationToken);
+        }
+        foreach (var p in cookLogPhotos)
+        {
+            await mediaStorageService.DeleteMediaFileAsync(p.PhotoImagePath, cancellationToken);
+            await mediaStorageService.DeleteMediaFileAsync(p.PhotoThumbnailPath, cancellationToken);
         }
 
         return true;

@@ -115,4 +115,18 @@ describe('RecipeListComponent', () => {
     expect(component['selectedDifficulty']()).toBe('All');
     expect(component['hasActiveFilters']()).toBe(false);
   });
+
+  it('toggles forgotten favorites and applies min rating', () => {
+    component.toggleForgottenFavorites();
+    expect(component['forgottenFavoritesOnly']()).toBe(true);
+    expect(mockRecipeService.getRecipes).toHaveBeenCalledWith(
+      expect.objectContaining({ forgottenFavoritesOnly: true }),
+    );
+
+    component.onMinRatingChange(4);
+    expect(component['minRating']()).toBe(4);
+    expect(mockRecipeService.getRecipes).toHaveBeenCalledWith(
+      expect.objectContaining({ minRating: 4 }),
+    );
+  });
 });

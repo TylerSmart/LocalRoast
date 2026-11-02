@@ -52,6 +52,14 @@ export interface PublicSubRecipeDto {
   steps: RecipeStepDto[];
 }
 
+export interface PublicCookLogDto {
+  cookedAt: string;
+  rating: number | null;
+  notes: string | null;
+  photoImagePath: string | null;
+  photoThumbnailPath: string | null;
+}
+
 export interface PublicSharedRecipeDto {
   title: string;
   description: string | null;
@@ -73,4 +81,8 @@ export interface PublicSharedRecipeDto {
   linkedSubRecipes: PublicSubRecipeDto[];
   includeCookLogs: boolean;
   expiresAt: string | null;
+  timesCooked?: number;
+  averageRating?: number | null;
+  ratingCount?: number;
+  cookLogs?: PublicCookLogDto[];
 }

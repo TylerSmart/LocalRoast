@@ -2,7 +2,11 @@ import { HttpClient } from '@angular/common/http';
 import { Service, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { apiUrl } from '../../api/api-url';
-import { UploadedMediaDto, UploadedRecipeCoverDto } from '../../models/media.models';
+import {
+  UploadedCookLogPhotoDto,
+  UploadedMediaDto,
+  UploadedRecipeCoverDto,
+} from '../../models/media.models';
 
 @Service()
 export class MediaService {
@@ -18,5 +22,11 @@ export class MediaService {
     const formData = new FormData();
     formData.append('file', file, file.name);
     return this.http.post<UploadedMediaDto>(apiUrl('/media/recipe-step'), formData);
+  }
+
+  uploadCookLogPhoto(file: File): Observable<UploadedCookLogPhotoDto> {
+    const formData = new FormData();
+    formData.append('file', file, file.name);
+    return this.http.post<UploadedCookLogPhotoDto>(apiUrl('/media/cook-log-photo'), formData);
   }
 }

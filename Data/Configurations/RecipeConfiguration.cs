@@ -38,6 +38,13 @@ public sealed class RecipeConfiguration : IEntityTypeConfiguration<Recipe>
 
         builder.Property(r => r.AverageRating).HasPrecision(3, 2);
 
+        builder.HasIndex(r => new
+        {
+            r.TimesCooked,
+            r.AverageRating,
+            r.LastCookedAt,
+        });
+
         builder.Property(r => r.CreatedBy).IsRequired().HasMaxLength(256);
         builder.Property(r => r.ModifiedBy).IsRequired().HasMaxLength(256);
     }

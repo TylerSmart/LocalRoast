@@ -53,6 +53,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
 
     public DbSet<ShoppingListItemSource> ShoppingListItemSources => Set<ShoppingListItemSource>();
 
+    public DbSet<CookLog> CookLogs => Set<CookLog>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);

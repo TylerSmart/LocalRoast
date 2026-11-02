@@ -75,6 +75,9 @@ export interface RecipeSummaryDto {
   modifiedAt: string;
   collections: RecipeCollectionBadgeDto[];
   tags: RecipeTagBadgeDto[];
+  lastCookedAt?: string | null;
+  ratingCount?: number;
+  latestCookNote?: string | null;
 }
 
 export interface RecipeIngredientDto {
@@ -167,6 +170,8 @@ export interface RecipeDetailDto {
   collections: RecipeCollectionBadgeDto[];
   tags: RecipeTagBadgeDto[];
   attachments?: RecipeAttachmentDto[];
+  ratingCount?: number;
+  cookLogs?: CookLogDto[];
 }
 
 export interface RecipeQueryParameters {
@@ -177,6 +182,9 @@ export interface RecipeQueryParameters {
   foodItemId?: string | null;
   collectionId?: string | null;
   tagIds?: string[] | null;
+  minRating?: number | null;
+  forgottenFavoritesOnly?: boolean;
+  forgottenDaysThreshold?: number;
 }
 
 export interface RecipeIngredientInput {
@@ -246,4 +254,42 @@ export interface IngredientMatchResultDto {
   pantryStaplesUsedCount: number;
   matchedIngredientNames: string[];
   missingNonStapleNames: string[];
+}
+
+export interface CookLogDto {
+  id: string;
+  recipeId: string;
+  cookedByUserId: string | null;
+  cookedByDisplayName: string;
+  cookedAt: string;
+  servingsMade: number | null;
+  rating: number | null;
+  notes: string | null;
+  photoImagePath: string | null;
+  photoThumbnailPath: string | null;
+  createdAt: string;
+  modifiedAt: string;
+}
+
+export interface RecipeCookStatsSummaryDto {
+  recipeId: string;
+  timesCooked: number;
+  lastCookedAt: string | null;
+  averageRating: number | null;
+  ratingCount: number;
+  latestCookNote: string | null;
+}
+
+export interface CookLogMutationResultDto {
+  cookLog: CookLogDto;
+  recipeStats: RecipeCookStatsSummaryDto;
+}
+
+export interface UpsertCookLogRequest {
+  cookedAt?: string | null;
+  servingsMade?: number | null;
+  rating?: number | null;
+  notes?: string | null;
+  photoImagePath?: string | null;
+  photoThumbnailPath?: string | null;
 }

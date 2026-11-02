@@ -44,6 +44,7 @@ import {
   MealPlanTemplatesDialogComponent,
   MealPlanTemplatesDialogData,
 } from '../meal-plan-templates-dialog/meal-plan-templates-dialog.component';
+import { CookLogDialogComponent } from '../../recipes/cook-log-dialog/cook-log-dialog.component';
 
 export interface DropZoneData {
   isOnDeck: boolean;
@@ -328,6 +329,29 @@ export class MealPlanCalendarComponent implements OnInit {
           });
         },
       });
+  }
+
+  protected startCooking(entry: MealPlanEntryDto): void {
+    if (!entry.recipe?.id) return;
+    void this.router.navigate(['/recipes', entry.recipe.id, 'cook'], {
+      queryParams: {
+        servings: entry.targetServings,
+        from: 'meal-plan',
+      },
+    });
+  }
+
+  protected logCook(entry: MealPlanEntryDto): void {
+    if (!entry.recipe?.id) return;
+    this.dialog.open(CookLogDialogComponent, {
+      data: {
+        recipeId: entry.recipe.id,
+        recipeTitle: entry.displayTitle,
+        targetServings: entry.targetServings,
+      },
+      width: '520px',
+      maxWidth: '96vw',
+    });
   }
 
   protected deleteEntry(entry: MealPlanEntryDto): void {

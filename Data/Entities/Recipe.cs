@@ -46,6 +46,8 @@ public sealed class Recipe : IAuditable
 
     public decimal? AverageRating { get; set; }
 
+    public int RatingCount { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
 
     public string CreatedBy { get; set; } = "System";
@@ -76,4 +78,6 @@ public sealed class Recipe : IAuditable
 
     public ICollection<MealPlanTemplateItem> MealPlanTemplateItems { get; set; } =
         new List<MealPlanTemplateItem>();
+
+    public ICollection<CookLog> CookLogs { get; set; } = new List<CookLog>();
 }

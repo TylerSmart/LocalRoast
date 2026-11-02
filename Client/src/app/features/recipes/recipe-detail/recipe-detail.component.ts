@@ -1,4 +1,5 @@
 import { RecipeAttachmentViewerDialogComponent } from '../recipe-attachment-viewer-dialog/recipe-attachment-viewer-dialog.component';
+import { DatePipe, DecimalPipe } from '@angular/common';
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
@@ -16,6 +17,7 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { MealPlanEntryDto } from '../../../core/models/meal-plan.models';
 import {
+  CookLogDto,
   RecipeAttachmentDto,
   RecipeDetailDto,
   RecipeIngredientDto,
@@ -45,6 +47,7 @@ import {
   RecipeShareDialogData,
 } from '../recipe-share-dialog/recipe-share-dialog.component';
 import { ShoppingListGenerationResultDto } from '../../../core/models/shopping.models';
+import { CookLogDialogComponent } from '../cook-log-dialog/cook-log-dialog.component';
 import { AddRecipeToListDialogComponent } from '../../shopping/add-recipe-to-list-dialog/add-recipe-to-list-dialog.component';
 
 export interface ScaledIngredientItem {
@@ -72,6 +75,8 @@ export interface StepSectionGroup {
   imports: [
     FormsModule,
     RouterLink,
+    DatePipe,
+    DecimalPipe,
     MatCardModule,
     MatButtonModule,
     MatButtonToggleModule,
@@ -104,6 +109,13 @@ export class RecipeDetailComponent implements OnInit {
   protected readonly checkedIngredients = signal<Record<string, boolean>>({});
   protected readonly isUploadingAttachment = signal<boolean>(false);
   protected readonly formatMinutes = formatMinutes;
+  protected readonly previewPhotoUrl = signal<string | null>(null);
+
+  protected readonly latestCookNote = computed<CookLogDto | null>(() => {
+    const logs = this.recipe()?.cookLogs;
+    if (!logs || logs.length === 0) return null;
+    return logs.find((l) => !!l.notes && l.notes.trim().length > 0) ?? null;
+  });
 
   protected readonly scaleFactor = computed(() => {
     const r = this.recipe();
@@ -520,5 +532,83 @@ export class RecipeDetailComponent implements OnInit {
         },
       });
     });
+  }
+
+  startCooking(): void {
+    const r = this.recipe();
+    if (!r) {
+      return;
+    }
+    this.router.navigate(['/recipes', r.id, 'cook'], {
+      queryParams: {
+        servings: this.targetServings(),
+        units: this.targetSystem(),
+        from: 'recipe',
+      },
+    });
+  }
+
+  openCookLogDialog(logToEdit?: CookLogDto): void {
+    const r = this.recipe();
+    if (!r) {
+      return;
+    }
+
+    const ref = this.dialog.open(CookLogDialogComponent, {
+      data: {
+        recipeId: r.id,
+        recipeTitle: r.title,
+        targetServings: this.targetServings(),
+        logToEdit,
+      },
+      width: '520px',
+      maxWidth: '96vw',
+    });
+
+    ref.afterClosed().subscribe((saved: boolean) => {
+      if (saved) {
+        this.loadRecipe(r.id);
+      }
+    });
+  }
+
+  deleteCookLog(logId: string): void {
+    const r = this.recipe();
+    if (!r) {
+      return;
+    }
+
+    const confirmRef = this.dialog.open(ConfirmDialogComponent, {
+      data: {
+        title: 'Delete Cook Log',
+        message: 'Are you sure you want to delete this cook log entry?',
+        confirmText: 'Delete',
+        isDestructive: true,
+      },
+    });
+
+    confirmRef.afterClosed().subscribe((confirmed: boolean) => {
+      if (!confirmed) {
+        return;
+      }
+
+      this.recipeService.deleteCookLog(r.id, logId).subscribe({
+        next: () => {
+          this.snackBar.open('Cook log deleted', 'Close', { duration: 3000 });
+          this.loadRecipe(r.id);
+        },
+        error: () => {
+          this.snackBar.open('Failed to delete cook log', 'Close', { duration: 3000 });
+        },
+      });
+    });
+  }
+
+  openPhotoLightbox(url: string): void {
+    this.previewPhotoUrl.set(url);
+  }
+
+  closePhotoLightbox(): void {
+    this.previewPhotoUrl.set(null);
   }
 }

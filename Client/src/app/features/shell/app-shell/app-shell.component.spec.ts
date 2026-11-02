@@ -6,6 +6,10 @@ import { APP_NAME } from '../../../app.branding';
 import { AccountService } from '../../../core/services/account/account.service';
 import { AuthService } from '../../../core/services/auth/auth.service';
 import { IngestionService } from '../../../core/services/ingestion/ingestion.service';
+import {
+  ActiveKitchenTimer,
+  KitchenTimerService,
+} from '../../../core/services/kitchen-timer/kitchen-timer.service';
 import { LlmSettingsService } from '../../../core/services/llm-settings/llm-settings.service';
 import { ThemeService } from '../../../core/services/theme/theme.service';
 import { AppShellComponent } from './app-shell.component';
@@ -40,7 +44,13 @@ describe('AppShellComponent', () => {
     openLlmSettingsDialog: vi.fn(),
   };
 
+  const mockTimers = signal<ActiveKitchenTimer[]>([]);
+  const mockKitchenTimerService = {
+    timers: mockTimers,
+  };
+
   beforeEach(async () => {
+    mockTimers.set([]);
     mockDialog = {
       open: vi.fn(),
       openDialogs: [],
@@ -55,6 +65,7 @@ describe('AppShellComponent', () => {
         { provide: ThemeService, useValue: mockThemeService },
         { provide: IngestionService, useValue: mockIngestionService },
         { provide: LlmSettingsService, useValue: mockLlmSettingsService },
+        { provide: KitchenTimerService, useValue: mockKitchenTimerService },
         { provide: MatDialog, useValue: mockDialog },
       ],
     }).compileComponents();
@@ -101,5 +112,33 @@ describe('AppShellComponent', () => {
   it('calls authService.logout on onLogout', () => {
     component.onLogout();
     expect(mockAuthService.logout).toHaveBeenCalled();
+  });
+
+  it('renders active timer nav pill when timers exist and hides when empty', () => {
+    // When no timers
+    let pill = fixture.nativeElement.querySelector('.active-timer-nav-pill');
+    expect(pill).toBeNull();
+
+    // When timer is active
+    mockTimers.set([
+      {
+        id: 'timer-1',
+        recipeId: 'rec-123',
+        recipeTitle: 'Carnitas',
+        stepNumber: 2,
+        label: 'Sear Pork',
+        totalDurationSeconds: 300,
+        remainingSeconds: 125,
+        state: 'running',
+        endsAtMs: Date.now() + 125000,
+      },
+    ]);
+    fixture.detectChanges();
+
+    pill = fixture.nativeElement.querySelector('.active-timer-nav-pill');
+    expect(pill).toBeTruthy();
+    expect(pill.textContent).toContain('02:05');
+    expect(pill.textContent).toContain('Sear Pork');
+    expect(pill.getAttribute('href')).toBe('/recipes/rec-123/cook');
   });
 });

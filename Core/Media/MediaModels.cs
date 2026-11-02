@@ -19,3 +19,5 @@ public record SavedRecipeAttachmentFileDto(
     string ContentType,
     long FileSizeBytes
 );
+
+public record UploadedCookLogPhotoDto(string PhotoImagePath, string PhotoThumbnailPath);

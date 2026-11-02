@@ -178,4 +178,75 @@ describe('PublicSharedRecipeComponent', () => {
     component.printRecipe();
     expect(printSpy).toHaveBeenCalled();
   });
+
+  it('renders cook notes when includeCookLogs is true and does not display user identity', () => {
+    const recipeWithCookLogs: PublicSharedRecipeDto = {
+      ...mockPublicRecipe,
+      includeCookLogs: true,
+      averageRating: 4.5,
+      timesCooked: 3,
+      cookLogs: [
+        {
+          cookedAt: '2026-11-01T12:00:00Z',
+          rating: 5,
+          notes: 'Crispier carnitas with higher broil temp!',
+          photoImagePath: '/media/cook-logs/photo1.webp',
+          photoThumbnailPath: '/media/cook-logs/thumb1.webp',
+        },
+      ],
+    };
+
+    shareLinkServiceSpy.getPublicSharedRecipe.mockReturnValue(of(recipeWithCookLogs));
+    component.loadSharedRecipe('test-token');
+    fixture.detectChanges();
+
+    const notesSection = fixture.nativeElement.querySelector('.public-cook-notes-section');
+    expect(notesSection).toBeTruthy();
+    expect(notesSection.textContent).toContain('Crispier carnitas with higher broil temp!');
+    // Privacy invariant: no user names, emails, or IDs
+    expect(notesSection.textContent).not.toContain('chef');
+    expect(notesSection.textContent).not.toContain('UserId');
+
+    // Photo thumbnail is displayed
+    const thumb = fixture.nativeElement.querySelector('.cook-photo-thumb');
+    expect(thumb).toBeTruthy();
+    expect(thumb.getAttribute('src')).toBe('/media/cook-logs/thumb1.webp');
+  });
+
+  it('hides cook notes section when includeCookLogs is false', () => {
+    const recipeWithoutCookLogs: PublicSharedRecipeDto = {
+      ...mockPublicRecipe,
+      includeCookLogs: false,
+      cookLogs: [
+        {
+          cookedAt: '2026-11-01T12:00:00Z',
+          rating: 5,
+          notes: 'Hidden note',
+          photoImagePath: null,
+          photoThumbnailPath: null,
+        },
+      ],
+    };
+
+    shareLinkServiceSpy.getPublicSharedRecipe.mockReturnValue(of(recipeWithoutCookLogs));
+    component.loadSharedRecipe('test-token');
+    fixture.detectChanges();
+
+    const notesSection = fixture.nativeElement.querySelector('.public-cook-notes-section');
+    expect(notesSection).toBeNull();
+  });
+
+  it('opens and closes photo lightbox', () => {
+    component.openPhotoLightbox('/media/cook-logs/photo1.webp');
+    fixture.detectChanges();
+
+    expect(component['previewPhotoUrl']()).toBe('/media/cook-logs/photo1.webp');
+    const lightbox = fixture.nativeElement.querySelector('.photo-lightbox-backdrop');
+    expect(lightbox).toBeTruthy();
+
+    component.closePhotoLightbox();
+    fixture.detectChanges();
+    expect(component['previewPhotoUrl']()).toBeNull();
+    expect(fixture.nativeElement.querySelector('.photo-lightbox-backdrop')).toBeNull();
+  });
 });

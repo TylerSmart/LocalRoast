@@ -27,7 +27,10 @@ public record RecipeSummaryDto(
     DateTimeOffset CreatedAt,
     DateTimeOffset ModifiedAt,
     IReadOnlyList<RecipeCollectionBadgeDto>? Collections = null,
-    IReadOnlyList<RecipeTagBadgeDto>? Tags = null
+    IReadOnlyList<RecipeTagBadgeDto>? Tags = null,
+    DateTimeOffset? LastCookedAt = null,
+    int RatingCount = 0,
+    string? LatestCookNote = null
 )
 {
     public IReadOnlyList<RecipeCollectionBadgeDto> Collections { get; init; } = Collections ?? [];
@@ -118,12 +121,15 @@ public record RecipeDetailDto(
     string ModifiedBy,
     IReadOnlyList<RecipeCollectionBadgeDto>? Collections = null,
     IReadOnlyList<RecipeTagBadgeDto>? Tags = null,
-    IReadOnlyList<RecipeAttachmentDto>? Attachments = null
+    IReadOnlyList<RecipeAttachmentDto>? Attachments = null,
+    int RatingCount = 0,
+    IReadOnlyList<CookLogDto>? CookLogs = null
 )
 {
     public IReadOnlyList<RecipeCollectionBadgeDto> Collections { get; init; } = Collections ?? [];
     public IReadOnlyList<RecipeTagBadgeDto> Tags { get; init; } = Tags ?? [];
     public IReadOnlyList<RecipeAttachmentDto> Attachments { get; init; } = Attachments ?? [];
+    public IReadOnlyList<CookLogDto> CookLogs { get; init; } = CookLogs ?? [];
 }
 
 public record RecipeQueryParameters(
@@ -133,7 +139,10 @@ public record RecipeQueryParameters(
     int? MaxTotalTimeMinutes = null,
     Guid? FoodItemId = null,
     Guid? CollectionId = null,
-    Guid[]? TagIds = null
+    Guid[]? TagIds = null,
+    decimal? MinRating = null,
+    bool ForgottenFavoritesOnly = false,
+    int ForgottenDaysThreshold = 60
 );
 
 public record RecipeIngredientInput(

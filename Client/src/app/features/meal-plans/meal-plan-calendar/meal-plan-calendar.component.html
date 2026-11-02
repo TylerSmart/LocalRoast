@@ -170,6 +170,16 @@
                               <mat-icon>more_vert</mat-icon>
                             </button>
                             <mat-menu #entryMenu="matMenu">
+                              @if (entry.recipe?.id) {
+                                <button mat-menu-item (click)="startCooking(entry)">
+                                  <mat-icon>skillet</mat-icon>
+                                  <span>Start Cooking</span>
+                                </button>
+                                <button mat-menu-item (click)="logCook(entry)">
+                                  <mat-icon>rate_review</mat-icon>
+                                  <span>Log a Cook</span>
+                                </button>
+                              }
                               <button mat-menu-item (click)="cookTonight(entry)">
                                 <mat-icon>dinner_dining</mat-icon>
                                 <span>Cook Tonight (Dinner)</span>
@@ -301,6 +311,16 @@
                                     <mat-icon>more_vert</mat-icon>
                                   </button>
                                   <mat-menu #slotEntryMenu="matMenu">
+                                    @if (entry.recipe?.id) {
+                                      <button mat-menu-item (click)="startCooking(entry)">
+                                        <mat-icon>skillet</mat-icon>
+                                        <span>Start Cooking</span>
+                                      </button>
+                                      <button mat-menu-item (click)="logCook(entry)">
+                                        <mat-icon>rate_review</mat-icon>
+                                        <span>Log a Cook</span>
+                                      </button>
+                                    }
                                     <button mat-menu-item (click)="editEntry(entry)">
                                       <mat-icon>edit</mat-icon>
                                       <span>Edit Meal</span>
@@ -322,6 +342,19 @@
                               </div>
 
                               <div class="meal-badges-row">
+                                @if (header.isToday && entry.recipe?.id && !entry.isLeftovers) {
+                                  <button
+                                    type="button"
+                                    mat-flat-button
+                                    color="primary"
+                                    class="start-cooking-meal-btn"
+                                    (click)="startCooking(entry)"
+                                    aria-label="Start cooking this meal"
+                                  >
+                                    <mat-icon>skillet</mat-icon>
+                                    <span>Start Cooking</span>
+                                  </button>
+                                }
                                 @if (entry.entryType === 'Recipe' && entry.targetServings) {
                                   <span class="badge servings-badge"
                                     >{{ entry.targetServings }} srv</span
@@ -418,6 +451,16 @@
                               <mat-icon>more_vert</mat-icon>
                             </button>
                             <mat-menu #desktopOndeckMenu="matMenu">
+                              @if (entry.recipe?.id) {
+                                <button mat-menu-item (click)="startCooking(entry)">
+                                  <mat-icon>skillet</mat-icon>
+                                  <span>Start Cooking</span>
+                                </button>
+                                <button mat-menu-item (click)="logCook(entry)">
+                                  <mat-icon>rate_review</mat-icon>
+                                  <span>Log a Cook</span>
+                                </button>
+                              }
                               <button mat-menu-item (click)="cookTonight(entry)">
                                 <mat-icon>dinner_dining</mat-icon>
                                 <span>Cook Tonight (Dinner)</span>

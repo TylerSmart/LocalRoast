@@ -79,6 +79,70 @@ namespace App.Data.Migrations
                     b.ToTable("Collections", (string)null);
                 });
 
+            modelBuilder.Entity("App.Data.Entities.CookLog", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CookedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("CookedByDisplayName")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("nvarchar(150)");
+
+                    b.Property<Guid?>("CookedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<DateTimeOffset>("ModifiedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("ModifiedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<string>("PhotoImagePath")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("PhotoThumbnailPath")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<int?>("Rating")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("RecipeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("ServingsMade")
+                        .HasPrecision(8, 2)
+                        .HasColumnType("decimal(8,2)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CookedByUserId");
+
+                    b.HasIndex("RecipeId", "CookedAt");
+
+                    b.ToTable("CookLogs", (string)null);
+                });
+
             modelBuilder.Entity("App.Data.Entities.FoodItem", b =>
                 {
                     b.Property<Guid>("Id")
@@ -656,6 +720,9 @@ namespace App.Data.Migrations
                     b.Property<int?>("PrepTimeMinutes")
                         .HasColumnType("int");
 
+                    b.Property<int>("RatingCount")
+                        .HasColumnType("int");
+
                     b.Property<string>("Slug")
                         .IsRequired()
                         .HasMaxLength(220)
@@ -712,6 +779,8 @@ namespace App.Data.Migrations
                     b.HasIndex("Status");
 
                     b.HasIndex("Title");
+
+                    b.HasIndex("TimesCooked", "AverageRating", "LastCookedAt");
 
                     b.ToTable("Recipes", (string)null);
                 });
@@ -1486,6 +1555,24 @@ namespace App.Data.Migrations
                     b.ToTable("Users", (string)null);
                 });
 
+            modelBuilder.Entity("App.Data.Entities.CookLog", b =>
+                {
+                    b.HasOne("App.Data.Entities.User", "CookedByUser")
+                        .WithMany("CookLogs")
+                        .HasForeignKey("CookedByUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("App.Data.Entities.Recipe", "Recipe")
+                        .WithMany("CookLogs")
+                        .HasForeignKey("RecipeId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("CookedByUser");
+
+                    b.Navigation("Recipe");
+                });
+
             modelBuilder.Entity("App.Data.Entities.FoodItem", b =>
                 {
                     b.HasOne("App.Data.Entities.StoreAisle", "DefaultStoreAisle")
@@ -1746,6 +1833,8 @@ namespace App.Data.Migrations
                 {
                     b.Navigation("Attachments");
 
+                    b.Navigation("CookLogs");
+
                     b.Navigation("IngestionJobs");
 
                     b.Navigation("Ingredients");
@@ -1799,6 +1888,8 @@ namespace App.Data.Migrations
 
             modelBuilder.Entity("App.Data.Entities.User", b =>
                 {
+                    b.Navigation("CookLogs");
+
                     b.Navigation("PersonalAccessTokens");
                 });
 #pragma warning restore 612, 618

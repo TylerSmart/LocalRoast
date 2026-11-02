@@ -1,4 +1,4 @@
-import { Component, OnInit, computed, inject, signal } from '@angular/core';
+﻿import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
@@ -63,6 +63,9 @@ export class RecipeListComponent implements OnInit {
   protected readonly maxTimeMinutes = signal<number | null>(null);
   protected readonly selectedCollectionId = signal<string | null>(null);
   protected readonly selectedTagIds = signal<string[]>([]);
+  protected readonly forgottenFavoritesOnly = signal<boolean>(false);
+  protected readonly minRating = signal<number | null>(null);
+  private searchTimer: ReturnType<typeof setTimeout> | null = null;
 
   protected readonly isLoading = signal<boolean>(false);
   protected readonly errorMessage = signal<string | null>(null);
@@ -83,7 +86,9 @@ export class RecipeListComponent implements OnInit {
       this.selectedDifficulty() !== 'All' ||
       this.maxTimeMinutes() !== null ||
       this.selectedCollectionId() !== null ||
-      this.selectedTagIds().length > 0
+      this.selectedTagIds().length > 0 ||
+      this.forgottenFavoritesOnly() ||
+      this.minRating() !== null
     );
   });
 
@@ -110,6 +115,19 @@ export class RecipeListComponent implements OnInit {
       }
       if (tagIds.length > 0 && !tagIds.every((tid) => r.tags.some((t) => t.id === tid))) {
         return false;
+      }
+      if (
+        this.minRating() !== null &&
+        (r.averageRating === null ||
+          r.averageRating === undefined ||
+          r.averageRating < this.minRating()!)
+      ) {
+        return false;
+      }
+      if (this.forgottenFavoritesOnly()) {
+        const isFavorite =
+          (r.averageRating !== null && r.averageRating >= 4.0) || r.timesCooked >= 2;
+        if (!isFavorite) return false;
       }
       if (!query) {
         return true;
@@ -158,6 +176,16 @@ export class RecipeListComponent implements OnInit {
     if (this.selectedTagIds().length > 0) {
       params.tagIds = this.selectedTagIds();
     }
+    if (this.forgottenFavoritesOnly()) {
+      params.forgottenFavoritesOnly = true;
+    }
+    if (this.minRating() !== null) {
+      params.minRating = this.minRating();
+    }
+    const searchVal = this.searchQuery().trim();
+    if (searchVal) {
+      params.search = searchVal;
+    }
 
     this.recipeService.getRecipes(params).subscribe({
       next: (list) => {
@@ -187,6 +215,24 @@ export class RecipeListComponent implements OnInit {
     return this.tags().filter((t) => t.category === category);
   }
 
+  onSearchChange(val: string): void {
+    this.searchQuery.set(val);
+    if (this.searchTimer) clearTimeout(this.searchTimer);
+    this.searchTimer = setTimeout(() => {
+      this.loadRecipes();
+    }, 300);
+  }
+
+  toggleForgottenFavorites(): void {
+    this.forgottenFavoritesOnly.update((v) => !v);
+    this.loadRecipes();
+  }
+
+  onMinRatingChange(val: number | null): void {
+    this.minRating.set(val);
+    this.loadRecipes();
+  }
+
   clearFilters(): void {
     this.searchQuery.set('');
     this.selectedStatus.set('Published');
@@ -194,6 +240,8 @@ export class RecipeListComponent implements OnInit {
     this.maxTimeMinutes.set(null);
     this.selectedCollectionId.set(null);
     this.selectedTagIds.set([]);
+    this.forgottenFavoritesOnly.set(false);
+    this.minRating.set(null);
     this.loadRecipes();
   }
 

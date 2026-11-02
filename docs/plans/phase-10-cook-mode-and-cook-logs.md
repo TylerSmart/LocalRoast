@@ -1,7 +1,7 @@
 # Phase 10: Hands-Free Cook Mode, Household Cook Logs & Forgotten Favorites
 
 > **Branch:** `feature/phase-10-cook-mode-and-cook-logs`
-> **Status:** `[ ]` Not Started (`[ ]` Not Started | `[~]` In Progress | `[x]` Completed)
+> **Status:** `[x]` Completed (`[ ]` Not Started | `[~]` In Progress | `[x]` Completed)
 > **PRD Reference:** `docs/prd.md` — Sections 1, 2, 3, 4.3, 4.6.1, 4.6.2, 4.7.1, 4.7.3, 5, and 6 (Milestone 4, Slice 1 of 2)
 > **Target Execution:** Run `/execute-phase` to execute this plan step-by-step.
 
@@ -453,7 +453,7 @@ Create `Tests/Client.E2ETests/CookModeAndCookLogsE2ETests.cs` extending `E2ETest
 
 ## 6. Step-by-Step Execution Checklist (For Implementation Agent)
 
-- [ ] **Task 1: Backend Core, CookLog Entity, Media Storage & EF Migration**
+- [x] **Task 1: Backend Core, CookLog Entity, Media Storage & EF Migration**
   - Update `Core/Media/MediaModels.cs`, `Core/Media/IMediaStorageService.cs`, `Core/Recipes/RecipeModels.cs`, and `Core/Recipes/ShareLinkModels.cs`.
   - Create `Core/Recipes/CookLogModels.cs` and `Core/Recipes/ICookLogService.cs`.
   - Create `Data/Entities/CookLog.cs` and `Data/Configurations/CookLogConfiguration.cs`; update `Data/Entities/Recipe.cs`, `Data/Entities/User.cs`, `Data/Configurations/RecipeConfiguration.cs`, and `Data/AppDbContext.cs`.
@@ -472,7 +472,7 @@ Create `Tests/Client.E2ETests/CookModeAndCookLogsE2ETests.cs` extending `E2ETest
     dotnet test --project Tests/Infrastructure.UnitTests/App.Infrastructure.UnitTests.csproj
     ```
 
-- [ ] **Task 2: API Controllers & Integration Tests**
+- [x] **Task 2: API Controllers & Integration Tests**
   - Create `API/Controllers/RecipeCookLogsController.cs` and add `POST /api/media/cook-log-photo` to `API/Controllers/MediaController.cs`.
   - Create `Tests/API.IntegrationTests/CookLogsAndDiscoveryIntegrationTests.cs` covering CookLog CRUD, validation (`400`/`404`), dish photo upload, `Recipe` rating/cook-count recomputation, CookLog note search, `ForgottenFavoritesOnly` & `MinRating` filtering, `ShareLink` `IncludeCookLogs` privacy boundary, and MCP `get_recipe` `CookHistoryNotes`.
   - Run API integration tests until 100% green:
@@ -480,7 +480,7 @@ Create `Tests/Client.E2ETests/CookModeAndCookLogsE2ETests.cs` extending `E2ETest
     dotnet test --project Tests/API.IntegrationTests/App.API.IntegrationTests.csproj
     ```
 
-- [ ] **Task 3: Angular Cook Mode, Timers, Cook Logs UI & Unit Tests**
+- [x] **Task 3: Angular Cook Mode, Timers, Cook Logs UI & Unit Tests**
   - Update `media.models.ts`, `recipe.models.ts`, `share-link.models.ts`, `culinary-math.ts`, `media.service.ts`, and `recipe.service.ts`.
   - Create `WakeLockService` (`core/services/wake-lock/`) and `KitchenTimerService` (`core/services/kitchen-timer/`) with `.spec.ts` unit tests.
   - Create `CookModeComponent` (`features/recipes/cook-mode/`) and `CookLogDialogComponent` (`features/recipes/cook-log-dialog/`) with dedicated `.ts`, `.html`, `.scss`, and `.spec.ts` files, and register `recipes/:id/cook` in `app.routes.ts`.
@@ -493,7 +493,7 @@ Create `Tests/Client.E2ETests/CookModeAndCookLogsE2ETests.cs` extending `E2ETest
     npm test -- --watch=false
     ```
 
-- [ ] **Task 4: Playwright E2E Verification & Final Formatting**
+- [x] **Task 4: Playwright E2E Verification & Final Formatting**
   - Create `Tests/Client.E2ETests/CookModeAndCookLogsE2ETests.cs` implementing all 3 scenarios from Section 5.
   - Build production Angular bundle + .NET solution and run Playwright E2E tests:
     ```powershell

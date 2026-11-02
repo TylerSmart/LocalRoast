@@ -1,0 +1,163 @@
+<h2 mat-dialog-title class="dialog-title">
+  <mat-icon class="title-icon">restaurant</mat-icon>
+  <span>{{ data.logToEdit ? 'Edit Cook Log' : 'I Made This!' }}</span>
+</h2>
+
+<mat-dialog-content class="dialog-content">
+  <p class="recipe-subtitle">{{ data.recipeTitle }}</p>
+
+  @if (errorMessage()) {
+    <div class="error-banner" role="alert">
+      <mat-icon>error_outline</mat-icon>
+      <span>{{ errorMessage() }}</span>
+    </div>
+  }
+
+  <form [formGroup]="form" class="cook-log-form">
+    <!-- Star Rating Selector -->
+    <div class="rating-row">
+      <span class="section-label" id="rating-label">Star Rating</span>
+      <div class="stars-bar" role="group" aria-labelledby="rating-label">
+        @for (star of [1, 2, 3, 4, 5]; track star) {
+          <button
+            type="button"
+            class="star-btn"
+            [class.is-filled]="(selectedRating() ?? 0) >= star"
+            (click)="setRating(star)"
+            [attr.aria-label]="star + ' stars'"
+          >
+            <mat-icon class="star-icon">
+              {{ (selectedRating() ?? 0) >= star ? 'star' : 'star_outline' }}
+            </mat-icon>
+          </button>
+        }
+        @if (selectedRating() !== null) {
+          <button
+            type="button"
+            mat-button
+            class="clear-rating-btn"
+            (click)="clearRating()"
+            aria-label="Clear rating"
+          >
+            Clear
+          </button>
+        }
+      </div>
+    </div>
+
+    <!-- Date & Servings Made Row -->
+    <div class="form-row">
+      <mat-form-field appearance="outline" class="form-field">
+        <mat-label>Cook Date</mat-label>
+        <input matInput type="date" formControlName="cookedDate" required />
+      </mat-form-field>
+
+      <mat-form-field appearance="outline" class="form-field">
+        <mat-label>Servings Made</mat-label>
+        <input
+          matInput
+          type="number"
+          step="0.5"
+          min="0.25"
+          max="999"
+          formControlName="servingsMade"
+          required
+        />
+      </mat-form-field>
+    </div>
+
+    <!-- Notes & Tweaks Textarea -->
+    <mat-form-field appearance="outline" class="form-field full-width">
+      <mat-label>Cook's Notes & Tweaks</mat-label>
+      <textarea
+        matInput
+        formControlName="notes"
+        rows="3"
+        maxlength="2000"
+        placeholder="e.g. Added smoked paprika, reduced bake time by 5 minutes..."
+      ></textarea>
+      <mat-hint align="end">{{ form.controls.notes.value.length }} / 2000</mat-hint>
+    </mat-form-field>
+
+    <!-- Dish Photo Upload -->
+    <div class="photo-upload-section">
+      <span class="section-label" id="photo-label">Dish Photo (Optional)</span>
+
+      @if (photoPreviewUrl()) {
+        <div class="photo-preview-card">
+          <img
+            [src]="photoThumbnailUrl() || photoPreviewUrl()"
+            alt="Dish preview"
+            class="photo-thumb"
+          />
+          <button
+            type="button"
+            mat-stroked-button
+            color="warn"
+            class="remove-photo-btn"
+            (click)="removePhoto()"
+            [disabled]="isSubmitting()"
+          >
+            <mat-icon>delete</mat-icon>
+            Remove Photo
+          </button>
+        </div>
+      } @else {
+        <div class="photo-picker-row">
+          <input
+            #photoInput
+            id="photo-upload-input"
+            type="file"
+            accept="image/*"
+            style="display: none"
+            (change)="onPhotoSelected($event)"
+          />
+          <button
+            type="button"
+            mat-stroked-button
+            class="upload-btn"
+            (click)="photoInput.click()"
+            [disabled]="isUploadingPhoto() || isSubmitting()"
+            aria-labelledby="photo-label"
+          >
+            @if (isUploadingPhoto()) {
+              <ng-container>
+                <mat-spinner diameter="18"></mat-spinner>
+                <span>Uploading...</span>
+              </ng-container>
+            } @else {
+              <ng-container>
+                <mat-icon>add_a_photo</mat-icon>
+                <span>Upload Dish Photo</span>
+              </ng-container>
+            }
+          </button>
+        </div>
+      }
+    </div>
+  </form>
+</mat-dialog-content>
+
+<mat-dialog-actions align="end" class="dialog-actions">
+  <button mat-button type="button" (click)="onCancel()" [disabled]="isSubmitting()">Cancel</button>
+  <button
+    mat-flat-button
+    color="primary"
+    type="button"
+    class="submit-btn"
+    (click)="onSubmit()"
+    [disabled]="form.invalid || isSubmitting() || isUploadingPhoto()"
+  >
+    @if (isSubmitting()) {
+      <ng-container>
+        <mat-spinner diameter="18"></mat-spinner>
+        <span>Saving...</span>
+      </ng-container>
+    } @else {
+      <ng-container>
+        <mat-icon>check</mat-icon>
+        <span>{{ data.logToEdit ? 'Save Changes' : 'Log Cook' }}</span>
+      </ng-container>
+    }
+  </button>
+</mat-dialog-actions>

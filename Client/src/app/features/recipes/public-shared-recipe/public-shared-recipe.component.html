@@ -110,6 +110,18 @@
               recipe()!.yieldDisplay || recipe()!.baseServings + ' servings'
             }}</span>
           </div>
+          @if (recipe()!.averageRating) {
+            <div class="stat-pill">
+              <span class="stat-label">Rating</span>
+              <span class="stat-value">★ {{ recipe()!.averageRating | number: '1.1-1' }}</span>
+            </div>
+          }
+          @if (recipe()!.timesCooked) {
+            <div class="stat-pill">
+              <span class="stat-label">Cooked</span>
+              <span class="stat-value">{{ recipe()!.timesCooked }}x</span>
+            </div>
+          }
           @if (recipe()!.sourceName) {
             <div class="stat-pill source-stat">
               <span class="stat-label">Source</span>
@@ -401,6 +413,79 @@
           }
         </section>
       </div>
+
+      <!-- Household Cook Notes (When opt-in enabled on share link) -->
+      @if (recipe()!.includeCookLogs && (recipe()!.cookLogs?.length ?? 0) > 0) {
+        <section class="public-cook-notes-section" aria-label="Kitchen Notes">
+          <h2 class="section-heading">
+            <mat-icon class="heading-icon">rate_review</mat-icon>
+            <span>Kitchen Notes &amp; Feedback</span>
+          </h2>
+          <div class="public-cook-notes-grid">
+            @for (log of recipe()!.cookLogs!; track log.cookedAt) {
+              <div class="public-cook-card">
+                <div class="card-meta-header">
+                  @if (log.rating) {
+                    <span class="stars" [attr.aria-label]="log.rating + ' stars'">
+                      @for (star of [1, 2, 3, 4, 5]; track star) {
+                        <mat-icon class="star-icon" [class.filled]="star <= log.rating"
+                          >star</mat-icon
+                        >
+                      }
+                    </span>
+                  }
+                  <span class="cook-date">{{ log.cookedAt | date: 'mediumDate' }}</span>
+                </div>
+                @if (log.notes) {
+                  <p class="cook-note-body">{{ log.notes }}</p>
+                }
+                @if (log.photoThumbnailPath || log.photoImagePath) {
+                  <div class="cook-photo-wrapper">
+                    <img
+                      [src]="log.photoThumbnailPath || log.photoImagePath"
+                      alt="Cook dish photo"
+                      class="cook-photo-thumb"
+                      (click)="openPhotoLightbox(log.photoImagePath || log.photoThumbnailPath!)"
+                      tabindex="0"
+                      (keydown.enter)="
+                        openPhotoLightbox(log.photoImagePath || log.photoThumbnailPath!)
+                      "
+                    />
+                  </div>
+                }
+              </div>
+            }
+          </div>
+        </section>
+      }
     }
   </main>
+
+  <!-- Photo Lightbox Modal -->
+  @if (previewPhotoUrl()) {
+    <div
+      class="photo-lightbox-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Dish photo preview"
+    >
+      <button
+        type="button"
+        class="lightbox-backdrop-btn"
+        (click)="closePhotoLightbox()"
+        aria-label="Close photo preview"
+      ></button>
+      <div class="photo-lightbox-content">
+        <img [src]="previewPhotoUrl()!" alt="Full size dish preview" class="lightbox-img" />
+        <button
+          mat-icon-button
+          class="lightbox-close-btn"
+          (click)="closePhotoLightbox()"
+          aria-label="Close preview"
+        >
+          <mat-icon>close</mat-icon>
+        </button>
+      </div>
+    </div>
+  }
 </div>

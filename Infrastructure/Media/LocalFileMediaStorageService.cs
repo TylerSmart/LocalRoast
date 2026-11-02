@@ -1,4 +1,4 @@
-using App.Core.Exceptions;
+﻿using App.Core.Exceptions;
 using App.Core.Media;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
@@ -471,6 +471,52 @@ public sealed class LocalFileMediaStorageService : IMediaStorageService
                 fileInfo.Length
             );
         }
+    }
+
+    public async Task<UploadedCookLogPhotoDto> SaveCookLogPhotoAsync(
+        Stream content,
+        string originalFileName,
+        long contentLength,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ValidateImageContentLength(contentLength);
+
+        using var image = await LoadAndNormalizeImageAsync(content, cancellationToken);
+
+        var token = Guid.NewGuid().ToString("N");
+        var cookLogsDir = Path.Combine(_uploadsRoot, "cook-logs");
+        Directory.CreateDirectory(cookLogsDir);
+
+        var thumbPath = Path.Combine(cookLogsDir, "$token-thumb.webp");
+        using (
+            var thumb = image.Clone(ctx =>
+            {
+                if (image.Width > 600 || image.Height > 450)
+                {
+                    ctx.Resize(
+                        new ResizeOptions { Size = new Size(600, 450), Mode = ResizeMode.Max }
+                    );
+                }
+            })
+        )
+        {
+            await thumb.SaveAsync(thumbPath, WebpLossyEncoder, cancellationToken);
+        }
+
+        var photoPath = Path.Combine(cookLogsDir, "$token-photo.webp");
+        if (image.Width > 1600 || image.Height > 1200)
+        {
+            image.Mutate(ctx =>
+                ctx.Resize(new ResizeOptions { Size = new Size(1600, 1200), Mode = ResizeMode.Max })
+            );
+        }
+        await image.SaveAsync(photoPath, WebpLossyEncoder, cancellationToken);
+
+        return new UploadedCookLogPhotoDto(
+            $"/api/uploads/cook-logs/$token-photo.webp",
+            $"/api/uploads/cook-logs/$token-thumb.webp"
+        );
     }
 
     public Task DeleteMediaFileAsync(

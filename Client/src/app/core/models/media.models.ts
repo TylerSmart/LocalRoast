@@ -6,3 +6,8 @@ export interface UploadedRecipeCoverDto {
 export interface UploadedMediaDto {
   imagePath: string;
 }
+
+export interface UploadedCookLogPhotoDto {
+  photoImagePath: string;
+  photoThumbnailPath: string;
+}

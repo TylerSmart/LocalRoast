@@ -1,3 +1,4 @@
+import { DatePipe, DecimalPipe } from '@angular/common';
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
@@ -49,6 +50,8 @@ export interface PublicStepSectionGroup {
 
 @Component({
   imports: [
+    DatePipe,
+    DecimalPipe,
     FormsModule,
     MatCardModule,
     MatButtonModule,
@@ -75,6 +78,7 @@ export class PublicSharedRecipeComponent implements OnInit {
   protected readonly recipe = signal<PublicSharedRecipeDto | null>(null);
   protected readonly isLoading = signal<boolean>(true);
   protected readonly isUnavailable = signal<boolean>(false);
+  protected readonly previewPhotoUrl = signal<string | null>(null);
 
   // Culinary math state
   protected readonly targetServings = signal<number>(4);
@@ -270,6 +274,14 @@ export class PublicSharedRecipeComponent implements OnInit {
   toggleTheme(): void {
     const current = this.themeService.isDark();
     this.themeService.setMode(current ? 'light' : 'dark');
+  }
+
+  openPhotoLightbox(url: string): void {
+    this.previewPhotoUrl.set(url);
+  }
+
+  closePhotoLightbox(): void {
+    this.previewPhotoUrl.set(null);
   }
 
   printRecipe(): void {

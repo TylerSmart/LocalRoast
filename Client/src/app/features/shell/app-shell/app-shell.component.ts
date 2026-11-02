@@ -10,8 +10,10 @@ import { APP_BRAND_ICON, APP_NAME } from '../../../app.branding';
 import { AccountService } from '../../../core/services/account/account.service';
 import { AuthService } from '../../../core/services/auth/auth.service';
 import { IngestionService } from '../../../core/services/ingestion/ingestion.service';
+import { KitchenTimerService } from '../../../core/services/kitchen-timer/kitchen-timer.service';
 import { LlmSettingsService } from '../../../core/services/llm-settings/llm-settings.service';
 import { ThemeMode, ThemeService } from '../../../core/services/theme/theme.service';
+import { formatCountdown } from '../../../core/utils/culinary-math';
 import { GlobalSearchDialogComponent } from '../global-search-dialog/global-search-dialog.component';
 
 const THEME_ICONS: Record<ThemeMode, string> = {
@@ -52,10 +54,28 @@ export class AppShellComponent implements OnInit {
   protected readonly themeService = inject(ThemeService);
   protected readonly ingestionService = inject(IngestionService);
   protected readonly llmSettingsService = inject(LlmSettingsService);
+  protected readonly kitchenTimerService = inject(KitchenTimerService);
   private readonly dialog = inject(MatDialog);
 
   protected readonly themeIcon = computed(() => THEME_ICONS[this.themeService.mode()]);
   protected readonly themeLabel = computed(() => THEME_LABELS[this.themeService.mode()]);
+
+  protected readonly activeTimer = computed(() => {
+    const timers = this.kitchenTimerService.timers();
+    if (timers.length === 0) {
+      return null;
+    }
+    const running = timers.filter((t) => t.state === 'running');
+    if (running.length > 0) {
+      return running.reduce((min, t) => (t.remainingSeconds < min.remainingSeconds ? t : min));
+    }
+    return timers[0];
+  });
+
+  protected readonly timerCountdown = computed(() => {
+    const t = this.activeTimer();
+    return t ? formatCountdown(t.remainingSeconds) : '';
+  });
 
   ngOnInit(): void {
     this.ingestionService.refreshSummary();

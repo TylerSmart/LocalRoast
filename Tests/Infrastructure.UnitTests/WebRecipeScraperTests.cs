@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Text;
 using App.Core.Exceptions;
 using App.Core.Media;
@@ -119,6 +119,19 @@ public sealed class WebRecipeScraperTests
                     "/api/uploads/attachments/test.pdf",
                     "application/pdf",
                     100
+                )
+            );
+
+        public Task<UploadedCookLogPhotoDto> SaveCookLogPhotoAsync(
+            Stream content,
+            string originalFileName,
+            long contentLength,
+            CancellationToken cancellationToken = default
+        ) =>
+            Task.FromResult(
+                new UploadedCookLogPhotoDto(
+                    "/api/uploads/cook-logs/test-photo.webp",
+                    "/api/uploads/cook-logs/test-thumb.webp"
                 )
             );
 

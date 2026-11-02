@@ -15,6 +15,12 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'recipes/:id/cook',
+    loadComponent: () =>
+      import('./features/recipes/cook-mode/cook-mode.component').then((m) => m.CookModeComponent),
+    canActivate: [authGuard],
+  },
+  {
     path: '',
     loadComponent: () =>
       import('./features/shell/app-shell/app-shell.component').then((m) => m.AppShellComponent),

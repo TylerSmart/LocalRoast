@@ -50,6 +50,14 @@ public record PublicSubRecipeDto(
     IReadOnlyList<RecipeStepDto> Steps
 );
 
+public record PublicCookLogDto(
+    DateTimeOffset CookedAt,
+    int? Rating,
+    string? Notes,
+    string? PhotoImagePath,
+    string? PhotoThumbnailPath
+);
+
 public record PublicSharedRecipeDto(
     string Title,
     string? Description,
@@ -70,5 +78,12 @@ public record PublicSharedRecipeDto(
     IReadOnlyList<RecipeStepDto> Steps,
     IReadOnlyList<PublicSubRecipeDto> LinkedSubRecipes,
     bool IncludeCookLogs,
-    DateTimeOffset? ExpiresAt
-);
+    DateTimeOffset? ExpiresAt,
+    int TimesCooked = 0,
+    decimal? AverageRating = null,
+    int RatingCount = 0,
+    IReadOnlyList<PublicCookLogDto>? CookLogs = null
+)
+{
+    public IReadOnlyList<PublicCookLogDto> CookLogs { get; init; } = CookLogs ?? [];
+}

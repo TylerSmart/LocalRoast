@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using App.Core.Exceptions;
 using App.Core.FoodCatalog;
 using App.Core.Ingestion;
@@ -125,10 +125,18 @@ public sealed class McpCookbookService(
                         )
                     )
                 )
+                || r.CookLogs.Any(cl => cl.Notes != null && cl.Notes.ToLower().Contains(norm))
             );
         }
 
-        return await q.OrderByDescending(r => r.ModifiedAt)
+        var orderedQuery = request.ForgottenFavoritesOnly
+            ? q.OrderBy(r => r.LastCookedAt)
+                .ThenByDescending(r => r.AverageRating)
+                .ThenByDescending(r => r.TimesCooked)
+                .ThenByDescending(r => r.ModifiedAt)
+            : q.OrderByDescending(r => r.ModifiedAt);
+
+        return await orderedQuery
             .Take(limit)
             .Select(r => new RecipeSummaryDto(
                 r.Id,
@@ -167,7 +175,14 @@ public sealed class McpCookbookService(
                         rt.Tag.Slug,
                         rt.Tag.Category
                     ))
-                    .ToList()
+                    .ToList(),
+                r.LastCookedAt,
+                r.RatingCount,
+                r.CookLogs.OrderByDescending(cl => cl.CookedAt)
+                    .ThenByDescending(cl => cl.CreatedAt)
+                    .Where(cl => cl.Notes != null && cl.Notes.Trim() != "")
+                    .Select(cl => cl.Notes)
+                    .FirstOrDefault()
             ))
             .ToListAsync(cancellationToken);
     }
@@ -269,7 +284,16 @@ public sealed class McpCookbookService(
             Collections: detail.Collections,
             Tags: detail.Tags,
             Attachments: detail.Attachments,
-            CookHistoryNotes: []
+            CookHistoryNotes: detail
+                .CookLogs.OrderByDescending(c => c.CookedAt)
+                .ThenByDescending(c => c.CreatedAt)
+                .Select(c => new McpCookHistoryNoteDto(
+                    c.CookedAt,
+                    c.CookedByDisplayName,
+                    c.Rating,
+                    c.Notes
+                ))
+                .ToList()
         );
     }
 

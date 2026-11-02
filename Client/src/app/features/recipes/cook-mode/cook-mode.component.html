@@ -1,0 +1,502 @@
+@if (isLoading()) {
+  <div class="loading-state">
+    <mat-spinner diameter="48"></mat-spinner>
+    <p>Preparing Kitchen Cook Mode...</p>
+  </div>
+} @else if (errorMessage()) {
+  <div class="error-state">
+    <mat-icon>error_outline</mat-icon>
+    <p>{{ errorMessage() }}</p>
+    <button mat-flat-button color="primary" (click)="exitCookMode()">Return to Cookbook</button>
+  </div>
+} @else if (recipe()) {
+  <div class="cook-mode-container">
+    <!-- Top Bar -->
+    <header class="cook-top-bar">
+      <div class="top-bar-left">
+        <button mat-button class="exit-btn" (click)="exitCookMode()" aria-label="Exit Cook Mode">
+          <mat-icon>arrow_back</mat-icon>
+          <span class="exit-label">Exit</span>
+        </button>
+
+        <h1 class="recipe-title" [title]="recipe()!.title">{{ recipe()!.title }}</h1>
+      </div>
+
+      <div class="top-bar-controls">
+        <!-- Wake Lock Indicator Pill -->
+        <div
+          class="wake-lock-pill"
+          [class.is-active]="wakeLockService.status() === 'active'"
+          [matTooltip]="
+            wakeLockService.status() === 'active'
+              ? 'Screen stay-awake lock is active'
+              : 'Screen stay-awake is not supported on this device/browser'
+          "
+        >
+          <mat-icon class="wake-icon">
+            {{
+              wakeLockService.status() === 'active'
+                ? 'screen_lock_portrait'
+                : 'screen_lock_rotation'
+            }}
+          </mat-icon>
+          <span class="wake-text">
+            {{ wakeLockService.status() === 'active' ? 'Screen Awake' : 'Standard Screen' }}
+          </span>
+        </div>
+
+        <!-- Servings Stepper -->
+        <div class="servings-stepper" aria-label="Adjust servings">
+          <button
+            mat-icon-button
+            class="step-btn"
+            (click)="adjustServings(-0.5)"
+            [disabled]="targetServings() <= 1"
+            aria-label="Decrease servings"
+          >
+            <mat-icon>remove</mat-icon>
+          </button>
+          <span class="servings-val">{{ targetServings() }} srv</span>
+          <button
+            mat-icon-button
+            class="step-btn"
+            (click)="adjustServings(0.5)"
+            [disabled]="targetServings() >= 50"
+            aria-label="Increase servings"
+          >
+            <mat-icon>add</mat-icon>
+          </button>
+        </div>
+
+        <!-- Multiplier Chips -->
+        <div class="multiplier-chips">
+          @for (m of [0.5, 1, 1.5, 2]; track m) {
+            <button
+              type="button"
+              class="mult-chip"
+              [class.is-active]="scaleFactor() === m"
+              (click)="setMultiplier(m)"
+            >
+              {{ m }}x
+            </button>
+          }
+        </div>
+
+        <!-- Unit System Toggle -->
+        <mat-button-toggle-group
+          [value]="targetSystem()"
+          (change)="setUnitSystem($event.value)"
+          class="unit-toggle"
+          aria-label="Unit system"
+        >
+          <mat-button-toggle value="Original">Orig</mat-button-toggle>
+          <mat-button-toggle value="UsCustomary">US</mat-button-toggle>
+          <mat-button-toggle value="Metric">Metric</mat-button-toggle>
+        </mat-button-toggle-group>
+
+        <!-- Log Cook Button -->
+        <button mat-flat-button color="accent" class="log-cook-btn" (click)="openCookLogDialog()">
+          <mat-icon>rate_review</mat-icon>
+          <span>Log Cook</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Latest Kitchen Note Banner (Dismissible) -->
+    @if (latestTweakNote() && !isNoteCalloutDismissed()) {
+      <div class="cook-tweak-callout">
+        <mat-icon class="tweak-icon">lightbulb</mat-icon>
+        <div class="tweak-content">
+          <div class="tweak-header">
+            <strong>Previous Cook Note</strong>
+            @if (latestTweakNote()!.rating) {
+              <span class="tweak-stars">★ {{ latestTweakNote()!.rating }}</span>
+            }
+            <span class="tweak-author">by {{ latestTweakNote()!.cookedByDisplayName }}</span>
+          </div>
+          <p class="tweak-body">{{ latestTweakNote()!.notes }}</p>
+        </div>
+        <button
+          mat-icon-button
+          class="dismiss-tweak-btn"
+          (click)="dismissNoteCallout()"
+          aria-label="Dismiss previous cook note"
+        >
+          <mat-icon>close</mat-icon>
+        </button>
+      </div>
+    }
+
+    <!-- Mobile Drawer Trigger Button -->
+    <div class="mobile-drawer-trigger-bar">
+      <button
+        mat-stroked-button
+        class="mobile-ingredients-btn"
+        (click)="toggleMobileDrawer()"
+        aria-label="Open ingredients drawer"
+      >
+        <mat-icon>checklist</mat-icon>
+        <span>Ingredients ({{ checkedIngredientsCount() }}/{{ totalIngredientsCount() }})</span>
+      </button>
+    </div>
+
+    <!-- Main Workspace: Ingredients on Left, Steps on Right -->
+    <div class="cook-workspace">
+      <!-- Pinned Desktop Ingredients Pane -->
+      <aside class="cook-ingredients-pane">
+        <div class="pane-header">
+          <h2>Ingredients</h2>
+          <span class="count-badge"
+            >{{ checkedIngredientsCount() }}/{{ totalIngredientsCount() }}</span
+          >
+        </div>
+
+        <div class="ingredients-scroll">
+          @for (section of groupedIngredients(); track section.sectionName) {
+            <div class="ingredient-section">
+              @if (section.sectionName) {
+                <h3 class="section-heading">{{ section.sectionName }}</h3>
+              }
+              <ul class="ingredient-list">
+                @for (item of section.items; track item.ingredient.id) {
+                  <li
+                    class="ingredient-item"
+                    [class.is-checked]="checkedIngredients()[item.ingredient.id]"
+                    (click)="toggleIngredient(item.ingredient.id)"
+                    (keydown.enter)="toggleIngredient(item.ingredient.id)"
+                    (keydown.space)="toggleIngredient(item.ingredient.id)"
+                    tabindex="0"
+                    role="button"
+                    [attr.aria-label]="item.ingredient.displayName"
+                  >
+                    <mat-checkbox
+                      [checked]="checkedIngredients()[item.ingredient.id]"
+                      (click)="$event.stopPropagation()"
+                      (change)="toggleIngredient(item.ingredient.id)"
+                      [attr.aria-label]="item.ingredient.displayName"
+                    ></mat-checkbox>
+                    <span class="item-qty">{{ item.displayQuantityAndUnit }}</span>
+                    <span class="item-name">{{ item.ingredient.displayName }}</span>
+                    @if (item.ingredient.preparationNote) {
+                      <span class="item-prep">({{ item.ingredient.preparationNote }})</span>
+                    }
+                  </li>
+                }
+              </ul>
+            </div>
+          }
+
+          <!-- Linked Sub-Recipes Expansion -->
+          @if (subRecipesList().length > 0) {
+            <div class="sub-recipes-section">
+              <h3 class="section-heading">Sub-Recipes</h3>
+              <mat-accordion class="sub-recipe-accordion" multi>
+                @for (sub of subRecipesList(); track sub.id) {
+                  <mat-expansion-panel>
+                    <mat-expansion-panel-header>
+                      <mat-panel-title>{{ sub.title }}</mat-panel-title>
+                    </mat-expansion-panel-header>
+                    <ul class="ingredient-list sub-list">
+                      @for (subIng of sub.ingredients; track subIng.id) {
+                        <li class="ingredient-item">
+                          <span class="item-qty"
+                            >{{ subIng.quantity }} {{ subIng.customUnitName || '' }}</span
+                          >
+                          <span class="item-name">{{ subIng.displayName }}</span>
+                        </li>
+                      }
+                    </ul>
+                  </mat-expansion-panel>
+                }
+              </mat-accordion>
+            </div>
+          }
+        </div>
+      </aside>
+
+      <!-- Active Step Execution Pane -->
+      <main class="cook-steps-pane">
+        <div class="step-progress-row">
+          <span class="step-counter">
+            Step {{ activeStepIndex() + 1 }} of {{ totalStepsCount() }}
+          </span>
+          <div class="step-stepper-dots">
+            @for (step of flattenedSteps(); track $index) {
+              <button
+                type="button"
+                class="step-dot-btn"
+                [class.is-active]="$index === activeStepIndex()"
+                [class.is-completed]="checkedSteps()[step.step.id]"
+                (click)="goToStep($index)"
+                [attr.aria-label]="'Go to step ' + ($index + 1)"
+              >
+                {{ $index + 1 }}
+              </button>
+            }
+          </div>
+        </div>
+
+        @if (currentStep()) {
+          <div class="cook-step-card is-active">
+            @if (currentStep()!.step.sectionName) {
+              <div class="step-section-tag">{{ currentStep()!.step.sectionName }}</div>
+            }
+
+            <div class="step-instruction-box">
+              <mat-checkbox
+                class="step-checkbox"
+                [checked]="checkedSteps()[currentStep()!.step.id]"
+                (change)="toggleStepChecked(currentStep()!.step.id)"
+                aria-label="Mark step completed"
+              ></mat-checkbox>
+              <p class="instruction-text" [class.is-done]="checkedSteps()[currentStep()!.step.id]">
+                {{ currentStep()!.step.instruction }}
+              </p>
+            </div>
+
+            <!-- Scaled Ingredient Callouts for this Step -->
+            @if (currentStep()!.ingredientCallouts.length > 0) {
+              <div class="step-callouts-box">
+                <span class="callouts-label">Ingredients for this step:</span>
+                <div class="callouts-chips">
+                  @for (callout of currentStep()!.ingredientCallouts; track callout.id) {
+                    <span class="cook-step-ingredient-chip">{{ callout.label }}</span>
+                  }
+                </div>
+              </div>
+            }
+
+            <!-- Step Timers (1-tap launch) -->
+            @if (currentStep()!.step.timers.length > 0) {
+              <div class="step-timers-box">
+                <span class="timers-label">Timers:</span>
+                <div class="timers-chips">
+                  @for (timer of currentStep()!.step.timers; track timer.id) {
+                    <button
+                      type="button"
+                      mat-stroked-button
+                      class="start-step-timer-btn"
+                      (click)="startStepTimer(timer, currentStep()!.step.stepNumber)"
+                    >
+                      <mat-icon>timer</mat-icon>
+                      <span
+                        >Start {{ formatDuration(timer.durationSeconds) }} · {{ timer.label }}</span
+                      >
+                    </button>
+                  }
+                </div>
+              </div>
+            }
+
+            @if (currentStep()!.step.imagePath) {
+              <div class="step-image-wrap">
+                <img
+                  [src]="currentStep()!.step.imagePath"
+                  [alt]="'Step ' + currentStep()!.step.stepNumber"
+                  class="step-image"
+                />
+              </div>
+            }
+          </div>
+        }
+
+        <!-- Thumb/Knuckle Friendly Step Navigation Footer -->
+        <nav class="step-nav-buttons" aria-label="Step navigation">
+          <button
+            mat-stroked-button
+            class="nav-step-btn prev-btn"
+            (click)="prevStep()"
+            [disabled]="activeStepIndex() === 0"
+          >
+            <mat-icon>arrow_back</mat-icon>
+            <span>Previous Step</span>
+          </button>
+
+          <button
+            mat-flat-button
+            color="primary"
+            class="nav-step-btn next-btn"
+            (click)="nextStep()"
+          >
+            @if (activeStepIndex() < totalStepsCount() - 1) {
+              <ng-container>
+                <span>Next Step</span>
+                <mat-icon iconPositionEnd>arrow_forward</mat-icon>
+              </ng-container>
+            } @else {
+              <ng-container>
+                <mat-icon>check_circle</mat-icon>
+                <span>Finish &amp; Log Cook</span>
+              </ng-container>
+            }
+          </button>
+        </nav>
+      </main>
+    </div>
+
+    <!-- Sticky Floating Multi-Timer Tray -->
+    <div class="floating-timer-tray">
+      <div class="tray-header">
+        <div class="tray-title">
+          <mat-icon class="tray-icon">timer</mat-icon>
+          <span>Kitchen Timers ({{ kitchenTimerService.timers().length }})</span>
+        </div>
+
+        <button mat-button class="custom-timer-toggle-btn" (click)="toggleCustomTimerForm()">
+          <mat-icon>add</mat-icon>
+          <span>{{ showCustomTimerForm() ? 'Close' : '+ Custom Timer' }}</span>
+        </button>
+      </div>
+
+      <!-- Custom Timer Quick Form -->
+      @if (showCustomTimerForm()) {
+        <div class="custom-timer-form">
+          <input
+            type="text"
+            class="custom-timer-input"
+            [(ngModel)]="customTimerLabel"
+            placeholder="Timer label"
+            aria-label="Timer label"
+          />
+          <input
+            type="number"
+            class="custom-timer-mins"
+            [(ngModel)]="customTimerMinutes"
+            min="1"
+            max="720"
+            aria-label="Timer duration in minutes"
+          />
+          <span class="mins-label">mins</span>
+          <button
+            mat-flat-button
+            color="primary"
+            class="start-custom-btn"
+            (click)="submitCustomTimer()"
+          >
+            Start
+          </button>
+        </div>
+      }
+
+      <!-- List of active timers -->
+      @if (kitchenTimerService.timers().length > 0) {
+        <div class="timer-cards-row">
+          @for (t of kitchenTimerService.timers(); track t.id) {
+            <div
+              class="timer-card"
+              [class.is-completed]="t.state === 'completed'"
+              [class.is-paused]="t.state === 'paused'"
+            >
+              <div class="timer-info">
+                <span class="timer-countdown">{{ formatCountdown(t.remainingSeconds) }}</span>
+                <span class="timer-label" [title]="t.label">{{ t.label }}</span>
+              </div>
+
+              <div class="timer-actions">
+                <button
+                  mat-button
+                  class="timer-action-btn bump-btn"
+                  (click)="kitchenTimerService.addSeconds(t.id, 60)"
+                  aria-label="Add 1 minute"
+                >
+                  +1m
+                </button>
+
+                @if (t.state === 'running') {
+                  <button
+                    mat-icon-button
+                    class="timer-action-btn"
+                    (click)="kitchenTimerService.pauseTimer(t.id)"
+                    aria-label="Pause timer"
+                  >
+                    <mat-icon>pause</mat-icon>
+                  </button>
+                } @else if (t.state === 'paused') {
+                  <button
+                    mat-icon-button
+                    class="timer-action-btn"
+                    (click)="kitchenTimerService.resumeTimer(t.id)"
+                    aria-label="Resume timer"
+                  >
+                    <mat-icon>play_arrow</mat-icon>
+                  </button>
+                }
+
+                <button
+                  mat-icon-button
+                  class="timer-action-btn"
+                  (click)="kitchenTimerService.resetTimer(t.id)"
+                  aria-label="Reset timer"
+                >
+                  <mat-icon>restart_alt</mat-icon>
+                </button>
+
+                <button
+                  mat-icon-button
+                  class="timer-action-btn dismiss-btn"
+                  (click)="kitchenTimerService.dismissTimer(t.id)"
+                  aria-label="Dismiss timer"
+                >
+                  <mat-icon>close</mat-icon>
+                </button>
+              </div>
+            </div>
+          }
+        </div>
+      }
+    </div>
+
+    <!-- Mobile Slide-Up Ingredients Drawer -->
+    @if (isMobileDrawerOpen()) {
+      <button
+        type="button"
+        class="mobile-drawer-backdrop"
+        (click)="closeMobileDrawer()"
+        aria-label="Close ingredients drawer backdrop"
+      ></button>
+      <div class="mobile-ingredients-drawer">
+        <div class="drawer-header">
+          <h3>Ingredients</h3>
+          <button
+            mat-icon-button
+            (click)="closeMobileDrawer()"
+            aria-label="Close ingredients drawer"
+          >
+            <mat-icon>close</mat-icon>
+          </button>
+        </div>
+        <div class="drawer-body">
+          @for (section of groupedIngredients(); track section.sectionName) {
+            <div class="ingredient-section">
+              @if (section.sectionName) {
+                <h4 class="section-heading">{{ section.sectionName }}</h4>
+              }
+              <ul class="ingredient-list">
+                @for (item of section.items; track item.ingredient.id) {
+                  <li
+                    class="ingredient-item"
+                    [class.is-checked]="checkedIngredients()[item.ingredient.id]"
+                    (click)="toggleIngredient(item.ingredient.id)"
+                    (keydown.enter)="toggleIngredient(item.ingredient.id)"
+                    (keydown.space)="toggleIngredient(item.ingredient.id)"
+                    tabindex="0"
+                    role="button"
+                    [attr.aria-label]="item.ingredient.displayName"
+                  >
+                    <mat-checkbox
+                      [checked]="checkedIngredients()[item.ingredient.id]"
+                      (click)="$event.stopPropagation()"
+                      (change)="toggleIngredient(item.ingredient.id)"
+                    ></mat-checkbox>
+                    <span class="item-qty">{{ item.displayQuantityAndUnit }}</span>
+                    <span class="item-name">{{ item.ingredient.displayName }}</span>
+                  </li>
+                }
+              </ul>
+            </div>
+          }
+        </div>
+      </div>
+    }
+  </div>
+}

@@ -232,4 +232,64 @@ describe('RecipeService', () => {
 
     await promise;
   });
+
+  it('fetches recipes with forgotten favorites & min rating parameters', async () => {
+    const promise = firstValueFrom(
+      service.getRecipes({
+        minRating: 4.5,
+        forgottenFavoritesOnly: true,
+        forgottenDaysThreshold: 90,
+      }),
+    );
+    const req = httpMock.expectOne(
+      '/api/recipes?minRating=4.5&forgottenFavoritesOnly=true&forgottenDaysThreshold=90',
+    );
+    expect(req.request.method).toBe('GET');
+    req.flush([]);
+
+    const result = await promise;
+    expect(result).toEqual([]);
+  });
+
+  it('performs cook log CRUD endpoints', async () => {
+    // 1. GET cook logs
+    const getPromise = firstValueFrom(service.getCookLogs('r-1'));
+    const getReq = httpMock.expectOne('/api/recipes/r-1/cook-logs');
+    expect(getReq.request.method).toBe('GET');
+    getReq.flush([]);
+    await getPromise;
+
+    // 2. CREATE cook log
+    const createPromise = firstValueFrom(
+      service.createCookLog('r-1', { rating: 5, notes: 'Great' }),
+    );
+    const createReq = httpMock.expectOne('/api/recipes/r-1/cook-logs');
+    expect(createReq.request.method).toBe('POST');
+    createReq.flush({
+      cookLog: { id: 'cl-1', recipeId: 'r-1', rating: 5, notes: 'Great' },
+      recipeStats: { recipeId: 'r-1', timesCooked: 1, averageRating: 5 },
+    });
+    const createResult = await createPromise;
+    expect(createResult.cookLog.id).toBe('cl-1');
+
+    // 3. UPDATE cook log
+    const updatePromise = firstValueFrom(
+      service.updateCookLog('r-1', 'cl-1', { rating: 4, notes: 'Updated' }),
+    );
+    const updateReq = httpMock.expectOne('/api/recipes/r-1/cook-logs/cl-1');
+    expect(updateReq.request.method).toBe('PUT');
+    updateReq.flush({
+      cookLog: { id: 'cl-1', recipeId: 'r-1', rating: 4, notes: 'Updated' },
+      recipeStats: { recipeId: 'r-1', timesCooked: 1, averageRating: 4 },
+    });
+    const updateResult = await updatePromise;
+    expect(updateResult.cookLog.rating).toBe(4);
+
+    // 4. DELETE cook log
+    const deletePromise = firstValueFrom(service.deleteCookLog('r-1', 'cl-1'));
+    const deleteReq = httpMock.expectOne('/api/recipes/r-1/cook-logs/cl-1');
+    expect(deleteReq.request.method).toBe('DELETE');
+    deleteReq.flush(null);
+    await deletePromise;
+  });
 });

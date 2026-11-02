@@ -1,4 +1,4 @@
-using App.Core.Exceptions;
+﻿using App.Core.Exceptions;
 using App.Core.FoodCatalog;
 using App.Core.Ingestion;
 using App.Core.Mcp;
@@ -98,6 +98,19 @@ public sealed class McpCookbookServiceTests
                     "/api/uploads/recipes/promoted.webp",
                     "image/webp",
                     1000
+                )
+            );
+
+        public Task<UploadedCookLogPhotoDto> SaveCookLogPhotoAsync(
+            Stream content,
+            string originalFileName,
+            long contentLength,
+            CancellationToken cancellationToken = default
+        ) =>
+            Task.FromResult(
+                new UploadedCookLogPhotoDto(
+                    "/api/uploads/cook-logs/photo.webp",
+                    "/api/uploads/cook-logs/thumb.webp"
                 )
             );
 
@@ -382,5 +395,90 @@ public sealed class McpCookbookServiceTests
                 new McpEnqueueIngestionRequest(Url: "https://example.com/recipe", RawText: "both")
             )
         );
+    }
+
+    [TestMethod]
+    public async Task GetRecipeAsync_PopulatesCookHistoryNotes()
+    {
+        var recipe = new Recipe
+        {
+            Id = Guid.NewGuid(),
+            Title = "Grandmas Meatloaf",
+            Slug = "grandmas-meatloaf",
+            Status = RecipeStatus.Published,
+            BaseServings = 4,
+            TimesCooked = 1,
+            AverageRating = 5.0m,
+            RatingCount = 1,
+            LastCookedAt = DateTimeOffset.UtcNow.AddDays(-10),
+        };
+        _dbContext.Recipes.Add(recipe);
+
+        var log = new CookLog
+        {
+            Id = Guid.NewGuid(),
+            RecipeId = recipe.Id,
+            CookedByDisplayName = "Grandpa",
+            CookedAt = DateTimeOffset.UtcNow.AddDays(-10),
+            Rating = 5,
+            Notes = "Added a pinch of nutmeg to the glaze. Delicious!",
+        };
+        _dbContext.CookLogs.Add(log);
+        await _dbContext.SaveChangesAsync();
+
+        var result = await _service.GetRecipeAsync(recipe.Id);
+
+        Assert.IsNotNull(result);
+        Assert.AreEqual(1, result.CookHistoryNotes.Count);
+        Assert.AreEqual("Grandpa", result.CookHistoryNotes[0].CookedBy);
+        Assert.AreEqual(5, result.CookHistoryNotes[0].Rating);
+        Assert.AreEqual(
+            "Added a pinch of nutmeg to the glaze. Delicious!",
+            result.CookHistoryNotes[0].Notes
+        );
+    }
+
+    [TestMethod]
+    public async Task SearchRecipesAsync_MatchesCookLogNotesAndForgottenFavorites()
+    {
+        var recipe = new Recipe
+        {
+            Id = Guid.NewGuid(),
+            Title = "Chicken Curry",
+            Slug = "chicken-curry",
+            Status = RecipeStatus.Published,
+            BaseServings = 4,
+            TimesCooked = 3,
+            AverageRating = 4.8m,
+            RatingCount = 2,
+            LastCookedAt = DateTimeOffset.UtcNow.AddDays(-90),
+        };
+        _dbContext.Recipes.Add(recipe);
+
+        var log = new CookLog
+        {
+            Id = Guid.NewGuid(),
+            RecipeId = recipe.Id,
+            CookedByDisplayName = "Chef",
+            CookedAt = DateTimeOffset.UtcNow.AddDays(-90),
+            Rating = 5,
+            Notes = "Used smoked paprika and extra coconut cream.",
+        };
+        _dbContext.CookLogs.Add(log);
+        await _dbContext.SaveChangesAsync();
+
+        // Search by cook log note keyword
+        var searchResults = await _service.SearchRecipesAsync(
+            new McpRecipeSearchRequest(Query: "coconut cream")
+        );
+        Assert.AreEqual(1, searchResults.Count);
+        Assert.AreEqual("Chicken Curry", searchResults[0].Title);
+
+        // Search forgotten favorites
+        var forgottenResults = await _service.SearchRecipesAsync(
+            new McpRecipeSearchRequest(ForgottenFavoritesOnly: true, ForgottenDaysThreshold: 60)
+        );
+        Assert.AreEqual(1, forgottenResults.Count);
+        Assert.AreEqual("Chicken Curry", forgottenResults[0].Title);
     }
 }

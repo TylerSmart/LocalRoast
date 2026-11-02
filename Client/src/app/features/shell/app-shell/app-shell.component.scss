@@ -88,6 +88,61 @@
   flex-shrink: 0;
 }
 
+.active-timer-nav-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  height: 36px;
+  border-radius: 9999px;
+  background-color: var(--mat-sys-secondary-container, #e8def8);
+  color: var(--mat-sys-on-secondary-container, #1d192b);
+  border: 1px solid var(--mat-sys-outline-variant, #cac4d0);
+  padding: 0 0.75rem;
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 0.85rem;
+
+  ::ng-deep .mdc-button__label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    line-height: normal;
+  }
+
+  .timer-nav-icon {
+    font-size: 1.1rem;
+    width: 1.1rem;
+    height: 1.1rem;
+    color: var(--mat-sys-primary, #6b5e43);
+    animation: timer-pulse 2s infinite ease-in-out;
+  }
+
+  .timer-nav-time {
+    font-family: monospace;
+    font-size: 0.9rem;
+    font-weight: 700;
+  }
+
+  .timer-nav-title {
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.8rem;
+    opacity: 0.85;
+  }
+}
+
+@keyframes timer-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
 .search-trigger-btn {
   display: inline-flex;
   align-items: center;
@@ -204,6 +259,13 @@
 
   .user-name {
     display: none;
+  }
+
+  .active-timer-nav-pill {
+    padding: 0 0.5rem;
+    .timer-nav-title {
+      display: none;
+    }
   }
 
   .main-content {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   formatAmount,
+  formatCountdown,
   formatDuration,
   formatMinutes,
   formatNumber,
@@ -131,6 +132,22 @@ describe('culinary-math', () => {
       expect(res.unit).toBe('Clove');
       expect(res.unitLabel).toBe('cloves');
       expect(res.formattedAmount).toBe('4');
+    });
+  });
+
+  describe('formatCountdown', () => {
+    it('should format seconds into MM:SS', () => {
+      expect(formatCountdown(900)).toBe('15:00');
+      expect(formatCountdown(65)).toBe('01:05');
+      expect(formatCountdown(9)).toBe('00:09');
+      expect(formatCountdown(0)).toBe('00:00');
+      expect(formatCountdown(-5)).toBe('00:00');
+    });
+
+    it('should format hours into H:MM:SS', () => {
+      expect(formatCountdown(3600)).toBe('1:00:00');
+      expect(formatCountdown(3905)).toBe('1:05:05');
+      expect(formatCountdown(7322)).toBe('2:02:02');
     });
   });
 });

@@ -208,4 +208,29 @@ describe('RecipeDetailComponent', () => {
     component.openAddToShoppingListDialog();
     expect(mockDialog.open).toHaveBeenCalled();
   });
+
+  it('navigates to Cook Mode on startCooking()', () => {
+    const navSpy = vi.spyOn(component['router'], 'navigate').mockResolvedValue(true);
+    component.startCooking();
+    expect(navSpy).toHaveBeenCalledWith(['/recipes', 'r-1', 'cook'], {
+      queryParams: {
+        servings: 4,
+        units: 'Original',
+        from: 'recipe',
+      },
+    });
+  });
+
+  it('opens cook log dialog on openCookLogDialog()', () => {
+    component.openCookLogDialog();
+    expect(mockDialog.open).toHaveBeenCalled();
+  });
+
+  it('opens and closes photo lightbox', () => {
+    component.openPhotoLightbox('/api/uploads/cook-logs/dish.webp');
+    expect(component['previewPhotoUrl']()).toBe('/api/uploads/cook-logs/dish.webp');
+
+    component.closePhotoLightbox();
+    expect(component['previewPhotoUrl']()).toBeNull();
+  });
 });

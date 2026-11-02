@@ -40,6 +40,22 @@
     </nav>
 
     <div class="top-actions">
+      <!-- Active Kitchen Timer Nav Pill (Visible when timers exist) -->
+      @if (activeTimer(); as timer) {
+        <a
+          mat-button
+          class="active-timer-nav-pill"
+          [routerLink]="['/recipes', timer.recipeId, 'cook']"
+          [attr.aria-label]="
+            'Return to cooking ' + timer.recipeTitle + ', ' + timerCountdown() + ' remaining'
+          "
+        >
+          <mat-icon class="timer-nav-icon">timer</mat-icon>
+          <span class="timer-nav-time">{{ timerCountdown() }}</span>
+          <span class="timer-nav-title">{{ timer.label }}</span>
+        </a>
+      }
+
       <!-- Quick Search Trigger -->
       <button
         type="button"

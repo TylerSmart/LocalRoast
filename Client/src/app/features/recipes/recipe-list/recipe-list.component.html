@@ -75,12 +75,12 @@
         <input
           matInput
           [ngModel]="searchQuery()"
-          (ngModelChange)="searchQuery.set($event)"
+          (ngModelChange)="onSearchChange($event)"
           placeholder="e.g. Lasagna, Vegetarian, Sheet Pan"
           autocomplete="off"
         />
         @if (searchQuery()) {
-          <button mat-icon-button matSuffix (click)="searchQuery.set('')" aria-label="Clear search">
+          <button mat-icon-button matSuffix (click)="onSearchChange('')" aria-label="Clear search">
             <mat-icon>close</mat-icon>
           </button>
         }
@@ -145,6 +145,29 @@
               </mat-optgroup>
             }
           }
+        </mat-select>
+      </mat-form-field>
+
+      <!-- Forgotten Favorites Toggle Pill -->
+      <button
+        type="button"
+        class="forgotten-favorites-pill"
+        [class.is-active]="forgottenFavoritesOnly()"
+        (click)="toggleForgottenFavorites()"
+        aria-label="Filter by forgotten favorites"
+      >
+        <mat-icon>favorite</mat-icon>
+        <span>Forgotten Favorites</span>
+      </button>
+
+      <!-- Min Rating Filter -->
+      <mat-form-field appearance="outline" class="filter-field" subscriptSizing="dynamic">
+        <mat-label>Rating</mat-label>
+        <mat-select [ngModel]="minRating()" (ngModelChange)="onMinRatingChange($event)">
+          <mat-option [value]="null">Any Rating</mat-option>
+          <mat-option [value]="4">★ 4+ Stars</mat-option>
+          <mat-option [value]="4.5">★ 4.5+ Stars</mat-option>
+          <mat-option [value]="5">★ 5 Stars</mat-option>
         </mat-select>
       </mat-form-field>
 
@@ -297,12 +320,20 @@
                   <span></span>
                 }
 
-                @if (recipe.timesCooked > 0) {
-                  <span class="cooked-badge">
-                    <mat-icon class="cooked-icon">skillet</mat-icon>
-                    <span>Cooked {{ recipe.timesCooked }}x</span>
-                  </span>
-                }
+                <div class="card-badges-footer">
+                  @if (recipe.averageRating) {
+                    <span class="rating-badge">
+                      <mat-icon class="rating-icon">star</mat-icon>
+                      <span>★ {{ recipe.averageRating }}</span>
+                    </span>
+                  }
+                  @if (recipe.timesCooked > 0) {
+                    <span class="cooked-badge">
+                      <mat-icon class="cooked-icon">skillet</mat-icon>
+                      <span>Cooked {{ recipe.timesCooked }}x</span>
+                    </span>
+                  }
+                </div>
               </div>
             </div>
           </mat-card>

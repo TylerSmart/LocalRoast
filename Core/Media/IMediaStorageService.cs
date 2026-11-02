@@ -64,4 +64,11 @@ public interface IMediaStorageService
         long contentLength,
         CancellationToken cancellationToken = default
     );
+
+    Task<UploadedCookLogPhotoDto> SaveCookLogPhotoAsync(
+        Stream content,
+        string originalFileName,
+        long contentLength,
+        CancellationToken cancellationToken = default
+    );
 }

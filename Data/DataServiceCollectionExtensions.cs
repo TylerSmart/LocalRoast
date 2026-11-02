@@ -1,4 +1,4 @@
-using App.Core.Account;
+﻿using App.Core.Account;
 using App.Core.Authentication;
 using App.Core.FoodCatalog;
 using App.Core.Ingestion;
@@ -30,6 +30,7 @@ public static class DataServiceCollectionExtensions
         services.AddScoped<IPersonalAccessTokenService, PersonalAccessTokenService>();
         services.AddScoped<IFoodCatalogService, FoodCatalogService>();
         services.AddScoped<IRecipeService, RecipeService>();
+        services.AddScoped<ICookLogService, CookLogService>();
         services.AddScoped<ITaxonomyService, TaxonomyService>();
         services.AddScoped<IShareLinkService, ShareLinkService>();
         services.AddScoped<ILlmSettingsService, LlmSettingsService>();
