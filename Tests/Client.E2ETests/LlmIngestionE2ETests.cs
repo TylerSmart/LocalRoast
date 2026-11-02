@@ -291,7 +291,18 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await Expect(Page.Locator(".recipe-title")).ToContainTextAsync("Crispy Sesame Tofu");
         await Expect(Page.Locator(".ingredients-column")).ToContainTextAsync("Toasted Sesame Oil");
 
-        // 6. Navigate to /catalog and verify "Toasted Sesame Oil" was created in the food catalog
+        // 6. Navigate back to /ingest and verify published job can be removed from the ingestion list
+        await Page.Locator("a.nav-link", new() { HasText = "Ingest" }).ClickAsync();
+        await Expect(Page).ToHaveURLAsync(new Regex(".*/ingest.*"));
+
+        var publishedJobCard = Page.Locator(".job-card", new() { HasText = "Crispy Sesame Tofu" });
+        await Expect(publishedJobCard).ToBeVisibleAsync();
+        await Expect(publishedJobCard.Locator(".status-badge")).ToContainTextAsync("Published");
+
+        await publishedJobCard.Locator("button.discard-btn").ClickAsync();
+        await Expect(publishedJobCard).Not.ToBeVisibleAsync();
+
+        // 7. Navigate to /catalog and verify "Toasted Sesame Oil" was created in the food catalog
         await Page.Locator("a.nav-link", new() { HasText = "Food Catalog" }).ClickAsync();
         await Expect(Page).ToHaveURLAsync(new Regex(".*/catalog.*"));
         await Expect(Page.Locator(".food-item-card", new() { HasText = "Toasted Sesame Oil" }))

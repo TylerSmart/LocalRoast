@@ -235,6 +235,20 @@ public sealed class IngestionIntegrationTests
             draft
         );
         Assert.AreEqual(HttpStatusCode.Conflict, secondApprove.StatusCode);
+
+        // 4. Discarding a published job removes it from the ingestion list while keeping the recipe intact
+        var discardPublishedResp = await _client.DeleteAsync($"/api/ingestion/jobs/{job.Id}");
+        Assert.AreEqual(HttpStatusCode.NoContent, discardPublishedResp.StatusCode);
+
+        var listResp = await _client.GetAsync("/api/ingestion/jobs");
+        var list = await listResp.Content.ReadFromJsonAsync<
+            IReadOnlyList<IngestionJobSummaryDto>
+        >();
+        Assert.IsNotNull(list);
+        Assert.IsFalse(list.Any(j => j.Id == job.Id));
+
+        var recipeResp = await _client.GetAsync($"/api/recipes/{recipe.Id}");
+        Assert.AreEqual(HttpStatusCode.OK, recipeResp.StatusCode);
     }
 
     [TestMethod]

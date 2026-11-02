@@ -1068,11 +1068,6 @@ public sealed class IngestionService(
             return false;
         }
 
-        if (job.Status == IngestionJobStatus.Published)
-        {
-            throw new ConflictException("Cannot discard a published ingestion job.");
-        }
-
         job.Status = IngestionJobStatus.Discarded;
         job.StatusDetail = "Job discarded by user.";
         var oldCover = job.DownloadedCoverImagePath;

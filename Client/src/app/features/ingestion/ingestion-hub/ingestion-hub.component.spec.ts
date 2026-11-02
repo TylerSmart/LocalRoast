@@ -59,6 +59,23 @@ describe('IngestionHubComponent', () => {
       createdAt: '2026-10-26T12:05:00Z',
       modifiedAt: '2026-10-26T12:05:00Z',
     },
+    {
+      id: 'job-3',
+      channel: 'WebUrl',
+      status: 'Published',
+      displayTitle: 'Published Herb Pasta',
+      sourceUrl: 'https://example.com/pasta',
+      thumbnailImagePath: null,
+      confidenceScore: 0.98,
+      statusDetail: 'Approved and published to cookbook.',
+      attemptCount: 1,
+      nextRetryAt: null,
+      resultingRecipeId: 'recipe-123',
+      resultingRecipeSlug: 'published-herb-pasta',
+      submittedByUsername: 'alice',
+      createdAt: '2026-10-26T12:10:00Z',
+      modifiedAt: '2026-10-26T12:10:00Z',
+    },
   ];
 
   beforeEach(async () => {
@@ -93,9 +110,10 @@ describe('IngestionHubComponent', () => {
 
   it('renders loaded jobs and computes review and waiting counts', () => {
     expect(mockIngestionService.getJobs).toHaveBeenCalled();
-    expect(component.jobs()).toHaveLength(2);
+    expect(component.jobs()).toHaveLength(3);
     expect(component.reviewCount()).toBe(1);
     expect(component.waitingJobs()).toHaveLength(1);
+    expect(component.publishedCount()).toBe(1);
   });
 
   it('filters jobs by status pill', () => {
@@ -107,8 +125,12 @@ describe('IngestionHubComponent', () => {
     expect(component.filteredJobs()).toHaveLength(1);
     expect(component.filteredJobs()[0].id).toBe('job-2');
 
+    component.setFilter('Published');
+    expect(component.filteredJobs()).toHaveLength(1);
+    expect(component.filteredJobs()[0].id).toBe('job-3');
+
     component.setFilter('All');
-    expect(component.filteredJobs()).toHaveLength(2);
+    expect(component.filteredJobs()).toHaveLength(3);
   });
 
   it('enqueues web URLs and clears form', () => {
@@ -146,9 +168,15 @@ describe('IngestionHubComponent', () => {
     expect(mockIngestionService.retryJob).toHaveBeenCalledWith('job-2');
   });
 
-  it('discards a job', () => {
+  it('discards waiting, review, and published jobs and renders remove buttons for all statuses', () => {
+    const discardButtons = fixture.nativeElement.querySelectorAll('button.discard-btn');
+    expect(discardButtons.length).toBe(3);
+
     component.discardJob(sampleJobs[1]);
     expect(mockIngestionService.discardJob).toHaveBeenCalledWith('job-2');
+
+    component.discardJob(sampleJobs[2]);
+    expect(mockIngestionService.discardJob).toHaveBeenCalledWith('job-3');
   });
 
   it('opens LLM provider settings dialog', () => {

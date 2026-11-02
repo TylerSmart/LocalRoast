@@ -383,24 +383,9 @@ public sealed class IngestionJobsController(IIngestionService ingestionService) 
     [HttpDelete("{id:guid}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     public async Task<IActionResult> DiscardJob(Guid id, CancellationToken cancellationToken)
     {
-        try
-        {
-            var deleted = await ingestionService.DiscardJobAsync(id, cancellationToken);
-            return deleted ? NoContent() : NotFound();
-        }
-        catch (ConflictException ex)
-        {
-            return Conflict(
-                new ProblemDetails
-                {
-                    Status = StatusCodes.Status409Conflict,
-                    Title = ex.Title,
-                    Detail = ex.Message,
-                }
-            );
-        }
+        var deleted = await ingestionService.DiscardJobAsync(id, cancellationToken);
+        return deleted ? NoContent() : NotFound();
     }
 }

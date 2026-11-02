@@ -215,6 +215,11 @@ public sealed class IngestionProcessor(
                 }
             }
 
+            if (await IsJobDiscardedInDbAsync(job.Id, cancellationToken))
+            {
+                return false;
+            }
+
             // Step 2: Extracting
             job.Status = IngestionJobStatus.Extracting;
             job.StatusDetail = "Extracting structured recipe via local LLM...";
@@ -386,6 +391,11 @@ public sealed class IngestionProcessor(
                 );
             }
 
+            if (await IsJobDiscardedInDbAsync(job.Id, cancellationToken))
+            {
+                return false;
+            }
+
             string? fallbackSourceName = null;
             string? fallbackSourceAuthor = null;
             if (!string.IsNullOrWhiteSpace(job.ScrapedPageJson))
@@ -472,6 +482,11 @@ public sealed class IngestionProcessor(
         }
         catch (LlmHostUnavailableException ex)
         {
+            if (await IsJobDiscardedInDbAsync(job.Id, cancellationToken))
+            {
+                return false;
+            }
+
             logger.LogWarning(
                 ex,
                 "LLM host unavailable while processing job {JobId}. Transitioning to WaitingForLlmHost.",
@@ -487,6 +502,11 @@ public sealed class IngestionProcessor(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            if (await IsJobDiscardedInDbAsync(job.Id, cancellationToken))
+            {
+                return false;
+            }
+
             logger.LogError(
                 ex,
                 "Fatal error processing job {JobId}. Transitioning to Failed.",
@@ -499,6 +519,14 @@ public sealed class IngestionProcessor(
             return false;
         }
     }
+
+    private Task<bool> IsJobDiscardedInDbAsync(Guid jobId, CancellationToken cancellationToken) =>
+        dbContext
+            .IngestionJobs.AsNoTracking()
+            .AnyAsync(
+                j => j.Id == jobId && j.Status == IngestionJobStatus.Discarded,
+                cancellationToken
+            );
 
     public async Task<int> ProbeAndPromoteWaitingJobsAsync(
         CancellationToken cancellationToken = default

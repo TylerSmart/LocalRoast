@@ -557,18 +557,16 @@
                 </button>
               }
 
-              @if (job.status !== 'Published') {
-                <button
-                  mat-icon-button
-                  type="button"
-                  (click)="discardJob(job)"
-                  class="discard-btn"
-                  [attr.aria-label]="'Discard ' + job.displayTitle"
-                  matTooltip="Discard job"
-                >
-                  <mat-icon>delete_outline</mat-icon>
-                </button>
-              }
+              <button
+                mat-icon-button
+                type="button"
+                (click)="discardJob(job)"
+                class="discard-btn"
+                [attr.aria-label]="'Discard ' + job.displayTitle"
+                [matTooltip]="job.status === 'Published' ? 'Remove from list' : 'Discard job'"
+              >
+                <mat-icon>delete_outline</mat-icon>
+              </button>
             </div>
           </div>
         </mat-card>
