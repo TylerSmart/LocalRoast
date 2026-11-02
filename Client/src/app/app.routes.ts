@@ -61,6 +61,13 @@ export const routes: Routes = [
           ),
       },
       {
+        path: 'shopping',
+        loadComponent: () =>
+          import('./features/shopping/shopping-workspace/shopping-workspace.component').then(
+            (m) => m.ShoppingWorkspaceComponent,
+          ),
+      },
+      {
         path: 'ingest',
         loadComponent: () =>
           import('./features/ingestion/ingestion-hub/ingestion-hub.component').then(

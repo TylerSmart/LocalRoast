@@ -54,6 +54,17 @@
         <button
           type="button"
           mat-stroked-button
+          (click)="openGenerateShoppingListDialog()"
+          class="shop-week-btn"
+          aria-label="Generate shopping list for this week"
+        >
+          <mat-icon>shopping_cart_checkout</mat-icon>
+          <span class="btn-text">Shop Week</span>
+        </button>
+
+        <button
+          type="button"
+          mat-stroked-button
           (click)="openTemplatesDialog()"
           class="template-action-btn"
           aria-label="Manage reusable week templates"

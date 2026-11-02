@@ -231,13 +231,15 @@
       justify-content: center;
       text-decoration: none;
       color: var(--mat-sys-on-surface-variant, #49454f);
-      font-size: 0.65rem;
+      font-size: 0.6rem;
       font-weight: 500;
       gap: 0.1rem;
-      padding: 0.25rem 0.25rem;
+      padding: 0.25rem 0.1rem;
       border-radius: 0.5rem;
       transition: background-color 0.15s ease;
-      min-width: 50px;
+      flex: 1 1 0;
+      min-width: 0;
+      white-space: nowrap;
       position: relative;
       box-sizing: border-box;
 

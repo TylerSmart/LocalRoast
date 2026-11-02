@@ -14,6 +14,14 @@
         </button>
         <button
           mat-stroked-button
+          (click)="openAddToShoppingListDialog()"
+          aria-label="Add ingredients to shopping list"
+        >
+          <mat-icon>add_shopping_cart</mat-icon>
+          <span>Add to List</span>
+        </button>
+        <button
+          mat-stroked-button
           (click)="openOrganizeDialog()"
           aria-label="Organize collections and tags"
         >

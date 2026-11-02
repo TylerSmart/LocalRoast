@@ -123,6 +123,23 @@ describe('MealPlanCalendarComponent', () => {
     expect(component['activeWeekStart']()).toBe('2026-11-02');
   });
 
+  it('opens generate shopping list dialog on openGenerateShoppingListDialog', () => {
+    mockDialog.open.mockReturnValue({
+      afterClosed: () => of(undefined),
+    });
+
+    component['openGenerateShoppingListDialog']();
+    expect(mockDialog.open).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        data: {
+          startDate: '2026-11-02',
+          endDate: '2026-11-08',
+        },
+      }),
+    );
+  });
+
   it('switches between week and month views', () => {
     component['setViewMode']('month');
     expect(component['viewMode']()).toBe('month');

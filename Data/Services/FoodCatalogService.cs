@@ -330,6 +330,14 @@ public sealed class FoodCatalogService(AppDbContext dbContext) : IFoodCatalogSer
             );
         }
 
+        var linkedShoppingItems = await dbContext
+            .ShoppingListItems.Where(i => i.FoodItemId == id)
+            .ToListAsync(cancellationToken);
+        foreach (var item in linkedShoppingItems)
+        {
+            item.FoodItemId = null;
+        }
+
         dbContext.FoodItems.Remove(foodItem);
         await dbContext.SaveChangesAsync(cancellationToken);
         return true;

@@ -1117,6 +1117,200 @@ namespace App.Data.Migrations
                     b.ToTable("ShareLinks", (string)null);
                 });
 
+            modelBuilder.Entity("App.Data.Entities.ShoppingList", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<bool>("IsPinned")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTimeOffset>("ModifiedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("ModifiedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("nvarchar(150)");
+
+                    b.Property<string>("NormalizedName")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("nvarchar(150)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("NormalizedName")
+                        .IsUnique();
+
+                    b.HasIndex("IsPinned", "ModifiedAt");
+
+                    b.ToTable("ShoppingLists", (string)null);
+                });
+
+            modelBuilder.Entity("App.Data.Entities.ShoppingListItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset?>("CheckedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("CheckedByDisplayName")
+                        .HasMaxLength(150)
+                        .HasColumnType("nvarchar(150)");
+
+                    b.Property<Guid?>("CheckedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("CustomUnitName")
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<string>("Dimension")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<Guid?>("FoodItemId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsChecked")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsPantryStapleExcluded")
+                        .HasColumnType("bit");
+
+                    b.Property<decimal?>("MaxQuantity")
+                        .HasPrecision(10, 4)
+                        .HasColumnType("decimal(10,4)");
+
+                    b.Property<DateTimeOffset>("ModifiedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("ModifiedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<decimal?>("Quantity")
+                        .HasPrecision(10, 4)
+                        .HasColumnType("decimal(10,4)");
+
+                    b.Property<Guid>("ShoppingListId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Unit")
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FoodItemId");
+
+                    b.HasIndex("ShoppingListId", "IsPantryStapleExcluded", "IsChecked", "SortOrder");
+
+                    b.ToTable("ShoppingListItems", (string)null);
+                });
+
+            modelBuilder.Entity("App.Data.Entities.ShoppingListItemSource", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("ContributedMaxQuantity")
+                        .HasPrecision(10, 4)
+                        .HasColumnType("decimal(10,4)");
+
+                    b.Property<decimal?>("ContributedQuantity")
+                        .HasPrecision(10, 4)
+                        .HasColumnType("decimal(10,4)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<Guid?>("MealPlanEntryId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("ModifiedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("ModifiedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<Guid?>("RecipeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateOnly?>("ScheduledDate")
+                        .HasColumnType("date");
+
+                    b.Property<Guid>("ShoppingListItemId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("SourceKind")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<string>("SourceLabel")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MealPlanEntryId");
+
+                    b.HasIndex("RecipeId");
+
+                    b.HasIndex("ShoppingListItemId");
+
+                    b.ToTable("ShoppingListItemSources", (string)null);
+                });
+
             modelBuilder.Entity("App.Data.Entities.StoreAisle", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1495,6 +1689,35 @@ namespace App.Data.Migrations
                     b.Navigation("Recipe");
                 });
 
+            modelBuilder.Entity("App.Data.Entities.ShoppingListItem", b =>
+                {
+                    b.HasOne("App.Data.Entities.FoodItem", "FoodItem")
+                        .WithMany("ShoppingListItems")
+                        .HasForeignKey("FoodItemId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("App.Data.Entities.ShoppingList", "ShoppingList")
+                        .WithMany("Items")
+                        .HasForeignKey("ShoppingListId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("FoodItem");
+
+                    b.Navigation("ShoppingList");
+                });
+
+            modelBuilder.Entity("App.Data.Entities.ShoppingListItemSource", b =>
+                {
+                    b.HasOne("App.Data.Entities.ShoppingListItem", "ShoppingListItem")
+                        .WithMany("Sources")
+                        .HasForeignKey("ShoppingListItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ShoppingListItem");
+                });
+
             modelBuilder.Entity("App.Data.Entities.Collection", b =>
                 {
                     b.Navigation("RecipeCollections");
@@ -1505,6 +1728,8 @@ namespace App.Data.Migrations
                     b.Navigation("Aliases");
 
                     b.Navigation("RecipeIngredients");
+
+                    b.Navigation("ShoppingListItems");
                 });
 
             modelBuilder.Entity("App.Data.Entities.MealPlanEntry", b =>
@@ -1550,6 +1775,16 @@ namespace App.Data.Migrations
                     b.Navigation("IngredientReferences");
 
                     b.Navigation("Timers");
+                });
+
+            modelBuilder.Entity("App.Data.Entities.ShoppingList", b =>
+                {
+                    b.Navigation("Items");
+                });
+
+            modelBuilder.Entity("App.Data.Entities.ShoppingListItem", b =>
+                {
+                    b.Navigation("Sources");
                 });
 
             modelBuilder.Entity("App.Data.Entities.StoreAisle", b =>

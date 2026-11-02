@@ -26,4 +26,7 @@ public sealed class FoodItem : IAuditable
 
     public ICollection<RecipeIngredient> RecipeIngredients { get; set; } =
         new List<RecipeIngredient>();
+
+    public ICollection<ShoppingListItem> ShoppingListItems { get; set; } =
+        new List<ShoppingListItem>();
 }

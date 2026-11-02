@@ -241,6 +241,21 @@ public static class HouseholdCatalogSeeder
 
             await db.SaveChangesAsync(cancellationToken);
         }
+
+        var hasShoppingLists = await db.ShoppingLists.AnyAsync(cancellationToken);
+        if (!hasShoppingLists)
+        {
+            db.ShoppingLists.Add(
+                new ShoppingList
+                {
+                    Name = "Weekly Groceries",
+                    NormalizedName = "weekly groceries",
+                    IsPinned = true,
+                }
+            );
+
+            await db.SaveChangesAsync(cancellationToken);
+        }
     }
 
     private static string ToKebabCase(string value)

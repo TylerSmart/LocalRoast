@@ -1,7 +1,7 @@
 # Phase 08: Smart Flat Shopping Lists, Unit Consolidation & Pantry Staples
 
 > **Branch:** `feature/phase-08-smart-shopping-lists`
-> **Status:** `[ ]` Not Started (`[ ]` Not Started | `[~]` In Progress | `[x]` Completed)
+> **Status:** `[~]` In Progress (`[ ]` Not Started | `[~]` In Progress | `[x]` Completed)
 > **PRD Reference:** `docs/prd.md` — Sections 1, 2, 3, 4.5 (4.5.1–4.5.3), 5, and 6 (Milestone 3, Slice 2 of 3)
 > **Target Execution:** Run `/execute-phase` to execute this plan step-by-step.
 
@@ -721,7 +721,7 @@ Create `Tests/Client.E2ETests/ShoppingListsE2ETests.cs` inheriting from `E2ETest
 
 ## 6. Step-by-Step Execution Checklist (For Implementation Agent)
 
-- [ ] **Task 1: Backend Core & Data Layer**
+- [x] **Task 1: Backend Core & Data Layer**
   - Create `Core/Shopping/` (`ShoppingEnums.cs`, `ShoppingConsolidator.cs`, `ShoppingListModels.cs`, `IShoppingListService.cs`).
   - Create `Data/Entities/` (`ShoppingList.cs`, `ShoppingListItem.cs`, `ShoppingListItemSource.cs`) and EF configurations in `Data/Configurations/`; update `FoodItem.cs`, `AppDbContext.cs`, `FoodCatalogService.DeleteFoodItemAsync`, and `HouseholdCatalogSeeder.SeedAsync`.
   - Implement `Data/Services/ShoppingListService.cs` and register `IShoppingListService` in `DataServiceCollectionExtensions.cs`.
@@ -737,7 +737,7 @@ Create `Tests/Client.E2ETests/ShoppingListsE2ETests.cs` inheriting from `E2ETest
     dotnet test --project Tests/Core.UnitTests/App.Core.UnitTests.csproj
     ```
 
-- [ ] **Task 2: API Controllers & Integration Tests**
+- [x] **Task 2: API Controllers & Integration Tests**
   - Create thin HTTP controller `API/Controllers/ShoppingListsController.cs`.
   - Update `Tests/API.IntegrationTests/OpenApiIntegrationTests.cs` and create `Tests/API.IntegrationTests/ShoppingListsIntegrationTests.cs` (covering seeded `"Weekly Groceries"` list, shopping list CRUD, ad-hoc item auto-catalog binding & compatible consolidation, check/uncheck attribution & clear-checked, meal-plan preview & generation with scaling + sub-recipes + `Leftovers`/`FreeformNote` exclusion + pantry staple separation & 1-tap promotion + idempotent `SkipAlreadyImported` vs `ReplaceAlreadyImported`, single-recipe generation, validation `400`/`409`s, and unauthenticated `401`s).
   - Run integration tests until 100% green:
@@ -745,7 +745,7 @@ Create `Tests/Client.E2ETests/ShoppingListsE2ETests.cs` inheriting from `E2ETest
     dotnet test --project Tests/API.IntegrationTests/App.API.IntegrationTests.csproj
     ```
 
-- [ ] **Task 3: Angular Client & Unit Tests**
+- [x] **Task 3: Angular Client & Unit Tests**
   - Create `shopping.models.ts` and `@Service()` `ShoppingService` (+ `shopping.service.spec.ts`).
   - Create dedicated per-component directories `shopping-workspace/`, `generate-shopping-list-dialog/`, `add-recipe-to-list-dialog/`, and `shopping-item-dialog/` under `Client/src/app/features/shopping/` (each with separate `.ts`, `.html`, `.scss`, and `.spec.ts` files).
   - Wire `/shopping` route in `app.routes.ts`, add `Shop` navigation item in `AppShellComponent` (+ `360px` 6-tab CSS & `.spec.ts`), add **"Shop Week"** button in `MealPlanCalendarComponent` (+ `.spec.ts`), and add **"Add to List"** button in `RecipeDetailComponent` (+ `.spec.ts`).
@@ -757,7 +757,7 @@ Create `Tests/Client.E2ETests/ShoppingListsE2ETests.cs` inheriting from `E2ETest
     npm test -- --watch=false
     ```
 
-- [ ] **Task 4: Playwright E2E Verification & Final Formatting**
+- [x] **Task 4: Playwright E2E Verification & Final Formatting**
   - Implement `Tests/Client.E2ETests/ShoppingListsE2ETests.cs` covering all scenarios in Section 5 (and verify existing E2E suites including `NavigationAndThemeE2ETests` and `MealPlanE2ETests` still pass at `360px` width).
   - Build production Angular bundle (`npm run build:production` in `Client/`) and run Playwright E2E tests:
     ```powershell

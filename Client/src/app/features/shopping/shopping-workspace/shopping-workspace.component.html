@@ -1,0 +1,388 @@
+<div class="shopping-workspace">
+  <!-- Top Header & Actions -->
+  <header class="workspace-header">
+    <div class="title-and-actions">
+      <h1 class="page-title">
+        <mat-icon>shopping_cart</mat-icon>
+        <span>Shopping Lists</span>
+      </h1>
+
+      <div class="header-action-buttons">
+        <button
+          type="button"
+          mat-flat-button
+          color="primary"
+          class="generate-btn"
+          (click)="openGenerateDialog()"
+          aria-label="Generate shopping list from meal plan"
+        >
+          <mat-icon>calendar_add_on</mat-icon>
+          <span>Generate from Meal Plan</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- List Switcher Navigation -->
+    <div class="list-switcher-bar">
+      <!-- Desktop Pill Selector -->
+      <nav class="desktop-list-pills" aria-label="Shopping lists">
+        @for (item of lists(); track item.id) {
+          <button
+            type="button"
+            class="list-pill"
+            [class.active]="item.id === activeList()?.id"
+            (click)="selectList(item.id)"
+          >
+            @if (item.isPinned) {
+              <mat-icon class="pill-pin-icon">push_pin</mat-icon>
+            }
+            <span class="pill-name">{{ item.name }}</span>
+            <span class="pill-count">({{ item.activeUncheckedCount }})</span>
+          </button>
+        }
+
+        <button
+          type="button"
+          mat-stroked-button
+          class="new-list-btn"
+          (click)="openNewListDialog()"
+          aria-label="Create new shopping list"
+        >
+          <mat-icon>add</mat-icon>
+          <span>New List</span>
+        </button>
+      </nav>
+
+      <!-- Mobile List Selector -->
+      <div class="mobile-list-select-wrapper">
+        <mat-form-field appearance="outline" class="mobile-list-select">
+          <mat-label>Select List</mat-label>
+          <mat-select
+            [value]="activeList()?.id"
+            (selectionChange)="selectList($event.value)"
+            aria-label="Select shopping list"
+          >
+            @for (item of lists(); track item.id) {
+              <mat-option [value]="item.id">
+                {{ item.name }} ({{ item.activeUncheckedCount }})
+              </mat-option>
+            }
+          </mat-select>
+        </mat-form-field>
+
+        <button
+          type="button"
+          mat-icon-button
+          class="new-list-icon-btn"
+          (click)="openNewListDialog()"
+          aria-label="Create new shopping list"
+        >
+          <mat-icon>add</mat-icon>
+        </button>
+      </div>
+
+      <!-- Active List Settings Menu -->
+      @if (activeList(); as curList) {
+        <div class="list-context-menu">
+          <button
+            type="button"
+            mat-icon-button
+            [matMenuTriggerFor]="listMenu"
+            aria-label="Shopping list options"
+          >
+            <mat-icon>more_vert</mat-icon>
+          </button>
+          <mat-menu #listMenu="matMenu">
+            <button mat-menu-item (click)="openRenameListDialog()">
+              <mat-icon>edit</mat-icon>
+              <span>Rename List</span>
+            </button>
+            <button mat-menu-item (click)="toggleListPinned()">
+              <mat-icon>{{ curList.isPinned ? 'push_pin' : 'keep' }}</mat-icon>
+              <span>{{ curList.isPinned ? 'Unpin List' : 'Pin to Top' }}</span>
+            </button>
+            <button mat-menu-item (click)="deleteActiveList()" class="delete-menu-item">
+              <mat-icon color="warn">delete</mat-icon>
+              <span>Delete List</span>
+            </button>
+          </mat-menu>
+        </div>
+      }
+    </div>
+  </header>
+
+  @if (isLoading()) {
+    <div class="loading-state">
+      <mat-spinner diameter="40"></mat-spinner>
+      <p>Loading shopping list...</p>
+    </div>
+  } @else if (!activeList()) {
+    <div class="no-lists-state">
+      <mat-icon class="large-icon">playlist_add</mat-icon>
+      <h2>No Shopping Lists</h2>
+      <p>Create a shopping list or generate one from your weekly meal plan.</p>
+      <button type="button" mat-flat-button color="primary" (click)="openNewListDialog()">
+        Create Shopping List
+      </button>
+    </div>
+  } @else {
+    <div class="workspace-content">
+      <!-- Quick Item Adder Bar -->
+      <form class="quick-add-bar" (submit)="onQuickAddSubmit(); $event.preventDefault()">
+        <mat-form-field appearance="outline" class="quick-add-input-field">
+          <mat-label>Quick Add Item</mat-label>
+          <input
+            matInput
+            [value]="quickAddName()"
+            (input)="quickAddName.set($any($event.target).value)"
+            placeholder="Add item (e.g., Paper Towels, Avocados)..."
+            aria-label="Quick add shopping item"
+          />
+        </mat-form-field>
+
+        <button
+          type="button"
+          mat-icon-button
+          class="detailed-add-btn"
+          (click)="openItemDialog()"
+          aria-label="Add item with details"
+        >
+          <mat-icon>tune</mat-icon>
+        </button>
+
+        <button
+          type="submit"
+          mat-flat-button
+          color="primary"
+          class="quick-add-submit-btn"
+          [disabled]="!quickAddName().trim() || isAddingItem()"
+        >
+          Add
+        </button>
+      </form>
+
+      <!-- Active Items Checklist -->
+      <div class="active-items-card">
+        @if (activeList()!.activeItems.length === 0) {
+          <div class="empty-items-state">
+            <mat-icon>checklist</mat-icon>
+            <p>No active items on this list.</p>
+            <span class="subtext"
+              >Add something above or generate ingredients from your meal plan!</span
+            >
+          </div>
+        } @else {
+          <ul class="items-list" role="list">
+            @for (item of activeList()!.activeItems; track item.id) {
+              <li class="shopping-item-row">
+                <mat-checkbox
+                  [checked]="false"
+                  (change)="toggleItemChecked(item, true)"
+                  [aria-label]="'Check off ' + item.displayName"
+                  class="item-checkbox"
+                ></mat-checkbox>
+
+                <div class="item-body">
+                  <div class="item-main-line">
+                    @if (item.formattedAmount) {
+                      <span class="item-qty-badge">
+                        {{ item.formattedAmount }}{{ item.unitLabel ? ' ' + item.unitLabel : '' }}
+                      </span>
+                    }
+                    <span class="item-display-name">{{ item.displayName }}</span>
+                  </div>
+
+                  @if (item.notes) {
+                    <div class="item-notes">{{ item.notes }}</div>
+                  }
+
+                  @if (item.sources.length > 0) {
+                    <div class="item-provenance-chips">
+                      @for (source of item.sources; track source.id) {
+                        @if (source.recipeId) {
+                          <a
+                            class="provenance-chip linked"
+                            [routerLink]="['/recipes', source.recipeId]"
+                          >
+                            <mat-icon class="chip-icon">menu_book</mat-icon>
+                            <span>{{ source.sourceLabel }}</span>
+                          </a>
+                        } @else {
+                          <span class="provenance-chip">
+                            <mat-icon class="chip-icon">schedule</mat-icon>
+                            <span>{{ source.sourceLabel }}</span>
+                          </span>
+                        }
+                      }
+                    </div>
+                  }
+                </div>
+
+                <div class="item-actions">
+                  <button
+                    type="button"
+                    mat-icon-button
+                    (click)="openItemDialog(item)"
+                    [aria-label]="'Edit ' + item.displayName"
+                  >
+                    <mat-icon>edit</mat-icon>
+                  </button>
+                  <button
+                    type="button"
+                    mat-icon-button
+                    (click)="deleteItem(item)"
+                    [aria-label]="'Delete ' + item.displayName"
+                  >
+                    <mat-icon>delete</mat-icon>
+                  </button>
+                </div>
+              </li>
+            }
+          </ul>
+        }
+      </div>
+
+      <!-- Collapsible Pantry Staples Drawer (Excluded during Generation) -->
+      @if (activeList()!.excludedPantryItems.length > 0) {
+        <section class="pantry-staples-drawer">
+          <button
+            type="button"
+            class="drawer-header-btn"
+            (click)="pantryDrawerExpanded.set(!pantryDrawerExpanded())"
+            [attr.aria-expanded]="pantryDrawerExpanded()"
+          >
+            <div class="drawer-header-title">
+              <mat-icon class="pantry-icon">inventory_2</mat-icon>
+              <span
+                >Verify Pantry Staples (Excluded) ({{
+                  activeList()!.excludedPantryItems.length
+                }})</span
+              >
+            </div>
+            <mat-icon>{{ pantryDrawerExpanded() ? 'expand_less' : 'expand_more' }}</mat-icon>
+          </button>
+
+          @if (pantryDrawerExpanded()) {
+            <div class="drawer-content">
+              <p class="drawer-explanation">
+                These pantry staples were excluded during generation. If you are running low, tap
+                <strong>Add to List</strong> to include them.
+              </p>
+
+              <ul class="pantry-items-list" role="list">
+                @for (item of activeList()!.excludedPantryItems; track item.id) {
+                  <li class="pantry-item-row">
+                    <div class="pantry-item-body">
+                      <div class="item-main-line">
+                        @if (item.formattedAmount) {
+                          <span class="item-qty-badge">
+                            {{ item.formattedAmount
+                            }}{{ item.unitLabel ? ' ' + item.unitLabel : '' }}
+                          </span>
+                        }
+                        <span class="item-display-name">{{ item.displayName }}</span>
+                      </div>
+
+                      @if (item.sources.length > 0) {
+                        <div class="item-provenance-chips">
+                          @for (source of item.sources; track source.id) {
+                            <span class="provenance-chip">
+                              <span>{{ source.sourceLabel }}</span>
+                            </span>
+                          }
+                        </div>
+                      }
+                    </div>
+
+                    <button
+                      type="button"
+                      mat-stroked-button
+                      class="promote-staple-btn"
+                      (click)="promotePantryStaple(item)"
+                      [aria-label]="'Add ' + item.displayName + ' to list'"
+                    >
+                      <mat-icon>add_shopping_cart</mat-icon>
+                      <span>Add to List</span>
+                    </button>
+                  </li>
+                }
+              </ul>
+            </div>
+          }
+        </section>
+      }
+
+      <!-- Collapsible Checked Off Section -->
+      @if (activeList()!.checkedItems.length > 0) {
+        <section class="checked-items-section">
+          <div class="checked-header-bar">
+            <button
+              type="button"
+              class="checked-toggle-btn"
+              (click)="checkedSectionExpanded.set(!checkedSectionExpanded())"
+              [attr.aria-expanded]="checkedSectionExpanded()"
+            >
+              <mat-icon>{{ checkedSectionExpanded() ? 'expand_less' : 'expand_more' }}</mat-icon>
+              <span>Checked Off ({{ activeList()!.checkedItems.length }})</span>
+            </button>
+
+            <button
+              type="button"
+              mat-stroked-button
+              color="warn"
+              class="clear-checked-btn"
+              (click)="clearCheckedItems()"
+              aria-label="Clear checked items"
+            >
+              <mat-icon>delete_sweep</mat-icon>
+              <span>Clear Checked Items</span>
+            </button>
+          </div>
+
+          @if (checkedSectionExpanded()) {
+            <ul class="checked-items-list" role="list">
+              @for (item of activeList()!.checkedItems; track item.id) {
+                <li class="shopping-item-row checked-row">
+                  <mat-checkbox
+                    [checked]="true"
+                    (change)="toggleItemChecked(item, false)"
+                    [aria-label]="'Uncheck ' + item.displayName"
+                    class="item-checkbox"
+                  ></mat-checkbox>
+
+                  <div class="item-body">
+                    <div class="item-main-line">
+                      @if (item.formattedAmount) {
+                        <span class="item-qty-badge muted">
+                          {{ item.formattedAmount }}{{ item.unitLabel ? ' ' + item.unitLabel : '' }}
+                        </span>
+                      }
+                      <span class="item-display-name checked">{{ item.displayName }}</span>
+                    </div>
+
+                    @if (item.checkedByDisplayName) {
+                      <div class="checked-by-meta">
+                        Checked off by {{ item.checkedByDisplayName }}
+                      </div>
+                    }
+                  </div>
+
+                  <div class="item-actions">
+                    <button
+                      type="button"
+                      mat-icon-button
+                      (click)="deleteItem(item)"
+                      [aria-label]="'Delete ' + item.displayName"
+                    >
+                      <mat-icon>delete</mat-icon>
+                    </button>
+                  </div>
+                </li>
+              }
+            </ul>
+          }
+        </section>
+      }
+    </div>
+  }
+</div>

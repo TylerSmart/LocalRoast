@@ -34,6 +34,8 @@ import {
   normalizeToMondayIso,
 } from '../../../core/utils/meal-plan-date';
 import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialog/confirm-dialog.component';
+import { ShoppingListGenerationResultDto } from '../../../core/models/shopping.models';
+import { GenerateShoppingListDialogComponent } from '../../shopping/generate-shopping-list-dialog/generate-shopping-list-dialog.component';
 import {
   MealPlanEntryDialogComponent,
   MealPlanEntryDialogData,
@@ -351,6 +353,38 @@ export class MealPlanCalendarComponent implements OnInit {
             duration: 4000,
           });
         },
+      });
+    });
+  }
+
+  protected openGenerateShoppingListDialog(): void {
+    const start = this.activeWeekStart();
+    const end = addDaysIso(start, 6);
+
+    const ref = this.dialog.open(GenerateShoppingListDialogComponent, {
+      data: {
+        startDate: start,
+        endDate: end,
+      },
+      width: '680px',
+      maxWidth: '95vw',
+    });
+
+    ref.afterClosed().subscribe((result?: ShoppingListGenerationResultDto) => {
+      if (!result) {
+        return;
+      }
+
+      const snack = this.snackBar.open(
+        `Generated shopping list for ${result.importedMealsCount} meal(s)`,
+        'Open List',
+        { duration: 5000 },
+      );
+
+      snack.onAction().subscribe(() => {
+        this.router.navigate(['/shopping'], {
+          queryParams: { listId: result.shoppingList.id },
+        });
       });
     });
   }

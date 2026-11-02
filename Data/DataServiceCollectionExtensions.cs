@@ -5,6 +5,7 @@ using App.Core.Ingestion;
 using App.Core.Mcp;
 using App.Core.MealPlans;
 using App.Core.Recipes;
+using App.Core.Shopping;
 using App.Data.Auditing;
 using App.Data.Services;
 using Microsoft.EntityFrameworkCore;
@@ -37,6 +38,7 @@ public static class DataServiceCollectionExtensions
         services.AddScoped<IMcpCookbookService, McpCookbookService>();
         services.AddScoped<IMealPlanService, MealPlanService>();
         services.AddScoped<IMealPlanTemplateService, MealPlanTemplateService>();
+        services.AddScoped<IShoppingListService, ShoppingListService>();
 
         if (
             string.Equals(

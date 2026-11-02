@@ -72,6 +72,7 @@ describe('AppShellComponent', () => {
     expect(text).toContain(APP_NAME);
     expect(text).toContain('Cookbook');
     expect(text).toContain('Meal Plan');
+    expect(text).toContain('Shop');
     expect(text).toContain('Ingest');
     expect(text).toContain('Matcher');
     expect(text).toContain('Food Catalog');

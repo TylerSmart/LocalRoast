@@ -1,0 +1,176 @@
+<h2 mat-dialog-title class="dialog-title">
+  <mat-icon>shopping_cart_checkout</mat-icon>
+  <span>Generate Shopping List</span>
+</h2>
+
+<mat-dialog-content class="dialog-content">
+  @if (errorMessage()) {
+    <div class="error-banner" role="alert">
+      <mat-icon>error</mat-icon>
+      <span>{{ errorMessage() }}</span>
+    </div>
+  }
+
+  <form [formGroup]="form" class="gen-form">
+    <!-- Target List -->
+    <mat-form-field appearance="outline" class="full-width">
+      <mat-label>Target Shopping List</mat-label>
+      <mat-select formControlName="targetShoppingListId">
+        @for (l of shoppingLists(); track l.id) {
+          <mat-option [value]="l.id">
+            {{ l.name }}
+            @if (l.isPinned) {
+              (Pinned)
+            }
+          </mat-option>
+        }
+      </mat-select>
+      @if (form.controls.targetShoppingListId.hasError('required')) {
+        <mat-error>Please select a target list</mat-error>
+      }
+    </mat-form-field>
+
+    <!-- Date Range -->
+    <div class="form-row dates-row">
+      <mat-form-field appearance="outline">
+        <mat-label>Start Date (Mon)</mat-label>
+        <input matInput type="date" formControlName="startDate" required />
+      </mat-form-field>
+
+      <mat-form-field appearance="outline">
+        <mat-label>End Date (Sun)</mat-label>
+        <input matInput type="date" formControlName="endDate" required />
+      </mat-form-field>
+    </div>
+
+    <!-- Toggles -->
+    <div class="checkbox-strip">
+      <mat-checkbox formControlName="includeOnDeck">Include On-Deck Meals</mat-checkbox>
+      <mat-checkbox formControlName="includeSubRecipes">Include Sub-Recipes</mat-checkbox>
+      <mat-checkbox formControlName="includeOptionalIngredients"
+        >Include Optional Ingredients</mat-checkbox
+      >
+    </div>
+
+    <!-- Duplicate Warning Banner -->
+    @if (preview() && preview()!.alreadyImportedMeals.length > 0) {
+      <div class="duplicate-meals-banner" role="alert">
+        <div class="dup-header">
+          <mat-icon>sync_problem</mat-icon>
+          <div>
+            <strong
+              >Already Imported Meals Detected ({{
+                preview()!.alreadyImportedMeals.length
+              }})</strong
+            >
+            <p class="dup-subtitle">
+              Some meals in this date range were already imported into this list.
+            </p>
+          </div>
+        </div>
+
+        <mat-radio-group formControlName="duplicatePolicy" class="dup-radio-group">
+          <mat-radio-button value="SkipAlreadyImported">
+            <span><strong>Skip duplicates</strong> (avoids doubling ingredients)</span>
+          </mat-radio-button>
+          <mat-radio-button value="ReplaceAlreadyImported">
+            <span><strong>Replace previous import</strong> (re-sync updated quantities)</span>
+          </mat-radio-button>
+        </mat-radio-group>
+      </div>
+    }
+
+    <!-- Preview Results Area -->
+    @if (isPreviewing()) {
+      <div class="preview-loading">
+        <mat-spinner diameter="24"></mat-spinner>
+        <span>Calculating consolidated ingredients...</span>
+      </div>
+    } @else if (preview()) {
+      <div class="preview-card">
+        <div class="metrics-row">
+          <div class="metric-pill">
+            <span class="m-val">{{ preview()!.eligibleMealsCount }}</span>
+            <span class="m-label">Meals</span>
+          </div>
+          <div class="metric-pill highlight">
+            <span class="m-val">{{ preview()!.activeCandidateItems.length }}</span>
+            <span class="m-label">Active Items</span>
+          </div>
+          <div class="metric-pill">
+            <span class="m-val">{{ preview()!.excludedPantryCandidateItems.length }}</span>
+            <span class="m-label">Pantry Staples</span>
+          </div>
+        </div>
+
+        @if (preview()!.ignoredLeftoversCount > 0 || preview()!.ignoredNotesCount > 0) {
+          <p class="ignored-note">
+            <mat-icon>info</mat-icon>
+            <span>
+              Ignored
+              @if (preview()!.ignoredLeftoversCount > 0) {
+                {{ preview()!.ignoredLeftoversCount }} leftovers
+              }
+              @if (preview()!.ignoredLeftoversCount > 0 && preview()!.ignoredNotesCount > 0) {
+                and
+              }
+              @if (preview()!.ignoredNotesCount > 0) {
+                {{ preview()!.ignoredNotesCount }} freeform notes
+              }
+              (zero grocery math impact).
+            </span>
+          </p>
+        }
+
+        <!-- Expandable Pantry Staples with Checkboxes to Promote -->
+        @if (preview()!.excludedPantryCandidateItems.length > 0) {
+          <mat-expansion-panel class="pantry-panel">
+            <mat-expansion-panel-header>
+              <mat-panel-title>
+                Verify Pantry Staples (Excluded) ({{
+                  preview()!.excludedPantryCandidateItems.length
+                }})
+              </mat-panel-title>
+              <mat-panel-description>Check any you need to buy</mat-panel-description>
+            </mat-expansion-panel-header>
+
+            <div class="staples-list">
+              @for (st of preview()!.excludedPantryCandidateItems; track st.displayName) {
+                <div class="staple-check-row">
+                  <mat-checkbox
+                    [checked]="st.foodItemId ? promotedStaples().has(st.foodItemId) : false"
+                    (change)="togglePromoteStaple(st.foodItemId)"
+                  >
+                    <span class="st-name">{{ st.displayName }}</span>
+                    @if (st.formattedAmount) {
+                      <span class="st-amt">({{ st.formattedAmount }} {{ st.unitLabel }})</span>
+                    }
+                  </mat-checkbox>
+                </div>
+              }
+            </div>
+          </mat-expansion-panel>
+        }
+      </div>
+    }
+  </form>
+</mat-dialog-content>
+
+<mat-dialog-actions align="end">
+  <button mat-button type="button" (click)="onCancel()" [disabled]="isGenerating()">Cancel</button>
+  <button
+    mat-flat-button
+    color="primary"
+    type="button"
+    (click)="onSubmit()"
+    [disabled]="
+      isGenerating() || form.invalid || !preview() || preview()!.activeCandidateItems.length === 0
+    "
+  >
+    @if (isGenerating()) {
+      <mat-spinner diameter="18"></mat-spinner>
+    } @else {
+      <span>Generate Items</span>
+    }
+  </button>
+</mat-dialog-actions>

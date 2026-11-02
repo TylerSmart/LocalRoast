@@ -203,4 +203,9 @@ describe('RecipeDetailComponent', () => {
     component.openPlanMealDialog();
     expect(mockDialog.open).toHaveBeenCalled();
   });
+
+  it('opens add to shopping list dialog on openAddToShoppingListDialog()', () => {
+    component.openAddToShoppingListDialog();
+    expect(mockDialog.open).toHaveBeenCalled();
+  });
 });

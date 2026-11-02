@@ -1,0 +1,67 @@
+<h2 mat-dialog-title class="dialog-title">
+  <mat-icon>add_shopping_cart</mat-icon>
+  <span>Add to Shopping List</span>
+</h2>
+
+<mat-dialog-content class="dialog-content">
+  <p class="recipe-name-pill">
+    <strong>{{ data.recipeTitle }}</strong>
+  </p>
+
+  @if (errorMessage()) {
+    <div class="error-banner" role="alert">
+      <mat-icon>error</mat-icon>
+      <span>{{ errorMessage() }}</span>
+    </div>
+  }
+
+  <form [formGroup]="form" class="add-form">
+    <mat-form-field appearance="outline" class="full-width">
+      <mat-label>Target Shopping List</mat-label>
+      <mat-select formControlName="targetShoppingListId">
+        @for (l of shoppingLists(); track l.id) {
+          <mat-option [value]="l.id">
+            {{ l.name }}
+            @if (l.isPinned) {
+              (Pinned)
+            }
+          </mat-option>
+        }
+      </mat-select>
+      @if (form.controls.targetShoppingListId.hasError('required')) {
+        <mat-error>Please select a shopping list</mat-error>
+      }
+    </mat-form-field>
+
+    <mat-form-field appearance="outline" class="full-width">
+      <mat-label>Target Servings</mat-label>
+      <input matInput type="number" step="0.5" min="0.25" formControlName="targetServings" />
+    </mat-form-field>
+
+    <div class="toggles-strip">
+      @if (data.hasSubRecipes) {
+        <mat-checkbox formControlName="includeSubRecipes">Include Sub-Recipes</mat-checkbox>
+      }
+      <mat-checkbox formControlName="includeOptionalIngredients"
+        >Include Optional Ingredients</mat-checkbox
+      >
+    </div>
+  </form>
+</mat-dialog-content>
+
+<mat-dialog-actions align="end">
+  <button mat-button type="button" (click)="onCancel()" [disabled]="isSubmitting()">Cancel</button>
+  <button
+    mat-flat-button
+    color="primary"
+    type="button"
+    (click)="onSubmit()"
+    [disabled]="isSubmitting() || form.invalid"
+  >
+    @if (isSubmitting()) {
+      <mat-spinner diameter="18"></mat-spinner>
+    } @else {
+      <span>Add Ingredients</span>
+    }
+  </button>
+</mat-dialog-actions>

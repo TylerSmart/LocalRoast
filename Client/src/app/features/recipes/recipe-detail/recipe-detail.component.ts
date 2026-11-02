@@ -44,6 +44,8 @@ import {
   RecipeShareDialogComponent,
   RecipeShareDialogData,
 } from '../recipe-share-dialog/recipe-share-dialog.component';
+import { ShoppingListGenerationResultDto } from '../../../core/models/shopping.models';
+import { AddRecipeToListDialogComponent } from '../../shopping/add-recipe-to-list-dialog/add-recipe-to-list-dialog.component';
 
 export interface ScaledIngredientItem {
   ingredient: RecipeIngredientDto;
@@ -238,6 +240,44 @@ export class RecipeDetailComponent implements OnInit {
           err?.error?.detail || err?.error?.title || 'Failed to load recipe details.',
         );
       },
+    });
+  }
+
+  openAddToShoppingListDialog(): void {
+    const r = this.recipe();
+    if (!r) {
+      return;
+    }
+
+    const hasSubRecipes = r.ingredients.some((i) => !!i.linkedRecipeId);
+
+    const ref = this.dialog.open(AddRecipeToListDialogComponent, {
+      data: {
+        recipeId: r.id,
+        recipeTitle: r.title,
+        targetServings: this.targetServings(),
+        hasSubRecipes,
+      },
+      width: '520px',
+      maxWidth: '95vw',
+    });
+
+    ref.afterClosed().subscribe((result?: ShoppingListGenerationResultDto) => {
+      if (!result) {
+        return;
+      }
+
+      const snack = this.snackBar.open(
+        `Added ingredients to ${result.shoppingList.name}`,
+        'View List',
+        { duration: 5000 },
+      );
+
+      snack.onAction().subscribe(() => {
+        this.router.navigate(['/shopping'], {
+          queryParams: { listId: result.shoppingList.id },
+        });
+      });
     });
   }
 
