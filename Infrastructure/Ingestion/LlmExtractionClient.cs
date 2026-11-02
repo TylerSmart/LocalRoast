@@ -332,10 +332,16 @@ public sealed class LlmExtractionClient(HttpClient httpClient) : ILlmExtractionC
                 {
                     model = config.TextModel!.Trim(),
                     stream = false,
+                    think = false,
                     keep_alive = string.IsNullOrWhiteSpace(config.OllamaKeepAlive)
                         ? "5m"
                         : config.OllamaKeepAlive.Trim(),
-                    options = new { temperature },
+                    options = new
+                    {
+                        temperature,
+                        num_predict = 4096,
+                        repeat_penalty = 1.1,
+                    },
                     format = jsonSchema,
                     messages = new object[]
                     {
@@ -357,9 +363,7 @@ public sealed class LlmExtractionClient(HttpClient httpClient) : ILlmExtractionC
                 await EnsureSuccessfulLlmResponseAsync(response, linkedCts.Token);
 
                 var rawResponse = await response.Content.ReadAsStringAsync(linkedCts.Token);
-                using var doc = JsonDocument.Parse(rawResponse);
-                responseContent =
-                    doc.RootElement.GetProperty("message").GetProperty("content").GetString() ?? "";
+                responseContent = ExtractOllamaMessageContent(rawResponse);
             }
             else // OpenAiCompatible
             {
@@ -410,13 +414,7 @@ public sealed class LlmExtractionClient(HttpClient httpClient) : ILlmExtractionC
                 await EnsureSuccessfulLlmResponseAsync(response, linkedCts.Token);
 
                 var rawResponse = await response.Content.ReadAsStringAsync(linkedCts.Token);
-                using var doc = JsonDocument.Parse(rawResponse);
-                responseContent =
-                    doc.RootElement.GetProperty("choices")[0]
-                        .GetProperty("message")
-                        .GetProperty("content")
-                        .GetString()
-                    ?? "";
+                responseContent = ExtractOpenAiMessageContent(rawResponse);
             }
         }
         catch (HttpRequestException ex)
@@ -483,10 +481,16 @@ public sealed class LlmExtractionClient(HttpClient httpClient) : ILlmExtractionC
                 {
                     model = config.VisionModel.Trim(),
                     stream = false,
+                    think = false,
                     keep_alive = string.IsNullOrWhiteSpace(config.OllamaKeepAlive)
                         ? "5m"
                         : config.OllamaKeepAlive.Trim(),
-                    options = new { temperature = 0.1 },
+                    options = new
+                    {
+                        temperature = 0.1,
+                        num_predict = 4096,
+                        repeat_penalty = 1.1,
+                    },
                     format = GetRecipeExtractionJsonSchema(),
                     messages = new object[]
                     {
@@ -513,9 +517,7 @@ public sealed class LlmExtractionClient(HttpClient httpClient) : ILlmExtractionC
                 await EnsureSuccessfulLlmResponseAsync(response, linkedCts.Token);
 
                 var rawResponse = await response.Content.ReadAsStringAsync(linkedCts.Token);
-                using var doc = JsonDocument.Parse(rawResponse);
-                responseContent =
-                    doc.RootElement.GetProperty("message").GetProperty("content").GetString() ?? "";
+                responseContent = ExtractOllamaMessageContent(rawResponse);
             }
             else // OpenAiCompatible
             {
@@ -583,13 +585,7 @@ public sealed class LlmExtractionClient(HttpClient httpClient) : ILlmExtractionC
                 await EnsureSuccessfulLlmResponseAsync(response, linkedCts.Token);
 
                 var rawResponse = await response.Content.ReadAsStringAsync(linkedCts.Token);
-                using var doc = JsonDocument.Parse(rawResponse);
-                responseContent =
-                    doc.RootElement.GetProperty("choices")[0]
-                        .GetProperty("message")
-                        .GetProperty("content")
-                        .GetString()
-                    ?? "";
+                responseContent = ExtractOpenAiMessageContent(rawResponse);
             }
         }
         catch (HttpRequestException ex)
@@ -681,6 +677,96 @@ public sealed class LlmExtractionClient(HttpClient httpClient) : ILlmExtractionC
         return trimmed;
     }
 
+    private static string ExtractOllamaMessageContent(string rawResponse)
+    {
+        using var doc = JsonDocument.Parse(rawResponse);
+        var root = doc.RootElement;
+
+        string? content = null;
+        string? thinking = null;
+
+        if (
+            root.TryGetProperty("message", out var msgProp)
+            && msgProp.ValueKind == JsonValueKind.Object
+        )
+        {
+            if (
+                msgProp.TryGetProperty("content", out var contentProp)
+                && contentProp.ValueKind == JsonValueKind.String
+            )
+            {
+                content = contentProp.GetString();
+            }
+
+            if (
+                msgProp.TryGetProperty("thinking", out var thinkingProp)
+                && thinkingProp.ValueKind == JsonValueKind.String
+            )
+            {
+                thinking = thinkingProp.GetString();
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(content))
+        {
+            return content;
+        }
+
+        var doneReason =
+            root.TryGetProperty("done_reason", out var doneReasonProp)
+            && doneReasonProp.ValueKind == JsonValueKind.String
+                ? doneReasonProp.GetString()
+                : null;
+
+        if (string.Equals(doneReason, "length", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new DomainValidationException(
+                "LLM output reached the maximum token limit before completing the structured JSON response (done_reason: length). Increase context/output limits or use an instruct/non-thinking model."
+            );
+        }
+
+        if (!string.IsNullOrWhiteSpace(thinking))
+        {
+            throw new DomainValidationException(
+                "LLM returned internal reasoning tokens without a final structured JSON response."
+            );
+        }
+
+        return content ?? "";
+    }
+
+    private static string ExtractOpenAiMessageContent(string rawResponse)
+    {
+        using var doc = JsonDocument.Parse(rawResponse);
+        var choice = doc.RootElement.GetProperty("choices")[0];
+        var content =
+            choice.TryGetProperty("message", out var msgProp)
+            && msgProp.TryGetProperty("content", out var contentProp)
+            && contentProp.ValueKind == JsonValueKind.String
+                ? contentProp.GetString()
+                : null;
+
+        if (!string.IsNullOrWhiteSpace(content))
+        {
+            return content;
+        }
+
+        var finishReason =
+            choice.TryGetProperty("finish_reason", out var finishProp)
+            && finishProp.ValueKind == JsonValueKind.String
+                ? finishProp.GetString()
+                : null;
+
+        if (string.Equals(finishReason, "length", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new DomainValidationException(
+                "LLM output reached the maximum token limit before completing the structured JSON response (finish_reason: length)."
+            );
+        }
+
+        return content ?? "";
+    }
+
     private static string CleanMarkdownJsonFences(string content)
     {
         var trimmed = content.Trim();
@@ -740,6 +826,7 @@ Rules:
      - "label": short label (e.g. "Simmer", "Bake", "Rest").
 5. SuggestedTagNames: choose applicable tags from: [{{tagList}}].
 6. ConfidenceScore: decimal number between 0.0 and 1.0 representing your extraction confidence.
+7. Output ONLY a single valid JSON object matching the requested schema with no conversational text.
 """;
     }
 
@@ -783,6 +870,7 @@ Rules:
      - "label": short label (e.g. "Simmer", "Bake", "Rest").
 6. SuggestedTagNames: choose applicable tags from: [{{tagList}}].
 7. ConfidenceScore: decimal number between 0.0 and 1.0 representing your transcription/extraction confidence.
+8. Output ONLY a single valid JSON object matching the requested schema with no conversational text.
 """;
     }
 

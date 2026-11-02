@@ -1,5 +1,6 @@
 using App.Core.Ingestion;
 using App.Core.Recipes;
+using App.Data.Services;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace App.Core.UnitTests;
@@ -192,5 +193,81 @@ public sealed class RecipeDraftNormalizerTests
         Assert.IsNull(ing.MatchedFoodItemId);
         Assert.AreEqual("White Miso Paste", ing.ProposedFoodItemName);
         Assert.AreEqual(_aisles[2].Id, ing.SuggestedStoreAisleId); // fallback to "Other"
+    }
+
+    [TestMethod]
+    public void BuildNormalizedWebText_CompleteJsonLd_OmitsCleanedBodyTextClutter()
+    {
+        var payload = new ScrapedWebRecipePayload(
+            CanonicalUrl: "https://instantpot.com/blogs/recipes/coconut-chicken-curry",
+            PageTitle: "Coconut Chicken Curry",
+            SiteName: "Instant Pot",
+            Author: "Instant Pot Kitchen",
+            Description: "Creamy weeknight coconut curry.",
+            PrepTimeIso: "PT10M",
+            PrepTimeMinutes: 10,
+            CookTimeIso: "PT15M",
+            CookTimeMinutes: 15,
+            TotalTimeIso: "PT25M",
+            TotalTimeMinutes: 25,
+            RecipeYieldText: "4 servings",
+            PrimaryImageUrl: null,
+            RawIngredientLines: ["1.5 lbs chicken thighs", "1 can coconut milk"],
+            RawInstructionLines: ["Saute chicken.", "Pressure cook on High for 8 minutes."],
+            CleanedBodyText: "Shop Accessories Cart Newsletter Mega Menu Footer Clutter...",
+            HadRecipeJsonLd: true
+        );
+
+        var normalized = IngestionProcessor.BuildNormalizedWebText(payload);
+
+        StringAssert.Contains(normalized, "Title: Coconut Chicken Curry");
+        StringAssert.Contains(normalized, "- 1.5 lbs chicken thighs");
+        StringAssert.Contains(normalized, "1. Saute chicken.");
+        Assert.IsFalse(
+            normalized.Contains("Cleaned Page Text:", StringComparison.Ordinal),
+            "Complete JSON-LD recipes should omit raw DOM body clutter."
+        );
+        Assert.IsFalse(normalized.Contains("Newsletter Mega Menu", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void BuildNormalizedWebText_MissingOrIncompleteJsonLd_IncludesCleanedBodyText()
+    {
+        var noJsonLdPayload = new ScrapedWebRecipePayload(
+            CanonicalUrl: "https://example.com/blog-recipe",
+            PageTitle: "Simple Soup",
+            SiteName: "Example Kitchen",
+            Author: null,
+            Description: null,
+            PrepTimeIso: null,
+            PrepTimeMinutes: null,
+            CookTimeIso: null,
+            CookTimeMinutes: null,
+            TotalTimeIso: null,
+            TotalTimeMinutes: null,
+            RecipeYieldText: null,
+            PrimaryImageUrl: null,
+            RawIngredientLines: [],
+            RawInstructionLines: [],
+            CleanedBodyText: "Simmer 4 cups broth with diced carrots for 20 minutes.",
+            HadRecipeJsonLd: false
+        );
+
+        var normalized = IngestionProcessor.BuildNormalizedWebText(noJsonLdPayload);
+
+        StringAssert.Contains(normalized, "Cleaned Page Text:");
+        StringAssert.Contains(normalized, "Simmer 4 cups broth with diced carrots for 20 minutes.");
+
+        var incompleteJsonLdPayload = noJsonLdPayload with
+        {
+            HadRecipeJsonLd = true,
+            RawIngredientLines = ["4 cups broth"],
+            RawInstructionLines = [],
+        };
+
+        var normalizedIncomplete = IngestionProcessor.BuildNormalizedWebText(
+            incompleteJsonLdPayload
+        );
+        StringAssert.Contains(normalizedIncomplete, "Cleaned Page Text:");
     }
 }

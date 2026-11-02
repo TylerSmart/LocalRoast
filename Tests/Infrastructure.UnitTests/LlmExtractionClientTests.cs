@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using App.Core.Exceptions;
 using App.Core.Ingestion;
 using App.Infrastructure.Ingestion;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -147,6 +148,10 @@ public sealed class LlmExtractionClientTests
         var handler = new MockHttpMessageHandler(req =>
         {
             Assert.AreEqual("/api/chat", req.RequestUri!.AbsolutePath);
+            var body = req.Content!.ReadAsStringAsync().Result;
+            StringAssert.Contains(body, "\"think\":false");
+            StringAssert.Contains(body, "\"num_predict\":4096");
+            StringAssert.Contains(body, "\"repeat_penalty\":1.1");
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(ollamaResponse, Encoding.UTF8, "application/json"),
@@ -237,6 +242,8 @@ public sealed class LlmExtractionClientTests
         {
             Assert.AreEqual("/api/chat", req.RequestUri!.AbsolutePath);
             var body = req.Content!.ReadAsStringAsync().Result;
+            StringAssert.Contains(body, "\"think\":false");
+            StringAssert.Contains(body, "\"num_predict\":4096");
             StringAssert.Contains(body, "\"images\":");
             StringAssert.Contains(body, "bW9ja2Jhc2U2NA==");
             return new HttpResponseMessage(HttpStatusCode.OK)
@@ -522,5 +529,136 @@ public sealed class LlmExtractionClientTests
         Assert.AreEqual(1, result.Proposals.Count);
         Assert.AreEqual(1, result.Proposals[0].CatalogIndex);
         Assert.AreEqual("Lemon Herb Chicken", result.Proposals[0].RecipeTitle);
+    }
+
+    [TestMethod]
+    public async Task ExtractRecipeFromTextAsync_Ollama_EmptyContentWithLengthDoneReason_ThrowsDomainValidationException()
+    {
+        var ollamaResponse = """
+            {
+                "done": true,
+                "done_reason": "length",
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "thinking": "Let me analyze every line of HTML..."
+                }
+            }
+            """;
+
+        var handler = new MockHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(ollamaResponse, Encoding.UTF8, "application/json"),
+        });
+
+        var client = new LlmExtractionClient(new HttpClient(handler));
+        var config = new EffectiveLlmConnectionConfig(
+            Provider: LlmProvider.Ollama,
+            BaseUrl: "http://localhost:11434",
+            ApiKey: null,
+            TextModel: "gemma4:12b",
+            VisionModel: null,
+            OllamaKeepAlive: "5m",
+            RequestTimeoutSeconds: 30,
+            AutoPublishHighConfidenceText: false
+        );
+
+        var ex = await Assert.ThrowsAsync<DomainValidationException>(async () =>
+        {
+            await client.ExtractRecipeFromTextAsync(
+                config,
+                new LlmExtractionContext("Title: Coconut Chicken Curry", [], [])
+            );
+        });
+
+        StringAssert.Contains(ex.Message, "done_reason: length");
+    }
+
+    [TestMethod]
+    public async Task ExtractRecipeFromTextAsync_Ollama_ThinkingOnlyWithoutContent_ThrowsDomainValidationException()
+    {
+        var ollamaResponse = """
+            {
+                "done": true,
+                "done_reason": "stop",
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "thinking": "Only internal reasoning tokens emitted."
+                }
+            }
+            """;
+
+        var handler = new MockHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(ollamaResponse, Encoding.UTF8, "application/json"),
+        });
+
+        var client = new LlmExtractionClient(new HttpClient(handler));
+        var config = new EffectiveLlmConnectionConfig(
+            Provider: LlmProvider.Ollama,
+            BaseUrl: "http://localhost:11434",
+            ApiKey: null,
+            TextModel: "gemma4:12b",
+            VisionModel: null,
+            OllamaKeepAlive: "5m",
+            RequestTimeoutSeconds: 30,
+            AutoPublishHighConfidenceText: false
+        );
+
+        var ex = await Assert.ThrowsAsync<DomainValidationException>(async () =>
+        {
+            await client.ExtractRecipeFromTextAsync(
+                config,
+                new LlmExtractionContext("Title: Coconut Chicken Curry", [], [])
+            );
+        });
+
+        StringAssert.Contains(ex.Message, "internal reasoning tokens");
+    }
+
+    [TestMethod]
+    public async Task ExtractRecipeFromTextAsync_OpenAiCompatible_EmptyContentWithLengthFinishReason_ThrowsDomainValidationException()
+    {
+        var openAiResponse = """
+            {
+                "choices": [
+                    {
+                        "finish_reason": "length",
+                        "message": {
+                            "role": "assistant",
+                            "content": ""
+                        }
+                    }
+                ]
+            }
+            """;
+
+        var handler = new MockHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(openAiResponse, Encoding.UTF8, "application/json"),
+        });
+
+        var client = new LlmExtractionClient(new HttpClient(handler));
+        var config = new EffectiveLlmConnectionConfig(
+            Provider: LlmProvider.OpenAiCompatible,
+            BaseUrl: "http://localhost:1234",
+            ApiKey: "test-key",
+            TextModel: "gemma-4-12b-it",
+            VisionModel: null,
+            OllamaKeepAlive: "5m",
+            RequestTimeoutSeconds: 30,
+            AutoPublishHighConfidenceText: false
+        );
+
+        var ex = await Assert.ThrowsAsync<DomainValidationException>(async () =>
+        {
+            await client.ExtractRecipeFromTextAsync(
+                config,
+                new LlmExtractionContext("Title: Coconut Chicken Curry", [], [])
+            );
+        });
+
+        StringAssert.Contains(ex.Message, "finish_reason: length");
     }
 }

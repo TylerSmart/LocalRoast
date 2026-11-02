@@ -148,6 +148,29 @@ public sealed class IngestionProcessor(
 
                     await dbContext.SaveChangesAsync(cancellationToken);
                 }
+                else
+                {
+                    try
+                    {
+                        var cachedPayload = JsonSerializer.Deserialize<ScrapedWebRecipePayload>(
+                            job.ScrapedPageJson,
+                            JsonOptions
+                        );
+                        if (cachedPayload is not null)
+                        {
+                            var refreshedText = BuildNormalizedWebText(cachedPayload);
+                            if (job.NormalizedSourceText != refreshedText)
+                            {
+                                job.NormalizedSourceText = refreshedText;
+                                await dbContext.SaveChangesAsync(cancellationToken);
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        // Keep existing NormalizedSourceText if cached payload cannot be parsed
+                    }
+                }
             }
             else if (job.Channel == IngestionChannel.RawText)
             {
@@ -729,7 +752,7 @@ public sealed class IngestionProcessor(
         return await recipeService.CreateRecipeAsync(upsertRequest, cancellationToken);
     }
 
-    private static string BuildNormalizedWebText(ScrapedWebRecipePayload payload)
+    public static string BuildNormalizedWebText(ScrapedWebRecipePayload payload)
     {
         var sb = new System.Text.StringBuilder();
 
@@ -770,7 +793,12 @@ public sealed class IngestionProcessor(
             }
         }
 
-        if (!string.IsNullOrWhiteSpace(payload.CleanedBodyText))
+        var hasCompleteStructuredRecipe =
+            payload.HadRecipeJsonLd
+            && payload.RawIngredientLines.Count > 0
+            && payload.RawInstructionLines.Count > 0;
+
+        if (!hasCompleteStructuredRecipe && !string.IsNullOrWhiteSpace(payload.CleanedBodyText))
         {
             sb.AppendLine();
             sb.AppendLine("Cleaned Page Text:");
