@@ -32,7 +32,8 @@
   - When the configured `Ollama` or OpenAI-compatible (`/v1`) host is unreachable or offline, the core web UI must remain 100% functional, 1-click AI helpers must gracefully disable/hide, and pending `IngestionJob`s must transition to `WaitingForLlmHost` without losing uploaded source files.
 - **Meal Plan & Shopping List Math:**
   - `MealPlanEntry` rows marked `IsLeftovers = true` (or freeform text notes without a recipe) **must never** contribute ingredient quantities when generating shopping lists.
-  - Ingredients linked to a `FoodItem` with `IsPantryStaple = true` must be separated from active shopping aisle items into the Pantry Staples verification bucket during shopping list generation.
+  - Shopping lists render as clean **flat checklists** (no custom Store Layouts or shopping-list aisle grouping; `StoreAisle` remains strictly on `FoodItem` for Food Catalog organization).
+  - Ingredients linked to a `FoodItem` with `IsPantryStaple = true` must be separated from active shopping list items into the Pantry Staples verification bucket during shopping list generation.
 - **Strict Public & MCP Access Boundaries:**
   - Public recipe share links (`/share/<token>`) are strictly read-only and scoped **solely** to the single shared `Recipe` while active/unrevoked—never exposing other recipes, user emails, meal plans, or shopping lists.
   - Embedded MCP requests (`/api/mcp`) authenticate via SHA-256-hashed `PersonalAccessToken`s (`lr_pat_...`) and execute domain services under the owning user's identity.

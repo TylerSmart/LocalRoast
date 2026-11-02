@@ -1,6 +1,6 @@
 # Product Requirements Document (PRD): LocalRoast
 
-**LocalRoast** is a self-hosted household recipe vault, local-AI multimodal recipe ingestion engine, meal planning calendar, and real-time shopping list application. Capture recipes from URLs, cookbook photos, PDFs, or chat assistants via a local LLM (`Ollama` or OpenAI-compatible server) and an embedded Model Context Protocol (**MCP**) server; plan real-world weeks of meals; shop together with live-synced aisle-sorted grocery lists; and cook hands-free in the kitchen.
+**LocalRoast** is a self-hosted household recipe vault, local-AI multimodal recipe ingestion engine, meal planning calendar, and real-time shopping list application. Capture recipes from URLs, cookbook photos, PDFs, or chat assistants via a local LLM (`Ollama` or OpenAI-compatible server) and an embedded Model Context Protocol (**MCP**) server; plan real-world weeks of meals; shop together with live-synced grocery lists; and cook hands-free in the kitchen.
 
 > [!NOTE]
 > **Document Scope:** This PRD defines the functional requirements, domain model, user workflows, and phased roadmap for **LocalRoast**—built on `.NET 10`, `Entity Framework Core 10` (SQL Server), and `Angular 22` (Material 3) for self-hosted Docker / TrueNAS Scale deployment.
@@ -20,7 +20,7 @@
 1. **Local-First Multimodal Ingestion & MCP Native:** Turn Web URLs, raw text, multi-page cookbook photos, and PDFs into structured recipes via `Ollama` (or any OpenAI-compatible `/v1` host) with offline-queue resilience—and expose your cookbook, meal calendar, and shopping lists to external AI clients through an embedded `/api/mcp` server.
 2. **Canonical Food Catalog & Culinary Math:** Structured quantities, ranges, units, and section headers backed by a shared `FoodItem` dictionary (with default grocery aisles, aliases, and pantry-staple flags) enable accurate scaling, US/Metric conversion, and consolidated shopping lists.
 3. **Flexible Real-World Meal Planning:** Combine `Breakfast`, `Lunch`, `Dinner`, and `Snack / Prep` calendar slots with multi-dish support, `Leftovers` entries, freeform notes, an **"On-Deck" flexible weekly tray**, and reusable **Week Templates**.
-4. **Hands-Free Kitchen & Live Co-Shopping:** Screen wake-lock **Cook Mode** with inline step ingredient callouts and floating multi-timers, historical **Cook Logs**, and **SignalR** real-time co-shopping sorted by custom store aisle layouts.
+4. **Hands-Free Kitchen & Live Co-Shopping:** Screen wake-lock **Cook Mode** with inline step ingredient callouts and floating multi-timers, historical **Cook Logs**, and **SignalR** real-time co-shopping across household phones.
 
 ---
 
@@ -29,7 +29,7 @@
 | Persona / Actor | Primary Surfaces | Key Workflows |
 | :--- | :--- | :--- |
 | **Household Cooks & Planners** | **Desktop Browser**, **Tablet**, & **Mobile Phone** | Ingesting & reviewing recipes, curating collections, planning weekly meals, generating shopping lists, cooking in Cook Mode, and logging cook notes/ratings. |
-| **Household Co-Shoppers** | **Mobile Phone (In-Store)** | Checking off grocery items in real time across multiple phones, adding ad-hoc household items, and walking aisles in store-specific order. |
+| **Household Co-Shoppers** | **Mobile Phone (In-Store)** | Checking off grocery items in real time across multiple phones and adding ad-hoc household items on a clean flat checklist. |
 | **External Friends & Family** | **Public Browser (No Login)** | Viewing, scaling, and printing a single shared recipe via a revocable `/share/<token>` link. |
 | **External AI Assistants (MCP Clients)** | **Claude Desktop, Antigravity, Open WebUI, Voice Agents** | Searching the household cookbook, pushing or enqueueing new recipes, drafting weekly meal plans, and updating shopping lists over `/api/mcp`. |
 
@@ -63,7 +63,6 @@ erDiagram
     INGESTION_JOB ||--o| RECIPE : "produces draft / recipe"
     MEAL_PLAN_ENTRY }o--|| RECIPE : "schedules (optional)"
     MEAL_PLAN_TEMPLATE ||--o{ MEAL_PLAN_TEMPLATE_ITEM : "stamps"
-    SHOPPING_LIST ||--o| STORE_LAYOUT : "sorts aisles via"
     SHOPPING_LIST ||--o{ SHOPPING_LIST_ITEM : "contains"
     FOOD_ITEM ||--o{ SHOPPING_LIST_ITEM : "links (optional)"
 ```
@@ -199,7 +198,7 @@ flowchart LR
      - `plan_meals`: Schedule recipes, leftovers, or freeform notes onto calendar slots or the weekly "On-Deck" tray.
      - `remove_meal_plan_entry`: Clear or reschedule planned entries.
   4. **Shopping List Tools:**
-     - `get_shopping_lists`: View active shopping lists and unchecked/checked items grouped by store aisle.
+     - `get_shopping_lists`: View active shopping lists alongside unchecked, checked, and excluded pantry-staple items.
      - `generate_shopping_list_from_meal_plan`: Build/merge consolidated meal-plan ingredients into a target shopping list.
      - `upsert_shopping_list_items` / `set_shopping_list_item_checked`: Add items (e.g., *"Add paper towels and milk to Costco list"*) or mark items checked.
 
@@ -228,9 +227,9 @@ flowchart LR
 
 ### 4.5 Smart Shopping Lists, Pantry Staples & Real-Time Co-Shopping
 
-#### 4.5.1 Multiple Named Lists & Custom Store Layouts
+#### 4.5.1 Multiple Named Flat Lists
 - Create unlimited named **Shopping Lists** (e.g., *Weekly Groceries*, *Costco*, *Trader Joe's*, *Thanksgiving Prep*).
-- Define reusable **Store Layouts** specifying the exact top-to-bottom order of **Store Aisles** (*Produce*, *Bakery*, *Deli*, *Meat & Seafood*, *Dairy & Eggs*, *Canned & Dry Goods*, *International*, *Spices & Baking*, *Frozen*, *Beverages*, *Household*) matching your physical walking path through a specific store. Switching a list's Store Layout instantly re-sorts aisle groups.
+- Shopping lists intentionally render as a **clean, flat checklist** without store-aisle grouping or custom store layout configuration—keeping grocery runs fast and zero-maintenance while preserving Food Catalog categories strictly for catalog browsing.
 
 #### 4.5.2 Smart Consolidation, Unit Math & Provenance Badges
 - Generating shopping items from a **Meal Plan Date Range** (with optional toggle to include **On-Deck** meals) or a single recipe:
@@ -242,7 +241,7 @@ flowchart LR
   4. **Idempotent Re-Generation / Sync Warning:** Re-running meal-plan generation for overlapping dates detects already-imported `MealPlanEntry` slices so ingredients are never accidentally doubled.
 
 #### 4.5.3 Lightweight Pantry Staples Tray
-- During shopping list generation, any ingredient whose `FoodItem` has `isPantryStaple = true` (*Water*, *Kosher Salt*, *Black Pepper*, *Olive Oil*, etc.) is automatically routed into a collapsed **"Verify Pantry Staples (Excluded)"** drawer at the bottom of the generation preview / list rather than cluttering active shopping aisles.
+- During shopping list generation, any ingredient whose `FoodItem` has `isPantryStaple = true` (*Water*, *Kosher Salt*, *Black Pepper*, *Olive Oil*, etc.) is automatically routed into a collapsed **"Verify Pantry Staples (Excluded)"** drawer at the bottom of the generation preview / list rather than cluttering active shopping items.
 - One tap promotes any staple (e.g., *Olive Oil*) onto the active shopping list when the household happens to be running low.
 
 #### 4.5.4 Real-Time Multi-Phone Sync (`SignalR`)
@@ -300,7 +299,7 @@ flowchart LR
 | **Navigation** | Bottom navigation bar (`Cookbook`, `Meal Plan`, `Shop`, `Ingest` + Inbox badge) and sticky top search. | Collapsible left navigation rail + global `Cmd/Ctrl + K` command palette and drag-and-drop workspaces. |
 | **Recipe Ingestion** | 1-tap **"Paste URL"** or **"Snap Cookbook Pages"** camera capture that queues immediately in `< 1s`. | **Side-by-Side Split Review** (zoomable source PDF/photo on left, structured recipe & `FoodItem` editor on right). |
 | **Meal Planning** | Vertical day-by-day agenda accordion with a slide-up **"On-Deck"** drawer and 1-tap *"Start Cooking"* on Today's meal. | Full 7-day multi-slot grid alongside a persistent **"On-Deck This Week"** sidebar with drag-and-drop scheduling. |
-| **Shopping List** | Thumb-friendly full-width check rows, high-contrast aisle headers, live SignalR sync indicator, and quick bottom item adder. | Split-pane Meal-Plan-to-List generator with date-range picker, recipe provenance chips, and Store Layout editor. |
+| **Shopping List** | Thumb-friendly full-width flat check rows, live SignalR sync indicator, and quick item adder. | Meal-Plan-to-List generator with date-range picker, recipe provenance chips, and Pantry Staples verification drawer. |
 | **Cooking (`Cook Mode`)** | Full-screen wake-locked step focus, inline ingredient chips, and sticky floating countdown timer bar. | Two-column tablet/landscape counter layout: pinned scaled ingredients on left, oversized active steps + timers on right. |
 
 ---
@@ -321,6 +320,6 @@ flowchart LR
 - **Milestone 2 — Local LLM Ingestion Pipeline, Vision/PDF & Embedded MCP Server:**
   - In-App LLM Provider Settings UI (`Ollama` + `OpenAI-compatible /v1` with model discovery & health checks), persistent `IngestionJob` SQL queue & background worker with offline-host retry resilience, Side-by-Side **Review Inbox**, Web URL + Raw Text + Multi-Page Camera Image + PDF ingestion with auto-enrichment (timers, tags, aisles), Personal Access Tokens (`lr_pat_...`), and `/api/mcp` Streamable HTTP server exposing cookbook & ingestion tools.
 - **Milestone 3 — Meal Planning Calendar, Smart Shopping Lists & Real-Time Co-Shopping:**
-  - Multi-slot Weekly/Monthly Meal Plan Calendar (multi-dish slots, custom serving overrides, `Leftovers` shopping exclusion, freeform notes, **"On-Deck"** flexible weekly tray, reusable Week Templates), Multiple Named Shopping Lists with unit-consolidated generation + recipe provenance badges + Pantry Staples separation, customizable Store Aisle Layouts, `SignalR` real-time co-shopping sync, and expanding `/api/mcp` with meal-plan and shopping-list tools.
+  - Multi-slot Weekly/Monthly Meal Plan Calendar (multi-dish slots, custom serving overrides, `Leftovers` shopping exclusion, freeform notes, **"On-Deck"** flexible weekly tray, reusable Week Templates), Multiple Named Flat Shopping Lists with unit-consolidated generation + recipe provenance badges + Pantry Staples separation, `SignalR` real-time co-shopping sync, and expanding `/api/mcp` with meal-plan and shopping-list tools.
 - **Milestone 4 — Hands-Free Cook Mode, Cook Logs & 1-Click AI Kitchen Helpers:**
   - Wake-locked **Cook Mode** (`navigator.wakeLock`, inline step ingredient callouts, floating multi-timer bar with alerts), **Cook Log** (*"I Made This!"* history, star ratings, tweak notes, dish photos, and *"Forgotten Favorites"* discovery filter), `FoodItem` duplicate-merge management tools, and graceful 1-click local LLM helpers (*Ingredient Substitutions* & *Draft Week Meal Plan*).
