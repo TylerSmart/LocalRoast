@@ -39,6 +39,7 @@ public sealed class OpenApiIntegrationTests
         StringAssert.Contains(content, expectedTitle);
         StringAssert.Contains(content, "/recipes");
         StringAssert.Contains(content, "/food-items");
+        StringAssert.Contains(content, "/food-items/merge");
         StringAssert.Contains(content, "/store-aisles");
         StringAssert.Contains(content, "/collections");
         StringAssert.Contains(content, "/tags");
@@ -52,6 +53,7 @@ public sealed class OpenApiIntegrationTests
         StringAssert.Contains(content, "/meal-plans");
         StringAssert.Contains(content, "/meal-plan-templates");
         StringAssert.Contains(content, "/shopping-lists");
+        StringAssert.Contains(content, "/ai-helpers");
         Assert.DoesNotContain("/api/mcp", content);
         StringAssert.Contains(content, "securitySchemes");
         StringAssert.Contains(content, "Bearer");

@@ -45,6 +45,11 @@ import {
   MealPlanTemplatesDialogData,
 } from '../meal-plan-templates-dialog/meal-plan-templates-dialog.component';
 import { CookLogDialogComponent } from '../../recipes/cook-log-dialog/cook-log-dialog.component';
+import { AiKitchenHelperService } from '../../../core/services/ai-helpers/ai-kitchen-helper.service';
+import {
+  DraftMealPlanDialogComponent,
+  DraftMealPlanDialogData,
+} from '../draft-meal-plan-dialog/draft-meal-plan-dialog.component';
 
 export interface DropZoneData {
   isOnDeck: boolean;
@@ -79,6 +84,7 @@ export class MealPlanCalendarComponent implements OnInit {
   private readonly dialog = inject(MatDialog);
   private readonly snackBar = inject(MatSnackBar);
   private readonly router = inject(Router);
+  protected readonly aiHelper = inject(AiKitchenHelperService);
 
   protected readonly mealSlots = MEAL_SLOTS;
   protected readonly dayNamesShort = DAY_NAMES_SHORT;
@@ -132,6 +138,7 @@ export class MealPlanCalendarComponent implements OnInit {
   });
 
   ngOnInit(): void {
+    this.aiHelper.checkStatus().subscribe();
     this.loadCurrentView();
   }
 
@@ -410,6 +417,26 @@ export class MealPlanCalendarComponent implements OnInit {
           queryParams: { listId: result.shoppingList.id },
         });
       });
+    });
+  }
+
+  protected openDraftMealPlanDialog(): void {
+    const ref = this.dialog.open<
+      DraftMealPlanDialogComponent,
+      DraftMealPlanDialogData,
+      MealPlanWeekDto
+    >(DraftMealPlanDialogComponent, {
+      width: '680px',
+      maxWidth: '96vw',
+      data: {
+        weekStartDate: this.activeWeekStart(),
+      },
+    });
+
+    ref.afterClosed().subscribe((updatedWeek) => {
+      if (updatedWeek) {
+        this.loadCurrentView();
+      }
     });
   }
 

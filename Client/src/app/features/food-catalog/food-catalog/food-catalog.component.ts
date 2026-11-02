@@ -12,10 +12,15 @@ import { MatSelectModule } from '@angular/material/select';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatTooltipModule } from '@angular/material/tooltip';
-import { FoodItemDto, StoreAisleDto } from '../../../core/models/food-catalog.models';
+import {
+  FoodItemDto,
+  MergeFoodItemsResultDto,
+  StoreAisleDto,
+} from '../../../core/models/food-catalog.models';
 import { FoodCatalogService } from '../../../core/services/food-catalog/food-catalog.service';
 import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialog/confirm-dialog.component';
 import { FoodItemDialogComponent } from '../food-item-dialog/food-item-dialog.component';
+import { MergeFoodItemsDialogComponent } from '../merge-food-items-dialog/merge-food-items-dialog.component';
 
 @Component({
   imports: [
@@ -128,6 +133,25 @@ export class FoodCatalogComponent implements OnInit {
       if (updated) {
         this.items.update((list) => list.map((i) => (i.id === updated.id ? updated : i)));
         this.snackBar.open(`Updated "${updated.name}"`, 'Close', { duration: 3000 });
+      }
+    });
+  }
+
+  openMergeDialog(preselectedItem?: FoodItemDto): void {
+    const dialogRef = this.dialog.open(MergeFoodItemsDialogComponent, {
+      width: '560px',
+      maxWidth: '95vw',
+      data: preselectedItem ? { targetItem: preselectedItem } : null,
+    });
+
+    dialogRef.afterClosed().subscribe((result: MergeFoodItemsResultDto | null) => {
+      if (result) {
+        this.loadItems();
+        this.snackBar.open(
+          `Merged ${result.mergedSourceCount} item(s) into "${result.targetFoodItem.name}"`,
+          'Close',
+          { duration: 4000 },
+        );
       }
     });
   }

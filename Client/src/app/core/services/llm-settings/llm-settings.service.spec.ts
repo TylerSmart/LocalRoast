@@ -2,7 +2,8 @@ import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { MatDialog } from '@angular/material/dialog';
-import { firstValueFrom } from 'rxjs';
+import { firstValueFrom, of } from 'rxjs';
+import { AiKitchenHelperService } from '../ai-helpers/ai-kitchen-helper.service';
 import {
   LlmConnectionTestResultDto,
   LlmSettingsDto,
@@ -15,10 +16,14 @@ describe('LlmSettingsService', () => {
   let service: LlmSettingsService;
   let httpMock: HttpTestingController;
   let mockDialog: { open: ReturnType<typeof vi.fn> };
+  let mockAiHelperService: { checkStatus: ReturnType<typeof vi.fn> };
 
   beforeEach(() => {
     mockDialog = {
       open: vi.fn(),
+    };
+    mockAiHelperService = {
+      checkStatus: vi.fn().mockReturnValue(of({ isAvailable: true })),
     };
 
     TestBed.configureTestingModule({
@@ -27,6 +32,7 @@ describe('LlmSettingsService', () => {
         provideHttpClientTesting(),
         LlmSettingsService,
         { provide: MatDialog, useValue: mockDialog },
+        { provide: AiKitchenHelperService, useValue: mockAiHelperService },
       ],
     });
 

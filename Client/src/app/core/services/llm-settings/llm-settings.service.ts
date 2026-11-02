@@ -1,7 +1,7 @@
 import { HttpClient } from '@angular/common/http';
 import { Service, inject } from '@angular/core';
 import { MatDialog, MatDialogRef } from '@angular/material/dialog';
-import { Observable } from 'rxjs';
+import { Observable, tap } from 'rxjs';
 import { apiUrl } from '../../api/api-url';
 import type {
   LlmConnectionTestResultDto,
@@ -9,22 +9,32 @@ import type {
   TestLlmConnectionRequest,
   UpdateLlmSettingsRequest,
 } from '../../models/ingestion.models';
+import { AiKitchenHelperService } from '../ai-helpers/ai-kitchen-helper.service';
 
 @Service()
 export class LlmSettingsService {
   private readonly http = inject(HttpClient);
   private readonly dialog = inject(MatDialog, { optional: true });
+  private readonly aiHelper = inject(AiKitchenHelperService, { optional: true });
 
   getSettings(): Observable<LlmSettingsDto> {
     return this.http.get<LlmSettingsDto>(apiUrl('/llm-settings'));
   }
 
   updateSettings(request: UpdateLlmSettingsRequest): Observable<LlmSettingsDto> {
-    return this.http.put<LlmSettingsDto>(apiUrl('/llm-settings'), request);
+    return this.http.put<LlmSettingsDto>(apiUrl('/llm-settings'), request).pipe(
+      tap(() => {
+        this.aiHelper?.checkStatus(true).subscribe();
+      }),
+    );
   }
 
   testConnection(request: TestLlmConnectionRequest): Observable<LlmConnectionTestResultDto> {
-    return this.http.post<LlmConnectionTestResultDto>(apiUrl('/llm-settings/test'), request);
+    return this.http.post<LlmConnectionTestResultDto>(apiUrl('/llm-settings/test'), request).pipe(
+      tap(() => {
+        this.aiHelper?.checkStatus(true).subscribe();
+      }),
+    );
   }
 
   async openLlmSettingsDialog(): Promise<MatDialogRef<unknown> | undefined> {

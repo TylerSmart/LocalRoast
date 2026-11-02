@@ -1,0 +1,114 @@
+<div class="dialog-header">
+  <div class="title-row">
+    <mat-icon class="ai-spark-icon">auto_awesome</mat-icon>
+    <h2 mat-dialog-title class="dialog-title">Ingredient Substitutions</h2>
+  </div>
+  <button
+    type="button"
+    mat-icon-button
+    class="close-btn"
+    (click)="onClose()"
+    aria-label="Close dialog"
+  >
+    <mat-icon>close</mat-icon>
+  </button>
+</div>
+
+<mat-dialog-content class="dialog-content">
+  <div class="ingredient-target-banner">
+    <span class="target-label">Target Ingredient:</span>
+    <span class="target-value">
+      @if (data.scaledAmountDisplay) {
+        <strong>{{ data.scaledAmountDisplay }}</strong>
+      }
+      {{ data.ingredientDisplayName }}
+    </span>
+  </div>
+
+  <!-- Optional Dietary/Allergy Constraint Input -->
+  <div class="constraint-bar">
+    <mat-form-field appearance="outline" class="constraint-field" subscriptSizing="dynamic">
+      <mat-label>Dietary preference or pantry constraint (optional)</mat-label>
+      <input
+        matInput
+        [ngModel]="dietaryNote()"
+        (ngModelChange)="dietaryNote.set($event)"
+        placeholder="e.g. Dairy-free, vegan, nut allergy, out of butter..."
+        (keydown.enter)="fetchSubstitutions()"
+      />
+    </mat-form-field>
+    <button
+      type="button"
+      mat-stroked-button
+      class="regenerate-btn"
+      (click)="fetchSubstitutions()"
+      [disabled]="isLoading()"
+    >
+      <mat-icon>refresh</mat-icon>
+      <span>Ask AI</span>
+    </button>
+  </div>
+
+  @if (errorMessage()) {
+    <div class="error-banner" role="alert">
+      <mat-icon>error_outline</mat-icon>
+      <div class="error-text">
+        <strong>Substitution Helper Unavailable</strong>
+        <p>{{ errorMessage() }}</p>
+      </div>
+    </div>
+  }
+
+  @if (isLoading()) {
+    <div class="loading-state">
+      <mat-spinner diameter="36"></mat-spinner>
+      <p>Consulting local AI kitchen assistant for culinary substitutions...</p>
+    </div>
+  } @else if (response()) {
+    <div class="substitutions-list">
+      @for (sub of response()!.substitutions; track $index) {
+        <div class="substitution-card">
+          <div class="card-header">
+            <div class="card-title-group">
+              <span class="sub-label option-title">{{ sub.label }}</span>
+              <span class="ratio-pill">{{ sub.ratioAndAmount }}</span>
+            </div>
+            <button
+              type="button"
+              mat-icon-button
+              class="copy-sub-btn copy-ratio-btn"
+              (click)="copySubstitution(sub, $index)"
+              [matTooltip]="copiedIndex() === $index ? 'Copied!' : 'Copy substitution details'"
+              aria-label="Copy substitution"
+            >
+              <mat-icon [class.copied]="copiedIndex() === $index">
+                {{ copiedIndex() === $index ? 'check' : 'content_copy' }}
+              </mat-icon>
+            </button>
+          </div>
+
+          <div class="card-body">
+            @if (sub.culinaryNotes) {
+              <div class="detail-row">
+                <mat-icon class="detail-icon">restaurant</mat-icon>
+                <span class="detail-text">{{ sub.culinaryNotes }}</span>
+              </div>
+            }
+            @if (sub.flavorOrTextureImpact) {
+              <div class="detail-row">
+                <mat-icon class="detail-icon">tune</mat-icon>
+                <span class="detail-text impact-text">{{ sub.flavorOrTextureImpact }}</span>
+              </div>
+            }
+          </div>
+        </div>
+      }
+    </div>
+  }
+</mat-dialog-content>
+
+<mat-dialog-actions align="end" class="dialog-actions">
+  <button type="button" mat-flat-button class="close-sub-dialog-btn" (click)="onClose()">
+    Close
+  </button>
+</mat-dialog-actions>

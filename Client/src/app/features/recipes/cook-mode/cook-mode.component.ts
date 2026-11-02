@@ -22,6 +22,8 @@ import {
 import { KitchenTimerService } from '../../../core/services/kitchen-timer/kitchen-timer.service';
 import { RecipeService } from '../../../core/services/recipe/recipe.service';
 import { WakeLockService } from '../../../core/services/wake-lock/wake-lock.service';
+import { AiKitchenHelperService } from '../../../core/services/ai-helpers/ai-kitchen-helper.service';
+import { IngredientSubstitutionDialogComponent } from '../ingredient-substitution-dialog/ingredient-substitution-dialog.component';
 import {
   FormattedQuantityResult,
   formatCountdown,
@@ -74,6 +76,7 @@ export class CookModeComponent implements OnInit, OnDestroy {
   private readonly recipeService = inject(RecipeService);
   protected readonly wakeLockService = inject(WakeLockService);
   protected readonly kitchenTimerService = inject(KitchenTimerService);
+  protected readonly aiHelper = inject(AiKitchenHelperService);
   private readonly dialog = inject(MatDialog);
 
   protected readonly recipe = signal<RecipeDetailDto | null>(null);
@@ -211,6 +214,7 @@ export class CookModeComponent implements OnInit, OnDestroy {
   });
 
   ngOnInit(): void {
+    this.aiHelper.checkStatus().subscribe();
     const recipeId = this.route.snapshot.paramMap.get('id');
     if (!recipeId) {
       this.errorMessage.set('Recipe ID is missing.');
@@ -304,6 +308,33 @@ export class CookModeComponent implements OnInit, OnDestroy {
       ...map,
       [id]: !map[id],
     }));
+  }
+
+  openIngredientSubstitution(item: ScaledCookIngredient, event?: Event): void {
+    event?.stopPropagation();
+    const r = this.recipe();
+    if (!r) return;
+
+    this.dialog.open(IngredientSubstitutionDialogComponent, {
+      width: '540px',
+      maxWidth: '95vw',
+      data: {
+        recipeId: r.id,
+        recipeTitle: r.title,
+        recipeIngredientId: item.ingredient.id,
+        ingredientDisplayName: item.ingredient.displayName,
+        scaledAmountDisplay: item.displayQuantityAndUnit,
+        targetServings: this.targetServings(),
+      },
+    });
+  }
+
+  openIngredientSubstitutionById(ingredientId: string, event?: Event): void {
+    event?.stopPropagation();
+    const item = this.scaledIngredientsMap().get(ingredientId);
+    if (item) {
+      this.openIngredientSubstitution(item, event);
+    }
   }
 
   protected toggleStepChecked(stepId: string): void {

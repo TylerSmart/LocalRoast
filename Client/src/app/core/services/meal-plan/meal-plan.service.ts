@@ -3,6 +3,7 @@ import { Service, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { apiUrl } from '../../api/api-url';
 import {
+  ApplyDraftMealPlanRequest,
   ApplyMealPlanTemplateRequest,
   CookTonightRequest,
   CreateMealPlanEntryRequest,
@@ -26,6 +27,7 @@ export class MealPlanService {
     if (weekStartIso) {
       params = params.set('weekStart', weekStartIso);
     }
+
     return this.http.get<MealPlanWeekDto>(apiUrl('/meal-plans/week'), { params });
   }
 
@@ -117,5 +119,9 @@ export class MealPlanService {
       apiUrl(`/meal-plan-templates/${templateId}/apply`),
       request,
     );
+  }
+
+  applyDraftEntries(request: ApplyDraftMealPlanRequest): Observable<MealPlanWeekDto> {
+    return this.http.post<MealPlanWeekDto>(apiUrl('/meal-plans/week/apply-draft'), request);
   }
 }

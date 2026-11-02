@@ -217,4 +217,67 @@ public sealed class FoodCatalogIntegrationTests
         Assert.IsNotNull(fetched);
         Assert.AreEqual("Smoked Paprika", fetched.Name);
     }
+
+    [TestMethod]
+    public async Task MergeFoodItems_ReturnsOk_AndRepointsReferences()
+    {
+        await RegisterAndAuthenticateAsync(_client, "merge_user@example.com", "mergeuser");
+
+        // 1. Create target and source items
+        var targetName = $"Unique Target {Guid.NewGuid():N}";
+        var sourceName = $"Unique Source {Guid.NewGuid():N}";
+
+        var targetRes = await _client.PostAsJsonAsync(
+            "/api/food-items",
+            new CreateFoodItemRequest(targetName)
+        );
+        Assert.AreEqual(HttpStatusCode.Created, targetRes.StatusCode);
+        var target = await targetRes.Content.ReadFromJsonAsync<FoodItemDto>();
+        Assert.IsNotNull(target);
+
+        var sourceRes = await _client.PostAsJsonAsync(
+            "/api/food-items",
+            new CreateFoodItemRequest(sourceName)
+        );
+        Assert.AreEqual(HttpStatusCode.Created, sourceRes.StatusCode);
+        var source = await sourceRes.Content.ReadFromJsonAsync<FoodItemDto>();
+        Assert.IsNotNull(source);
+
+        // 2. Perform merge
+        var mergeReq = new MergeFoodItemsRequest(
+            TargetFoodItemId: target.Id,
+            SourceFoodItemIds: [source.Id],
+            KeepSourceNamesAsAliases: true
+        );
+        var mergeRes = await _client.PostAsJsonAsync("/api/food-items/merge", mergeReq);
+        Assert.AreEqual(HttpStatusCode.OK, mergeRes.StatusCode);
+
+        var mergeResult = await mergeRes.Content.ReadFromJsonAsync<MergeFoodItemsResultDto>();
+        Assert.IsNotNull(mergeResult);
+        Assert.AreEqual(target.Id, mergeResult.TargetFoodItem.Id);
+        Assert.AreEqual(1, mergeResult.MergedSourceCount);
+        Assert.IsTrue(mergeResult.AddedAliases.Contains(sourceName));
+
+        // 3. Verify source deleted (404)
+        var getSourceRes = await _client.GetAsync($"/api/food-items/{source.Id}");
+        Assert.AreEqual(HttpStatusCode.NotFound, getSourceRes.StatusCode);
+
+        // 4. Verify target updated with alias
+        var getTargetRes = await _client.GetAsync($"/api/food-items/{target.Id}");
+        Assert.AreEqual(HttpStatusCode.OK, getTargetRes.StatusCode);
+        var updatedTarget = await getTargetRes.Content.ReadFromJsonAsync<FoodItemDto>();
+        Assert.IsNotNull(updatedTarget);
+        Assert.IsTrue(updatedTarget.Aliases.Contains(sourceName));
+    }
+
+    [TestMethod]
+    public async Task MergeFoodItems_Unauthorized_Returns401()
+    {
+        using var unauthClient = _factory.CreateClient();
+        var mergeRes = await unauthClient.PostAsJsonAsync(
+            "/api/food-items/merge",
+            new MergeFoodItemsRequest(Guid.NewGuid(), [Guid.NewGuid()])
+        );
+        Assert.AreEqual(HttpStatusCode.Unauthorized, mergeRes.StatusCode);
+    }
 }

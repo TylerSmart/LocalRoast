@@ -49,4 +49,9 @@ public interface IMealPlanService
         bool includeOnDeck = false,
         CancellationToken cancellationToken = default
     );
+
+    Task<MealPlanWeekDto> ApplyDraftEntriesAsync(
+        ApplyDraftMealPlanRequest request,
+        CancellationToken cancellationToken = default
+    );
 }

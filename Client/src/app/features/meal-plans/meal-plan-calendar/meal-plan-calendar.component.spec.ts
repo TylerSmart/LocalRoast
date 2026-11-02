@@ -1,9 +1,12 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { signal } from '@angular/core';
 import { MatDialog } from '@angular/material/dialog';
 import { provideRouter } from '@angular/router';
 import { of } from 'rxjs';
 import { MealPlanEntryDto, MealPlanWeekDto } from '../../../core/models/meal-plan.models';
 import { MealPlanService } from '../../../core/services/meal-plan/meal-plan.service';
+import { AiKitchenHelperService } from '../../../core/services/ai-helpers/ai-kitchen-helper.service';
+import { DraftMealPlanDialogComponent } from '../draft-meal-plan-dialog/draft-meal-plan-dialog.component';
 import { MealPlanCalendarComponent } from './meal-plan-calendar.component';
 
 describe('MealPlanCalendarComponent', () => {
@@ -88,6 +91,14 @@ describe('MealPlanCalendarComponent', () => {
     clearWeek: vi.fn().mockReturnValue(of(undefined)),
   };
 
+  const mockAiHelperService = {
+    checkStatus: vi
+      .fn()
+      .mockReturnValue(of({ isAvailable: true, provider: 'Ollama', latencyMs: 25 })),
+    status: signal({ isAvailable: true, provider: 'Ollama', latencyMs: 25 }),
+    isAvailable: signal(true),
+  };
+
   beforeEach(async () => {
     await TestBed.configureTestingModule({
       imports: [MealPlanCalendarComponent],
@@ -95,6 +106,7 @@ describe('MealPlanCalendarComponent', () => {
         provideRouter([]),
         { provide: MealPlanService, useValue: mockMealPlanService },
         { provide: MatDialog, useValue: mockDialog },
+        { provide: AiKitchenHelperService, useValue: mockAiHelperService },
       ],
     }).compileComponents();
 
@@ -175,5 +187,26 @@ describe('MealPlanCalendarComponent', () => {
     const entry = mockWeek.days[0].entries[0];
     component['logCook'](entry);
     expect(mockDialog.open).toHaveBeenCalled();
+  });
+
+  it('renders Draft Week button when aiHelper is available and opens dialog', () => {
+    const el = fixture.nativeElement as HTMLElement;
+    const draftBtn = el.querySelector('.draft-week-ai-btn') as HTMLButtonElement;
+    expect(draftBtn).toBeTruthy();
+
+    mockDialog.open.mockReturnValue({
+      afterClosed: () => of({ weekStartDate: '2026-11-02' }),
+    });
+
+    draftBtn.click();
+
+    expect(mockDialog.open).toHaveBeenCalledWith(
+      DraftMealPlanDialogComponent,
+      expect.objectContaining({
+        data: {
+          weekStartDate: component['activeWeekStart'](),
+        },
+      }),
+    );
   });
 });

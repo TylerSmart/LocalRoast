@@ -131,4 +131,42 @@ public sealed class FoodItemsController(IFoodCatalogService foodCatalogService) 
             );
         }
     }
+
+    [HttpPost("merge")]
+    [ProducesResponseType(typeof(MergeFoodItemsResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> MergeFoodItems(
+        [FromBody] MergeFoodItemsRequest request,
+        CancellationToken cancellationToken
+    )
+    {
+        try
+        {
+            var result = await foodCatalogService.MergeFoodItemsAsync(request, cancellationToken);
+            return Ok(result);
+        }
+        catch (DomainValidationException ex)
+        {
+            return BadRequest(
+                new ProblemDetails
+                {
+                    Status = StatusCodes.Status400BadRequest,
+                    Title = ex.Title,
+                    Detail = ex.Message,
+                }
+            );
+        }
+        catch (NotFoundException ex)
+        {
+            return NotFound(
+                new ProblemDetails
+                {
+                    Status = StatusCodes.Status404NotFound,
+                    Title = "Not Found",
+                    Detail = ex.Message,
+                }
+            );
+        }
+    }
 }

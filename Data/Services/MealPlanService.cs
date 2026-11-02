@@ -464,6 +464,50 @@ public sealed class MealPlanService(AppDbContext dbContext, TimeProvider? timePr
         return entriesToDelete.Count;
     }
 
+    public async Task<MealPlanWeekDto> ApplyDraftEntriesAsync(
+        ApplyDraftMealPlanRequest request,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (request.Entries is null || request.Entries.Count == 0)
+        {
+            throw new DomainValidationException(
+                "At least one draft meal plan entry must be provided."
+            );
+        }
+
+        if (request.Entries.Count > 28)
+        {
+            throw new DomainValidationException(
+                "A maximum of 28 draft meal plan entries can be applied at once."
+            );
+        }
+
+        var weekMonday = MealPlanDateHelper.NormalizeToMonday(request.WeekStartDate);
+
+        foreach (var entryRequest in request.Entries)
+        {
+            var req = entryRequest;
+            if (req.IsOnDeck && !req.WeekStartDate.HasValue)
+            {
+                req = req with { WeekStartDate = weekMonday };
+            }
+            else if (!req.IsOnDeck && req.ScheduledDate.HasValue && !req.WeekStartDate.HasValue)
+            {
+                req = req with
+                {
+                    WeekStartDate = MealPlanDateHelper.NormalizeToMonday(req.ScheduledDate.Value),
+                };
+            }
+
+            await CreateEntryAsync(req, cancellationToken);
+        }
+
+        return await GetWeekAsync(weekMonday, cancellationToken);
+    }
+
     private static (
         DateOnly WeekStartDate,
         DateOnly? ScheduledDate,

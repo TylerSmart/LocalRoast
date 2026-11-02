@@ -20,6 +20,7 @@ describe('FoodCatalogComponent', () => {
       isPantryStaple: true,
       aliases: ['EVOO'],
       referencedRecipeCount: 3,
+      referencedShoppingListItemCount: 2,
       createdAt: '2026-01-01T00:00:00Z',
       modifiedAt: '2026-01-01T00:00:00Z',
     },
@@ -32,6 +33,7 @@ describe('FoodCatalogComponent', () => {
       isPantryStaple: false,
       aliases: [],
       referencedRecipeCount: 5,
+      referencedShoppingListItemCount: 0,
       createdAt: '2026-01-01T00:00:00Z',
       modifiedAt: '2026-01-01T00:00:00Z',
     },
@@ -72,12 +74,13 @@ describe('FoodCatalogComponent', () => {
     fixture.detectChanges();
   });
 
-  it('renders loaded items', () => {
+  it('renders loaded items and badges', () => {
     expect(component).toBeTruthy();
     expect(component['items']().length).toBe(2);
     const text = fixture.nativeElement.textContent;
     expect(text).toContain('Olive Oil');
     expect(text).toContain('Garlic');
+    expect(text).toContain('2 list items');
   });
 
   it('filters items by search query', () => {
@@ -92,5 +95,14 @@ describe('FoodCatalogComponent', () => {
     fixture.detectChanges();
     expect(component['filteredItems']().length).toBe(1);
     expect(component['filteredItems']()[0].name).toBe('Olive Oil');
+  });
+
+  it('opens merge dialog when openMergeDialog is called', () => {
+    mockDialog.open.mockReturnValue({
+      afterClosed: () => of(null),
+    });
+
+    component.openMergeDialog();
+    expect(mockDialog.open).toHaveBeenCalled();
   });
 });

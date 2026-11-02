@@ -1,0 +1,166 @@
+<h2 mat-dialog-title class="dialog-title">
+  <mat-icon class="title-icon">call_merge</mat-icon>
+  <span>Merge Food Items</span>
+</h2>
+
+<mat-dialog-content class="dialog-content">
+  <p class="dialog-description">
+    Combine duplicate ingredient catalog items. All recipe references and shopping list items will
+    be safely repointed to the canonical target item.
+  </p>
+
+  @if (errorMessage()) {
+    <div class="form-error-banner" role="alert">
+      <mat-icon>error</mat-icon>
+      <span>{{ errorMessage() }}</span>
+    </div>
+  }
+
+  @if (isLoadingItems()) {
+    <div class="loading-state">
+      <mat-spinner diameter="32"></mat-spinner>
+      <span>Loading catalog items...</span>
+    </div>
+  } @else {
+    <!-- Target Item Selector -->
+    <div class="selector-section">
+      <div class="section-header">
+        <span class="badge target-badge">Target (Keep)</span>
+        <span class="section-label">Canonical item to preserve</span>
+      </div>
+      <mat-form-field appearance="outline" class="full-width">
+        <mat-label>Canonical Food Item</mat-label>
+        <mat-select
+          [value]="targetItemId()"
+          (valueChange)="onTargetChange($event)"
+          placeholder="Select canonical item"
+          class="target-item-select target-select"
+        >
+          @for (item of allItems(); track item.id) {
+            <mat-option [value]="item.id">
+              {{ item.name }}
+              @if (item.defaultStoreAisleName) {
+                <span class="aisle-hint">({{ item.defaultStoreAisleName }})</span>
+              }
+            </mat-option>
+          }
+        </mat-select>
+      </mat-form-field>
+    </div>
+
+    <!-- Swap Button if 1 source is chosen -->
+    @if (canSwap()) {
+      <div class="swap-action-row">
+        <button
+          type="button"
+          mat-button
+          class="swap-btn"
+          (click)="swapTargetAndSource()"
+          title="Swap target and source"
+        >
+          <mat-icon>swap_vert</mat-icon>
+          <span>Swap Target & Source</span>
+        </button>
+      </div>
+    }
+
+    <!-- Sources Item Selector -->
+    <div class="selector-section">
+      <div class="section-header">
+        <span class="badge source-badge">Sources (Merge & Delete)</span>
+        <span class="section-label">Duplicate items to absorb into target</span>
+      </div>
+      <mat-form-field appearance="outline" class="full-width">
+        <mat-label>Duplicate Source Items</mat-label>
+        <mat-select
+          multiple
+          [value]="selectedSourceIds()"
+          (valueChange)="onSourceSelectionChange($event)"
+          placeholder="Select one or more duplicate items"
+          class="source-items-select source-select"
+        >
+          @for (item of availableSources(); track item.id) {
+            <mat-option [value]="item.id">
+              {{ item.name }}
+              @if (item.referencedRecipeCount > 0) {
+                <span class="count-hint">({{ item.referencedRecipeCount }} recipes)</span>
+              }
+            </mat-option>
+          }
+        </mat-select>
+      </mat-form-field>
+    </div>
+
+    <!-- Aliases Toggle -->
+    <div class="checkbox-row">
+      <mat-checkbox
+        [checked]="keepAliases()"
+        (change)="keepAliases.set($event.checked)"
+        class="preserve-aliases-checkbox"
+      >
+        Preserve merged item names as aliases / synonyms on target item
+      </mat-checkbox>
+    </div>
+
+    <!-- Impact Summary Card -->
+    @if (isValid()) {
+      <div class="impact-summary-card">
+        <div class="summary-header">
+          <mat-icon class="summary-icon">info</mat-icon>
+          <strong>Merge Impact Summary</strong>
+        </div>
+        <div class="summary-details">
+          <div class="summary-line">
+            <mat-icon class="bullet-icon">check_circle</mat-icon>
+            <span>
+              <strong>{{ selectedSourceIds().length }}</strong>
+              duplicate item(s) will be merged into <strong>{{ targetItem()?.name }}</strong
+              >.
+            </span>
+          </div>
+          <div class="summary-line">
+            <mat-icon class="bullet-icon">menu_book</mat-icon>
+            <span>
+              <strong>{{ affectedRecipesCount() }}</strong> recipe ingredient reference(s) will be
+              repointed.
+            </span>
+          </div>
+          <div class="summary-line">
+            <mat-icon class="bullet-icon">shopping_cart</mat-icon>
+            <span>
+              <strong>{{ affectedShoppingItemsCount() }}</strong> shopping list item(s) will be
+              consolidated.
+            </span>
+          </div>
+        </div>
+      </div>
+    }
+  }
+</mat-dialog-content>
+
+<mat-dialog-actions align="end" class="dialog-actions">
+  <button
+    type="button"
+    mat-button
+    class="cancel-merge-btn"
+    (click)="onCancel()"
+    [disabled]="isSaving()"
+  >
+    Cancel
+  </button>
+  <button
+    type="button"
+    mat-flat-button
+    color="primary"
+    class="confirm-merge-btn"
+    (click)="onConfirmMerge()"
+    [disabled]="!isValid() || isSaving()"
+  >
+    @if (isSaving()) {
+      <mat-spinner diameter="18" class="button-spinner"></mat-spinner>
+    } @else {
+      <mat-icon>call_merge</mat-icon>
+    }
+    <span>{{ isSaving() ? 'Merging...' : 'Merge Food Items' }}</span>
+  </button>
+</mat-dialog-actions>

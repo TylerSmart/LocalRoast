@@ -1,7 +1,7 @@
 # Phase 11: Food Catalog Duplicate-Merge & 1-Click Local AI Kitchen Helpers
 
 > **Branch:** `feature/phase-11-food-item-merge-and-ai-helpers`
-> **Status:** Planned (`[ ]` Not Started | `[~]` In Progress | `[x]` Completed)
+> **Status:** `[x]` Completed (`[ ]` Not Started | `[~]` In Progress | `[x]` Completed)
 > **PRD Reference:** `docs/prd.md` — Sections 1, 2, 4.1.3, 4.2.4, 4.4, 4.6.1, 5, and 6 (Milestone 4, Slice 2 of 2)
 > **Target Execution:** Run `/execute-phase` to execute this plan step-by-step.
 
@@ -517,7 +517,7 @@ Create `Tests/Client.E2ETests/FoodItemMergeAndAiHelpersE2ETests.cs` extending `E
 
 ## 6. Step-by-Step Execution Checklist (For Implementation Agent)
 
-- [ ] **Task 1: Backend Core, FoodItem Merge, AI Helper Services & LLM Client**
+- [x] **Task 1: Backend Core, FoodItem Merge, AI Helper Services & LLM Client**
   - Update `Core/FoodCatalog/FoodCatalogModels.cs`, `Core/FoodCatalog/IFoodCatalogService.cs`, `Core/Ingestion/ILlmExtractionClient.cs`, `Core/MealPlans/MealPlanModels.cs`, and `Core/MealPlans/IMealPlanService.cs`.
   - Create `Core/AiHelpers/AiKitchenHelperModels.cs` and `Core/AiHelpers/IAiKitchenHelperService.cs`.
   - Implement `SuggestIngredientSubstitutionsAsync` and `DraftWeeklyMealPlanAsync` in `Infrastructure/Ingestion/LlmExtractionClient.cs`.
@@ -529,7 +529,7 @@ Create `Tests/Client.E2ETests/FoodItemMergeAndAiHelpersE2ETests.cs` extending `E
     dotnet test --project Tests/Infrastructure.UnitTests/App.Infrastructure.UnitTests.csproj
     ```
 
-- [ ] **Task 2: API Controllers & Integration Tests**
+- [x] **Task 2: API Controllers & Integration Tests**
   - Add `POST /api/food-items/merge` to `API/Controllers/FoodItemsController.cs` and `POST /api/meal-plans/week/apply-draft` to `API/Controllers/MealPlansController.cs`.
   - Create `API/Controllers/AiKitchenHelpersController.cs` (`GET /api/ai-helpers/status`, `POST /api/ai-helpers/ingredient-substitutions`, `POST /api/ai-helpers/draft-meal-plan`).
   - Update `Tests/API.IntegrationTests/FoodCatalogIntegrationTests.cs` and `Tests/API.IntegrationTests/OpenApiIntegrationTests.cs`, and create `Tests/API.IntegrationTests/AiKitchenHelpersIntegrationTests.cs` covering auth boundaries (`401`), offline/unconfigured status, `503` host-unavailable mapping, scaled substitution generation, strict cookbook grounding during meal-plan drafting, and batch draft application.
@@ -538,7 +538,7 @@ Create `Tests/Client.E2ETests/FoodItemMergeAndAiHelpersE2ETests.cs` extending `E
     dotnet test --project Tests/API.IntegrationTests/App.API.IntegrationTests.csproj
     ```
 
-- [ ] **Task 3: Angular Client Components, Dialogs & Unit Tests**
+- [x] **Task 3: Angular Client Components, Dialogs & Unit Tests**
   - Update `food-catalog.models.ts`, `meal-plan.models.ts`, `food-catalog.service.ts`, `meal-plan.service.ts`, and `llm-settings.service.ts`; create `ai-helper.models.ts` and `AiKitchenHelperService` (`core/services/ai-helpers/`) with `.spec.ts` unit tests.
   - Create `MergeFoodItemsDialogComponent` (`features/food-catalog/merge-food-items-dialog/`), `IngredientSubstitutionDialogComponent` (`features/recipes/ingredient-substitution-dialog/`), and `DraftMealPlanDialogComponent` (`features/meal-plans/draft-meal-plan-dialog/`) with dedicated external `.ts`, `.html`, `.scss`, and `.spec.ts` files.
   - Update `FoodCatalogComponent`, `RecipeDetailComponent`, `CookModeComponent`, and `MealPlanCalendarComponent` (+ `.spec.ts` tests).
@@ -550,7 +550,7 @@ Create `Tests/Client.E2ETests/FoodItemMergeAndAiHelpersE2ETests.cs` extending `E
     npm test -- --watch=false
     ```
 
-- [ ] **Task 4: Playwright E2E Verification & Final Formatting**
+- [x] **Task 4: Playwright E2E Verification & Final Formatting**
   - Create `Tests/Client.E2ETests/FoodItemMergeAndAiHelpersE2ETests.cs` implementing all 3 scenarios from Section 5.
   - Build production Angular bundle + .NET solution and run Playwright E2E tests:
     ```powershell

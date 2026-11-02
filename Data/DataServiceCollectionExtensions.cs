@@ -1,4 +1,5 @@
-﻿using App.Core.Account;
+using App.Core.Account;
+using App.Core.AiHelpers;
 using App.Core.Authentication;
 using App.Core.FoodCatalog;
 using App.Core.Ingestion;
@@ -41,6 +42,7 @@ public static class DataServiceCollectionExtensions
         services.AddScoped<IMealPlanTemplateService, MealPlanTemplateService>();
         services.AddScoped<IShoppingListService, ShoppingListService>();
         services.AddScoped<IMcpMealAndShoppingService, McpMealAndShoppingService>();
+        services.AddScoped<IAiKitchenHelperService, AiKitchenHelperService>();
 
         if (
             string.Equals(

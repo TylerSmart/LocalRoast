@@ -92,3 +92,8 @@ public sealed record CookTonightRequest(
     DateOnly? TargetDate = null,
     MealSlot Slot = MealSlot.Dinner
 );
+
+public sealed record ApplyDraftMealPlanRequest(
+    DateOnly WeekStartDate,
+    [Required, MinLength(1)] IReadOnlyList<CreateMealPlanEntryRequest> Entries
+);

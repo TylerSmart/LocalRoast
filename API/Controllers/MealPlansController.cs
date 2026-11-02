@@ -194,4 +194,30 @@ public sealed class MealPlansController(IMealPlanService mealPlanService) : Cont
         await mealPlanService.ClearWeekAsync(weekStart, includeOnDeck, cancellationToken);
         return NoContent();
     }
+
+    [HttpPost("week/apply-draft")]
+    [ProducesResponseType(typeof(MealPlanWeekDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> ApplyDraftEntries(
+        [FromBody] ApplyDraftMealPlanRequest request,
+        CancellationToken cancellationToken
+    )
+    {
+        try
+        {
+            var week = await mealPlanService.ApplyDraftEntriesAsync(request, cancellationToken);
+            return Ok(week);
+        }
+        catch (DomainValidationException ex)
+        {
+            return BadRequest(
+                new ProblemDetails
+                {
+                    Status = StatusCodes.Status400BadRequest,
+                    Title = ex.Title,
+                    Detail = ex.Message,
+                }
+            );
+        }
+    }
 }

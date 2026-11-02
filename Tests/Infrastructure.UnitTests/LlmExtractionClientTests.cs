@@ -401,4 +401,126 @@ public sealed class LlmExtractionClientTests
         Assert.AreEqual(4, result.BaseServings);
         Assert.AreEqual(1, result.Ingredients?.Count);
     }
+
+    [TestMethod]
+    public async Task SuggestIngredientSubstitutionsAsync_Ollama_ReturnsParsedSubstitutions()
+    {
+        var jsonResponse = """
+            {
+                "model": "qwen2.5:14b",
+                "message": {
+                    "role": "assistant",
+                    "content": "{\"substitutions\":[{\"label\":\"Greek Yogurt\",\"ratioAndAmount\":\"1 cup Greek yogurt + 1/4 cup milk\",\"culinaryNotes\":\"Stir until smooth.\",\"flavorOrTextureImpact\":\"Provides pleasant tang and tender crumb.\"}]}"
+                }
+            }
+            """;
+
+        var handler = new MockHttpMessageHandler(req =>
+        {
+            Assert.AreEqual("/api/chat", req.RequestUri!.AbsolutePath);
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(jsonResponse, Encoding.UTF8, "application/json"),
+            };
+        });
+
+        var client = new LlmExtractionClient(new HttpClient(handler));
+        var config = new EffectiveLlmConnectionConfig(
+            Provider: LlmProvider.Ollama,
+            BaseUrl: "http://localhost:11434",
+            ApiKey: null,
+            TextModel: "qwen2.5:14b",
+            VisionModel: null,
+            OllamaKeepAlive: "5m",
+            RequestTimeoutSeconds: 30,
+            AutoPublishHighConfidenceText: false
+        );
+
+        var context = new LlmSubstitutionContext(
+            RecipeTitle: "Sour Cream Coffee Cake",
+            RecipeDescription: "Rich breakfast cake",
+            TargetServings: 8,
+            TargetIngredientName: "Sour Cream",
+            ScaledAmountDisplay: "1 cup",
+            PreparationNote: null,
+            OtherRecipeIngredients: ["Flour", "Sugar", "Butter"],
+            RelevantStepInstructions: ["Beat butter, sugar, and sour cream."],
+            DietaryOrPantryNote: null
+        );
+
+        var result = await client.SuggestIngredientSubstitutionsAsync(config, context);
+
+        Assert.IsNotNull(result.Substitutions);
+        Assert.AreEqual(1, result.Substitutions.Count);
+        Assert.AreEqual("Greek Yogurt", result.Substitutions[0].Label);
+    }
+
+    [TestMethod]
+    public async Task DraftWeeklyMealPlanAsync_OpenAiCompatible_ReturnsParsedProposals()
+    {
+        var rawContent =
+            "{\"proposals\":[{\"catalogIndex\":1,\"recipeTitle\":\"Lemon Herb Chicken\",\"dayOffset\":0,\"slot\":\"Dinner\",\"isOnDeck\":false,\"targetServings\":4,\"rationale\":\"Fast weeknight meal\"}]}";
+        var openAiResponse = System.Text.Json.JsonSerializer.Serialize(
+            new
+            {
+                choices = new[]
+                {
+                    new { message = new { role = "assistant", content = rawContent } },
+                },
+            }
+        );
+
+        var handler = new MockHttpMessageHandler(req =>
+        {
+            Assert.AreEqual("/v1/chat/completions", req.RequestUri!.AbsolutePath);
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(openAiResponse, Encoding.UTF8, "application/json"),
+            };
+        });
+
+        var client = new LlmExtractionClient(new HttpClient(handler));
+        var config = new EffectiveLlmConnectionConfig(
+            Provider: LlmProvider.OpenAiCompatible,
+            BaseUrl: "http://localhost:1234",
+            ApiKey: "test-key",
+            TextModel: "meta-llama/llama-3.1-8b",
+            VisionModel: null,
+            OllamaKeepAlive: "5m",
+            RequestTimeoutSeconds: 30,
+            AutoPublishHighConfidenceText: false
+        );
+
+        var context = new LlmDraftMealPlanContext(
+            WeekStartDate: new DateOnly(2026, 11, 2),
+            UserPrompt: "Quick dinners",
+            RequestedMealCount: 1,
+            DefaultSlotName: "Dinner",
+            PlaceOnDeck: false,
+            ExistingWeekScheduleLines: [],
+            CookbookCatalog:
+            [
+                new LlmCookbookRecipeCandidate(
+                    CatalogIndex: 1,
+                    RecipeId: Guid.NewGuid(),
+                    Title: "Lemon Herb Chicken",
+                    BaseServings: 4,
+                    TotalTimeMinutes: 30,
+                    Difficulty: "Easy",
+                    Tags: ["Quick"],
+                    KeyIngredients: ["Chicken"],
+                    AverageRating: 4.8m,
+                    TimesCooked: 3,
+                    DaysSinceLastCooked: 10
+                ),
+            ]
+        );
+
+        var result = await client.DraftWeeklyMealPlanAsync(config, context);
+
+        Assert.IsNotNull(result.Proposals);
+        Assert.AreEqual(1, result.Proposals.Count);
+        Assert.AreEqual(1, result.Proposals[0].CatalogIndex);
+        Assert.AreEqual("Lemon Herb Chicken", result.Proposals[0].RecipeTitle);
+    }
 }

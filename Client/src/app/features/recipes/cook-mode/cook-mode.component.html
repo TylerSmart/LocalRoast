@@ -14,7 +14,12 @@
     <!-- Top Bar -->
     <header class="cook-top-bar">
       <div class="top-bar-left">
-        <button mat-button class="exit-btn" (click)="exitCookMode()" aria-label="Exit Cook Mode">
+        <button
+          mat-button
+          class="exit-btn exit-cook-btn"
+          (click)="exitCookMode()"
+          aria-label="Exit Cook Mode"
+        >
           <mat-icon>arrow_back</mat-icon>
           <span class="exit-label">Exit</span>
         </button>
@@ -180,6 +185,18 @@
                     @if (item.ingredient.preparationNote) {
                       <span class="item-prep">({{ item.ingredient.preparationNote }})</span>
                     }
+                    @if (aiHelper.isAvailable() && !item.ingredient.linkedRecipeId) {
+                      <button
+                        type="button"
+                        mat-icon-button
+                        class="cook-substitute-btn desktop-sub-btn"
+                        matTooltip="Suggest substitution"
+                        aria-label="Suggest substitution"
+                        (click)="openIngredientSubstitution(item, $event)"
+                      >
+                        <mat-icon>auto_awesome</mat-icon>
+                      </button>
+                    }
                   </li>
                 }
               </ul>
@@ -260,7 +277,20 @@
                 <span class="callouts-label">Ingredients for this step:</span>
                 <div class="callouts-chips">
                   @for (callout of currentStep()!.ingredientCallouts; track callout.id) {
-                    <span class="cook-step-ingredient-chip">{{ callout.label }}</span>
+                    <span class="cook-step-ingredient-chip">
+                      <span>{{ callout.label }}</span>
+                      @if (aiHelper.isAvailable()) {
+                        <button
+                          type="button"
+                          class="cook-substitute-btn chip-sub-btn"
+                          matTooltip="Suggest substitution"
+                          aria-label="Suggest substitution"
+                          (click)="openIngredientSubstitutionById(callout.id, $event)"
+                        >
+                          <mat-icon>auto_awesome</mat-icon>
+                        </button>
+                      }
+                    </span>
                   }
                 </div>
               </div>
@@ -490,6 +520,18 @@
                     ></mat-checkbox>
                     <span class="item-qty">{{ item.displayQuantityAndUnit }}</span>
                     <span class="item-name">{{ item.ingredient.displayName }}</span>
+                    @if (aiHelper.isAvailable() && !item.ingredient.linkedRecipeId) {
+                      <button
+                        type="button"
+                        mat-icon-button
+                        class="cook-substitute-btn mobile-sub-btn"
+                        matTooltip="Suggest substitution"
+                        aria-label="Suggest substitution"
+                        (click)="openIngredientSubstitution(item, $event)"
+                      >
+                        <mat-icon>auto_awesome</mat-icon>
+                      </button>
+                    }
                   </li>
                 }
               </ul>

@@ -10,6 +10,15 @@
     </div>
     <div class="header-actions">
       <button
+        mat-stroked-button
+        class="merge-duplicates-btn"
+        (click)="openMergeDialog()"
+        aria-label="Merge duplicate food items"
+      >
+        <mat-icon>call_merge</mat-icon>
+        <span>Merge Duplicates</span>
+      </button>
+      <button
         mat-flat-button
         color="primary"
         (click)="openCreateDialog()"
@@ -141,22 +150,45 @@
                 <div class="item-aliases">
                   <span class="aliases-label">Aliases:</span>
                   @for (alias of item.aliases; track alias) {
-                    <span class="alias-pill">{{ alias }}</span>
+                    <span class="alias-pill alias-chip">{{ alias }}</span>
                   }
                 </div>
               }
 
               <!-- Footer with Recipe References and Actions -->
               <div class="item-footer">
-                <span class="usage-count">
-                  <mat-icon class="usage-icon">menu_book</mat-icon>
-                  <span
-                    >Used in {{ item.referencedRecipeCount }}
-                    {{ item.referencedRecipeCount === 1 ? 'recipe' : 'recipes' }}</span
-                  >
-                </span>
+                <div class="references-block">
+                  <span class="usage-count">
+                    <mat-icon class="usage-icon">menu_book</mat-icon>
+                    <span
+                      >{{ item.referencedRecipeCount }}
+                      {{ item.referencedRecipeCount === 1 ? 'recipe' : 'recipes' }}</span
+                    >
+                  </span>
+                  @if ((item.referencedShoppingListItemCount ?? 0) > 0) {
+                    <span
+                      class="usage-count shopping-usage-count"
+                      matTooltip="Referenced in active shopping lists"
+                    >
+                      <mat-icon class="usage-icon">shopping_bag</mat-icon>
+                      <span
+                        >{{ item.referencedShoppingListItemCount }} list
+                        {{ item.referencedShoppingListItemCount === 1 ? 'item' : 'items' }}</span
+                      >
+                    </span>
+                  }
+                </div>
 
                 <div class="item-actions">
+                  <button
+                    mat-icon-button
+                    class="merge-item-btn"
+                    (click)="openMergeDialog(item)"
+                    aria-label="Merge duplicate items into this"
+                    matTooltip="Merge duplicate items"
+                  >
+                    <mat-icon>call_merge</mat-icon>
+                  </button>
                   <button
                     mat-icon-button
                     (click)="openEditDialog(item)"

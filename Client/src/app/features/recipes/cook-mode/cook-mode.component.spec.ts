@@ -1,4 +1,5 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { signal } from '@angular/core';
 import { MatDialog } from '@angular/material/dialog';
 import { ActivatedRoute, Router } from '@angular/router';
 import { of } from 'rxjs';
@@ -7,6 +8,8 @@ import { RecipeDetailDto } from '../../../core/models/recipe.models';
 import { KitchenTimerService } from '../../../core/services/kitchen-timer/kitchen-timer.service';
 import { RecipeService } from '../../../core/services/recipe/recipe.service';
 import { WakeLockService } from '../../../core/services/wake-lock/wake-lock.service';
+import { AiKitchenHelperService } from '../../../core/services/ai-helpers/ai-kitchen-helper.service';
+import { IngredientSubstitutionDialogComponent } from '../ingredient-substitution-dialog/ingredient-substitution-dialog.component';
 import { CookModeComponent } from './cook-mode.component';
 
 describe('CookModeComponent', () => {
@@ -169,6 +172,13 @@ describe('CookModeComponent', () => {
     mockRouter = {
       navigate: vi.fn().mockResolvedValue(true),
     };
+    const mockAiHelperService = {
+      checkStatus: vi
+        .fn()
+        .mockReturnValue(of({ isAvailable: true, provider: 'Ollama', latencyMs: 25 })),
+      status: signal({ isAvailable: true, provider: 'Ollama', latencyMs: 25 }),
+      isAvailable: signal(true),
+    };
 
     await TestBed.configureTestingModule({
       imports: [CookModeComponent],
@@ -178,6 +188,7 @@ describe('CookModeComponent', () => {
         { provide: KitchenTimerService, useValue: mockKitchenTimerService },
         { provide: MatDialog, useValue: mockDialog },
         { provide: Router, useValue: mockRouter },
+        { provide: AiKitchenHelperService, useValue: mockAiHelperService },
         {
           provide: ActivatedRoute,
           useValue: {
@@ -247,5 +258,23 @@ describe('CookModeComponent', () => {
   it('releases wake lock on component destroy', () => {
     fixture.destroy();
     expect(mockWakeLockService.release).toHaveBeenCalled();
+  });
+
+  it('opens ingredient substitution dialog when requested', () => {
+    const item = component['groupedIngredients']()[0].items[0];
+    const event = new MouseEvent('click');
+    const stopSpy = vi.spyOn(event, 'stopPropagation');
+
+    component.openIngredientSubstitution(item, event);
+
+    expect(stopSpy).toHaveBeenCalled();
+    expect(mockDialog.open).toHaveBeenCalledWith(IngredientSubstitutionDialogComponent, {
+      data: expect.objectContaining({
+        recipeTitle: 'Beef Chili',
+        ingredientDisplayName: item.ingredient.displayName,
+      }),
+      width: '540px',
+      maxWidth: '95vw',
+    });
   });
 });

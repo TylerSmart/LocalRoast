@@ -6,6 +6,8 @@ import {
   CreateFoodItemRequest,
   FoodItemDto,
   FoodItemQueryParameters,
+  MergeFoodItemsRequest,
+  MergeFoodItemsResultDto,
   StoreAisleDto,
   UpdateFoodItemRequest,
 } from '../../models/food-catalog.models';
@@ -47,5 +49,9 @@ export class FoodCatalogService {
 
   deleteFoodItem(id: string): Observable<void> {
     return this.http.delete<void>(apiUrl(`/food-items/${id}`));
+  }
+
+  mergeFoodItems(request: MergeFoodItemsRequest): Observable<MergeFoodItemsResultDto> {
+    return this.http.post<MergeFoodItemsResultDto>(apiUrl('/food-items/merge'), request);
   }
 }

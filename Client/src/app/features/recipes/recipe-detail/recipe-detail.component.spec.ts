@@ -1,3 +1,4 @@
+import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { MatDialog } from '@angular/material/dialog';
 import { MatSnackBar } from '@angular/material/snack-bar';
@@ -5,6 +6,7 @@ import { provideRouter } from '@angular/router';
 import { of } from 'rxjs';
 import { RecipeDetailDto } from '../../../core/models/recipe.models';
 import { RecipeService } from '../../../core/services/recipe/recipe.service';
+import { AiKitchenHelperService } from '../../../core/services/ai-helpers/ai-kitchen-helper.service';
 import { RecipeShareDialogComponent } from '../recipe-share-dialog/recipe-share-dialog.component';
 import { RecipeDetailComponent } from './recipe-detail.component';
 
@@ -114,6 +116,14 @@ describe('RecipeDetailComponent', () => {
     open: vi.fn(),
   };
 
+  const mockAiHelperService = {
+    checkStatus: vi
+      .fn()
+      .mockReturnValue(of({ isAvailable: true, provider: 'Ollama', latencyMs: 25 })),
+    status: signal({ isAvailable: true, provider: 'Ollama', latencyMs: 25 }),
+    isAvailable: signal(true),
+  };
+
   beforeEach(async () => {
     await TestBed.configureTestingModule({
       imports: [RecipeDetailComponent],
@@ -122,6 +132,7 @@ describe('RecipeDetailComponent', () => {
         { provide: RecipeService, useValue: mockRecipeService },
         { provide: MatDialog, useValue: mockDialog },
         { provide: MatSnackBar, useValue: mockSnackBar },
+        { provide: AiKitchenHelperService, useValue: mockAiHelperService },
       ],
     }).compileComponents();
 

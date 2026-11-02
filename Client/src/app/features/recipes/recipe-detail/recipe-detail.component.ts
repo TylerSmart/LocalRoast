@@ -26,6 +26,7 @@ import {
   UnitSystem,
 } from '../../../core/models/recipe.models';
 import { RecipeService } from '../../../core/services/recipe/recipe.service';
+import { AiKitchenHelperService } from '../../../core/services/ai-helpers/ai-kitchen-helper.service';
 import {
   FormattedQuantityResult,
   formatDuration,
@@ -49,6 +50,7 @@ import {
 import { ShoppingListGenerationResultDto } from '../../../core/models/shopping.models';
 import { CookLogDialogComponent } from '../cook-log-dialog/cook-log-dialog.component';
 import { AddRecipeToListDialogComponent } from '../../shopping/add-recipe-to-list-dialog/add-recipe-to-list-dialog.component';
+import { IngredientSubstitutionDialogComponent } from '../ingredient-substitution-dialog/ingredient-substitution-dialog.component';
 
 export interface ScaledIngredientItem {
   ingredient: RecipeIngredientDto;
@@ -98,6 +100,7 @@ export class RecipeDetailComponent implements OnInit {
   private readonly recipeService = inject(RecipeService);
   private readonly dialog = inject(MatDialog);
   private readonly snackBar = inject(MatSnackBar);
+  protected readonly aiHelper = inject(AiKitchenHelperService);
 
   protected readonly recipe = signal<RecipeDetailDto | null>(null);
   protected readonly isLoading = signal<boolean>(true);
@@ -228,11 +231,29 @@ export class RecipeDetailComponent implements OnInit {
   });
 
   ngOnInit(): void {
+    this.aiHelper.checkStatus().subscribe();
     this.route.paramMap.subscribe((params) => {
       const id = params.get('id');
       if (id) {
         this.loadRecipe(id);
       }
+    });
+  }
+
+  openIngredientSubstitution(item: ScaledIngredientItem): void {
+    const r = this.recipe();
+    if (!r) return;
+
+    this.dialog.open(IngredientSubstitutionDialogComponent, {
+      width: '540px',
+      maxWidth: '95vw',
+      data: {
+        recipeId: r.id,
+        recipeIngredientId: item.ingredient.id,
+        ingredientDisplayName: item.ingredient.displayName,
+        scaledAmountDisplay: item.displayQuantityAndUnit,
+        targetServings: this.targetServings(),
+      },
     });
   }
 

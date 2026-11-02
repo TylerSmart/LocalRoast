@@ -1,12 +1,25 @@
+using System.Text.Json;
 using App.Core.Exceptions;
 using App.Core.FoodCatalog;
+using App.Core.Ingestion;
+using App.Core.Shopping;
 using App.Data.Entities;
 using Microsoft.EntityFrameworkCore;
 
 namespace App.Data.Services;
 
-public sealed class FoodCatalogService(AppDbContext dbContext) : IFoodCatalogService
+public sealed class FoodCatalogService(
+    AppDbContext dbContext,
+    IShoppingListService? shoppingListService = null,
+    IShoppingRealtimeNotifier? shoppingRealtimeNotifier = null,
+    TimeProvider? timeProvider = null
+) : IFoodCatalogService
 {
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+    };
+
     private static string NormalizeKey(string input)
     {
         var trimmed = input?.Trim();
@@ -65,7 +78,8 @@ public sealed class FoodCatalogService(AppDbContext dbContext) : IFoodCatalogSer
                 f.Aliases.Select(a => a.Alias).ToList(),
                 f.RecipeIngredients.Select(ri => ri.RecipeId).Distinct().Count(),
                 f.CreatedAt,
-                f.ModifiedAt
+                f.ModifiedAt,
+                f.ShoppingListItems.Count()
             ))
             .ToListAsync(cancellationToken);
     }
@@ -88,7 +102,8 @@ public sealed class FoodCatalogService(AppDbContext dbContext) : IFoodCatalogSer
                 f.Aliases.Select(a => a.Alias).ToList(),
                 f.RecipeIngredients.Select(ri => ri.RecipeId).Distinct().Count(),
                 f.CreatedAt,
-                f.ModifiedAt
+                f.ModifiedAt,
+                f.ShoppingListItems.Count()
             ))
             .FirstOrDefaultAsync(cancellationToken);
     }
@@ -341,5 +356,402 @@ public sealed class FoodCatalogService(AppDbContext dbContext) : IFoodCatalogSer
         dbContext.FoodItems.Remove(foodItem);
         await dbContext.SaveChangesAsync(cancellationToken);
         return true;
+    }
+
+    public async Task<MergeFoodItemsResultDto> MergeFoodItemsAsync(
+        MergeFoodItemsRequest request,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (request.TargetFoodItemId == Guid.Empty)
+        {
+            throw new DomainValidationException("Target food item ID must be specified.");
+        }
+
+        var distinctSourceIds = (request.SourceFoodItemIds ?? [])
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .ToList();
+
+        if (distinctSourceIds.Count == 0)
+        {
+            throw new DomainValidationException(
+                "At least one source food item ID must be specified."
+            );
+        }
+
+        if (distinctSourceIds.Contains(request.TargetFoodItemId))
+        {
+            throw new DomainValidationException("Cannot merge a food item into itself.");
+        }
+
+        var target = await dbContext
+            .FoodItems.Include(f => f.Aliases)
+            .FirstOrDefaultAsync(f => f.Id == request.TargetFoodItemId, cancellationToken);
+
+        if (target is null)
+        {
+            throw new NotFoundException("Target food item not found.");
+        }
+
+        var sources = await dbContext
+            .FoodItems.Include(f => f.Aliases)
+            .Where(f => distinctSourceIds.Contains(f.Id))
+            .ToListAsync(cancellationToken);
+
+        if (sources.Count != distinctSourceIds.Count)
+        {
+            throw new NotFoundException("One or more source food items not found.");
+        }
+
+        await using var tx = dbContext.Database.IsRelational()
+            ? await dbContext.Database.BeginTransactionAsync(cancellationToken)
+            : null;
+
+        // Aisle inheritance
+        if (!target.DefaultStoreAisleId.HasValue)
+        {
+            var inheritedAisleId = sources
+                .OrderBy(s => distinctSourceIds.IndexOf(s.Id))
+                .Select(s => s.DefaultStoreAisleId)
+                .FirstOrDefault(id => id.HasValue);
+
+            if (inheritedAisleId.HasValue)
+            {
+                target.DefaultStoreAisleId = inheritedAisleId.Value;
+            }
+        }
+
+        // Re-point RecipeIngredients
+        var repointedRecipeIngredients = await dbContext
+            .RecipeIngredients.Where(ri =>
+                ri.FoodItemId.HasValue && distinctSourceIds.Contains(ri.FoodItemId.Value)
+            )
+            .ToListAsync(cancellationToken);
+
+        foreach (var ri in repointedRecipeIngredients)
+        {
+            ri.FoodItemId = target.Id;
+        }
+
+        var repointedRecipeIngredientCount = repointedRecipeIngredients.Count;
+
+        // Re-point ShoppingListItems & consolidate
+        var sourceShoppingItems = await dbContext
+            .ShoppingListItems.Include(i => i.Sources)
+            .Where(i => i.FoodItemId.HasValue && distinctSourceIds.Contains(i.FoodItemId.Value))
+            .ToListAsync(cancellationToken);
+
+        var repointedShoppingListItemCount = sourceShoppingItems.Count;
+        var affectedListIds = sourceShoppingItems.Select(i => i.ShoppingListId).Distinct().ToList();
+
+        var sourceNames = sources.Select(s => s.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in sourceShoppingItems)
+        {
+            item.FoodItemId = target.Id;
+            if (sourceNames.Contains(item.DisplayName))
+            {
+                item.DisplayName = target.Name;
+            }
+        }
+
+        var consolidatedCount = 0;
+        if (affectedListIds.Count > 0)
+        {
+            var targetShoppingItems = await dbContext
+                .ShoppingListItems.Include(i => i.Sources)
+                .Where(i => affectedListIds.Contains(i.ShoppingListId) && i.FoodItemId == target.Id)
+                .ToListAsync(cancellationToken);
+
+            var allListItemsOnAffected = sourceShoppingItems
+                .Concat(targetShoppingItems)
+                .DistinctBy(i => i.Id)
+                .ToList();
+
+            var groups = allListItemsOnAffected.GroupBy(item =>
+                (
+                    item.ShoppingListId,
+                    item.IsChecked,
+                    item.IsPantryStapleExcluded,
+                    ConsolidationKey: ShoppingConsolidator.BuildConsolidationKey(
+                        target.Id,
+                        target.Name,
+                        ShoppingConsolidator.GetDimension(item.Unit, item.Quantity),
+                        item.Unit,
+                        item.CustomUnitName
+                    )
+                )
+            );
+
+            foreach (var group in groups)
+            {
+                var itemList = group.ToList();
+                if (itemList.Count > 1)
+                {
+                    var inputs = new List<ConsolidatableIngredientInput>();
+                    foreach (var item in itemList)
+                    {
+                        if (item.Sources.Count > 0)
+                        {
+                            foreach (var s in item.Sources)
+                            {
+                                inputs.Add(
+                                    new ConsolidatableIngredientInput(
+                                        target.Id,
+                                        target.Name,
+                                        target.IsPantryStaple,
+                                        s.ContributedQuantity ?? item.Quantity,
+                                        s.ContributedMaxQuantity ?? item.MaxQuantity,
+                                        item.Unit,
+                                        item.CustomUnitName,
+                                        item.Notes,
+                                        s.SourceKind,
+                                        s.MealPlanEntryId,
+                                        s.RecipeId,
+                                        s.SourceLabel,
+                                        s.ScheduledDate
+                                    )
+                                );
+                            }
+                        }
+                        else
+                        {
+                            inputs.Add(
+                                new ConsolidatableIngredientInput(
+                                    target.Id,
+                                    target.Name,
+                                    target.IsPantryStaple,
+                                    item.Quantity,
+                                    item.MaxQuantity,
+                                    item.Unit,
+                                    item.CustomUnitName,
+                                    item.Notes,
+                                    ShoppingListSourceKind.Manual,
+                                    null,
+                                    null,
+                                    "Manual",
+                                    null
+                                )
+                            );
+                        }
+                    }
+
+                    var consolidatedBuckets = ShoppingConsolidator.Consolidate(inputs);
+                    if (consolidatedBuckets.Count > 0)
+                    {
+                        var bucket = consolidatedBuckets[0];
+                        var surviving =
+                            itemList.FirstOrDefault(i => !sourceShoppingItems.Contains(i))
+                            ?? itemList.First();
+
+                        surviving.Quantity = bucket.Quantity;
+                        surviving.MaxQuantity = bucket.MaxQuantity;
+                        surviving.Unit = bucket.Unit;
+                        surviving.CustomUnitName = bucket.CustomUnitName;
+                        surviving.Dimension = bucket.Dimension;
+                        surviving.Notes = bucket.MergedNotes;
+                        surviving.DisplayName = target.Name;
+
+                        dbContext.ShoppingListItemSources.RemoveRange(surviving.Sources);
+                        surviving.Sources.Clear();
+                        foreach (var src in bucket.Sources)
+                        {
+                            var newSource = new ShoppingListItemSource
+                            {
+                                ShoppingListItemId = surviving.Id,
+                                SourceKind = src.SourceKind,
+                                MealPlanEntryId = src.MealPlanEntryId,
+                                RecipeId = src.RecipeId,
+                                SourceLabel = src.SourceLabel,
+                                ScheduledDate = src.ScheduledDate,
+                                ContributedQuantity = src.QuantityInConsolidatedUnit,
+                                ContributedMaxQuantity = src.MaxQuantityInConsolidatedUnit,
+                            };
+                            dbContext.ShoppingListItemSources.Add(newSource);
+                        }
+
+                        foreach (var redundant in itemList.Where(i => i.Id != surviving.Id))
+                        {
+                            dbContext.ShoppingListItemSources.RemoveRange(redundant.Sources);
+                            dbContext.ShoppingListItems.Remove(redundant);
+                            consolidatedCount++;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Review inbox drafts hygiene
+        var readyJobs = await dbContext
+            .IngestionJobs.Where(j =>
+                j.Status == IngestionJobStatus.ReadyForReview && j.ExtractedDraftJson != null
+            )
+            .ToListAsync(cancellationToken);
+
+        foreach (var job in readyJobs)
+        {
+            try
+            {
+                var draft = JsonSerializer.Deserialize<IngestionExtractedDraftDto>(
+                    job.ExtractedDraftJson!,
+                    JsonOptions
+                );
+
+                if (
+                    draft?.Ingredients is not null
+                    && draft.Ingredients.Any(i =>
+                        i.MatchedFoodItemId.HasValue
+                        && distinctSourceIds.Contains(i.MatchedFoodItemId.Value)
+                    )
+                )
+                {
+                    var updatedIngredients = draft
+                        .Ingredients.Select(ing =>
+                        {
+                            if (
+                                ing.MatchedFoodItemId.HasValue
+                                && distinctSourceIds.Contains(ing.MatchedFoodItemId.Value)
+                            )
+                            {
+                                return ing with
+                                {
+                                    MatchedFoodItemId = target.Id,
+                                    MatchedFoodItemName = target.Name,
+                                };
+                            }
+                            return ing;
+                        })
+                        .ToList();
+
+                    draft = draft with { Ingredients = updatedIngredients };
+                    job.ExtractedDraftJson = JsonSerializer.Serialize(draft, JsonOptions);
+                }
+            }
+            catch
+            {
+                // Ignore parse errors on drafts
+            }
+        }
+
+        // Aliases & source removal
+        var addedAliases = new List<string>();
+        var knownNormKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            target.NormalizedName,
+        };
+
+        foreach (var a in target.Aliases)
+        {
+            knownNormKeys.Add(a.NormalizedAlias);
+        }
+
+        if (request.KeepSourceNamesAsAliases)
+        {
+            foreach (var source in sources)
+            {
+                var sourceAliases = source.Aliases.ToList();
+                foreach (var alias in sourceAliases)
+                {
+                    if (knownNormKeys.Add(alias.NormalizedAlias))
+                    {
+                        alias.FoodItemId = target.Id;
+                        addedAliases.Add(alias.Alias);
+                    }
+                    else
+                    {
+                        dbContext.FoodItemAliases.Remove(alias);
+                    }
+                }
+            }
+
+            foreach (var source in sources)
+            {
+                if (knownNormKeys.Add(source.NormalizedName))
+                {
+                    var newAlias = new FoodItemAlias
+                    {
+                        FoodItemId = target.Id,
+                        Alias = source.Name,
+                        NormalizedAlias = source.NormalizedName,
+                    };
+                    dbContext.FoodItemAliases.Add(newAlias);
+                    addedAliases.Add(source.Name);
+                }
+            }
+        }
+        else
+        {
+            foreach (var source in sources)
+            {
+                foreach (var alias in source.Aliases)
+                {
+                    dbContext.FoodItemAliases.Remove(alias);
+                }
+            }
+        }
+
+        dbContext.FoodItems.RemoveRange(sources);
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        if (tx is not null)
+        {
+            await tx.CommitAsync(cancellationToken);
+        }
+
+        // Broadcast realtime SignalR updates if affected
+        if (
+            affectedListIds.Count > 0
+            && shoppingListService is not null
+            && shoppingRealtimeNotifier is not null
+        )
+        {
+            var now = timeProvider?.GetUtcNow() ?? DateTimeOffset.UtcNow;
+            var catalogSummary = await shoppingListService.GetShoppingListsAsync(cancellationToken);
+
+            foreach (var listId in affectedListIds)
+            {
+                var listDetail = await shoppingListService.GetShoppingListByIdAsync(
+                    listId,
+                    cancellationToken
+                );
+                if (listDetail is not null)
+                {
+                    var listEvt = new ShoppingListRealtimeEventDto(
+                        ShoppingRealtimeEventType.ListUpdated,
+                        listId,
+                        listDetail,
+                        null,
+                        null,
+                        null,
+                        "System",
+                        now
+                    );
+                    var catEvt = new ShoppingListsCatalogChangedDto(
+                        ShoppingRealtimeEventType.ListUpdated,
+                        listId,
+                        catalogSummary,
+                        now
+                    );
+                    await shoppingRealtimeNotifier.NotifyListChangedAsync(
+                        listEvt,
+                        catEvt,
+                        cancellationToken
+                    );
+                }
+            }
+        }
+
+        var targetDto = (await GetFoodItemByIdAsync(target.Id, cancellationToken))!;
+        return new MergeFoodItemsResultDto(
+            targetDto,
+            sources.Count,
+            repointedRecipeIngredientCount,
+            repointedShoppingListItemCount,
+            consolidatedCount,
+            addedAliases
+        );
     }
 }

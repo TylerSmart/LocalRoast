@@ -173,3 +173,8 @@ export interface ApplyMealPlanTemplateRequest {
   targetWeekStartDate: string;
   mode?: ApplyTemplateMode;
 }
+
+export interface ApplyDraftMealPlanRequest {
+  weekStartDate: string;
+  entries: CreateMealPlanEntryRequest[];
+}

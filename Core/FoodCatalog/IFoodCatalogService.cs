@@ -25,4 +25,9 @@ public interface IFoodCatalogService
     );
 
     Task<bool> DeleteFoodItemAsync(Guid id, CancellationToken cancellationToken = default);
+
+    Task<MergeFoodItemsResultDto> MergeFoodItemsAsync(
+        MergeFoodItemsRequest request,
+        CancellationToken cancellationToken = default
+    );
 }

@@ -359,6 +359,19 @@
                     </span>
                   </mat-checkbox>
 
+                  @if (aiHelper.isAvailable() && !item.ingredient.linkedRecipeId) {
+                    <button
+                      type="button"
+                      mat-icon-button
+                      class="substitute-ing-btn no-print"
+                      matTooltip="Suggest ingredient substitution"
+                      aria-label="Suggest ingredient substitution"
+                      (click)="openIngredientSubstitution(item)"
+                    >
+                      <mat-icon>auto_awesome</mat-icon>
+                    </button>
+                  }
+
                   <!-- Linked Sub-Recipe inline expansion if applicable -->
                   @if (item.ingredient.linkedRecipeId) {
                     @if (getSubRecipe(item.ingredient.linkedRecipeId); as subRecipe) {

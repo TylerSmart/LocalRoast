@@ -26,6 +26,13 @@
     font-size: 0.95rem;
     color: var(--mat-sys-on-surface-variant, #49454f);
   }
+
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
 }
 
 .filter-card {
@@ -73,7 +80,6 @@
   justify-content: center;
   padding: 3rem 1rem;
   text-align: center;
-  gap: 0.75rem;
   color: var(--mat-sys-on-surface-variant, #49454f);
 
   .empty-icon {
@@ -81,27 +87,34 @@
     width: 3rem;
     height: 3rem;
     color: var(--mat-sys-outline, #79747e);
+    margin-bottom: 0.5rem;
+  }
+
+  h3 {
+    margin: 0 0 0.25rem 0;
+    font-size: 1.25rem;
+  }
+
+  p {
+    margin: 0 0 1rem 0;
+    max-width: 400px;
   }
 }
 
 .catalog-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 1rem;
 }
 
 .food-item-card {
   padding: 1rem;
-  border: 1px solid var(--mat-sys-outline-variant, #cac4d0);
-  background-color: var(--mat-sys-surface, #fff);
-  box-shadow: none !important;
-  border-radius: 0.75rem;
   transition:
     transform 0.15s ease,
     box-shadow 0.15s ease;
 
   &:hover {
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08) !important;
+    transform: translateY(-2px);
   }
 }
 
@@ -121,29 +134,29 @@
     display: flex;
     flex-direction: column;
     gap: 0.25rem;
+  }
 
-    .item-name {
-      margin: 0;
-      font-size: 1.1rem;
-      font-weight: 600;
-    }
+  .item-name {
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 600;
+  }
 
-    .aisle-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.25rem;
-      font-size: 0.75rem;
-      padding: 0.15rem 0.5rem;
-      border-radius: 9999px;
-      background-color: var(--mat-sys-surface-variant, #e7e0ec);
-      color: var(--mat-sys-on-surface-variant, #49454f);
-      width: fit-content;
+  .aisle-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: 0.75rem;
+    color: var(--mat-sys-primary, #6750a4);
+    background-color: var(--mat-sys-primary-container, #eaddff);
+    padding: 0.15rem 0.5rem;
+    border-radius: 1rem;
+    width: fit-content;
 
-      .badge-icon {
-        font-size: 0.875rem;
-        width: 0.875rem;
-        height: 0.875rem;
-      }
+    .badge-icon {
+      font-size: 0.875rem;
+      width: 0.875rem;
+      height: 0.875rem;
     }
   }
 
@@ -179,6 +192,12 @@
   padding-top: 0.5rem;
   border-top: 1px dashed var(--mat-sys-outline-variant, #cac4d0);
 
+  .references-block {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+
   .usage-count {
     display: inline-flex;
     align-items: center;
@@ -191,6 +210,10 @@
       width: 0.875rem;
       height: 0.875rem;
     }
+  }
+
+  .shopping-usage-count {
+    color: var(--mat-sys-primary, #6750a4);
   }
 
   .item-actions {

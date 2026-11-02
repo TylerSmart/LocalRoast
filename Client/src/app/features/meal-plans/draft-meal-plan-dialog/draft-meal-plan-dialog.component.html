@@ -1,0 +1,234 @@
+<div class="draft-dialog-container">
+  <div class="dialog-header">
+    <div class="title-wrap">
+      <mat-icon class="ai-header-icon">auto_awesome</mat-icon>
+      <h2 mat-dialog-title class="dialog-title">Draft Weekly Meal Plan</h2>
+    </div>
+    <button mat-icon-button type="button" (click)="close()" aria-label="Close dialog">
+      <mat-icon>close</mat-icon>
+    </button>
+  </div>
+
+  <mat-dialog-content class="dialog-content">
+    <div class="generator-section">
+      <p class="section-desc">
+        Ask your local AI assistant to recommend a grounded schedule from your cookbook recipes.
+      </p>
+
+      <div class="preset-chips-section">
+        <span class="preset-label">Ideas:</span>
+        <div class="preset-chips-list">
+          @for (preset of presets; track preset) {
+            <button
+              type="button"
+              class="preset-chip"
+              (click)="selectPreset(preset)"
+              [class.is-active]="prompt() === preset"
+            >
+              {{ preset }}
+            </button>
+          }
+        </div>
+      </div>
+
+      <div class="prompt-box">
+        <mat-form-field appearance="outline" class="w-full">
+          <mat-label>Plan preferences or dietary prompt</mat-label>
+          <textarea
+            matInput
+            rows="2"
+            class="prompt-input"
+            [ngModel]="prompt()"
+            (ngModelChange)="prompt.set($event)"
+            placeholder="e.g. Quick 30-minute meals for busy weeknights with high protein..."
+          ></textarea>
+        </mat-form-field>
+      </div>
+
+      <div class="form-row-params">
+        <mat-form-field appearance="outline" class="meal-count-field">
+          <mat-label>Meals</mat-label>
+          <mat-select [ngModel]="mealCount()" (ngModelChange)="mealCount.set($event)">
+            <mat-option [value]="1">1 meal</mat-option>
+            <mat-option [value]="2">2 meals</mat-option>
+            <mat-option [value]="3">3 meals</mat-option>
+            <mat-option [value]="4">4 meals</mat-option>
+            <mat-option [value]="5">5 meals</mat-option>
+            <mat-option [value]="6">6 meals</mat-option>
+            <mat-option [value]="7">7 meals</mat-option>
+          </mat-select>
+        </mat-form-field>
+
+        <mat-form-field appearance="outline" class="default-slot-field">
+          <mat-label>Default Slot</mat-label>
+          <mat-select [ngModel]="defaultSlot()" (ngModelChange)="defaultSlot.set($event)">
+            @for (slot of slots; track slot) {
+              <mat-option [value]="slot">{{ slot }}</mat-option>
+            }
+          </mat-select>
+        </mat-form-field>
+
+        <div class="deck-toggle-wrap">
+          <mat-checkbox
+            class="place-on-deck-checkbox"
+            [ngModel]="placeOnDeck()"
+            (ngModelChange)="placeOnDeck.set($event)"
+          >
+            Place On-Deck shelf
+          </mat-checkbox>
+        </div>
+
+        <button
+          type="button"
+          mat-flat-button
+          color="primary"
+          class="draft-submit-btn"
+          (click)="submitDraft()"
+          [disabled]="isLoading() || !prompt().trim()"
+        >
+          @if (isLoading()) {
+            <mat-spinner diameter="18" class="inline-spinner"></mat-spinner>
+          } @else {
+            <mat-icon>auto_awesome</mat-icon>
+          }
+          <span>{{ isLoading() ? 'Drafting...' : 'Draft Plan' }}</span>
+        </button>
+      </div>
+    </div>
+
+    @if (errorMessage()) {
+      <div class="error-banner" role="alert">
+        <mat-icon>error_outline</mat-icon>
+        <span>{{ errorMessage() }}</span>
+      </div>
+    }
+
+    @if (draftResponse(); as resp) {
+      <div class="results-section">
+        <div class="results-header">
+          <h3 class="results-title">Proposed Meal Schedule</h3>
+          <span class="meta-pill">
+            {{ resp.modelUsed }} &bull; {{ resp.consideredCookbookRecipeCount }} recipes evaluated
+          </span>
+        </div>
+
+        <div class="candidates-list">
+          @for (item of candidateItems(); track item.id) {
+            <div class="candidate-card" [class.is-deselected]="!item.selected">
+              <div class="card-selection">
+                <mat-checkbox
+                  class="candidate-checkbox"
+                  [checked]="item.selected"
+                  (change)="toggleCandidate(item.id)"
+                  [attr.aria-label]="'Select ' + item.recipe.title"
+                ></mat-checkbox>
+              </div>
+
+              <div class="card-media">
+                @if (item.recipe.thumbnailImagePath) {
+                  <img
+                    [src]="item.recipe.thumbnailImagePath"
+                    [alt]="item.recipe.title"
+                    class="candidate-thumb"
+                  />
+                } @else {
+                  <div class="candidate-thumb-placeholder">
+                    <mat-icon>restaurant</mat-icon>
+                  </div>
+                }
+              </div>
+
+              <div class="card-body">
+                <div class="recipe-title-bar">
+                  <h4 class="candidate-title">{{ item.recipe.title }}</h4>
+                  <div class="candidate-badges">
+                    @if (item.recipe.totalTimeMinutes) {
+                      <span class="badge time-badge">
+                        <mat-icon>schedule</mat-icon>
+                        {{ item.recipe.totalTimeMinutes }}m
+                      </span>
+                    }
+                    <span class="badge servings-badge">
+                      <mat-icon>group</mat-icon>
+                      {{ item.recipe.baseServings }} servings
+                    </span>
+                  </div>
+                </div>
+
+                <p class="candidate-rationale">{{ item.rationale }}</p>
+
+                <div class="candidate-schedule-controls">
+                  @if (!item.isOnDeck) {
+                    <div class="control-item">
+                      <label class="control-label" [for]="'date-' + item.id">Date</label>
+                      <input
+                        type="date"
+                        [id]="'date-' + item.id"
+                        class="candidate-date-input"
+                        [value]="item.scheduledDate"
+                        (input)="updateScheduledDate(item.id, $any($event.target).value)"
+                      />
+                    </div>
+
+                    <div class="control-item">
+                      <label class="control-label" [for]="'slot-' + item.id">Slot</label>
+                      <select
+                        [id]="'slot-' + item.id"
+                        class="candidate-slot-select"
+                        [value]="item.slot"
+                        (change)="updateSlot(item.id, $any($event.target).value)"
+                      >
+                        @for (slot of slots; track slot) {
+                          <option [value]="slot">{{ slot }}</option>
+                        }
+                      </select>
+                    </div>
+                  } @else {
+                    <span class="on-deck-tag">On-Deck</span>
+                  }
+
+                  <div class="control-item">
+                    <label class="control-label" [for]="'servings-' + item.id">Servings</label>
+                    <input
+                      type="number"
+                      [id]="'servings-' + item.id"
+                      class="candidate-servings-input"
+                      min="1"
+                      max="50"
+                      [value]="item.targetServings"
+                      (change)="updateServings(item.id, +$any($event.target).value)"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          }
+        </div>
+      </div>
+    }
+  </mat-dialog-content>
+
+  <mat-dialog-actions align="end" class="dialog-actions">
+    <button mat-button type="button" class="cancel-btn" (click)="close()">Cancel</button>
+
+    @if (candidateItems().length > 0) {
+      <button
+        type="button"
+        mat-flat-button
+        color="primary"
+        class="apply-draft-btn"
+        [disabled]="selectedCount() === 0 || isSubmitting()"
+        (click)="applySelectedMeals()"
+      >
+        @if (isSubmitting()) {
+          <mat-spinner diameter="18" class="inline-spinner"></mat-spinner>
+        } @else {
+          <mat-icon>playlist_add_check</mat-icon>
+        }
+        <span>{{
+          isSubmitting() ? 'Adding to Plan...' : 'Add Selected Meals (' + selectedCount() + ')'
+        }}</span>
+      </button>
+    }
+  </mat-dialog-actions>
+</div>

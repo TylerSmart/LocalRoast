@@ -171,8 +171,148 @@ public sealed class LlmExtractionClient(HttpClient httpClient) : ILlmExtractionC
             );
         }
 
-        var normalizedBase = NormalizeBaseUrl(config.Provider, config.BaseUrl);
         var systemPrompt = BuildExtractionSystemPrompt(context);
+        var responseContent = await SendStructuredTextChatAsync(
+            config,
+            "recipe_extraction",
+            GetRecipeExtractionJsonSchema(),
+            systemPrompt,
+            context.SourceContent,
+            temperature: 0.1,
+            cancellationToken
+        );
+
+        var cleanedJson = CleanMarkdownJsonFences(responseContent);
+
+        try
+        {
+            var result = JsonSerializer.Deserialize<LlmExtractedRecipePayload>(
+                cleanedJson,
+                JsonOptions
+            );
+            if (result is null || string.IsNullOrWhiteSpace(result.Title))
+            {
+                throw new DomainValidationException(
+                    "Extracted recipe output was empty or missing a title."
+                );
+            }
+            return result;
+        }
+        catch (JsonException ex)
+        {
+            throw new DomainValidationException(
+                $"Failed to parse recipe extraction JSON output from LLM: {ex.Message}"
+            );
+        }
+    }
+
+    public async Task<LlmSubstitutionPayload> SuggestIngredientSubstitutionsAsync(
+        EffectiveLlmConnectionConfig config,
+        LlmSubstitutionContext context,
+        CancellationToken cancellationToken = default
+    )
+    {
+        if (string.IsNullOrWhiteSpace(config.TextModel))
+        {
+            throw new LlmHostUnavailableException(
+                "No Text LLM model is configured in LLM Settings. Please select a Text Model and retry."
+            );
+        }
+
+        var systemPrompt = BuildSubstitutionSystemPrompt();
+        var userPrompt = BuildSubstitutionUserPrompt(context);
+
+        var responseContent = await SendStructuredTextChatAsync(
+            config,
+            "ingredient_substitutions",
+            GetIngredientSubstitutionJsonSchema(),
+            systemPrompt,
+            userPrompt,
+            temperature: 0.2,
+            cancellationToken
+        );
+
+        var cleanedJson = CleanMarkdownJsonFences(responseContent);
+
+        try
+        {
+            var result = JsonSerializer.Deserialize<LlmSubstitutionPayload>(
+                cleanedJson,
+                JsonOptions
+            );
+            if (result is null || result.Substitutions is null || result.Substitutions.Count == 0)
+            {
+                throw new DomainValidationException("Ingredient substitution output was empty.");
+            }
+            return result;
+        }
+        catch (JsonException ex)
+        {
+            throw new DomainValidationException(
+                $"Failed to parse ingredient substitution JSON output from LLM: {ex.Message}"
+            );
+        }
+    }
+
+    public async Task<LlmDraftMealPlanPayload> DraftWeeklyMealPlanAsync(
+        EffectiveLlmConnectionConfig config,
+        LlmDraftMealPlanContext context,
+        CancellationToken cancellationToken = default
+    )
+    {
+        if (string.IsNullOrWhiteSpace(config.TextModel))
+        {
+            throw new LlmHostUnavailableException(
+                "No Text LLM model is configured in LLM Settings. Please select a Text Model and retry."
+            );
+        }
+
+        var systemPrompt = BuildDraftMealPlanSystemPrompt();
+        var userPrompt = BuildDraftMealPlanUserPrompt(context);
+
+        var responseContent = await SendStructuredTextChatAsync(
+            config,
+            "draft_meal_plan",
+            GetDraftMealPlanJsonSchema(),
+            systemPrompt,
+            userPrompt,
+            temperature: 0.2,
+            cancellationToken
+        );
+
+        var cleanedJson = CleanMarkdownJsonFences(responseContent);
+
+        try
+        {
+            var result = JsonSerializer.Deserialize<LlmDraftMealPlanPayload>(
+                cleanedJson,
+                JsonOptions
+            );
+            if (result is null || result.Proposals is null || result.Proposals.Count == 0)
+            {
+                throw new DomainValidationException("Draft meal plan output was empty.");
+            }
+            return result;
+        }
+        catch (JsonException ex)
+        {
+            throw new DomainValidationException(
+                $"Failed to parse draft meal plan JSON output from LLM: {ex.Message}"
+            );
+        }
+    }
+
+    private async Task<string> SendStructuredTextChatAsync(
+        EffectiveLlmConnectionConfig config,
+        string schemaName,
+        object jsonSchema,
+        string systemPrompt,
+        string userPrompt,
+        double temperature,
+        CancellationToken cancellationToken
+    )
+    {
+        var normalizedBase = NormalizeBaseUrl(config.Provider, config.BaseUrl);
         var timeout = TimeSpan.FromSeconds(Math.Max(15, config.RequestTimeoutSeconds));
         var sw = Stopwatch.StartNew();
 
@@ -190,17 +330,17 @@ public sealed class LlmExtractionClient(HttpClient httpClient) : ILlmExtractionC
             {
                 var payload = new
                 {
-                    model = config.TextModel.Trim(),
+                    model = config.TextModel!.Trim(),
                     stream = false,
                     keep_alive = string.IsNullOrWhiteSpace(config.OllamaKeepAlive)
                         ? "5m"
                         : config.OllamaKeepAlive.Trim(),
-                    options = new { temperature = 0.1 },
-                    format = GetRecipeExtractionJsonSchema(),
+                    options = new { temperature },
+                    format = jsonSchema,
                     messages = new object[]
                     {
                         new { role = "system", content = systemPrompt },
-                        new { role = "user", content = context.SourceContent },
+                        new { role = "user", content = userPrompt },
                     },
                 };
 
@@ -223,30 +363,29 @@ public sealed class LlmExtractionClient(HttpClient httpClient) : ILlmExtractionC
             }
             else // OpenAiCompatible
             {
-                var schemaObj = GetRecipeExtractionJsonSchema();
-                var schemaString = JsonSerializer.Serialize(schemaObj);
+                var schemaString = JsonSerializer.Serialize(jsonSchema);
                 var systemWithSchema =
                     $"{systemPrompt}\n\nStrict Output Rule: You MUST respond strictly in valid JSON matching this schema:\n{schemaString}";
 
                 var payload = new
                 {
-                    model = config.TextModel.Trim(),
+                    model = config.TextModel!.Trim(),
                     stream = false,
-                    temperature = 0.1,
+                    temperature,
                     response_format = new
                     {
                         type = "json_schema",
                         json_schema = new
                         {
-                            name = "recipe_extraction",
+                            name = schemaName,
                             strict = true,
-                            schema = schemaObj,
+                            schema = jsonSchema,
                         },
                     },
                     messages = new object[]
                     {
                         new { role = "system", content = systemWithSchema },
-                        new { role = "user", content = context.SourceContent },
+                        new { role = "user", content = userPrompt },
                     },
                 };
 
@@ -294,28 +433,7 @@ public sealed class LlmExtractionClient(HttpClient httpClient) : ILlmExtractionC
             );
         }
 
-        var cleanedJson = CleanMarkdownJsonFences(responseContent);
-
-        try
-        {
-            var result = JsonSerializer.Deserialize<LlmExtractedRecipePayload>(
-                cleanedJson,
-                JsonOptions
-            );
-            if (result is null || string.IsNullOrWhiteSpace(result.Title))
-            {
-                throw new DomainValidationException(
-                    "Extracted recipe output was empty or missing a title."
-                );
-            }
-            return result;
-        }
-        catch (JsonException ex)
-        {
-            throw new DomainValidationException(
-                $"Failed to parse recipe extraction JSON output from LLM: {ex.Message}"
-            );
-        }
+        return responseContent;
     }
 
     public async Task<LlmExtractedRecipePayload> ExtractRecipeFromImagesAsync(
@@ -668,6 +786,101 @@ Rules:
 """;
     }
 
+    private static string BuildSubstitutionSystemPrompt()
+    {
+        return """
+You are an expert culinary chef and recipe consultant.
+Your goal is to suggest practical, high-quality ingredient substitutions for a specific ingredient in a home recipe.
+
+Rules:
+1. Provide 2 to 3 realistic, culinary-sound substitutions tailored specifically to how the ingredient functions in the recipe.
+2. For each substitution:
+   - "label": Short name of the substitute (e.g. "Lemon Juice + Milk", "Greek Yogurt", "Applesauce").
+   - "ratioAndAmount": The exact scaled measurement to use for the target amount (e.g. "1 tbsp lemon juice + whole milk to measure 1 cup").
+   - "culinaryNotes": How to mix, prepare, or incorporate this substitute.
+   - "flavorOrTextureImpact": Any subtle change in flavor, acidity, moisture, or texture the cook should expect.
+3. If dietary or pantry constraints are specified, strictly respect them.
+""";
+    }
+
+    private static string BuildSubstitutionUserPrompt(LlmSubstitutionContext context)
+    {
+        return $$"""
+Recipe: {{context.RecipeTitle}}
+Description: {{context.RecipeDescription ?? "N/A"}}
+Target Servings: {{context.TargetServings}}
+Ingredient to Substitute: {{context.TargetIngredientName}} (Scaled Amount: {{context.ScaledAmountDisplay}}{{(
+                !string.IsNullOrWhiteSpace(context.PreparationNote)
+                    ? $", {context.PreparationNote}"
+                    : ""
+            )}})
+Other Ingredients in Dish: {{(
+                context.OtherRecipeIngredients.Count > 0
+                    ? string.Join(", ", context.OtherRecipeIngredients)
+                    : "None listed"
+            )}}
+Relevant Cooking Steps:
+{{(
+                context.RelevantStepInstructions.Count > 0
+                    ? string.Join(
+                        "\n",
+                        context.RelevantStepInstructions.Select((s, i) => $"{i + 1}. {s}")
+                    )
+                    : "N/A"
+            )}}
+{{(
+                !string.IsNullOrWhiteSpace(context.DietaryOrPantryNote)
+                    ? $"Dietary / Pantry Constraint: {context.DietaryOrPantryNote.Trim()}"
+                    : ""
+            )}}
+""";
+    }
+
+    private static string BuildDraftMealPlanSystemPrompt()
+    {
+        return """
+You are an expert household meal planning assistant.
+Your goal is to suggest a cohesive, satisfying weekly meal plan for a household strictly using recipes from their personal saved cookbook catalog.
+
+Strict Rules:
+1. You MUST ONLY propose recipes from the provided Household Cookbook Catalog using their exact integer "catalogIndex".
+2. NEVER invent, hallucinate, or suggest any recipe that is not listed in the catalog.
+3. Respect the user's prompt constraints (e.g. max time, vegetarian, high-rated, specific proteins, busy weeknights).
+4. For each proposal:
+   - "catalogIndex": The integer index of the recipe from the catalog (1-based).
+   - "recipeTitle": Title of the recipe matching the catalog.
+   - "dayOffset": Day of the week offset: 0 for Monday, 1 for Tuesday, ..., 6 for Sunday (or null if placed on-deck).
+   - "slot": Meal slot ("Breakfast", "Lunch", "Dinner", or "SnackPrep").
+   - "isOnDeck": True if placed in the flexible weekly On-Deck tray, otherwise false.
+   - "targetServings": Servings to cook (defaults to the recipe's base servings).
+   - "rationale": Short explanation of why this recipe fits the plan and prompt.
+""";
+    }
+
+    private static string BuildDraftMealPlanUserPrompt(LlmDraftMealPlanContext context)
+    {
+        var catalogLines = context.CookbookCatalog.Select(c =>
+            $"[{c.CatalogIndex}] {c.Title} | BaseServings: {c.BaseServings} | Time: {(c.TotalTimeMinutes.HasValue ? $"{c.TotalTimeMinutes}m" : "N/A")} | Difficulty: {c.Difficulty ?? "N/A"} | Rating: {(c.AverageRating.HasValue ? $"★{c.AverageRating:F1}" : "Unrated")} | Cooked: {c.TimesCooked}x (Last: {(c.DaysSinceLastCooked.HasValue ? $"{c.DaysSinceLastCooked}d ago" : "Never")}) | Tags: {(c.Tags.Count > 0 ? string.Join(", ", c.Tags) : "None")} | Ingredients: {(c.KeyIngredients.Count > 0 ? string.Join(", ", c.KeyIngredients) : "N/A")}"
+        );
+
+        return $$"""
+Target Week: Monday {{context.WeekStartDate:yyyy-MM-dd}}
+User Request / Constraints: {{context.UserPrompt}}
+Requested Number of Meals: {{context.RequestedMealCount}}
+Default Meal Slot: {{context.DefaultSlotName}}
+Place in On-Deck Tray by Default: {{context.PlaceOnDeck}}
+Existing Scheduled Meals This Week:
+{{(
+                context.ExistingWeekScheduleLines.Count > 0
+                    ? string.Join("\n", context.ExistingWeekScheduleLines)
+                    : "None scheduled yet"
+            )}}
+
+Household Cookbook Catalog:
+{{string.Join("\n", catalogLines)}}
+""";
+    }
+
     private static object GetRecipeExtractionJsonSchema()
     {
         return new
@@ -747,6 +960,71 @@ Rules:
                 },
             },
             required = new[] { "title", "ingredients", "steps" },
+        };
+    }
+
+    private static object GetIngredientSubstitutionJsonSchema()
+    {
+        return new
+        {
+            type = "object",
+            properties = new
+            {
+                substitutions = new
+                {
+                    type = "array",
+                    items = new
+                    {
+                        type = "object",
+                        properties = new
+                        {
+                            label = new { type = "string" },
+                            ratioAndAmount = new { type = "string" },
+                            culinaryNotes = new { type = "string" },
+                            flavorOrTextureImpact = new { type = "string" },
+                        },
+                        required = new[]
+                        {
+                            "label",
+                            "ratioAndAmount",
+                            "culinaryNotes",
+                            "flavorOrTextureImpact",
+                        },
+                    },
+                },
+            },
+            required = new[] { "substitutions" },
+        };
+    }
+
+    private static object GetDraftMealPlanJsonSchema()
+    {
+        return new
+        {
+            type = "object",
+            properties = new
+            {
+                proposals = new
+                {
+                    type = "array",
+                    items = new
+                    {
+                        type = "object",
+                        properties = new
+                        {
+                            catalogIndex = new { type = "integer" },
+                            recipeTitle = new { type = "string" },
+                            dayOffset = new { type = "integer" },
+                            slot = new { type = "string" },
+                            isOnDeck = new { type = "boolean" },
+                            targetServings = new { type = "number" },
+                            rationale = new { type = "string" },
+                        },
+                        required = new[] { "catalogIndex", "rationale" },
+                    },
+                },
+            },
+            required = new[] { "proposals" },
         };
     }
 }
