@@ -121,6 +121,7 @@ public sealed class RecipeCookbookE2ETests : E2ETestBase
             .Not.ToBeVisibleAsync();
 
         // Filter by Draft / Review
+        await Page.Locator("button.filter-toggle-btn").ClickAsync();
         await Page.Locator("mat-select", new() { HasText = "Published" }).ClickAsync();
         await Page.Locator("mat-option", new() { HasText = "Draft / Review" }).ClickAsync();
         await Expect(Page.Locator(".recipe-card", new() { HasText = draftTitle }))
@@ -180,6 +181,7 @@ public sealed class RecipeCookbookE2ETests : E2ETestBase
         await Expect(Page.Locator(".ingredient-row")).ToContainTextAsync("Yellow Cornmeal");
 
         // 3. Click Edit
+        await Page.Locator(".recipe-actions-menu-btn").ClickAsync();
         await Page.Locator("a[aria-label='Edit recipe']").ClickAsync();
         await Expect(Page).ToHaveURLAsync(new Regex(".*/recipes/[a-f0-9-]+/edit$"));
         await Expect(Page.Locator(".page-title")).ToContainTextAsync("Edit Recipe");

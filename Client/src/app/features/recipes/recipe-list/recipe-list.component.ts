@@ -24,6 +24,10 @@ import { TaxonomyService } from '../../../core/services/taxonomy/taxonomy.servic
 import { formatMinutes } from '../../../core/utils/culinary-math';
 import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialog/confirm-dialog.component';
 import {
+  SearchableSelectComponent,
+  SearchableSelectOption,
+} from '../../../shared/components/searchable-select/searchable-select.component';
+import {
   CollectionDialogComponent,
   CollectionDialogData,
 } from '../collection-dialog/collection-dialog.component';
@@ -42,6 +46,7 @@ import { TagDialogComponent, TagDialogData } from '../tag-dialog/tag-dialog.comp
     MatChipsModule,
     MatTooltipModule,
     MatProgressSpinnerModule,
+    SearchableSelectComponent,
   ],
   selector: 'app-recipe-list',
   templateUrl: './recipe-list.component.html',
@@ -57,6 +62,14 @@ export class RecipeListComponent implements OnInit {
   protected readonly recipes = signal<RecipeSummaryDto[]>([]);
   protected readonly collections = signal<CollectionDto[]>([]);
   protected readonly tags = signal<TagDto[]>([]);
+
+  protected readonly tagOptions = computed<SearchableSelectOption[]>(() =>
+    this.tags().map((t) => ({
+      value: t.id,
+      label: t.name,
+      group: t.category,
+    })),
+  );
 
   protected readonly searchQuery = signal<string>('');
   protected readonly selectedStatus = signal<RecipeStatus | 'All'>('Published');

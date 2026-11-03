@@ -1,4 +1,4 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatButtonToggleModule } from '@angular/material/button-toggle';
@@ -11,6 +11,8 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSelectModule } from '@angular/material/select';
+import { Observable } from 'rxjs';
+import { map } from 'rxjs/operators';
 import {
   CreateMealPlanEntryRequest,
   MEAL_SLOTS,
@@ -22,6 +24,10 @@ import {
 import { RecipeSummaryDto } from '../../../core/models/recipe.models';
 import { MealPlanService } from '../../../core/services/meal-plan/meal-plan.service';
 import { RecipeService } from '../../../core/services/recipe/recipe.service';
+import {
+  SearchableSelectComponent,
+  SearchableSelectOption,
+} from '../../../shared/components/searchable-select/searchable-select.component';
 import {
   coerceToDateLocal,
   coerceToIsoDateLocal,
@@ -60,6 +66,7 @@ export interface MealPlanEntryDialogData {
     MatButtonToggleModule,
     MatProgressSpinnerModule,
     MatChipsModule,
+    SearchableSelectComponent,
   ],
   providers: [provideNativeDateAdapter()],
   selector: 'app-meal-plan-entry-dialog',
@@ -81,6 +88,51 @@ export class MealPlanEntryDialogComponent implements OnInit {
   protected readonly recipes = signal<RecipeSummaryDto[]>([]);
   protected readonly recipeSearchTerm = signal('');
   protected readonly errorMessage = signal<string | null>(null);
+
+  protected readonly recipeOptions = computed<SearchableSelectOption[]>(() =>
+    this.recipes().map((r) => ({
+      value: r.id,
+      label: r.title,
+      sublabel: `${r.baseServings} servings`,
+    })),
+  );
+
+  protected readonly preselectedRecipeOption = computed<SearchableSelectOption | null>(() => {
+    if (this.data.preselectedRecipe) {
+      return {
+        value: this.data.preselectedRecipe.id,
+        label: this.data.preselectedRecipe.title,
+        sublabel: `${this.data.preselectedRecipe.baseServings} servings`,
+      };
+    }
+    if (this.data.entry?.recipe) {
+      return {
+        value: this.data.entry.recipe.id,
+        label: this.data.entry.recipe.title,
+        sublabel: `${this.data.entry.recipe.baseServings} servings`,
+      };
+    }
+    return null;
+  });
+
+  protected readonly recipeSearchFn = (query: string): Observable<SearchableSelectOption[]> => {
+    return this.recipeService.getRecipes({ search: query }).pipe(
+      map((list) => {
+        this.recipes.update((existing) => {
+          const map = new Map(existing.map((e) => [e.id, e]));
+          for (const item of list) {
+            map.set(item.id, item);
+          }
+          return Array.from(map.values());
+        });
+        return list.map((r) => ({
+          value: r.id,
+          label: r.title,
+          sublabel: `${r.baseServings} servings`,
+        }));
+      }),
+    );
+  };
 
   protected readonly quickNoteChips = [
     'Date Night / Eating Out',

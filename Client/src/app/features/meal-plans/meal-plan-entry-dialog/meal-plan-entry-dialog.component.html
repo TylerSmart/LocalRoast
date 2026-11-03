@@ -95,25 +95,15 @@
       @switch (form.controls.entryType.value) {
         @case ('Recipe') {
           <div class="recipe-selection-section">
-            <mat-form-field appearance="outline" class="full-width" subscriptSizing="dynamic">
-              <mat-label>Select Recipe</mat-label>
-              <mat-select
-                formControlName="recipeId"
-                (selectionChange)="onRecipeSelected($event.value)"
-              >
-                @if (isLoadingRecipes()) {
-                  <mat-option disabled>Loading recipes...</mat-option>
-                }
-                @for (r of recipes(); track r.id) {
-                  <mat-option [value]="r.id">
-                    <div class="recipe-option">
-                      <span class="recipe-option-title">{{ r.title }}</span>
-                      <span class="recipe-option-servings">({{ r.baseServings }} servings)</span>
-                    </div>
-                  </mat-option>
-                }
-              </mat-select>
-            </mat-form-field>
+            <app-searchable-select
+              formControlName="recipeId"
+              [searchFn]="recipeSearchFn"
+              [initialOptions]="recipeOptions()"
+              [selectedOption]="preselectedRecipeOption()"
+              label="Select Recipe"
+              placeholder="Search recipes..."
+              (selectionChange)="onRecipeSelected($event)"
+            />
 
             <div class="servings-stepper-row">
               <span class="stepper-label">Target Servings:</span>

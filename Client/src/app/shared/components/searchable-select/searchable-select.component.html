@@ -1,0 +1,140 @@
+<mat-form-field
+  [appearance]="appearance()"
+  [subscriptSizing]="subscriptSizing()"
+  class="searchable-select-field"
+  [class.has-selection]="hasValue()"
+>
+  @if (label()) {
+    <mat-label>{{ label() }}</mat-label>
+  }
+
+  <input
+    matInput
+    #inputRef
+    #autocompleteTrigger="matAutocompleteTrigger"
+    type="text"
+    [value]="displayInputText()"
+    (input)="onInputChange($event)"
+    (focus)="onFocus()"
+    (blur)="onBlur()"
+    [placeholder]="placeholder()"
+    [disabled]="disabled()"
+    [matAutocomplete]="auto"
+    [attr.aria-label]="ariaLabel() || label() || placeholder()"
+  />
+
+  @if (isLoading()) {
+    <div matSuffix class="suffix-action-wrapper">
+      <mat-progress-spinner
+        mode="indeterminate"
+        diameter="18"
+        class="loading-spinner"
+        aria-label="Loading options"
+      ></mat-progress-spinner>
+    </div>
+  } @else if (clearable() && hasValue() && !disabled()) {
+    <div matSuffix class="suffix-action-wrapper">
+      <button
+        mat-icon-button
+        type="button"
+        (click)="clearSelection($event)"
+        aria-label="Clear selection"
+        class="action-btn clear-btn"
+      >
+        <mat-icon>close</mat-icon>
+      </button>
+    </div>
+  }
+
+  <div matSuffix class="suffix-action-wrapper">
+    <button
+      mat-icon-button
+      type="button"
+      (click)="togglePanel($event)"
+      [attr.aria-label]="'Toggle ' + (label() || 'options')"
+      class="action-btn dropdown-chevron-btn"
+      [disabled]="disabled()"
+      tabindex="-1"
+    >
+      <mat-icon class="dropdown-chevron">arrow_drop_down</mat-icon>
+    </button>
+  </div>
+
+  @if (hint()) {
+    <mat-hint>{{ hint() }}</mat-hint>
+  }
+</mat-form-field>
+
+<mat-autocomplete
+  #auto="matAutocomplete"
+  (optionSelected)="onOptionSelected($event)"
+  [classList]="panelClass()"
+>
+  @if (hasGroups()) {
+    @for (group of groupedOptions(); track group.name) {
+      @if (group.items.length > 0) {
+        <mat-optgroup [label]="group.name">
+          @for (opt of group.items; track opt.value) {
+            <mat-option
+              [value]="opt.value"
+              [disabled]="opt.disabled ?? false"
+              [class.is-selected]="isSelected(opt.value)"
+            >
+              <div class="option-row">
+                @if (multiple()) {
+                  <mat-checkbox
+                    [checked]="isSelected(opt.value)"
+                    tabindex="-1"
+                    class="option-checkbox"
+                    (click)="$event.stopPropagation()"
+                  ></mat-checkbox>
+                }
+                <div class="option-content">
+                  <span class="option-label">{{ opt.label }}</span>
+                  @if (opt.sublabel) {
+                    <span class="option-sublabel">{{ opt.sublabel }}</span>
+                  }
+                </div>
+              </div>
+            </mat-option>
+          }
+        </mat-optgroup>
+      }
+    }
+  } @else {
+    @for (opt of flatOptions(); track opt.value) {
+      <mat-option
+        [value]="opt.value"
+        [disabled]="opt.disabled ?? false"
+        [class.is-selected]="isSelected(opt.value)"
+      >
+        <div class="option-row">
+          @if (multiple()) {
+            <mat-checkbox
+              [checked]="isSelected(opt.value)"
+              tabindex="-1"
+              class="option-checkbox"
+              (click)="$event.stopPropagation()"
+            ></mat-checkbox>
+          }
+          <div class="option-content">
+            <span class="option-label">{{ opt.label }}</span>
+            @if (opt.sublabel) {
+              <span class="option-sublabel">{{ opt.sublabel }}</span>
+            }
+          </div>
+        </div>
+      </mat-option>
+    }
+  }
+
+  @if (
+    !isLoading() &&
+    flatOptions().length === 0 &&
+    (groupedOptions().length === 0 || allGroupItemsCount() === 0)
+  ) {
+    <mat-option disabled class="no-options-message">
+      {{ emptyMessage() }}
+    </mat-option>
+  }
+</mat-autocomplete>

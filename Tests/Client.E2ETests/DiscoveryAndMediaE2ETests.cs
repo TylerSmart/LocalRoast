@@ -135,7 +135,8 @@ public sealed class DiscoveryAndMediaE2ETests : E2ETestBase
 
         // Filter by Tag
         await Page.Locator("button.filter-toggle-btn").ClickAsync();
-        await Page.Locator(".tag-filter-field mat-select").ClickAsync();
+        await Page.Locator("app-searchable-select.tag-filter-field, .tag-filter-field")
+            .ClickAsync();
         await Page.Locator("mat-option", new() { HasText = "Vegetarian" }).ClickAsync();
         await Page.Keyboard.PressAsync("Escape");
         await Expect(recipeCard).ToBeVisibleAsync();

@@ -65,6 +65,7 @@ public sealed class ShoppingListsE2ETests : E2ETestBase
         );
 
         // Schedule Recipe A with 8 servings on Monday
+        await Page.Locator("button.recipe-actions-menu-btn").ClickAsync();
         var planMealBtn = Page.Locator("button[aria-label='Plan meal']");
         await planMealBtn.ClickAsync();
 
@@ -86,6 +87,7 @@ public sealed class ShoppingListsE2ETests : E2ETestBase
         );
 
         // Put Recipe B in On-Deck
+        await Page.Locator("button.recipe-actions-menu-btn").ClickAsync();
         await Page.Locator("button[aria-label='Plan meal']").ClickAsync();
         var ondeckDialog = Page.Locator("mat-dialog-container");
         await Expect(ondeckDialog.Locator("h2")).ToContainTextAsync("Plan a Meal");

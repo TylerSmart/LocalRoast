@@ -16,6 +16,10 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSelectModule } from '@angular/material/select';
 import { TagCategory, TagDto, UpsertTagRequest } from '../../../core/models/taxonomy.models';
 import { TaxonomyService } from '../../../core/services/taxonomy/taxonomy.service';
+import {
+  SearchableSelectComponent,
+  SearchableSelectOption,
+} from '../../../shared/components/searchable-select/searchable-select.component';
 
 export interface TagDialogData {
   tag?: TagDto | null;
@@ -34,6 +38,7 @@ export interface TagDialogData {
     MatFormFieldModule,
     MatInputModule,
     MatSelectModule,
+    SearchableSelectComponent,
     MatIconModule,
     MatProgressSpinnerModule,
   ],
@@ -50,6 +55,14 @@ export class TagDialogComponent {
   protected readonly isEdit = signal<boolean>(!!this.data?.tag);
   protected readonly isSubmitting = signal<boolean>(false);
   protected readonly errorMessage = signal<string | null>(null);
+
+  protected readonly categoryOptions: SearchableSelectOption<TagCategory>[] = [
+    'Course',
+    'Cuisine',
+    'Dietary',
+    'Equipment',
+    'Custom',
+  ].map((c) => ({ value: c as TagCategory, label: c }));
 
   protected readonly categories: TagCategory[] = [
     'Course',

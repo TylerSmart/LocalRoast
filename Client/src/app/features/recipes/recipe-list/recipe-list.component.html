@@ -277,29 +277,15 @@
 
         <!-- Line 5: Tags Multi-Select -->
         <div class="filter-line">
-          <mat-form-field
-            appearance="outline"
+          <app-searchable-select
             class="filter-field tag-filter-field"
-            subscriptSizing="dynamic"
-          >
-            <mat-label>Tags</mat-label>
-            <mat-select
-              [ngModel]="selectedTagIds()"
-              (ngModelChange)="onTagSelectionChange($event)"
-              multiple
-              placeholder="Filter by tags"
-            >
-              @for (cat of tagCategories; track cat) {
-                @if (tagsByCategory(cat).length > 0) {
-                  <mat-optgroup [label]="cat">
-                    @for (t of tagsByCategory(cat); track t.id) {
-                      <mat-option [value]="t.id">{{ t.name }}</mat-option>
-                    }
-                  </mat-optgroup>
-                }
-              }
-            </mat-select>
-          </mat-form-field>
+            [options]="tagOptions()"
+            [multiple]="true"
+            label="Tags"
+            placeholder="Filter by tags..."
+            [ngModel]="selectedTagIds()"
+            (selectionChange)="onTagSelectionChange($event)"
+          />
         </div>
 
         <!-- Line 6: Forgotten Favorites Toggle Pill -->

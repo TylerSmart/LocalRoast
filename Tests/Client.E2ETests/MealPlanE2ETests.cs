@@ -97,7 +97,11 @@ public sealed class MealPlanE2ETests : E2ETestBase
 
         var addDishDialog = Page.Locator("mat-dialog-container");
         await Expect(addDishDialog.Locator("h2")).ToContainTextAsync("Plan a Meal");
-        await addDishDialog.Locator("mat-select[formcontrolname='recipeId']").ClickAsync();
+        await addDishDialog
+            .Locator(
+                "app-searchable-select[formcontrolname='recipeId'], mat-select[formcontrolname='recipeId']"
+            )
+            .ClickAsync();
         await Page.Locator("mat-option", new() { HasText = breadTitle }).ClickAsync();
         await addDishDialog
             .Locator("button[color='primary']", new() { HasText = "Plan Meal" })

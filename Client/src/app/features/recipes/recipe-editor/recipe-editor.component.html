@@ -475,21 +475,15 @@
                 <!-- Linked Entity / Display Name -->
                 @if (ingGroup.get('isSubRecipe')?.value) {
                   <!-- Sub-Recipe Selector -->
-                  <mat-form-field
-                    appearance="outline"
+                  <app-searchable-select
                     class="field-display-name"
-                    subscriptSizing="dynamic"
-                  >
-                    <mat-label>Select Linked Sub-Recipe</mat-label>
-                    <mat-select
-                      formControlName="linkedRecipeId"
-                      (selectionChange)="onSubRecipeSelected($index, $event.value)"
-                    >
-                      @for (sub of availableSubRecipes(); track sub.id) {
-                        <mat-option [value]="sub.id">{{ sub.title }}</mat-option>
-                      }
-                    </mat-select>
-                  </mat-form-field>
+                    formControlName="linkedRecipeId"
+                    [searchFn]="subRecipeSearchFn"
+                    [initialOptions]="subRecipeOptions()"
+                    label="Select Linked Sub-Recipe"
+                    placeholder="Search sub-recipes..."
+                    (selectionChange)="onSubRecipeSelected($index, $event)"
+                  />
                 } @else {
                   <!-- Food Item Autocomplete / Display Name -->
                   <mat-form-field
