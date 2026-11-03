@@ -172,6 +172,8 @@ export interface RecipeDetailDto {
   attachments?: RecipeAttachmentDto[];
   ratingCount?: number;
   cookLogs?: CookLogDto[];
+  extractedModel?: string | null;
+  ingestionJobId?: string | null;
 }
 
 export interface RecipeQueryParameters {
@@ -235,6 +237,7 @@ export interface UpsertRecipeRequest {
   thumbnailImagePath?: string | null;
   collectionIds?: string[] | null;
   tagIds?: string[] | null;
+  extractedModel?: string | null;
 }
 
 export interface UpdateRecipeOrganizationRequest {

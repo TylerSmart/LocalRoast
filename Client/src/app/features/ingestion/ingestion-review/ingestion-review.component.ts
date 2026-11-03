@@ -90,6 +90,7 @@ export class IngestionReviewComponent implements OnInit {
   readonly isLoading = signal<boolean>(true);
   readonly isSaving = signal<boolean>(false);
   readonly isPublishing = signal<boolean>(false);
+  readonly isRerunning = signal<boolean>(false);
   readonly errorMessage = signal<string | null>(null);
   readonly mobilePane = signal<'source' | 'draft'>('draft');
   readonly isPromotingCover = signal<boolean>(false);
@@ -462,6 +463,7 @@ export class IngestionReviewComponent implements OnInit {
       ingredients,
       steps,
       confidenceScore: this.job()?.confidenceScore ?? 0.8,
+      extractedModel: this.job()?.extractedModel ?? null,
     };
   }
 
@@ -522,6 +524,33 @@ export class IngestionReviewComponent implements OnInit {
       });
   }
 
+  rerunExtraction(): void {
+    const currentJob = this.job();
+    if (!currentJob || this.isRerunning()) return;
+
+    this.isRerunning.set(true);
+    this.ingestionService
+      .retryJob(currentJob.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.isRerunning.set(false);
+          this.snackBar.open(
+            'Re-queued extraction for "' + currentJob.displayTitle + '" with current LLM model.',
+            'Close',
+            { duration: 4000 },
+          );
+          this.router.navigate(['/ingest']);
+        },
+        error: (err) => {
+          this.isRerunning.set(false);
+          this.snackBar.open(err?.error?.detail || 'Failed to rerun extraction.', 'Close', {
+            duration: 5000,
+          });
+        },
+      });
+  }
+
   approveAndPublish(): void {
     const currentJob = this.job();
     if (!currentJob || this.form.invalid || this.isPublishing()) {
@@ -539,9 +568,15 @@ export class IngestionReviewComponent implements OnInit {
       .subscribe({
         next: (createdRecipe) => {
           this.isPublishing.set(false);
-          this.snackBar.open(`Recipe "${createdRecipe.title}" published!`, 'Close', {
-            duration: 3000,
-          });
+          this.snackBar.open(
+            currentJob.resultingRecipeId
+              ? `Recipe "${createdRecipe.title}" updated!`
+              : `Recipe "${createdRecipe.title}" published!`,
+            'Close',
+            {
+              duration: 3000,
+            },
+          );
           this.router.navigate(['/recipes', createdRecipe.id]);
         },
         error: (err) => {

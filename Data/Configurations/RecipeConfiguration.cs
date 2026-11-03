@@ -35,6 +35,7 @@ public sealed class RecipeConfiguration : IEntityTypeConfiguration<Recipe>
 
         builder.Property(r => r.CoverImagePath).HasMaxLength(500);
         builder.Property(r => r.ThumbnailImagePath).HasMaxLength(500);
+        builder.Property(r => r.ExtractedModel).HasMaxLength(200);
 
         builder.Property(r => r.AverageRating).HasPrecision(3, 2);
 

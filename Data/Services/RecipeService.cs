@@ -184,6 +184,7 @@ public sealed partial class RecipeService(
                 .ThenInclude(rt => rt.Tag)
             .Include(r => r.Attachments)
             .Include(r => r.CookLogs)
+            .Include(r => r.IngestionJobs)
             .FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
 
         if (recipe is null)
@@ -273,6 +274,10 @@ public sealed partial class RecipeService(
             ))
             .ToList();
 
+        var latestJob = recipe.IngestionJobs.OrderByDescending(j => j.CreatedAt).FirstOrDefault();
+        var extractedModel = recipe.ExtractedModel ?? latestJob?.ExtractedModel;
+        var ingestionJobId = latestJob?.Id;
+
         return new RecipeDetailDto(
             recipe.Id,
             recipe.Title,
@@ -323,7 +328,9 @@ public sealed partial class RecipeService(
                     c.CreatedAt,
                     c.ModifiedAt
                 ))
-                .ToList()
+                .ToList(),
+            ExtractedModel: extractedModel,
+            IngestionJobId: ingestionJobId
         );
     }
 
@@ -394,6 +401,7 @@ public sealed partial class RecipeService(
             SourceBookPage = request.SourceBookPage,
             CoverImagePath = ValidateAndNormalizeMediaPath(request.CoverImagePath),
             ThumbnailImagePath = ValidateAndNormalizeMediaPath(request.ThumbnailImagePath),
+            ExtractedModel = request.ExtractedModel,
         };
 
         await ValidateAndBuildGraphAsync(recipe, request, cancellationToken);
@@ -484,6 +492,10 @@ public sealed partial class RecipeService(
         recipe.SourceBookPage = request.SourceBookPage;
         recipe.CoverImagePath = ValidateAndNormalizeMediaPath(request.CoverImagePath);
         recipe.ThumbnailImagePath = ValidateAndNormalizeMediaPath(request.ThumbnailImagePath);
+        if (request.ExtractedModel != null)
+        {
+            recipe.ExtractedModel = request.ExtractedModel;
+        }
 
         await ValidateAndBuildGraphAsync(recipe, request, cancellationToken);
         await SyncTaxonomyAsync(recipe, request.CollectionIds, request.TagIds, cancellationToken);

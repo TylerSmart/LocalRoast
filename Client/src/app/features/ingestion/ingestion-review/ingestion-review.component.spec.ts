@@ -24,6 +24,7 @@ describe('IngestionReviewComponent', () => {
     saveDraft: ReturnType<typeof vi.fn>;
     approveAndPublish: ReturnType<typeof vi.fn>;
     discardJob: ReturnType<typeof vi.fn>;
+    retryJob: ReturnType<typeof vi.fn>;
   };
   let mockFoodCatalogService: {
     getStoreAisles: ReturnType<typeof vi.fn>;
@@ -137,6 +138,7 @@ describe('IngestionReviewComponent', () => {
       confidenceScore: 0.94,
     },
     confidenceScore: 0.94,
+    extractedModel: 'gpt-4o',
     statusDetail: 'Ready for side-by-side review.',
     attemptCount: 1,
     nextRetryAt: null,
@@ -204,6 +206,7 @@ describe('IngestionReviewComponent', () => {
         } as RecipeDetailDto),
       ),
       discardJob: vi.fn().mockReturnValue(of(undefined)),
+      retryJob: vi.fn().mockReturnValue(of(sampleJob)),
     };
 
     mockFoodCatalogService = {
@@ -337,5 +340,16 @@ describe('IngestionReviewComponent', () => {
     expect(mockDialog.open).toHaveBeenCalled();
     expect(mockIngestionService.discardJob).toHaveBeenCalledWith('job-123');
     expect(router.navigate).toHaveBeenCalledWith(['/ingest']);
+  });
+  it('reruns extraction and navigates to /ingest', () => {
+    component.rerunExtraction();
+    expect(mockIngestionService.retryJob).toHaveBeenCalledWith('job-123');
+    expect(router.navigate).toHaveBeenCalledWith(['/ingest']);
+  });
+
+  it('displays extracted model badge in review header', () => {
+    const badge = fixture.nativeElement.querySelector('.model-badge');
+    expect(badge).toBeTruthy();
+    expect(badge.textContent).toContain('gpt-4o');
   });
 });

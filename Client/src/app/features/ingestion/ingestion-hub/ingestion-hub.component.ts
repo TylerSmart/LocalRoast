@@ -381,11 +381,17 @@ export class IngestionHubComponent implements OnInit {
   }
 
   retryJob(job: IngestionJobSummaryDto): void {
+    this.errorMessage.set(null);
     this.ingestionService
       .retryJob(job.id)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: () => this.loadJobs(),
+        next: () => {
+          this.feedbackMessage.set(
+            'Re-queued "' + job.displayTitle + '" for extraction with current LLM model.',
+          );
+          this.loadJobs();
+        },
         error: (err) =>
           this.errorMessage.set(err?.error?.detail || `Failed to retry job "${job.displayTitle}".`),
       });

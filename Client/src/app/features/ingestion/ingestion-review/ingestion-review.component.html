@@ -19,11 +19,22 @@
           <mat-icon>arrow_back</mat-icon>
         </a>
         <div class="title-section">
-          <div class="channel-badge">
-            <mat-icon class="channel-icon">
-              {{ job()?.channel === 'WebUrl' ? 'link' : 'description' }}
-            </mat-icon>
-            <span>{{ job()?.channel === 'WebUrl' ? 'Web Recipe' : 'Raw Text' }}</span>
+          <div class="title-meta-row">
+            <div class="channel-badge">
+              <mat-icon class="channel-icon">
+                {{ job()?.channel === 'WebUrl' ? 'link' : 'description' }}
+              </mat-icon>
+              <span>{{ job()?.channel === 'WebUrl' ? 'Web Recipe' : 'Raw Text' }}</span>
+            </div>
+            @if (job()?.extractedModel) {
+              <div
+                class="model-badge"
+                [matTooltip]="'Extracted with LLM model: ' + job()!.extractedModel"
+              >
+                <mat-icon class="model-icon">smart_toy</mat-icon>
+                <span>{{ job()!.extractedModel }}</span>
+              </div>
+            }
           </div>
           <h1 class="header-title">{{ job()?.displayTitle }}</h1>
         </div>
@@ -39,6 +50,23 @@
         >
           <mat-icon>delete_outline</mat-icon>
           <span>Discard</span>
+        </button>
+
+        <button
+          mat-stroked-button
+          type="button"
+          (click)="rerunExtraction()"
+          [disabled]="isRerunning() || isSaving() || isPublishing()"
+          matTooltip="Rerun extraction using currently configured LLM model"
+          aria-label="Rerun extraction with current model"
+          class="rerun-btn"
+        >
+          @if (isRerunning()) {
+            <mat-spinner diameter="18" class="inline-spinner"></mat-spinner>
+          } @else {
+            <mat-icon>refresh</mat-icon>
+          }
+          <span>{{ isRerunning() ? 'Re-queueing...' : 'Rerun' }}</span>
         </button>
 
         <button
@@ -69,7 +97,15 @@
           } @else {
             <mat-icon>check_circle</mat-icon>
           }
-          <span>{{ isPublishing() ? 'Publishing...' : 'Approve & Publish' }}</span>
+          <span>{{
+            isPublishing()
+              ? job()?.resultingRecipeId
+                ? 'Updating...'
+                : 'Publishing...'
+              : job()?.resultingRecipeId
+                ? 'Update Recipe'
+                : 'Approve & Publish'
+          }}</span>
         </button>
       </div>
     </header>

@@ -123,7 +123,9 @@ public record RecipeDetailDto(
     IReadOnlyList<RecipeTagBadgeDto>? Tags = null,
     IReadOnlyList<RecipeAttachmentDto>? Attachments = null,
     int RatingCount = 0,
-    IReadOnlyList<CookLogDto>? CookLogs = null
+    IReadOnlyList<CookLogDto>? CookLogs = null,
+    string? ExtractedModel = null,
+    Guid? IngestionJobId = null
 )
 {
     public IReadOnlyList<RecipeCollectionBadgeDto> Collections { get; init; } = Collections ?? [];
@@ -192,7 +194,8 @@ public record UpsertRecipeRequest(
     [MaxLength(500)] string? CoverImagePath = null,
     [MaxLength(500)] string? ThumbnailImagePath = null,
     IReadOnlyList<Guid>? CollectionIds = null,
-    IReadOnlyList<Guid>? TagIds = null
+    IReadOnlyList<Guid>? TagIds = null,
+    [MaxLength(200)] string? ExtractedModel = null
 );
 
 public record UpdateRecipeOrganizationRequest(

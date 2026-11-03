@@ -127,7 +127,8 @@ public sealed class IngestionService(
                         : null,
                     CreatedAt: j.CreatedAt,
                     ModifiedAt: j.ModifiedAt,
-                    SourceFileCount: fileCount
+                    SourceFileCount: fileCount,
+                    ExtractedModel: j.ExtractedModel
                 );
             })
             .ToList();
@@ -247,7 +248,8 @@ public sealed class IngestionService(
             SourceFiles: sourceFiles,
             PdfInspection: pdfInspection,
             SourceBookTitle: job.SourceBookTitle,
-            SourceBookPage: job.SourceBookPage
+            SourceBookPage: job.SourceBookPage,
+            ExtractedModel: job.ExtractedModel
         );
     }
 
@@ -716,7 +718,9 @@ public sealed class IngestionService(
             ResultingRecipeSlug: null,
             SubmittedByUsername: null,
             CreatedAt: job.CreatedAt,
-            ModifiedAt: job.ModifiedAt
+            ModifiedAt: job.ModifiedAt,
+            SourceFileCount: 0,
+            ExtractedModel: job.ExtractedModel
         );
     }
 
@@ -751,6 +755,10 @@ public sealed class IngestionService(
         job.ConfidenceScore = draft.ConfidenceScore;
         job.DownloadedCoverImagePath = draft.CoverImagePath;
         job.DownloadedThumbnailImagePath = draft.ThumbnailImagePath;
+        if (!string.IsNullOrWhiteSpace(draft.ExtractedModel))
+        {
+            job.ExtractedModel = draft.ExtractedModel;
+        }
 
         await dbContext.SaveChangesAsync(cancellationToken);
         return await GetJobByIdAsync(id, cancellationToken);
@@ -899,53 +907,87 @@ public sealed class IngestionService(
             CoverImagePath: draft.CoverImagePath,
             ThumbnailImagePath: draft.ThumbnailImagePath,
             CollectionIds: draft.SuggestedCollectionIds,
-            TagIds: draft.SuggestedTagIds
+            TagIds: draft.SuggestedTagIds,
+            ExtractedModel: job.ExtractedModel
         );
 
-        var createdRecipe = await recipeService.CreateRecipeAsync(upsertRequest, cancellationToken);
+        RecipeDetailDto createdRecipe;
+        if (job.ResultingRecipeId.HasValue)
+        {
+            var existingRecipe = await dbContext.Recipes.FirstOrDefaultAsync(
+                r => r.Id == job.ResultingRecipeId.Value,
+                cancellationToken
+            );
+            if (existingRecipe is not null)
+            {
+                var updated = await recipeService.UpdateRecipeAsync(
+                    existingRecipe.Id,
+                    upsertRequest,
+                    cancellationToken
+                );
+                createdRecipe =
+                    updated ?? throw new InvalidOperationException("Failed to update recipe.");
+            }
+            else
+            {
+                createdRecipe = await recipeService.CreateRecipeAsync(
+                    upsertRequest,
+                    cancellationToken
+                );
+            }
+        }
+        else
+        {
+            createdRecipe = await recipeService.CreateRecipeAsync(upsertRequest, cancellationToken);
+        }
 
         if (draft.RetainSourceAttachments && !string.IsNullOrWhiteSpace(job.SourceFilesJson))
         {
-            try
-            {
-                var sourceFiles = JsonSerializer.Deserialize<List<IngestionSourceFileDto>>(
-                    job.SourceFilesJson,
-                    JsonOptions
-                );
-                if (sourceFiles is { Count: > 0 })
+            var hasAttachments = await dbContext.RecipeAttachments.AnyAsync(
+                a => a.RecipeId == createdRecipe.Id,
+                cancellationToken
+            );
+            if (!hasAttachments)
+                try
                 {
-                    foreach (var sf in sourceFiles)
+                    var sourceFiles = JsonSerializer.Deserialize<List<IngestionSourceFileDto>>(
+                        job.SourceFilesJson,
+                        JsonOptions
+                    );
+                    if (sourceFiles is { Count: > 0 })
                     {
-                        var promoted =
-                            await mediaStorageService.PromoteIngestionFileToAttachmentAsync(
-                                sf.UrlPath,
-                                cancellationToken
-                            );
+                        foreach (var sf in sourceFiles)
+                        {
+                            var promoted =
+                                await mediaStorageService.PromoteIngestionFileToAttachmentAsync(
+                                    sf.UrlPath,
+                                    cancellationToken
+                                );
 
-                        dbContext.RecipeAttachments.Add(
-                            new RecipeAttachment
-                            {
-                                Id = Guid.NewGuid(),
-                                RecipeId = createdRecipe.Id,
-                                SortOrder = sf.PageNumber,
-                                FileName = sf.OriginalFileName,
-                                MediaUrlPath = promoted.MediaUrlPath,
-                                ContentType = promoted.ContentType,
-                                FileSizeBytes = promoted.FileSizeBytes,
-                                Label =
-                                    sf.PageNumber == 1
-                                        ? "Source Cover / Page"
-                                        : $"Source Page {sf.PageNumber}",
-                            }
-                        );
+                            dbContext.RecipeAttachments.Add(
+                                new RecipeAttachment
+                                {
+                                    Id = Guid.NewGuid(),
+                                    RecipeId = createdRecipe.Id,
+                                    SortOrder = sf.PageNumber,
+                                    FileName = sf.OriginalFileName,
+                                    MediaUrlPath = promoted.MediaUrlPath,
+                                    ContentType = promoted.ContentType,
+                                    FileSizeBytes = promoted.FileSizeBytes,
+                                    Label =
+                                        sf.PageNumber == 1
+                                            ? "Source Cover / Page"
+                                            : $"Source Page {sf.PageNumber}",
+                                }
+                            );
+                        }
+                        await dbContext.SaveChangesAsync(cancellationToken);
                     }
-                    await dbContext.SaveChangesAsync(cancellationToken);
                 }
-            }
-            catch
-            {
-                // Non-blocking attachment promotion failure
-            }
+                catch
+                {
+                    // Non-blocking attachment promotion failure
+                }
         }
         else if (!draft.RetainSourceAttachments && !string.IsNullOrWhiteSpace(job.SourceFilesJson))
         {
@@ -999,13 +1041,19 @@ public sealed class IngestionService(
             return null;
         }
 
-        if (job.Status is IngestionJobStatus.Published or IngestionJobStatus.Discarded)
+        if (job.Status is IngestionJobStatus.Discarded)
         {
-            throw new ConflictException("Cannot retry a published or discarded ingestion job.");
+            throw new ConflictException("Cannot retry a discarded ingestion job.");
+        }
+
+        if (job.Status is IngestionJobStatus.Preprocessing or IngestionJobStatus.Extracting)
+        {
+            throw new ConflictException("Ingestion job is currently being processed.");
         }
 
         job.Status = IngestionJobStatus.Queued;
         job.NextRetryAt = null;
+        job.AttemptCount = 0;
         job.StatusDetail = "Queued for retry.";
 
         await dbContext.SaveChangesAsync(cancellationToken);

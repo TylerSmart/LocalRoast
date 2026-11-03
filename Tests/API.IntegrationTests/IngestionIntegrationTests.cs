@@ -280,4 +280,117 @@ public sealed class IngestionIntegrationTests
         var retryResp = await _client.PostAsync($"/api/ingestion/jobs/{job.Id}/retry", null);
         Assert.AreEqual(HttpStatusCode.Conflict, retryResp.StatusCode);
     }
+
+    [TestMethod]
+    public async Task RerunPublishedJob_RetriesSuccessfully_AndUpdatesExistingRecipeWithModelTag()
+    {
+        await AuthenticateAsync(_client);
+
+        // 1. Enqueue text job
+        var enqueue = await _client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest(RawText: "Original text recipe")
+        );
+        Assert.AreEqual(HttpStatusCode.Accepted, enqueue.StatusCode);
+        var job = await enqueue.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
+        Assert.IsNotNull(job);
+
+        // 2. Save draft with initial model tag
+        var initialDraft = new IngestionExtractedDraftDto(
+            Title: "Initial Pizza Recipe",
+            Ingredients:
+            [
+                new IngestionDraftIngredientDto(
+                    DisplayName: "Flour",
+                    MatchedFoodItemId: null,
+                    ProposedFoodItemName: "Pizza Flour",
+                    CreateNewFoodItem: true
+                ),
+            ],
+            ExtractedModel: "llama3.2:latest"
+        );
+
+        var saveDraftResp = await _client.PutAsJsonAsync(
+            $"/api/ingestion/jobs/{job.Id}/draft",
+            initialDraft
+        );
+        Assert.AreEqual(HttpStatusCode.OK, saveDraftResp.StatusCode);
+
+        // 3. Approve and publish initial recipe
+        var approveResp = await _client.PostAsJsonAsync(
+            $"/api/ingestion/jobs/{job.Id}/approve",
+            initialDraft
+        );
+        Assert.AreEqual(HttpStatusCode.Created, approveResp.StatusCode);
+        var recipe = await approveResp.Content.ReadFromJsonAsync<RecipeDetailDto>();
+        Assert.IsNotNull(recipe);
+        Assert.AreEqual("Initial Pizza Recipe", recipe.Title);
+        Assert.AreEqual("llama3.2:latest", recipe.ExtractedModel);
+        Assert.AreEqual(job.Id, recipe.IngestionJobId);
+
+        // Verify published job detail has ExtractedModel
+        var jobDetailResp = await _client.GetAsync($"/api/ingestion/jobs/{job.Id}");
+        var jobDetail = await jobDetailResp.Content.ReadFromJsonAsync<IngestionJobDetailDto>();
+        Assert.IsNotNull(jobDetail);
+        Assert.AreEqual(IngestionJobStatus.Published, jobDetail.Status);
+        Assert.AreEqual("llama3.2:latest", jobDetail.ExtractedModel);
+        Assert.AreEqual(recipe.Id, jobDetail.ResultingRecipeId);
+
+        // 4. Rerun the published ingestion job!
+        var retryResp = await _client.PostAsync($"/api/ingestion/jobs/{job.Id}/retry", null);
+        Assert.AreEqual(HttpStatusCode.Accepted, retryResp.StatusCode);
+
+        var retriedSummary = await retryResp.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
+        Assert.IsNotNull(retriedSummary);
+        Assert.AreEqual(IngestionJobStatus.Queued, retriedSummary.Status);
+        Assert.AreEqual(recipe.Id, retriedSummary.ResultingRecipeId);
+
+        // 5. Update draft with new model extraction (e.g. qwen2.5:14b)
+        var updatedDraft = new IngestionExtractedDraftDto(
+            Title: "Enhanced Sourdough Pizza",
+            Ingredients:
+            [
+                new IngestionDraftIngredientDto(
+                    DisplayName: "Organic 00 Flour",
+                    MatchedFoodItemId: null,
+                    ProposedFoodItemName: "Organic 00 Flour",
+                    CreateNewFoodItem: true
+                ),
+                new IngestionDraftIngredientDto(
+                    DisplayName: "Warm Water",
+                    MatchedFoodItemId: null,
+                    ProposedFoodItemName: "Water",
+                    CreateNewFoodItem: true
+                ),
+            ],
+            ExtractedModel: "qwen2.5:14b"
+        );
+
+        var saveSecondDraft = await _client.PutAsJsonAsync(
+            $"/api/ingestion/jobs/{job.Id}/draft",
+            updatedDraft
+        );
+        Assert.AreEqual(HttpStatusCode.OK, saveSecondDraft.StatusCode);
+
+        // 6. Approve again -> should UPDATE the existing recipe, NOT create a second recipe!
+        var approveSecondResp = await _client.PostAsJsonAsync(
+            $"/api/ingestion/jobs/{job.Id}/approve",
+            updatedDraft
+        );
+        Assert.AreEqual(HttpStatusCode.Created, approveSecondResp.StatusCode);
+        var updatedRecipe = await approveSecondResp.Content.ReadFromJsonAsync<RecipeDetailDto>();
+        Assert.IsNotNull(updatedRecipe);
+        Assert.AreEqual(recipe.Id, updatedRecipe.Id); // Same recipe ID!
+        Assert.AreEqual("Enhanced Sourdough Pizza", updatedRecipe.Title);
+        Assert.AreEqual("qwen2.5:14b", updatedRecipe.ExtractedModel);
+
+        // Verify recipe detail endpoint shows updated model and ingestion job ID
+        var getRecipeResp = await _client.GetAsync($"/api/recipes/{recipe.Id}");
+        Assert.AreEqual(HttpStatusCode.OK, getRecipeResp.StatusCode);
+        var fetchedRecipe = await getRecipeResp.Content.ReadFromJsonAsync<RecipeDetailDto>();
+        Assert.IsNotNull(fetchedRecipe);
+        Assert.AreEqual("Enhanced Sourdough Pizza", fetchedRecipe.Title);
+        Assert.AreEqual("qwen2.5:14b", fetchedRecipe.ExtractedModel);
+        Assert.AreEqual(job.Id, fetchedRecipe.IngestionJobId);
+    }
 }
