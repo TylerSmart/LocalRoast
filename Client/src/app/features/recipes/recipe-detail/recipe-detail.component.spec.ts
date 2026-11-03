@@ -6,6 +6,7 @@ import { provideRouter } from '@angular/router';
 import { of } from 'rxjs';
 import { RecipeDetailDto } from '../../../core/models/recipe.models';
 import { RecipeService } from '../../../core/services/recipe/recipe.service';
+import { IngestionService } from '../../../core/services/ingestion/ingestion.service';
 import { AiKitchenHelperService } from '../../../core/services/ai-helpers/ai-kitchen-helper.service';
 import { RecipeShareDialogComponent } from '../recipe-share-dialog/recipe-share-dialog.component';
 import { RecipeDetailComponent } from './recipe-detail.component';
@@ -31,6 +32,8 @@ describe('RecipeDetailComponent', () => {
     sourceAuthor: 'Grandma',
     sourceBookTitle: null,
     sourceBookPage: null,
+    extractedModel: 'llama3.2-vision',
+    ingestionJobId: 'job-100',
     coverImagePath: null,
     thumbnailImagePath: null,
     timesCooked: 2,
@@ -103,6 +106,10 @@ describe('RecipeDetailComponent', () => {
     modifiedBy: 'test-user',
   };
 
+  const mockIngestionService = {
+    retryJob: vi.fn().mockReturnValue(of({ id: 'job-100', status: 'Queued' })),
+  };
+
   const mockRecipeService = {
     getRecipeById: vi.fn().mockReturnValue(of(sampleRecipe)),
     deleteRecipe: vi.fn(),
@@ -130,6 +137,7 @@ describe('RecipeDetailComponent', () => {
       providers: [
         provideRouter([]),
         { provide: RecipeService, useValue: mockRecipeService },
+        { provide: IngestionService, useValue: mockIngestionService },
         { provide: MatDialog, useValue: mockDialog },
         { provide: MatSnackBar, useValue: mockSnackBar },
         { provide: AiKitchenHelperService, useValue: mockAiHelperService },
@@ -243,5 +251,17 @@ describe('RecipeDetailComponent', () => {
 
     component.closePhotoLightbox();
     expect(component['previewPhotoUrl']()).toBeNull();
+  });
+  it('displays extracted model pill in stats strip when recipe was ingested', () => {
+    const modelPill = fixture.nativeElement.querySelector('.stat-pill.model-stat');
+    expect(modelPill).toBeTruthy();
+    expect(modelPill.textContent).toContain('llama3.2-vision');
+  });
+
+  it('reruns ingestion and navigates to /ingest when rerun button is clicked', () => {
+    const navSpy = vi.spyOn(component['router'], 'navigate').mockResolvedValue(true);
+    component.rerunIngestion();
+    expect(mockIngestionService.retryJob).toHaveBeenCalledWith('job-100');
+    expect(navSpy).toHaveBeenCalledWith(['/ingest']);
   });
 });

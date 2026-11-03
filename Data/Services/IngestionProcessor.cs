@@ -88,10 +88,7 @@ public sealed class IngestionProcessor(
             cancellationToken
         );
 
-        if (
-            job is null
-            || job.Status is IngestionJobStatus.Published or IngestionJobStatus.Discarded
-        )
+        if (job is null || job.Status is IngestionJobStatus.Discarded)
         {
             return false;
         }
@@ -301,6 +298,7 @@ public sealed class IngestionProcessor(
             }
 
             LlmExtractedRecipePayload rawExtracted;
+            string modelUsed;
 
             if (requiresVision)
             {
@@ -310,6 +308,8 @@ public sealed class IngestionProcessor(
                         "No Vision LLM model is configured in LLM Settings. Please select a Vision Model and retry."
                     );
                 }
+
+                modelUsed = config.VisionModel;
 
                 var imageInputs = new List<LlmVisionImageInput>();
 
@@ -401,6 +401,8 @@ public sealed class IngestionProcessor(
                     );
                 }
 
+                modelUsed = config.TextModel;
+
                 var extractionContext = new LlmExtractionContext(
                     SourceContent: job.NormalizedSourceText ?? job.RawText ?? "",
                     AvailableAisleNames: aisleNames,
@@ -452,8 +454,11 @@ public sealed class IngestionProcessor(
                 fallbackSourceBookPage: job.SourceBookPage,
                 retainSourceAttachments: job.Channel
                     is IngestionChannel.Images
-                        or IngestionChannel.Pdf
+                        or IngestionChannel.Pdf,
+                extractedModel: modelUsed
             );
+
+            job.ExtractedModel = modelUsed;
 
             if (
                 string.IsNullOrWhiteSpace(job.SourceBookTitle)
@@ -488,7 +493,7 @@ public sealed class IngestionProcessor(
                 job.ConfidenceScore = draft.ConfidenceScore;
                 job.DisplayTitle = draft.Title;
                 job.ProcessedAt = DateTimeOffset.UtcNow;
-                job.StatusDetail = "Auto-published high-confidence extraction.";
+                job.StatusDetail = $"Auto-published high-confidence extraction ({modelUsed}).";
             }
             else
             {
@@ -497,7 +502,7 @@ public sealed class IngestionProcessor(
                 job.ConfidenceScore = draft.ConfidenceScore;
                 job.DisplayTitle = draft.Title;
                 job.ProcessedAt = DateTimeOffset.UtcNow;
-                job.StatusDetail = "Ready for side-by-side review.";
+                job.StatusDetail = $"Ready for side-by-side review ({modelUsed}).";
             }
 
             await dbContext.SaveChangesAsync(cancellationToken);
@@ -746,8 +751,29 @@ public sealed class IngestionProcessor(
             CoverImagePath: draft.CoverImagePath,
             ThumbnailImagePath: draft.ThumbnailImagePath,
             CollectionIds: draft.SuggestedCollectionIds,
-            TagIds: draft.SuggestedTagIds
+            TagIds: draft.SuggestedTagIds,
+            ExtractedModel: job.ExtractedModel
         );
+
+        if (job.ResultingRecipeId.HasValue)
+        {
+            var existingRecipe = await dbContext.Recipes.FirstOrDefaultAsync(
+                r => r.Id == job.ResultingRecipeId.Value,
+                cancellationToken
+            );
+            if (existingRecipe is not null)
+            {
+                var updated = await recipeService.UpdateRecipeAsync(
+                    existingRecipe.Id,
+                    upsertRequest,
+                    cancellationToken
+                );
+                if (updated is not null)
+                {
+                    return updated;
+                }
+            }
+        }
 
         return await recipeService.CreateRecipeAsync(upsertRequest, cancellationToken);
     }

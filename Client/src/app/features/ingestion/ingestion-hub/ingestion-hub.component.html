@@ -548,6 +548,15 @@
               <div class="job-header-row">
                 <h3 class="job-title">{{ job.displayTitle }}</h3>
                 <div class="job-badges">
+                  @if (job.extractedModel) {
+                    <span
+                      class="model-chip"
+                      [matTooltip]="'Extracted with LLM model: ' + job.extractedModel"
+                    >
+                      <mat-icon class="chip-icon">smart_toy</mat-icon>
+                      <span class="model-name">{{ job.extractedModel }}</span>
+                    </span>
+                  }
                   @if (job.confidenceScore !== null) {
                     <span class="confidence-chip" [matTooltip]="'LLM extraction confidence'">
                       {{ (job.confidenceScore * 100).toFixed(0) }}% conf

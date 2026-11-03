@@ -69,7 +69,8 @@ public record LlmExtractedRecipePayload(
     IReadOnlyList<LlmExtractedIngredientItem>? Ingredients,
     IReadOnlyList<LlmExtractedStepItem>? Steps,
     string? SourceBookTitle = null,
-    int? SourceBookPage = null
+    int? SourceBookPage = null,
+    string? ExtractedModel = null
 );
 
 // Normalized structured draft stored in IngestionJob.ExtractedDraftJson & edited in Review Inbox
@@ -121,7 +122,8 @@ public record IngestionExtractedDraftDto(
     decimal ConfidenceScore = 0.8m,
     [MaxLength(200)] string? SourceBookTitle = null,
     [Range(1, 10000)] int? SourceBookPage = null,
-    bool RetainSourceAttachments = true
+    bool RetainSourceAttachments = true,
+    [MaxLength(200)] string? ExtractedModel = null
 );
 
 public record EnqueueWebUrlIngestionRequest([Required] IReadOnlyList<string> Urls);
@@ -199,7 +201,8 @@ public record IngestionJobSummaryDto(
     string? SubmittedByUsername,
     DateTimeOffset CreatedAt,
     DateTimeOffset ModifiedAt,
-    int SourceFileCount = 0
+    int SourceFileCount = 0,
+    string? ExtractedModel = null
 );
 
 public record IngestionJobDetailDto(
@@ -227,7 +230,8 @@ public record IngestionJobDetailDto(
     IReadOnlyList<IngestionSourceFileDto>? SourceFiles = null,
     PdfInspectionSummaryDto? PdfInspection = null,
     string? SourceBookTitle = null,
-    int? SourceBookPage = null
+    int? SourceBookPage = null,
+    string? ExtractedModel = null
 )
 {
     public IReadOnlyList<IngestionSourceFileDto> SourceFiles { get; init; } = SourceFiles ?? [];

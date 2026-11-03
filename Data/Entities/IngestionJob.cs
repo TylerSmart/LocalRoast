@@ -34,6 +34,8 @@ public sealed class IngestionJob : IAuditable
 
     public string? ExtractedDraftJson { get; set; }
 
+    public string? ExtractedModel { get; set; }
+
     public decimal? ConfidenceScore { get; set; }
 
     public string? StatusDetail { get; set; }

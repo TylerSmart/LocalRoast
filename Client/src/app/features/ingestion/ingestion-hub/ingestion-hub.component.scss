@@ -307,6 +307,32 @@
     gap: 0.5rem;
     flex-shrink: 0;
 
+    .model-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      padding: 0.15rem 0.5rem;
+      border-radius: 12px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      background-color: var(--mat-sys-surface-container-high, #ece6f0);
+      color: var(--mat-sys-on-surface-variant, #49454f);
+      border: 1px solid var(--mat-sys-outline-variant, #cac4d0);
+
+      .chip-icon {
+        font-size: 14px;
+        width: 14px;
+        height: 14px;
+      }
+
+      .model-name {
+        max-width: 160px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+    }
+
     .confidence-chip {
       padding: 0.15rem 0.45rem;
       border-radius: 12px;

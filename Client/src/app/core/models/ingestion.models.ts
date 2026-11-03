@@ -147,6 +147,7 @@ export interface IngestionExtractedDraftDto {
   sourceBookTitle?: string | null;
   sourceBookPage?: number | null;
   retainSourceAttachments?: boolean;
+  extractedModel?: string | null;
 }
 
 export interface EnqueueWebUrlIngestionRequest {
@@ -187,6 +188,7 @@ export interface IngestionJobSummaryDto {
   createdAt: string;
   modifiedAt: string;
   sourceFileCount?: number;
+  extractedModel?: string | null;
 }
 
 export interface IngestionJobDetailDto {
@@ -215,6 +217,7 @@ export interface IngestionJobDetailDto {
   pdfInspection?: PdfInspectionSummaryDto | null;
   sourceBookTitle?: string | null;
   sourceBookPage?: number | null;
+  extractedModel?: string | null;
 }
 
 export interface RetryWaitingJobsResultDto {

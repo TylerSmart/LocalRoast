@@ -70,7 +70,8 @@ public static class RecipeDraftNormalizer
         string? thumbnailImagePath,
         string? fallbackSourceBookTitle = null,
         int? fallbackSourceBookPage = null,
-        bool retainSourceAttachments = true
+        bool retainSourceAttachments = true,
+        string? extractedModel = null
     )
     {
         var title = string.IsNullOrWhiteSpace(raw.Title) ? "Untitled Recipe" : raw.Title.Trim();
@@ -289,7 +290,8 @@ public static class RecipeDraftNormalizer
             ConfidenceScore: confidence,
             SourceBookTitle: sourceBookTitle,
             SourceBookPage: sourceBookPage,
-            RetainSourceAttachments: retainSourceAttachments
+            RetainSourceAttachments: retainSourceAttachments,
+            ExtractedModel: extractedModel ?? raw.ExtractedModel
         );
     }
 

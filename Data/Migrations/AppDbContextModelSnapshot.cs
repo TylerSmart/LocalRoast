@@ -349,6 +349,10 @@ namespace App.Data.Migrations
                         .HasMaxLength(200000)
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("ExtractedModel")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
                     b.Property<DateTimeOffset>("ModifiedAt")
                         .HasColumnType("datetimeoffset");
 
@@ -705,6 +709,10 @@ namespace App.Data.Migrations
                     b.Property<string>("Difficulty")
                         .HasMaxLength(32)
                         .HasColumnType("nvarchar(32)");
+
+                    b.Property<string>("ExtractedModel")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
 
                     b.Property<DateTimeOffset?>("LastCookedAt")
                         .HasColumnType("datetimeoffset");

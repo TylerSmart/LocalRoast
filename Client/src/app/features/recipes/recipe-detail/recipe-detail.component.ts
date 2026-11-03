@@ -27,6 +27,7 @@ import {
   UnitSystem,
 } from '../../../core/models/recipe.models';
 import { RecipeService } from '../../../core/services/recipe/recipe.service';
+import { IngestionService } from '../../../core/services/ingestion/ingestion.service';
 import { AiKitchenHelperService } from '../../../core/services/ai-helpers/ai-kitchen-helper.service';
 import {
   FormattedQuantityResult,
@@ -100,6 +101,7 @@ export class RecipeDetailComponent implements OnInit {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly recipeService = inject(RecipeService);
+  private readonly ingestionService = inject(IngestionService);
   private readonly dialog = inject(MatDialog);
   private readonly snackBar = inject(MatSnackBar);
   protected readonly aiHelper = inject(AiKitchenHelperService);
@@ -113,6 +115,7 @@ export class RecipeDetailComponent implements OnInit {
   protected readonly targetSystem = signal<UnitSystem>('Original');
   protected readonly checkedIngredients = signal<Record<string, boolean>>({});
   protected readonly isUploadingAttachment = signal<boolean>(false);
+  protected readonly isRerunningIngestion = signal<boolean>(false);
   protected readonly formatMinutes = formatMinutes;
   protected readonly previewPhotoUrl = signal<string | null>(null);
 
@@ -518,6 +521,34 @@ export class RecipeDetailComponent implements OnInit {
           });
         },
       });
+    });
+  }
+
+  rerunIngestion(): void {
+    const r = this.recipe();
+    if (!r?.ingestionJobId || this.isRerunningIngestion()) {
+      return;
+    }
+
+    this.isRerunningIngestion.set(true);
+    this.ingestionService.retryJob(r.ingestionJobId).subscribe({
+      next: () => {
+        this.isRerunningIngestion.set(false);
+        this.snackBar.open(
+          `Re-queued '${r.title}' for extraction with current LLM model.`,
+          'Close',
+          { duration: 4000 },
+        );
+        this.router.navigate(['/ingest']);
+      },
+      error: (err: { error?: { detail?: string; title?: string } }) => {
+        this.isRerunningIngestion.set(false);
+        this.snackBar.open(
+          err?.error?.detail || err?.error?.title || 'Failed to rerun recipe ingestion.',
+          'Close',
+          { duration: 5000 },
+        );
+      },
     });
   }
 

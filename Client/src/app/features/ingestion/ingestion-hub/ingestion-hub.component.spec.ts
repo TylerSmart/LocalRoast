@@ -72,6 +72,7 @@ describe('IngestionHubComponent', () => {
       nextRetryAt: null,
       resultingRecipeId: 'recipe-123',
       resultingRecipeSlug: 'published-herb-pasta',
+      extractedModel: 'llama3:8b',
       submittedByUsername: 'alice',
       createdAt: '2026-10-26T12:10:00Z',
       modifiedAt: '2026-10-26T12:10:00Z',
@@ -182,5 +183,15 @@ describe('IngestionHubComponent', () => {
   it('opens LLM provider settings dialog', () => {
     component.openLlmSettings();
     expect(mockLlmSettingsService.openLlmSettingsDialog).toHaveBeenCalled();
+  });
+  it('displays extracted model chip when present on job', () => {
+    const chips = fixture.nativeElement.querySelectorAll('.model-chip');
+    expect(chips.length).toBeGreaterThan(0);
+    expect(chips[0].textContent).toContain('llama3:8b');
+  });
+
+  it('retries published job when rerun button is clicked', () => {
+    component.retryJob(sampleJobs[2]);
+    expect(mockIngestionService.retryJob).toHaveBeenCalledWith('job-3');
   });
 });

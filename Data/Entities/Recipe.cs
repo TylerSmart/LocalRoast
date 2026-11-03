@@ -40,6 +40,8 @@ public sealed class Recipe : IAuditable
 
     public string? ThumbnailImagePath { get; set; }
 
+    public string? ExtractedModel { get; set; }
+
     public int TimesCooked { get; set; }
 
     public DateTimeOffset? LastCookedAt { get; set; }
