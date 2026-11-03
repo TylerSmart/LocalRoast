@@ -150,6 +150,11 @@ public record EnqueuePdfIngestionMetadata(
     [Range(1, 10000)] int? SourceBookPage = null
 );
 
+public record EnqueuePdfBatchMetadata(
+    [MaxLength(200)] string? SourceBookTitle = null,
+    bool SplitMultiPage = false
+);
+
 public record PromotePageToCoverRequest([Range(1, 50)] int PageNumber = 1);
 
 public record IngestionSourceFileDto(

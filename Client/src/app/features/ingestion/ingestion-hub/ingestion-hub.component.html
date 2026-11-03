@@ -305,41 +305,93 @@
             <input
               #pdfFileInput
               type="file"
+              multiple
               accept="application/pdf"
               (change)="onPdfSelected($event)"
               class="hidden-file-input"
             />
 
-            @if (!selectedPdf()) {
+            @if (selectedPdfs().length === 0) {
               <div class="pdf-picker-area">
                 <button mat-stroked-button type="button" (click)="pdfFileInput.click()">
                   <mat-icon>upload_file</mat-icon>
-                  <span>Select PDF Recipe Document (up to 25 MB)</span>
+                  <span>Select PDF Recipe Document(s)</span>
                 </button>
                 <p class="dropzone-hint">
-                  Supports digital text PDFs (instant extraction) or scanned cookbook pages (visual
-                  OCR pipeline).
+                  Supports single recipe PDFs or batch multi-file card uploads (1–50 PDFs, up to 25
+                  MB each).
                 </p>
               </div>
-            } @else {
+            } @else if (selectedPdfs().length === 1) {
               <div class="selected-pdf-badge">
                 <mat-icon class="pdf-icon">picture_as_pdf</mat-icon>
                 <div class="pdf-details">
-                  <span class="pdf-name">{{ selectedPdf()!.name }}</span>
+                  <span class="pdf-name">{{ selectedPdfs()[0].name }}</span>
                   <span class="pdf-size"
-                    >{{ (selectedPdf()!.size / (1024 * 1024)).toFixed(2) }} MB</span
+                    >{{ (selectedPdfs()[0].size / (1024 * 1024)).toFixed(2) }} MB</span
                   >
                 </div>
-                <button
-                  mat-icon-button
-                  type="button"
-                  (click)="clearSelectedPdf()"
-                  matTooltip="Remove PDF"
-                >
-                  <mat-icon>close</mat-icon>
-                </button>
+                <div class="single-pdf-actions">
+                  <button
+                    mat-stroked-button
+                    type="button"
+                    (click)="pdfFileInput.click()"
+                    class="add-more-btn"
+                  >
+                    <mat-icon>add</mat-icon>
+                    <span>Add More</span>
+                  </button>
+                  <button
+                    mat-icon-button
+                    type="button"
+                    (click)="clearSelectedPdf()"
+                    matTooltip="Remove PDF"
+                  >
+                    <mat-icon>close</mat-icon>
+                  </button>
+                </div>
+              </div>
+            } @else {
+              <div class="batch-pdf-container">
+                <div class="batch-summary-strip">
+                  <div class="batch-count-info">
+                    <mat-icon class="pdf-icon">library_books</mat-icon>
+                    <span>
+                      <strong>{{ selectedPdfs().length }}</strong> PDF documents selected ({{
+                        (totalPdfSizeBytes() / (1024 * 1024)).toFixed(1)
+                      }}
+                      MB total)
+                    </span>
+                  </div>
+                  <div class="batch-actions">
+                    <button mat-stroked-button type="button" (click)="pdfFileInput.click()">
+                      <mat-icon>add</mat-icon>
+                      <span>Add More</span>
+                    </button>
+                    <button mat-button type="button" (click)="clearSelectedPdf()">Clear All</button>
+                  </div>
+                </div>
+
+                <div class="batch-pdf-chips">
+                  <mat-chip-set>
+                    @for (file of selectedPdfs(); track $index; let i = $index) {
+                      <mat-chip (removed)="removeSelectedPdf(i)">
+                        <span class="chip-filename">{{ file.name }}</span>
+                        <button matChipRemove aria-label="'Remove ' + file.name">
+                          <mat-icon>cancel</mat-icon>
+                        </button>
+                      </mat-chip>
+                    }
+                  </mat-chip-set>
+                </div>
               </div>
             }
+
+            <div class="split-option-strip">
+              <mat-checkbox formControlName="splitMultiPage" class="split-checkbox">
+                <span>Split multi-page PDFs (treat each page as an individual recipe card)</span>
+              </mat-checkbox>
+            </div>
           </div>
 
           <div class="form-actions">
@@ -347,7 +399,7 @@
               mat-flat-button
               color="primary"
               type="submit"
-              [disabled]="!selectedPdf() || isSubmitting()"
+              [disabled]="selectedPdfs().length === 0 || isSubmitting()"
               aria-label="Queue PDF recipe"
             >
               @if (isSubmitting()) {
@@ -356,7 +408,11 @@
                 <mat-icon>auto_fix_high</mat-icon>
               }
               <span>{{
-                isSubmitting() ? 'Uploading & Queueing...' : 'Extract Recipe from PDF'
+                isSubmitting()
+                  ? 'Uploading & Queueing...'
+                  : selectedPdfs().length > 1
+                    ? 'Queue ' + selectedPdfs().length + ' PDF Recipes'
+                    : 'Extract Recipe from PDF'
               }}</span>
             </button>
           </div>

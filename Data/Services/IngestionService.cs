@@ -514,6 +514,138 @@ public sealed class IngestionService(
         );
     }
 
+    public async Task<IReadOnlyList<IngestionJobSummaryDto>> EnqueuePdfBatchAsync(
+        IReadOnlyList<IngestionUploadFileStream> files,
+        EnqueuePdfBatchMetadata metadata,
+        CancellationToken cancellationToken = default
+    )
+    {
+        if (files is null || files.Count == 0)
+        {
+            throw new DomainValidationException("At least one PDF file must be provided.");
+        }
+
+        if (files.Count > 50)
+        {
+            throw new DomainValidationException(
+                "A maximum of 50 PDF files can be queued per batch."
+            );
+        }
+
+        var newJobs = new List<IngestionJob>();
+        var cleanBookTitle = string.IsNullOrWhiteSpace(metadata.SourceBookTitle)
+            ? null
+            : metadata.SourceBookTitle.Trim();
+
+        for (var fileIdx = 0; fileIdx < files.Count; fileIdx++)
+        {
+            var file = files[fileIdx];
+            if (file.ContentLength <= 0)
+            {
+                continue;
+            }
+
+            var ext = Path.GetExtension(file.OriginalFileName);
+            if (
+                !string.Equals(ext, ".pdf", StringComparison.OrdinalIgnoreCase)
+                && !file.ContentType.Contains("pdf", StringComparison.OrdinalIgnoreCase)
+            )
+            {
+                throw new DomainValidationException(
+                    $"File '{file.OriginalFileName}' is not a valid PDF document."
+                );
+            }
+
+            var jobId = Guid.NewGuid();
+            var jobToken = jobId.ToString("N");
+
+            var savedPdf = await mediaStorageService.SaveIngestionPdfAsync(
+                file.Content,
+                file.OriginalFileName,
+                file.ContentLength,
+                jobToken,
+                cancellationToken
+            );
+
+            var rawName = Path.GetFileNameWithoutExtension(file.OriginalFileName);
+            string displayTitle;
+            if (!string.IsNullOrWhiteSpace(cleanBookTitle))
+            {
+                displayTitle = string.IsNullOrWhiteSpace(rawName)
+                    ? $"PDF: {cleanBookTitle} (#{fileIdx + 1})"
+                    : $"PDF: {cleanBookTitle} - {rawName}";
+            }
+            else
+            {
+                displayTitle = string.IsNullOrWhiteSpace(rawName)
+                    ? "PDF Document"
+                    : $"PDF: {rawName}";
+            }
+
+            if (displayTitle.Length > 200)
+            {
+                displayTitle = displayTitle[..200];
+            }
+
+            var sourceFiles = new List<IngestionSourceFileDto>
+            {
+                new(
+                    PageNumber: 1,
+                    OriginalFileName: file.OriginalFileName,
+                    UrlPath: savedPdf.UrlPath,
+                    ContentType: "application/pdf",
+                    FileSizeBytes: savedPdf.FileSizeBytes
+                ),
+            };
+
+            var job = new IngestionJob
+            {
+                Id = jobId,
+                Channel = IngestionChannel.Pdf,
+                Status = IngestionJobStatus.Queued,
+                DisplayTitle = displayTitle,
+                SourceBookTitle = cleanBookTitle,
+                SourceBookPage = null,
+                SourceFilesJson = JsonSerializer.Serialize(sourceFiles, JsonOptions),
+                StatusDetail = "Queued for PDF inspection and processing.",
+            };
+
+            dbContext.IngestionJobs.Add(job);
+            newJobs.Add(job);
+        }
+
+        if (newJobs.Count == 0)
+        {
+            throw new DomainValidationException(
+                "No valid non-empty PDF files were found in the request."
+            );
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        queueSignal.NotifyWorkAvailable();
+
+        return newJobs
+            .Select(job => new IngestionJobSummaryDto(
+                Id: job.Id,
+                Channel: job.Channel,
+                Status: job.Status,
+                DisplayTitle: job.DisplayTitle,
+                SourceUrl: null,
+                ThumbnailImagePath: null,
+                ConfidenceScore: null,
+                StatusDetail: job.StatusDetail,
+                AttemptCount: 0,
+                NextRetryAt: null,
+                ResultingRecipeId: null,
+                ResultingRecipeSlug: null,
+                SubmittedByUsername: null,
+                CreatedAt: job.CreatedAt,
+                ModifiedAt: job.ModifiedAt,
+                SourceFileCount: 1
+            ))
+            .ToList();
+    }
+
     public async Task<IngestionJobDetailDto?> PromoteSourcePageToCoverAsync(
         Guid id,
         int pageNumber,

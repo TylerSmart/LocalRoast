@@ -375,3 +375,4 @@ logs/
 !Client/src/app/features/admin/logs/**
 
 API/App_Data/
+.angular/

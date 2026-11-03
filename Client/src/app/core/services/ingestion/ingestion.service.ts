@@ -136,6 +136,25 @@ export class IngestionService {
       .pipe(tap(() => this.refreshSummary()));
   }
 
+  enqueuePdfBatch(
+    files: File[],
+    metadata?: { sourceBookTitle?: string; splitMultiPage?: boolean },
+  ): Observable<IngestionJobSummaryDto[]> {
+    const formData = new FormData();
+    for (const file of files) {
+      formData.append('files', file, file.name);
+    }
+    if (metadata?.sourceBookTitle) {
+      formData.append('sourceBookTitle', metadata.sourceBookTitle);
+    }
+    if (metadata?.splitMultiPage) {
+      formData.append('splitMultiPage', 'true');
+    }
+    return this.http
+      .post<IngestionJobSummaryDto[]>(apiUrl('/ingestion/jobs/pdf/bulk'), formData)
+      .pipe(tap(() => this.refreshSummary()));
+  }
+
   promotePageToCover(id: string, pageNumber: number): Observable<IngestionJobDetailDto> {
     return this.http.post<IngestionJobDetailDto>(apiUrl(`/ingestion/jobs/${id}/cover-from-page`), {
       pageNumber,

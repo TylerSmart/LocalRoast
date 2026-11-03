@@ -158,6 +158,11 @@ export interface EnqueueRawTextIngestionRequest {
   titleHint?: string | null;
 }
 
+export interface EnqueuePdfBatchMetadata {
+  sourceBookTitle?: string | null;
+  splitMultiPage?: boolean;
+}
+
 export interface IngestionQueueSummaryDto {
   readyForReviewCount: number;
   activeProcessingCount: number;

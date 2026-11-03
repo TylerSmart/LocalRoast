@@ -216,6 +216,69 @@ public sealed class IngestionJobsController(IIngestionService ingestionService) 
         }
     }
 
+    [HttpPost("pdf/bulk")]
+    [Consumes("multipart/form-data")]
+    [RequestSizeLimit(134_217_728)]
+    [ProducesResponseType(
+        typeof(IReadOnlyList<IngestionJobSummaryDto>),
+        StatusCodes.Status202Accepted
+    )]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> EnqueuePdfBatch(
+        [FromForm] IFormFileCollection files,
+        [FromForm] string? sourceBookTitle,
+        [FromForm] bool? splitMultiPage,
+        CancellationToken cancellationToken
+    )
+    {
+        if (files is null || files.Count == 0)
+        {
+            return BadRequest(
+                new ProblemDetails
+                {
+                    Status = StatusCodes.Status400BadRequest,
+                    Title = "Validation Failed",
+                    Detail = "At least one valid PDF file is required.",
+                }
+            );
+        }
+
+        try
+        {
+            var uploadStreams = files
+                .Select(f => new IngestionUploadFileStream(
+                    f.OpenReadStream(),
+                    f.FileName,
+                    f.ContentType,
+                    f.Length
+                ))
+                .ToList();
+
+            var metadata = new EnqueuePdfBatchMetadata(
+                SourceBookTitle: sourceBookTitle,
+                SplitMultiPage: splitMultiPage ?? false
+            );
+
+            var jobs = await ingestionService.EnqueuePdfBatchAsync(
+                uploadStreams,
+                metadata,
+                cancellationToken
+            );
+            return Accepted(jobs);
+        }
+        catch (DomainValidationException ex)
+        {
+            return BadRequest(
+                new ProblemDetails
+                {
+                    Status = StatusCodes.Status400BadRequest,
+                    Title = ex.Title,
+                    Detail = ex.Message,
+                }
+            );
+        }
+    }
+
     [HttpPost("{id:guid}/cover-from-page")]
     [ProducesResponseType(typeof(IngestionJobDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]

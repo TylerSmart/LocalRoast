@@ -38,6 +38,12 @@ public interface IIngestionService
         CancellationToken cancellationToken = default
     );
 
+    Task<IReadOnlyList<IngestionJobSummaryDto>> EnqueuePdfBatchAsync(
+        IReadOnlyList<IngestionUploadFileStream> files,
+        EnqueuePdfBatchMetadata metadata,
+        CancellationToken cancellationToken = default
+    );
+
     Task<IngestionJobDetailDto?> PromoteSourcePageToCoverAsync(
         Guid id,
         int pageNumber,

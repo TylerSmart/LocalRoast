@@ -150,6 +150,46 @@ public sealed class VisionAndPdfIngestionIntegrationTests
     }
 
     [TestMethod]
+    public async Task EnqueuePdfBatch_MultiplePdfs_ReturnsAcceptedAndCreatesMultipleJobs()
+    {
+        await AuthenticateAsync(_client);
+
+        using var form = new MultipartFormDataContent();
+        var pdfBytes1 = CreateSamplePdfBytes();
+        var pdfBytes2 = CreateSamplePdfBytes();
+
+        form.Add(
+            new ByteArrayContent(pdfBytes1)
+            {
+                Headers = { ContentType = new MediaTypeHeaderValue("application/pdf") },
+            },
+            "files",
+            "grandma-cookies.pdf"
+        );
+
+        form.Add(
+            new ByteArrayContent(pdfBytes2)
+            {
+                Headers = { ContentType = new MediaTypeHeaderValue("application/pdf") },
+            },
+            "files",
+            "lemon-bars.pdf"
+        );
+
+        form.Add(new StringContent("Family Recipe Box"), "sourceBookTitle");
+
+        var response = await _client.PostAsync("/api/ingestion/jobs/pdf/bulk", form);
+        Assert.AreEqual(HttpStatusCode.Accepted, response.StatusCode);
+
+        var jobs = await response.Content.ReadFromJsonAsync<List<IngestionJobSummaryDto>>();
+        Assert.IsNotNull(jobs);
+        Assert.AreEqual(2, jobs.Count);
+        Assert.IsTrue(jobs.All(j => j.Channel == IngestionChannel.Pdf));
+        StringAssert.Contains(jobs[0].DisplayTitle, "Family Recipe Box");
+        StringAssert.Contains(jobs[1].DisplayTitle, "Family Recipe Box");
+    }
+
+    [TestMethod]
     public async Task PromoteSourcePageToCover_ValidJob_UpdatesJobCoverImage()
     {
         await AuthenticateAsync(_client);

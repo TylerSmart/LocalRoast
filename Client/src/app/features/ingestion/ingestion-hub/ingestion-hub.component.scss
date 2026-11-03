@@ -609,4 +609,72 @@
       color: var(--mat-sys-on-surface-variant, #666);
     }
   }
+
+  .single-pdf-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+}
+
+.batch-pdf-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: var(--mat-sys-surface, #fff);
+  border: 1px solid var(--mat-sys-outline-variant, #e0e0e0);
+  border-radius: 8px;
+
+  .batch-summary-strip {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+
+    .batch-count-info {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.95rem;
+
+      .pdf-icon {
+        color: #e53935;
+        font-size: 24px;
+        width: 24px;
+        height: 24px;
+      }
+    }
+
+    .batch-actions {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+  }
+
+  .batch-pdf-chips {
+    max-height: 140px;
+    overflow-y: auto;
+    padding: 0.25rem 0;
+
+    .chip-filename {
+      max-width: 200px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+  }
+}
+
+.split-option-strip {
+  display: flex;
+  align-items: center;
+  padding-top: 0.25rem;
+
+  .split-checkbox {
+    font-size: 0.9rem;
+    color: var(--mat-sys-on-surface, #1d1b20);
+  }
 }

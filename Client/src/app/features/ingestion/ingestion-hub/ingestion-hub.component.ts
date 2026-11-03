@@ -12,6 +12,7 @@ import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatButtonToggleModule } from '@angular/material/button-toggle';
 import { MatCardModule } from '@angular/material/card';
+import { MatCheckboxModule } from '@angular/material/checkbox';
 import { MatChipsModule } from '@angular/material/chips';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
@@ -38,6 +39,7 @@ export type IngestionFilter = 'All' | 'ReadyForReview' | 'ActiveWaiting' | 'Publ
     MatButtonModule,
     MatButtonToggleModule,
     MatCardModule,
+    MatCheckboxModule,
     MatChipsModule,
     MatFormFieldModule,
     MatInputModule,
@@ -83,10 +85,17 @@ export class IngestionHubComponent implements OnInit {
     titleHint: this.fb.control<string>(''),
     sourceBookTitle: this.fb.control<string>(''),
     sourceBookPage: this.fb.control<number | null>(null),
+    splitMultiPage: this.fb.control<boolean>(false),
   });
 
   readonly selectedImages = signal<{ file: File; previewUrl: string }[]>([]);
-  readonly selectedPdf = signal<File | null>(null);
+  readonly selectedPdfs = signal<File[]>([]);
+  readonly selectedPdf = computed(() =>
+    this.selectedPdfs().length > 0 ? this.selectedPdfs()[0] : null,
+  );
+  readonly totalPdfSizeBytes = computed(() =>
+    this.selectedPdfs().reduce((acc, f) => acc + f.size, 0),
+  );
   readonly failedThumbJobIds = signal<Set<string>>(new Set());
 
   onJobThumbError(jobId: string): void {
@@ -263,24 +272,36 @@ export class IngestionHubComponent implements OnInit {
     const input = event.target as HTMLInputElement;
     if (!input.files || input.files.length === 0) return;
 
-    const file = input.files[0];
-    if (file.size > 25 * 1024 * 1024) {
-      this.errorMessage.set('PDF file exceeds the maximum allowed size of 25 MB.');
-      input.value = '';
-      return;
+    const files = Array.from(input.files);
+    const validFiles: File[] = [];
+    for (const file of files) {
+      if (file.size > 25 * 1024 * 1024) {
+        this.errorMessage.set(`File "${file.name}" exceeds the maximum allowed size of 25 MB.`);
+        continue;
+      }
+      validFiles.push(file);
     }
 
-    this.selectedPdf.set(file);
+    if (validFiles.length > 0) {
+      this.selectedPdfs.update((prev) => {
+        const combined = [...prev, ...validFiles];
+        return combined.slice(0, 50);
+      });
+    }
     input.value = '';
   }
 
+  removeSelectedPdf(index: number): void {
+    this.selectedPdfs.update((prev) => prev.filter((_, i) => i !== index));
+  }
+
   clearSelectedPdf(): void {
-    this.selectedPdf.set(null);
+    this.selectedPdfs.set([]);
   }
 
   submitPdf(): void {
-    const pdf = this.selectedPdf();
-    if (!pdf || this.isSubmitting()) return;
+    const pdfs = this.selectedPdfs();
+    if (pdfs.length === 0 || this.isSubmitting()) return;
 
     this.isSubmitting.set(true);
     this.errorMessage.set(null);
@@ -288,26 +309,48 @@ export class IngestionHubComponent implements OnInit {
 
     const formVal = this.pdfForm.value;
 
-    this.ingestionService
-      .enqueuePdf(pdf, {
-        titleHint: formVal.titleHint || undefined,
-        sourceBookTitle: formVal.sourceBookTitle || undefined,
-        sourceBookPage: formVal.sourceBookPage || undefined,
-      })
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (job) => {
-          this.selectedPdf.set(null);
-          this.pdfForm.reset();
-          this.isSubmitting.set(false);
-          this.feedbackMessage.set(`Enqueued PDF document job "${job.displayTitle}".`);
-          this.loadJobs();
-        },
-        error: (err) => {
-          this.errorMessage.set(err?.error?.detail || 'Failed to enqueue PDF document.');
-          this.isSubmitting.set(false);
-        },
-      });
+    if (pdfs.length === 1 && !formVal.splitMultiPage) {
+      this.ingestionService
+        .enqueuePdf(pdfs[0], {
+          titleHint: formVal.titleHint || undefined,
+          sourceBookTitle: formVal.sourceBookTitle || undefined,
+          sourceBookPage: formVal.sourceBookPage || undefined,
+        })
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: (job) => {
+            this.selectedPdfs.set([]);
+            this.pdfForm.reset();
+            this.isSubmitting.set(false);
+            this.feedbackMessage.set(`Enqueued PDF document job "${job.displayTitle}".`);
+            this.loadJobs();
+          },
+          error: (err) => {
+            this.errorMessage.set(err?.error?.detail || 'Failed to enqueue PDF document.');
+            this.isSubmitting.set(false);
+          },
+        });
+    } else {
+      this.ingestionService
+        .enqueuePdfBatch(pdfs, {
+          sourceBookTitle: formVal.sourceBookTitle || undefined,
+          splitMultiPage: formVal.splitMultiPage || false,
+        })
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: (jobs) => {
+            this.selectedPdfs.set([]);
+            this.pdfForm.reset();
+            this.isSubmitting.set(false);
+            this.feedbackMessage.set(`Enqueued ${jobs.length} PDF recipe job(s).`);
+            this.loadJobs();
+          },
+          error: (err) => {
+            this.errorMessage.set(err?.error?.detail || 'Failed to enqueue PDF batch.');
+            this.isSubmitting.set(false);
+          },
+        });
+    }
   }
 
   submitWebUrls(): void {

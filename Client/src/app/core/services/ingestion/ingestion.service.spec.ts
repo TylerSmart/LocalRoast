@@ -368,6 +368,72 @@ describe('IngestionService', () => {
     expect(result.channel).toBe('Pdf');
   });
 
+  it('enqueues PDF batch and refreshes summary', async () => {
+    const pdf1 = new File(['%PDF-1.4'], 'card1.pdf', { type: 'application/pdf' });
+    const pdf2 = new File(['%PDF-1.4'], 'card2.pdf', { type: 'application/pdf' });
+
+    const promise = firstValueFrom(
+      service.enqueuePdfBatch([pdf1, pdf2], {
+        sourceBookTitle: 'Recipe Box',
+        splitMultiPage: false,
+      }),
+    );
+
+    const req = httpMock.expectOne('/api/ingestion/jobs/pdf/bulk');
+    expect(req.request.method).toBe('POST');
+    expect(req.request.body instanceof FormData).toBe(true);
+
+    req.flush([
+      {
+        id: 'job-bulk-1',
+        channel: 'Pdf',
+        status: 'Queued',
+        displayTitle: 'PDF: Recipe Box - card1',
+        sourceUrl: null,
+        thumbnailImagePath: null,
+        confidenceScore: null,
+        statusDetail: 'Queued',
+        attemptCount: 0,
+        nextRetryAt: null,
+        resultingRecipeId: null,
+        resultingRecipeSlug: null,
+        submittedByUsername: null,
+        createdAt: '2026-10-26T12:00:00Z',
+        modifiedAt: '2026-10-26T12:00:00Z',
+        sourceFileCount: 1,
+      },
+      {
+        id: 'job-bulk-2',
+        channel: 'Pdf',
+        status: 'Queued',
+        displayTitle: 'PDF: Recipe Box - card2',
+        sourceUrl: null,
+        thumbnailImagePath: null,
+        confidenceScore: null,
+        statusDetail: 'Queued',
+        attemptCount: 0,
+        nextRetryAt: null,
+        resultingRecipeId: null,
+        resultingRecipeSlug: null,
+        submittedByUsername: null,
+        createdAt: '2026-10-26T12:00:00Z',
+        modifiedAt: '2026-10-26T12:00:00Z',
+        sourceFileCount: 1,
+      },
+    ]);
+
+    httpMock.expectOne('/api/ingestion/jobs/summary').flush({
+      readyForReviewCount: 0,
+      activeProcessingCount: 2,
+      waitingForLlmHostCount: 0,
+      failedCount: 0,
+    });
+
+    const result = await promise;
+    expect(result).toHaveLength(2);
+    expect(result[0].id).toBe('job-bulk-1');
+  });
+
   it('promotes page to cover via POST /api/ingestion/jobs/:id/cover-from-page', async () => {
     const promise = firstValueFrom(service.promotePageToCover('job-1', 2));
     const req = httpMock.expectOne('/api/ingestion/jobs/job-1/cover-from-page');
