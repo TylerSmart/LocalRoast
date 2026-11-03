@@ -351,9 +351,19 @@
 /* Grid Layout */
 .recipe-body-grid {
   display: grid;
-  grid-template-columns: 1fr 1.6fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr);
   gap: 2rem;
-  align-items: start;
+  align-items: stretch;
+}
+
+.ingredients-column,
+.instructions-column {
+  min-width: 0;
+  min-height: 0;
+}
+
+.ingredients-column {
+  align-self: start;
 }
 
 .section-heading {
@@ -463,6 +473,8 @@
 }
 
 .steps-list {
+  min-width: 0;
+  min-height: 0;
   list-style: none;
   padding: 0;
   margin: 0;
@@ -472,6 +484,9 @@
 }
 
 .step-card {
+  -webkit-transform: translateZ(0);
+  transform: translateZ(0);
+  backface-visibility: hidden;
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
@@ -734,6 +749,7 @@
   .recipe-body-grid {
     grid-template-columns: 1fr;
     gap: 1.5rem;
+    align-items: stretch;
   }
 
   .scaling-toolbar {
