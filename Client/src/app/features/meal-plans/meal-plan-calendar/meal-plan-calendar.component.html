@@ -161,6 +161,7 @@
                     <div
                       cdkDrag
                       [cdkDragData]="entry"
+                      [cdkDragStartDelay]="dragStartDelay"
                       class="meal-entry-card ondeck-item ondeck-card"
                     >
                       <div class="meal-card-content">
@@ -300,7 +301,12 @@
 
                       <div class="slot-items">
                         @for (entry of slotEntries; track entry.id) {
-                          <div cdkDrag [cdkDragData]="entry" class="meal-entry-card">
+                          <div
+                            cdkDrag
+                            [cdkDragData]="entry"
+                            [cdkDragStartDelay]="dragStartDelay"
+                            class="meal-entry-card"
+                          >
                             <div class="meal-card-content">
                               <div class="meal-title-row">
                                 @if (entry.recipe) {
@@ -442,6 +448,7 @@
                     <div
                       cdkDrag
                       [cdkDragData]="entry"
+                      [cdkDragStartDelay]="dragStartDelay"
                       class="meal-entry-card ondeck-item ondeck-card"
                     >
                       <div class="meal-card-content">

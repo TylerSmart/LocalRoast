@@ -1,4 +1,6 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
+import { CdkDrag } from '@angular/cdk/drag-drop';
 import { signal } from '@angular/core';
 import { MatDialog } from '@angular/material/dialog';
 import { provideRouter } from '@angular/router';
@@ -208,5 +210,16 @@ describe('MealPlanCalendarComponent', () => {
         },
       }),
     );
+  });
+
+  it('configures cdkDragStartDelay with touch delay and zero mouse delay for mobile scroll mitigation', () => {
+    expect(component['dragStartDelay']).toEqual({ touch: 250, mouse: 0 });
+
+    const dragDirectives = fixture.debugElement.queryAll(By.directive(CdkDrag));
+    expect(dragDirectives.length).toBeGreaterThan(0);
+    for (const dragDebugEl of dragDirectives) {
+      const cdkDrag = dragDebugEl.injector.get(CdkDrag);
+      expect(cdkDrag.dragStartDelay).toEqual({ touch: 250, mouse: 0 });
+    }
   });
 });

@@ -1,4 +1,12 @@
-import { CdkDrag, CdkDragDrop, CdkDropList, CdkDropListGroup } from '@angular/cdk/drag-drop';
+import {
+  CDK_DRAG_CONFIG,
+  CdkDrag,
+  CdkDragDrop,
+  CdkDropList,
+  CdkDropListGroup,
+  DragDropConfig,
+  DragStartDelay,
+} from '@angular/cdk/drag-drop';
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { MatButtonModule } from '@angular/material/button';
 import { MatButtonToggleModule } from '@angular/material/button-toggle';
@@ -58,6 +66,13 @@ export interface DropZoneData {
   weekStartDate?: string;
 }
 
+export const MEAL_PLAN_DRAG_CONFIG: DragDropConfig = {
+  dragStartDelay: {
+    touch: 250,
+    mouse: 0,
+  },
+};
+
 @Component({
   imports: [
     RouterLink,
@@ -75,6 +90,12 @@ export interface DropZoneData {
     MatTooltipModule,
     MatExpansionModule,
   ],
+  providers: [
+    {
+      provide: CDK_DRAG_CONFIG,
+      useValue: MEAL_PLAN_DRAG_CONFIG,
+    },
+  ],
   selector: 'app-meal-plan-calendar',
   templateUrl: './meal-plan-calendar.component.html',
   styleUrl: './meal-plan-calendar.component.scss',
@@ -86,6 +107,7 @@ export class MealPlanCalendarComponent implements OnInit {
   private readonly router = inject(Router);
   protected readonly aiHelper = inject(AiKitchenHelperService);
 
+  protected readonly dragStartDelay: DragStartDelay = { touch: 250, mouse: 0 };
   protected readonly mealSlots = MEAL_SLOTS;
   protected readonly dayNamesShort = DAY_NAMES_SHORT;
   protected readonly todayIso = getTodayIsoLocal();
