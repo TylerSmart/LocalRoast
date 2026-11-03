@@ -33,6 +33,12 @@ import { MediaService } from '../../../core/services/media/media.service';
 import { RecipeService } from '../../../core/services/recipe/recipe.service';
 import { TaxonomyService } from '../../../core/services/taxonomy/taxonomy.service';
 import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialog/confirm-dialog.component';
+import {
+  SearchableSelectComponent,
+  SearchableSelectOption,
+} from '../../../shared/components/searchable-select/searchable-select.component';
+import { Observable } from 'rxjs';
+import { map } from 'rxjs/operators';
 import { FoodItemDialogComponent } from '../../food-catalog/food-item-dialog/food-item-dialog.component';
 import {
   CollectionDialogComponent,
@@ -111,6 +117,7 @@ export const MEASUREMENT_UNITS: { value: MeasurementUnit; label: string }[] = [
     MatAutocompleteModule,
     MatTooltipModule,
     MatProgressSpinnerModule,
+    SearchableSelectComponent,
   ],
   selector: 'app-recipe-editor',
   templateUrl: './recipe-editor.component.html',
@@ -136,6 +143,38 @@ export class RecipeEditorComponent implements OnInit {
 
   protected readonly foodItems = signal<FoodItemDto[]>([]);
   protected readonly availableSubRecipes = signal<RecipeSummaryDto[]>([]);
+
+  protected readonly subRecipeOptions = computed<SearchableSelectOption[]>(() =>
+    this.availableSubRecipes().map((sub) => ({
+      value: sub.id,
+      label: sub.title,
+      sublabel: `${sub.baseServings} servings`,
+    })),
+  );
+
+  protected readonly subRecipeSearchFn = (query: string): Observable<SearchableSelectOption[]> => {
+    const currentId = this.recipeId();
+    return this.recipeService.getRecipes({ search: query }).pipe(
+      map((list) => {
+        this.availableSubRecipes.update((existing) => {
+          const map = new Map(existing.map((e) => [e.id, e]));
+          for (const item of list) {
+            if (item.id !== currentId) {
+              map.set(item.id, item);
+            }
+          }
+          return Array.from(map.values());
+        });
+        return list
+          .filter((r) => r.id !== currentId)
+          .map((r) => ({
+            value: r.id,
+            label: r.title,
+            sublabel: `${r.baseServings} servings`,
+          }));
+      }),
+    );
+  };
 
   // Media signals
   protected readonly coverImagePath = signal<string | null>(null);

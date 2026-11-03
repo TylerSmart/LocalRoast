@@ -1,0 +1,94 @@
+:host {
+  display: block;
+  width: 100%;
+}
+
+.searchable-select-field {
+  width: 100%;
+
+  // Suffix icons alignment
+  .suffix-action-wrapper {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+  }
+
+  .loading-spinner {
+    margin-right: 4px;
+  }
+
+  .action-btn {
+    width: 28px;
+    height: 28px;
+    line-height: 28px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--mat-sys-on-surface-variant, #79747e);
+
+    mat-icon {
+      font-size: 18px;
+      width: 18px;
+      height: 18px;
+      line-height: 18px;
+    }
+
+    &:hover:not([disabled]) {
+      color: var(--mat-sys-on-surface, #1d1b20);
+    }
+  }
+
+  .dropdown-chevron {
+    transition: transform 0.2s ease;
+  }
+}
+
+.option-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  overflow: hidden;
+
+  .option-checkbox {
+    pointer-events: none; // Let option handle click
+  }
+}
+
+.option-content {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.25;
+
+  .option-label {
+    font-size: 0.9375rem;
+    color: var(--mat-sys-on-surface, #1d1b20);
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .option-sublabel {
+    font-size: 0.75rem;
+    color: var(--mat-sys-on-surface-variant, #79747e);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 2px;
+  }
+}
+
+.no-options-message {
+  font-style: italic;
+  color: var(--mat-sys-on-surface-variant, #79747e);
+  cursor: default;
+}
+
+@media (max-width: 480px) {
+  .option-content .option-label {
+    font-size: 0.875rem;
+  }
+}

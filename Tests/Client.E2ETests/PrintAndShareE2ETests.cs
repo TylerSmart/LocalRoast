@@ -46,7 +46,9 @@ public sealed class PrintAndShareE2ETests : E2ETestBase
         var secondIng = Page.Locator(".builder-item-card").Nth(1);
         await secondIng.Locator("mat-checkbox.mode-checkbox").ClickAsync();
 
-        var subSelect = secondIng.Locator("mat-select[formcontrolname='linkedRecipeId']");
+        var subSelect = secondIng.Locator(
+            "app-searchable-select[formcontrolname='linkedRecipeId'], mat-select[formcontrolname='linkedRecipeId']"
+        );
         await Expect(subSelect).ToBeVisibleAsync();
         await subSelect.ClickAsync(new() { Force = true });
         await Page.Locator("mat-option", new() { HasText = subRecipeTitle }).First.ClickAsync();
@@ -63,6 +65,7 @@ public sealed class PrintAndShareE2ETests : E2ETestBase
         await Expect(Page.Locator(".recipe-title")).ToContainTextAsync(parentRecipeTitle);
 
         // 3. Open Share Dialog and create a share link
+        await Page.Locator("button.recipe-actions-menu-btn").ClickAsync();
         await Page.Locator("button[aria-label='Share recipe']").ClickAsync();
         var shareDialog = Page.Locator("app-recipe-share-dialog");
         await Expect(shareDialog).ToBeVisibleAsync();
@@ -153,6 +156,7 @@ public sealed class PrintAndShareE2ETests : E2ETestBase
         await Page.EvaluateAsync(
             "window.__printed = false; window.print = () => { window.__printed = true; };"
         );
+        await Page.Locator("button.recipe-actions-menu-btn").ClickAsync();
         await Page.Locator("button[aria-label='Print recipe']").ClickAsync();
         var wasPrinted = await Page.EvaluateAsync<bool>("() => window.__printed === true");
         Assert.IsTrue(wasPrinted, "Expected window.print() to be triggered.");
@@ -180,6 +184,7 @@ public sealed class PrintAndShareE2ETests : E2ETestBase
         await Page.EmulateMediaAsync(new() { Media = Media.Screen });
 
         // 4. Create a share link
+        await Page.Locator("button.recipe-actions-menu-btn").ClickAsync();
         await Page.Locator("button[aria-label='Share recipe']").ClickAsync();
         var shareDialog = Page.Locator("app-recipe-share-dialog");
         await Expect(shareDialog).ToBeVisibleAsync();
@@ -221,6 +226,7 @@ public sealed class PrintAndShareE2ETests : E2ETestBase
         await Expect(Page).ToHaveURLAsync(new Regex(".*/recipes/[a-f0-9-]+$"));
 
         // 2. Assert recipe detail action buttons are present and no horizontal overflow at 360px
+        await Page.Locator("button.recipe-actions-menu-btn").ClickAsync();
         await Expect(Page.Locator("button[aria-label='Share recipe']")).ToBeVisibleAsync();
         await Expect(Page.Locator("button[aria-label='Print recipe']")).ToBeVisibleAsync();
 
