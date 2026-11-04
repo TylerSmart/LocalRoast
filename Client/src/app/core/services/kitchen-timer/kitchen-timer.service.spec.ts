@@ -74,4 +74,25 @@ describe('KitchenTimerService', () => {
     service.dismissTimer(id);
     expect(service.timers().length).toBe(0);
   });
+
+  it('restarts a timer immediately into running state from total duration', () => {
+    const id = service.startTimer('rec-1', 'Chili', 'Simmer', 60);
+    vi.advanceTimersByTime(35000);
+    expect(service.timers()[0].remainingSeconds).toBe(25);
+
+    service.restartTimer(id);
+    expect(service.timers()[0].remainingSeconds).toBe(60);
+    expect(service.timers()[0].state).toBe('running');
+
+    vi.advanceTimersByTime(10000);
+    expect(service.timers()[0].remainingSeconds).toBe(50);
+  });
+
+  it('cancels timer via cancelTimer alias', () => {
+    const id = service.startTimer('rec-1', 'Chili', 'Simmer', 60);
+    expect(service.timers().length).toBe(1);
+
+    service.cancelTimer(id);
+    expect(service.timers().length).toBe(0);
+  });
 });

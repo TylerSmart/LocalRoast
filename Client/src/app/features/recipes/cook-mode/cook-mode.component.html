@@ -220,6 +220,18 @@
             <span>Starts timer on the current step</span>
           </div>
           <div class="help-cmd-item">
+            <code>"Pause timer"</code> or <code>"Resume timer"</code>
+            <span>Pauses or resumes the active timer</span>
+          </div>
+          <div class="help-cmd-item">
+            <code>"Restart timer"</code>
+            <span>Restarts the timer from the beginning</span>
+          </div>
+          <div class="help-cmd-item">
+            <code>"Cancel timer"</code> or <code>"Stop timer"</code>
+            <span>Cancels and clears the active timer</span>
+          </div>
+          <div class="help-cmd-item">
             <code>"Done"</code> or <code>"Check"</code>
             <span>Marks active step as completed</span>
           </div>
@@ -590,6 +602,7 @@
                     mat-icon-button
                     class="timer-action-btn"
                     (click)="kitchenTimerService.pauseTimer(t.id)"
+                    matTooltip="Pause timer"
                     aria-label="Pause timer"
                   >
                     <mat-icon>pause</mat-icon>
@@ -599,6 +612,7 @@
                     mat-icon-button
                     class="timer-action-btn"
                     (click)="kitchenTimerService.resumeTimer(t.id)"
+                    matTooltip="Resume timer"
                     aria-label="Resume timer"
                   >
                     <mat-icon>play_arrow</mat-icon>
@@ -608,8 +622,9 @@
                 <button
                   mat-icon-button
                   class="timer-action-btn"
-                  (click)="kitchenTimerService.resetTimer(t.id)"
-                  aria-label="Reset timer"
+                  (click)="kitchenTimerService.restartTimer(t.id)"
+                  matTooltip="Restart timer"
+                  aria-label="Restart timer"
                 >
                   <mat-icon>restart_alt</mat-icon>
                 </button>
@@ -617,8 +632,9 @@
                 <button
                   mat-icon-button
                   class="timer-action-btn dismiss-btn"
-                  (click)="kitchenTimerService.dismissTimer(t.id)"
-                  aria-label="Dismiss timer"
+                  (click)="kitchenTimerService.cancelTimer(t.id)"
+                  matTooltip="Cancel timer"
+                  aria-label="Cancel timer"
                 >
                   <mat-icon>close</mat-icon>
                 </button>

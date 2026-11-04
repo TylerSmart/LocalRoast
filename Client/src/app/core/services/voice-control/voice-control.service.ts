@@ -6,7 +6,17 @@ export const COOK_VOICE_STORAGE_KEY = `${APP_STORAGE_PREFIX}:cook-voice-control-
 export const DEFAULT_VOICE_COMMAND_COOLDOWN_MS = 1200;
 
 export type VoiceCommandAction =
-  'next' | 'previous' | 'repeat' | 'timer' | 'check' | 'help' | 'stop';
+  | 'next'
+  | 'previous'
+  | 'repeat'
+  | 'timer'
+  | 'pause_timer'
+  | 'resume_timer'
+  | 'restart_timer'
+  | 'cancel_timer'
+  | 'check'
+  | 'help'
+  | 'stop';
 
 export interface VoiceCommandEvent {
   action: VoiceCommandAction;
@@ -330,7 +340,63 @@ export class VoiceControlService {
       return { action: 'repeat', transcript: raw, matchedKeyword: 'repeat' };
     }
 
-    // 4. Timer: "timer", "start timer", "set timer"
+    // 4. Timer commands
+    // 4a. Resume timer: "resume timer", "unpause timer", "continue timer"
+    if (
+      normalized.includes('resume timer') ||
+      normalized.includes('resume the timer') ||
+      normalized.includes('unpause timer') ||
+      normalized.includes('continue timer') ||
+      ((words.includes('resume') || words.includes('unpause') || words.includes('continue')) &&
+        words.includes('timer'))
+    ) {
+      return { action: 'resume_timer', transcript: raw, matchedKeyword: 'resume timer' };
+    }
+
+    // 4b. Pause timer: "pause timer", "pause the timer", "hold timer"
+    if (
+      !normalized.includes('unpause') &&
+      (normalized.includes('pause timer') ||
+        normalized.includes('pause the timer') ||
+        normalized.includes('hold timer') ||
+        ((words.includes('pause') || words.includes('hold')) && words.includes('timer')))
+    ) {
+      return { action: 'pause_timer', transcript: raw, matchedKeyword: 'pause timer' };
+    }
+
+    // 4c. Restart / Reset timer: "restart timer", "reset timer", "restart"
+    if (
+      normalized.includes('restart timer') ||
+      normalized.includes('restart the timer') ||
+      normalized.includes('reset timer') ||
+      normalized.includes('reset the timer') ||
+      ((words.includes('restart') || words.includes('reset')) && words.includes('timer')) ||
+      words.includes('restart')
+    ) {
+      return { action: 'restart_timer', transcript: raw, matchedKeyword: 'restart timer' };
+    }
+
+    // 4d. Cancel / Stop / Dismiss timer: "cancel timer", "stop timer", "dismiss timer", "clear timer"
+    if (
+      normalized.includes('cancel timer') ||
+      normalized.includes('cancel the timer') ||
+      normalized.includes('stop timer') ||
+      normalized.includes('stop the timer') ||
+      normalized.includes('dismiss timer') ||
+      normalized.includes('clear timer') ||
+      normalized.includes('delete timer') ||
+      normalized.includes('turn off timer') ||
+      ((words.includes('cancel') ||
+        words.includes('dismiss') ||
+        words.includes('clear') ||
+        words.includes('delete') ||
+        words.includes('stop')) &&
+        words.includes('timer'))
+    ) {
+      return { action: 'cancel_timer', transcript: raw, matchedKeyword: 'cancel timer' };
+    }
+
+    // 4e. Start timer: "timer", "start timer", "set timer"
     if (words.includes('timer') || normalized.includes('start timer')) {
       return { action: 'timer', transcript: raw, matchedKeyword: 'timer' };
     }
@@ -369,6 +435,14 @@ export class VoiceControlService {
         return 'Repeat Step';
       case 'timer':
         return 'Start Timer';
+      case 'pause_timer':
+        return 'Pause Timer';
+      case 'resume_timer':
+        return 'Resume Timer';
+      case 'restart_timer':
+        return 'Restart Timer';
+      case 'cancel_timer':
+        return 'Cancel Timer';
       case 'check':
         return 'Toggle Step Done';
       case 'help':

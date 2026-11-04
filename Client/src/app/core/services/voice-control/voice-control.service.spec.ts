@@ -146,6 +146,61 @@ describe('VoiceControlService', () => {
     expect(res2?.action).toBe('timer');
   });
 
+  it('matches "pause timer" and "hold timer" commands', () => {
+    const res1 = service.processTranscript('pause timer');
+    expect(res1?.action).toBe('pause_timer');
+
+    const res2 = service.processTranscript('pause the timer please');
+    expect(res2?.action).toBe('pause_timer');
+
+    const res3 = service.processTranscript('hold timer');
+    expect(res3?.action).toBe('pause_timer');
+  });
+
+  it('matches "resume timer" and "unpause timer" commands', () => {
+    const res1 = service.processTranscript('resume timer');
+    expect(res1?.action).toBe('resume_timer');
+
+    const res2 = service.processTranscript('unpause timer');
+    expect(res2?.action).toBe('resume_timer');
+
+    const res3 = service.processTranscript('continue timer');
+    expect(res3?.action).toBe('resume_timer');
+  });
+
+  it('matches "restart timer", "reset timer", and "restart" commands', () => {
+    const res1 = service.processTranscript('restart timer');
+    expect(res1?.action).toBe('restart_timer');
+
+    const res2 = service.processTranscript('reset timer');
+    expect(res2?.action).toBe('restart_timer');
+
+    const res3 = service.processTranscript('restart');
+    expect(res3?.action).toBe('restart_timer');
+  });
+
+  it('matches "cancel timer", "stop timer", and "dismiss timer" commands', () => {
+    const res1 = service.processTranscript('cancel timer');
+    expect(res1?.action).toBe('cancel_timer');
+
+    const res2 = service.processTranscript('stop timer');
+    expect(res2?.action).toBe('cancel_timer');
+
+    const res3 = service.processTranscript('dismiss timer');
+    expect(res3?.action).toBe('cancel_timer');
+
+    const res4 = service.processTranscript('clear timer');
+    expect(res4?.action).toBe('cancel_timer');
+  });
+
+  it('distinguishes generic "stop" from "stop timer"', () => {
+    const narrationStop = service.processTranscript('stop');
+    expect(narrationStop?.action).toBe('stop');
+
+    const timerCancel = service.processTranscript('stop timer');
+    expect(timerCancel?.action).toBe('cancel_timer');
+  });
+
   it('matches "done", "check", and "complete" commands', () => {
     const res1 = service.processTranscript('done');
     expect(res1?.action).toBe('check');

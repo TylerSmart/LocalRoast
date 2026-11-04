@@ -34,6 +34,8 @@ describe('CookModeComponent', () => {
     startTimer: ReturnType<typeof vi.fn>;
     pauseTimer: ReturnType<typeof vi.fn>;
     resumeTimer: ReturnType<typeof vi.fn>;
+    restartTimer: ReturnType<typeof vi.fn>;
+    cancelTimer: ReturnType<typeof vi.fn>;
     addSeconds: ReturnType<typeof vi.fn>;
     resetTimer: ReturnType<typeof vi.fn>;
     dismissTimer: ReturnType<typeof vi.fn>;
@@ -193,6 +195,8 @@ describe('CookModeComponent', () => {
       startTimer: vi.fn().mockReturnValue('t-123'),
       pauseTimer: vi.fn(),
       resumeTimer: vi.fn(),
+      restartTimer: vi.fn(),
+      cancelTimer: vi.fn(),
       addSeconds: vi.fn(),
       resetTimer: vi.fn(),
       dismissTimer: vi.fn(),
@@ -463,6 +467,133 @@ describe('CookModeComponent', () => {
       1,
     );
     expect(mockVoiceControlService.setFeedback).toHaveBeenCalledWith('Started timer: Brown Beef');
+  });
+
+  it('handles "pause_timer" voice command by pausing active timer', () => {
+    mockKitchenTimerService.timers.mockReturnValue([
+      {
+        id: 'timer-1',
+        recipeId: 'rec-1',
+        recipeTitle: 'Beef Chili',
+        stepNumber: 1,
+        label: 'Brown Beef',
+        totalDurationSeconds: 600,
+        remainingSeconds: 400,
+        endsAtMs: 123456,
+        state: 'running',
+      },
+    ]);
+
+    commandSubject.next({
+      action: 'pause_timer',
+      transcript: 'pause timer',
+      matchedKeyword: 'pause timer',
+    });
+
+    expect(mockKitchenTimerService.pauseTimer).toHaveBeenCalledWith('timer-1');
+    expect(mockVoiceControlService.setFeedback).toHaveBeenCalledWith('Paused timer: Brown Beef');
+  });
+
+  it('handles "resume_timer" voice command by resuming paused timer', () => {
+    mockKitchenTimerService.timers.mockReturnValue([
+      {
+        id: 'timer-1',
+        recipeId: 'rec-1',
+        recipeTitle: 'Beef Chili',
+        stepNumber: 1,
+        label: 'Brown Beef',
+        totalDurationSeconds: 600,
+        remainingSeconds: 400,
+        endsAtMs: null,
+        state: 'paused',
+      },
+    ]);
+
+    commandSubject.next({
+      action: 'resume_timer',
+      transcript: 'resume timer',
+      matchedKeyword: 'resume timer',
+    });
+
+    expect(mockKitchenTimerService.resumeTimer).toHaveBeenCalledWith('timer-1');
+    expect(mockVoiceControlService.setFeedback).toHaveBeenCalledWith('Resumed timer: Brown Beef');
+  });
+
+  it('handles "restart_timer" voice command by restarting timer', () => {
+    mockKitchenTimerService.timers.mockReturnValue([
+      {
+        id: 'timer-1',
+        recipeId: 'rec-1',
+        recipeTitle: 'Beef Chili',
+        stepNumber: 1,
+        label: 'Brown Beef',
+        totalDurationSeconds: 600,
+        remainingSeconds: 100,
+        endsAtMs: 123456,
+        state: 'running',
+      },
+    ]);
+
+    commandSubject.next({
+      action: 'restart_timer',
+      transcript: 'restart timer',
+      matchedKeyword: 'restart timer',
+    });
+
+    expect(mockKitchenTimerService.restartTimer).toHaveBeenCalledWith('timer-1');
+    expect(mockVoiceControlService.setFeedback).toHaveBeenCalledWith('Restarted timer: Brown Beef');
+  });
+
+  it('handles "cancel_timer" voice command by cancelling timer', () => {
+    mockKitchenTimerService.timers.mockReturnValue([
+      {
+        id: 'timer-1',
+        recipeId: 'rec-1',
+        recipeTitle: 'Beef Chili',
+        stepNumber: 1,
+        label: 'Brown Beef',
+        totalDurationSeconds: 600,
+        remainingSeconds: 400,
+        endsAtMs: 123456,
+        state: 'running',
+      },
+    ]);
+
+    commandSubject.next({
+      action: 'cancel_timer',
+      transcript: 'cancel timer',
+      matchedKeyword: 'cancel timer',
+    });
+
+    expect(mockKitchenTimerService.cancelTimer).toHaveBeenCalledWith('timer-1');
+    expect(mockVoiceControlService.setFeedback).toHaveBeenCalledWith('Cancelled timer: Brown Beef');
+  });
+
+  it('provides friendly feedback when timer commands find no matching timer', () => {
+    mockKitchenTimerService.timers.mockReturnValue([]);
+
+    commandSubject.next({
+      action: 'pause_timer',
+      transcript: 'pause timer',
+      matchedKeyword: 'pause timer',
+    });
+    expect(mockVoiceControlService.setFeedback).toHaveBeenCalledWith(
+      'No running timer to pause',
+      2500,
+    );
+
+    // Reset lastVoiceCommandTime on component to allow next command through debounce
+    (component as unknown as { lastVoiceCommandTime: number }).lastVoiceCommandTime = 0;
+
+    commandSubject.next({
+      action: 'resume_timer',
+      transcript: 'resume timer',
+      matchedKeyword: 'resume timer',
+    });
+    expect(mockVoiceControlService.setFeedback).toHaveBeenCalledWith(
+      'No paused timer to resume',
+      2500,
+    );
   });
 
   it('handles "help" voice command by toggling help cheatsheet', () => {

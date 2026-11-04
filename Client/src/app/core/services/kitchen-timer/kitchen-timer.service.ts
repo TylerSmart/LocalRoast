@@ -161,6 +161,28 @@ export class KitchenTimerService {
     this.syncAlarmLoop();
   }
 
+  restartTimer(id: string): void {
+    const now = Date.now();
+    this._timers.update((timers) =>
+      timers.map((t) => {
+        if (t.id !== id) return t;
+        const endsAtMs = now + t.totalDurationSeconds * 1000;
+        return {
+          ...t,
+          remainingSeconds: t.totalDurationSeconds,
+          endsAtMs,
+          state: 'running',
+        };
+      }),
+    );
+    this.syncAlarmLoop();
+    this.ensureTicker();
+  }
+
+  cancelTimer(id: string): void {
+    this.dismissTimer(id);
+  }
+
   dismissTimer(id: string): void {
     this._timers.update((timers) => timers.filter((t) => t.id !== id));
     this.syncAlarmLoop();

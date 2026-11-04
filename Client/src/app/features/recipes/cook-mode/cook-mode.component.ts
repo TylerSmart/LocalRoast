@@ -19,7 +19,10 @@ import {
   SubRecipePreviewDto,
   UnitSystem,
 } from '../../../core/models/recipe.models';
-import { KitchenTimerService } from '../../../core/services/kitchen-timer/kitchen-timer.service';
+import {
+  ActiveKitchenTimer,
+  KitchenTimerService,
+} from '../../../core/services/kitchen-timer/kitchen-timer.service';
 import { RecipeService } from '../../../core/services/recipe/recipe.service';
 import { WakeLockService } from '../../../core/services/wake-lock/wake-lock.service';
 import { SpeechNarrationService } from '../../../core/services/speech-narration/speech-narration.service';
@@ -530,6 +533,18 @@ export class CookModeComponent implements OnInit, OnDestroy {
       case 'timer':
         this.startCurrentStepFirstTimer();
         break;
+      case 'pause_timer':
+        this.pauseActiveTimerVoice();
+        break;
+      case 'resume_timer':
+        this.resumeActiveTimerVoice();
+        break;
+      case 'restart_timer':
+        this.restartActiveTimerVoice();
+        break;
+      case 'cancel_timer':
+        this.cancelActiveTimerVoice();
+        break;
       case 'check': {
         const current = this.currentStep();
         if (current) {
@@ -544,6 +559,69 @@ export class CookModeComponent implements OnInit, OnDestroy {
         this.speechNarrationService.stop();
         break;
     }
+  }
+
+  private findStepOrActiveTimer(
+    predicate?: (timer: ActiveKitchenTimer) => boolean,
+  ): ActiveKitchenTimer | null {
+    const allTimers = this.kitchenTimerService.timers();
+    const filtered = predicate ? allTimers.filter(predicate) : allTimers;
+    if (filtered.length === 0) return null;
+
+    const currentStepNum = this.currentStep()?.step.stepNumber;
+    if (currentStepNum != null) {
+      const stepMatch = filtered.find((t) => t.stepNumber === currentStepNum);
+      if (stepMatch) return stepMatch;
+    }
+
+    return filtered[filtered.length - 1];
+  }
+
+  protected pauseActiveTimerVoice(): void {
+    const target = this.findStepOrActiveTimer((t) => t.state === 'running');
+    if (!target) {
+      this.voiceControlService.setFeedback('No running timer to pause', 2500);
+      return;
+    }
+    this.kitchenTimerService.pauseTimer(target.id);
+    this.voiceControlService.setFeedback(`Paused timer: ${target.label}`);
+  }
+
+  protected resumeActiveTimerVoice(): void {
+    const target = this.findStepOrActiveTimer((t) => t.state === 'paused');
+    if (!target) {
+      this.voiceControlService.setFeedback('No paused timer to resume', 2500);
+      return;
+    }
+    this.kitchenTimerService.resumeTimer(target.id);
+    this.voiceControlService.setFeedback(`Resumed timer: ${target.label}`);
+  }
+
+  protected restartActiveTimerVoice(): void {
+    const target = this.findStepOrActiveTimer();
+    if (!target) {
+      const current = this.currentStep();
+      if (current && current.step.timers.length > 0) {
+        const stepTimer = current.step.timers[0];
+        this.startStepTimer(stepTimer, current.step.stepNumber);
+        this.voiceControlService.setFeedback(`Started timer: ${stepTimer.label}`);
+        return;
+      }
+      this.voiceControlService.setFeedback('No timer to restart', 2500);
+      return;
+    }
+    this.kitchenTimerService.restartTimer(target.id);
+    this.voiceControlService.setFeedback(`Restarted timer: ${target.label}`);
+  }
+
+  protected cancelActiveTimerVoice(): void {
+    const target = this.findStepOrActiveTimer();
+    if (!target) {
+      this.voiceControlService.setFeedback('No timer to cancel', 2500);
+      return;
+    }
+    this.kitchenTimerService.cancelTimer(target.id);
+    this.voiceControlService.setFeedback(`Cancelled timer: ${target.label}`);
   }
 
   protected startCurrentStepFirstTimer(): void {
