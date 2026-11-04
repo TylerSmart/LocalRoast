@@ -700,4 +700,53 @@ public sealed class RecipeDraftNormalizerTests
             "Boilerplate header should be stripped."
         );
     }
+
+    [TestMethod]
+    public void DisambiguatesDuplicateTimerLabelsOnSameStep()
+    {
+        var rawPayload = new LlmExtractedRecipePayload(
+            Title: "Test Stew",
+            Description: "Hearty stew.",
+            BaseServings: 4,
+            YieldDisplay: "4 servings",
+            PrepTimeMinutes: 10,
+            CookTimeMinutes: 30,
+            TotalTimeMinutes: 40,
+            Difficulty: "Medium",
+            SourceName: null,
+            SourceAuthor: null,
+            ConfidenceScore: 0.95m,
+            SuggestedTagNames: [],
+            Ingredients: [],
+            Steps:
+            [
+                new(
+                    SectionName: null,
+                    Instruction: "Simmer uncovered for 10 minutes. Then cover and simmer for 20 more minutes.",
+                    IngredientIndices: [],
+                    Timers: [new(600, "Simmer"), new(1200, "Simmer")]
+                ),
+            ]
+        );
+
+        var draft = RecipeDraftNormalizer.Normalize(
+            raw: rawPayload,
+            catalogFoods: [],
+            tags: [],
+            sourceUrl: null,
+            fallbackSourceName: null,
+            fallbackSourceAuthor: null,
+            coverImagePath: null,
+            thumbnailImagePath: null
+        );
+
+        Assert.AreEqual(1, draft.Steps.Count);
+        var timers = draft.Steps[0].Timers;
+        Assert.IsNotNull(timers);
+        Assert.AreEqual(2, timers.Count);
+        Assert.AreEqual("Simmer (10m)", timers[0].Label);
+        Assert.AreEqual(600, timers[0].DurationSeconds);
+        Assert.AreEqual("Simmer (20m)", timers[1].Label);
+        Assert.AreEqual(1200, timers[1].DurationSeconds);
+    }
 }

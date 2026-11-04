@@ -466,7 +466,49 @@ describe('CookModeComponent', () => {
       600,
       1,
     );
-    expect(mockVoiceControlService.setFeedback).toHaveBeenCalledWith('Started timer: Brown Beef');
+    expect(mockVoiceControlService.setFeedback).toHaveBeenCalledWith(
+      'Started timer: Brown Beef · 10 min',
+    );
+  });
+
+  it('selects the unstarted timer when multiple timers exist on the active step', () => {
+    // Inject second timer into step 1
+    const current = component['recipe']()!;
+    current.steps[0].timers.push({
+      id: 'st-2',
+      sortOrder: 2,
+      durationSeconds: 1200,
+      label: 'Brown Beef',
+    });
+
+    // Timer 1 is already running in kitchenTimerService
+    mockKitchenTimerService.timers.mockReturnValue([
+      {
+        id: 'timer-1',
+        recipeId: 'rec-1',
+        recipeTitle: 'Beef Chili',
+        stepNumber: 1,
+        label: 'Brown Beef',
+        totalDurationSeconds: 600,
+        remainingSeconds: 300,
+        endsAtMs: 123456,
+        state: 'running',
+      },
+    ]);
+
+    commandSubject.next({ action: 'timer', transcript: 'start timer', matchedKeyword: 'timer' });
+
+    // It should have chosen the unstarted second timer (1200s)
+    expect(mockKitchenTimerService.startTimer).toHaveBeenCalledWith(
+      'rec-1',
+      'Beef Chili',
+      'Brown Beef',
+      1200,
+      1,
+    );
+    expect(mockVoiceControlService.setFeedback).toHaveBeenCalledWith(
+      'Started timer: Brown Beef · 20 min (2 of 2)',
+    );
   });
 
   it('handles "pause_timer" voice command by pausing active timer', () => {

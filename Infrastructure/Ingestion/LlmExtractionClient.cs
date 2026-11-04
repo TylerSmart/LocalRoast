@@ -870,7 +870,7 @@ Rules:
    - "ingredientIndices": 0-based array of indices of the ingredients used in this step.
    - "timers": list of timers for any duration in this step:
      - "durationSeconds": integer seconds (e.g. 15 minutes = 900, 1 hour = 3600).
-     - "label": short label (e.g. "Simmer", "Bake", "Rest").
+     - "label": short descriptive label (e.g. "Simmer", "Bake", "Rest"). If a step has multiple timers, assign distinct descriptive labels (e.g. "Initial Simmer", "Covered Simmer", "Rest") rather than duplicate names.
 6. {{tagRule}}
 7. ConfidenceScore: decimal number between 0.0 and 1.0 representing your extraction confidence.
 8. Output ONLY a single valid JSON object matching the requested schema with no conversational text.{{foodCatalogSection}}
@@ -914,7 +914,7 @@ Rules:
    - "ingredientIndices": 0-based array of indices of the ingredients used in this step.
    - "timers": list of timers for any duration in this step:
      - "durationSeconds": integer seconds (e.g. 15 minutes = 900, 1 hour = 3600).
-     - "label": short label (e.g. "Simmer", "Bake", "Rest").
+     - "label": short descriptive label (e.g. "Simmer", "Bake", "Rest"). If a step has multiple timers, assign distinct descriptive labels (e.g. "Initial Simmer", "Covered Simmer", "Rest") rather than duplicate names.
 7. {{tagRule}}
 8. ConfidenceScore: decimal number between 0.0 and 1.0 representing your transcription/extraction confidence.
 9. Output ONLY a single valid JSON object matching the requested schema with no conversational text.{{foodCatalogSection}}

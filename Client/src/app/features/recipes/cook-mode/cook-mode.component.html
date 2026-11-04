@@ -584,7 +584,15 @@
             >
               <div class="timer-info">
                 <span class="timer-countdown">{{ formatCountdown(t.remainingSeconds) }}</span>
-                <span class="timer-label" [title]="t.label">{{ t.label }}</span>
+                <span class="timer-label" [title]="t.label">
+                  @if (t.stepNumber) {
+                    <span class="timer-step-badge">Step {{ t.stepNumber }} · </span>
+                  }
+                  {{ t.label }}
+                  <span class="timer-duration-sub"
+                    >({{ formatDuration(t.totalDurationSeconds) }})</span
+                  >
+                </span>
               </div>
 
               <div class="timer-actions">

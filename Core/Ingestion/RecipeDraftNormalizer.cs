@@ -358,6 +358,38 @@ public static class RecipeDraftNormalizer
                 timers.AddRange(StepTimerExtractor.DetectTimers(instruction, i + 1));
             }
 
+            if (timers.Count > 1)
+            {
+                var labelGroups = timers
+                    .GroupBy(t => t.Label, StringComparer.OrdinalIgnoreCase)
+                    .Where(g => g.Count() > 1)
+                    .Select(g => g.Key)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                if (labelGroups.Count > 0)
+                {
+                    var disambiguated = new List<RecipeStepTimerInput>(timers.Count);
+                    foreach (var timer in timers)
+                    {
+                        if (labelGroups.Contains(timer.Label))
+                        {
+                            var formatted = FormatTimerDuration(timer.DurationSeconds);
+                            disambiguated.Add(
+                                timer with
+                                {
+                                    Label = $"{timer.Label} ({formatted})",
+                                }
+                            );
+                        }
+                        else
+                        {
+                            disambiguated.Add(timer);
+                        }
+                    }
+                    timers = disambiguated;
+                }
+            }
+
             normalizedSteps.Add(
                 new IngestionDraftStepDto(
                     SectionName: string.IsNullOrWhiteSpace(rawStep.SectionName)
@@ -662,6 +694,28 @@ public static class RecipeDraftNormalizer
 
             _ => TagCategory.Custom,
         };
+    }
+
+    public static string FormatTimerDuration(int seconds)
+    {
+        if (seconds >= 3600 && seconds % 3600 == 0)
+        {
+            var hours = seconds / 3600;
+            return hours == 1 ? "1 hr" : $"{hours} hrs";
+        }
+        if (seconds >= 3600)
+        {
+            var hours = seconds / 3600;
+            var mins = (seconds % 3600) / 60;
+            return $"{hours}h {mins}m";
+        }
+        if (seconds >= 60)
+        {
+            var mins = seconds / 60;
+            var secs = seconds % 60;
+            return secs > 0 ? $"{mins}m {secs}s" : $"{mins}m";
+        }
+        return $"{seconds}s";
     }
 
     private static string ToTitleCase(string text)

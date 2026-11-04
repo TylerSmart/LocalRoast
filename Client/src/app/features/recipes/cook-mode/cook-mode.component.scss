@@ -984,10 +984,20 @@
         .timer-label {
           font-size: 0.75rem;
           color: var(--mat-sys-on-surface-variant);
-          max-width: 140px;
+          max-width: 200px;
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
+
+          .timer-step-badge {
+            font-weight: 600;
+            color: var(--mat-sys-primary);
+          }
+
+          .timer-duration-sub {
+            opacity: 0.85;
+            margin-left: 2px;
+          }
         }
       }
 

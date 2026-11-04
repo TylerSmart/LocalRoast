@@ -531,19 +531,19 @@ export class CookModeComponent implements OnInit, OnDestroy {
         this.narrateCurrentStep();
         break;
       case 'timer':
-        this.startCurrentStepFirstTimer();
+        this.startCurrentStepTimer(cmd.transcript);
         break;
       case 'pause_timer':
-        this.pauseActiveTimerVoice();
+        this.pauseActiveTimerVoice(cmd.transcript);
         break;
       case 'resume_timer':
-        this.resumeActiveTimerVoice();
+        this.resumeActiveTimerVoice(cmd.transcript);
         break;
       case 'restart_timer':
-        this.restartActiveTimerVoice();
+        this.restartActiveTimerVoice(cmd.transcript);
         break;
       case 'cancel_timer':
-        this.cancelActiveTimerVoice();
+        this.cancelActiveTimerVoice(cmd.transcript);
         break;
       case 'check': {
         const current = this.currentStep();
@@ -563,10 +563,31 @@ export class CookModeComponent implements OnInit, OnDestroy {
 
   private findStepOrActiveTimer(
     predicate?: (timer: ActiveKitchenTimer) => boolean,
+    transcript?: string,
   ): ActiveKitchenTimer | null {
     const allTimers = this.kitchenTimerService.timers();
     const filtered = predicate ? allTimers.filter(predicate) : allTimers;
     if (filtered.length === 0) return null;
+
+    if (transcript) {
+      const lower = transcript.toLowerCase();
+      // Match by duration mention (e.g. "10 minute", "20 min")
+      for (const t of filtered) {
+        const mins = Math.round(t.totalDurationSeconds / 60);
+        if (
+          (mins > 0 && (lower.includes(`${mins} min`) || lower.includes(`${mins} minute`))) ||
+          (t.totalDurationSeconds < 60 && lower.includes(`${t.totalDurationSeconds} sec`))
+        ) {
+          return t;
+        }
+      }
+      // Match by ordinal
+      if (lower.includes('second') || lower.includes(' 2') || lower.includes('two')) {
+        if (filtered.length > 1) return filtered[1];
+      } else if (lower.includes('first') || lower.includes(' 1') || lower.includes('one')) {
+        return filtered[0];
+      }
+    }
 
     const currentStepNum = this.currentStep()?.step.stepNumber;
     if (currentStepNum != null) {
@@ -577,8 +598,8 @@ export class CookModeComponent implements OnInit, OnDestroy {
     return filtered[filtered.length - 1];
   }
 
-  protected pauseActiveTimerVoice(): void {
-    const target = this.findStepOrActiveTimer((t) => t.state === 'running');
+  protected pauseActiveTimerVoice(transcript?: string): void {
+    const target = this.findStepOrActiveTimer((t) => t.state === 'running', transcript);
     if (!target) {
       this.voiceControlService.setFeedback('No running timer to pause', 2500);
       return;
@@ -587,8 +608,8 @@ export class CookModeComponent implements OnInit, OnDestroy {
     this.voiceControlService.setFeedback(`Paused timer: ${target.label}`);
   }
 
-  protected resumeActiveTimerVoice(): void {
-    const target = this.findStepOrActiveTimer((t) => t.state === 'paused');
+  protected resumeActiveTimerVoice(transcript?: string): void {
+    const target = this.findStepOrActiveTimer((t) => t.state === 'paused', transcript);
     if (!target) {
       this.voiceControlService.setFeedback('No paused timer to resume', 2500);
       return;
@@ -597,8 +618,8 @@ export class CookModeComponent implements OnInit, OnDestroy {
     this.voiceControlService.setFeedback(`Resumed timer: ${target.label}`);
   }
 
-  protected restartActiveTimerVoice(): void {
-    const target = this.findStepOrActiveTimer();
+  protected restartActiveTimerVoice(transcript?: string): void {
+    const target = this.findStepOrActiveTimer(undefined, transcript);
     if (!target) {
       const current = this.currentStep();
       if (current && current.step.timers.length > 0) {
@@ -614,8 +635,8 @@ export class CookModeComponent implements OnInit, OnDestroy {
     this.voiceControlService.setFeedback(`Restarted timer: ${target.label}`);
   }
 
-  protected cancelActiveTimerVoice(): void {
-    const target = this.findStepOrActiveTimer();
+  protected cancelActiveTimerVoice(transcript?: string): void {
+    const target = this.findStepOrActiveTimer(undefined, transcript);
     if (!target) {
       this.voiceControlService.setFeedback('No timer to cancel', 2500);
       return;
@@ -625,13 +646,66 @@ export class CookModeComponent implements OnInit, OnDestroy {
   }
 
   protected startCurrentStepFirstTimer(): void {
+    this.startCurrentStepTimer();
+  }
+
+  protected startCurrentStepTimer(transcript?: string): void {
     const current = this.currentStep();
-    if (current && current.step.timers.length > 0) {
-      const timer = current.step.timers[0];
-      this.startStepTimer(timer, current.step.stepNumber);
-      this.voiceControlService.setFeedback(`Started timer: ${timer.label}`);
-    } else {
+    if (!current || current.step.timers.length === 0) {
       this.voiceControlService.setFeedback('No timer on this step', 2500);
+      return;
     }
+
+    const timers = current.step.timers;
+    let targetTimer: RecipeStepTimerDto | undefined;
+
+    if (transcript) {
+      const lower = transcript.toLowerCase();
+
+      // Check for ordinal/number references: "first", "second", "third", "1", "2", "3"
+      if (lower.includes('second') || lower.includes(' 2') || lower.includes('two')) {
+        targetTimer = timers[1];
+      } else if (lower.includes('third') || lower.includes(' 3') || lower.includes('three')) {
+        targetTimer = timers[2];
+      } else if (lower.includes('first') || lower.includes(' 1') || lower.includes('one')) {
+        targetTimer = timers[0];
+      }
+
+      // Check for duration mention in transcript (e.g. "10 minute", "20 min", "45 second")
+      if (!targetTimer) {
+        for (const t of timers) {
+          const mins = Math.round(t.durationSeconds / 60);
+          if (
+            (mins > 0 && (lower.includes(`${mins} min`) || lower.includes(`${mins} minute`))) ||
+            (t.durationSeconds < 60 && lower.includes(`${t.durationSeconds} sec`))
+          ) {
+            targetTimer = t;
+            break;
+          }
+        }
+      }
+    }
+
+    // Default sequential fallback: find the first timer on this step that isn't already active
+    if (!targetTimer) {
+      const activeTimers = this.kitchenTimerService.timers();
+      const unstarted = timers.find(
+        (st) =>
+          !activeTimers.some(
+            (at) =>
+              at.stepNumber === current.step.stepNumber &&
+              at.totalDurationSeconds === st.durationSeconds &&
+              at.state !== 'completed',
+          ),
+      );
+      targetTimer = unstarted ?? timers[0];
+    }
+
+    const index = timers.indexOf(targetTimer);
+    const countInfo = timers.length > 1 ? ` (${index + 1} of ${timers.length})` : '';
+    this.startStepTimer(targetTimer, current.step.stepNumber);
+    this.voiceControlService.setFeedback(
+      `Started timer: ${targetTimer.label} · ${formatDuration(targetTimer.durationSeconds)}${countInfo}`,
+    );
   }
 }
