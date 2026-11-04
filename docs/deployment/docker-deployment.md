@@ -187,7 +187,7 @@ volumes:
 
 > [!NOTE]
 > **Docker Named Volumes vs. Host Bind Mounts (e.g. TrueNAS)**:
-> In standard Docker, `sqlserver_data:/var/opt/mssql` is a Docker-managed named volume, which requires declaring `volumes: sqlserver_data:` at the bottom of the Compose file. On systems like TrueNAS Scale, a host path bind-mount (`/mnt/tank/...:/var/opt/mssql`) is used instead to leverage ZFS datasets and automated snapshots, which does not require a top-level `volumes:` section.
+> In standard Docker, `sqlserver_data:/var/opt/mssql` and `uploads_data:/data/uploads` are Docker-managed named volumes, which requires declaring `volumes: [sqlserver_data, uploads_data]` at the bottom of the Compose file. On systems like TrueNAS Scale, host path bind-mounts (e.g. `/mnt/tank/localroast/db:/var/opt/mssql` and `/mnt/tank/localroast/uploads:/data/uploads`) are used instead to leverage ZFS datasets and automated snapshots, which does not require a top-level `volumes:` section. See the [TrueNAS Scale Deployment Guide](truenas-scale.md) for details.
 
 > [!TIP]
 > If you prefer to build the container from source code instead of pulling the prebuilt image from GHCR, clone the repository and add a `build:` block to the `api` service:
