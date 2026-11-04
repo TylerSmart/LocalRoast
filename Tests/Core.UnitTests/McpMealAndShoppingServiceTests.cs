@@ -42,7 +42,7 @@ public sealed class McpMealAndShoppingServiceTests
             .Options;
 
         _dbContext = new AppDbContext(options);
-        // Fixed date: Monday, Nov 2, 2026
+        // Fixed date: Monday, Nov 2, 2026 (week starts Sunday, Nov 1, 2026)
         _timeProvider = new FixedTimeProvider(
             new DateTimeOffset(2026, 11, 2, 12, 0, 0, TimeSpan.Zero)
         );
@@ -125,21 +125,21 @@ public sealed class McpMealAndShoppingServiceTests
     }
 
     [TestMethod]
-    public async Task GetMealPlan_WhenDatesOmitted_DefaultsToCurrentWeekMondayToSunday()
+    public async Task GetMealPlan_WhenDatesOmitted_DefaultsToCurrentWeekSundayToSaturday()
     {
         var result = await _service.GetMealPlanAsync(new McpGetMealPlanRequest());
-        Assert.AreEqual(new DateOnly(2026, 11, 2), result.StartDate);
-        Assert.AreEqual(new DateOnly(2026, 11, 8), result.EndDate);
+        Assert.AreEqual(new DateOnly(2026, 11, 1), result.StartDate);
+        Assert.AreEqual(new DateOnly(2026, 11, 7), result.EndDate);
     }
 
     [TestMethod]
     public async Task GetMealPlan_WhenOnlyStartDateProvided_DefaultsEndDateToSevenDays()
     {
         var result = await _service.GetMealPlanAsync(
-            new McpGetMealPlanRequest(StartDate: "2026-11-09")
+            new McpGetMealPlanRequest(StartDate: "2026-11-08")
         );
-        Assert.AreEqual(new DateOnly(2026, 11, 9), result.StartDate);
-        Assert.AreEqual(new DateOnly(2026, 11, 15), result.EndDate);
+        Assert.AreEqual(new DateOnly(2026, 11, 8), result.StartDate);
+        Assert.AreEqual(new DateOnly(2026, 11, 14), result.EndDate);
     }
 
     [TestMethod]
@@ -191,7 +191,7 @@ public sealed class McpMealAndShoppingServiceTests
 
         var onDeckRecipe = result.Entries[3];
         Assert.IsTrue(onDeckRecipe.IsOnDeck);
-        Assert.AreEqual(new DateOnly(2026, 11, 2), onDeckRecipe.WeekStartDate);
+        Assert.AreEqual(new DateOnly(2026, 11, 1), onDeckRecipe.WeekStartDate);
         Assert.IsNull(onDeckRecipe.ScheduledDate);
     }
 
@@ -258,8 +258,8 @@ public sealed class McpMealAndShoppingServiceTests
         // 2. Generate shopping list from meal plan into "Weekly Groceries" (auto-created)
         var genRes = await _service.GenerateShoppingListFromMealPlanAsync(
             new McpGenerateShoppingListRequest(
-                StartDate: "2026-11-02",
-                EndDate: "2026-11-08",
+                StartDate: "2026-11-01",
+                EndDate: "2026-11-07",
                 ListName: "Weekly Groceries",
                 CreateListIfMissing: true
             )

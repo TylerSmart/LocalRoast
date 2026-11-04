@@ -8,46 +8,46 @@ namespace App.Core.UnitTests;
 public sealed class MealPlanDateHelperTests
 {
     [TestMethod]
-    public void NormalizeToMonday_ReturnsCorrectMonday()
+    public void NormalizeToSunday_ReturnsCorrectSunday()
     {
-        // 2026-11-02 is Monday
-        var monday = new DateOnly(2026, 11, 2);
-        Assert.AreEqual(monday, MealPlanDateHelper.NormalizeToMonday(monday));
+        // 2026-11-01 is Sunday
+        var sunday = new DateOnly(2026, 11, 1);
+        Assert.AreEqual(sunday, MealPlanDateHelper.NormalizeToSunday(sunday));
 
-        // 2026-11-04 is Wednesday -> should normalize to 2026-11-02
+        // 2026-11-04 is Wednesday -> should normalize to 2026-11-01
         var wednesday = new DateOnly(2026, 11, 4);
-        Assert.AreEqual(monday, MealPlanDateHelper.NormalizeToMonday(wednesday));
+        Assert.AreEqual(sunday, MealPlanDateHelper.NormalizeToSunday(wednesday));
 
-        // 2026-11-08 is Sunday -> should normalize to 2026-11-02
-        var sunday = new DateOnly(2026, 11, 8);
-        Assert.AreEqual(monday, MealPlanDateHelper.NormalizeToMonday(sunday));
+        // 2026-11-07 is Saturday -> should normalize to 2026-11-01
+        var saturday = new DateOnly(2026, 11, 7);
+        Assert.AreEqual(sunday, MealPlanDateHelper.NormalizeToSunday(saturday));
 
-        // 2026-03-01 is Sunday -> previous Monday was 2026-02-23
-        var march1 = new DateOnly(2026, 3, 1);
-        Assert.AreEqual(new DateOnly(2026, 2, 23), MealPlanDateHelper.NormalizeToMonday(march1));
+        // 2026-03-04 is Wednesday -> previous Sunday was 2026-03-01
+        var march4 = new DateOnly(2026, 3, 4);
+        Assert.AreEqual(new DateOnly(2026, 3, 1), MealPlanDateHelper.NormalizeToSunday(march4));
     }
 
     [TestMethod]
-    public void GetDayOffsetFromMonday_ReturnsZeroToSix()
+    public void GetDayOffsetFromSunday_ReturnsZeroToSix()
     {
-        // 2026-11-02 is Monday
-        var monday = new DateOnly(2026, 11, 2);
-        Assert.AreEqual(0, MealPlanDateHelper.GetDayOffsetFromMonday(monday));
-        Assert.AreEqual(1, MealPlanDateHelper.GetDayOffsetFromMonday(monday.AddDays(1)));
-        Assert.AreEqual(2, MealPlanDateHelper.GetDayOffsetFromMonday(monday.AddDays(2)));
-        Assert.AreEqual(3, MealPlanDateHelper.GetDayOffsetFromMonday(monday.AddDays(3)));
-        Assert.AreEqual(4, MealPlanDateHelper.GetDayOffsetFromMonday(monday.AddDays(4)));
-        Assert.AreEqual(5, MealPlanDateHelper.GetDayOffsetFromMonday(monday.AddDays(5)));
-        Assert.AreEqual(6, MealPlanDateHelper.GetDayOffsetFromMonday(monday.AddDays(6)));
+        // 2026-11-01 is Sunday
+        var sunday = new DateOnly(2026, 11, 1);
+        Assert.AreEqual(0, MealPlanDateHelper.GetDayOffsetFromSunday(sunday));
+        Assert.AreEqual(1, MealPlanDateHelper.GetDayOffsetFromSunday(sunday.AddDays(1)));
+        Assert.AreEqual(2, MealPlanDateHelper.GetDayOffsetFromSunday(sunday.AddDays(2)));
+        Assert.AreEqual(3, MealPlanDateHelper.GetDayOffsetFromSunday(sunday.AddDays(3)));
+        Assert.AreEqual(4, MealPlanDateHelper.GetDayOffsetFromSunday(sunday.AddDays(4)));
+        Assert.AreEqual(5, MealPlanDateHelper.GetDayOffsetFromSunday(sunday.AddDays(5)));
+        Assert.AreEqual(6, MealPlanDateHelper.GetDayOffsetFromSunday(sunday.AddDays(6)));
     }
 
     [TestMethod]
-    public void GetMonthGridBounds_ValidMonth_ReturnsMondayStartAndSundayEnd()
+    public void GetMonthGridBounds_ValidMonth_ReturnsSundayStartAndSaturdayEnd()
     {
         var (gridStart, gridEnd) = MealPlanDateHelper.GetMonthGridBounds(2026, 11);
 
-        Assert.AreEqual(DayOfWeek.Monday, gridStart.DayOfWeek);
-        Assert.AreEqual(DayOfWeek.Sunday, gridEnd.DayOfWeek);
+        Assert.AreEqual(DayOfWeek.Sunday, gridStart.DayOfWeek);
+        Assert.AreEqual(DayOfWeek.Saturday, gridEnd.DayOfWeek);
         Assert.IsTrue(gridStart <= new DateOnly(2026, 11, 1));
         Assert.IsTrue(gridEnd >= new DateOnly(2026, 11, 30));
     }

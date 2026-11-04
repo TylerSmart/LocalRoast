@@ -21,6 +21,8 @@ using Serilog.Events;
 
 var builder = WebApplication.CreateBuilder(args);
 
+ApiBuildVersion.Initialize(builder.Configuration["App:Version"]);
+
 builder.Host.UseSerilog(
     (context, services, configuration) =>
         configuration
@@ -304,6 +306,10 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapGroup("/api").MapControllers();
+
+app.MapGet("/version", () => Results.Ok(ApiBuildVersion.Info))
+    .AllowAnonymous()
+    .ExcludeFromDescription();
 
 app.MapHub<ShoppingHub>("/api/hubs/shopping").RequireAuthorization().ExcludeFromDescription();
 

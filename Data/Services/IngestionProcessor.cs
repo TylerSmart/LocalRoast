@@ -271,6 +271,52 @@ public sealed class IngestionProcessor(
                 .Take(500)
                 .ToListAsync(cancellationToken);
 
+            var pendingDraftJsons = await dbContext
+                .IngestionJobs.AsNoTracking()
+                .Where(j =>
+                    j.Status == IngestionJobStatus.ReadyForReview && j.ExtractedDraftJson != null
+                )
+                .OrderByDescending(j => j.ProcessedAt)
+                .Take(100)
+                .Select(j => j.ExtractedDraftJson!)
+                .ToListAsync(cancellationToken);
+            foreach (var dj in pendingDraftJsons)
+            {
+                try
+                {
+                    var pd = JsonSerializer.Deserialize<IngestionExtractedDraftDto>(
+                        dj,
+                        JsonOptions
+                    );
+                    if (pd?.ProposedTagNames is { Count: > 0 })
+                    {
+                        foreach (var pt in pd.ProposedTagNames)
+                        {
+                            if (
+                                !string.IsNullOrWhiteSpace(pt)
+                                && !tagNames.Contains(pt, StringComparer.OrdinalIgnoreCase)
+                            )
+                                tagNames.Add(pt);
+                        }
+                    }
+                    if (pd?.Ingredients is { Count: > 0 })
+                    {
+                        foreach (var ing in pd.Ingredients)
+                        {
+                            if (
+                                !string.IsNullOrWhiteSpace(ing.ProposedFoodItemName)
+                                && availableFoodNames.Count < 500
+                                && !availableFoodNames.Contains(
+                                    ing.ProposedFoodItemName,
+                                    StringComparer.OrdinalIgnoreCase
+                                )
+                            )
+                                availableFoodNames.Add(ing.ProposedFoodItemName);
+                        }
+                    }
+                }
+                catch { }
+            }
             // Determine if Vision or Text pipeline is needed
             var requiresVision = job.Channel == IngestionChannel.Images;
             if (
@@ -419,6 +465,35 @@ public sealed class IngestionProcessor(
                 return false;
             }
 
+            if (
+                !requiresVision
+                && (
+                    (rawExtracted.Ingredients?.Count ?? 0) == 0
+                    || (rawExtracted.Steps?.Count ?? 0) == 0
+                )
+                && (job.NormalizedSourceText ?? job.RawText ?? "").Length > 80
+            )
+            {
+                var retryContext = new LlmExtractionContext(
+                    SourceContent: (job.NormalizedSourceText ?? job.RawText ?? "")
+                        + "\n\nIMPORTANT: Extract all ingredients into the ingredients array and all numbered steps into the steps array. Do not return empty arrays.",
+                    AvailableTagNames: tagNames,
+                    AvailableFoodNames: availableFoodNames
+                );
+                var retryExtracted = await llmClient.ExtractRecipeFromTextAsync(
+                    config,
+                    retryContext,
+                    cancellationToken
+                );
+                if (
+                    (retryExtracted.Ingredients?.Count ?? 0)
+                        > (rawExtracted.Ingredients?.Count ?? 0)
+                    || (retryExtracted.Steps?.Count ?? 0) > (rawExtracted.Steps?.Count ?? 0)
+                )
+                {
+                    rawExtracted = retryExtracted;
+                }
+            }
             string? fallbackSourceName = job.SourceName;
             string? fallbackSourceAuthor = job.SourceAuthor;
             if (!string.IsNullOrWhiteSpace(job.ScrapedPageJson))

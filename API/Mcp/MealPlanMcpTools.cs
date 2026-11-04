@@ -11,12 +11,12 @@ public sealed class MealPlanMcpTools(IMcpMealAndShoppingService mcpMealAndShoppi
 {
     [McpServerTool(Name = "get_meal_plan", ReadOnly = true)]
     [Description(
-        "Get scheduled household meal plan entries and weekly on-deck tray for a date range (defaults to current week Monday-Sunday when omitted)."
+        "Get scheduled household meal plan entries and weekly on-deck tray for a date range (defaults to current week Sunday-Saturday when omitted)."
     )]
     public Task<CallToolResult> GetMealPlanAsync(
-        [Description("Start date in ISO format YYYY-MM-DD (e.g. '2026-11-02')")]
+        [Description("Start date in ISO format YYYY-MM-DD (e.g. '2026-11-01')")]
             string? startDate = null,
-        [Description("End date in ISO format YYYY-MM-DD (e.g. '2026-11-08')")]
+        [Description("End date in ISO format YYYY-MM-DD (e.g. '2026-11-07')")]
             string? endDate = null,
         [Description("Include weekly on-deck entries (default true)")] bool includeOnDeck = true,
         ClaimsPrincipal? user = null,
@@ -80,7 +80,7 @@ public sealed class MealPlanMcpTools(IMcpMealAndShoppingService mcpMealAndShoppi
             string? rescheduleToSlot = null,
         [Description("Move entry to the weekly on-deck tray (default false)")]
             bool moveToOnDeck = false,
-        [Description("Optional target Monday weekStartDate YYYY-MM-DD when moving to on-deck")]
+        [Description("Optional target Sunday weekStartDate YYYY-MM-DD when moving to on-deck")]
             string? weekStartDate = null,
         ClaimsPrincipal? user = null,
         CancellationToken cancellationToken = default

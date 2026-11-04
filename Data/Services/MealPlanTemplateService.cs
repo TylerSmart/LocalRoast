@@ -108,12 +108,16 @@ public sealed class MealPlanTemplateService(
             );
         }
 
-        var weekMonday = MealPlanDateHelper.NormalizeToMonday(request.WeekStartDate);
+        var weekSunday = MealPlanDateHelper.NormalizeToSunday(request.WeekStartDate);
+        var weekSaturday = weekSunday.AddDays(6);
 
         var query = dbContext
             .MealPlanEntries.AsNoTracking()
             .Include(e => e.Recipe)
-            .Where(e => e.WeekStartDate == weekMonday);
+            .Where(e =>
+                (e.IsOnDeck && e.WeekStartDate >= weekSunday && e.WeekStartDate <= weekSaturday)
+                || (!e.IsOnDeck && e.ScheduledDate >= weekSunday && e.ScheduledDate <= weekSaturday)
+            );
 
         if (!request.IncludeOnDeck)
         {
@@ -142,7 +146,7 @@ public sealed class MealPlanTemplateService(
         {
             var dayOffset = entry.IsOnDeck
                 ? (int?)null
-                : entry.ScheduledDate!.Value.DayNumber - weekMonday.DayNumber;
+                : entry.ScheduledDate!.Value.DayNumber - weekSunday.DayNumber;
 
             items.Add(
                 new MealPlanTemplateItem
@@ -263,19 +267,27 @@ public sealed class MealPlanTemplateService(
             return null;
         }
 
-        var targetMonday = MealPlanDateHelper.NormalizeToMonday(request.TargetWeekStartDate);
+        var targetSunday = MealPlanDateHelper.NormalizeToSunday(request.TargetWeekStartDate);
+        var targetSaturday = targetSunday.AddDays(6);
 
         if (request.Mode == ApplyTemplateMode.Replace)
         {
             await mealPlanService.ClearWeekAsync(
-                targetMonday,
+                targetSunday,
                 includeOnDeck: true,
                 cancellationToken
             );
         }
 
         var existingEntries = await dbContext
-            .MealPlanEntries.Where(e => e.WeekStartDate == targetMonday)
+            .MealPlanEntries.Where(e =>
+                (e.IsOnDeck && e.WeekStartDate >= targetSunday && e.WeekStartDate <= targetSaturday)
+                || (
+                    !e.IsOnDeck
+                    && e.ScheduledDate >= targetSunday
+                    && e.ScheduledDate <= targetSaturday
+                )
+            )
             .ToListAsync(cancellationToken);
 
         var sortedItems = template
@@ -289,7 +301,7 @@ public sealed class MealPlanTemplateService(
         {
             var scheduledDate = item.IsOnDeck
                 ? (DateOnly?)null
-                : targetMonday.AddDays(item.DayOffset!.Value);
+                : targetSunday.AddDays(item.DayOffset!.Value);
 
             if (request.Mode == ApplyTemplateMode.Merge)
             {
@@ -330,7 +342,7 @@ public sealed class MealPlanTemplateService(
 
             var newEntry = new MealPlanEntry
             {
-                WeekStartDate = targetMonday,
+                WeekStartDate = targetSunday,
                 IsOnDeck = item.IsOnDeck,
                 ScheduledDate = scheduledDate,
                 Slot = item.Slot,
@@ -348,7 +360,7 @@ public sealed class MealPlanTemplateService(
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
-        return await mealPlanService.GetWeekAsync(targetMonday, cancellationToken);
+        return await mealPlanService.GetWeekAsync(targetSunday, cancellationToken);
     }
 
     private static string ValidateName(string name)
@@ -394,7 +406,7 @@ public sealed class MealPlanTemplateService(
                 if (!input.DayOffset.HasValue || input.DayOffset.Value is < 0 or > 6)
                 {
                     throw new DomainValidationException(
-                        "DayOffset must be between 0 (Monday) and 6 (Sunday) for scheduled template items."
+                        "DayOffset must be between 0 (Sunday) and 6 (Saturday) for scheduled template items."
                     );
                 }
 

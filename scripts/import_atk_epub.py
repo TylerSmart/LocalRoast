@@ -492,47 +492,39 @@ def inspect_llm_settings(api_base, token):
         print(f"  (Notice: could not query /api/llm-settings: {ex})")
 
 
-def ensure_chapter_collections(api_base, token, recipes):
-    """Ensure LocalRoast Collections exist for every ATK chapter in the selection."""
-    chapter_map = {}
-    unique_chapters = []
-    for r in recipes:
-        ch = (r.get("chapter") or "").strip()[:100]
-        if ch and ch not in unique_chapters:
-            unique_chapters.append(ch)
-
-    if not unique_chapters:
-        return chapter_map
+def ensure_book_collection(api_base, token, collection_name=BOOK_TITLE):
+    """Ensure a single LocalRoast Collection exists for the cookbook (by default BOOK_TITLE)."""
+    clean_name = (collection_name or BOOK_TITLE).strip()[:100]
+    if not clean_name:
+        return None
 
     existing = api_json_request("GET", f"{api_base}/collections", token=token) or []
-    by_norm = {c["name"].strip().lower(): c["id"] for c in existing if c.get("name") and c.get("id")}
+    by_norm = {
+        c["name"].strip().lower(): c["id"]
+        for c in existing
+        if c.get("name") and c.get("id")
+    }
 
-    created_count = 0
-    for idx, ch in enumerate(unique_chapters):
-        norm = ch.lower()
-        if norm in by_norm:
-            chapter_map[ch] = by_norm[norm]
-        else:
-            created = api_json_request(
-                "POST",
-                f"{api_base}/collections",
-                token=token,
-                payload_obj={
-                    "name": ch,
-                    "description": f"Chapter from {BOOK_TITLE}",
-                    "sortOrder": idx + 1,
-                },
-            )
-            if created and created.get("id"):
-                chapter_map[ch] = created["id"]
-                by_norm[norm] = created["id"]
-                created_count += 1
+    norm = clean_name.lower()
+    if norm in by_norm:
+        print(f"Reusing existing collection: '{clean_name}'")
+        return by_norm[norm]
 
-    print(
-        f"Resolved {len(chapter_map)} chapter collection(s) "
-        f"({created_count} newly created, {len(chapter_map) - created_count} reused)."
+    created = api_json_request(
+        "POST",
+        f"{api_base}/collections",
+        token=token,
+        payload_obj={
+            "name": clean_name,
+            "description": f"Recipes imported from {BOOK_TITLE} by {BOOK_AUTHOR}",
+            "sortOrder": 1,
+        },
     )
-    return chapter_map
+    if created and created.get("id"):
+        print(f"Created cookbook collection: '{clean_name}'")
+        return created["id"]
+
+    return None
 
 
 def upload_cover_image(api_base, token, zip_handle, image_inner_path):
@@ -653,9 +645,20 @@ def main():
         help="Trigger API import (also triggered automatically when --email/--username or --token is provided).",
     )
     parser.add_argument(
+        "--collection",
+        type=str,
+        default=BOOK_TITLE,
+        help=f"Collection name for imported recipes (default: '{BOOK_TITLE}').",
+    )
+    parser.add_argument(
+        "--auto-publish",
+        action="store_true",
+        help="Force per-job auto-publishing even if the Auto-Publish toggle in LLM Settings is off.",
+    )
+    parser.add_argument(
         "--review-only",
         action="store_true",
-        help="Hold LLM-extracted recipes in ReadyForReview instead of auto-publishing.",
+        help="Hold LLM-extracted recipes in ReadyForReview (default unless --auto-publish or LLM Settings Auto-Publish is enabled).",
     )
     parser.add_argument("--url", default="http://localhost:5041", help="LocalRoast base URL")
     parser.add_argument("--email", "--username", dest="email", help="LocalRoast account email")
@@ -750,19 +753,19 @@ def main():
 
         use_llm_queue = not args.direct_import
         upload_images = not args.no_images
-        auto_publish = not args.review_only
+        auto_publish = bool(args.auto_publish) and not args.review_only
 
         if use_llm_queue:
             inspect_llm_settings(api_base, token)
             mode_desc = (
-                "LLM Queue (Auto-Publish ON)"
+                "LLM Queue (Force Auto-Publish ON)"
                 if auto_publish
-                else "LLM Queue (Review Inbox / Auto-Publish OFF)"
+                else "LLM Queue (Follows LLM Settings Auto-Publish Toggle)"
             )
         else:
             mode_desc = "Direct Recipe Creation (Bypassing LLM)"
 
-        chapter_collections = ensure_chapter_collections(api_base, token, recipes)
+        book_collection_id = ensure_book_collection(api_base, token, args.collection)
 
         print(f"\nStarting {mode_desc} for {len(recipes)} recipe(s) -> {api_base}...")
         success_count = 0
@@ -771,8 +774,7 @@ def main():
         with zipfile.ZipFile(args.epub, "r") as epub_zip:
             for i, r in enumerate(recipes):
                 title = r["title"][:200]
-                ch = (r.get("chapter") or "").strip()[:100]
-                col_id = chapter_collections.get(ch)
+                col_id = book_collection_id
                 action_verb = "Queueing" if use_llm_queue else "Importing"
                 print(f"[{i+1}/{len(recipes)}] {action_verb}: {title}...", end="", flush=True)
 

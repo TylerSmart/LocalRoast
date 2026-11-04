@@ -221,10 +221,10 @@ public sealed class AiKitchenHelperService(
             );
         }
 
-        var weekMonday = MealPlanDateHelper.NormalizeToMonday(
+        var weekSunday = MealPlanDateHelper.NormalizeToSunday(
             request.WeekStartDate ?? DateOnly.FromDateTime(_timeProvider.GetUtcNow().UtcDateTime)
         );
-        var weekSunday = weekMonday.AddDays(6);
+        var weekSaturday = weekSunday.AddDays(6);
 
         var publishedRecipes = await dbContext
             .Recipes.AsNoTracking()
@@ -287,7 +287,10 @@ public sealed class AiKitchenHelperService(
         var existingWeekEntries = await dbContext
             .MealPlanEntries.AsNoTracking()
             .Include(e => e.Recipe)
-            .Where(e => e.WeekStartDate == weekMonday)
+            .Where(e =>
+                (e.IsOnDeck && e.WeekStartDate >= weekSunday && e.WeekStartDate <= weekSaturday)
+                || (!e.IsOnDeck && e.ScheduledDate >= weekSunday && e.ScheduledDate <= weekSaturday)
+            )
             .ToListAsync(cancellationToken);
 
         var existingLines = existingWeekEntries
@@ -299,7 +302,7 @@ public sealed class AiKitchenHelperService(
             .ToList();
 
         var llmContext = new LlmDraftMealPlanContext(
-            WeekStartDate: weekMonday,
+            WeekStartDate: weekSunday,
             UserPrompt: prompt,
             RequestedMealCount: requestedMealCount,
             DefaultSlotName: request.DefaultSlot.ToString(),
@@ -328,7 +331,7 @@ public sealed class AiKitchenHelperService(
         // Track open days for default assignment
         var usedDays = existingWeekEntries
             .Where(e => !e.IsOnDeck && e.ScheduledDate.HasValue && e.Slot == request.DefaultSlot)
-            .Select(e => e.ScheduledDate!.Value.DayNumber - weekMonday.DayNumber)
+            .Select(e => e.ScheduledDate!.Value.DayNumber - weekSunday.DayNumber)
             .Where(d => d is >= 0 and <= 6)
             .ToHashSet();
 
@@ -389,7 +392,7 @@ public sealed class AiKitchenHelperService(
                 }
 
                 usedDays.Add(dayOffset.Value);
-                scheduledDate = weekMonday.AddDays(dayOffset.Value);
+                scheduledDate = weekSunday.AddDays(dayOffset.Value);
 
                 if (
                     !string.IsNullOrWhiteSpace(p.Slot)
@@ -450,8 +453,8 @@ public sealed class AiKitchenHelperService(
         }
 
         return new DraftMealPlanResponseDto(
-            WeekStartDate: weekMonday,
-            WeekEndDate: weekSunday,
+            WeekStartDate: weekSunday,
+            WeekEndDate: weekSaturday,
             ModelUsed: config.TextModel,
             ConsideredCookbookRecipeCount: catalogList.Count,
             Candidates: resultCandidates

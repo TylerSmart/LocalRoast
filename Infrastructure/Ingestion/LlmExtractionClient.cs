@@ -935,7 +935,7 @@ Strict Rules:
 4. For each proposal:
    - "catalogIndex": The integer index of the recipe from the catalog (1-based).
    - "recipeTitle": Title of the recipe matching the catalog.
-   - "dayOffset": Day of the week offset: 0 for Monday, 1 for Tuesday, ..., 6 for Sunday (or null if placed on-deck).
+   - "dayOffset": Day of the week offset: 0 for Sunday, 1 for Monday, ..., 6 for Saturday (or null if placed on-deck).
    - "slot": Meal slot ("Breakfast", "Lunch", "Dinner", or "SnackPrep").
    - "isOnDeck": True if placed in the flexible weekly On-Deck tray, otherwise false.
    - "targetServings": Servings to cook (defaults to the recipe's base servings).
@@ -950,7 +950,7 @@ Strict Rules:
         );
 
         return $$"""
-Target Week: Monday {{context.WeekStartDate:yyyy-MM-dd}}
+Target Week: Sunday {{context.WeekStartDate:yyyy-MM-dd}}
 User Request / Constraints: {{context.UserPrompt}}
 Requested Number of Meals: {{context.RequestedMealCount}}
 Default Meal Slot: {{context.DefaultSlotName}}
@@ -988,6 +988,7 @@ Household Cookbook Catalog:
                 sourceBookPage = new { type = "integer" },
                 confidenceScore = new { type = "number" },
                 suggestedTagNames = new { type = "array", items = new { type = "string" } },
+
                 ingredients = new
                 {
                     type = "array",
@@ -1044,7 +1045,14 @@ Household Cookbook Catalog:
                     },
                 },
             },
-            required = new[] { "title", "ingredients", "steps" },
+            required = new[]
+            {
+                "title",
+                "ingredients",
+                "steps",
+                "suggestedTagNames",
+                "confidenceScore",
+            },
         };
     }
 

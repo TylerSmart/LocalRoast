@@ -32,7 +32,7 @@ import {
   coerceToDateLocal,
   coerceToIsoDateLocal,
   getTodayIsoLocal,
-  normalizeToMondayIso,
+  normalizeToSundayIso,
   shouldUseTouchDatepicker,
 } from '../../../core/utils/meal-plan-date';
 
@@ -149,7 +149,7 @@ export class MealPlanEntryDialogComponent implements OnInit {
       nonNullable: true,
     }),
     slot: this.fb.control<MealSlot>('Dinner', { nonNullable: true }),
-    weekStartDate: this.fb.control<string>(normalizeToMondayIso(getTodayIsoLocal()), {
+    weekStartDate: this.fb.control<string>(normalizeToSundayIso(getTodayIsoLocal()), {
       nonNullable: true,
     }),
     recipeId: this.fb.control<string | null>(null),
@@ -188,7 +188,7 @@ export class MealPlanEntryDialogComponent implements OnInit {
       const initialEntryType = this.data.initialEntryType ?? 'Recipe';
       const initialPlacement = this.data.initialIsOnDeck ? 'ondeck' : 'scheduled';
       const initialDate = this.data.initialDate ?? getTodayIsoLocal();
-      const initialWeekStart = this.data.initialWeekStartDate ?? normalizeToMondayIso(initialDate);
+      const initialWeekStart = this.data.initialWeekStartDate ?? normalizeToSundayIso(initialDate);
 
       this.form.patchValue({
         entryType: initialEntryType,
@@ -274,8 +274,8 @@ export class MealPlanEntryDialogComponent implements OnInit {
     const isOnDeck = val.placement === 'ondeck';
     const scheduledDateStr = coerceToIsoDateLocal(val.scheduledDate);
     const weekStartDate = isOnDeck
-      ? normalizeToMondayIso(val.weekStartDate || scheduledDateStr)
-      : normalizeToMondayIso(scheduledDateStr);
+      ? normalizeToSundayIso(val.weekStartDate || scheduledDateStr)
+      : normalizeToSundayIso(scheduledDateStr);
 
     if (this.data.entry) {
       const updateReq: UpdateMealPlanEntryRequest = {

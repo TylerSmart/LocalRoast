@@ -33,14 +33,14 @@
     <!-- Date Range -->
     <div class="form-row dates-row">
       <mat-form-field appearance="outline" subscriptSizing="dynamic">
-        <mat-label>Start Date (Mon)</mat-label>
+        <mat-label>Start Date (Sun)</mat-label>
         <input matInput [matDatepicker]="startDatePicker" formControlName="startDate" required />
         <mat-datepicker-toggle matIconSuffix [for]="startDatePicker"></mat-datepicker-toggle>
         <mat-datepicker #startDatePicker [touchUi]="useTouchDatepicker"></mat-datepicker>
       </mat-form-field>
 
       <mat-form-field appearance="outline" subscriptSizing="dynamic">
-        <mat-label>End Date (Sun)</mat-label>
+        <mat-label>End Date (Sat)</mat-label>
         <input matInput [matDatepicker]="endDatePicker" formControlName="endDate" required />
         <mat-datepicker-toggle matIconSuffix [for]="endDatePicker"></mat-datepicker-toggle>
         <mat-datepicker #endDatePicker [touchUi]="useTouchDatepicker"></mat-datepicker>

@@ -4,18 +4,18 @@ namespace App.Core.MealPlans;
 
 public static class MealPlanDateHelper
 {
-    public static DateOnly NormalizeToMonday(DateOnly date)
+    public static DateOnly NormalizeToSunday(DateOnly date)
     {
-        int diff = ((int)date.DayOfWeek - (int)DayOfWeek.Monday + 7) % 7;
+        int diff = ((int)date.DayOfWeek - (int)DayOfWeek.Sunday + 7) % 7;
         return date.AddDays(-diff);
     }
 
-    public static int GetDayOffsetFromMonday(DateOnly date)
+    public static int GetDayOffsetFromSunday(DateOnly date)
     {
-        return ((int)date.DayOfWeek - (int)DayOfWeek.Monday + 7) % 7;
+        return ((int)date.DayOfWeek - (int)DayOfWeek.Sunday + 7) % 7;
     }
 
-    public static (DateOnly GridStartMonday, DateOnly GridEndSunday) GetMonthGridBounds(
+    public static (DateOnly GridStartSunday, DateOnly GridEndSaturday) GetMonthGridBounds(
         int year,
         int month
     )
@@ -33,6 +33,6 @@ public static class MealPlanDateHelper
         var firstOfMonth = new DateOnly(year, month, 1);
         var lastOfMonth = new DateOnly(year, month, DateTime.DaysInMonth(year, month));
 
-        return (NormalizeToMonday(firstOfMonth), NormalizeToMonday(lastOfMonth).AddDays(6));
+        return (NormalizeToSunday(firstOfMonth), NormalizeToSunday(lastOfMonth).AddDays(6));
     }
 }

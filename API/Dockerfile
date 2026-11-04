@@ -29,5 +29,8 @@ COPY --from=api-build /app/publish .
 COPY --from=client-build /src/Client/dist/App.Client/browser ./wwwroot
 RUN mkdir -p /data/uploads
 
+ARG APP_VERSION=""
+ENV APP_VERSION=${APP_VERSION}
+
 EXPOSE 8080
 ENTRYPOINT ["dotnet", "App.API.dll"]

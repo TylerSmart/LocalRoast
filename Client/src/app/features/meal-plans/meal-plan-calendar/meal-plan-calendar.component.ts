@@ -39,7 +39,7 @@ import {
   formatWeekRangeLabel,
   getMonthGrid,
   getTodayIsoLocal,
-  normalizeToMondayIso,
+  normalizeToSundayIso,
 } from '../../../core/utils/meal-plan-date';
 import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialog/confirm-dialog.component';
 import { ShoppingListGenerationResultDto } from '../../../core/models/shopping.models';
@@ -113,7 +113,7 @@ export class MealPlanCalendarComponent implements OnInit {
   protected readonly todayIso = getTodayIsoLocal();
 
   protected readonly viewMode = signal<'week' | 'month'>('week');
-  protected readonly activeWeekStart = signal<string>(normalizeToMondayIso(getTodayIsoLocal()));
+  protected readonly activeWeekStart = signal<string>(normalizeToSundayIso(getTodayIsoLocal()));
   protected readonly activeMonth = signal<{ year: number; monthIndex0: number }>({
     year: new Date().getFullYear(),
     monthIndex0: new Date().getMonth(),
@@ -231,14 +231,14 @@ export class MealPlanCalendarComponent implements OnInit {
 
   protected goToToday(): void {
     const today = getTodayIsoLocal();
-    this.activeWeekStart.set(normalizeToMondayIso(today));
+    this.activeWeekStart.set(normalizeToSundayIso(today));
     const now = new Date();
     this.activeMonth.set({ year: now.getFullYear(), monthIndex0: now.getMonth() });
     this.loadCurrentView();
   }
 
   protected selectMonthDay(isoDate: string): void {
-    this.activeWeekStart.set(normalizeToMondayIso(isoDate));
+    this.activeWeekStart.set(normalizeToSundayIso(isoDate));
     this.viewMode.set('week');
     this.loadWeek(this.activeWeekStart());
   }

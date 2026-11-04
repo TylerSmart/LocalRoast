@@ -25,7 +25,7 @@ import {
   coerceToDateLocal,
   coerceToIsoDateLocal,
   getTodayIsoLocal,
-  normalizeToMondayIso,
+  normalizeToSundayIso,
   shouldUseTouchDatepicker,
 } from '../../../core/utils/meal-plan-date';
 
@@ -84,7 +84,7 @@ export class GenerateShoppingListDialogComponent implements OnInit {
 
   ngOnInit(): void {
     const today = getTodayIsoLocal();
-    const monday = this.data?.startDate || normalizeToMondayIso(today);
+    const monday = this.data?.startDate || normalizeToSundayIso(today);
     const sunday = this.data?.endDate || addDaysIso(monday, 6);
 
     this.form.patchValue({

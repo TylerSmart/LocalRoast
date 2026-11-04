@@ -1,12 +1,12 @@
-export const DAY_NAMES_SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+export const DAY_NAMES_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 export const DAY_NAMES_LONG = [
+  'Sunday',
   'Monday',
   'Tuesday',
   'Wednesday',
   'Thursday',
   'Friday',
   'Saturday',
-  'Sunday',
 ];
 
 export function parseIsoDateLocal(iso: string): Date {
@@ -66,11 +66,10 @@ export function shouldUseTouchDatepicker(): boolean {
   return hasCoarsePointer || hasTouchPoints || isSmallViewport;
 }
 
-export function normalizeToMondayIso(isoDate: string): string {
+export function normalizeToSundayIso(isoDate: string): string {
   const date = parseIsoDateLocal(isoDate);
   const day = date.getDay(); // 0 = Sun, 1 = Mon ... 6 = Sat
-  const diff = (day - 1 + 7) % 7;
-  date.setDate(date.getDate() - diff);
+  date.setDate(date.getDate() - day);
   return formatIsoDateLocal(date);
 }
 
@@ -80,22 +79,22 @@ export function addDaysIso(isoDate: string, days: number): string {
   return formatIsoDateLocal(date);
 }
 
-export function formatWeekRangeLabel(mondayIso: string): string {
-  const mon = parseIsoDateLocal(mondayIso);
-  const sun = parseIsoDateLocal(addDaysIso(mondayIso, 6));
+export function formatWeekRangeLabel(weekStartIso: string): string {
+  const start = parseIsoDateLocal(weekStartIso);
+  const end = parseIsoDateLocal(addDaysIso(weekStartIso, 6));
 
-  const monMonth = mon.toLocaleDateString(undefined, { month: 'short' });
-  const sunMonth = sun.toLocaleDateString(undefined, { month: 'short' });
+  const startMonth = start.toLocaleDateString(undefined, { month: 'short' });
+  const endMonth = end.toLocaleDateString(undefined, { month: 'short' });
 
-  if (mon.getFullYear() !== sun.getFullYear()) {
-    return `${monMonth} ${mon.getDate()}, ${mon.getFullYear()} – ${sunMonth} ${sun.getDate()}, ${sun.getFullYear()}`;
+  if (start.getFullYear() !== end.getFullYear()) {
+    return `${startMonth} ${start.getDate()}, ${start.getFullYear()} – ${endMonth} ${end.getDate()}, ${end.getFullYear()}`;
   }
 
-  if (monMonth === sunMonth) {
-    return `${monMonth} ${mon.getDate()} – ${sun.getDate()}, ${mon.getFullYear()}`;
+  if (startMonth === endMonth) {
+    return `${startMonth} ${start.getDate()} – ${end.getDate()}, ${start.getFullYear()}`;
   }
 
-  return `${monMonth} ${mon.getDate()} – ${sunMonth} ${sun.getDate()}, ${mon.getFullYear()}`;
+  return `${startMonth} ${start.getDate()} – ${endMonth} ${end.getDate()}, ${start.getFullYear()}`;
 }
 
 export function formatMonthYearLabel(year: number, monthIndex0: number): string {
@@ -111,13 +110,12 @@ export function formatDayHeader(isoDate: string): {
   formattedDate: string;
 } {
   const date = parseIsoDateLocal(isoDate);
-  const jsDay = date.getDay();
-  const offset = (jsDay - 1 + 7) % 7; // 0 = Mon, 6 = Sun
+  const jsDay = date.getDay(); // 0 = Sun, 6 = Sat
   const today = getTodayIsoLocal();
 
   return {
-    dayShort: DAY_NAMES_SHORT[offset],
-    dayLong: DAY_NAMES_LONG[offset],
+    dayShort: DAY_NAMES_SHORT[jsDay],
+    dayLong: DAY_NAMES_LONG[jsDay],
     dateNum: date.getDate(),
     isToday: isoDate === today,
     formattedDate: date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
@@ -135,8 +133,8 @@ export function getMonthGrid(year: number, monthIndex0: number): MonthGridDay[] 
   const firstOfMonth = new Date(year, monthIndex0, 1);
   const lastOfMonth = new Date(year, monthIndex0 + 1, 0);
 
-  const startIso = normalizeToMondayIso(formatIsoDateLocal(firstOfMonth));
-  const endIso = addDaysIso(normalizeToMondayIso(formatIsoDateLocal(lastOfMonth)), 6);
+  const startIso = normalizeToSundayIso(formatIsoDateLocal(firstOfMonth));
+  const endIso = addDaysIso(normalizeToSundayIso(formatIsoDateLocal(lastOfMonth)), 6);
 
   const todayIso = getTodayIsoLocal();
   const days: MonthGridDay[] = [];

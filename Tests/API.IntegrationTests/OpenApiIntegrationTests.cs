@@ -53,6 +53,7 @@ public sealed class OpenApiIntegrationTests
         StringAssert.Contains(content, "/meal-plan-templates");
         StringAssert.Contains(content, "/shopping-lists");
         StringAssert.Contains(content, "/ai-helpers");
+        StringAssert.Contains(content, "/version");
         Assert.DoesNotContain("/api/mcp", content);
         StringAssert.Contains(content, "securitySchemes");
         StringAssert.Contains(content, "Bearer");

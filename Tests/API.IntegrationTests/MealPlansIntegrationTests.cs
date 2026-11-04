@@ -93,13 +93,13 @@ public sealed class MealPlansIntegrationTests
         var chili = await CreateTestRecipeAsync("Sunday Chili", 4m);
         var cornbread = await CreateTestRecipeAsync("Buttermilk Cornbread", 8m);
 
-        var monday = new DateOnly(2026, 11, 2);
+        var sunday = new DateOnly(2026, 11, 1);
 
         // 1. Create On-Deck item
         var onDeckReq = new CreateMealPlanEntryRequest(
             EntryType: MealPlanEntryType.Recipe,
             IsOnDeck: true,
-            WeekStartDate: monday,
+            WeekStartDate: sunday,
             RecipeId: chili.Id,
             TargetServings: 6m
         );
@@ -112,7 +112,7 @@ public sealed class MealPlansIntegrationTests
         Assert.AreEqual("Sunday Chili", onDeck.DisplayTitle);
 
         // 2. Schedule two recipes in Wednesday Dinner (multi-dish)
-        var wednesday = monday.AddDays(2);
+        var wednesday = sunday.AddDays(3);
         var dish1Req = new CreateMealPlanEntryRequest(
             EntryType: MealPlanEntryType.Recipe,
             IsOnDeck: false,
@@ -135,12 +135,12 @@ public sealed class MealPlansIntegrationTests
 
         // 3. Query Week
         var weekResp = await _client.GetAsync(
-            $"/api/meal-plans/week?weekStart={monday:yyyy-MM-dd}"
+            $"/api/meal-plans/week?weekStart={sunday:yyyy-MM-dd}"
         );
         Assert.AreEqual(HttpStatusCode.OK, weekResp.StatusCode);
         var week = await weekResp.Content.ReadFromJsonAsync<MealPlanWeekDto>();
         Assert.IsNotNull(week);
-        Assert.AreEqual(monday, week.WeekStartDate);
+        Assert.AreEqual(sunday, week.WeekStartDate);
         Assert.AreEqual(1, week.OnDeckEntries.Count);
 
         var wednesdayDay = week.Days.First(d => d.Date == wednesday);
@@ -156,14 +156,14 @@ public sealed class MealPlansIntegrationTests
         await RegisterAndAuthenticateAsync(_client, email, "chef_cook");
 
         var recipe = await CreateTestRecipeAsync("Quick Stir Fry", 2m);
-        var monday = new DateOnly(2026, 11, 2);
+        var sunday = new DateOnly(2026, 11, 1);
 
         var createResp = await _client.PostAsJsonAsync(
             "/api/meal-plans/entries",
             new CreateMealPlanEntryRequest(
                 EntryType: MealPlanEntryType.Recipe,
                 IsOnDeck: true,
-                WeekStartDate: monday,
+                WeekStartDate: sunday,
                 RecipeId: recipe.Id
             )
         );
@@ -193,7 +193,7 @@ public sealed class MealPlansIntegrationTests
         await RegisterAndAuthenticateAsync(_client, email, "chef_leftovers");
 
         var recipe = await CreateTestRecipeAsync("Roast Turkey", 12m);
-        var monday = new DateOnly(2026, 11, 2);
+        var sunday = new DateOnly(2026, 11, 1);
 
         // Scheduled meal
         var sourceResp = await _client.PostAsJsonAsync(
@@ -201,7 +201,7 @@ public sealed class MealPlansIntegrationTests
             new CreateMealPlanEntryRequest(
                 EntryType: MealPlanEntryType.Recipe,
                 IsOnDeck: false,
-                ScheduledDate: monday,
+                ScheduledDate: sunday,
                 Slot: MealSlot.Dinner,
                 RecipeId: recipe.Id
             )
@@ -215,7 +215,7 @@ public sealed class MealPlansIntegrationTests
             new CreateMealPlanEntryRequest(
                 EntryType: MealPlanEntryType.Leftovers,
                 IsOnDeck: false,
-                ScheduledDate: monday.AddDays(1),
+                ScheduledDate: sunday.AddDays(1),
                 Slot: MealSlot.Lunch,
                 SourceMealPlanEntryId: source.Id
             )
@@ -231,7 +231,7 @@ public sealed class MealPlansIntegrationTests
             new CreateMealPlanEntryRequest(
                 EntryType: MealPlanEntryType.FreeformNote,
                 IsOnDeck: false,
-                ScheduledDate: monday.AddDays(4),
+                ScheduledDate: sunday.AddDays(5),
                 Slot: MealSlot.Dinner,
                 CustomTitle: "Family Dinner Out"
             )
@@ -258,7 +258,7 @@ public sealed class MealPlansIntegrationTests
         await RegisterAndAuthenticateAsync(_client, email, "chef_templates");
 
         var recipe = await CreateTestRecipeAsync("Sheet Pan Fajitas", 4m);
-        var week1Monday = new DateOnly(2026, 11, 2);
+        var week1Sunday = new DateOnly(2026, 11, 1);
 
         // Create week 1 meal
         await _client.PostAsJsonAsync(
@@ -266,7 +266,7 @@ public sealed class MealPlansIntegrationTests
             new CreateMealPlanEntryRequest(
                 EntryType: MealPlanEntryType.Recipe,
                 IsOnDeck: false,
-                ScheduledDate: week1Monday.AddDays(1), // Tuesday
+                ScheduledDate: week1Sunday.AddDays(1), // Monday
                 Slot: MealSlot.Dinner,
                 RecipeId: recipe.Id
             )
@@ -276,7 +276,7 @@ public sealed class MealPlansIntegrationTests
         var tplResp = await _client.PostAsJsonAsync(
             "/api/meal-plan-templates/from-week",
             new CreateTemplateFromWeekRequest(
-                WeekStartDate: week1Monday,
+                WeekStartDate: week1Sunday,
                 Name: "Fajita Week Template",
                 IncludeOnDeck: true
             )
@@ -288,11 +288,11 @@ public sealed class MealPlansIntegrationTests
         Assert.AreEqual(1, template.Items.Count);
 
         // Apply template to week 2 in Merge mode
-        var week2Monday = week1Monday.AddDays(7);
+        var week2Sunday = week1Sunday.AddDays(7);
         var applyResp = await _client.PostAsJsonAsync(
             $"/api/meal-plan-templates/{template.Id}/apply",
             new ApplyMealPlanTemplateRequest(
-                TargetWeekStartDate: week2Monday,
+                TargetWeekStartDate: week2Sunday,
                 Mode: ApplyTemplateMode.Merge
             )
         );

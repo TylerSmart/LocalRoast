@@ -986,8 +986,8 @@ public sealed class ShoppingListService(
         CancellationToken cancellationToken
     )
     {
-        var firstMonday = MealPlanDateHelper.NormalizeToMonday(request.StartDate);
-        var lastMonday = MealPlanDateHelper.NormalizeToMonday(request.EndDate);
+        var firstSunday = MealPlanDateHelper.NormalizeToSunday(request.StartDate);
+        var lastSaturday = MealPlanDateHelper.NormalizeToSunday(request.EndDate).AddDays(6);
 
         var q = dbContext.MealPlanEntries.AsNoTracking().Include(e => e.Recipe).AsQueryable();
 
@@ -998,7 +998,8 @@ public sealed class ShoppingListService(
                     !e.IsOnDeck
                     && e.ScheduledDate >= request.StartDate
                     && e.ScheduledDate <= request.EndDate
-                ) || (e.IsOnDeck && e.WeekStartDate >= firstMonday && e.WeekStartDate <= lastMonday)
+                )
+                || (e.IsOnDeck && e.WeekStartDate >= firstSunday && e.WeekStartDate <= lastSaturday)
             );
         }
         else

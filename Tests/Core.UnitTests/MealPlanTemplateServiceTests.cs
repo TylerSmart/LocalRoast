@@ -32,7 +32,7 @@ public sealed class MealPlanTemplateServiceTests
 
         _dbContext = new AppDbContext(options);
         var timeProvider = new FixedTimeProvider(
-            new DateTimeOffset(2026, 11, 2, 12, 0, 0, TimeSpan.Zero)
+            new DateTimeOffset(2026, 11, 1, 12, 0, 0, TimeSpan.Zero)
         );
         _mealPlanService = new MealPlanService(_dbContext, timeProvider);
         _service = new MealPlanTemplateService(_dbContext, _mealPlanService);
@@ -76,7 +76,7 @@ public sealed class MealPlanTemplateServiceTests
             [
                 new MealPlanTemplateItemInput(
                     IsOnDeck: false,
-                    DayOffset: 1, // Tuesday
+                    DayOffset: 2, // Tuesday
                     Slot: MealSlot.Dinner,
                     EntryType: MealPlanEntryType.Recipe,
                     RecipeId: _recipe1.Id
@@ -96,7 +96,7 @@ public sealed class MealPlanTemplateServiceTests
         Assert.AreEqual(2, created.Items.Count);
 
         var tuesday = created.Items.First(i => !i.IsOnDeck);
-        Assert.AreEqual(1, tuesday.DayOffset);
+        Assert.AreEqual(2, tuesday.DayOffset);
         Assert.AreEqual(MealSlot.Dinner, tuesday.Slot);
         Assert.AreEqual("Taco Tuesday", tuesday.DisplayTitle);
 
@@ -119,12 +119,12 @@ public sealed class MealPlanTemplateServiceTests
     [TestMethod]
     public async Task CreateTemplateFromWeekAsync_SnapshotsExistingWeek()
     {
-        var monday = new DateOnly(2026, 11, 2);
+        var sunday = new DateOnly(2026, 11, 1);
         await _mealPlanService.CreateEntryAsync(
             new CreateMealPlanEntryRequest(
                 EntryType: MealPlanEntryType.Recipe,
                 IsOnDeck: false,
-                ScheduledDate: monday.AddDays(1),
+                ScheduledDate: sunday.AddDays(1),
                 Slot: MealSlot.Dinner,
                 RecipeId: _recipe1.Id
             )
@@ -133,14 +133,14 @@ public sealed class MealPlanTemplateServiceTests
             new CreateMealPlanEntryRequest(
                 EntryType: MealPlanEntryType.Recipe,
                 IsOnDeck: true,
-                WeekStartDate: monday,
+                WeekStartDate: sunday,
                 RecipeId: _recipe2.Id
             )
         );
 
         var template = await _service.CreateTemplateFromWeekAsync(
             new CreateTemplateFromWeekRequest(
-                WeekStartDate: monday,
+                WeekStartDate: sunday,
                 Name: "Snapshotted Week",
                 IncludeOnDeck: true
             )
@@ -161,14 +161,14 @@ public sealed class MealPlanTemplateServiceTests
                 [
                     new MealPlanTemplateItemInput(
                         IsOnDeck: false,
-                        DayOffset: 0, // Monday
+                        DayOffset: 0, // Sunday
                         Slot: MealSlot.Dinner,
                         EntryType: MealPlanEntryType.Recipe,
                         RecipeId: _recipe1.Id
                     ),
                     new MealPlanTemplateItemInput(
                         IsOnDeck: false,
-                        DayOffset: 1, // Tuesday
+                        DayOffset: 1, // Monday
                         Slot: MealSlot.Dinner,
                         EntryType: MealPlanEntryType.Recipe,
                         RecipeId: _recipe2.Id
@@ -177,13 +177,13 @@ public sealed class MealPlanTemplateServiceTests
             )
         );
 
-        var targetMonday = new DateOnly(2026, 11, 9);
-        // Pre-create Monday Dinner with recipe1
+        var targetSunday = new DateOnly(2026, 11, 8);
+        // Pre-create Sunday Dinner with recipe1
         await _mealPlanService.CreateEntryAsync(
             new CreateMealPlanEntryRequest(
                 EntryType: MealPlanEntryType.Recipe,
                 IsOnDeck: false,
-                ScheduledDate: targetMonday,
+                ScheduledDate: targetSunday,
                 Slot: MealSlot.Dinner,
                 RecipeId: _recipe1.Id
             )
@@ -193,15 +193,15 @@ public sealed class MealPlanTemplateServiceTests
         var week = await _service.ApplyTemplateToWeekAsync(
             template.Id,
             new ApplyMealPlanTemplateRequest(
-                TargetWeekStartDate: targetMonday,
+                TargetWeekStartDate: targetSunday,
                 Mode: ApplyTemplateMode.Merge
             )
         );
 
         Assert.IsNotNull(week);
-        // Monday should still have 1 entry (not duplicated)
+        // Sunday should still have 1 entry (not duplicated)
         Assert.AreEqual(1, week.Days[0].Entries.Count);
-        // Tuesday should have recipe2 added
+        // Monday should have recipe2 added
         Assert.AreEqual(1, week.Days[1].Entries.Count);
         Assert.AreEqual("Sheet Pan Salmon", week.Days[1].Entries[0].DisplayTitle);
     }
@@ -216,7 +216,7 @@ public sealed class MealPlanTemplateServiceTests
                 [
                     new MealPlanTemplateItemInput(
                         IsOnDeck: false,
-                        DayOffset: 1, // Tuesday
+                        DayOffset: 1, // Monday
                         Slot: MealSlot.Dinner,
                         EntryType: MealPlanEntryType.Recipe,
                         RecipeId: _recipe2.Id
@@ -225,13 +225,13 @@ public sealed class MealPlanTemplateServiceTests
             )
         );
 
-        var targetMonday = new DateOnly(2026, 11, 9);
-        // Pre-create an ad-hoc note on Monday
+        var targetSunday = new DateOnly(2026, 11, 8);
+        // Pre-create an ad-hoc note on Sunday
         await _mealPlanService.CreateEntryAsync(
             new CreateMealPlanEntryRequest(
                 EntryType: MealPlanEntryType.FreeformNote,
                 IsOnDeck: false,
-                ScheduledDate: targetMonday,
+                ScheduledDate: targetSunday,
                 Slot: MealSlot.Lunch,
                 CustomTitle: "Old Lunch"
             )
@@ -241,7 +241,7 @@ public sealed class MealPlanTemplateServiceTests
         var week = await _service.ApplyTemplateToWeekAsync(
             template.Id,
             new ApplyMealPlanTemplateRequest(
-                TargetWeekStartDate: targetMonday,
+                TargetWeekStartDate: targetSunday,
                 Mode: ApplyTemplateMode.Replace
             )
         );

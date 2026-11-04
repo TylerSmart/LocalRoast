@@ -32,9 +32,9 @@ public sealed class McpMealAndShoppingService(
         )
         {
             var today = DateOnly.FromDateTime(_timeProvider.GetUtcNow().UtcDateTime);
-            var monday = MealPlanDateHelper.NormalizeToMonday(today);
-            startDate = monday;
-            endDate = monday.AddDays(6);
+            var sunday = MealPlanDateHelper.NormalizeToSunday(today);
+            startDate = sunday;
+            endDate = sunday.AddDays(6);
         }
         else if (
             !string.IsNullOrWhiteSpace(request.StartDate)
@@ -95,14 +95,14 @@ public sealed class McpMealAndShoppingService(
                 if (weekStartDate is null)
                 {
                     weekStartDate = scheduledDate.HasValue
-                        ? MealPlanDateHelper.NormalizeToMonday(scheduledDate.Value)
-                        : MealPlanDateHelper.NormalizeToMonday(
+                        ? MealPlanDateHelper.NormalizeToSunday(scheduledDate.Value)
+                        : MealPlanDateHelper.NormalizeToSunday(
                             DateOnly.FromDateTime(_timeProvider.GetUtcNow().UtcDateTime)
                         );
                 }
                 else
                 {
-                    weekStartDate = MealPlanDateHelper.NormalizeToMonday(weekStartDate.Value);
+                    weekStartDate = MealPlanDateHelper.NormalizeToSunday(weekStartDate.Value);
                 }
 
                 scheduledDate = null;
@@ -115,7 +115,7 @@ public sealed class McpMealAndShoppingService(
                     scheduledDate = DateOnly.FromDateTime(_timeProvider.GetUtcNow().UtcDateTime);
                 }
 
-                weekStartDate = MealPlanDateHelper.NormalizeToMonday(scheduledDate.Value);
+                weekStartDate = MealPlanDateHelper.NormalizeToSunday(scheduledDate.Value);
                 slot = ParseSlot(item.Slot);
             }
 
@@ -198,7 +198,7 @@ public sealed class McpMealAndShoppingService(
         if (request.MoveToOnDeck)
         {
             var targetWeek = !string.IsNullOrWhiteSpace(request.WeekStartDate)
-                ? MealPlanDateHelper.NormalizeToMonday(
+                ? MealPlanDateHelper.NormalizeToSunday(
                     ParseDateOnly(request.WeekStartDate, "weekStartDate")
                 )
                 : existing.WeekStartDate;

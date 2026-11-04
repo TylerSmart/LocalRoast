@@ -16,19 +16,22 @@ public sealed class MealPlanService(AppDbContext dbContext, TimeProvider? timePr
         CancellationToken cancellationToken = default
     )
     {
-        var weekMonday = MealPlanDateHelper.NormalizeToMonday(weekDate);
-        var weekSunday = weekMonday.AddDays(6);
+        var weekSunday = MealPlanDateHelper.NormalizeToSunday(weekDate);
+        var weekSaturday = weekSunday.AddDays(6);
 
         var entries = await dbContext
             .MealPlanEntries.AsNoTracking()
             .Include(e => e.Recipe)
-            .Where(e => e.WeekStartDate == weekMonday)
+            .Where(e =>
+                (e.IsOnDeck && e.WeekStartDate >= weekSunday && e.WeekStartDate <= weekSaturday)
+                || (!e.IsOnDeck && e.ScheduledDate >= weekSunday && e.ScheduledDate <= weekSaturday)
+            )
             .ToListAsync(cancellationToken);
 
         var days = new List<MealPlanDayDto>(7);
         for (var offset = 0; offset < 7; offset++)
         {
-            var date = weekMonday.AddDays(offset);
+            var date = weekSunday.AddDays(offset);
             var dayEntries = entries
                 .Where(e => !e.IsOnDeck && e.ScheduledDate == date)
                 .OrderBy(e => e.Slot)
@@ -47,7 +50,7 @@ public sealed class MealPlanService(AppDbContext dbContext, TimeProvider? timePr
             .Select(MapEntryDto)
             .ToList();
 
-        return new MealPlanWeekDto(weekMonday, weekSunday, days, onDeckEntries);
+        return new MealPlanWeekDto(weekSunday, weekSaturday, days, onDeckEntries);
     }
 
     public async Task<MealPlanRangeResponseDto> GetRangeAsync(
@@ -84,14 +87,14 @@ public sealed class MealPlanService(AppDbContext dbContext, TimeProvider? timePr
         IReadOnlyList<MealPlanEntryDto> onDeckEntries = [];
         if (includeOnDeck)
         {
-            var firstMonday = MealPlanDateHelper.NormalizeToMonday(startDate);
-            var lastMonday = MealPlanDateHelper.NormalizeToMonday(endDate);
+            var firstSunday = MealPlanDateHelper.NormalizeToSunday(startDate);
+            var lastSaturday = MealPlanDateHelper.NormalizeToSunday(endDate).AddDays(6);
 
             var rawOnDeck = await dbContext
                 .MealPlanEntries.AsNoTracking()
                 .Include(e => e.Recipe)
                 .Where(e =>
-                    e.IsOnDeck && e.WeekStartDate >= firstMonday && e.WeekStartDate <= lastMonday
+                    e.IsOnDeck && e.WeekStartDate >= firstSunday && e.WeekStartDate <= lastSaturday
                 )
                 .OrderBy(e => e.WeekStartDate)
                 .ThenBy(e => e.SortOrder)
@@ -279,12 +282,12 @@ public sealed class MealPlanService(AppDbContext dbContext, TimeProvider? timePr
         if (request.IsOnDeck)
         {
             destIsOnDeck = true;
-            destWeekStart =
-                request.WeekStartDate
-                ?? (
+            destWeekStart = request.WeekStartDate.HasValue
+                ? MealPlanDateHelper.NormalizeToSunday(request.WeekStartDate.Value)
+                : (
                     request.ScheduledDate.HasValue
-                        ? MealPlanDateHelper.NormalizeToMonday(request.ScheduledDate.Value)
-                        : entry.WeekStartDate
+                        ? MealPlanDateHelper.NormalizeToSunday(request.ScheduledDate.Value)
+                        : MealPlanDateHelper.NormalizeToSunday(entry.WeekStartDate)
                 );
             destScheduledDate = null;
             destSlot = null;
@@ -294,7 +297,7 @@ public sealed class MealPlanService(AppDbContext dbContext, TimeProvider? timePr
             destIsOnDeck = false;
             destScheduledDate = request.ScheduledDate ?? entry.ScheduledDate ?? entry.WeekStartDate;
             destSlot = request.Slot ?? entry.Slot ?? MealSlot.Dinner;
-            destWeekStart = MealPlanDateHelper.NormalizeToMonday(destScheduledDate.Value);
+            destWeekStart = MealPlanDateHelper.NormalizeToSunday(destScheduledDate.Value);
         }
 
         var bucketChanged =
@@ -426,9 +429,13 @@ public sealed class MealPlanService(AppDbContext dbContext, TimeProvider? timePr
         CancellationToken cancellationToken = default
     )
     {
-        var weekMonday = MealPlanDateHelper.NormalizeToMonday(weekDate);
+        var weekSunday = MealPlanDateHelper.NormalizeToSunday(weekDate);
+        var weekSaturday = weekSunday.AddDays(6);
 
-        var query = dbContext.MealPlanEntries.Where(e => e.WeekStartDate == weekMonday);
+        var query = dbContext.MealPlanEntries.Where(e =>
+            (e.IsOnDeck && e.WeekStartDate >= weekSunday && e.WeekStartDate <= weekSaturday)
+            || (!e.IsOnDeck && e.ScheduledDate >= weekSunday && e.ScheduledDate <= weekSaturday)
+        );
 
         if (!includeOnDeck)
         {
@@ -485,27 +492,27 @@ public sealed class MealPlanService(AppDbContext dbContext, TimeProvider? timePr
             );
         }
 
-        var weekMonday = MealPlanDateHelper.NormalizeToMonday(request.WeekStartDate);
+        var weekSunday = MealPlanDateHelper.NormalizeToSunday(request.WeekStartDate);
 
         foreach (var entryRequest in request.Entries)
         {
             var req = entryRequest;
             if (req.IsOnDeck && !req.WeekStartDate.HasValue)
             {
-                req = req with { WeekStartDate = weekMonday };
+                req = req with { WeekStartDate = weekSunday };
             }
             else if (!req.IsOnDeck && req.ScheduledDate.HasValue && !req.WeekStartDate.HasValue)
             {
                 req = req with
                 {
-                    WeekStartDate = MealPlanDateHelper.NormalizeToMonday(req.ScheduledDate.Value),
+                    WeekStartDate = MealPlanDateHelper.NormalizeToSunday(req.ScheduledDate.Value),
                 };
             }
 
             await CreateEntryAsync(req, cancellationToken);
         }
 
-        return await GetWeekAsync(weekMonday, cancellationToken);
+        return await GetWeekAsync(weekSunday, cancellationToken);
     }
 
     private static (
@@ -529,7 +536,7 @@ public sealed class MealPlanService(AppDbContext dbContext, TimeProvider? timePr
                 );
             }
 
-            return (MealPlanDateHelper.NormalizeToMonday(rawWeek.Value), null, null);
+            return (MealPlanDateHelper.NormalizeToSunday(rawWeek.Value), null, null);
         }
 
         if (!scheduledDate.HasValue || !slot.HasValue || !Enum.IsDefined(slot.Value))
@@ -539,8 +546,8 @@ public sealed class MealPlanService(AppDbContext dbContext, TimeProvider? timePr
             );
         }
 
-        var monday = MealPlanDateHelper.NormalizeToMonday(scheduledDate.Value);
-        return (monday, scheduledDate.Value, slot.Value);
+        var sunday = MealPlanDateHelper.NormalizeToSunday(scheduledDate.Value);
+        return (sunday, scheduledDate.Value, slot.Value);
     }
 
     private async Task<(

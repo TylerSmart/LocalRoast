@@ -8,6 +8,11 @@ import { of } from 'rxjs';
 import { MealPlanEntryDto, MealPlanWeekDto } from '../../../core/models/meal-plan.models';
 import { MealPlanService } from '../../../core/services/meal-plan/meal-plan.service';
 import { AiKitchenHelperService } from '../../../core/services/ai-helpers/ai-kitchen-helper.service';
+import {
+  addDaysIso,
+  getTodayIsoLocal,
+  normalizeToSundayIso,
+} from '../../../core/utils/meal-plan-date';
 import { DraftMealPlanDialogComponent } from '../draft-meal-plan-dialog/draft-meal-plan-dialog.component';
 import { MealPlanCalendarComponent } from './meal-plan-calendar.component';
 
@@ -20,18 +25,18 @@ describe('MealPlanCalendarComponent', () => {
   };
 
   const mockWeek: MealPlanWeekDto = {
-    weekStartDate: '2026-11-02',
-    weekEndDate: '2026-11-08',
+    weekStartDate: '2026-11-01',
+    weekEndDate: '2026-11-07',
     days: [
       {
-        date: '2026-11-02',
+        date: '2026-11-01',
         dayOffset: 0,
         entries: [
           {
             id: 'e-1',
-            weekStartDate: '2026-11-02',
+            weekStartDate: '2026-11-01',
             isOnDeck: false,
-            scheduledDate: '2026-11-02',
+            scheduledDate: '2026-11-01',
             slot: 'Dinner',
             sortOrder: 0,
             entryType: 'Recipe',
@@ -50,9 +55,9 @@ describe('MealPlanCalendarComponent', () => {
               difficulty: 'Easy',
               thumbnailImagePath: null,
             },
-            createdAt: '2026-11-02T00:00:00Z',
+            createdAt: '2026-11-01T00:00:00Z',
             createdBy: 'chef',
-            modifiedAt: '2026-11-02T00:00:00Z',
+            modifiedAt: '2026-11-01T00:00:00Z',
             modifiedBy: 'chef',
           },
         ],
@@ -61,7 +66,7 @@ describe('MealPlanCalendarComponent', () => {
     onDeckEntries: [
       {
         id: 'e-2',
-        weekStartDate: '2026-11-02',
+        weekStartDate: '2026-11-01',
         isOnDeck: true,
         scheduledDate: null,
         slot: null,
@@ -74,9 +79,9 @@ describe('MealPlanCalendarComponent', () => {
         notes: null,
         sourceMealPlanEntryId: null,
         recipe: null,
-        createdAt: '2026-11-02T00:00:00Z',
+        createdAt: '2026-11-01T00:00:00Z',
         createdBy: 'chef',
-        modifiedAt: '2026-11-02T00:00:00Z',
+        modifiedAt: '2026-11-01T00:00:00Z',
         modifiedBy: 'chef',
       },
     ],
@@ -129,15 +134,21 @@ describe('MealPlanCalendarComponent', () => {
   });
 
   it('navigates next and previous week', () => {
+    const currentSunday = normalizeToSundayIso(getTodayIsoLocal());
+    const nextSunday = addDaysIso(currentSunday, 7);
+
     component['navigatePeriod'](1);
-    expect(component['activeWeekStart']()).toBe('2026-11-09');
-    expect(mockMealPlanService.getWeek).toHaveBeenCalledWith('2026-11-09');
+    expect(component['activeWeekStart']()).toBe(nextSunday);
+    expect(mockMealPlanService.getWeek).toHaveBeenCalledWith(nextSunday);
 
     component['navigatePeriod'](-1);
-    expect(component['activeWeekStart']()).toBe('2026-11-02');
+    expect(component['activeWeekStart']()).toBe(currentSunday);
   });
 
   it('opens generate shopping list dialog on openGenerateShoppingListDialog', () => {
+    const currentSunday = normalizeToSundayIso(getTodayIsoLocal());
+    const currentSaturday = addDaysIso(currentSunday, 6);
+
     mockDialog.open.mockReturnValue({
       afterClosed: () => of(undefined),
     });
@@ -147,8 +158,8 @@ describe('MealPlanCalendarComponent', () => {
       expect.anything(),
       expect.objectContaining({
         data: {
-          startDate: '2026-11-02',
-          endDate: '2026-11-08',
+          startDate: currentSunday,
+          endDate: currentSaturday,
         },
       }),
     );
@@ -197,7 +208,7 @@ describe('MealPlanCalendarComponent', () => {
     expect(draftBtn).toBeTruthy();
 
     mockDialog.open.mockReturnValue({
-      afterClosed: () => of({ weekStartDate: '2026-11-02' }),
+      afterClosed: () => of({ weekStartDate: '2026-11-01' }),
     });
 
     draftBtn.click();

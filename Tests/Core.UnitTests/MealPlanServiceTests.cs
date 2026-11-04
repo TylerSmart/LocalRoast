@@ -33,7 +33,7 @@ public sealed class MealPlanServiceTests
 
         _dbContext = new AppDbContext(options);
         _timeProvider = new FixedTimeProvider(
-            new DateTimeOffset(2026, 11, 2, 12, 0, 0, TimeSpan.Zero)
+            new DateTimeOffset(2026, 11, 1, 12, 0, 0, TimeSpan.Zero)
         );
         _service = new MealPlanService(_dbContext, _timeProvider);
 
@@ -81,7 +81,7 @@ public sealed class MealPlanServiceTests
         var request = new CreateMealPlanEntryRequest(
             EntryType: MealPlanEntryType.Recipe,
             IsOnDeck: true,
-            WeekStartDate: new DateOnly(2026, 11, 2),
+            WeekStartDate: new DateOnly(2026, 11, 1),
             RecipeId: _recipe1.Id,
             TargetServings: 6m
         );
@@ -92,7 +92,7 @@ public sealed class MealPlanServiceTests
         Assert.IsTrue(created.IsOnDeck);
         Assert.IsNull(created.ScheduledDate);
         Assert.IsNull(created.Slot);
-        Assert.AreEqual(new DateOnly(2026, 11, 2), created.WeekStartDate);
+        Assert.AreEqual(new DateOnly(2026, 11, 1), created.WeekStartDate);
         Assert.AreEqual("Sunday Chili", created.DisplayTitle);
         Assert.AreEqual(6m, created.TargetServings);
         Assert.IsFalse(created.IsLeftovers);
@@ -126,13 +126,13 @@ public sealed class MealPlanServiceTests
         Assert.AreEqual(MealSlot.Dinner, dish1.Slot);
         Assert.AreEqual(MealSlot.Dinner, dish2.Slot);
         Assert.AreEqual(date, dish1.ScheduledDate);
-        Assert.AreEqual(new DateOnly(2026, 11, 2), dish1.WeekStartDate);
+        Assert.AreEqual(new DateOnly(2026, 11, 1), dish1.WeekStartDate);
     }
 
     [TestMethod]
     public async Task CreateEntryAsync_Leftovers_WithSourceEntry_SetsLeftoverFlagAndTitle()
     {
-        var scheduledDate = new DateOnly(2026, 11, 2);
+        var scheduledDate = new DateOnly(2026, 11, 1);
         var sourceReq = new CreateMealPlanEntryRequest(
             EntryType: MealPlanEntryType.Recipe,
             IsOnDeck: false,
@@ -209,12 +209,12 @@ public sealed class MealPlanServiceTests
     [TestMethod]
     public async Task GetWeekAsync_Returns7DaysAndOnDeck_OrderedProperly()
     {
-        var monday = new DateOnly(2026, 11, 2);
+        var sunday = new DateOnly(2026, 11, 1);
         await _service.CreateEntryAsync(
             new CreateMealPlanEntryRequest(
                 EntryType: MealPlanEntryType.Recipe,
                 IsOnDeck: true,
-                WeekStartDate: monday,
+                WeekStartDate: sunday,
                 RecipeId: _recipe1.Id
             )
         );
@@ -223,16 +223,16 @@ public sealed class MealPlanServiceTests
             new CreateMealPlanEntryRequest(
                 EntryType: MealPlanEntryType.Recipe,
                 IsOnDeck: false,
-                ScheduledDate: monday,
+                ScheduledDate: sunday,
                 Slot: MealSlot.Breakfast,
                 RecipeId: _recipe2.Id
             )
         );
 
-        var week = await _service.GetWeekAsync(monday);
+        var week = await _service.GetWeekAsync(sunday);
 
-        Assert.AreEqual(monday, week.WeekStartDate);
-        Assert.AreEqual(monday.AddDays(6), week.WeekEndDate);
+        Assert.AreEqual(sunday, week.WeekStartDate);
+        Assert.AreEqual(sunday.AddDays(6), week.WeekEndDate);
         Assert.AreEqual(7, week.Days.Count);
         Assert.AreEqual(1, week.OnDeckEntries.Count);
         Assert.AreEqual(1, week.Days[0].Entries.Count);
@@ -242,12 +242,12 @@ public sealed class MealPlanServiceTests
     [TestMethod]
     public async Task MoveEntryAsync_BetweenOnDeckAndDay_ReSequencesSortOrders()
     {
-        var monday = new DateOnly(2026, 11, 2);
+        var sunday = new DateOnly(2026, 11, 1);
         var onDeck1 = await _service.CreateEntryAsync(
             new CreateMealPlanEntryRequest(
                 EntryType: MealPlanEntryType.Recipe,
                 IsOnDeck: true,
-                WeekStartDate: monday,
+                WeekStartDate: sunday,
                 RecipeId: _recipe1.Id
             )
         );
@@ -255,7 +255,7 @@ public sealed class MealPlanServiceTests
             new CreateMealPlanEntryRequest(
                 EntryType: MealPlanEntryType.Recipe,
                 IsOnDeck: true,
-                WeekStartDate: monday,
+                WeekStartDate: sunday,
                 RecipeId: _recipe2.Id
             )
         );
@@ -263,12 +263,12 @@ public sealed class MealPlanServiceTests
         Assert.AreEqual(0, onDeck1.SortOrder);
         Assert.AreEqual(1, onDeck2.SortOrder);
 
-        // Move onDeck1 to Monday Dinner
+        // Move onDeck1 to Sunday Dinner
         var moved = await _service.MoveEntryAsync(
             onDeck1.Id,
             new MoveMealPlanEntryRequest(
                 IsOnDeck: false,
-                ScheduledDate: monday,
+                ScheduledDate: sunday,
                 Slot: MealSlot.Dinner,
                 TargetSortOrder: 0
             )
@@ -276,7 +276,7 @@ public sealed class MealPlanServiceTests
 
         Assert.IsNotNull(moved);
         Assert.IsFalse(moved.IsOnDeck);
-        Assert.AreEqual(monday, moved.ScheduledDate);
+        Assert.AreEqual(sunday, moved.ScheduledDate);
         Assert.AreEqual(MealSlot.Dinner, moved.Slot);
         Assert.AreEqual(0, moved.SortOrder);
 
@@ -288,12 +288,12 @@ public sealed class MealPlanServiceTests
     [TestMethod]
     public async Task CookTonightAsync_PromotesOnDeckMealToTodayDinner()
     {
-        var monday = new DateOnly(2026, 11, 2);
+        var sunday = new DateOnly(2026, 11, 1);
         var entry = await _service.CreateEntryAsync(
             new CreateMealPlanEntryRequest(
                 EntryType: MealPlanEntryType.Recipe,
                 IsOnDeck: true,
-                WeekStartDate: monday,
+                WeekStartDate: sunday,
                 RecipeId: _recipe1.Id
             )
         );
@@ -302,19 +302,19 @@ public sealed class MealPlanServiceTests
 
         Assert.IsNotNull(cooked);
         Assert.IsFalse(cooked.IsOnDeck);
-        Assert.AreEqual(monday, cooked.ScheduledDate);
+        Assert.AreEqual(sunday, cooked.ScheduledDate);
         Assert.AreEqual(MealSlot.Dinner, cooked.Slot);
     }
 
     [TestMethod]
     public async Task DeleteEntryAsync_DetachesDerivedLeftovers()
     {
-        var monday = new DateOnly(2026, 11, 2);
+        var sunday = new DateOnly(2026, 11, 1);
         var source = await _service.CreateEntryAsync(
             new CreateMealPlanEntryRequest(
                 EntryType: MealPlanEntryType.Recipe,
                 IsOnDeck: false,
-                ScheduledDate: monday,
+                ScheduledDate: sunday,
                 Slot: MealSlot.Dinner,
                 RecipeId: _recipe1.Id
             )
@@ -324,7 +324,7 @@ public sealed class MealPlanServiceTests
             new CreateMealPlanEntryRequest(
                 EntryType: MealPlanEntryType.Leftovers,
                 IsOnDeck: false,
-                ScheduledDate: monday.AddDays(1),
+                ScheduledDate: sunday.AddDays(1),
                 Slot: MealSlot.Lunch,
                 SourceMealPlanEntryId: source.Id
             )
@@ -342,12 +342,12 @@ public sealed class MealPlanServiceTests
     [TestMethod]
     public async Task ClearWeekAsync_DeletesScheduledMeals_AndPreservesOnDeckWhenNotSpecified()
     {
-        var monday = new DateOnly(2026, 11, 2);
+        var sunday = new DateOnly(2026, 11, 1);
         await _service.CreateEntryAsync(
             new CreateMealPlanEntryRequest(
                 EntryType: MealPlanEntryType.Recipe,
                 IsOnDeck: true,
-                WeekStartDate: monday,
+                WeekStartDate: sunday,
                 RecipeId: _recipe1.Id
             )
         );
@@ -355,16 +355,16 @@ public sealed class MealPlanServiceTests
             new CreateMealPlanEntryRequest(
                 EntryType: MealPlanEntryType.Recipe,
                 IsOnDeck: false,
-                ScheduledDate: monday,
+                ScheduledDate: sunday,
                 Slot: MealSlot.Dinner,
                 RecipeId: _recipe2.Id
             )
         );
 
-        var count = await _service.ClearWeekAsync(monday, includeOnDeck: false);
+        var count = await _service.ClearWeekAsync(sunday, includeOnDeck: false);
         Assert.AreEqual(1, count);
 
-        var week = await _service.GetWeekAsync(monday);
+        var week = await _service.GetWeekAsync(sunday);
         Assert.AreEqual(1, week.OnDeckEntries.Count);
         Assert.AreEqual(0, week.Days[0].Entries.Count);
     }

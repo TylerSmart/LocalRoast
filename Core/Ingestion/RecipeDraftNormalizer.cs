@@ -285,9 +285,16 @@ public static class RecipeDraftNormalizer
             ? fallbackCollectionIds.Distinct().ToList()
             : [];
 
-        var confidence = raw.ConfidenceScore is >= 0.0m and <= 1.0m
-            ? raw.ConfidenceScore.Value
-            : 0.8m;
+        var confidence = raw.ConfidenceScore switch
+        {
+            >= 0.0m and <= 1.0m => raw.ConfidenceScore.Value,
+            > 1.0m and <= 100.0m => Math.Round(raw.ConfidenceScore.Value / 100.0m, 2),
+            _ => 0.8m,
+        };
+        if (normalizedIngredients.Count == 0 || normalizedSteps.Count == 0)
+        {
+            confidence = Math.Min(confidence, 0.25m);
+        } //
 
         return new IngestionExtractedDraftDto(
             Title: title,
