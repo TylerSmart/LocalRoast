@@ -87,6 +87,46 @@
       "webRoot": "${workspaceFolder}/Client",
       "sourceMaps": true,
       "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
+    },
+    {
+      "name": "Debug E2E Tests (Headed Browser)",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "e2e: build",
+      "program": "${workspaceFolder}/Tests/Client.E2ETests/bin/Debug/net10.0/App.Client.E2ETests.dll",
+      "args": [
+        "--settings",
+        "${workspaceFolder}/Tests/Client.E2ETests/playwright.headed.runsettings",
+        "--filter",
+        "FullyQualifiedName~${input:e2eTestFilter}"
+      ],
+      "cwd": "${workspaceFolder}/Tests/Client.E2ETests",
+      "stopAtEntry": false,
+      "env": {
+        "HEADED": "1"
+      }
+    },
+    {
+      "name": "Debug E2E Tests (Playwright Inspector)",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "e2e: build",
+      "program": "${workspaceFolder}/Tests/Client.E2ETests/bin/Debug/net10.0/App.Client.E2ETests.dll",
+      "args": ["--filter", "FullyQualifiedName~${input:e2eTestFilter}"],
+      "cwd": "${workspaceFolder}/Tests/Client.E2ETests",
+      "stopAtEntry": false,
+      "env": {
+        "HEADED": "1",
+        "PWDEBUG": "1"
+      }
+    }
+  ],
+  "inputs": [
+    {
+      "id": "e2eTestFilter",
+      "type": "promptString",
+      "description": "Test class or method name filter (leave as 'E2ETests' to run all, or enter e.g. 'MealPlanE2ETests' or a test method name)",
+      "default": "ClientSmokeTests"
     }
   ],
   "compounds": [

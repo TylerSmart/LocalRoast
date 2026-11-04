@@ -95,6 +95,37 @@
         "panel": "dedicated",
         "clear": false
       }
+    },
+    {
+      "label": "e2e: build",
+      "command": "dotnet",
+      "type": "process",
+      "args": [
+        "build",
+        "${workspaceFolder}/Tests/Client.E2ETests/App.Client.E2ETests.csproj",
+        "/property:GenerateFullPaths=true",
+        "/consoleloggerparameters:NoSummary"
+      ],
+      "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "e2e: run headed (slow-mo)",
+      "type": "shell",
+      "command": "dotnet",
+      "args": [
+        "test",
+        "--project",
+        "${workspaceFolder}/Tests/Client.E2ETests/App.Client.E2ETests.csproj",
+        "--",
+        "--settings",
+        "${workspaceFolder}/Tests/Client.E2ETests/playwright.headed.runsettings"
+      ],
+      "problemMatcher": "$msCompile",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
     }
   ]
 }
