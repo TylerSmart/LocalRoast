@@ -3,6 +3,7 @@ using App.Core.AiHelpers;
 using App.Core.Authentication;
 using App.Core.FoodCatalog;
 using App.Core.Ingestion;
+using App.Core.Maintenance;
 using App.Core.Mcp;
 using App.Core.MealPlans;
 using App.Core.Recipes;
@@ -43,6 +44,7 @@ public static class DataServiceCollectionExtensions
         services.AddScoped<IShoppingListService, ShoppingListService>();
         services.AddScoped<IMcpMealAndShoppingService, McpMealAndShoppingService>();
         services.AddScoped<IAiKitchenHelperService, AiKitchenHelperService>();
+        services.AddScoped<IAppDataMaintenanceService, AppDataMaintenanceService>();
 
         if (
             string.Equals(

@@ -1,5 +1,6 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using App.Core.Exceptions;
+using App.Core.FoodCatalog;
 using App.Core.Ingestion;
 using App.Core.Media;
 using App.Core.Recipes;
@@ -93,6 +94,7 @@ public sealed class IngestionService(
         return jobs.Select(j =>
             {
                 var fileCount = 0;
+
                 if (!string.IsNullOrWhiteSpace(j.SourceFilesJson))
                 {
                     try
@@ -101,6 +103,7 @@ public sealed class IngestionService(
                             j.SourceFilesJson,
                             JsonOptions
                         );
+
                         fileCount = files?.Count ?? 0;
                     }
                     catch
@@ -150,6 +153,7 @@ public sealed class IngestionService(
         }
 
         ScrapedWebRecipePayload? scraped = null;
+
         if (!string.IsNullOrWhiteSpace(job.ScrapedPageJson))
         {
             try
@@ -166,6 +170,7 @@ public sealed class IngestionService(
         }
 
         IngestionExtractedDraftDto? draft = null;
+
         if (!string.IsNullOrWhiteSpace(job.ExtractedDraftJson))
         {
             try
@@ -182,6 +187,7 @@ public sealed class IngestionService(
         }
 
         string? username = null;
+
         if (Guid.TryParse(job.CreatedBy, out var uid))
         {
             username = await dbContext
@@ -192,6 +198,7 @@ public sealed class IngestionService(
         }
 
         IReadOnlyList<IngestionSourceFileDto>? sourceFiles = null;
+
         if (!string.IsNullOrWhiteSpace(job.SourceFilesJson))
         {
             try
@@ -208,6 +215,7 @@ public sealed class IngestionService(
         }
 
         PdfInspectionSummaryDto? pdfInspection = null;
+
         if (!string.IsNullOrWhiteSpace(job.PdfInspectionJson))
         {
             try
@@ -278,6 +286,7 @@ public sealed class IngestionService(
             }
 
             var trimmed = urlStr.Trim();
+
             if (
                 !Uri.TryCreate(trimmed, UriKind.Absolute, out var uri)
                 || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
@@ -289,6 +298,7 @@ public sealed class IngestionService(
             }
 
             var displayTitle = (uri.Host + uri.AbsolutePath).TrimEnd('/');
+
             if (displayTitle.Length > 200)
             {
                 displayTitle = displayTitle[..200];
@@ -297,12 +307,16 @@ public sealed class IngestionService(
             var job = new IngestionJob
             {
                 Channel = IngestionChannel.WebUrl,
+
                 Status = IngestionJobStatus.Queued,
+
                 SourceUrl = trimmed,
+
                 DisplayTitle = displayTitle,
             };
 
             dbContext.IngestionJobs.Add(job);
+
             newJobs.Add(job);
         }
 
@@ -312,6 +326,7 @@ public sealed class IngestionService(
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
+
         queueSignal.NotifyWorkAvailable();
 
         return newJobs
@@ -347,11 +362,15 @@ public sealed class IngestionService(
         }
 
         var jobId = Guid.NewGuid();
+
         var jobToken = jobId.ToString("N");
+
         var savedFiles = new List<SavedIngestionImageDto>();
+
         for (var i = 0; i < files.Count; i++)
         {
             var f = files[i];
+
             var saved = await mediaStorageService.SaveIngestionPageImageAsync(
                 f.Content,
                 f.OriginalFileName,
@@ -361,13 +380,16 @@ public sealed class IngestionService(
                 i == 0,
                 cancellationToken
             );
+
             savedFiles.Add(saved);
         }
 
         var sourceFiles = new List<IngestionSourceFileDto>();
+
         for (var i = 0; i < savedFiles.Count; i++)
         {
             var s = savedFiles[i];
+
             sourceFiles.Add(
                 new IngestionSourceFileDto(
                     PageNumber: i + 1,
@@ -382,9 +404,11 @@ public sealed class IngestionService(
         }
 
         string displayTitle;
+
         if (!string.IsNullOrWhiteSpace(metadata.SourceBookTitle))
         {
             var cleanTitle = metadata.SourceBookTitle.Trim();
+
             displayTitle = metadata.SourceBookPage.HasValue
                 ? $"Photo: {cleanTitle} (p. {metadata.SourceBookPage.Value})"
                 : $"Photo: {cleanTitle}";
@@ -398,21 +422,32 @@ public sealed class IngestionService(
         var job = new IngestionJob
         {
             Id = jobId,
+
             Channel = IngestionChannel.Images,
+
             Status = IngestionJobStatus.Queued,
+
             DisplayTitle = displayTitle,
+
             SourceBookTitle = string.IsNullOrWhiteSpace(metadata.SourceBookTitle)
                 ? null
                 : metadata.SourceBookTitle.Trim(),
+
             SourceBookPage = metadata.SourceBookPage,
+
             SourceFilesJson = JsonSerializer.Serialize(sourceFiles, JsonOptions),
+
             DownloadedCoverImagePath = savedFiles[0].UrlPath,
+
             DownloadedThumbnailImagePath = savedFiles[0].ThumbnailUrlPath ?? savedFiles[0].UrlPath,
+
             StatusDetail = "Queued for vision extraction.",
         };
 
         dbContext.IngestionJobs.Add(job);
+
         await dbContext.SaveChangesAsync(cancellationToken);
+
         queueSignal.NotifyWorkAvailable();
 
         return new IngestionJobSummaryDto(
@@ -444,7 +479,9 @@ public sealed class IngestionService(
         ArgumentNullException.ThrowIfNull(file);
 
         var jobId = Guid.NewGuid();
+
         var jobToken = jobId.ToString("N");
+
         var savedPdf = await mediaStorageService.SaveIngestionPdfAsync(
             file.Content,
             file.OriginalFileName,
@@ -465,9 +502,11 @@ public sealed class IngestionService(
         };
 
         string displayTitle;
+
         if (!string.IsNullOrWhiteSpace(metadata.SourceBookTitle))
         {
             var cleanTitle = metadata.SourceBookTitle.Trim();
+
             displayTitle = metadata.SourceBookPage.HasValue
                 ? $"PDF: {cleanTitle} (p. {metadata.SourceBookPage.Value})"
                 : $"PDF: {cleanTitle}";
@@ -475,25 +514,35 @@ public sealed class IngestionService(
         else
         {
             var rawName = Path.GetFileNameWithoutExtension(file.OriginalFileName);
+
             displayTitle = string.IsNullOrWhiteSpace(rawName) ? "PDF Document" : $"PDF: {rawName}";
         }
 
         var job = new IngestionJob
         {
             Id = jobId,
+
             Channel = IngestionChannel.Pdf,
+
             Status = IngestionJobStatus.Queued,
+
             DisplayTitle = displayTitle,
+
             SourceBookTitle = string.IsNullOrWhiteSpace(metadata.SourceBookTitle)
                 ? null
                 : metadata.SourceBookTitle.Trim(),
+
             SourceBookPage = metadata.SourceBookPage,
+
             SourceFilesJson = JsonSerializer.Serialize(sourceFiles, JsonOptions),
+
             StatusDetail = "Queued for PDF inspection and processing.",
         };
 
         dbContext.IngestionJobs.Add(job);
+
         await dbContext.SaveChangesAsync(cancellationToken);
+
         queueSignal.NotifyWorkAvailable();
 
         return new IngestionJobSummaryDto(
@@ -535,6 +584,7 @@ public sealed class IngestionService(
         }
 
         var newJobs = new List<IngestionJob>();
+
         var cleanBookTitle = string.IsNullOrWhiteSpace(metadata.SourceBookTitle)
             ? null
             : metadata.SourceBookTitle.Trim();
@@ -542,12 +592,14 @@ public sealed class IngestionService(
         for (var fileIdx = 0; fileIdx < files.Count; fileIdx++)
         {
             var file = files[fileIdx];
+
             if (file.ContentLength <= 0)
             {
                 continue;
             }
 
             var ext = Path.GetExtension(file.OriginalFileName);
+
             if (
                 !string.Equals(ext, ".pdf", StringComparison.OrdinalIgnoreCase)
                 && !file.ContentType.Contains("pdf", StringComparison.OrdinalIgnoreCase)
@@ -559,6 +611,7 @@ public sealed class IngestionService(
             }
 
             var jobId = Guid.NewGuid();
+
             var jobToken = jobId.ToString("N");
 
             var savedPdf = await mediaStorageService.SaveIngestionPdfAsync(
@@ -570,7 +623,9 @@ public sealed class IngestionService(
             );
 
             var rawName = Path.GetFileNameWithoutExtension(file.OriginalFileName);
+
             string displayTitle;
+
             if (!string.IsNullOrWhiteSpace(cleanBookTitle))
             {
                 displayTitle = string.IsNullOrWhiteSpace(rawName)
@@ -603,16 +658,24 @@ public sealed class IngestionService(
             var job = new IngestionJob
             {
                 Id = jobId,
+
                 Channel = IngestionChannel.Pdf,
+
                 Status = IngestionJobStatus.Queued,
+
                 DisplayTitle = displayTitle,
+
                 SourceBookTitle = cleanBookTitle,
+
                 SourceBookPage = null,
+
                 SourceFilesJson = JsonSerializer.Serialize(sourceFiles, JsonOptions),
+
                 StatusDetail = "Queued for PDF inspection and processing.",
             };
 
             dbContext.IngestionJobs.Add(job);
+
             newJobs.Add(job);
         }
 
@@ -624,6 +687,7 @@ public sealed class IngestionService(
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
+
         queueSignal.NotifyWorkAvailable();
 
         return newJobs
@@ -684,6 +748,7 @@ public sealed class IngestionService(
                     job.SourceFilesJson,
                     JsonOptions
                 );
+
                 if (files is { Count: > 0 })
                 {
                     var match =
@@ -716,6 +781,7 @@ public sealed class IngestionService(
                     job.PdfInspectionJson,
                     JsonOptions
                 );
+
                 if (inspection?.RenderedPageImages is { Count: > 0 })
                 {
                     var match =
@@ -727,6 +793,7 @@ public sealed class IngestionService(
                                 ? inspection.RenderedPageImages[pageNumber - 1]
                                 : null
                         );
+
                     if (match is not null)
                     {
                         targetImageUrl = match.UrlPath;
@@ -752,6 +819,7 @@ public sealed class IngestionService(
         );
 
         job.DownloadedCoverImagePath = promotedCover.CoverImagePath;
+
         job.DownloadedThumbnailImagePath = promotedCover.ThumbnailImagePath;
 
         if (!string.IsNullOrWhiteSpace(job.ExtractedDraftJson))
@@ -762,13 +830,16 @@ public sealed class IngestionService(
                     job.ExtractedDraftJson,
                     JsonOptions
                 );
+
                 if (draft is not null)
                 {
                     draft = draft with
                     {
                         CoverImagePath = promotedCover.CoverImagePath,
+
                         ThumbnailImagePath = promotedCover.ThumbnailImagePath,
                     };
+
                     job.ExtractedDraftJson = JsonSerializer.Serialize(draft, JsonOptions);
                 }
             }
@@ -779,6 +850,7 @@ public sealed class IngestionService(
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
+
         return await GetJobByIdAsync(id, cancellationToken);
     }
 
@@ -793,6 +865,7 @@ public sealed class IngestionService(
         }
 
         var trimmed = request.RawText.Trim();
+
         if (trimmed.Length > 100000)
         {
             throw new DomainValidationException(
@@ -801,6 +874,7 @@ public sealed class IngestionService(
         }
 
         string displayTitle;
+
         if (!string.IsNullOrWhiteSpace(request.TitleHint))
         {
             displayTitle = request.TitleHint.Trim();
@@ -815,6 +889,7 @@ public sealed class IngestionService(
                     )
                     .FirstOrDefault()
                 ?? "Raw Text Recipe";
+
             displayTitle = firstLine.TrimStart('#', '*', ' ', '-');
         }
 
@@ -826,41 +901,57 @@ public sealed class IngestionService(
         var coverPath = IngestionCatalogMaterializer.ValidateOptionalMediaPath(
             request.CoverImagePath
         );
+
         var thumbPath =
             IngestionCatalogMaterializer.ValidateOptionalMediaPath(request.ThumbnailImagePath)
             ?? coverPath;
 
         string? initialCollectionsJson = null;
+
         if (request.CollectionIds is { Count: > 0 })
         {
             var distinctCollections = request.CollectionIds.Distinct().ToList();
+
             initialCollectionsJson = JsonSerializer.Serialize(distinctCollections, JsonOptions);
         }
 
         var job = new IngestionJob
         {
             Channel = IngestionChannel.RawText,
+
             Status = IngestionJobStatus.Queued,
+
             RawText = trimmed,
+
             DisplayTitle = displayTitle,
+
             SourceName = string.IsNullOrWhiteSpace(request.SourceName)
                 ? null
                 : request.SourceName.Trim(),
+
             SourceAuthor = string.IsNullOrWhiteSpace(request.SourceAuthor)
                 ? null
                 : request.SourceAuthor.Trim(),
+
             SourceBookTitle = string.IsNullOrWhiteSpace(request.SourceBookTitle)
                 ? null
                 : request.SourceBookTitle.Trim(),
+
             SourceBookPage = request.SourceBookPage,
+
             DownloadedCoverImagePath = coverPath,
+
             DownloadedThumbnailImagePath = thumbPath,
+
             InitialCollectionIdsJson = initialCollectionsJson,
+
             AutoPublish = request.AutoPublish,
         };
 
         dbContext.IngestionJobs.Add(job);
+
         await dbContext.SaveChangesAsync(cancellationToken);
+
         queueSignal.NotifyWorkAvailable();
 
         return new IngestionJobSummaryDto(
@@ -908,19 +999,25 @@ public sealed class IngestionService(
         }
 
         job.ExtractedDraftJson = JsonSerializer.Serialize(draft, JsonOptions);
+
         if (!string.IsNullOrWhiteSpace(draft.Title))
         {
             job.DisplayTitle = draft.Title.Trim();
         }
+
         job.ConfidenceScore = draft.ConfidenceScore;
+
         job.DownloadedCoverImagePath = draft.CoverImagePath;
+
         job.DownloadedThumbnailImagePath = draft.ThumbnailImagePath;
+
         if (!string.IsNullOrWhiteSpace(draft.ExtractedModel))
         {
             job.ExtractedModel = draft.ExtractedModel;
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
+
         return await GetJobByIdAsync(id, cancellationToken);
     }
 
@@ -951,7 +1048,9 @@ public sealed class IngestionService(
         }
 
         // 1. Create missing food items
+
         var ingredientsInput = new List<RecipeIngredientInput>();
+
         if (draft.Ingredients is not null)
         {
             foreach (var ing in draft.Ingredients)
@@ -972,13 +1071,26 @@ public sealed class IngestionService(
                     );
                 }
 
+                var (cleanQty, cleanMaxQty) = RecipeDraftNormalizer.NormalizeQuantities(
+                    ing.Quantity,
+                    ing.MaxQuantity
+                );
+
+                var cleanUnit =
+                    ing.Unit == MeasurementUnit.Custom
+                    && string.IsNullOrWhiteSpace(ing.CustomUnitName)
+                        ? null
+                        : ing.Unit;
+
                 ingredientsInput.Add(
                     new RecipeIngredientInput(
                         SectionName: ing.SectionName,
-                        Quantity: ing.Quantity,
-                        MaxQuantity: ing.MaxQuantity,
-                        Unit: ing.Unit,
-                        CustomUnitName: ing.CustomUnitName,
+                        Quantity: cleanQty,
+                        MaxQuantity: cleanMaxQty,
+                        Unit: cleanUnit,
+                        CustomUnitName: cleanUnit == MeasurementUnit.Custom
+                            ? ing.CustomUnitName
+                            : null,
                         FoodItemId: foodItemId,
                         LinkedRecipeId: null,
                         DisplayName: ing.DisplayName,
@@ -991,7 +1103,9 @@ public sealed class IngestionService(
         }
 
         // 2. Map steps
+
         var stepsInput = new List<RecipeStepInput>();
+
         if (draft.Steps is not null)
         {
             foreach (var s in draft.Steps)
@@ -1009,6 +1123,7 @@ public sealed class IngestionService(
         }
 
         // 3. Resolve & auto-create any proposed tags
+
         var resolvedTagIds = await IngestionCatalogMaterializer.ResolveAndMaterializeTagsAsync(
             dbContext,
             draft.SuggestedTagIds,
@@ -1017,6 +1132,7 @@ public sealed class IngestionService(
         );
 
         // 4. Create published recipe
+
         var upsertRequest = new UpsertRecipeRequest(
             Title: draft.Title,
             Description: draft.Description,
@@ -1042,12 +1158,14 @@ public sealed class IngestionService(
         );
 
         RecipeDetailDto createdRecipe;
+
         if (job.ResultingRecipeId.HasValue)
         {
             var existingRecipe = await dbContext.Recipes.FirstOrDefaultAsync(
                 r => r.Id == job.ResultingRecipeId.Value,
                 cancellationToken
             );
+
             if (existingRecipe is not null)
             {
                 var updated = await recipeService.UpdateRecipeAsync(
@@ -1055,6 +1173,7 @@ public sealed class IngestionService(
                     upsertRequest,
                     cancellationToken
                 );
+
                 createdRecipe =
                     updated ?? throw new InvalidOperationException("Failed to update recipe.");
             }
@@ -1077,6 +1196,7 @@ public sealed class IngestionService(
                 a => a.RecipeId == createdRecipe.Id,
                 cancellationToken
             );
+
             if (!hasAttachments)
                 try
                 {
@@ -1084,6 +1204,7 @@ public sealed class IngestionService(
                         job.SourceFilesJson,
                         JsonOptions
                     );
+
                     if (sourceFiles is { Count: > 0 })
                     {
                         foreach (var sf in sourceFiles)
@@ -1098,12 +1219,19 @@ public sealed class IngestionService(
                                 new RecipeAttachment
                                 {
                                     Id = Guid.NewGuid(),
+
                                     RecipeId = createdRecipe.Id,
+
                                     SortOrder = sf.PageNumber,
+
                                     FileName = sf.OriginalFileName,
+
                                     MediaUrlPath = promoted.MediaUrlPath,
+
                                     ContentType = promoted.ContentType,
+
                                     FileSizeBytes = promoted.FileSizeBytes,
+
                                     Label =
                                         sf.PageNumber == 1
                                             ? "Source Cover / Page"
@@ -1111,6 +1239,7 @@ public sealed class IngestionService(
                                 }
                             );
                         }
+
                         await dbContext.SaveChangesAsync(cancellationToken);
                     }
                 }
@@ -1127,6 +1256,7 @@ public sealed class IngestionService(
                     job.SourceFilesJson,
                     JsonOptions
                 );
+
                 if (sourceFiles is { Count: > 0 })
                 {
                     foreach (var sf in sourceFiles)
@@ -1145,13 +1275,19 @@ public sealed class IngestionService(
         }
 
         job.Status = IngestionJobStatus.Published;
+
         job.ResultingRecipeId = createdRecipe.Id;
+
         job.ExtractedDraftJson = JsonSerializer.Serialize(draft, JsonOptions);
+
         job.StatusDetail = "Approved and published to cookbook.";
+
         job.ProcessedAt = DateTimeOffset.UtcNow;
+
         job.DisplayTitle = draft.Title;
 
         await dbContext.SaveChangesAsync(cancellationToken);
+
         return (await recipeService.GetRecipeByIdAsync(createdRecipe.Id, cancellationToken))
             ?? createdRecipe;
     }
@@ -1182,11 +1318,15 @@ public sealed class IngestionService(
         }
 
         job.Status = IngestionJobStatus.Queued;
+
         job.NextRetryAt = null;
+
         job.AttemptCount = 0;
+
         job.StatusDetail = "Queued for retry.";
 
         await dbContext.SaveChangesAsync(cancellationToken);
+
         queueSignal.NotifyWorkAvailable();
 
         return new IngestionJobSummaryDto(
@@ -1224,14 +1364,80 @@ public sealed class IngestionService(
         foreach (var job in waitingJobs)
         {
             job.Status = IngestionJobStatus.Queued;
+
             job.NextRetryAt = null;
+
             job.StatusDetail = "Queued for retry.";
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
+
         queueSignal.NotifyWorkAvailable();
 
         return new RetryWaitingJobsResultDto(waitingJobs.Count);
+    }
+
+    public async Task<RetryBatchJobsResultDto> RetryBatchJobsAsync(
+        IReadOnlyList<Guid>? jobIds,
+        string? filter = null,
+        CancellationToken cancellationToken = default
+    )
+    {
+        IQueryable<IngestionJob> query = dbContext.IngestionJobs.Where(j =>
+            j.Status != IngestionJobStatus.Discarded
+        );
+
+        if (jobIds is { Count: > 0 })
+        {
+            query = query.Where(j => jobIds.Contains(j.Id));
+        }
+        else if (
+            !string.IsNullOrWhiteSpace(filter)
+            && !filter.Equals("All", StringComparison.OrdinalIgnoreCase)
+        )
+        {
+            query = filter.ToLowerInvariant() switch
+            {
+                "readyforreview" => query.Where(j => j.Status == IngestionJobStatus.ReadyForReview),
+
+                "activewaiting" => query.Where(j =>
+                    j.Status == IngestionJobStatus.Queued
+                    || j.Status == IngestionJobStatus.Preprocessing
+                    || j.Status == IngestionJobStatus.Extracting
+                    || j.Status == IngestionJobStatus.WaitingForLlmHost
+                ),
+
+                "published" => query.Where(j => j.Status == IngestionJobStatus.Published),
+
+                "failed" => query.Where(j => j.Status == IngestionJobStatus.Failed),
+
+                _ => query,
+            };
+        }
+
+        var jobs = await query.ToListAsync(cancellationToken);
+
+        if (jobs.Count == 0)
+        {
+            return new RetryBatchJobsResultDto(0);
+        }
+
+        foreach (var job in jobs)
+        {
+            job.Status = IngestionJobStatus.Queued;
+
+            job.NextRetryAt = null;
+
+            job.AttemptCount = 0;
+
+            job.StatusDetail = "Queued for retry.";
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        queueSignal.NotifyWorkAvailable();
+
+        return new RetryBatchJobsResultDto(jobs.Count);
     }
 
     public async Task<bool> DiscardJobAsync(Guid id, CancellationToken cancellationToken = default)
@@ -1247,12 +1453,17 @@ public sealed class IngestionService(
         }
 
         job.Status = IngestionJobStatus.Discarded;
+
         job.StatusDetail = "Job discarded by user.";
+
         var oldCover = job.DownloadedCoverImagePath;
+
         var oldThumb = job.DownloadedThumbnailImagePath;
+
         if (job.ResultingRecipeId == null)
         {
             job.DownloadedCoverImagePath = null;
+
             job.DownloadedThumbnailImagePath = null;
         }
 
@@ -1262,10 +1473,12 @@ public sealed class IngestionService(
             {
                 await mediaStorageService.DeleteMediaFileAsync(oldCover, cancellationToken);
             }
+
             if (!string.IsNullOrWhiteSpace(oldThumb))
             {
                 await mediaStorageService.DeleteMediaFileAsync(oldThumb, cancellationToken);
             }
+
             if (!string.IsNullOrWhiteSpace(job.SourceFilesJson))
             {
                 try
@@ -1274,6 +1487,7 @@ public sealed class IngestionService(
                         job.SourceFilesJson,
                         JsonOptions
                     );
+
                     if (sourceFiles is { Count: > 0 })
                     {
                         foreach (var sf in sourceFiles)
@@ -1290,6 +1504,7 @@ public sealed class IngestionService(
                     // ignore
                 }
             }
+
             if (!string.IsNullOrWhiteSpace(job.PdfInspectionJson))
             {
                 try
@@ -1298,6 +1513,7 @@ public sealed class IngestionService(
                         job.PdfInspectionJson,
                         JsonOptions
                     );
+
                     if (inspection?.RenderedPageImages is { Count: > 0 })
                     {
                         foreach (var rendered in inspection.RenderedPageImages)
@@ -1317,6 +1533,7 @@ public sealed class IngestionService(
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
+
         return true;
     }
 }

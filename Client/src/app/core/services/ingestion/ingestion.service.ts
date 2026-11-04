@@ -10,6 +10,8 @@ import type {
   IngestionJobStatus,
   IngestionJobSummaryDto,
   IngestionQueueSummaryDto,
+  RetryBatchJobsRequest,
+  RetryBatchJobsResultDto,
   RetryWaitingJobsResultDto,
 } from '../../models/ingestion.models';
 import type { RecipeDetailDto } from '../../models/recipe.models';
@@ -86,6 +88,12 @@ export class IngestionService {
   retryAllWaitingJobs(): Observable<RetryWaitingJobsResultDto> {
     return this.http
       .post<RetryWaitingJobsResultDto>(apiUrl('/ingestion/jobs/retry-waiting'), {})
+      .pipe(tap(() => this.refreshSummary()));
+  }
+
+  retryBatchJobs(request: RetryBatchJobsRequest): Observable<RetryBatchJobsResultDto> {
+    return this.http
+      .post<RetryBatchJobsResultDto>(apiUrl('/ingestion/jobs/retry-batch'), request)
       .pipe(tap(() => this.refreshSummary()));
   }
 

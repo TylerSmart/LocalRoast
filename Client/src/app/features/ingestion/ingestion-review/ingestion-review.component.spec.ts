@@ -364,4 +364,46 @@ describe('IngestionReviewComponent', () => {
     const payload = component.buildDraftPayload();
     expect(payload.proposedTagNames).toEqual(['Italian']);
   });
+
+  it('toggles between edit mode and inline recipe preview mode', () => {
+    expect(component.rightPaneMode()).toBe('edit');
+
+    component.setRightPaneMode('preview');
+    fixture.detectChanges();
+
+    expect(component.rightPaneMode()).toBe('preview');
+    expect(component.previewData()).not.toBeNull();
+    expect(component.previewData()?.title).toBe('Crispy Sesame Tofu');
+
+    const previewEl = fixture.nativeElement.querySelector('app-recipe-detail-preview');
+    expect(previewEl).toBeTruthy();
+
+    component.setRightPaneMode('edit');
+    fixture.detectChanges();
+    expect(component.rightPaneMode()).toBe('edit');
+    expect(fixture.nativeElement.querySelector('.draft-form')).toBeTruthy();
+  });
+
+  it('toggles mobile pane between source, draft, and preview', () => {
+    component.setMobilePane('preview');
+    expect(component.mobilePane()).toBe('preview');
+    expect(component.rightPaneMode()).toBe('preview');
+
+    component.setMobilePane('source');
+    expect(component.mobilePane()).toBe('source');
+
+    component.setMobilePane('draft');
+    expect(component.mobilePane()).toBe('draft');
+    expect(component.rightPaneMode()).toBe('edit');
+  });
+
+  it('opens recipe preview dialog from header button and handles publish action', () => {
+    mockDialog.open.mockReturnValue({
+      afterClosed: () => of({ action: 'publish' }),
+    });
+
+    component.openPreviewDialog();
+    expect(mockDialog.open).toHaveBeenCalled();
+    expect(mockIngestionService.approveAndPublish).toHaveBeenCalled();
+  });
 });

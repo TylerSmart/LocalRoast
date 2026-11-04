@@ -36,6 +36,9 @@ public sealed class LlmSettingsService(
                 OllamaKeepAlive: entity.OllamaKeepAlive,
                 RequestTimeoutSeconds: entity.RequestTimeoutSeconds,
                 AutoPublishHighConfidenceText: entity.AutoPublishHighConfidenceText,
+                EnableThinking: entity.EnableThinking,
+                MaxIngestionRetries: entity.MaxIngestionRetries,
+                EnableIngestion: entity.EnableIngestion,
                 ModifiedAt: entity.ModifiedAt
             );
         }
@@ -51,6 +54,9 @@ public sealed class LlmSettingsService(
             OllamaKeepAlive: opt.OllamaKeepAlive,
             RequestTimeoutSeconds: opt.RequestTimeoutSeconds,
             AutoPublishHighConfidenceText: opt.AutoPublishHighConfidenceText,
+            EnableThinking: opt.EnableThinking,
+            MaxIngestionRetries: opt.MaxIngestionRetries,
+            EnableIngestion: opt.EnableIngestion,
             ModifiedAt: null
         );
     }
@@ -76,7 +82,10 @@ public sealed class LlmSettingsService(
                 VisionModel: entity.VisionModel,
                 OllamaKeepAlive: entity.OllamaKeepAlive,
                 RequestTimeoutSeconds: entity.RequestTimeoutSeconds,
-                AutoPublishHighConfidenceText: entity.AutoPublishHighConfidenceText
+                AutoPublishHighConfidenceText: entity.AutoPublishHighConfidenceText,
+                EnableThinking: entity.EnableThinking,
+                MaxIngestionRetries: entity.MaxIngestionRetries,
+                EnableIngestion: entity.EnableIngestion
             );
         }
 
@@ -89,7 +98,10 @@ public sealed class LlmSettingsService(
             VisionModel: opt.VisionModel,
             OllamaKeepAlive: opt.OllamaKeepAlive,
             RequestTimeoutSeconds: opt.RequestTimeoutSeconds,
-            AutoPublishHighConfidenceText: opt.AutoPublishHighConfidenceText
+            AutoPublishHighConfidenceText: opt.AutoPublishHighConfidenceText,
+            EnableThinking: opt.EnableThinking,
+            MaxIngestionRetries: opt.MaxIngestionRetries,
+            EnableIngestion: opt.EnableIngestion
         );
     }
 
@@ -137,8 +149,39 @@ public sealed class LlmSettingsService(
             : request.OllamaKeepAlive.Trim();
         entity.RequestTimeoutSeconds = request.RequestTimeoutSeconds;
         entity.AutoPublishHighConfidenceText = request.AutoPublishHighConfidenceText;
+        entity.EnableThinking = request.EnableThinking;
+        var wasIngestionEnabled = entity.EnableIngestion;
+        entity.MaxIngestionRetries = request.MaxIngestionRetries;
+        entity.EnableIngestion = request.EnableIngestion;
 
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        if (!request.EnableIngestion && wasIngestionEnabled)
+        {
+            queueSignal.CancelActiveExecution();
+            var workingJobs = await dbContext
+                .IngestionJobs.Where(j =>
+                    j.Status == IngestionJobStatus.Preprocessing
+                    || j.Status == IngestionJobStatus.Extracting
+                )
+                .ToListAsync(cancellationToken);
+
+            foreach (var job in workingJobs)
+            {
+                job.Status = IngestionJobStatus.Queued;
+                job.NextRetryAt = null;
+                job.StatusDetail = "Paused. Queued to resume when ingestion is enabled.";
+            }
+
+            if (workingJobs.Count > 0)
+            {
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
+        }
+        else if (request.EnableIngestion && !wasIngestionEnabled)
+        {
+            queueSignal.NotifyWorkAvailable();
+        }
 
         // If a model is configured, wake any waiting jobs
         if (!string.IsNullOrWhiteSpace(entity.TextModel))
@@ -195,10 +238,67 @@ public sealed class LlmSettingsService(
             VisionModel: effective.VisionModel,
             OllamaKeepAlive: effective.OllamaKeepAlive,
             RequestTimeoutSeconds: timeout,
-            AutoPublishHighConfidenceText: effective.AutoPublishHighConfidenceText
+            AutoPublishHighConfidenceText: effective.AutoPublishHighConfidenceText,
+            EnableThinking: effective.EnableThinking,
+            MaxIngestionRetries: effective.MaxIngestionRetries,
+            EnableIngestion: effective.EnableIngestion
         );
 
         return await llmClient.ProbeAndListModelsAsync(testConfig, timeout, cancellationToken);
+    }
+
+    public async Task<LlmSettingsDto> SetIngestionEnabledAsync(
+        bool enabled,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var entity = await dbContext.HouseholdLlmSettings.FirstOrDefaultAsync(
+            s => s.SingletonKey == HouseholdLlmSettings.DefaultSingletonKey,
+            cancellationToken
+        );
+
+        if (entity is null)
+        {
+            entity = new HouseholdLlmSettings
+            {
+                SingletonKey = HouseholdLlmSettings.DefaultSingletonKey,
+            };
+            dbContext.HouseholdLlmSettings.Add(entity);
+        }
+
+        var wasEnabled = entity.EnableIngestion;
+        entity.EnableIngestion = enabled;
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        if (!enabled)
+        {
+            queueSignal.CancelActiveExecution();
+
+            var workingJobs = await dbContext
+                .IngestionJobs.Where(j =>
+                    j.Status == IngestionJobStatus.Preprocessing
+                    || j.Status == IngestionJobStatus.Extracting
+                )
+                .ToListAsync(cancellationToken);
+
+            foreach (var job in workingJobs)
+            {
+                job.Status = IngestionJobStatus.Queued;
+                job.NextRetryAt = null;
+                job.StatusDetail = "Paused. Queued to resume when ingestion is enabled.";
+            }
+
+            if (workingJobs.Count > 0)
+            {
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
+        }
+        else if (!wasEnabled)
+        {
+            queueSignal.NotifyWorkAvailable();
+        }
+
+        return await GetSettingsAsync(cancellationToken);
     }
 
     private static void ValidateUrl(string? url)

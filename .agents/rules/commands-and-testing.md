@@ -15,10 +15,11 @@ On **every** code implementation, you MUST:
      - Every `[TestMethod]` MUST include `[Timeout(DefaultTestTimeoutMs)]` so no E2E test can hang indefinitely.
      - When debugging a test from Visual Studio (`Debugger.IsAttached`), `AssemblyInitializer` automatically enables headed browser mode (`HEADED=1`) and `E2ETestBase` disables Playwright action/navigation timeouts so developers can step through C# breakpoints with a live browser window. Developers can also select `Tests/Client.E2ETests/playwright.headed.runsettings` for headed runs with `SlowMo`.
      - On failure, `E2ETestBase` automatically saves debug artifacts (`screenshot.png`, `video.webm`, `page.html`, `page-data.json`, `console.log`, `network-errors.log`, `trace.zip`, and `api-server.log`) to the git-ignored `Tests/Client.E2ETests/DebugArtifacts/` directory.
-     - Every phase delivering or updating user-facing UI **MUST** implement dedicated E2E tests in `Tests/Client.E2ETests/<Feature>E2ETests.cs` validating:
-       1. Core user journeys and authenticated CRUD flows.
-       2. Interactive dialogs, filters, toggles, and calculations.
-       3. Mobile responsive behavior at `360px` viewport width.
+     - **Mandatory on EVERY UI or Flow Change (Not Just Formal Phases):** Whenever a conversational request, fix, or phase adds or modifies user-facing UI, dialogs, buttons, polling intervals, or routes:
+       1. **Inspect Existing E2E Tests:** Check existing suites in `Tests/Client.E2ETests/` for impacted selectors, timing assumptions, or polling intervals (e.g. use `WaitForLocatorWithRefreshAsync` when waiting on queue dashboard items).
+       2. **Add / Update Tests:** Add new `[TestMethod]` cases covering the new controls, toggles, dialog confirmations, and error states.
+       3. **Build & Execute E2E Suite:** Build the production bundle (`npm run build:production --prefix Client`) and run the Playwright test suite (`dotnet test --project Tests/Client.E2ETests/App.Client.E2ETests.csproj`), fixing any failures until green before declaring the request complete.
+       4. Validate mobile responsive behavior at `360px` viewport width when layout or navigation is modified.
 2. **Execute & Fix Until Green:**
    - Build the full solution and run all relevant linters and test suites—not only targeted single-file tests—after every implementation iteration.
    - Diagnose, fix, and re-run iteratively until **all** builds, linters, and tests pass cleanly.

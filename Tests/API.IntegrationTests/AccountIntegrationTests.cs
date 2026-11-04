@@ -3,6 +3,10 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using App.Core.Account;
 using App.Core.Authentication;
+using App.Core.FoodCatalog;
+using App.Core.Maintenance;
+using App.Core.Recipes;
+using App.Core.Shopping;
 using App.Data;
 using App.Data.Entities;
 using Microsoft.AspNetCore.Mvc;
@@ -316,5 +320,89 @@ public sealed class AccountIntegrationTests
             auth.Token
         );
         return auth;
+    }
+
+    [TestMethod]
+    public async Task ResetAppData_WipesCulinaryData_WhilePreservingUserAccountAndAuth()
+    {
+        var auth = await RegisterAndAuthorizeAsync("nuke@example.com", "nukeuser", "Password123!");
+
+        // 1. Seed food item
+        var foodRes = await _client.PostAsJsonAsync(
+            "/api/food-items",
+            new CreateFoodItemRequest("Cheddar Cheese", IsPantryStaple: true)
+        );
+        Assert.AreEqual(HttpStatusCode.Created, foodRes.StatusCode);
+        var food = await foodRes.Content.ReadFromJsonAsync<FoodItemDto>();
+        Assert.IsNotNull(food);
+
+        // 2. Seed recipe
+        var recipeReq = new UpsertRecipeRequest(
+            Title: "Grilled Cheese",
+            Description: "Crispy sandwich",
+            Ingredients:
+            [
+                new RecipeIngredientInput(
+                    SectionName: null,
+                    Quantity: 2m,
+                    MaxQuantity: null,
+                    Unit: MeasurementUnit.Slice,
+                    CustomUnitName: null,
+                    FoodItemId: food.Id,
+                    LinkedRecipeId: null,
+                    DisplayName: "slices cheddar cheese",
+                    PreparationNote: null
+                ),
+            ],
+            Steps: [new RecipeStepInput(null, "Grill sandwich.", [0])]
+        );
+        var recipeRes = await _client.PostAsJsonAsync("/api/recipes", recipeReq);
+        Assert.AreEqual(HttpStatusCode.Created, recipeRes.StatusCode);
+
+        // 3. Seed shopping list
+        var listRes = await _client.PostAsJsonAsync(
+            "/api/shopping-lists",
+            new CreateShoppingListRequest("Weekly Groceries", IsPinned: false)
+        );
+        Assert.AreEqual(HttpStatusCode.Created, listRes.StatusCode);
+
+        // 4. Call nuclear reset endpoint
+        var resetRes = await _client.PostAsync("/api/account/reset-data", null);
+        Assert.AreEqual(HttpStatusCode.OK, resetRes.StatusCode);
+
+        var result = await resetRes.Content.ReadFromJsonAsync<ResetAppDataResultDto>();
+        Assert.IsNotNull(result);
+        Assert.IsTrue(result.DeletedRecipesCount >= 1);
+        Assert.IsTrue(result.DeletedFoodItemsCount >= 1);
+        Assert.IsTrue(result.DeletedShoppingListsCount >= 1);
+
+        // 5. Verify culinary collections are empty
+        var getRecipes = await _client.GetFromJsonAsync<List<RecipeSummaryDto>>("/api/recipes");
+        Assert.IsNotNull(getRecipes);
+        Assert.AreEqual(0, getRecipes.Count);
+
+        var getFoods = await _client.GetFromJsonAsync<List<FoodItemDto>>("/api/food-items");
+        Assert.IsNotNull(getFoods);
+        Assert.AreEqual(0, getFoods.Count);
+
+        var getLists = await _client.GetFromJsonAsync<List<ShoppingListSummaryDto>>(
+            "/api/shopping-lists"
+        );
+        Assert.IsNotNull(getLists);
+        Assert.AreEqual(0, getLists.Count);
+
+        // 6. User account is still valid and fully functional
+        var account = await _client.GetFromJsonAsync<AccountDto>("/api/account");
+        Assert.IsNotNull(account);
+        Assert.AreEqual("nuke@example.com", account.Email);
+        Assert.AreEqual("nukeuser", account.Username);
+    }
+
+    [TestMethod]
+    public async Task ResetAppData_Unauthorized_Returns401()
+    {
+        using var anonClient = _factory.CreateClient();
+        var res = await anonClient.PostAsync("/api/account/reset-data", null);
+        Assert.AreEqual(HttpStatusCode.Unauthorized, res.StatusCode);
     }
 }

@@ -91,7 +91,14 @@ public sealed class FoodCatalogService(
         CancellationToken cancellationToken = default
     )
     {
-        var normName = NormalizeKey(request.Name);
+        var cleanName = request.Name?.Trim();
+        if (!FoodNameSanitizer.IsValidFoodName(cleanName))
+        {
+            throw new DomainValidationException(
+                $"Food item name cannot be a placeholder or invalid name like '{request.Name}'."
+            );
+        }
+        var normName = NormalizeKey(cleanName);
 
         var nameCollides =
             await dbContext.FoodItems.AnyAsync(f => f.NormalizedName == normName, cancellationToken)
@@ -180,7 +187,14 @@ public sealed class FoodCatalogService(
             return null;
         }
 
-        var normName = NormalizeKey(request.Name);
+        var cleanName = request.Name?.Trim();
+        if (!FoodNameSanitizer.IsValidFoodName(cleanName))
+        {
+            throw new DomainValidationException(
+                $"Food item name cannot be a placeholder or invalid name like '{request.Name}'."
+            );
+        }
+        var normName = NormalizeKey(cleanName);
 
         if (normName != foodItem.NormalizedName)
         {
@@ -274,6 +288,7 @@ public sealed class FoodCatalogService(
 
     public async Task<bool> DeleteFoodItemAsync(
         Guid id,
+        bool unlinkFromRecipes = false,
         CancellationToken cancellationToken = default
     )
     {
@@ -286,15 +301,23 @@ public sealed class FoodCatalogService(
             return false;
         }
 
-        var isReferenced = await dbContext.RecipeIngredients.AnyAsync(
-            ri => ri.FoodItemId == id,
-            cancellationToken
-        );
-        if (isReferenced)
+        var linkedIngredients = await dbContext
+            .RecipeIngredients.Where(ri => ri.FoodItemId == id)
+            .ToListAsync(cancellationToken);
+
+        if (linkedIngredients.Count > 0)
         {
-            throw new ConflictException(
-                "Cannot delete a food item that is used in one or more recipes."
-            );
+            if (!unlinkFromRecipes)
+            {
+                throw new ConflictException(
+                    "Cannot delete a food item that is used in one or more recipes."
+                );
+            }
+
+            foreach (var ri in linkedIngredients)
+            {
+                ri.FoodItemId = null;
+            }
         }
 
         var linkedShoppingItems = await dbContext
@@ -308,6 +331,68 @@ public sealed class FoodCatalogService(
         dbContext.FoodItems.Remove(foodItem);
         await dbContext.SaveChangesAsync(cancellationToken);
         return true;
+    }
+
+    public async Task<IReadOnlyList<FoodItemRecipeUsageDto>> GetFoodItemRecipesAsync(
+        Guid foodItemId,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var exists = await dbContext.FoodItems.AnyAsync(f => f.Id == foodItemId, cancellationToken);
+        if (!exists)
+        {
+            throw new NotFoundException($"Food item '{foodItemId}' was not found.");
+        }
+
+        return await dbContext
+            .Recipes.AsNoTracking()
+            .Where(r => r.Ingredients.Any(i => i.FoodItemId == foodItemId))
+            .OrderBy(r => r.Title)
+            .Select(r => new FoodItemRecipeUsageDto(
+                r.Id,
+                r.Title,
+                r.Slug,
+                r.ThumbnailImagePath,
+                r.Status,
+                r.Ingredients.Where(i => i.FoodItemId == foodItemId)
+                    .Select(i => i.DisplayName)
+                    .ToList()
+            ))
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<UnlinkFoodItemRecipesResultDto> UnlinkFoodItemRecipesAsync(
+        Guid foodItemId,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var foodItem = await dbContext.FoodItems.FirstOrDefaultAsync(
+            f => f.Id == foodItemId,
+            cancellationToken
+        );
+        if (foodItem is null)
+        {
+            throw new NotFoundException($"Food item '{foodItemId}' was not found.");
+        }
+
+        var linkedIngredients = await dbContext
+            .RecipeIngredients.Where(ri => ri.FoodItemId == foodItemId)
+            .ToListAsync(cancellationToken);
+
+        var distinctRecipeCount = linkedIngredients.Select(ri => ri.RecipeId).Distinct().Count();
+
+        foreach (var ri in linkedIngredients)
+        {
+            ri.FoodItemId = null;
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return new UnlinkFoodItemRecipesResultDto(
+            foodItemId,
+            distinctRecipeCount,
+            linkedIngredients.Count
+        );
     }
 
     public async Task<MergeFoodItemsResultDto> MergeFoodItemsAsync(

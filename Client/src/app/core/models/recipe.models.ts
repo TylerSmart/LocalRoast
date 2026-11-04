@@ -296,3 +296,50 @@ export interface UpsertCookLogRequest {
   photoImagePath?: string | null;
   photoThumbnailPath?: string | null;
 }
+
+export interface RecipePreviewIngredient {
+  id: string;
+  index: number;
+  sectionName?: string | null;
+  quantity?: number | null;
+  maxQuantity?: number | null;
+  unit?: MeasurementUnit | null;
+  customUnitName?: string | null;
+  displayName: string;
+  preparationNote?: string | null;
+  isOptional?: boolean;
+  isPantryStaple?: boolean;
+  matchedFoodItemName?: string | null;
+}
+
+export interface RecipePreviewStep {
+  id: string;
+  stepNumber: number;
+  sectionName?: string | null;
+  instruction: string;
+  imagePath?: string | null;
+  ingredientIndices?: number[];
+  timers?: { durationSeconds: number; label?: string }[];
+}
+
+export interface RecipePreviewData {
+  title: string;
+  description?: string | null;
+  baseServings: number;
+  yieldDisplay?: string | null;
+  prepTimeMinutes?: number | null;
+  cookTimeMinutes?: number | null;
+  totalTimeMinutes?: number | null;
+  difficulty?: RecipeDifficulty | string | null;
+  sourceName?: string | null;
+  sourceAuthor?: string | null;
+  sourceUrl?: string | null;
+  sourceBookTitle?: string | null;
+  sourceBookPage?: number | null;
+  coverImagePath?: string | null;
+  extractedModel?: string | null;
+  collections: { id?: string; name: string }[];
+  tags: { id?: string; name: string; category?: string }[];
+  ingredients: RecipePreviewIngredient[];
+  steps: RecipePreviewStep[];
+}

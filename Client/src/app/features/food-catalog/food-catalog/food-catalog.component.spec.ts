@@ -97,4 +97,61 @@ describe('FoodCatalogComponent', () => {
     component.openMergeDialog();
     expect(mockDialog.open).toHaveBeenCalled();
   });
+
+  it('opens FoodItemRecipesDialogComponent and updates count when unlinked', () => {
+    mockDialog.open.mockReturnValue({
+      afterClosed: () => of({ unlinked: true, unlinkedRecipeCount: 3 }),
+    });
+
+    component.viewReferencedRecipes(sampleItems[0]);
+    expect(mockDialog.open).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        data: { foodItem: sampleItems[0] },
+      }),
+    );
+    const updated = component['items']().find((i) => i.id === 'f-1');
+    expect(updated?.referencedRecipeCount).toBe(0);
+  });
+
+  it('prompts to unlink and delete when item has referenced recipes', () => {
+    mockDialog.open.mockReturnValue({
+      afterClosed: () => of(true),
+    });
+    mockCatalogService.deleteFoodItem.mockReturnValue(of(undefined));
+
+    component.deleteItem(sampleItems[0]);
+    expect(mockDialog.open).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        data: expect.objectContaining({
+          confirmText: 'Unlink & Delete',
+        }),
+      }),
+    );
+    expect(mockCatalogService.deleteFoodItem).toHaveBeenCalledWith('f-1', true);
+  });
+
+  it('prompts standard delete when item has no referenced recipes', () => {
+    const itemWithoutRecipes: FoodItemDto = {
+      ...sampleItems[1],
+      id: 'f-3',
+      referencedRecipeCount: 0,
+    };
+    mockDialog.open.mockReturnValue({
+      afterClosed: () => of(true),
+    });
+    mockCatalogService.deleteFoodItem.mockReturnValue(of(undefined));
+
+    component.deleteItem(itemWithoutRecipes);
+    expect(mockDialog.open).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        data: expect.objectContaining({
+          confirmText: 'Delete',
+        }),
+      }),
+    );
+    expect(mockCatalogService.deleteFoodItem).toHaveBeenCalledWith('f-3', false);
+  });
 });

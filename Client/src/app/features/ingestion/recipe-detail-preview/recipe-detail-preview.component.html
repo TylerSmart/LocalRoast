@@ -1,0 +1,368 @@
+<article class="recipe-preview-container" aria-label="Recipe detail preview">
+  <!-- Live Preview Banner -->
+  @if (showPreviewBanner()) {
+    <aside class="preview-banner" role="status">
+      <div class="banner-content">
+        <mat-icon class="banner-icon">visibility</mat-icon>
+        <div class="banner-text">
+          <strong class="banner-title">Recipe Detail Preview</strong>
+          <span class="banner-subtitle">
+            Live preview of how this recipe will look when approved and published
+          </span>
+        </div>
+      </div>
+      @if (showPublishButton()) {
+        <button
+          mat-flat-button
+          color="primary"
+          type="button"
+          (click)="onPublish()"
+          [disabled]="isPublishing()"
+          class="banner-publish-btn"
+          aria-label="Approve and publish recipe from preview"
+        >
+          @if (isPublishing()) {
+            <mat-spinner diameter="18" class="inline-spinner"></mat-spinner>
+          } @else {
+            <mat-icon>check_circle</mat-icon>
+          }
+          <span>Approve & Publish</span>
+        </button>
+      }
+    </aside>
+  }
+
+  <!-- Recipe Hero / Header Section -->
+  <header class="recipe-hero">
+    @if (recipe().coverImagePath) {
+      <div class="hero-image-wrapper">
+        <img
+          [src]="recipe().coverImagePath!"
+          [alt]="recipe().title || 'Recipe cover image'"
+          class="recipe-hero-image"
+        />
+      </div>
+    }
+
+    <div class="hero-header-row">
+      <h1 class="recipe-title">{{ recipe().title || 'Untitled Recipe' }}</h1>
+      <div class="hero-badges">
+        @if (recipe().difficulty) {
+          <span class="diff-badge" [attr.data-diff]="recipe().difficulty">
+            {{ recipe().difficulty }}
+          </span>
+        }
+        <span class="status-badge" data-status="DraftReview">Draft Preview</span>
+      </div>
+    </div>
+
+    <!-- Collections & Tags Badges in Hero -->
+    @if (recipe().collections.length > 0 || recipe().tags.length > 0) {
+      <div class="hero-taxonomy-strip">
+        @for (c of recipe().collections; track c.id ?? c.name) {
+          <span class="hero-collection-badge">
+            <mat-icon class="badge-icon">collections_bookmark</mat-icon>
+            <span>{{ c.name }}</span>
+          </span>
+        }
+        @for (t of recipe().tags; track t.id ?? t.name) {
+          <span class="hero-tag-badge" [class]="'cat-' + (t.category || 'general').toLowerCase()">
+            {{ t.name }}
+          </span>
+        }
+      </div>
+    }
+
+    @if (recipe().description) {
+      <p class="recipe-description">{{ recipe().description }}</p>
+    }
+
+    <!-- Metadata Summary Row -->
+    <div class="recipe-stats-strip">
+      @if (recipe().extractedModel) {
+        <div class="stat-pill model-stat">
+          <span class="stat-label">Model</span>
+          <span class="stat-value">
+            <mat-icon class="stat-icon">smart_toy</mat-icon>
+            <span>{{ recipe().extractedModel }}</span>
+          </span>
+        </div>
+      }
+      @if (recipe().prepTimeMinutes) {
+        <div class="stat-pill">
+          <span class="stat-label">Prep Time</span>
+          <span class="stat-value">{{ formatMinutes(recipe().prepTimeMinutes) }}</span>
+        </div>
+      }
+      @if (recipe().cookTimeMinutes) {
+        <div class="stat-pill">
+          <span class="stat-label">Cook Time</span>
+          <span class="stat-value">{{ formatMinutes(recipe().cookTimeMinutes) }}</span>
+        </div>
+      }
+      @if (recipe().totalTimeMinutes) {
+        <div class="stat-pill stat-highlight">
+          <span class="stat-label">Total Time</span>
+          <span class="stat-value">{{ formatMinutes(recipe().totalTimeMinutes) }}</span>
+        </div>
+      }
+      <div class="stat-pill">
+        <span class="stat-label">Base Yield</span>
+        <span class="stat-value">{{
+          recipe().yieldDisplay || recipe().baseServings + ' servings'
+        }}</span>
+      </div>
+      @if (recipe().sourceName || recipe().sourceBookTitle || recipe().sourceUrl) {
+        <div class="stat-pill source-stat">
+          <span class="stat-label">Source</span>
+          <span class="stat-value">
+            @if (recipe().sourceUrl) {
+              <a
+                [href]="recipe().sourceUrl"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="source-link"
+              >
+                {{ recipe().sourceName || recipe().sourceUrl }}
+                @if (recipe().sourceBookPage) {
+                  (p. {{ recipe().sourceBookPage }})
+                }
+                <mat-icon class="external-icon">open_in_new</mat-icon>
+              </a>
+            } @else {
+              <span>
+                {{ recipe().sourceName || 'Cookbook' }}
+                @if (recipe().sourceBookTitle) {
+                  · <em>{{ recipe().sourceBookTitle }}</em>
+                }
+                @if (recipe().sourceBookPage) {
+                  (p. {{ recipe().sourceBookPage }})
+                }
+              </span>
+            }
+          </span>
+        </div>
+      }
+    </div>
+  </header>
+
+  <!-- Culinary Scaling & Converter Toolbar Card -->
+  <mat-card class="scaling-toolbar-card">
+    <div class="scaling-toolbar">
+      <!-- Servings Stepper -->
+      <div class="servings-stepper">
+        <span class="toolbar-label">Servings:</span>
+        <div class="stepper-controls">
+          <button
+            mat-icon-button
+            type="button"
+            (click)="adjustServings(-1)"
+            [disabled]="targetServings() <= 1"
+            aria-label="Decrease preview servings"
+          >
+            <mat-icon>remove</mat-icon>
+          </button>
+          <span class="servings-display">{{ targetServings() }}</span>
+          <button
+            mat-icon-button
+            type="button"
+            (click)="adjustServings(1)"
+            aria-label="Increase preview servings"
+          >
+            <mat-icon>add</mat-icon>
+          </button>
+        </div>
+      </div>
+
+      <!-- Quick Multipliers -->
+      <div class="multiplier-chips">
+        <button
+          type="button"
+          class="mult-chip"
+          [class.active-mult]="scaleFactor() === 0.5"
+          (click)="setMultiplier(0.5)"
+        >
+          0.5x
+        </button>
+        <button
+          type="button"
+          class="mult-chip"
+          [class.active-mult]="scaleFactor() === 1"
+          (click)="setMultiplier(1)"
+        >
+          1x
+        </button>
+        <button
+          type="button"
+          class="mult-chip"
+          [class.active-mult]="scaleFactor() === 1.5"
+          (click)="setMultiplier(1.5)"
+        >
+          1.5x
+        </button>
+        <button
+          type="button"
+          class="mult-chip"
+          [class.active-mult]="scaleFactor() === 2"
+          (click)="setMultiplier(2)"
+        >
+          2x
+        </button>
+        <button
+          type="button"
+          class="mult-chip"
+          [class.active-mult]="scaleFactor() === 3"
+          (click)="setMultiplier(3)"
+        >
+          3x
+        </button>
+      </div>
+
+      <div class="toolbar-divider"></div>
+
+      <!-- Unit Converter Toggle -->
+      <div class="unit-system-toggle">
+        <span class="toolbar-label">Units:</span>
+        <mat-button-toggle-group
+          [ngModel]="targetSystem()"
+          (ngModelChange)="targetSystem.set($event)"
+          aria-label="Preview Measurement Unit System"
+        >
+          <mat-button-toggle value="Original">Original</mat-button-toggle>
+          <mat-button-toggle value="UsCustomary">US</mat-button-toggle>
+          <mat-button-toggle value="Metric">Metric</mat-button-toggle>
+        </mat-button-toggle-group>
+      </div>
+    </div>
+  </mat-card>
+
+  <!-- Main Content Two-Column Grid (Desktop) / Stacked (Mobile) -->
+  <div class="recipe-body-grid">
+    <!-- Left Column: Ingredients -->
+    <section class="ingredients-column" aria-label="Ingredients Preview">
+      <h2 class="section-heading">
+        <mat-icon class="heading-icon">format_list_bulleted</mat-icon>
+        <span>Ingredients ({{ recipe().ingredients.length }})</span>
+      </h2>
+
+      @if (recipe().ingredients.length === 0) {
+        <p class="empty-hint">No ingredients found in draft.</p>
+      }
+
+      @for (group of groupedIngredients(); track group.sectionName) {
+        <div class="ingredient-section-group">
+          @if (group.sectionName) {
+            <h3 class="group-subtitle">{{ group.sectionName }}</h3>
+          }
+
+          <ul class="ingredients-list">
+            @for (item of group.items; track item.ingredient.id) {
+              <li class="ingredient-row">
+                <span class="ingredient-bullet">•</span>
+                <span class="ingredient-text">
+                  @if (item.displayQuantityAndUnit) {
+                    <strong class="scaled-qty">{{ item.displayQuantityAndUnit }}</strong>
+                  }
+                  <span class="ing-name">{{ item.ingredient.displayName }}</span>
+                  @if (item.ingredient.preparationNote) {
+                    <span class="prep-note">({{ item.ingredient.preparationNote }})</span>
+                  }
+                  @if (item.ingredient.isOptional) {
+                    <span class="optional-tag">optional</span>
+                  }
+                  @if (item.ingredient.isPantryStaple) {
+                    <span class="pantry-tag" matTooltip="Pantry Staple">pantry</span>
+                  }
+                  @if (item.ingredient.matchedFoodItemName) {
+                    <span
+                      class="catalog-badge"
+                      [matTooltip]="'Food Catalog: ' + item.ingredient.matchedFoodItemName"
+                    >
+                      <mat-icon class="catalog-icon">inventory_2</mat-icon>
+                      <span>{{ item.ingredient.matchedFoodItemName }}</span>
+                    </span>
+                  }
+                </span>
+              </li>
+            }
+          </ul>
+        </div>
+      }
+    </section>
+
+    <!-- Right Column: Instructions -->
+    <section class="instructions-column" aria-label="Instructions Preview">
+      <h2 class="section-heading">
+        <mat-icon class="heading-icon">menu_book</mat-icon>
+        <span>Instructions ({{ recipe().steps.length }})</span>
+      </h2>
+
+      @if (recipe().steps.length === 0) {
+        <p class="empty-hint">No steps found in draft.</p>
+      }
+
+      @for (group of groupedSteps(); track group.sectionName) {
+        <div class="step-section-group">
+          @if (group.sectionName) {
+            <h3 class="group-subtitle">{{ group.sectionName }}</h3>
+          }
+
+          <ol class="steps-list">
+            @for (stepItem of group.items; track stepItem.step.id) {
+              <li class="step-card">
+                <div class="step-header">
+                  <span class="step-number-circle">{{ stepItem.step.stepNumber }}</span>
+                  <p class="step-instruction-text">{{ stepItem.step.instruction }}</p>
+                </div>
+
+                <!-- Step Reference Photo -->
+                @if (stepItem.step.imagePath) {
+                  <div class="step-reference-wrapper">
+                    <img
+                      [src]="stepItem.step.imagePath"
+                      [alt]="'Step ' + stepItem.step.stepNumber + ' reference photo'"
+                      class="step-reference-image"
+                      loading="lazy"
+                    />
+                  </div>
+                }
+
+                <!-- Inline Scaled Ingredient Callouts -->
+                @if (stepItem.ingredientCallouts.length > 0) {
+                  <div class="step-callouts-strip">
+                    <span class="callout-label">Used in this step:</span>
+                    <div class="callout-chips">
+                      @for (callout of stepItem.ingredientCallouts; track callout.id) {
+                        <span class="ingredient-callout-pill">
+                          <mat-icon class="callout-icon">restaurant</mat-icon>
+                          <span>{{ callout.label }}</span>
+                        </span>
+                      }
+                    </div>
+                  </div>
+                }
+
+                <!-- Step Timers -->
+                @if (stepItem.step.timers && stepItem.step.timers.length > 0) {
+                  <div class="step-timers-strip">
+                    @for (timer of stepItem.step.timers; track $index) {
+                      <div class="timer-badge">
+                        <mat-icon class="timer-icon">timer</mat-icon>
+                        <span class="timer-duration">{{
+                          formatTimerDuration(timer.durationSeconds)
+                        }}</span>
+                        @if (timer.label && timer.label !== 'Timer') {
+                          <span class="timer-label">({{ timer.label }})</span>
+                        }
+                      </div>
+                    }
+                  </div>
+                }
+              </li>
+            }
+          </ol>
+        </div>
+      }
+    </section>
+  </div>
+</article>

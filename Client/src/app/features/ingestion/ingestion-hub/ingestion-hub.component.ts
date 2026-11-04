@@ -14,13 +14,16 @@ import { MatButtonToggleModule } from '@angular/material/button-toggle';
 import { MatCardModule } from '@angular/material/card';
 import { MatCheckboxModule } from '@angular/material/checkbox';
 import { MatChipsModule } from '@angular/material/chips';
+import { MatDividerModule } from '@angular/material/divider';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
+import { MatMenuModule } from '@angular/material/menu';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { RouterLink } from '@angular/router';
 import { interval } from 'rxjs';
+import { APP_STORAGE_PREFIX } from '../../../app.branding';
 import type {
   IngestionChannel,
   IngestionJobStatus,
@@ -30,6 +33,20 @@ import { IngestionService } from '../../../core/services/ingestion/ingestion.ser
 import { LlmSettingsService } from '../../../core/services/llm-settings/llm-settings.service';
 
 export type IngestionFilter = 'All' | 'ReadyForReview' | 'ActiveWaiting' | 'Published' | 'Failed';
+
+export interface RefreshOption {
+  readonly label: string;
+  readonly value: number;
+}
+
+export const REFRESH_OPTIONS: RefreshOption[] = [
+  { label: '15 seconds', value: 15 },
+  { label: '30 seconds', value: 30 },
+  { label: '1 minute', value: 60 },
+  { label: '2 minutes', value: 120 },
+  { label: '5 minutes', value: 300 },
+  { label: 'Manual (Off)', value: 0 },
+];
 
 @Component({
   selector: 'app-ingestion-hub',
@@ -41,9 +58,11 @@ export type IngestionFilter = 'All' | 'ReadyForReview' | 'ActiveWaiting' | 'Publ
     MatCardModule,
     MatCheckboxModule,
     MatChipsModule,
+    MatDividerModule,
     MatFormFieldModule,
     MatInputModule,
     MatIconModule,
+    MatMenuModule,
     MatProgressSpinnerModule,
     MatTooltipModule,
   ],
@@ -57,14 +76,44 @@ export class IngestionHubComponent implements OnInit {
   private readonly ingestionService = inject(IngestionService);
   private readonly llmSettingsService = inject(LlmSettingsService);
 
+  readonly refreshOptions = REFRESH_OPTIONS;
+  private readonly refreshStorageKey = `${APP_STORAGE_PREFIX}:ingestion-refresh-interval`;
+  private lastActiveInterval = 15;
+
+  readonly refreshInterval = signal<number>(this.getInitialRefreshInterval());
+  readonly remainingSeconds = signal<number>(this.getInitialRefreshInterval());
+  readonly isRefreshing = signal<boolean>(false);
+  readonly isAutoRefreshEnabled = computed(() => this.refreshInterval() > 0);
+
   readonly activeTab = signal<'urls' | 'text' | 'images' | 'pdf'>('urls');
   readonly filter = signal<IngestionFilter>('All');
   readonly jobs = signal<IngestionJobSummaryDto[]>([]);
   readonly isLoading = signal<boolean>(true);
   readonly isSubmitting = signal<boolean>(false);
   readonly isRetryingAll = signal<boolean>(false);
+  readonly isIngestionEnabled = signal<boolean>(true);
+  readonly isTogglingIngestion = signal<boolean>(false);
   readonly feedbackMessage = signal<string | null>(null);
   readonly errorMessage = signal<string | null>(null);
+
+  readonly countdownProgress = computed(() => {
+    const total = this.refreshInterval();
+    if (total <= 0) return 0;
+    const remaining = this.remainingSeconds();
+    return Math.max(0, Math.min(100, (remaining / total) * 100));
+  });
+
+  readonly remainingTimeDisplay = computed(() => {
+    const total = this.refreshInterval();
+    if (total <= 0) return 'Manual';
+    const remaining = this.remainingSeconds();
+    if (remaining >= 60) {
+      const minutes = Math.floor(remaining / 60);
+      const seconds = remaining % 60;
+      return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+    }
+    return `${remaining}s`;
+  });
 
   readonly urlForm = this.fb.nonNullable.group({
     urlsText: this.fb.nonNullable.control<string>('', [Validators.required]),
@@ -154,10 +203,70 @@ export class IngestionHubComponent implements OnInit {
 
   ngOnInit(): void {
     this.loadJobs();
+    this.loadLlmSettings();
     this.setupPolling();
   }
 
+  private getInitialRefreshInterval(): number {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const stored = window.localStorage.getItem(this.refreshStorageKey);
+        if (stored !== null) {
+          const parsed = parseInt(stored, 10);
+          if (REFRESH_OPTIONS.some((opt) => opt.value === parsed)) {
+            return parsed;
+          }
+        }
+      }
+    } catch {
+      // Ignore storage errors in restricted contexts
+    }
+    return 15;
+  }
+
+  setRefreshInterval(seconds: number): void {
+    if (seconds > 0) {
+      this.lastActiveInterval = seconds;
+    }
+    this.refreshInterval.set(seconds);
+    this.remainingSeconds.set(seconds);
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.setItem(this.refreshStorageKey, seconds.toString());
+      }
+    } catch {
+      // Ignore storage errors
+    }
+  }
+
+  toggleAutoRefresh(): void {
+    if (this.refreshInterval() > 0) {
+      this.lastActiveInterval = this.refreshInterval();
+      this.setRefreshInterval(0);
+    } else {
+      this.setRefreshInterval(this.lastActiveInterval || 15);
+    }
+  }
+
+  manualRefresh(): void {
+    if (this.isRefreshing()) {
+      return;
+    }
+    this.executeRefresh();
+    if (this.refreshInterval() > 0) {
+      this.remainingSeconds.set(this.refreshInterval());
+    }
+  }
+
   loadJobs(): void {
+    this.executeRefresh();
+    if (this.refreshInterval() > 0) {
+      this.remainingSeconds.set(this.refreshInterval());
+    }
+  }
+
+  private executeRefresh(): void {
+    this.isRefreshing.set(true);
     this.ingestionService
       .getJobs()
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -165,24 +274,38 @@ export class IngestionHubComponent implements OnInit {
         next: (jobs) => {
           this.jobs.set(jobs);
           this.isLoading.set(false);
+          this.isRefreshing.set(false);
+          this.ingestionService.refreshSummary();
         },
         error: (err) => {
           this.errorMessage.set(err?.error?.detail || 'Failed to load ingestion jobs.');
           this.isLoading.set(false);
+          this.isRefreshing.set(false);
         },
       });
   }
 
   private setupPolling(): void {
-    interval(2000)
+    interval(1000)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(() => {
-        const hasProcessing = this.jobs().some(
-          (j) => j.status === 'Queued' || j.status === 'Preprocessing' || j.status === 'Extracting',
-        );
-        if (hasProcessing) {
-          this.loadJobs();
-          this.ingestionService.refreshSummary();
+        const intervalVal = this.refreshInterval();
+        if (intervalVal <= 0) {
+          // Manual mode: do not count down or auto-refresh
+          return;
+        }
+
+        if (this.isRefreshing()) {
+          // Keep countdown steady while refresh request is in-flight
+          return;
+        }
+
+        const remaining = this.remainingSeconds();
+        if (remaining <= 1) {
+          this.remainingSeconds.set(intervalVal);
+          this.executeRefresh();
+        } else {
+          this.remainingSeconds.set(remaining - 1);
         }
       });
   }
@@ -195,8 +318,62 @@ export class IngestionHubComponent implements OnInit {
     this.activeTab.set(tab);
   }
 
-  openLlmSettings(): void {
-    this.llmSettingsService.openLlmSettingsDialog();
+  loadLlmSettings(): void {
+    this.llmSettingsService
+      .getSettings()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (settings) => {
+          this.isIngestionEnabled.set(settings.enableIngestion ?? true);
+        },
+        error: () => {
+          // Fallback or leave default true
+        },
+      });
+  }
+
+  toggleIngestionState(): void {
+    if (this.isTogglingIngestion()) {
+      return;
+    }
+
+    const nextState = !this.isIngestionEnabled();
+    this.isTogglingIngestion.set(true);
+
+    this.llmSettingsService
+      .setIngestionEnabled(nextState)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (settings) => {
+          this.isIngestionEnabled.set(settings.enableIngestion ?? nextState);
+          this.isTogglingIngestion.set(false);
+          this.feedbackMessage.set(
+            nextState
+              ? 'LLM ingestion resumed. Background processor will process queued recipes.'
+              : 'LLM ingestion paused. Active jobs have been safely paused and returned to the queue.',
+          );
+          this.loadJobs();
+        },
+        error: (err) => {
+          this.errorMessage.set(err?.error?.detail || 'Failed to update ingestion state.');
+          this.isTogglingIngestion.set(false);
+        },
+      });
+  }
+
+  async openLlmSettings(): Promise<void> {
+    const dialogRef = await this.llmSettingsService.openLlmSettingsDialog();
+    if (dialogRef) {
+      dialogRef
+        .afterClosed()
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe((saved) => {
+          if (saved) {
+            this.loadLlmSettings();
+            this.loadJobs();
+          }
+        });
+    }
   }
 
   onImagesSelected(event: Event): void {
@@ -459,6 +636,37 @@ export class IngestionHubComponent implements OnInit {
         },
         error: (err) => {
           this.errorMessage.set(err?.error?.detail || 'Failed to retry waiting jobs.');
+          this.isRetryingAll.set(false);
+        },
+      });
+  }
+
+  retryAllInCurrentTab(): void {
+    if (this.isRetryingAll() || this.filteredJobs().length === 0) {
+      return;
+    }
+
+    this.isRetryingAll.set(true);
+    this.errorMessage.set(null);
+    this.feedbackMessage.set(null);
+
+    const currentFilter = this.filter();
+    const jobIds = this.filteredJobs().map((j) => j.id);
+
+    this.ingestionService
+      .retryBatchJobs({
+        jobIds,
+        filter: currentFilter,
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) => {
+          this.isRetryingAll.set(false);
+          this.feedbackMessage.set(`Requeued ${res.requeuedCount} job(s) for extraction.`);
+          this.loadJobs();
+        },
+        error: (err) => {
+          this.errorMessage.set(err?.error?.detail || 'Failed to retry jobs.');
           this.isRetryingAll.set(false);
         },
       });

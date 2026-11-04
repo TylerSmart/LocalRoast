@@ -231,6 +231,39 @@
         <mat-tab label="MCP Tokens">
           <app-personal-access-tokens-panel />
         </mat-tab>
+
+        <!-- Data Management Tab -->
+        <mat-tab label="Data Management">
+          <div class="data-management-tab">
+            <div class="danger-zone-card">
+              <div class="danger-zone-header">
+                <div class="danger-zone-icon-badge">
+                  <mat-icon aria-hidden="true">warning</mat-icon>
+                </div>
+                <div class="danger-zone-info">
+                  <h3 class="danger-title">Reset All Application Data</h3>
+                  <p class="danger-description">
+                    Permanently delete all recipes, meal plans, shopping lists, food catalog items,
+                    ingestion jobs, cook logs, and uploaded media. Your user account, password, LLM
+                    settings, and MCP access tokens will be preserved.
+                  </p>
+                </div>
+              </div>
+              <div class="danger-zone-actions">
+                <button
+                  mat-stroked-button
+                  color="warn"
+                  type="button"
+                  class="reset-data-button"
+                  (click)="openResetAppDataDialog()"
+                >
+                  <mat-icon aria-hidden="true">delete_forever</mat-icon>
+                  Reset App Data...
+                </button>
+              </div>
+            </div>
+          </div>
+        </mat-tab>
       </mat-tab-group>
     }
   </mat-dialog-content>

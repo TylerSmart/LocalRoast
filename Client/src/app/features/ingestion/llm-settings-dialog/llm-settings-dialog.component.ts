@@ -80,6 +80,13 @@ export class LlmSettingsDialogComponent implements OnInit {
       Validators.max(600),
     ]),
     autoPublishHighConfidenceText: this.fb.nonNullable.control<boolean>(false),
+    enableThinking: this.fb.nonNullable.control<boolean>(false),
+    enableIngestion: this.fb.nonNullable.control<boolean>(true),
+    maxIngestionRetries: this.fb.nonNullable.control<number>(3, [
+      Validators.required,
+      Validators.min(0),
+      Validators.max(10),
+    ]),
   });
 
   ngOnInit(): void {
@@ -122,9 +129,16 @@ export class LlmSettingsDialogComponent implements OnInit {
             ollamaKeepAlive: settings.ollamaKeepAlive,
             requestTimeoutSeconds: settings.requestTimeoutSeconds,
             autoPublishHighConfidenceText: settings.autoPublishHighConfidenceText,
+            enableThinking: settings.enableThinking ?? false,
+            enableIngestion: settings.enableIngestion ?? true,
+            maxIngestionRetries: settings.maxIngestionRetries ?? 3,
           });
 
           this.isLoading.set(false);
+
+          if (settings.baseUrl && settings.baseUrl.trim().length > 0) {
+            this.testConnection();
+          }
         },
         error: (err) => {
           this.errorMessage.set(err?.error?.detail || 'Failed to load LLM settings.');
@@ -196,6 +210,9 @@ export class LlmSettingsDialogComponent implements OnInit {
         ollamaKeepAlive: values.ollamaKeepAlive.trim() || '5m',
         requestTimeoutSeconds: values.requestTimeoutSeconds,
         autoPublishHighConfidenceText: values.autoPublishHighConfidenceText,
+        enableThinking: values.enableThinking,
+        enableIngestion: values.enableIngestion,
+        maxIngestionRetries: values.maxIngestionRetries,
       })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({

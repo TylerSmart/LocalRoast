@@ -40,3 +40,18 @@ export interface MergeFoodItemsResultDto {
   consolidatedShoppingListItemCount: number;
   addedAliases: string[];
 }
+
+export interface FoodItemRecipeUsageDto {
+  recipeId: string;
+  recipeTitle: string;
+  recipeSlug: string;
+  thumbnailImagePath?: string | null;
+  status: string;
+  ingredientDisplayNames: string[];
+}
+
+export interface UnlinkFoodItemRecipesResultDto {
+  foodItemId: string;
+  unlinkedRecipeCount: number;
+  unlinkedIngredientCount: number;
+}

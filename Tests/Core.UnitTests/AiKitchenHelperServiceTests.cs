@@ -36,6 +36,11 @@ public sealed class AiKitchenHelperServiceTests
             TestLlmConnectionRequest request,
             CancellationToken cancellationToken = default
         ) => throw new NotImplementedException();
+
+        public Task<LlmSettingsDto> SetIngestionEnabledAsync(
+            bool enabled,
+            CancellationToken cancellationToken = default
+        ) => throw new NotImplementedException();
     }
 
     private sealed class MockLlmExtractionClient : ILlmExtractionClient

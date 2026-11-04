@@ -42,6 +42,7 @@ import type {
 import {
   MEASUREMENT_UNITS,
   RecipeDifficulty,
+  RecipePreviewData,
   RecipeStepTimerInput,
 } from '../../../core/models/recipe.models';
 import { CollectionDto, TagDto } from '../../../core/models/taxonomy.models';
@@ -49,6 +50,12 @@ import { FoodCatalogService } from '../../../core/services/food-catalog/food-cat
 import { IngestionService } from '../../../core/services/ingestion/ingestion.service';
 import { TaxonomyService } from '../../../core/services/taxonomy/taxonomy.service';
 import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialog/confirm-dialog.component';
+import { RecipeDetailPreviewComponent } from '../recipe-detail-preview/recipe-detail-preview.component';
+import {
+  RecipeDetailPreviewDialogComponent,
+  RecipeDetailPreviewDialogData,
+  RecipeDetailPreviewDialogResult,
+} from '../recipe-detail-preview-dialog/recipe-detail-preview-dialog.component';
 
 @Component({
   selector: 'app-ingestion-review',
@@ -68,6 +75,7 @@ import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialo
     MatSelectModule,
     MatTooltipModule,
     SourceViewerComponent,
+    RecipeDetailPreviewComponent,
   ],
   templateUrl: './ingestion-review.component.html',
   styleUrl: './ingestion-review.component.scss',
@@ -92,7 +100,9 @@ export class IngestionReviewComponent implements OnInit {
   readonly isPublishing = signal<boolean>(false);
   readonly isRerunning = signal<boolean>(false);
   readonly errorMessage = signal<string | null>(null);
-  readonly mobilePane = signal<'source' | 'draft'>('draft');
+  readonly mobilePane = signal<'source' | 'draft' | 'preview'>('draft');
+  readonly rightPaneMode = signal<'edit' | 'preview'>('edit');
+  readonly previewData = signal<RecipePreviewData | null>(null);
   readonly isPromotingCover = signal<boolean>(false);
 
   readonly foodItems = signal<FoodItemDto[]>([]);
@@ -252,6 +262,8 @@ export class IngestionReviewComponent implements OnInit {
     } else {
       this.addStep();
     }
+
+    this.refreshPreviewData();
   }
 
   addIngredient(item?: Partial<IngestionDraftIngredientDto>): void {
@@ -388,8 +400,114 @@ export class IngestionReviewComponent implements OnInit {
     this.selectedProposedTagNames.set(next);
   }
 
-  setMobilePane(pane: 'source' | 'draft'): void {
+  setRightPaneMode(mode: 'edit' | 'preview'): void {
+    if (mode === 'preview') {
+      this.refreshPreviewData();
+    }
+    this.rightPaneMode.set(mode);
+  }
+
+  setMobilePane(pane: 'source' | 'draft' | 'preview'): void {
     this.mobilePane.set(pane);
+    if (pane === 'preview') {
+      this.refreshPreviewData();
+      this.rightPaneMode.set('preview');
+    } else if (pane === 'draft') {
+      this.rightPaneMode.set('edit');
+    }
+  }
+
+  refreshPreviewData(): void {
+    this.previewData.set(this.buildPreviewData());
+  }
+
+  buildPreviewData(): RecipePreviewData {
+    const draft = this.buildDraftPayload();
+    const allCollections = this.collections();
+    const allTags = this.tags();
+
+    const selectedCollections = (draft.suggestedCollectionIds || [])
+      .map((id) => allCollections.find((c) => c.id === id))
+      .filter((c): c is CollectionDto => !!c)
+      .map((c) => ({ id: c.id, name: c.name }));
+
+    const selectedTags = [
+      ...(draft.suggestedTagIds || [])
+        .map((id) => allTags.find((t) => t.id === id))
+        .filter((t): t is TagDto => !!t)
+        .map((t) => ({ id: t.id, name: t.name, category: t.category })),
+      ...(draft.proposedTagNames || []).map((name) => ({ name, category: 'General' })),
+    ];
+
+    return {
+      title: draft.title,
+      description: draft.description,
+      baseServings: draft.baseServings,
+      yieldDisplay: draft.yieldDisplay,
+      prepTimeMinutes: draft.prepTimeMinutes,
+      cookTimeMinutes: draft.cookTimeMinutes,
+      totalTimeMinutes: draft.totalTimeMinutes,
+      difficulty: draft.difficulty,
+      sourceName: draft.sourceName,
+      sourceAuthor: draft.sourceAuthor,
+      sourceUrl: draft.sourceUrl,
+      sourceBookTitle: draft.sourceBookTitle,
+      sourceBookPage: draft.sourceBookPage,
+      coverImagePath: draft.coverImagePath,
+      extractedModel: draft.extractedModel,
+      collections: selectedCollections,
+      tags: selectedTags,
+      ingredients: (draft.ingredients || []).map((ing, i) => ({
+        id: `ing-${i}`,
+        index: i,
+        sectionName: ing.sectionName,
+        quantity: ing.quantity,
+        maxQuantity: ing.maxQuantity,
+        unit: ing.unit,
+        customUnitName: ing.customUnitName,
+        displayName: ing.displayName,
+        preparationNote: ing.preparationNote,
+        isOptional: ing.isOptional,
+        isPantryStaple: ing.suggestedIsPantryStaple,
+        matchedFoodItemName: ing.matchedFoodItemName || ing.proposedFoodItemName,
+      })),
+      steps: (draft.steps || []).map((st, i) => ({
+        id: `step-${i}`,
+        stepNumber: st.stepNumber,
+        sectionName: st.sectionName,
+        instruction: st.instruction,
+        imagePath: st.imagePath,
+        ingredientIndices: st.ingredientIndices,
+        timers: st.timers,
+      })),
+    };
+  }
+
+  openPreviewDialog(): void {
+    this.refreshPreviewData();
+    const preview = this.previewData();
+    if (!preview) return;
+
+    const ref = this.dialog.open<
+      RecipeDetailPreviewDialogComponent,
+      RecipeDetailPreviewDialogData,
+      RecipeDetailPreviewDialogResult
+    >(RecipeDetailPreviewDialogComponent, {
+      width: '920px',
+      maxWidth: '96vw',
+      maxHeight: '92vh',
+      data: {
+        recipe: preview,
+        canPublish: !this.form.invalid,
+        isPublishing: this.isPublishing(),
+      },
+    });
+
+    ref.afterClosed().subscribe((res) => {
+      if (res?.action === 'publish') {
+        this.approveAndPublish();
+      }
+    });
   }
 
   buildDraftPayload(): IngestionExtractedDraftDto {
@@ -567,10 +685,21 @@ export class IngestionReviewComponent implements OnInit {
 
   approveAndPublish(): void {
     const currentJob = this.job();
-    if (!currentJob || this.form.invalid || this.isPublishing()) {
+    if (!currentJob) return;
+
+    if (this.form.invalid) {
       this.form.markAllAsTouched();
+      this.rightPaneMode.set('edit');
+      this.mobilePane.set('draft');
+      this.snackBar.open(
+        'Please fix the validation errors in the draft before publishing.',
+        'Close',
+        { duration: 4000 },
+      );
       return;
     }
+
+    if (this.isPublishing()) return;
 
     this.isPublishing.set(true);
     this.errorMessage.set(null);

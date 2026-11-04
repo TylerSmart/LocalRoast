@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Text;
 using App.Core.Exceptions;
 using App.Core.Ingestion;
@@ -150,7 +150,7 @@ public sealed class LlmExtractionClientTests
             Assert.AreEqual("/api/chat", req.RequestUri!.AbsolutePath);
             var body = req.Content!.ReadAsStringAsync().Result;
             StringAssert.Contains(body, "\"think\":false");
-            StringAssert.Contains(body, "\"num_predict\":4096");
+            StringAssert.Contains(body, "\"num_predict\":16384");
             StringAssert.Contains(body, "\"repeat_penalty\":1.1");
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
@@ -242,7 +242,7 @@ public sealed class LlmExtractionClientTests
             Assert.AreEqual("/api/chat", req.RequestUri!.AbsolutePath);
             var body = req.Content!.ReadAsStringAsync().Result;
             StringAssert.Contains(body, "\"think\":false");
-            StringAssert.Contains(body, "\"num_predict\":4096");
+            StringAssert.Contains(body, "\"num_predict\":16384");
             StringAssert.Contains(body, "\"images\":");
             StringAssert.Contains(body, "bW9ja2Jhc2U2NA==");
             return new HttpResponseMessage(HttpStatusCode.OK)
@@ -705,5 +705,198 @@ public sealed class LlmExtractionClientTests
         StringAssert.Contains(capturedBody, "Existing Tags: [Dinner, Italian]");
         StringAssert.Contains(capturedBody, "propose new concise Title-Case tags");
         StringAssert.Contains(capturedBody, "suggestedIsPantryStaple");
+    }
+
+    [TestMethod]
+    public async Task ExtractRecipeFromTextAsync_TruncatedStepsJson_RepairsAndExtractsAllCompletedSteps()
+    {
+        // Simulates an LLM cut off mid-timer in step 2
+        var truncatedRawJson =
+            "{\"title\":\"ATK Crispy Skin Salmon\",\"description\":\"Perfect pan-seared salmon with crispy skin.\",\"baseServings\":4,\"sourceBookPage\":\"184-185\",\"ingredients\":[{\"displayName\":\"4 salmon fillets\",\"canonicalFoodName\":\"salmon fillet\",\"quantity\":4,\"unit\":\"whole\"}],\"steps\":[{\"instruction\":\"Score salmon skin and pat thoroughly dry.\"},{\"instruction\":\"Place salmon skin-side down in cold skillet and turn heat to medium-high.\",\"timers\":[{\"durationSeconds\":360,\"label\":\"Crisp skin";
+
+        var ollamaResponse = System.Text.Json.JsonSerializer.Serialize(
+            new { message = new { role = "assistant", content = truncatedRawJson } }
+        );
+
+        var handler = new MockHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(ollamaResponse, Encoding.UTF8, "application/json"),
+        });
+
+        var client = new LlmExtractionClient(new HttpClient(handler));
+        var config = new EffectiveLlmConnectionConfig(
+            Provider: LlmProvider.Ollama,
+            BaseUrl: "http://localhost:11434",
+            ApiKey: null,
+            TextModel: "qwen2.5:14b",
+            VisionModel: null,
+            OllamaKeepAlive: "5m",
+            RequestTimeoutSeconds: 30,
+            AutoPublishHighConfidenceText: false
+        );
+
+        var context = new LlmExtractionContext("Crispy Skin Salmon recipe", []);
+        var result = await client.ExtractRecipeFromTextAsync(config, context);
+
+        Assert.AreEqual("ATK Crispy Skin Salmon", result.Title);
+        Assert.AreEqual(184, result.SourceBookPage); // Flexible converter parsed string range "184-185" into 184
+        Assert.AreEqual(1, result.Ingredients?.Count);
+        Assert.AreEqual(2, result.Steps?.Count); // Repaired step 2 cleanly
+        Assert.AreEqual(
+            "Place salmon skin-side down in cold skillet and turn heat to medium-high.",
+            result.Steps![1].Instruction
+        );
+        Assert.AreEqual("Crisp skin", result.Steps![1].Timers![0].Label);
+    }
+
+    [TestMethod]
+    public async Task ExtractRecipeFromTextAsync_StringSourceBookPageWithPrefix_ParsesPageNumber()
+    {
+        var rawRecipeJson = """
+            {
+                "title": "Cast Iron Steak",
+                "sourceBookTitle": "The Cook's Illustrated Meat Book",
+                "sourceBookPage": "p. 210",
+                "confidenceScore": "0.95",
+                "ingredients": [
+                    { "displayName": "1 strip steak", "quantity": "1", "unit": "whole" }
+                ],
+                "steps": [
+                    { "instruction": "Sear steak in hot cast iron skillet." }
+                ]
+            }
+            """;
+
+        var ollamaResponse = System.Text.Json.JsonSerializer.Serialize(
+            new { message = new { role = "assistant", content = rawRecipeJson } }
+        );
+
+        var handler = new MockHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(ollamaResponse, Encoding.UTF8, "application/json"),
+        });
+
+        var client = new LlmExtractionClient(new HttpClient(handler));
+        var config = new EffectiveLlmConnectionConfig(
+            Provider: LlmProvider.Ollama,
+            BaseUrl: "http://localhost:11434",
+            ApiKey: null,
+            TextModel: "qwen2.5:14b",
+            VisionModel: null,
+            OllamaKeepAlive: "5m",
+            RequestTimeoutSeconds: 30,
+            AutoPublishHighConfidenceText: false
+        );
+
+        var result = await client.ExtractRecipeFromTextAsync(
+            config,
+            new LlmExtractionContext("Recipe", [])
+        );
+
+        Assert.AreEqual("Cast Iron Steak", result.Title);
+        Assert.AreEqual(210, result.SourceBookPage);
+        Assert.AreEqual(0.95m, result.ConfidenceScore);
+        Assert.AreEqual(1m, result.Ingredients![0].Quantity);
+    }
+
+    [TestMethod]
+    public async Task ExtractRecipeFromTextAsync_WithThinkingTags_StripsThinkingAndParsesRecipe()
+    {
+        var rawRecipeJson = """
+            <think>
+            Analyzing recipe ingredients and steps...
+            Checking for cookware instructions.
+            </think>
+            ```json
+            {
+                "title": "Herb Roasted Chicken",
+                "ingredients": [
+                    { "displayName": "1 whole chicken", "quantity": "1", "unit": "whole" }
+                ],
+                "steps": [
+                    { "instruction": "Roast chicken at 425F until internal temp reaches 165F." }
+                ]
+            }
+            ```
+            """;
+
+        var ollamaResponse = System.Text.Json.JsonSerializer.Serialize(
+            new { message = new { role = "assistant", content = rawRecipeJson } }
+        );
+
+        var handler = new MockHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(ollamaResponse, Encoding.UTF8, "application/json"),
+        });
+
+        var client = new LlmExtractionClient(new HttpClient(handler));
+        var config = new EffectiveLlmConnectionConfig(
+            Provider: LlmProvider.Ollama,
+            BaseUrl: "http://localhost:11434",
+            ApiKey: null,
+            TextModel: "qwen2.5:14b",
+            VisionModel: null,
+            OllamaKeepAlive: "5m",
+            RequestTimeoutSeconds: 30,
+            AutoPublishHighConfidenceText: false,
+            EnableThinking: true
+        );
+
+        var result = await client.ExtractRecipeFromTextAsync(
+            config,
+            new LlmExtractionContext("Recipe", [])
+        );
+
+        Assert.AreEqual("Herb Roasted Chicken", result.Title);
+        Assert.AreEqual(1, result.Ingredients!.Count);
+        Assert.AreEqual(1, result.Steps!.Count);
+    }
+
+    [TestMethod]
+    public async Task ExtractRecipeFromTextAsync_EnableThinkingTrue_SendsThinkTrueInOllamaPayload()
+    {
+        string? capturedRequestBody = null;
+
+        var rawRecipeJson = """
+            {
+                "title": "Simple Pasta",
+                "ingredients": [{ "displayName": "Pasta", "quantity": 1, "unit": "package" }],
+                "steps": [{ "instruction": "Boil pasta." }]
+            }
+            """;
+
+        var ollamaResponse = System.Text.Json.JsonSerializer.Serialize(
+            new { message = new { role = "assistant", content = rawRecipeJson } }
+        );
+
+        var handler = new MockHttpMessageHandler(req =>
+        {
+            capturedRequestBody = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(ollamaResponse, Encoding.UTF8, "application/json"),
+            };
+        });
+
+        var client = new LlmExtractionClient(new HttpClient(handler));
+        var config = new EffectiveLlmConnectionConfig(
+            Provider: LlmProvider.Ollama,
+            BaseUrl: "http://localhost:11434",
+            ApiKey: null,
+            TextModel: "deepseek-r1:14b",
+            VisionModel: null,
+            OllamaKeepAlive: "5m",
+            RequestTimeoutSeconds: 30,
+            AutoPublishHighConfidenceText: false,
+            EnableThinking: true
+        );
+
+        await client.ExtractRecipeFromTextAsync(
+            config,
+            new LlmExtractionContext("Simple Pasta", [])
+        );
+
+        Assert.IsNotNull(capturedRequestBody);
+        Assert.IsTrue(capturedRequestBody.Contains("\"think\":true"));
     }
 }

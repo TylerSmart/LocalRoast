@@ -7,11 +7,12 @@ import { apiUrl } from '../../api/api-url';
 import {
   AccountDto,
   ChangePasswordRequest,
+  ResetAppDataResultDto,
   UpdateProfileRequest,
 } from '../../models/account.models';
 import { AuthResponse } from '../../models/auth.models';
 
-export type AccountSettingsTab = 'profile' | 'password' | 'tokens';
+export type AccountSettingsTab = 'profile' | 'password' | 'tokens' | 'data';
 
 @Service()
 export class AccountService {
@@ -28,6 +29,10 @@ export class AccountService {
 
   changePassword(request: ChangePasswordRequest): Observable<AuthResponse> {
     return this.http.put<AuthResponse>(apiUrl('/account/password'), request);
+  }
+
+  resetAppData(): Observable<ResetAppDataResultDto> {
+    return this.http.post<ResetAppDataResultDto>(apiUrl('/account/reset-data'), {});
   }
 
   async openAccountSettingsDialog(

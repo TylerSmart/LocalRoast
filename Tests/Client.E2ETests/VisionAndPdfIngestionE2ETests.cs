@@ -293,7 +293,7 @@ public sealed class VisionAndPdfIngestionE2ETests : E2ETestBase
             "a.review-action-btn",
             new() { HasText = "Review Side-by-Side" }
         );
-        await Expect(reviewBtn).ToBeVisibleAsync(new() { Timeout = 20000 });
+        await WaitForLocatorWithRefreshAsync(reviewBtn);
         await reviewBtn.ClickAsync();
 
         await Expect(Page).ToHaveURLAsync(new Regex(".*/ingest/review/.*"));
@@ -378,7 +378,7 @@ public sealed class VisionAndPdfIngestionE2ETests : E2ETestBase
 
         // Expect waiting host banner to appear
         var waitingBanner = Page.Locator(".waiting-host-banner");
-        await Expect(waitingBanner).ToBeVisibleAsync(new() { Timeout = 15000 });
+        await WaitForLocatorWithRefreshAsync(waitingBanner);
         await Expect(waitingBanner).ToContainTextAsync("waiting for local LLM host");
 
         // Bring mock server back online
@@ -395,7 +395,7 @@ public sealed class VisionAndPdfIngestionE2ETests : E2ETestBase
             "a.review-action-btn",
             new() { HasText = "Review Side-by-Side" }
         );
-        await Expect(reviewBtn).ToBeVisibleAsync(new() { Timeout = 20000 });
+        await WaitForLocatorWithRefreshAsync(reviewBtn);
     }
 
     [TestMethod]
@@ -433,7 +433,7 @@ public sealed class VisionAndPdfIngestionE2ETests : E2ETestBase
             "a.review-action-btn",
             new() { HasText = "Review Side-by-Side" }
         );
-        await Expect(reviewBtn).ToBeVisibleAsync(new() { Timeout = 20000 });
+        await WaitForLocatorWithRefreshAsync(reviewBtn);
         await reviewBtn.ClickAsync();
 
         // On mobile review page, verify mobile pane switcher

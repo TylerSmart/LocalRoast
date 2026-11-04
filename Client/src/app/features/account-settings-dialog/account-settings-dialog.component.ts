@@ -16,17 +16,29 @@ import {
   Validators,
 } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
-import { MAT_DIALOG_DATA, MatDialogModule, MatDialogRef } from '@angular/material/dialog';
+import {
+  MAT_DIALOG_DATA,
+  MatDialog,
+  MatDialogActions,
+  MatDialogContent,
+  MatDialogRef,
+  MatDialogTitle,
+} from '@angular/material/dialog';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatTabsModule } from '@angular/material/tabs';
+import { Router } from '@angular/router';
 import { AccountDto } from '../../core/models/account.models';
 import { AccountService, AccountSettingsTab } from '../../core/services/account/account.service';
 import { AuthService } from '../../core/services/auth/auth.service';
 import { PersonalAccessTokensPanelComponent } from '../mcp-tokens/personal-access-tokens-panel/personal-access-tokens-panel.component';
+import {
+  ResetAppDataDialogComponent,
+  ResetAppDataDialogResult,
+} from './reset-app-data-dialog/reset-app-data-dialog.component';
 
 export interface AccountSettingsDialogData {
   initialTab?: AccountSettingsTab;
@@ -45,7 +57,9 @@ function passwordsMatchValidator(group: AbstractControl): ValidationErrors | nul
   selector: 'app-account-settings-dialog',
   imports: [
     ReactiveFormsModule,
-    MatDialogModule,
+    MatDialogTitle,
+    MatDialogContent,
+    MatDialogActions,
     MatButtonModule,
     MatFormFieldModule,
     MatInputModule,
@@ -65,6 +79,8 @@ export class AccountSettingsDialogComponent implements OnInit {
   private readonly authService = inject(AuthService);
   private readonly snackBar = inject(MatSnackBar);
   private readonly dialogRef = inject(MatDialogRef<AccountSettingsDialogComponent>);
+  private readonly dialog = inject(MatDialog);
+  private readonly router = inject(Router);
   private readonly dialogData = inject<AccountSettingsDialogData | null>(MAT_DIALOG_DATA, {
     optional: true,
   });
@@ -281,6 +297,30 @@ export class AccountSettingsDialogComponent implements OnInit {
       });
   }
 
+  openResetAppDataDialog(): void {
+    const resetRef = this.dialog.open<ResetAppDataDialogComponent, void, ResetAppDataDialogResult>(
+      ResetAppDataDialogComponent,
+      {
+        width: '540px',
+        disableClose: true,
+      },
+    );
+
+    resetRef.afterClosed().subscribe((res) => {
+      if (res?.success && res.result) {
+        this.snackBar.open(
+          `Application data reset successfully. ${res.result.deletedRecipesCount} recipes deleted.`,
+          'Close',
+          { duration: 5000 },
+        );
+        this.dialogRef.close();
+        this.router.navigate(['/recipes']).then(() => {
+          window.location.reload();
+        });
+      }
+    });
+  }
+
   close(): void {
     this.dialogRef.close();
   }
@@ -306,6 +346,8 @@ export class AccountSettingsDialogComponent implements OnInit {
         return 1;
       case 'tokens':
         return 2;
+      case 'data':
+        return 3;
       case 'profile':
       default:
         return 0;

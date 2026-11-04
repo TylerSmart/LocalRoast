@@ -1,4 +1,5 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
+using App.Core.Recipes;
 
 namespace App.Core.FoodCatalog;
 
@@ -40,4 +41,19 @@ public record MergeFoodItemsResultDto(
     int RepointedShoppingListItemCount,
     int ConsolidatedShoppingListItemCount,
     IReadOnlyList<string> AddedAliases
+);
+
+public record FoodItemRecipeUsageDto(
+    Guid RecipeId,
+    string RecipeTitle,
+    string RecipeSlug,
+    string? ThumbnailImagePath,
+    RecipeStatus Status,
+    IReadOnlyList<string> IngredientDisplayNames
+);
+
+public record UnlinkFoodItemRecipesResultDto(
+    Guid FoodItemId,
+    int UnlinkedRecipeCount,
+    int UnlinkedIngredientCount
 );

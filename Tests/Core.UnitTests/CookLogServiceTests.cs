@@ -98,6 +98,9 @@ public sealed class CookLogServiceTests
             long contentLength,
             CancellationToken cancellationToken = default
         ) => throw new NotImplementedException();
+
+        public Task PurgeAllMediaAsync(CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
     }
 
     private sealed class TestUserContext(string userId) : IUserContext

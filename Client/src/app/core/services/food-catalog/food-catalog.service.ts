@@ -6,8 +6,10 @@ import {
   CreateFoodItemRequest,
   FoodItemDto,
   FoodItemQueryParameters,
+  FoodItemRecipeUsageDto,
   MergeFoodItemsRequest,
   MergeFoodItemsResultDto,
+  UnlinkFoodItemRecipesResultDto,
   UpdateFoodItemRequest,
 } from '../../models/food-catalog.models';
 
@@ -39,11 +41,26 @@ export class FoodCatalogService {
     return this.http.put<FoodItemDto>(apiUrl(`/food-items/${id}`), request);
   }
 
-  deleteFoodItem(id: string): Observable<void> {
-    return this.http.delete<void>(apiUrl(`/food-items/${id}`));
+  deleteFoodItem(id: string, unlinkFromRecipes = false): Observable<void> {
+    let params = new HttpParams();
+    if (unlinkFromRecipes) {
+      params = params.set('unlinkFromRecipes', 'true');
+    }
+    return this.http.delete<void>(apiUrl(`/food-items/${id}`), { params });
   }
 
   mergeFoodItems(request: MergeFoodItemsRequest): Observable<MergeFoodItemsResultDto> {
     return this.http.post<MergeFoodItemsResultDto>(apiUrl('/food-items/merge'), request);
+  }
+
+  getFoodItemRecipes(id: string): Observable<FoodItemRecipeUsageDto[]> {
+    return this.http.get<FoodItemRecipeUsageDto[]>(apiUrl(`/food-items/${id}/recipes`));
+  }
+
+  unlinkFoodItemRecipes(id: string): Observable<UnlinkFoodItemRecipesResultDto> {
+    return this.http.post<UnlinkFoodItemRecipesResultDto>(
+      apiUrl(`/food-items/${id}/unlink-recipes`),
+      {},
+    );
   }
 }

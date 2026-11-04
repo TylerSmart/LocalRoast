@@ -1,4 +1,4 @@
-<div class="catalog-page">
+﻿<div class="catalog-page">
   <!-- Header Bar -->
   <div class="page-header">
     <div class="header-titles">
@@ -143,13 +143,28 @@
               <!-- Footer with Recipe References and Actions -->
               <div class="item-footer">
                 <div class="references-block">
-                  <span class="usage-count">
-                    <mat-icon class="usage-icon">menu_book</mat-icon>
-                    <span
-                      >{{ item.referencedRecipeCount }}
-                      {{ item.referencedRecipeCount === 1 ? 'recipe' : 'recipes' }}</span
+                  @if (item.referencedRecipeCount > 0) {
+                    <button
+                      mat-button
+                      class="usage-btn"
+                      (click)="viewReferencedRecipes(item)"
+                      [matTooltip]="
+                        'View ' + item.referencedRecipeCount + ' recipes using this ingredient'
+                      "
+                      aria-label="View recipes using this item"
                     >
-                  </span>
+                      <mat-icon class="usage-icon">menu_book</mat-icon>
+                      <span
+                        >{{ item.referencedRecipeCount }}
+                        {{ item.referencedRecipeCount === 1 ? 'recipe' : 'recipes' }}</span
+                      >
+                    </button>
+                  } @else {
+                    <span class="usage-count muted">
+                      <mat-icon class="usage-icon">menu_book</mat-icon>
+                      <span>0 recipes</span>
+                    </span>
+                  }
                   @if ((item.referencedShoppingListItemCount ?? 0) > 0) {
                     <span
                       class="usage-count shopping-usage-count"

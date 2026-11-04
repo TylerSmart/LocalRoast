@@ -11,6 +11,24 @@
       <button
         mat-stroked-button
         type="button"
+        (click)="toggleIngestionState()"
+        [disabled]="isTogglingIngestion()"
+        [class.paused-btn]="!isIngestionEnabled()"
+        class="toggle-ingestion-btn"
+        [matTooltip]="
+          isIngestionEnabled()
+            ? 'Pause LLM background ingestion'
+            : 'Resume LLM background ingestion'
+        "
+        aria-label="Toggle LLM background ingestion"
+      >
+        <mat-icon>{{ isIngestionEnabled() ? 'pause_circle' : 'play_circle' }}</mat-icon>
+        <span>{{ isIngestionEnabled() ? 'Pause Ingestion' : 'Resume Ingestion' }}</span>
+      </button>
+
+      <button
+        mat-stroked-button
+        type="button"
         (click)="openLlmSettings()"
         class="llm-settings-btn"
         aria-label="Open LLM provider settings"
@@ -20,6 +38,32 @@
       </button>
     </div>
   </div>
+
+  @if (!isIngestionEnabled()) {
+    <div class="alert-banner warning-banner paused-ingestion-banner" role="status">
+      <div class="banner-left">
+        <mat-icon>pause_circle</mat-icon>
+        <div class="banner-content">
+          <strong>LLM Ingestion is Paused</strong>
+          <span>
+            Background processing of queue items is held. Click Resume to continue extracting
+            recipes.
+          </span>
+        </div>
+      </div>
+      <button
+        mat-flat-button
+        color="warn"
+        type="button"
+        class="banner-resume-btn"
+        (click)="toggleIngestionState()"
+        [disabled]="isTogglingIngestion()"
+      >
+        <mat-icon>play_circle</mat-icon>
+        <span>Resume</span>
+      </button>
+    </div>
+  }
 
   @if (feedbackMessage()) {
     <div class="alert-banner info-banner" role="status">
@@ -459,53 +503,156 @@
     </div>
   }
 
-  <!-- Queue & Inbox Filter Strip -->
-  <div class="filter-strip" role="tablist" aria-label="Ingestion Queue Filters">
-    <button
-      type="button"
-      class="filter-pill"
-      [class.active]="filter() === 'All'"
-      (click)="setFilter('All')"
-    >
-      <span>All</span>
-      <span class="count-badge">{{ jobs().length }}</span>
-    </button>
-    <button
-      type="button"
-      class="filter-pill review-pill"
-      [class.active]="filter() === 'ReadyForReview'"
-      (click)="setFilter('ReadyForReview')"
-    >
-      <span>Review Inbox</span>
-      <span class="count-badge review-badge">{{ reviewCount() }}</span>
-    </button>
-    <button
-      type="button"
-      class="filter-pill"
-      [class.active]="filter() === 'ActiveWaiting'"
-      (click)="setFilter('ActiveWaiting')"
-    >
-      <span>Active & Waiting</span>
-      <span class="count-badge">{{ activeJobs().length }}</span>
-    </button>
-    <button
-      type="button"
-      class="filter-pill"
-      [class.active]="filter() === 'Published'"
-      (click)="setFilter('Published')"
-    >
-      <span>Published</span>
-      <span class="count-badge">{{ publishedCount() }}</span>
-    </button>
-    <button
-      type="button"
-      class="filter-pill"
-      [class.active]="filter() === 'Failed'"
-      (click)="setFilter('Failed')"
-    >
-      <span>Failed</span>
-      <span class="count-badge">{{ failedCount() }}</span>
-    </button>
+  <!-- Queue & Inbox Toolbar -->
+  <div class="queue-toolbar">
+    <div class="filter-strip" role="tablist" aria-label="Ingestion Queue Filters">
+      <button
+        type="button"
+        class="filter-pill"
+        [class.active]="filter() === 'All'"
+        (click)="setFilter('All')"
+      >
+        <span>All</span>
+        <span class="count-badge">{{ jobs().length }}</span>
+      </button>
+      <button
+        type="button"
+        class="filter-pill review-pill"
+        [class.active]="filter() === 'ReadyForReview'"
+        (click)="setFilter('ReadyForReview')"
+      >
+        <span>Review Inbox</span>
+        <span class="count-badge review-badge">{{ reviewCount() }}</span>
+      </button>
+      <button
+        type="button"
+        class="filter-pill"
+        [class.active]="filter() === 'ActiveWaiting'"
+        (click)="setFilter('ActiveWaiting')"
+      >
+        <span>Active & Waiting</span>
+        <span class="count-badge">{{ activeJobs().length }}</span>
+      </button>
+      <button
+        type="button"
+        class="filter-pill"
+        [class.active]="filter() === 'Published'"
+        (click)="setFilter('Published')"
+      >
+        <span>Published</span>
+        <span class="count-badge">{{ publishedCount() }}</span>
+      </button>
+      <button
+        type="button"
+        class="filter-pill"
+        [class.active]="filter() === 'Failed'"
+        (click)="setFilter('Failed')"
+      >
+        <span>Failed</span>
+        <span class="count-badge">{{ failedCount() }}</span>
+      </button>
+    </div>
+
+    <div class="queue-toolbar-actions">
+      <button
+        mat-stroked-button
+        type="button"
+        class="retry-all-tab-btn"
+        (click)="retryAllInCurrentTab()"
+        [disabled]="isRetryingAll() || filteredJobs().length === 0"
+        aria-label="Retry all jobs in current tab"
+      >
+        @if (isRetryingAll()) {
+          <mat-spinner diameter="16" class="inline-spinner"></mat-spinner>
+        } @else {
+          <mat-icon>replay</mat-icon>
+        }
+        <span>{{
+          isRetryingAll() ? 'Retrying...' : 'Retry All (' + filteredJobs().length + ')'
+        }}</span>
+      </button>
+
+      <!-- Unified Refresh & Auto-Refresh Timing Control -->
+      <div class="unified-refresh-group">
+        <button
+          mat-stroked-button
+          type="button"
+          class="refresh-main-btn"
+          (click)="manualRefresh()"
+          [disabled]="isRefreshing()"
+          [matTooltip]="
+            refreshInterval() > 0
+              ? 'Refresh now (Next auto-refresh in ' + remainingTimeDisplay() + ')'
+              : 'Refresh queue now (Auto-refresh off)'
+          "
+          aria-label="Refresh ingestion jobs"
+        >
+          <span class="refresh-indicator" matButtonIcon>
+            @if (isRefreshing()) {
+              <mat-spinner diameter="16" class="inline-spinner"></mat-spinner>
+            } @else if (refreshInterval() > 0) {
+              <mat-progress-spinner
+                mode="determinate"
+                [value]="countdownProgress()"
+                diameter="16"
+                strokeWidth="2.5"
+                class="countdown-spinner"
+              ></mat-progress-spinner>
+            } @else {
+              <mat-icon>refresh</mat-icon>
+            }
+          </span>
+          <span class="refresh-text">
+            @if (isRefreshing()) {
+              Refreshing...
+            } @else if (refreshInterval() > 0) {
+              Refresh ({{ remainingTimeDisplay() }})
+            } @else {
+              Refresh
+            }
+          </span>
+        </button>
+
+        <button
+          mat-stroked-button
+          type="button"
+          class="refresh-config-btn"
+          [matMenuTriggerFor]="refreshTimingMenu"
+          aria-label="Configure auto-refresh frequency"
+          matTooltip="Auto-refresh settings"
+        >
+          <mat-icon>arrow_drop_down</mat-icon>
+        </button>
+
+        <mat-menu #refreshTimingMenu="matMenu" xPosition="before" class="refresh-menu-panel">
+          <div class="menu-heading">Auto-Refresh</div>
+          <button mat-menu-item (click)="toggleAutoRefresh()" class="toggle-auto-refresh-item">
+            <mat-icon>{{
+              refreshInterval() > 0 ? 'check_box' : 'check_box_outline_blank'
+            }}</mat-icon>
+            <span>{{
+              refreshInterval() > 0 ? 'Auto-refresh Enabled' : 'Auto-refresh Disabled'
+            }}</span>
+          </button>
+          <mat-divider></mat-divider>
+          <div class="menu-subheading">Interval</div>
+          @for (option of refreshOptions; track option.value) {
+            <button
+              mat-menu-item
+              (click)="setRefreshInterval(option.value)"
+              [class.active-option]="refreshInterval() === option.value"
+            >
+              <mat-icon>{{
+                refreshInterval() === option.value
+                  ? 'radio_button_checked'
+                  : 'radio_button_unchecked'
+              }}</mat-icon>
+              <span>{{ option.label }}</span>
+            </button>
+          }
+        </mat-menu>
+      </div>
+    </div>
   </div>
 
   <!-- Job List -->
@@ -608,7 +755,11 @@
                 </a>
               }
 
-              @if (job.status === 'WaitingForLlmHost' || job.status === 'Failed') {
+              @if (
+                job.status !== 'Queued' &&
+                job.status !== 'Preprocessing' &&
+                job.status !== 'Extracting'
+              ) {
                 <button
                   mat-stroked-button
                   type="button"

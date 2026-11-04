@@ -72,6 +72,18 @@
         <button
           mat-stroked-button
           type="button"
+          (click)="openPreviewDialog()"
+          matTooltip="Preview formatted recipe"
+          aria-label="Preview formatted recipe"
+          class="preview-btn"
+        >
+          <mat-icon>visibility</mat-icon>
+          <span>Preview</span>
+        </button>
+
+        <button
+          mat-stroked-button
+          type="button"
           (click)="saveDraft()"
           [disabled]="isSaving() || isPublishing()"
           aria-label="Save review draft"
@@ -131,8 +143,19 @@
         role="tab"
         [attr.aria-selected]="mobilePane() === 'draft'"
       >
-        <mat-icon>auto_awesome</mat-icon>
-        <span>Structured Draft</span>
+        <mat-icon>edit_note</mat-icon>
+        <span>Edit Draft</span>
+      </button>
+      <button
+        type="button"
+        class="switcher-pill preview-pill"
+        [class.active]="mobilePane() === 'preview'"
+        (click)="setMobilePane('preview')"
+        role="tab"
+        [attr.aria-selected]="mobilePane() === 'preview'"
+      >
+        <mat-icon>visibility</mat-icon>
+        <span>Preview</span>
       </button>
     </div>
 
@@ -240,398 +263,451 @@
       <!-- Right Pane: Structured Recipe Draft Editor -->
       <section
         class="draft-editor-pane"
-        [class.pane-hidden-mobile]="mobilePane() !== 'draft'"
+        [class.pane-hidden-mobile]="mobilePane() !== 'draft' && mobilePane() !== 'preview'"
         aria-label="Structured recipe draft editor"
       >
-        <form [formGroup]="form" class="draft-form">
-          <!-- Overview Card -->
-          <mat-card class="editor-card">
-            <mat-card-content class="editor-card-content">
-              <mat-form-field appearance="outline" class="form-field full-width">
-                <mat-label>Recipe Title</mat-label>
-                <input
-                  matInput
-                  formControlName="title"
-                  placeholder="e.g. Crispy Sesame Tofu"
-                  required
-                />
-              </mat-form-field>
+        <!-- Draft Pane View Toggle (Edit vs Preview) -->
+        <div class="draft-pane-toolbar">
+          <div class="pane-view-toggle">
+            <button
+              type="button"
+              class="view-toggle-btn"
+              [class.active]="rightPaneMode() === 'edit'"
+              (click)="setRightPaneMode('edit')"
+              aria-label="Edit recipe draft"
+            >
+              <mat-icon>edit_note</mat-icon>
+              <span>Edit Draft</span>
+            </button>
+            <button
+              type="button"
+              class="view-toggle-btn preview-toggle-btn"
+              [class.active]="rightPaneMode() === 'preview'"
+              (click)="setRightPaneMode('preview')"
+              aria-label="Preview formatted recipe"
+            >
+              <mat-icon>visibility</mat-icon>
+              <span>Recipe Preview</span>
+            </button>
+          </div>
 
-              <mat-form-field appearance="outline" class="form-field full-width">
-                <mat-label>Description / Notes</mat-label>
-                <textarea
-                  matInput
-                  formControlName="description"
-                  rows="2"
-                  placeholder="Summary or tips..."
-                ></textarea>
-              </mat-form-field>
+          @if (rightPaneMode() === 'preview') {
+            <button
+              mat-icon-button
+              type="button"
+              (click)="openPreviewDialog()"
+              matTooltip="Open full-screen preview"
+              aria-label="Open full-screen preview dialog"
+              class="open-modal-preview-btn"
+            >
+              <mat-icon>open_in_full</mat-icon>
+            </button>
+          }
+        </div>
 
-              <!-- Provenance Row -->
-              <div class="form-row three-cols">
-                <mat-form-field appearance="outline" class="form-field">
-                  <mat-label>Cookbook Title</mat-label>
+        @if (rightPaneMode() === 'edit') {
+          <form [formGroup]="form" class="draft-form">
+            <!-- Overview Card -->
+            <mat-card class="editor-card">
+              <mat-card-content class="editor-card-content">
+                <mat-form-field appearance="outline" class="form-field full-width">
+                  <mat-label>Recipe Title</mat-label>
                   <input
                     matInput
-                    formControlName="sourceBookTitle"
-                    placeholder="e.g. Master Class"
+                    formControlName="title"
+                    placeholder="e.g. Crispy Sesame Tofu"
+                    required
                   />
                 </mat-form-field>
 
-                <mat-form-field appearance="outline" class="form-field">
-                  <mat-label>Cookbook Page #</mat-label>
-                  <input
+                <mat-form-field appearance="outline" class="form-field full-width">
+                  <mat-label>Description / Notes</mat-label>
+                  <textarea
                     matInput
-                    type="number"
-                    formControlName="sourceBookPage"
-                    placeholder="e.g. 102"
-                  />
+                    formControlName="description"
+                    rows="2"
+                    placeholder="Summary or tips..."
+                  ></textarea>
                 </mat-form-field>
 
-                <mat-form-field appearance="outline" class="form-field">
-                  <mat-label>Author / Source</mat-label>
-                  <input matInput formControlName="sourceAuthor" placeholder="e.g. Julia Child" />
-                </mat-form-field>
-              </div>
+                <!-- Provenance Row -->
+                <div class="form-row three-cols">
+                  <mat-form-field appearance="outline" class="form-field">
+                    <mat-label>Cookbook Title</mat-label>
+                    <input
+                      matInput
+                      formControlName="sourceBookTitle"
+                      placeholder="e.g. Master Class"
+                    />
+                  </mat-form-field>
 
-              @if (job()?.channel === 'Images' || job()?.channel === 'Pdf') {
-                <div class="attachment-retention-row">
-                  <mat-checkbox formControlName="retainSourceAttachments">
-                    <span>Retain source scans/PDF as recipe attachments upon publishing</span>
-                  </mat-checkbox>
+                  <mat-form-field appearance="outline" class="form-field">
+                    <mat-label>Cookbook Page #</mat-label>
+                    <input
+                      matInput
+                      type="number"
+                      formControlName="sourceBookPage"
+                      placeholder="e.g. 102"
+                    />
+                  </mat-form-field>
+
+                  <mat-form-field appearance="outline" class="form-field">
+                    <mat-label>Author / Source</mat-label>
+                    <input matInput formControlName="sourceAuthor" placeholder="e.g. Julia Child" />
+                  </mat-form-field>
                 </div>
-              }
 
-              <!-- Yield & Timing Row -->
-              <div class="form-row three-cols">
-                <mat-form-field appearance="outline" class="form-field">
-                  <mat-label>Base Servings</mat-label>
-                  <input
-                    matInput
-                    type="number"
-                    formControlName="baseServings"
-                    step="0.5"
-                    min="0.25"
-                  />
-                </mat-form-field>
-
-                <mat-form-field appearance="outline" class="form-field">
-                  <mat-label>Prep Time (min)</mat-label>
-                  <input matInput type="number" formControlName="prepTimeMinutes" min="0" />
-                </mat-form-field>
-
-                <mat-form-field appearance="outline" class="form-field">
-                  <mat-label>Cook Time (min)</mat-label>
-                  <input matInput type="number" formControlName="cookTimeMinutes" min="0" />
-                </mat-form-field>
-              </div>
-
-              <!-- Difficulty & Yield Display Row -->
-              <div class="form-row two-cols">
-                <mat-form-field appearance="outline" class="form-field">
-                  <mat-label>Difficulty</mat-label>
-                  <mat-select formControlName="difficulty">
-                    <mat-option value="Easy">Easy</mat-option>
-                    <mat-option value="Medium">Medium</mat-option>
-                    <mat-option value="Project">Project</mat-option>
-                  </mat-select>
-                </mat-form-field>
-
-                <mat-form-field appearance="outline" class="form-field">
-                  <mat-label>Yield Display</mat-label>
-                  <input
-                    matInput
-                    formControlName="yieldDisplay"
-                    placeholder="e.g. 4 bowls, 12 cookies"
-                  />
-                </mat-form-field>
-              </div>
-
-              <!-- Taxonomy Chips: Collections & Suggested Tags -->
-              @if (collections().length > 0) {
-                <div class="taxonomy-chip-strip">
-                  <span class="strip-label">Collections:</span>
-                  <div class="chips-row">
-                    @for (col of collections(); track col.id) {
-                      <button
-                        type="button"
-                        class="chip-toggle"
-                        [class.selected]="selectedCollectionIds().has(col.id)"
-                        (click)="toggleCollection(col.id)"
-                      >
-                        {{ col.name }}
-                      </button>
-                    }
+                @if (job()?.channel === 'Images' || job()?.channel === 'Pdf') {
+                  <div class="attachment-retention-row">
+                    <mat-checkbox formControlName="retainSourceAttachments">
+                      <span>Retain source scans/PDF as recipe attachments upon publishing</span>
+                    </mat-checkbox>
                   </div>
+                }
+
+                <!-- Yield & Timing Row -->
+                <div class="form-row three-cols">
+                  <mat-form-field appearance="outline" class="form-field">
+                    <mat-label>Base Servings</mat-label>
+                    <input
+                      matInput
+                      type="number"
+                      formControlName="baseServings"
+                      step="0.5"
+                      min="0.25"
+                    />
+                  </mat-form-field>
+
+                  <mat-form-field appearance="outline" class="form-field">
+                    <mat-label>Prep Time (min)</mat-label>
+                    <input matInput type="number" formControlName="prepTimeMinutes" min="0" />
+                  </mat-form-field>
+
+                  <mat-form-field appearance="outline" class="form-field">
+                    <mat-label>Cook Time (min)</mat-label>
+                    <input matInput type="number" formControlName="cookTimeMinutes" min="0" />
+                  </mat-form-field>
                 </div>
-              }
 
-              @if (tags().length > 0 || proposedTagNames().length > 0) {
-                <div class="taxonomy-chip-strip">
-                  <span class="strip-label">Suggested Tags:</span>
-                  <div class="chips-row">
-                    @for (tg of tags(); track tg.id) {
-                      <button
-                        type="button"
-                        class="chip-toggle tag-toggle"
-                        [class.selected]="selectedTagIds().has(tg.id)"
-                        (click)="toggleTag(tg.id)"
-                      >
-                        {{ tg.name }}
-                      </button>
-                    }
-                    @for (propTag of proposedTagNames(); track propTag) {
-                      <button
-                        type="button"
-                        class="chip-toggle proposed-tag-toggle"
-                        [class.selected]="selectedProposedTagNames().has(propTag)"
-                        (click)="toggleProposedTag(propTag)"
-                        [attr.aria-label]="'Toggle new tag ' + propTag"
-                      >
-                        + {{ propTag }}
-                      </button>
-                    }
-                  </div>
+                <!-- Difficulty & Yield Display Row -->
+                <div class="form-row two-cols">
+                  <mat-form-field appearance="outline" class="form-field">
+                    <mat-label>Difficulty</mat-label>
+                    <mat-select formControlName="difficulty">
+                      <mat-option value="Easy">Easy</mat-option>
+                      <mat-option value="Medium">Medium</mat-option>
+                      <mat-option value="Project">Project</mat-option>
+                    </mat-select>
+                  </mat-form-field>
+
+                  <mat-form-field appearance="outline" class="form-field">
+                    <mat-label>Yield Display</mat-label>
+                    <input
+                      matInput
+                      formControlName="yieldDisplay"
+                      placeholder="e.g. 4 bowls, 12 cookies"
+                    />
+                  </mat-form-field>
                 </div>
-              }
-            </mat-card-content>
-          </mat-card>
 
-          <!-- Ingredients Form Section -->
-          <mat-card class="editor-card ingredients-section-card">
-            <div class="card-header-row">
-              <h2 class="card-title">
-                <mat-icon>egg_alt</mat-icon>
-                <span>Ingredients ({{ ingredientsArray.length }})</span>
-              </h2>
-              <button mat-stroked-button type="button" (click)="addIngredient()">
-                <mat-icon>add</mat-icon>
-                <span>Add Ingredient</span>
-              </button>
-            </div>
-
-            <mat-card-content class="editor-card-content" formArrayName="ingredients">
-              @for (ingGroup of ingredientsArray.controls; track $index) {
-                <div [formGroupName]="$index" class="ingredient-row-card">
-                  <!-- Original Raw Text Caption -->
-                  @if (ingGroup.get('originalRawText')?.value) {
-                    <div class="raw-ingredient-caption">
-                      <mat-icon class="raw-icon">format_quote</mat-icon>
-                      <span class="raw-text-quote">{{
-                        ingGroup.get('originalRawText')?.value
-                      }}</span>
-                    </div>
-                  }
-
-                  <!-- Matched FoodItem vs New FoodItem Banner -->
-                  <div class="food-item-binding-strip">
-                    @if (ingGroup.get('matchedFoodItemId')?.value) {
-                      <div class="matched-food-pill">
-                        <mat-icon>link</mat-icon>
-                        <span
-                          >Linked:
-                          {{
-                            ingGroup.get('matchedFoodItemName')?.value ||
-                              getFoodItemName(ingGroup.get('matchedFoodItemId')?.value)
-                          }}</span
+                <!-- Taxonomy Chips: Collections & Suggested Tags -->
+                @if (collections().length > 0) {
+                  <div class="taxonomy-chip-strip">
+                    <span class="strip-label">Collections:</span>
+                    <div class="chips-row">
+                      @for (col of collections(); track col.id) {
+                        <button
+                          type="button"
+                          class="chip-toggle"
+                          [class.selected]="selectedCollectionIds().has(col.id)"
+                          (click)="toggleCollection(col.id)"
                         >
-                      </div>
-                    } @else {
-                      <div class="new-food-item-banner">
-                        <mat-icon>sparkles</mat-icon>
-                        <span>New Food Item</span>
+                          {{ col.name }}
+                        </button>
+                      }
+                    </div>
+                  </div>
+                }
+
+                @if (tags().length > 0 || proposedTagNames().length > 0) {
+                  <div class="taxonomy-chip-strip">
+                    <span class="strip-label">Suggested Tags:</span>
+                    <div class="chips-row">
+                      @for (tg of tags(); track tg.id) {
+                        <button
+                          type="button"
+                          class="chip-toggle tag-toggle"
+                          [class.selected]="selectedTagIds().has(tg.id)"
+                          (click)="toggleTag(tg.id)"
+                        >
+                          {{ tg.name }}
+                        </button>
+                      }
+                      @for (propTag of proposedTagNames(); track propTag) {
+                        <button
+                          type="button"
+                          class="chip-toggle proposed-tag-toggle"
+                          [class.selected]="selectedProposedTagNames().has(propTag)"
+                          (click)="toggleProposedTag(propTag)"
+                          [attr.aria-label]="'Toggle new tag ' + propTag"
+                        >
+                          + {{ propTag }}
+                        </button>
+                      }
+                    </div>
+                  </div>
+                }
+              </mat-card-content>
+            </mat-card>
+
+            <!-- Ingredients Form Section -->
+            <mat-card class="editor-card ingredients-section-card">
+              <div class="card-header-row">
+                <h2 class="card-title">
+                  <mat-icon>egg_alt</mat-icon>
+                  <span>Ingredients ({{ ingredientsArray.length }})</span>
+                </h2>
+                <button mat-stroked-button type="button" (click)="addIngredient()">
+                  <mat-icon>add</mat-icon>
+                  <span>Add Ingredient</span>
+                </button>
+              </div>
+
+              <mat-card-content class="editor-card-content" formArrayName="ingredients">
+                @for (ingGroup of ingredientsArray.controls; track $index) {
+                  <div [formGroupName]="$index" class="ingredient-row-card">
+                    <!-- Original Raw Text Caption -->
+                    @if (ingGroup.get('originalRawText')?.value) {
+                      <div class="raw-ingredient-caption">
+                        <mat-icon class="raw-icon">format_quote</mat-icon>
+                        <span class="raw-text-quote">{{
+                          ingGroup.get('originalRawText')?.value
+                        }}</span>
                       </div>
                     }
-                  </div>
 
-                  <!-- New Food Item Configuration Fields -->
-                  @if (!ingGroup.get('matchedFoodItemId')?.value) {
-                    <div class="new-item-row">
-                      <mat-form-field appearance="outline" class="form-field proposed-name-field">
-                        <mat-label>Canonical Food Item Name</mat-label>
+                    <!-- Matched FoodItem vs New FoodItem Banner -->
+                    <div class="food-item-binding-strip">
+                      @if (ingGroup.get('matchedFoodItemId')?.value) {
+                        <div class="matched-food-pill">
+                          <mat-icon>link</mat-icon>
+                          <span
+                            >Linked:
+                            {{
+                              ingGroup.get('matchedFoodItemName')?.value ||
+                                getFoodItemName(ingGroup.get('matchedFoodItemId')?.value)
+                            }}</span
+                          >
+                        </div>
+                      } @else {
+                        <div class="new-food-item-banner">
+                          <mat-icon>sparkles</mat-icon>
+                          <span>New Food Item</span>
+                        </div>
+                      }
+                    </div>
+
+                    <!-- New Food Item Configuration Fields -->
+                    @if (!ingGroup.get('matchedFoodItemId')?.value) {
+                      <div class="new-item-row">
+                        <mat-form-field appearance="outline" class="form-field proposed-name-field">
+                          <mat-label>Canonical Food Item Name</mat-label>
+                          <input
+                            matInput
+                            formControlName="proposedFoodItemName"
+                            placeholder="e.g. Toasted Sesame Oil"
+                          />
+                        </mat-form-field>
+
+                        <mat-checkbox
+                          formControlName="suggestedIsPantryStaple"
+                          class="pantry-staple-checkbox"
+                        >
+                          Pantry Staple
+                        </mat-checkbox>
+                      </div>
+                    }
+
+                    <!-- Ingredient Input Details -->
+                    <div class="ingredient-inputs-grid">
+                      <mat-form-field appearance="outline" class="form-field qty-field">
+                        <mat-label>Qty</mat-label>
+                        <input matInput type="number" step="any" formControlName="quantity" />
+                      </mat-form-field>
+
+                      <mat-form-field appearance="outline" class="form-field unit-field">
+                        <mat-label>Unit</mat-label>
+                        <mat-select formControlName="unit">
+                          <mat-option [value]="null">None</mat-option>
+                          @for (u of measurementUnits; track u.value) {
+                            <mat-option [value]="u.value">{{ u.label }}</mat-option>
+                          }
+                        </mat-select>
+                      </mat-form-field>
+
+                      <mat-form-field appearance="outline" class="form-field name-field">
+                        <mat-label>Display Name</mat-label>
                         <input
                           matInput
-                          formControlName="proposedFoodItemName"
-                          placeholder="e.g. Toasted Sesame Oil"
+                          formControlName="displayName"
+                          placeholder="e.g. firm tofu, pressed and cubed"
+                          required
                         />
                       </mat-form-field>
 
-                      <mat-checkbox
-                        formControlName="suggestedIsPantryStaple"
-                        class="pantry-staple-checkbox"
-                      >
-                        Pantry Staple
-                      </mat-checkbox>
-                    </div>
-                  }
+                      <mat-form-field appearance="outline" class="form-field note-field">
+                        <mat-label>Prep Note</mat-label>
+                        <input
+                          matInput
+                          formControlName="preparationNote"
+                          placeholder="e.g. minced, room temp"
+                        />
+                      </mat-form-field>
 
-                  <!-- Ingredient Input Details -->
-                  <div class="ingredient-inputs-grid">
-                    <mat-form-field appearance="outline" class="form-field qty-field">
-                      <mat-label>Qty</mat-label>
-                      <input matInput type="number" step="any" formControlName="quantity" />
+                      <button
+                        mat-icon-button
+                        type="button"
+                        class="delete-btn"
+                        (click)="removeIngredient($index)"
+                        aria-label="Remove ingredient"
+                      >
+                        <mat-icon>delete_outline</mat-icon>
+                      </button>
+                    </div>
+                  </div>
+                }
+              </mat-card-content>
+            </mat-card>
+
+            <!-- Steps Form Section -->
+            <mat-card class="editor-card steps-section-card">
+              <div class="card-header-row">
+                <h2 class="card-title">
+                  <mat-icon>format_list_numbered</mat-icon>
+                  <span>Instructions ({{ stepsArray.length }})</span>
+                </h2>
+                <button mat-stroked-button type="button" (click)="addStep()">
+                  <mat-icon>add</mat-icon>
+                  <span>Add Step</span>
+                </button>
+              </div>
+
+              <mat-card-content class="editor-card-content" formArrayName="steps">
+                @for (stepGroup of stepsArray.controls; track $index) {
+                  <div [formGroupName]="$index" class="step-row-card">
+                    <div class="step-card-header">
+                      <span class="step-number-badge">Step {{ $index + 1 }}</span>
+                      <button
+                        mat-icon-button
+                        type="button"
+                        class="delete-btn"
+                        (click)="removeStep($index)"
+                        aria-label="Remove step"
+                      >
+                        <mat-icon>delete_outline</mat-icon>
+                      </button>
+                    </div>
+
+                    <mat-form-field appearance="outline" class="form-field full-width">
+                      <mat-label>Step Instruction</mat-label>
+                      <textarea
+                        matInput
+                        formControlName="instruction"
+                        rows="3"
+                        placeholder="Detailed culinary action..."
+                        required
+                      ></textarea>
                     </mat-form-field>
 
-                    <mat-form-field appearance="outline" class="form-field unit-field">
-                      <mat-label>Unit</mat-label>
-                      <mat-select formControlName="unit">
-                        <mat-option [value]="null">None</mat-option>
-                        @for (u of measurementUnits; track u.value) {
-                          <mat-option [value]="u.value">{{ u.label }}</mat-option>
+                    <!-- Step Ingredient Callouts Selection -->
+                    <mat-form-field appearance="outline" class="form-field full-width">
+                      <mat-label>Ingredients used in this step</mat-label>
+                      <mat-select formControlName="ingredientIndices" multiple>
+                        @for (item of availableIngredientLabels(); track item.index) {
+                          <mat-option [value]="item.index">{{ item.label }}</mat-option>
                         }
                       </mat-select>
                     </mat-form-field>
 
-                    <mat-form-field appearance="outline" class="form-field name-field">
-                      <mat-label>Display Name</mat-label>
-                      <input
-                        matInput
-                        formControlName="displayName"
-                        placeholder="e.g. firm tofu, pressed and cubed"
-                        required
-                      />
-                    </mat-form-field>
-
-                    <mat-form-field appearance="outline" class="form-field note-field">
-                      <mat-label>Prep Note</mat-label>
-                      <input
-                        matInput
-                        formControlName="preparationNote"
-                        placeholder="e.g. minced, room temp"
-                      />
-                    </mat-form-field>
-
-                    <button
-                      mat-icon-button
-                      type="button"
-                      class="delete-btn"
-                      (click)="removeIngredient($index)"
-                      aria-label="Remove ingredient"
-                    >
-                      <mat-icon>delete_outline</mat-icon>
-                    </button>
-                  </div>
-                </div>
-              }
-            </mat-card-content>
-          </mat-card>
-
-          <!-- Steps Form Section -->
-          <mat-card class="editor-card steps-section-card">
-            <div class="card-header-row">
-              <h2 class="card-title">
-                <mat-icon>format_list_numbered</mat-icon>
-                <span>Instructions ({{ stepsArray.length }})</span>
-              </h2>
-              <button mat-stroked-button type="button" (click)="addStep()">
-                <mat-icon>add</mat-icon>
-                <span>Add Step</span>
-              </button>
-            </div>
-
-            <mat-card-content class="editor-card-content" formArrayName="steps">
-              @for (stepGroup of stepsArray.controls; track $index) {
-                <div [formGroupName]="$index" class="step-row-card">
-                  <div class="step-card-header">
-                    <span class="step-number-badge">Step {{ $index + 1 }}</span>
-                    <button
-                      mat-icon-button
-                      type="button"
-                      class="delete-btn"
-                      (click)="removeStep($index)"
-                      aria-label="Remove step"
-                    >
-                      <mat-icon>delete_outline</mat-icon>
-                    </button>
-                  </div>
-
-                  <mat-form-field appearance="outline" class="form-field full-width">
-                    <mat-label>Step Instruction</mat-label>
-                    <textarea
-                      matInput
-                      formControlName="instruction"
-                      rows="3"
-                      placeholder="Detailed culinary action..."
-                      required
-                    ></textarea>
-                  </mat-form-field>
-
-                  <!-- Step Ingredient Callouts Selection -->
-                  <mat-form-field appearance="outline" class="form-field full-width">
-                    <mat-label>Ingredients used in this step</mat-label>
-                    <mat-select formControlName="ingredientIndices" multiple>
-                      @for (item of availableIngredientLabels(); track item.index) {
-                        <mat-option [value]="item.index">{{ item.label }}</mat-option>
-                      }
-                    </mat-select>
-                  </mat-form-field>
-
-                  <!-- Nested Timers -->
-                  <div class="timers-subgroup" formArrayName="timers">
-                    <div class="timers-header">
-                      <span class="timers-title">Step Countdown Timers:</span>
-                      <button
-                        mat-button
-                        type="button"
-                        class="add-timer-btn"
-                        (click)="addStepTimer($index)"
-                      >
-                        <mat-icon>timer</mat-icon>
-                        <span>Add Timer</span>
-                      </button>
-                    </div>
-
-                    @for (
-                      timerGroup of getStepTimersArray($index).controls;
-                      track $index;
-                      let tIdx = $index
-                    ) {
-                      <div class="timer-input-row" [formGroupName]="tIdx">
-                        <mat-form-field appearance="outline" class="form-field timer-label-field">
-                          <mat-label>Timer Label</mat-label>
-                          <input matInput formControlName="label" placeholder="e.g. Simmer" />
-                        </mat-form-field>
-
-                        <mat-form-field appearance="outline" class="form-field timer-num-field">
-                          <mat-label>Min</mat-label>
-                          <input
-                            matInput
-                            type="number"
-                            formControlName="minutes"
-                            min="0"
-                            (input)="updateTimerDuration(asFormGroup(timerGroup))"
-                          />
-                        </mat-form-field>
-
-                        <mat-form-field appearance="outline" class="form-field timer-num-field">
-                          <mat-label>Sec</mat-label>
-                          <input
-                            matInput
-                            type="number"
-                            formControlName="seconds"
-                            min="0"
-                            max="59"
-                            (input)="updateTimerDuration(asFormGroup(timerGroup))"
-                          />
-                        </mat-form-field>
-
+                    <!-- Nested Timers -->
+                    <div class="timers-subgroup" formArrayName="timers">
+                      <div class="timers-header">
+                        <span class="timers-title">Step Countdown Timers:</span>
                         <button
-                          mat-icon-button
+                          mat-button
                           type="button"
-                          class="delete-btn"
-                          (click)="removeStepTimer($index, tIdx)"
-                          aria-label="Remove timer"
+                          class="add-timer-btn"
+                          (click)="addStepTimer($index)"
                         >
-                          <mat-icon>close</mat-icon>
+                          <mat-icon>timer</mat-icon>
+                          <span>Add Timer</span>
                         </button>
                       </div>
-                    }
+
+                      @for (
+                        timerGroup of getStepTimersArray($index).controls;
+                        track $index;
+                        let tIdx = $index
+                      ) {
+                        <div class="timer-input-row" [formGroupName]="tIdx">
+                          <mat-form-field appearance="outline" class="form-field timer-label-field">
+                            <mat-label>Timer Label</mat-label>
+                            <input matInput formControlName="label" placeholder="e.g. Simmer" />
+                          </mat-form-field>
+
+                          <mat-form-field appearance="outline" class="form-field timer-num-field">
+                            <mat-label>Min</mat-label>
+                            <input
+                              matInput
+                              type="number"
+                              formControlName="minutes"
+                              min="0"
+                              (input)="updateTimerDuration(asFormGroup(timerGroup))"
+                            />
+                          </mat-form-field>
+
+                          <mat-form-field appearance="outline" class="form-field timer-num-field">
+                            <mat-label>Sec</mat-label>
+                            <input
+                              matInput
+                              type="number"
+                              formControlName="seconds"
+                              min="0"
+                              max="59"
+                              (input)="updateTimerDuration(asFormGroup(timerGroup))"
+                            />
+                          </mat-form-field>
+
+                          <button
+                            mat-icon-button
+                            type="button"
+                            class="delete-btn"
+                            (click)="removeStepTimer($index, tIdx)"
+                            aria-label="Remove timer"
+                          >
+                            <mat-icon>close</mat-icon>
+                          </button>
+                        </div>
+                      }
+                    </div>
                   </div>
-                </div>
-              }
-            </mat-card-content>
-          </mat-card>
-        </form>
+                }
+              </mat-card-content>
+            </mat-card>
+          </form>
+        } @else {
+          <div class="inline-preview-pane">
+            @if (previewData(); as preview) {
+              <app-recipe-detail-preview
+                [recipe]="preview"
+                [showPreviewBanner]="true"
+                [showPublishButton]="true"
+                [isPublishing]="isPublishing()"
+                (publishRequested)="approveAndPublish()"
+              ></app-recipe-detail-preview>
+            }
+          </div>
+        }
       </section>
     </div>
   }

@@ -34,6 +34,9 @@ describe('LlmSettingsDialogComponent', () => {
     ollamaKeepAlive: '5m',
     requestTimeoutSeconds: 120,
     autoPublishHighConfidenceText: false,
+    enableThinking: true,
+    enableIngestion: true,
+    maxIngestionRetries: 5,
     modifiedAt: null,
   };
 
@@ -42,7 +45,16 @@ describe('LlmSettingsDialogComponent', () => {
     mockLlmSettingsService = {
       getSettings: vi.fn().mockReturnValue(of(initialSettings)),
       updateSettings: vi.fn().mockReturnValue(of(initialSettings)),
-      testConnection: vi.fn(),
+      testConnection: vi.fn().mockReturnValue(
+        of({
+          isReachable: true,
+          provider: 'Ollama',
+          normalizedBaseUrl: 'http://localhost:11434',
+          latencyMs: 15,
+          models: ['qwen2.5:14b'],
+          errorMessage: null,
+        }),
+      ),
     };
     mockIngestionService = {
       refreshSummary: vi.fn(),
@@ -70,6 +82,18 @@ describe('LlmSettingsDialogComponent', () => {
     expect(component.form.controls.baseUrl.value).toBe('http://localhost:11434');
     expect(component.form.controls.textModel.value).toBe('qwen2.5:14b');
     expect(component.form.controls.visionModel.value).toBe('qwen2.5vl:7b');
+    expect(component.form.controls.enableThinking.value).toBe(true);
+    expect(component.form.controls.enableIngestion.value).toBe(true);
+    expect(component.form.controls.maxIngestionRetries.value).toBe(5);
+  });
+
+  it('automatically attempts to pull models on dialog init when baseUrl is configured', () => {
+    expect(mockLlmSettingsService.testConnection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        baseUrl: 'http://localhost:11434',
+        provider: 'Ollama',
+      }),
+    );
   });
 
   it('switches provider and updates default base url', () => {
@@ -109,9 +133,17 @@ describe('LlmSettingsDialogComponent', () => {
 
   it('saves settings and closes dialog', () => {
     component.form.controls.textModel.setValue('mistral:7b');
+    component.form.controls.enableThinking.setValue(false);
+    component.form.controls.maxIngestionRetries.setValue(2);
     component.onSave();
 
-    expect(mockLlmSettingsService.updateSettings).toHaveBeenCalled();
+    expect(mockLlmSettingsService.updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        textModel: 'mistral:7b',
+        enableThinking: false,
+        maxIngestionRetries: 2,
+      }),
+    );
     expect(mockIngestionService.refreshSummary).toHaveBeenCalled();
     expect(mockDialogRef.close).toHaveBeenCalledWith(true);
   });

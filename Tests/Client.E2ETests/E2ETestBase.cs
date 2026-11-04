@@ -625,6 +625,115 @@ public abstract class E2ETestBase : PageTest
         );
     }
 
+    protected async Task WaitForLocatorWithRefreshAsync(
+        ILocator targetLocator,
+        int maxRetries = 15,
+        int delayBetweenRetriesMs = 1500
+    )
+    {
+        for (var i = 0; i < maxRetries; i++)
+        {
+            if (await targetLocator.IsVisibleAsync())
+            {
+                return;
+            }
+
+            var refreshBtn = Page.Locator(
+                ".unified-refresh-group .refresh-main-btn, .refresh-btn"
+            ).First;
+            if (await refreshBtn.IsVisibleAsync())
+            {
+                await refreshBtn.ClickAsync();
+            }
+
+            try
+            {
+                await Expect(targetLocator)
+                    .ToBeVisibleAsync(new() { Timeout = delayBetweenRetriesMs });
+                return;
+            }
+            catch
+            {
+                // Continue to next refresh retry
+            }
+        }
+
+        await Expect(targetLocator).ToBeVisibleAsync(new() { Timeout = 5000 });
+    }
+
+    protected async Task<Guid> CreateFoodItemViaApiAsync(string name, bool isPantryStaple = false)
+    {
+        var idStr = await Page.EvaluateAsync<string>(
+            @"async ({ name, isPantryStaple }) => {
+                const tokenKey = Object.keys(localStorage).find(k => k.endsWith('-token'));
+                const token = tokenKey ? localStorage.getItem(tokenKey) : null;
+                const res = await fetch('/api/food-items', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({
+                        name,
+                        isPantryStaple,
+                        aliases: []
+                    })
+                });
+                const data = await res.json();
+                return data.id;
+            }",
+            new { name, isPantryStaple }
+        );
+        return Guid.Parse(idStr);
+    }
+
+    protected async Task<Guid> CreateRecipeWithIngredientViaApiAsync(
+        string title,
+        string ingredientName,
+        Guid? foodItemId = null
+    )
+    {
+        var idStr = await Page.EvaluateAsync<string>(
+            @"async ({ title, ingredientName, foodItemId }) => {
+                const tokenKey = Object.keys(localStorage).find(k => k.endsWith('-token'));
+                const token = tokenKey ? localStorage.getItem(tokenKey) : null;
+                const res = await fetch('/api/recipes', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({
+                        title,
+                        baseServings: 4,
+                        ingredients: [
+                            {
+                                displayName: ingredientName,
+                                quantity: 2,
+                                foodItemId: foodItemId
+                            }
+                        ],
+                        steps: [
+                            {
+                                stepNumber: 1,
+                                instruction: 'Cook until golden.'
+                            }
+                        ]
+                    })
+                });
+                const data = await res.json();
+                return data.id;
+            }",
+            new
+            {
+                title,
+                ingredientName,
+                foodItemId = foodItemId?.ToString(),
+            }
+        );
+        return Guid.Parse(idStr);
+    }
+
     protected async Task EnsureTagExistsViaApiAsync(
         string name,
         string category = "Dietary",

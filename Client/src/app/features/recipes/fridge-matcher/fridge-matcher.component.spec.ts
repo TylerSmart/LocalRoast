@@ -124,4 +124,36 @@ describe('FridgeMatcherComponent', () => {
     expect(component['selectedFoodItems']().length).toBe(0);
     expect(component['matchResults']().length).toBe(0);
   });
+
+  it('excludes placeholder food items from filtered and suggested items', () => {
+    component['foodItems'].set([
+      ...mockFoodItems,
+      {
+        id: 'fi-null',
+        name: 'Null',
+        isPantryStaple: false,
+        aliases: [],
+        referencedRecipeCount: 42,
+        createdAt: '2026-01-01T00:00:00Z',
+        modifiedAt: '2026-01-01T00:00:00Z',
+      },
+      {
+        id: 'fi-none',
+        name: 'none',
+        isPantryStaple: false,
+        aliases: [],
+        referencedRecipeCount: 5,
+        createdAt: '2026-01-01T00:00:00Z',
+        modifiedAt: '2026-01-01T00:00:00Z',
+      },
+    ]);
+
+    const suggested = component['suggestedFoodItems']();
+    expect(suggested.some((i) => i.name.toLowerCase() === 'null')).toBe(false);
+    expect(suggested.some((i) => i.name.toLowerCase() === 'none')).toBe(false);
+
+    component['searchControl'].setValue('nu');
+    const filtered = component['filteredFoodItems']();
+    expect(filtered.some((i) => i.name.toLowerCase() === 'null')).toBe(false);
+  });
 });

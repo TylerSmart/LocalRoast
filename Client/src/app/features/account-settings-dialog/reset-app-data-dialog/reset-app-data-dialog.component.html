@@ -1,0 +1,97 @@
+<div class="reset-dialog-container">
+  <div class="dialog-header" mat-dialog-title>
+    <div class="danger-header-badge">
+      <mat-icon aria-hidden="true">warning</mat-icon>
+    </div>
+    <div class="header-text">
+      <h2 class="dialog-title">Reset All Application Data?</h2>
+      <p class="dialog-subtitle">This action is irreversible and permanently deletes data.</p>
+    </div>
+  </div>
+
+  <mat-dialog-content class="dialog-content">
+    <div class="warning-banner">
+      <mat-icon aria-hidden="true">report_problem</mat-icon>
+      <p>
+        You are about to completely wipe all culinary and application data from your LocalRoast
+        instance.
+      </p>
+    </div>
+
+    <div class="deletion-breakdown">
+      <div class="breakdown-section will-delete">
+        <div class="section-title">
+          <mat-icon aria-hidden="true">delete_forever</mat-icon>
+          <span>What will be permanently deleted:</span>
+        </div>
+        <ul>
+          <li>All recipes, ingredients, steps, and photos</li>
+          <li>All meal plans and meal plan templates</li>
+          <li>All shopping lists and items</li>
+          <li>All ingestion jobs, review drafts, and queue history</li>
+          <li>All food catalog items, aliases, and matcher data</li>
+          <li>All custom tags, collections, and cook logs</li>
+        </ul>
+      </div>
+
+      <div class="breakdown-section will-keep">
+        <div class="section-title">
+          <mat-icon aria-hidden="true">shield</mat-icon>
+          <span>What will be preserved:</span>
+        </div>
+        <ul>
+          <li>Your user account, email, and password</li>
+          <li>Configured LLM providers and API keys</li>
+          <li>Personal Access Tokens (MCP)</li>
+        </ul>
+      </div>
+    </div>
+
+    @if (errorMessage()) {
+      <div class="alert-banner alert-error" role="alert">
+        <mat-icon aria-hidden="true">error_outline</mat-icon>
+        <span>{{ errorMessage() }}</span>
+      </div>
+    }
+
+    <div class="confirmation-prompt">
+      <p class="prompt-text">
+        To confirm, type <span class="confirm-keyword">DELETE</span> in the box below:
+      </p>
+      <mat-form-field appearance="outline" class="full-width">
+        <mat-label>Type DELETE to confirm</mat-label>
+        <input
+          matInput
+          [ngModel]="confirmationText()"
+          (ngModelChange)="confirmationText.set($event)"
+          placeholder="DELETE"
+          autocomplete="off"
+          [disabled]="isResetting()"
+          aria-label="Confirm data reset by typing DELETE"
+        />
+      </mat-form-field>
+    </div>
+  </mat-dialog-content>
+
+  <mat-dialog-actions align="end" class="dialog-actions">
+    <button mat-button type="button" (click)="close()" [disabled]="isResetting()">Cancel</button>
+    <button
+      mat-flat-button
+      color="warn"
+      type="button"
+      class="destructive-btn"
+      (click)="confirmReset()"
+      [disabled]="!isConfirmed() || isResetting()"
+    >
+      @if (isResetting()) {
+        <mat-spinner diameter="18"></mat-spinner>
+        <span>Resetting Data...</span>
+      } @else {
+        <span class="btn-label-group">
+          <mat-icon aria-hidden="true">delete_forever</mat-icon>
+          <span>I understand, reset everything</span>
+        </span>
+      }
+    </button>
+  </mat-dialog-actions>
+</div>

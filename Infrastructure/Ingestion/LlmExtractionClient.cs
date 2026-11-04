@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using App.Core.Exceptions;
 using App.Core.Ingestion;
 
@@ -30,6 +31,13 @@ public sealed class LlmExtractionClient(HttpClient httpClient) : ILlmExtractionC
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
+        NumberHandling = JsonNumberHandling.AllowReadingFromString,
+        Converters =
+        {
+            new FlexibleNullableIntJsonConverter(),
+            new FlexibleIntJsonConverter(),
+            new FlexibleNullableDecimalJsonConverter(),
+        },
     };
 
     public async Task<LlmConnectionTestResultDto> ProbeAndListModelsAsync(
@@ -186,17 +194,7 @@ public sealed class LlmExtractionClient(HttpClient httpClient) : ILlmExtractionC
 
         try
         {
-            var result = JsonSerializer.Deserialize<LlmExtractedRecipePayload>(
-                cleanedJson,
-                JsonOptions
-            );
-            if (result is null || string.IsNullOrWhiteSpace(result.Title))
-            {
-                throw new DomainValidationException(
-                    "Extracted recipe output was empty or missing a title."
-                );
-            }
-            return result;
+            return DeserializeRecipeWithRepair(cleanedJson);
         }
         catch (JsonException ex)
         {
@@ -332,14 +330,14 @@ public sealed class LlmExtractionClient(HttpClient httpClient) : ILlmExtractionC
                 {
                     model = config.TextModel!.Trim(),
                     stream = false,
-                    think = false,
+                    think = config.EnableThinking,
                     keep_alive = string.IsNullOrWhiteSpace(config.OllamaKeepAlive)
                         ? "5m"
                         : config.OllamaKeepAlive.Trim(),
                     options = new
                     {
                         temperature,
-                        num_predict = 4096,
+                        num_predict = 16384,
                         repeat_penalty = 1.1,
                     },
                     format = jsonSchema,
@@ -376,6 +374,7 @@ public sealed class LlmExtractionClient(HttpClient httpClient) : ILlmExtractionC
                     model = config.TextModel!.Trim(),
                     stream = false,
                     temperature,
+                    max_tokens = 16384,
                     response_format = new
                     {
                         type = "json_schema",
@@ -481,14 +480,14 @@ public sealed class LlmExtractionClient(HttpClient httpClient) : ILlmExtractionC
                 {
                     model = config.VisionModel.Trim(),
                     stream = false,
-                    think = false,
+                    think = config.EnableThinking,
                     keep_alive = string.IsNullOrWhiteSpace(config.OllamaKeepAlive)
                         ? "5m"
                         : config.OllamaKeepAlive.Trim(),
                     options = new
                     {
                         temperature = 0.1,
-                        num_predict = 4096,
+                        num_predict = 16384,
                         repeat_penalty = 1.1,
                     },
                     format = GetRecipeExtractionJsonSchema(),
@@ -547,6 +546,7 @@ public sealed class LlmExtractionClient(HttpClient httpClient) : ILlmExtractionC
                     model = config.VisionModel.Trim(),
                     stream = false,
                     temperature = 0.1,
+                    max_tokens = 16384,
                     response_format = new
                     {
                         type = "json_schema",
@@ -606,17 +606,7 @@ public sealed class LlmExtractionClient(HttpClient httpClient) : ILlmExtractionC
 
         try
         {
-            var result = JsonSerializer.Deserialize<LlmExtractedRecipePayload>(
-                cleanedJson,
-                JsonOptions
-            );
-            if (result is null || string.IsNullOrWhiteSpace(result.Title))
-            {
-                throw new DomainValidationException(
-                    "Extracted recipe output was empty or missing a title."
-                );
-            }
-            return result;
+            return DeserializeRecipeWithRepair(cleanedJson);
         }
         catch (JsonException ex)
         {
@@ -767,9 +757,66 @@ public sealed class LlmExtractionClient(HttpClient httpClient) : ILlmExtractionC
         return content ?? "";
     }
 
+    private static LlmExtractedRecipePayload DeserializeRecipeWithRepair(string cleanedJson)
+    {
+        try
+        {
+            var result = JsonSerializer.Deserialize<LlmExtractedRecipePayload>(
+                cleanedJson,
+                JsonOptions
+            );
+            if (result is not null && !string.IsNullOrWhiteSpace(result.Title))
+            {
+                return result;
+            }
+        }
+        catch (JsonException)
+        {
+            // Fall through to truncation repair
+        }
+
+        if (JsonTruncationRepair.TryRepair(cleanedJson, out var repairedJson))
+        {
+            try
+            {
+                var repairedResult = JsonSerializer.Deserialize<LlmExtractedRecipePayload>(
+                    repairedJson,
+                    JsonOptions
+                );
+                if (repairedResult is not null && !string.IsNullOrWhiteSpace(repairedResult.Title))
+                {
+                    return repairedResult;
+                }
+            }
+            catch
+            {
+                // Fall through to re-throw original JsonException
+            }
+        }
+
+        var finalResult = JsonSerializer.Deserialize<LlmExtractedRecipePayload>(
+            cleanedJson,
+            JsonOptions
+        );
+        if (finalResult is null || string.IsNullOrWhiteSpace(finalResult.Title))
+        {
+            throw new DomainValidationException(
+                "Extracted recipe output was empty or missing a title."
+            );
+        }
+        return finalResult;
+    }
+
     private static string CleanMarkdownJsonFences(string content)
     {
-        var trimmed = content.Trim();
+        var trimmed = System
+            .Text.RegularExpressions.Regex.Replace(
+                content.Trim(),
+                @"<think>[\s\S]*?</think>",
+                "",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase
+            )
+            .Trim();
         if (trimmed.StartsWith("```json", StringComparison.OrdinalIgnoreCase))
         {
             trimmed = trimmed[7..].Trim();
@@ -803,29 +850,30 @@ You are an expert culinary recipe extractor and normalizer.
 Your goal is to parse recipe text, HTML, or notes into a structured JSON recipe format.
 
 Rules:
-1. Extract Title, Description, BaseServings (numeric count, e.g. 4), YieldDisplay (e.g. "12 muffins" or "4 servings"), PrepTimeMinutes, CookTimeMinutes, TotalTimeMinutes, and Difficulty ("Easy", "Medium", or "Project").
-2. SourceName & SourceAuthor: extract publication/blog name and author if present. SourceBookTitle & SourceBookPage: extract cookbook title and page number if visible.
-3. Ingredients:
+1. Extract Title, BaseServings (numeric count, e.g. 4), YieldDisplay (e.g. "12 muffins" or "4 servings"), PrepTimeMinutes, CookTimeMinutes, TotalTimeMinutes, and Difficulty ("Easy", "Medium", or "Project").
+2. Description: Extract the recipe's intro/headnote description VERBATIM as written in the source text. Do NOT summarize, rewrite, condense, or invent your own description. Preserve the author's original headnote text and explanation verbatim. Strip out boilerplate section headers like "WHY THIS RECIPE WORKS", "Why This Recipe Works", or "Why It Works" at the start of the description so it begins directly with the headnote narrative. If no headnote or intro description exists in the source text, set description to null.
+3. SourceName & SourceAuthor: extract publication/blog name and author if present. SourceBookTitle & SourceBookPage: extract cookbook title and page number if visible.
+4. Ingredients:
    - "sectionName": optional group name (e.g. "For the Marinade", "For the Sauce").
-   - "quantity": numeric decimal or null (e.g. 1.5).
+   - "quantity": numeric decimal greater than 0, or null if unmeasured / to taste (e.g. 1.5). NEVER output 0 or negative numbers.
    - "maxQuantity": upper bound if a range was specified (e.g. 2.0 for "1.5 to 2 tbsp"), else null.
    - "unit": normalized unit code (tsp, tbsp, fl_oz, cup, pt, qt, gal, ml, l, oz, lb, g, kg, pinch, dash, clove, can, bunch, slice, whole, or custom unit name).
-   - "canonicalFoodName": the singular canonical ingredient name without preparation, brand, or quantities (e.g. "yellow onion", "garlic", "chicken thigh", "all-purpose flour", "unsalted butter"). When an ingredient matches an item in Existing Food Catalog, reuse that exact canonical name.
+   - "canonicalFoodName": the singular canonical ingredient name without preparation, brand, or quantities (e.g. "yellow onion", "garlic", "chicken thigh", "all-purpose flour", "unsalted butter"). When an ingredient matches an item in Existing Food Catalog, reuse that exact canonical name. NEVER output "null", "none", or placeholder words (leave empty or null if unclassified).
    - "displayName": recipe display name as written without leading quantity/unit (e.g. "extra-virgin olive oil").
    - "preparationNote": preparation instructions or parenthetical weights (e.g. "finely diced", "room temperature", "7 1/2 ounces").
    - "isOptional": boolean flag.
    - "originalRawText": verbatim line as originally written.
    - "suggestedIsPantryStaple": boolean flag; true ONLY for basic everyday household staples typically kept on hand (water, salt, black pepper, cooking oils, basic vinegars, all-purpose flour, sugar, baking powder/soda, dried spices/herbs, soy sauce), false for fresh produce, meats, dairy, canned goods, and specialty items.
-4. Steps:
+5. Steps:
    - "sectionName": optional section header (e.g. "Prepare the Marinade").
    - "instruction": full clear step instruction text.
    - "ingredientIndices": 0-based array of indices of the ingredients used in this step.
    - "timers": list of timers for any duration in this step:
      - "durationSeconds": integer seconds (e.g. 15 minutes = 900, 1 hour = 3600).
      - "label": short label (e.g. "Simmer", "Bake", "Rest").
-5. {{tagRule}}
-6. ConfidenceScore: decimal number between 0.0 and 1.0 representing your extraction confidence.
-7. Output ONLY a single valid JSON object matching the requested schema with no conversational text.{{foodCatalogSection}}
+6. {{tagRule}}
+7. ConfidenceScore: decimal number between 0.0 and 1.0 representing your extraction confidence.
+8. Output ONLY a single valid JSON object matching the requested schema with no conversational text.{{foodCatalogSection}}
 """;
     }
 
@@ -846,29 +894,30 @@ Your goal is to transcribe multi-page cookbook scans, photos, or handwritten rec
 
 Rules:
 1. Carefully transcribe the recipe across all provided page images in sequential page order.
-2. Extract Title, Description, BaseServings (numeric count, e.g. 4), YieldDisplay (e.g. "12 muffins" or "4 servings"), PrepTimeMinutes, CookTimeMinutes, TotalTimeMinutes, and Difficulty ("Easy", "Medium", or "Project").
-3. SourceBookTitle & SourceBookPage: if visible in headers, footers, or margins, extract the cookbook title and page number. SourceAuthor / SourceName: extract author or chef attribution if printed.
-4. Ingredients:
+2. Extract Title, BaseServings (numeric count, e.g. 4), YieldDisplay (e.g. "12 muffins" or "4 servings"), PrepTimeMinutes, CookTimeMinutes, TotalTimeMinutes, and Difficulty ("Easy", "Medium", or "Project").
+3. Description: Transcribe the recipe's intro/headnote description VERBATIM from the page text as printed. Do NOT summarize, rewrite, condense, or invent your own description. Transcribe the author's original headnote text and explanation verbatim across all paragraphs. Strip out boilerplate section headers like "WHY THIS RECIPE WORKS", "Why This Recipe Works", or "Why It Works" at the start of the description so it begins directly with the headnote narrative. If no headnote or intro description is printed on the page(s), set description to null.
+4. SourceBookTitle & SourceBookPage: if visible in headers, footers, or margins, extract the cookbook title and page number. SourceAuthor / SourceName: extract author or chef attribution if printed.
+5. Ingredients:
    - "sectionName": optional group name (e.g. "For the Marinade", "For the Sauce").
-   - "quantity": numeric decimal or null (e.g. 1.5).
+   - "quantity": numeric decimal greater than 0, or null if unmeasured / to taste (e.g. 1.5). NEVER output 0 or negative numbers.
    - "maxQuantity": upper bound if a range was specified (e.g. 2.0 for "1.5 to 2 tbsp"), else null.
    - "unit": normalized unit code (tsp, tbsp, fl_oz, cup, pt, qt, gal, ml, l, oz, lb, g, kg, pinch, dash, clove, can, bunch, slice, whole, or custom unit name).
-   - "canonicalFoodName": the singular canonical ingredient name without preparation, brand, or quantities (e.g. "yellow onion", "garlic", "chicken thigh", "all-purpose flour", "unsalted butter"). When an ingredient matches an item in Existing Food Catalog, reuse that exact canonical name.
+   - "canonicalFoodName": the singular canonical ingredient name without preparation, brand, or quantities (e.g. "yellow onion", "garlic", "chicken thigh", "all-purpose flour", "unsalted butter"). When an ingredient matches an item in Existing Food Catalog, reuse that exact canonical name. NEVER output "null", "none", or placeholder words (leave empty or null if unclassified).
    - "displayName": recipe display name as written without leading quantity/unit (e.g. "extra-virgin olive oil").
    - "preparationNote": preparation instructions or parenthetical weights (e.g. "finely diced", "room temperature", "7 1/2 ounces").
    - "isOptional": boolean flag.
    - "originalRawText": verbatim line as originally printed.
    - "suggestedIsPantryStaple": boolean flag; true ONLY for basic everyday household staples typically kept on hand (water, salt, black pepper, cooking oils, basic vinegars, all-purpose flour, sugar, baking powder/soda, dried spices/herbs, soy sauce), false for fresh produce, meats, dairy, canned goods, and specialty items.
-5. Steps:
+6. Steps:
    - "sectionName": optional section header (e.g. "Prepare the Marinade").
    - "instruction": full clear step instruction text.
    - "ingredientIndices": 0-based array of indices of the ingredients used in this step.
    - "timers": list of timers for any duration in this step:
      - "durationSeconds": integer seconds (e.g. 15 minutes = 900, 1 hour = 3600).
      - "label": short label (e.g. "Simmer", "Bake", "Rest").
-6. {{tagRule}}
-7. ConfidenceScore: decimal number between 0.0 and 1.0 representing your transcription/extraction confidence.
-8. Output ONLY a single valid JSON object matching the requested schema with no conversational text.{{foodCatalogSection}}
+7. {{tagRule}}
+8. ConfidenceScore: decimal number between 0.0 and 1.0 representing your transcription/extraction confidence.
+9. Output ONLY a single valid JSON object matching the requested schema with no conversational text.{{foodCatalogSection}}
 """;
     }
 
@@ -975,7 +1024,11 @@ Household Cookbook Catalog:
             properties = new
             {
                 title = new { type = "string" },
-                description = new { type = "string" },
+                description = new
+                {
+                    type = "string",
+                    description = "Verbatim headnote or intro description from the source without rewriting or summarizing. Omit 'WHY THIS RECIPE WORKS' headers.",
+                },
                 baseServings = new { type = "number" },
                 yieldDisplay = new { type = "string" },
                 prepTimeMinutes = new { type = "integer" },

@@ -49,6 +49,9 @@ export interface LlmSettingsDto {
   ollamaKeepAlive: string;
   requestTimeoutSeconds: number;
   autoPublishHighConfidenceText: boolean;
+  enableThinking: boolean;
+  enableIngestion: boolean;
+  maxIngestionRetries: number;
   modifiedAt: string | null;
 }
 
@@ -62,6 +65,9 @@ export interface UpdateLlmSettingsRequest {
   ollamaKeepAlive?: string;
   requestTimeoutSeconds?: number;
   autoPublishHighConfidenceText?: boolean;
+  enableThinking?: boolean;
+  enableIngestion?: boolean;
+  maxIngestionRetries?: number;
 }
 
 export interface TestLlmConnectionRequest {
@@ -229,5 +235,14 @@ export interface IngestionJobDetailDto {
 }
 
 export interface RetryWaitingJobsResultDto {
+  requeuedCount: number;
+}
+
+export interface RetryBatchJobsRequest {
+  jobIds?: string[];
+  filter?: string;
+}
+
+export interface RetryBatchJobsResultDto {
   requeuedCount: number;
 }

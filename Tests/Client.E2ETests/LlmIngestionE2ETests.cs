@@ -256,7 +256,7 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
 
         // 3. Wait for job to process and reach ReadyForReview
         var reviewButton = Page.Locator("a.review-action-btn").First;
-        await Expect(reviewButton).ToBeVisibleAsync(new() { Timeout = 20000 });
+        await WaitForLocatorWithRefreshAsync(reviewButton);
 
         // Shell Ingest badge should display "1"
         var navBadge = Page.Locator("nav.desktop-nav .inbox-count-badge");
@@ -347,7 +347,7 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
 
         // 4. Verify job enters WaitingForLlmHost and banner appears
         var waitingBanner = Page.Locator(".waiting-host-banner");
-        await Expect(waitingBanner).ToBeVisibleAsync(new() { Timeout = 15000 });
+        await WaitForLocatorWithRefreshAsync(waitingBanner);
         await Expect(waitingBanner.Locator(".banner-title"))
             .ToContainTextAsync("waiting for local LLM host");
 
@@ -369,7 +369,7 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
 
         // 6. Job should complete and transition to ReadyForReview
         var reviewBtn = Page.Locator("a.review-action-btn").First;
-        await Expect(reviewBtn).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await WaitForLocatorWithRefreshAsync(reviewBtn);
 
         // Open review and discard cleanly
         await reviewBtn.ClickAsync();
@@ -436,7 +436,7 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await Page.Locator("button[aria-label='Queue raw text recipe']").ClickAsync();
 
         var reviewBtn = Page.Locator("a.review-action-btn").First;
-        await Expect(reviewBtn).ToBeVisibleAsync(new() { Timeout = 25000 });
+        await WaitForLocatorWithRefreshAsync(reviewBtn);
         await reviewBtn.ClickAsync();
 
         await Expect(Page).ToHaveURLAsync(new Regex(".*/ingest/review/.*"));
@@ -452,15 +452,25 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await Expect(draftPane).ToBeVisibleAsync();
         await Expect(sourcePane).Not.ToBeVisibleAsync();
 
+        // Switch to Recipe Preview on mobile
+        await switcher.Locator("button", new() { HasText = "Preview" }).ClickAsync();
+        await Expect(draftPane).ToBeVisibleAsync();
+        await Expect(Page.Locator("app-recipe-detail-preview")).ToBeVisibleAsync();
+
         // Switch to Original Source
         await switcher.Locator("button", new() { HasText = "Original Source" }).ClickAsync();
         await Expect(sourcePane).ToBeVisibleAsync();
         await Expect(draftPane).Not.ToBeVisibleAsync();
 
         // Switch back to Structured Draft
-        await switcher.Locator("button", new() { HasText = "Structured Draft" }).ClickAsync();
+        await switcher.Locator("button", new() { HasText = "Edit Draft" }).ClickAsync();
         await Expect(draftPane).ToBeVisibleAsync();
         await Expect(sourcePane).Not.ToBeVisibleAsync();
+
+        // Switch to Recipe Preview on mobile
+        await switcher.Locator("button", new() { HasText = "Preview" }).ClickAsync();
+        await Expect(draftPane).ToBeVisibleAsync();
+        await Expect(Page.Locator("app-recipe-detail-preview")).ToBeVisibleAsync();
 
         // Verify document scrollWidth does not exceed 360px (no horizontal overflow)
         var docScrollWidth = await Page.EvaluateAsync<int>(
@@ -471,5 +481,244 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
             360,
             $"Mobile document scrollWidth {docScrollWidth} must not exceed 360px viewport."
         );
+    }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task IngestionHub_AutoRefreshAndCountdownAndRetryAll_WorksAsExpected()
+    {
+        await RegisterAndLoginAsync();
+
+        // 1. Navigate to /ingest
+        await Page.GotoAsync($"{ServerUrl}/ingest");
+        await Expect(Page).ToHaveURLAsync(new Regex(".*/ingest$"));
+
+        // 2. Verify unified refresh controls in queue toolbar
+        var refreshGroup = Page.Locator(".queue-toolbar-actions .unified-refresh-group");
+        await Expect(refreshGroup).ToBeVisibleAsync();
+
+        var refreshBtn = refreshGroup.Locator(".refresh-main-btn");
+        await Expect(refreshBtn).ToBeVisibleAsync();
+        await Expect(refreshBtn).ToContainTextAsync("Refresh");
+
+        // Circular countdown spinner should be visible
+        var countdownSpinner = refreshGroup.Locator(".countdown-spinner");
+        await Expect(countdownSpinner).ToBeVisibleAsync();
+
+        var configBtn = refreshGroup.Locator(".refresh-config-btn");
+        await Expect(configBtn).ToBeVisibleAsync();
+
+        // 3. Open menu and switch to Manual (Off)
+        await configBtn.ClickAsync();
+        var menu = Page.Locator(".refresh-menu-panel");
+        await Expect(menu).ToBeVisibleAsync();
+
+        await menu.Locator("button", new() { HasText = "Manual (Off)" }).ClickAsync();
+        await Expect(refreshBtn).ToContainTextAsync("Refresh");
+        await Expect(countdownSpinner).Not.ToBeVisibleAsync();
+
+        // 4. Click manual refresh button
+        await refreshBtn.ClickAsync();
+
+        // 5. Open menu and switch interval to 30 seconds
+        await configBtn.ClickAsync();
+        await Expect(menu).ToBeVisibleAsync();
+        await menu.Locator("button", new() { HasText = "30 seconds" }).ClickAsync();
+        await Expect(countdownSpinner).ToBeVisibleAsync();
+        await Expect(refreshBtn).ToContainTextAsync(new Regex(@"Refresh \(\d+s\)"));
+
+        // 6. Verify Retry All button exists in queue toolbar
+        var retryAllBtn = Page.Locator(".queue-toolbar .retry-all-tab-btn");
+        await Expect(retryAllBtn).ToBeVisibleAsync();
+    }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task IngestionHub_PauseAndResumeIngestion_TogglesStateAndShowsBanner()
+    {
+        await RegisterAndLoginAsync();
+
+        await Page.GotoAsync($"{ServerUrl}/ingest");
+        await Expect(Page).ToHaveURLAsync(new Regex(".*/ingest$"));
+
+        // 1. Initial state: Pause Ingestion button is shown, no paused banner
+        var pauseBtn = Page.Locator(".toggle-ingestion-btn");
+        await Expect(pauseBtn).ToBeVisibleAsync();
+        await Expect(pauseBtn).ToContainTextAsync("Pause Ingestion");
+
+        var pausedBanner = Page.Locator(".paused-ingestion-banner");
+        await Expect(pausedBanner).Not.ToBeVisibleAsync();
+
+        // 2. Click Pause Ingestion
+        await pauseBtn.ClickAsync();
+
+        // Button switches to Resume Ingestion
+        await Expect(pauseBtn).ToContainTextAsync("Resume Ingestion");
+
+        // Paused banner appears
+        await Expect(pausedBanner).ToBeVisibleAsync();
+        await Expect(pausedBanner.Locator(".banner-content"))
+            .ToContainTextAsync("LLM Ingestion is Paused");
+
+        // 3. Click Resume button in banner
+        var resumeBannerBtn = pausedBanner.Locator(".banner-resume-btn");
+        await resumeBannerBtn.ClickAsync();
+
+        // Banner disappears and header button switches back to Pause Ingestion
+        await Expect(pausedBanner).Not.ToBeVisibleAsync();
+        await Expect(pauseBtn).ToContainTextAsync("Pause Ingestion");
+    }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task LlmSettingsDialog_AutoDiscoversModelsAndTogglesThinkingAndRetries()
+    {
+        await using var mockServer = await MockLanLlmAndBlogServer.StartAsync();
+
+        await RegisterAndLoginAsync();
+
+        await Page.GotoAsync($"{ServerUrl}/ingest");
+        await Page.Locator(".llm-settings-btn").ClickAsync();
+
+        var dialog = Page.Locator("app-llm-settings-dialog");
+        await Expect(dialog).ToBeVisibleAsync();
+
+        // Enter mock server baseUrl and test connection to discover models
+        await dialog.Locator("input[formcontrolname='baseUrl']").FillAsync(mockServer.BaseUrl);
+        await dialog
+            .Locator("button[aria-label='Test LLM connection and refresh models']")
+            .ClickAsync();
+
+        var statusBanner = dialog.Locator(".connection-status-banner.status-success");
+        await Expect(statusBanner).ToBeVisibleAsync();
+        await Expect(statusBanner).ToContainTextAsync("model(s) discovered");
+
+        // Check Thinking toggle
+        var thinkingToggle = dialog.Locator(
+            "mat-slide-toggle[formcontrolname='enableThinking'] button"
+        );
+        await Expect(thinkingToggle).ToBeVisibleAsync();
+        await thinkingToggle.ClickAsync();
+
+        // Check retries input
+        var retriesInput = dialog.Locator("input[formcontrolname='maxIngestionRetries']");
+        await Expect(retriesInput).ToBeVisibleAsync();
+        await retriesInput.FillAsync("4");
+
+        // Check enable ingestion toggle
+        var ingestionToggle = dialog.Locator(
+            "mat-slide-toggle[formcontrolname='enableIngestion'] button"
+        );
+        await Expect(ingestionToggle).ToBeVisibleAsync();
+
+        await Page.Keyboard.PressAsync("Escape");
+
+        // Save
+        await dialog
+            .Locator("button", new() { HasText = "Save Settings" })
+            .ClickAsync(new() { Force = true });
+        await Expect(dialog).Not.ToBeVisibleAsync();
+
+        // Re-open to verify persisted values
+        await Page.Locator(".llm-settings-btn").ClickAsync();
+        await Expect(dialog).ToBeVisibleAsync();
+
+        var savedRetries = dialog.Locator("input[formcontrolname='maxIngestionRetries']");
+        await Expect(savedRetries).ToHaveValueAsync("4");
+        await dialog.Locator("button", new() { HasText = "Cancel" }).ClickAsync();
+        await Expect(dialog).Not.ToBeVisibleAsync();
+    }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task IngestionReview_RecipeDetailPreview_InlineToggleAndDialogPreview_WorksAsExpected()
+    {
+        await using var mockServer = await MockLanLlmAndBlogServer.StartAsync();
+
+        await RegisterAndLoginAsync();
+
+        // 1. Configure LLM settings pointing to mock server
+        await Page.GotoAsync($"{ServerUrl}/ingest");
+        await Page.Locator(".llm-settings-btn").ClickAsync();
+
+        var dialog = Page.Locator("app-llm-settings-dialog");
+        await Expect(dialog).ToBeVisibleAsync();
+        await dialog.Locator("input[formcontrolname='baseUrl']").FillAsync(mockServer.BaseUrl);
+        await dialog.Locator("input[formcontrolname='textModel']").FillAsync("qwen2.5:14b");
+        await Page.Keyboard.PressAsync("Escape");
+
+        await dialog
+            .Locator("button", new() { HasText = "Save Settings" })
+            .ClickAsync(new() { Force = true });
+        await Expect(dialog).Not.ToBeVisibleAsync();
+
+        // 2. Submit a raw text recipe
+        await Page.Locator("button.tab-pill", new() { HasText = "Paste Raw Text" }).ClickAsync();
+        await Page.Locator("textarea[formcontrolname='rawText']")
+            .FillAsync("Crispy Sesame Tofu with garlic and oil");
+        await Page.Locator("button[aria-label='Queue raw text recipe']").ClickAsync();
+
+        var reviewBtn = Page.Locator("a.review-action-btn").First;
+        await WaitForLocatorWithRefreshAsync(reviewBtn);
+        await reviewBtn.ClickAsync();
+
+        await Expect(Page).ToHaveURLAsync(new Regex(".*/ingest/review/.*"));
+
+        // 3. Verify Preview button exists in header actions
+        var headerPreviewBtn = Page.Locator(".header-actions button.preview-btn");
+        await Expect(headerPreviewBtn).ToBeVisibleAsync();
+        await Expect(headerPreviewBtn).ToContainTextAsync("Preview");
+
+        // 4. Verify segmented view toggle in draft pane toolbar
+        var paneToolbar = Page.Locator(".draft-pane-toolbar");
+        await Expect(paneToolbar).ToBeVisibleAsync();
+
+        var editToggle = paneToolbar.Locator("button", new() { HasText = "Edit Draft" });
+        var previewToggle = paneToolbar.Locator("button", new() { HasText = "Recipe Preview" });
+        await Expect(editToggle).ToBeVisibleAsync();
+        await Expect(previewToggle).ToBeVisibleAsync();
+
+        // Initially in Edit Draft mode
+        await Expect(Page.Locator(".draft-form")).ToBeVisibleAsync();
+        await Expect(Page.Locator("app-recipe-detail-preview")).Not.ToBeVisibleAsync();
+
+        // 5. Click "Recipe Preview" in pane toolbar
+        await previewToggle.ClickAsync();
+
+        var inlinePreview = Page.Locator(".inline-preview-pane app-recipe-detail-preview");
+        await Expect(inlinePreview).ToBeVisibleAsync();
+        await Expect(Page.Locator(".draft-form")).Not.ToBeVisibleAsync();
+
+        // Verify recipe details in preview
+        await Expect(inlinePreview.Locator(".recipe-title"))
+            .ToContainTextAsync("Crispy Sesame Tofu");
+        await Expect(inlinePreview.Locator(".recipe-stats-strip")).ToContainTextAsync("15 min");
+        await Expect(inlinePreview.Locator(".ingredients-column")).ToContainTextAsync("Garlic");
+        await Expect(inlinePreview.Locator(".instructions-column"))
+            .ToContainTextAsync("Heat oil and sauté");
+
+        // Verify expand button in pane toolbar
+        var expandBtn = paneToolbar.Locator(".open-modal-preview-btn");
+        await Expect(expandBtn).ToBeVisibleAsync();
+
+        // 6. Switch back to Edit Draft
+        await editToggle.ClickAsync();
+        await Expect(Page.Locator(".draft-form")).ToBeVisibleAsync();
+        await Expect(inlinePreview).Not.ToBeVisibleAsync();
+
+        // 7. Open full modal preview via header button
+        await headerPreviewBtn.ClickAsync();
+        var previewModal = Page.Locator("app-recipe-detail-preview-dialog");
+        await Expect(previewModal).ToBeVisibleAsync();
+        await Expect(previewModal.Locator(".dialog-title"))
+            .ToContainTextAsync("Recipe Detail Preview");
+        await Expect(previewModal.Locator(".recipe-title"))
+            .ToContainTextAsync("Crispy Sesame Tofu");
+
+        // Close modal via "Back to Edit"
+        await previewModal.Locator("button.back-btn").ClickAsync();
+        await Expect(previewModal).Not.ToBeVisibleAsync();
+        await Expect(Page.Locator(".draft-form")).ToBeVisibleAsync();
+        await Expect(dialog).Not.ToBeVisibleAsync();
     }
 }

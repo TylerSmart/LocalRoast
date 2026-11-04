@@ -275,6 +275,89 @@ public sealed class IngestionIntegrationTests
     }
 
     [TestMethod]
+    public async Task RetryBatchJobs_RetriesAllSpecifiedJobs_RegardlessOfStatus()
+    {
+        await AuthenticateAsync(_client);
+
+        // 1. Enqueue two recipes
+        var enqueue1 = await _client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest(RawText: "Recipe One Ingredients and Steps")
+        );
+        var job1 = await enqueue1.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
+        Assert.IsNotNull(job1);
+
+        var enqueue2 = await _client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest(RawText: "Recipe Two Ingredients and Steps")
+        );
+        var job2 = await enqueue2.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
+        Assert.IsNotNull(job2);
+
+        // 2. Publish Job 1
+        var draft1 = new IngestionExtractedDraftDto(
+            Title: "Batch Pizza One",
+            Ingredients:
+            [
+                new IngestionDraftIngredientDto(
+                    DisplayName: "Flour",
+                    MatchedFoodItemId: null,
+                    ProposedFoodItemName: "Pizza Flour",
+                    CreateNewFoodItem: true
+                ),
+            ],
+            ExtractedModel: "llama3:8b"
+        );
+        await _client.PutAsJsonAsync($"/api/ingestion/jobs/{job1.Id}/draft", draft1);
+        await _client.PostAsJsonAsync($"/api/ingestion/jobs/{job1.Id}/approve", draft1);
+
+        // 3. Mark Job 2 as ReadyForReview
+        var draft2 = new IngestionExtractedDraftDto(
+            Title: "Batch Soup Two",
+            Ingredients:
+            [
+                new IngestionDraftIngredientDto(
+                    DisplayName: "Carrots",
+                    MatchedFoodItemId: null,
+                    ProposedFoodItemName: "Carrot",
+                    CreateNewFoodItem: true
+                ),
+            ],
+            ExtractedModel: "llama3:8b"
+        );
+        await _client.PutAsJsonAsync($"/api/ingestion/jobs/{job2.Id}/draft", draft2);
+
+        // Verify statuses before batch retry
+        var j1Before = await (
+            await _client.GetAsync($"/api/ingestion/jobs/{job1.Id}")
+        ).Content.ReadFromJsonAsync<IngestionJobDetailDto>();
+        var j2Before = await (
+            await _client.GetAsync($"/api/ingestion/jobs/{job2.Id}")
+        ).Content.ReadFromJsonAsync<IngestionJobDetailDto>();
+        Assert.AreEqual(IngestionJobStatus.Published, j1Before!.Status);
+        Assert.AreEqual(IngestionJobStatus.Queued, j2Before!.Status);
+
+        // 4. Call retry-batch with explicit job IDs
+        var retryBatchResp = await _client.PostAsJsonAsync(
+            "/api/ingestion/jobs/retry-batch",
+            new RetryBatchJobsRequest(JobIds: [job1.Id, job2.Id])
+        );
+        Assert.AreEqual(HttpStatusCode.OK, retryBatchResp.StatusCode);
+        var batchResult = await retryBatchResp.Content.ReadFromJsonAsync<RetryBatchJobsResultDto>();
+        Assert.IsNotNull(batchResult);
+        Assert.AreEqual(2, batchResult.RequeuedCount);
+
+        // 5. Verify both jobs were re-queued
+        var j1After = await (
+            await _client.GetAsync($"/api/ingestion/jobs/{job1.Id}")
+        ).Content.ReadFromJsonAsync<IngestionJobDetailDto>();
+        var j2After = await (
+            await _client.GetAsync($"/api/ingestion/jobs/{job2.Id}")
+        ).Content.ReadFromJsonAsync<IngestionJobDetailDto>();
+        Assert.AreEqual(IngestionJobStatus.Queued, j1After!.Status);
+        Assert.AreEqual(IngestionJobStatus.Queued, j2After!.Status);
+    }
+
     public async Task RerunPublishedJob_RetriesSuccessfully_AndUpdatesExistingRecipeWithModelTag()
     {
         await AuthenticateAsync(_client);

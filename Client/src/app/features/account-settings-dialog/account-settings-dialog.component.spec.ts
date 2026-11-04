@@ -1,7 +1,8 @@
 import { provideAnimationsAsync } from '@angular/platform-browser/animations/async';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { MAT_DIALOG_DATA, MatDialogRef } from '@angular/material/dialog';
+import { MAT_DIALOG_DATA, MatDialog, MatDialogRef } from '@angular/material/dialog';
 import { MatSnackBar } from '@angular/material/snack-bar';
+import { Router } from '@angular/router';
 import { of, throwError } from 'rxjs';
 import { AccountDto } from '../../core/models/account.models';
 import { AuthResponse } from '../../core/models/auth.models';
@@ -41,6 +42,14 @@ describe('AccountSettingsDialogComponent', () => {
 
   let mockDialogRef: {
     close: ReturnType<typeof vi.fn>;
+  };
+
+  let mockDialog: {
+    open: ReturnType<typeof vi.fn>;
+  };
+
+  let mockRouter: {
+    navigate: ReturnType<typeof vi.fn>;
   };
 
   let dialogData: AccountSettingsDialogData | null = null;
@@ -85,6 +94,16 @@ describe('AccountSettingsDialogComponent', () => {
       close: vi.fn(),
     };
 
+    mockDialog = {
+      open: vi.fn().mockReturnValue({
+        afterClosed: () => of({ success: false }),
+      }),
+    };
+
+    mockRouter = {
+      navigate: vi.fn().mockReturnValue(Promise.resolve(true)),
+    };
+
     await TestBed.configureTestingModule({
       imports: [AccountSettingsDialogComponent],
       providers: [
@@ -94,6 +113,8 @@ describe('AccountSettingsDialogComponent', () => {
         { provide: PersonalAccessTokenService, useValue: mockTokenService },
         { provide: MatSnackBar, useValue: mockSnackBar },
         { provide: MatDialogRef, useValue: mockDialogRef },
+        { provide: MatDialog, useValue: mockDialog },
+        { provide: Router, useValue: mockRouter },
         { provide: MAT_DIALOG_DATA, useFactory: () => dialogData },
       ],
     }).compileComponents();
@@ -127,6 +148,24 @@ describe('AccountSettingsDialogComponent', () => {
     createComponent();
 
     expect(component['selectedTabIndex']()).toBe(1);
+  });
+
+  it('initializes on data tab when MAT_DIALOG_DATA specifies data', () => {
+    dialogData = { initialTab: 'data' };
+    createComponent();
+
+    expect(component['selectedTabIndex']()).toBe(3);
+  });
+
+  it('opens reset app data dialog when requested', () => {
+    mockDialog.open.mockReturnValue({
+      afterClosed: () => of({ success: false }),
+    });
+
+    createComponent();
+    component.openResetAppDataDialog();
+
+    expect(mockDialog.open).toHaveBeenCalledTimes(1);
   });
 
   it('updates username without requiring current password and refreshes session', () => {

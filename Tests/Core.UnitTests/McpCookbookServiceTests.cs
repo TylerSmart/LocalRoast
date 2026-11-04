@@ -127,6 +127,9 @@ public sealed class McpCookbookServiceTests
                     1000
                 )
             );
+
+        public Task PurgeAllMediaAsync(CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
     }
 
     private sealed class DummyIngestionQueueSignal : IIngestionQueueSignal
@@ -137,6 +140,18 @@ public sealed class McpCookbookServiceTests
             TimeSpan timeout,
             CancellationToken cancellationToken = default
         ) => ValueTask.FromResult(false);
+
+        public IDisposable RegisterActiveJobExecution(Guid jobId, CancellationTokenSource cts) =>
+            new DummyDisposable();
+
+        public void CancelActiveExecution() { }
+
+        public Guid? ActiveJobId => null;
+
+        private sealed class DummyDisposable : IDisposable
+        {
+            public void Dispose() { }
+        }
     }
 
     [TestInitialize]

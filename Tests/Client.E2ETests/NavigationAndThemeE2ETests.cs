@@ -156,6 +156,63 @@ public sealed class NavigationAndThemeE2ETests : E2ETestBase
         await Expect(Page.Locator("h1")).ToContainTextAsync("Welcome to LocalRoast");
     }
 
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task AccountSettings_ResetApplicationData_RequiresConfirmation_AndClearsData()
+    {
+        await RegisterAndLoginAsync();
+
+        // Create a recipe so there is data to reset
+        await CreateRecipeWithIngredientViaApiAsync("Grandma Stew", "Beef");
+
+        // 1. Open User Menu -> Account Settings
+        await Page.Locator("button.user-profile-btn").ClickAsync();
+        var accountSettingsMenuItem = Page.Locator(
+            "button[role='menuitem']",
+            new() { HasText = "Account Settings" }
+        );
+        await accountSettingsMenuItem.ClickAsync();
+
+        var accountDialog = Page.Locator("app-account-settings-dialog");
+        await Expect(accountDialog).ToBeVisibleAsync();
+
+        // 2. Click Data tab
+        var dataTab = accountDialog.Locator(".mat-mdc-tab", new() { HasText = "Data" });
+        await dataTab.ClickAsync();
+
+        var openResetBtn = accountDialog.Locator("button.reset-data-button");
+        await Expect(openResetBtn).ToBeVisibleAsync();
+        await openResetBtn.ClickAsync();
+
+        // 4. Verify Reset App Data dialog opens
+        var resetDialog = Page.Locator("app-reset-app-data-dialog");
+        await Expect(resetDialog).ToBeVisibleAsync();
+
+        var confirmBtn = resetDialog.Locator("button.destructive-btn");
+        // Button should be disabled before typing DELETE
+        await Expect(confirmBtn).ToBeDisabledAsync();
+
+        // 5. Type confirmation text
+        var confirmInput = resetDialog.Locator(
+            "input[aria-label='Confirm data reset by typing DELETE']"
+        );
+        await confirmInput.FillAsync("DELETE");
+
+        // Button should become enabled
+        await Expect(confirmBtn).ToBeEnabledAsync();
+
+        // 6. Submit reset
+        await confirmBtn.ClickAsync();
+
+        // Dialogs close
+        await Expect(resetDialog).Not.ToBeVisibleAsync();
+        await Expect(accountDialog).Not.ToBeVisibleAsync();
+
+        // Verify Cookbook now has empty state (recipe was wiped)
+        await Page.GotoAsync($"{ServerUrl}/recipes");
+        await Expect(Page.Locator(".empty-state")).ToBeVisibleAsync();
+    }
+
     private sealed class NavMetrics
     {
         public double NavClientWidth { get; set; }

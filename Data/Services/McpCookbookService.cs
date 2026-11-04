@@ -1,4 +1,5 @@
-using App.Core.Exceptions;
+﻿using App.Core.Exceptions;
+using App.Core.FoodCatalog;
 using App.Core.Ingestion;
 using App.Core.Mcp;
 using App.Core.Recipes;
@@ -469,13 +470,13 @@ public sealed class McpCookbookService(
                     : ing.DisplayName.Trim();
 
                 var matchedFood = FindMatchingFood(candidateName, allFoodItems);
-                Guid foodItemId;
+                Guid? foodItemId = null;
 
                 if (matchedFood is not null)
                 {
                     foodItemId = matchedFood.Id;
                 }
-                else
+                else if (FoodNameSanitizer.IsValidFoodName(candidateName))
                 {
                     var proposedName = ToTitleCase(candidateName);
                     var normName = proposedName.ToLowerInvariant();

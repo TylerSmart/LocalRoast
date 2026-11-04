@@ -17,11 +17,14 @@ describe('IngestionHubComponent', () => {
     enqueueRawText: ReturnType<typeof vi.fn>;
     retryJob: ReturnType<typeof vi.fn>;
     retryAllWaitingJobs: ReturnType<typeof vi.fn>;
+    retryBatchJobs: ReturnType<typeof vi.fn>;
     discardJob: ReturnType<typeof vi.fn>;
     refreshSummary: ReturnType<typeof vi.fn>;
   };
   let mockLlmSettingsService: {
     openLlmSettingsDialog: ReturnType<typeof vi.fn>;
+    getSettings: ReturnType<typeof vi.fn>;
+    setIngestionEnabled: ReturnType<typeof vi.fn>;
   };
 
   const sampleJobs: IngestionJobSummaryDto[] = [
@@ -80,17 +83,53 @@ describe('IngestionHubComponent', () => {
   ];
 
   beforeEach(async () => {
+    localStorage.clear();
     mockIngestionService = {
       getJobs: vi.fn().mockReturnValue(of(sampleJobs)),
       enqueueUrls: vi.fn().mockReturnValue(of([sampleJobs[0]])),
       enqueueRawText: vi.fn().mockReturnValue(of(sampleJobs[1])),
       retryJob: vi.fn().mockReturnValue(of(sampleJobs[1])),
       retryAllWaitingJobs: vi.fn().mockReturnValue(of({ requeuedCount: 1 })),
+      retryBatchJobs: vi.fn().mockReturnValue(of({ requeuedCount: 3 })),
       discardJob: vi.fn().mockReturnValue(of(undefined)),
       refreshSummary: vi.fn(),
     };
     mockLlmSettingsService = {
       openLlmSettingsDialog: vi.fn(),
+      getSettings: vi.fn().mockReturnValue(
+        of({
+          provider: 'Ollama',
+          baseUrl: 'http://localhost:11434',
+          hasApiKey: false,
+          apiKeyMasked: null,
+          textModel: 'qwen2.5:14b',
+          visionModel: null,
+          ollamaKeepAlive: '5m',
+          requestTimeoutSeconds: 120,
+          autoPublishHighConfidenceText: false,
+          enableThinking: true,
+          enableIngestion: true,
+          maxIngestionRetries: 3,
+          modifiedAt: null,
+        }),
+      ),
+      setIngestionEnabled: vi.fn().mockImplementation((enabled: boolean) =>
+        of({
+          provider: 'Ollama',
+          baseUrl: 'http://localhost:11434',
+          hasApiKey: false,
+          apiKeyMasked: null,
+          textModel: 'qwen2.5:14b',
+          visionModel: null,
+          ollamaKeepAlive: '5m',
+          requestTimeoutSeconds: 120,
+          autoPublishHighConfidenceText: false,
+          enableThinking: true,
+          enableIngestion: enabled,
+          maxIngestionRetries: 3,
+          modifiedAt: null,
+        }),
+      ),
     };
 
     await TestBed.configureTestingModule({
@@ -193,5 +232,148 @@ describe('IngestionHubComponent', () => {
   it('retries published job when rerun button is clicked', () => {
     component.retryJob(sampleJobs[2]);
     expect(mockIngestionService.retryJob).toHaveBeenCalledWith('job-3');
+  });
+
+  it('initializes with default 15-second refresh interval and countdown progress', () => {
+    expect(component.refreshInterval()).toBe(15);
+    expect(component.remainingSeconds()).toBe(15);
+    expect(component.countdownProgress()).toBe(100);
+    expect(component.remainingTimeDisplay()).toBe('15s');
+    expect(component.refreshOptions).toHaveLength(6);
+  });
+
+  it('triggers refresh and resets countdown on manualRefresh', () => {
+    mockIngestionService.getJobs.mockClear();
+    mockIngestionService.refreshSummary.mockClear();
+
+    component.remainingSeconds.set(5);
+    component.manualRefresh();
+
+    expect(mockIngestionService.getJobs).toHaveBeenCalled();
+    expect(mockIngestionService.refreshSummary).toHaveBeenCalled();
+    expect(component.remainingSeconds()).toBe(15);
+  });
+
+  it('updates interval, remaining seconds, countdown progress, and persists to localStorage on setRefreshInterval', () => {
+    component.setRefreshInterval(30);
+    expect(component.refreshInterval()).toBe(30);
+    expect(component.remainingSeconds()).toBe(30);
+    expect(component.countdownProgress()).toBe(100);
+    expect(component.remainingTimeDisplay()).toBe('30s');
+
+    component.remainingSeconds.set(6);
+    expect(component.countdownProgress()).toBe(20);
+    expect(component.remainingTimeDisplay()).toBe('6s');
+
+    // Switch to manual mode
+    component.setRefreshInterval(0);
+    expect(component.refreshInterval()).toBe(0);
+    expect(component.remainingSeconds()).toBe(0);
+    expect(component.countdownProgress()).toBe(0);
+    expect(component.remainingTimeDisplay()).toBe('Manual');
+  });
+
+  it('toggles auto-refresh on and off via toggleAutoRefresh', () => {
+    expect(component.refreshInterval()).toBe(15);
+    component.toggleAutoRefresh();
+    expect(component.refreshInterval()).toBe(0);
+    expect(component.isAutoRefreshEnabled()).toBe(false);
+
+    component.toggleAutoRefresh();
+    expect(component.refreshInterval()).toBe(15);
+    expect(component.isAutoRefreshEnabled()).toBe(true);
+  });
+
+  it('formats remaining time with minutes when interval is 1 minute or more', () => {
+    component.setRefreshInterval(120);
+    expect(component.remainingTimeDisplay()).toBe('2m');
+
+    component.remainingSeconds.set(95);
+    expect(component.remainingTimeDisplay()).toBe('1m 35s');
+  });
+
+  it('renders unified refresh button and config trigger in DOM', () => {
+    const refreshBtn = fixture.nativeElement.querySelector(
+      '.unified-refresh-group .refresh-main-btn',
+    );
+    expect(refreshBtn).toBeTruthy();
+
+    const configBtn = fixture.nativeElement.querySelector(
+      '.unified-refresh-group .refresh-config-btn',
+    );
+    expect(configBtn).toBeTruthy();
+
+    const countdownSpinner = fixture.nativeElement.querySelector(
+      '.unified-refresh-group .countdown-spinner',
+    );
+    expect(countdownSpinner).toBeTruthy();
+  });
+
+  it('retries all jobs in current tab and displays updated feedback message', () => {
+    component.setFilter('All');
+    component.retryAllInCurrentTab();
+
+    expect(mockIngestionService.retryBatchJobs).toHaveBeenCalledWith({
+      jobIds: ['job-1', 'job-2', 'job-3'],
+      filter: 'All',
+    });
+    expect(component.feedbackMessage()).toContain('Requeued 3 job(s) for extraction.');
+  });
+
+  it('retries all jobs in review tab with only review job IDs', () => {
+    component.setFilter('ReadyForReview');
+    component.retryAllInCurrentTab();
+
+    expect(mockIngestionService.retryBatchJobs).toHaveBeenCalledWith({
+      jobIds: ['job-1'],
+      filter: 'ReadyForReview',
+    });
+  });
+
+  it('renders Retry All button in queue toolbar with filtered count', () => {
+    component.setFilter('All');
+    fixture.detectChanges();
+
+    const retryAllBtn = fixture.nativeElement.querySelector('.queue-toolbar .retry-all-tab-btn');
+    expect(retryAllBtn).toBeTruthy();
+    expect(retryAllBtn.textContent).toContain('Retry All (3)');
+
+    component.setFilter('Published');
+    fixture.detectChanges();
+    expect(retryAllBtn.textContent).toContain('Retry All (1)');
+  });
+
+  it('loads LLM settings on init and displays Pause button when enabled', () => {
+    expect(mockLlmSettingsService.getSettings).toHaveBeenCalled();
+    expect(component.isIngestionEnabled()).toBe(true);
+
+    const toggleBtn = fixture.nativeElement.querySelector('.toggle-ingestion-btn');
+    expect(toggleBtn).toBeTruthy();
+    expect(toggleBtn.textContent).toContain('Pause Ingestion');
+
+    const pausedBanner = fixture.nativeElement.querySelector('.paused-ingestion-banner');
+    expect(pausedBanner).toBeNull();
+  });
+
+  it('toggles ingestion state and renders paused banner when paused', () => {
+    component.toggleIngestionState();
+    fixture.detectChanges();
+
+    expect(mockLlmSettingsService.setIngestionEnabled).toHaveBeenCalledWith(false);
+    expect(component.isIngestionEnabled()).toBe(false);
+
+    const toggleBtn = fixture.nativeElement.querySelector('.toggle-ingestion-btn');
+    expect(toggleBtn.textContent).toContain('Resume Ingestion');
+
+    const pausedBanner = fixture.nativeElement.querySelector('.paused-ingestion-banner');
+    expect(pausedBanner).toBeTruthy();
+    expect(pausedBanner.textContent).toContain('LLM Ingestion is Paused');
+
+    // Resume via banner button
+    component.toggleIngestionState();
+    fixture.detectChanges();
+
+    expect(mockLlmSettingsService.setIngestionEnabled).toHaveBeenCalledWith(true);
+    expect(component.isIngestionEnabled()).toBe(true);
   });
 });

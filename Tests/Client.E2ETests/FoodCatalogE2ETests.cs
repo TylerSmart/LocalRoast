@@ -100,4 +100,55 @@ public sealed class FoodCatalogE2ETests : E2ETestBase
         await searchInput.FillAsync("ZzzNonExistentFoodItem999");
         await Expect(Page.Locator(".empty-state h3")).ToContainTextAsync("No food items found");
     }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task FoodCatalog_RecipesUsingFoodItem_CanOpenDialog_AndUnlinkIngredient()
+    {
+        await RegisterAndLoginAsync();
+
+        // 1. Create a canonical food item via API
+        var foodItemId = await CreateFoodItemViaApiAsync("Organic Sweet Basil");
+
+        // 2. Create a recipe using this food item
+        var recipeTitle = $"Basil Pesto {Guid.NewGuid():N}"[..20];
+        await CreateRecipeWithIngredientViaApiAsync(recipeTitle, "Organic Sweet Basil", foodItemId);
+
+        // 3. Navigate to Food Catalog
+        await Page.Locator("nav.desktop-nav a", new() { HasText = "Food Catalog" }).ClickAsync();
+        await Expect(Page).ToHaveURLAsync(new Regex(".*/catalog.*"));
+
+        var card = Page.Locator(".food-item-card", new() { HasText = "Organic Sweet Basil" });
+        await Expect(card).ToBeVisibleAsync();
+
+        // 4. Verify "1 recipe" button is present
+        var recipesBtn = card.Locator(".usage-btn");
+        await Expect(recipesBtn).ToBeVisibleAsync();
+        await Expect(recipesBtn).ToContainTextAsync("1 recipe");
+
+        // 5. Click button to open FoodItemRecipesDialog
+        await recipesBtn.ClickAsync();
+
+        var recipesDialog = Page.Locator("app-food-item-recipes-dialog");
+        await Expect(recipesDialog).ToBeVisibleAsync();
+        await Expect(recipesDialog.Locator(".dialog-title"))
+            .ToContainTextAsync("Organic Sweet Basil");
+
+        var recipeRow = recipesDialog.Locator(".recipe-usage-row", new() { HasText = recipeTitle });
+        await Expect(recipeRow).ToBeVisibleAsync();
+
+        // 6. Click "Unlink All"
+        var unlinkBtn = recipesDialog.Locator(".unlink-all-btn");
+        await unlinkBtn.ClickAsync();
+
+        // Verify success banner appears
+        await Expect(recipesDialog.Locator(".success-banner")).ToBeVisibleAsync();
+
+        // Close dialog
+        await recipesDialog.Locator("button", new() { HasText = "Close" }).ClickAsync();
+        await Expect(recipesDialog).Not.ToBeVisibleAsync();
+
+        // Card should now display "0 recipes"
+        await Expect(card.Locator(".usage-count.muted")).ToContainTextAsync("0 recipes");
+    }
 }

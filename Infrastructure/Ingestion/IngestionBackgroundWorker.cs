@@ -41,6 +41,22 @@ public sealed class IngestionBackgroundWorker(
         {
             try
             {
+                var pollInterval = TimeSpan.FromSeconds(
+                    Math.Max(1, options.Value.WorkerPollIntervalSeconds)
+                );
+
+                using (var checkScope = scopeFactory.CreateScope())
+                {
+                    var settingsService =
+                        checkScope.ServiceProvider.GetRequiredService<ILlmSettingsService>();
+                    var config = await settingsService.GetEffectiveConfigAsync(stoppingToken);
+                    if (!config.EnableIngestion)
+                    {
+                        await queueSignal.WaitForWorkAsync(pollInterval, stoppingToken);
+                        continue;
+                    }
+                }
+
                 // 1. Drain all pending queued jobs
                 bool processedAny;
                 do
@@ -59,7 +75,7 @@ public sealed class IngestionBackgroundWorker(
                 }
 
                 // 3. Await signal or poll interval
-                var pollInterval = TimeSpan.FromSeconds(
+                pollInterval = TimeSpan.FromSeconds(
                     Math.Max(1, options.Value.WorkerPollIntervalSeconds)
                 );
                 await queueSignal.WaitForWorkAsync(pollInterval, stoppingToken);

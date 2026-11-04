@@ -69,4 +69,15 @@ public sealed class LlmSettingsController(ILlmSettingsService settingsService) :
             );
         }
     }
+
+    [HttpPost("set-ingestion-enabled")]
+    [ProducesResponseType(typeof(LlmSettingsDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> SetIngestionEnabled(
+        [FromQuery] bool enabled,
+        CancellationToken cancellationToken
+    )
+    {
+        var updated = await settingsService.SetIngestionEnabledAsync(enabled, cancellationToken);
+        return Ok(updated);
+    }
 }

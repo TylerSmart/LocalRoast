@@ -3,7 +3,7 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { TestBed } from '@angular/core/testing';
 import { MatDialog } from '@angular/material/dialog';
 import { firstValueFrom } from 'rxjs';
-import { AccountDto } from '../../models/account.models';
+import { AccountDto, ResetAppDataResultDto } from '../../models/account.models';
 import { AuthResponse } from '../../models/auth.models';
 import { AccountService } from './account.service';
 
@@ -102,6 +102,26 @@ describe('AccountService', () => {
         width: '640px',
       }),
     );
+  });
+
+  it('resets app data via POST /api/account/reset-data', async () => {
+    const expectedRes: ResetAppDataResultDto = {
+      deletedRecipesCount: 5,
+      deletedMealPlansCount: 2,
+      deletedShoppingListsCount: 1,
+      deletedIngestionJobsCount: 3,
+      deletedFoodItemsCount: 10,
+      deletedTagsCount: 4,
+      deletedCollectionsCount: 2,
+      resetAt: '2026-11-04T12:00:00Z',
+    };
+
+    const promise = firstValueFrom(service.resetAppData());
+    const req = httpMock.expectOne('/api/account/reset-data');
+    expect(req.request.method).toBe('POST');
+    req.flush(expectedRes);
+
+    await expect(promise).resolves.toEqual(expectedRes);
   });
 
   it('opens AccountSettingsDialogComponent via MatDialog with specific initialTab', async () => {

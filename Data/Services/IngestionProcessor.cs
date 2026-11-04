@@ -1,5 +1,6 @@
 using System.Text.Json;
 using App.Core.Exceptions;
+using App.Core.FoodCatalog;
 using App.Core.Ingestion;
 using App.Core.Media;
 using App.Core.Recipes;
@@ -45,21 +46,32 @@ public sealed class IngestionProcessor(
         foreach (var job in interrupted)
         {
             job.Status = IngestionJobStatus.Queued;
+
             job.NextRetryAt = null;
+
             job.StatusDetail = "Recovered from interrupted processing.";
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
+
         logger.LogInformation(
             "Recovered {Count} interrupted ingestion job(s) back to Queued state.",
             interrupted.Count
         );
+
         return interrupted.Count;
     }
 
     public async Task<bool> ProcessNextQueuedJobAsync(CancellationToken cancellationToken = default)
     {
+        var config = await llmSettingsService.GetEffectiveConfigAsync(cancellationToken);
+        if (!config.EnableIngestion)
+        {
+            return false;
+        }
+
         var now = DateTimeOffset.UtcNow;
+
         var nextJob = await dbContext
             .IngestionJobs.Where(j =>
                 j.Status == IngestionJobStatus.Queued
@@ -82,6 +94,12 @@ public sealed class IngestionProcessor(
         CancellationToken cancellationToken = default
     )
     {
+        var initialConfig = await llmSettingsService.GetEffectiveConfigAsync(cancellationToken);
+        if (!initialConfig.EnableIngestion)
+        {
+            return false;
+        }
+
         var job = await dbContext.IngestionJobs.FirstOrDefaultAsync(
             j => j.Id == jobId,
             cancellationToken
@@ -92,12 +110,19 @@ public sealed class IngestionProcessor(
             return false;
         }
 
+        using var activeCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        using var activeRegistration = queueSignal.RegisterActiveJobExecution(job.Id, activeCts);
+        var jobCt = activeCts.Token;
+
         try
         {
             // Step 1: Preprocessing
+
             job.Status = IngestionJobStatus.Preprocessing;
+
             job.StatusDetail = "Preprocessing source content...";
-            await dbContext.SaveChangesAsync(cancellationToken);
+
+            await dbContext.SaveChangesAsync(jobCt);
 
             if (job.Channel == IngestionChannel.WebUrl)
             {
@@ -108,18 +133,18 @@ public sealed class IngestionProcessor(
                         throw new DomainValidationException("WebUrl job has no SourceUrl.");
                     }
 
-                    var scrapeResult = await scraper.ScrapeRecipePageAsync(
-                        job.SourceUrl,
-                        cancellationToken
-                    );
+                    var scrapeResult = await scraper.ScrapeRecipePageAsync(job.SourceUrl, jobCt);
+
                     var payload = scrapeResult.Payload;
 
                     job.ScrapedPageJson = JsonSerializer.Serialize(payload, JsonOptions);
+
                     job.NormalizedSourceText = BuildNormalizedWebText(payload);
 
                     if (!string.IsNullOrWhiteSpace(scrapeResult.DownloadedCoverImagePath))
                     {
                         job.DownloadedCoverImagePath = scrapeResult.DownloadedCoverImagePath;
+
                         job.DownloadedThumbnailImagePath =
                             scrapeResult.DownloadedThumbnailImagePath;
                     }
@@ -142,7 +167,7 @@ public sealed class IngestionProcessor(
                                 : payload.PageTitle.Trim();
                     }
 
-                    await dbContext.SaveChangesAsync(cancellationToken);
+                    await dbContext.SaveChangesAsync(jobCt);
                 }
                 else
                 {
@@ -152,13 +177,16 @@ public sealed class IngestionProcessor(
                             job.ScrapedPageJson,
                             JsonOptions
                         );
+
                         if (cachedPayload is not null)
                         {
                             var refreshedText = BuildNormalizedWebText(cachedPayload);
+
                             if (job.NormalizedSourceText != refreshedText)
                             {
                                 job.NormalizedSourceText = refreshedText;
-                                await dbContext.SaveChangesAsync(cancellationToken);
+
+                                await dbContext.SaveChangesAsync(jobCt);
                             }
                         }
                     }
@@ -173,7 +201,8 @@ public sealed class IngestionProcessor(
                 if (string.IsNullOrWhiteSpace(job.NormalizedSourceText))
                 {
                     job.NormalizedSourceText = job.RawText;
-                    await dbContext.SaveChangesAsync(cancellationToken);
+
+                    await dbContext.SaveChangesAsync(jobCt);
                 }
             }
             else if (job.Channel == IngestionChannel.Pdf)
@@ -181,6 +210,7 @@ public sealed class IngestionProcessor(
                 if (string.IsNullOrWhiteSpace(job.PdfInspectionJson))
                 {
                     string? pdfUrl = null;
+
                     if (!string.IsNullOrWhiteSpace(job.SourceFilesJson))
                     {
                         try
@@ -188,6 +218,7 @@ public sealed class IngestionProcessor(
                             var sourceFiles = JsonSerializer.Deserialize<
                                 List<IngestionSourceFileDto>
                             >(job.SourceFilesJson, JsonOptions);
+
                             pdfUrl = sourceFiles?.FirstOrDefault()?.UrlPath;
                         }
                         catch
@@ -203,11 +234,12 @@ public sealed class IngestionProcessor(
                         );
                     }
 
-                    var jobToken = job.Id.ToString("N");
+                    var jobPrefix = job.Id.ToString("N");
+
                     var inspection = await pdfInspector.InspectAndPrepareAsync(
                         pdfUrl,
-                        jobToken,
-                        cancellationToken
+                        jobPrefix,
+                        jobCt
                     );
 
                     job.PdfInspectionJson = JsonSerializer.Serialize(
@@ -225,31 +257,35 @@ public sealed class IngestionProcessor(
                             .Summary
                             .RenderedPageImages[0]
                             .UrlPath;
+
                         job.DownloadedThumbnailImagePath =
                             inspection.GeneratedThumbnailImagePath
                             ?? inspection.Summary.RenderedPageImages[0].UrlPath;
                     }
 
-                    await dbContext.SaveChangesAsync(cancellationToken);
+                    await dbContext.SaveChangesAsync(jobCt);
                 }
             }
 
-            if (await IsJobDiscardedInDbAsync(job.Id, cancellationToken))
+            if (await IsJobDiscardedInDbAsync(job.Id, jobCt))
             {
                 return false;
             }
 
             // Step 2: Extracting
-            job.Status = IngestionJobStatus.Extracting;
-            job.StatusDetail = "Extracting structured recipe via local LLM...";
-            await dbContext.SaveChangesAsync(cancellationToken);
 
-            var config = await llmSettingsService.GetEffectiveConfigAsync(cancellationToken);
+            job.Status = IngestionJobStatus.Extracting;
+
+            job.StatusDetail = "Extracting structured recipe via local LLM...";
+
+            await dbContext.SaveChangesAsync(jobCt);
+
+            var config = await llmSettingsService.GetEffectiveConfigAsync(jobCt);
 
             var tags = await dbContext
                 .Tags.AsNoTracking()
                 .Select(t => new CatalogTagLookupItem(t.Id, t.Name, t.NormalizedName, t.Slug))
-                .ToListAsync(cancellationToken);
+                .ToListAsync(jobCt);
 
             var catalogFoods = await dbContext
                 .FoodItems.AsNoTracking()
@@ -260,16 +296,17 @@ public sealed class IngestionProcessor(
                     f.IsPantryStaple,
                     f.Aliases.Select(a => a.NormalizedAlias).ToList()
                 ))
-                .ToListAsync(cancellationToken);
+                .ToListAsync(jobCt);
 
             var tagNames = tags.Select(t => t.Name).ToList();
+
             var availableFoodNames = await dbContext
                 .FoodItems.AsNoTracking()
                 .OrderByDescending(f => f.RecipeIngredients.Count)
                 .ThenBy(f => f.Name)
                 .Select(f => f.Name)
                 .Take(500)
-                .ToListAsync(cancellationToken);
+                .ToListAsync(jobCt);
 
             var pendingDraftJsons = await dbContext
                 .IngestionJobs.AsNoTracking()
@@ -279,7 +316,8 @@ public sealed class IngestionProcessor(
                 .OrderByDescending(j => j.ProcessedAt)
                 .Take(100)
                 .Select(j => j.ExtractedDraftJson!)
-                .ToListAsync(cancellationToken);
+                .ToListAsync(jobCt);
+
             foreach (var dj in pendingDraftJsons)
             {
                 try
@@ -288,6 +326,7 @@ public sealed class IngestionProcessor(
                         dj,
                         JsonOptions
                     );
+
                     if (pd?.ProposedTagNames is { Count: > 0 })
                     {
                         foreach (var pt in pd.ProposedTagNames)
@@ -299,6 +338,7 @@ public sealed class IngestionProcessor(
                                 tagNames.Add(pt);
                         }
                     }
+
                     if (pd?.Ingredients is { Count: > 0 })
                     {
                         foreach (var ing in pd.Ingredients)
@@ -317,8 +357,11 @@ public sealed class IngestionProcessor(
                 }
                 catch { }
             }
+
             // Determine if Vision or Text pipeline is needed
+
             var requiresVision = job.Channel == IngestionChannel.Images;
+
             if (
                 job.Channel == IngestionChannel.Pdf
                 && !string.IsNullOrWhiteSpace(job.PdfInspectionJson)
@@ -330,6 +373,7 @@ public sealed class IngestionProcessor(
                         job.PdfInspectionJson,
                         JsonOptions
                     );
+
                     if (insp?.ExtractionMode == PdfExtractionMode.VisionRaster)
                     {
                         requiresVision = true;
@@ -342,6 +386,7 @@ public sealed class IngestionProcessor(
             }
 
             LlmExtractedRecipePayload rawExtracted;
+
             string modelUsed;
 
             if (requiresVision)
@@ -373,9 +418,11 @@ public sealed class IngestionProcessor(
                         var jpegBytes = await mediaStorageService.EncodeMediaImageAsVisionJpegAsync(
                             sf.UrlPath,
                             1568,
-                            cancellationToken
+                            jobCt
                         );
+
                         var base64 = Convert.ToBase64String(jpegBytes);
+
                         imageInputs.Add(
                             new LlmVisionImageInput(sf.PageNumber, "image/jpeg", base64)
                         );
@@ -390,6 +437,7 @@ public sealed class IngestionProcessor(
                         job.PdfInspectionJson,
                         JsonOptions
                     );
+
                     if (insp?.RenderedPageImages is { Count: > 0 })
                     {
                         foreach (var page in insp.RenderedPageImages)
@@ -398,9 +446,11 @@ public sealed class IngestionProcessor(
                                 await mediaStorageService.EncodeMediaImageAsVisionJpegAsync(
                                     page.UrlPath,
                                     1568,
-                                    cancellationToken
+                                    jobCt
                                 );
+
                             var base64 = Convert.ToBase64String(jpegBytes);
+
                             imageInputs.Add(
                                 new LlmVisionImageInput(page.PageNumber, "image/jpeg", base64)
                             );
@@ -416,6 +466,7 @@ public sealed class IngestionProcessor(
                 }
 
                 string? hintText = null;
+
                 if (!string.IsNullOrWhiteSpace(job.SourceBookTitle))
                 {
                     hintText = job.SourceBookPage.HasValue
@@ -433,7 +484,7 @@ public sealed class IngestionProcessor(
                 rawExtracted = await llmClient.ExtractRecipeFromImagesAsync(
                     config,
                     visionContext,
-                    cancellationToken
+                    jobCt
                 );
             }
             else
@@ -456,11 +507,11 @@ public sealed class IngestionProcessor(
                 rawExtracted = await llmClient.ExtractRecipeFromTextAsync(
                     config,
                     extractionContext,
-                    cancellationToken
+                    jobCt
                 );
             }
 
-            if (await IsJobDiscardedInDbAsync(job.Id, cancellationToken))
+            if (await IsJobDiscardedInDbAsync(job.Id, jobCt))
             {
                 return false;
             }
@@ -480,11 +531,13 @@ public sealed class IngestionProcessor(
                     AvailableTagNames: tagNames,
                     AvailableFoodNames: availableFoodNames
                 );
+
                 var retryExtracted = await llmClient.ExtractRecipeFromTextAsync(
                     config,
                     retryContext,
-                    cancellationToken
+                    jobCt
                 );
+
                 if (
                     (retryExtracted.Ingredients?.Count ?? 0)
                         > (rawExtracted.Ingredients?.Count ?? 0)
@@ -494,8 +547,11 @@ public sealed class IngestionProcessor(
                     rawExtracted = retryExtracted;
                 }
             }
+
             string? fallbackSourceName = job.SourceName;
+
             string? fallbackSourceAuthor = job.SourceAuthor;
+
             if (!string.IsNullOrWhiteSpace(job.ScrapedPageJson))
             {
                 try
@@ -504,7 +560,9 @@ public sealed class IngestionProcessor(
                         job.ScrapedPageJson,
                         JsonOptions
                     );
+
                     fallbackSourceName ??= page?.SiteName;
+
                     fallbackSourceAuthor ??= page?.Author;
                 }
                 catch
@@ -514,6 +572,7 @@ public sealed class IngestionProcessor(
             }
 
             IReadOnlyList<Guid>? fallbackCollectionIds = null;
+
             if (!string.IsNullOrWhiteSpace(job.InitialCollectionIdsJson))
             {
                 try
@@ -522,14 +581,16 @@ public sealed class IngestionProcessor(
                         job.InitialCollectionIdsJson,
                         JsonOptions
                     );
+
                     if (parsedIds is { Count: > 0 })
                     {
                         var distinctIds = parsedIds.Distinct().ToList();
+
                         fallbackCollectionIds = await dbContext
                             .Collections.AsNoTracking()
                             .Where(c => distinctIds.Contains(c.Id))
                             .Select(c => c.Id)
-                            .ToListAsync(cancellationToken);
+                            .ToListAsync(jobCt);
                     }
                 }
                 catch
@@ -553,7 +614,8 @@ public sealed class IngestionProcessor(
                     is IngestionChannel.Images
                         or IngestionChannel.Pdf,
                 extractedModel: modelUsed,
-                fallbackCollectionIds: fallbackCollectionIds
+                fallbackCollectionIds: fallbackCollectionIds,
+                rawSourceText: job.NormalizedSourceText ?? job.RawText
             );
 
             job.ExtractedModel = modelUsed;
@@ -565,12 +627,14 @@ public sealed class IngestionProcessor(
             {
                 job.SourceBookTitle = draft.SourceBookTitle;
             }
+
             if (!job.SourceBookPage.HasValue && draft.SourceBookPage.HasValue)
             {
                 job.SourceBookPage = draft.SourceBookPage;
             }
 
             // Auto-Publish check
+
             var canAutoPublish =
                 (config.AutoPublishHighConfidenceText || job.AutoPublish)
                 && (
@@ -584,27 +648,59 @@ public sealed class IngestionProcessor(
 
             if (canAutoPublish)
             {
-                var createdRecipe = await PublishDraftInternalAsync(job, draft, cancellationToken);
+                var createdRecipe = await PublishDraftInternalAsync(job, draft, jobCt);
+
                 job.Status = IngestionJobStatus.Published;
+
                 job.ResultingRecipeId = createdRecipe.Id;
+
                 job.ExtractedDraftJson = JsonSerializer.Serialize(draft, JsonOptions);
+
                 job.ConfidenceScore = draft.ConfidenceScore;
+
                 job.DisplayTitle = draft.Title;
+
                 job.ProcessedAt = DateTimeOffset.UtcNow;
+
                 job.StatusDetail = $"Auto-published high-confidence extraction ({modelUsed}).";
             }
             else
             {
                 job.Status = IngestionJobStatus.ReadyForReview;
+
                 job.ExtractedDraftJson = JsonSerializer.Serialize(draft, JsonOptions);
+
                 job.ConfidenceScore = draft.ConfidenceScore;
+
                 job.DisplayTitle = draft.Title;
+
                 job.ProcessedAt = DateTimeOffset.UtcNow;
+
                 job.StatusDetail = $"Ready for side-by-side review ({modelUsed}).";
             }
 
-            await dbContext.SaveChangesAsync(cancellationToken);
+            await dbContext.SaveChangesAsync(jobCt);
+
             return true;
+        }
+        catch (OperationCanceledException)
+        {
+            if (await IsJobDiscardedInDbAsync(job.Id, CancellationToken.None))
+            {
+                return false;
+            }
+
+            logger.LogInformation(
+                "Job {JobId} execution was canceled or ingestion was paused. Reverting to Queued.",
+                job.Id
+            );
+
+            job.Status = IngestionJobStatus.Queued;
+            job.NextRetryAt = null;
+            job.StatusDetail = "Paused. Queued to resume when ingestion is enabled.";
+
+            await dbContext.SaveChangesAsync(CancellationToken.None);
+            return false;
         }
         catch (LlmHostUnavailableException ex)
         {
@@ -618,12 +714,19 @@ public sealed class IngestionProcessor(
                 "LLM host unavailable while processing job {JobId}. Transitioning to WaitingForLlmHost.",
                 job.Id
             );
+
             job.Status = IngestionJobStatus.WaitingForLlmHost;
+
             job.AttemptCount++;
+
             var delaySeconds = Math.Min(300, 15 * (1 << Math.Min(job.AttemptCount - 1, 5)));
+
             job.NextRetryAt = DateTimeOffset.UtcNow.AddSeconds(delaySeconds);
+
             job.StatusDetail = ex.Message;
+
             await dbContext.SaveChangesAsync(cancellationToken);
+
             return false;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -633,15 +736,53 @@ public sealed class IngestionProcessor(
                 return false;
             }
 
+            job.AttemptCount++;
+
+            int maxRetries;
+            try
+            {
+                var cfg = await llmSettingsService.GetEffectiveConfigAsync(cancellationToken);
+                maxRetries = cfg.MaxIngestionRetries;
+            }
+            catch
+            {
+                maxRetries = 3;
+            }
+
+            if (job.AttemptCount <= maxRetries)
+            {
+                var delaySeconds = Math.Min(60, 5 * (1 << Math.Min(job.AttemptCount - 1, 4)));
+                job.Status = IngestionJobStatus.Queued;
+                job.NextRetryAt = DateTimeOffset.UtcNow.AddSeconds(delaySeconds);
+                job.StatusDetail =
+                    $"Attempt {job.AttemptCount}/{maxRetries} failed: {ex.Message}. Retrying shortly...";
+
+                logger.LogWarning(
+                    ex,
+                    "Error processing job {JobId} (attempt {AttemptCount}/{MaxRetries}). Scheduled auto-retry in {DelaySeconds}s.",
+                    job.Id,
+                    job.AttemptCount,
+                    maxRetries,
+                    delaySeconds
+                );
+
+                await dbContext.SaveChangesAsync(cancellationToken);
+                return false;
+            }
+
             logger.LogError(
                 ex,
-                "Fatal error processing job {JobId}. Transitioning to Failed.",
-                job.Id
+                "Fatal error processing job {JobId} after {AttemptCount} attempt(s). Transitioning to Failed.",
+                job.Id,
+                job.AttemptCount
             );
+
             job.Status = IngestionJobStatus.Failed;
-            job.AttemptCount++;
+            job.NextRetryAt = null;
             job.StatusDetail = ex.Message;
+
             await dbContext.SaveChangesAsync(cancellationToken);
+
             return false;
         }
     }
@@ -659,6 +800,7 @@ public sealed class IngestionProcessor(
     )
     {
         var now = DateTimeOffset.UtcNow;
+
         var waitingJobs = await dbContext
             .IngestionJobs.Where(j =>
                 j.Status == IngestionJobStatus.WaitingForLlmHost
@@ -672,18 +814,22 @@ public sealed class IngestionProcessor(
         }
 
         var config = await llmSettingsService.GetEffectiveConfigAsync(cancellationToken);
+
         if (string.IsNullOrWhiteSpace(config.TextModel))
         {
             return 0;
         }
 
         var probeResult = await llmClient.ProbeAndListModelsAsync(config, 10, cancellationToken);
+
         if (probeResult.IsReachable)
         {
             var promotedCount = 0;
+
             foreach (var job in waitingJobs)
             {
                 var isVisionJob = job.Channel == IngestionChannel.Images;
+
                 if (
                     job.Channel == IngestionChannel.Pdf
                     && !string.IsNullOrWhiteSpace(job.PdfInspectionJson)
@@ -695,6 +841,7 @@ public sealed class IngestionProcessor(
                             job.PdfInspectionJson,
                             JsonOptions
                         );
+
                         if (insp?.ExtractionMode == PdfExtractionMode.VisionRaster)
                         {
                             isVisionJob = true;
@@ -713,8 +860,11 @@ public sealed class IngestionProcessor(
                 if (canPromote)
                 {
                     job.Status = IngestionJobStatus.Queued;
+
                     job.NextRetryAt = null;
+
                     job.StatusDetail = "LLM host is online; queued for extraction.";
+
                     promotedCount++;
                 }
             }
@@ -722,21 +872,27 @@ public sealed class IngestionProcessor(
             if (promotedCount > 0)
             {
                 await dbContext.SaveChangesAsync(cancellationToken);
+
                 queueSignal.NotifyWorkAvailable();
+
                 logger.LogInformation(
                     "LLM host is back online; promoted {Count} waiting job(s) to Queued.",
                     promotedCount
                 );
+
                 return promotedCount;
             }
         }
 
         // Host still down; increment backoff
+
         foreach (var job in waitingJobs)
         {
             job.NextRetryAt = DateTimeOffset.UtcNow.AddSeconds(30);
         }
+
         await dbContext.SaveChangesAsync(cancellationToken);
+
         return 0;
     }
 
@@ -747,7 +903,9 @@ public sealed class IngestionProcessor(
     )
     {
         // 1. Create missing food items
+
         var ingredientsInput = new List<RecipeIngredientInput>();
+
         if (draft.Ingredients is not null)
         {
             foreach (var ing in draft.Ingredients)
@@ -768,13 +926,26 @@ public sealed class IngestionProcessor(
                     );
                 }
 
+                var (cleanQty, cleanMaxQty) = RecipeDraftNormalizer.NormalizeQuantities(
+                    ing.Quantity,
+                    ing.MaxQuantity
+                );
+
+                var cleanUnit =
+                    ing.Unit == MeasurementUnit.Custom
+                    && string.IsNullOrWhiteSpace(ing.CustomUnitName)
+                        ? null
+                        : ing.Unit;
+
                 ingredientsInput.Add(
                     new RecipeIngredientInput(
                         SectionName: ing.SectionName,
-                        Quantity: ing.Quantity,
-                        MaxQuantity: ing.MaxQuantity,
-                        Unit: ing.Unit,
-                        CustomUnitName: ing.CustomUnitName,
+                        Quantity: cleanQty,
+                        MaxQuantity: cleanMaxQty,
+                        Unit: cleanUnit,
+                        CustomUnitName: cleanUnit == MeasurementUnit.Custom
+                            ? ing.CustomUnitName
+                            : null,
                         FoodItemId: foodItemId,
                         LinkedRecipeId: null,
                         DisplayName: ing.DisplayName,
@@ -787,7 +958,9 @@ public sealed class IngestionProcessor(
         }
 
         // 2. Map steps
+
         var stepsInput = new List<RecipeStepInput>();
+
         if (draft.Steps is not null)
         {
             foreach (var s in draft.Steps)
@@ -805,6 +978,7 @@ public sealed class IngestionProcessor(
         }
 
         // 3. Resolve & auto-create any proposed tags
+
         var resolvedTagIds = await IngestionCatalogMaterializer.ResolveAndMaterializeTagsAsync(
             dbContext,
             draft.SuggestedTagIds,
@@ -813,6 +987,7 @@ public sealed class IngestionProcessor(
         );
 
         // 4. Create published recipe
+
         var upsertRequest = new UpsertRecipeRequest(
             Title: draft.Title,
             Description: draft.Description,
@@ -843,6 +1018,7 @@ public sealed class IngestionProcessor(
                 r => r.Id == job.ResultingRecipeId.Value,
                 cancellationToken
             );
+
             if (existingRecipe is not null)
             {
                 var updated = await recipeService.UpdateRecipeAsync(
@@ -850,6 +1026,7 @@ public sealed class IngestionProcessor(
                     upsertRequest,
                     cancellationToken
                 );
+
                 if (updated is not null)
                 {
                     return updated;
@@ -866,25 +1043,34 @@ public sealed class IngestionProcessor(
 
         if (!string.IsNullOrWhiteSpace(payload.PageTitle))
             sb.AppendLine($"Title: {payload.PageTitle}");
+
         if (!string.IsNullOrWhiteSpace(payload.SiteName))
             sb.AppendLine($"Site: {payload.SiteName}");
+
         if (!string.IsNullOrWhiteSpace(payload.Author))
             sb.AppendLine($"Author: {payload.Author}");
+
         if (!string.IsNullOrWhiteSpace(payload.Description))
             sb.AppendLine($"Description: {payload.Description}");
+
         if (!string.IsNullOrWhiteSpace(payload.RecipeYieldText))
             sb.AppendLine($"Yield: {payload.RecipeYieldText}");
+
         if (payload.PrepTimeMinutes.HasValue)
             sb.AppendLine($"Prep Time: {payload.PrepTimeMinutes} minutes");
+
         if (payload.CookTimeMinutes.HasValue)
             sb.AppendLine($"Cook Time: {payload.CookTimeMinutes} minutes");
+
         if (payload.TotalTimeMinutes.HasValue)
             sb.AppendLine($"Total Time: {payload.TotalTimeMinutes} minutes");
 
         if (payload.RawIngredientLines.Count > 0)
         {
             sb.AppendLine();
+
             sb.AppendLine("Ingredients:");
+
             foreach (var ing in payload.RawIngredientLines)
             {
                 sb.AppendLine($"- {ing}");
@@ -894,7 +1080,9 @@ public sealed class IngestionProcessor(
         if (payload.RawInstructionLines.Count > 0)
         {
             sb.AppendLine();
+
             sb.AppendLine("Instructions:");
+
             for (var i = 0; i < payload.RawInstructionLines.Count; i++)
             {
                 sb.AppendLine($"{i + 1}. {payload.RawInstructionLines[i]}");
@@ -909,7 +1097,9 @@ public sealed class IngestionProcessor(
         if (!hasCompleteStructuredRecipe && !string.IsNullOrWhiteSpace(payload.CleanedBodyText))
         {
             sb.AppendLine();
+
             sb.AppendLine("Cleaned Page Text:");
+
             sb.AppendLine(payload.CleanedBodyText);
         }
 

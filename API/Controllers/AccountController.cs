@@ -2,6 +2,7 @@ using System.Security.Claims;
 using App.Core.Account;
 using App.Core.Authentication;
 using App.Core.Exceptions;
+using App.Core.Maintenance;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -203,5 +204,23 @@ public sealed class AccountController(IAccountService accountService) : Controll
                 }
             );
         }
+    }
+
+    [HttpPost("reset-data")]
+    [ProducesResponseType(typeof(ResetAppDataResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> ResetAppData(
+        [FromServices] IAppDataMaintenanceService maintenanceService,
+        CancellationToken cancellationToken
+    )
+    {
+        var userId = TryGetCurrentUserId();
+        if (userId is null)
+        {
+            return Unauthorized();
+        }
+
+        var result = await maintenanceService.ResetAppDataAsync(cancellationToken);
+        return Ok(result);
     }
 }

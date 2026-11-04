@@ -65,6 +65,8 @@ public interface IMediaStorageService
         CancellationToken cancellationToken = default
     );
 
+    Task PurgeAllMediaAsync(CancellationToken cancellationToken = default);
+
     Task<UploadedCookLogPhotoDto> SaveCookLogPhotoAsync(
         Stream content,
         string originalFileName,

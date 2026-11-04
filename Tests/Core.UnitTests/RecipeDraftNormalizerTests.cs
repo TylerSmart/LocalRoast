@@ -404,4 +404,300 @@ public sealed class RecipeDraftNormalizerTests
         Assert.AreEqual(TagCategory.Equipment, RecipeDraftNormalizer.InferTagCategory("Sheet Pan"));
         Assert.AreEqual(TagCategory.Custom, RecipeDraftNormalizer.InferTagCategory("Weeknight"));
     }
+
+    [TestMethod]
+    public void NormalizeQuantities_ZeroOrNegativeQuantity_NormalizesToNull()
+    {
+        var (qZero, maxQZero) = RecipeDraftNormalizer.NormalizeQuantities(0m, null);
+        Assert.IsNull(qZero);
+        Assert.IsNull(maxQZero);
+
+        var (qNeg, maxQNeg) = RecipeDraftNormalizer.NormalizeQuantities(-1.5m, 0m);
+        Assert.IsNull(qNeg);
+        Assert.IsNull(maxQNeg);
+    }
+
+    [TestMethod]
+    public void NormalizeQuantities_MaxQuantitySmallerThanQuantity_SwapsValues()
+    {
+        var (qty, maxQty) = RecipeDraftNormalizer.NormalizeQuantities(2m, 1m);
+        Assert.AreEqual(1m, qty);
+        Assert.AreEqual(2m, maxQty);
+    }
+
+    [TestMethod]
+    public void NormalizeQuantities_MaxQuantityOnly_PromotesToBaseQuantity()
+    {
+        var (qty, maxQty) = RecipeDraftNormalizer.NormalizeQuantities(null, 2.5m);
+        Assert.AreEqual(2.5m, qty);
+        Assert.IsNull(maxQty);
+    }
+
+    [TestMethod]
+    public void NormalizeQuantities_EqualQuantityAndMaxQuantity_ClearsRedundantMax()
+    {
+        var (qty, maxQty) = RecipeDraftNormalizer.NormalizeQuantities(2m, 2m);
+        Assert.AreEqual(2m, qty);
+        Assert.IsNull(maxQty);
+    }
+
+    [TestMethod]
+    public void Normalize_ZeroQuantityIngredient_ProducesNullQuantityInDraft()
+    {
+        var raw = new LlmExtractedRecipePayload(
+            Title: "Garlic Bread",
+            Description: null,
+            BaseServings: 4,
+            YieldDisplay: null,
+            PrepTimeMinutes: null,
+            CookTimeMinutes: null,
+            TotalTimeMinutes: null,
+            Difficulty: null,
+            SourceName: null,
+            SourceAuthor: null,
+            ConfidenceScore: 0.9m,
+            SuggestedTagNames: null,
+            Ingredients:
+            [
+                new LlmExtractedIngredientItem(
+                    SectionName: null,
+                    Quantity: 0m, // 0 quantity from LLM
+                    MaxQuantity: 0m,
+                    Unit: null,
+                    CanonicalFoodName: "garlic powder",
+                    DisplayName: "garlic powder to taste",
+                    PreparationNote: null,
+                    IsOptional: false,
+                    OriginalRawText: "garlic powder to taste"
+                ),
+            ],
+            Steps: [new LlmExtractedStepItem(null, "Toast bread with butter and garlic powder.")]
+        );
+
+        var draft = RecipeDraftNormalizer.Normalize(
+            raw,
+            catalogFoods: [],
+            tags: [],
+            sourceUrl: null,
+            fallbackSourceName: null,
+            fallbackSourceAuthor: null,
+            coverImagePath: null,
+            thumbnailImagePath: null
+        );
+
+        Assert.AreEqual(1, draft.Ingredients?.Count);
+        Assert.IsNull(draft.Ingredients![0].Quantity, "0 quantity should be normalized to null.");
+        Assert.IsNull(
+            draft.Ingredients![0].MaxQuantity,
+            "0 max quantity should be normalized to null."
+        );
+    }
+
+    [TestMethod]
+    public void Normalize_PlaceholderFoodName_DoesNotProposeNewFoodItemOrMatchPlaceholderCatalogItem()
+    {
+        var catalogWithNullItem = new List<CatalogFoodLookupItem>
+        {
+            new(Guid.NewGuid(), "Null", "null", false, []),
+            new(Guid.NewGuid(), "Kosher Salt", "kosher salt", true, ["salt"]),
+        };
+
+        var raw = new LlmExtractedRecipePayload(
+            Title: "Seasoned Water",
+            Description: null,
+            BaseServings: 1,
+            YieldDisplay: null,
+            PrepTimeMinutes: null,
+            CookTimeMinutes: null,
+            TotalTimeMinutes: null,
+            Difficulty: null,
+            SourceName: null,
+            SourceAuthor: null,
+            ConfidenceScore: 0.9m,
+            SuggestedTagNames: null,
+            Ingredients:
+            [
+                new LlmExtractedIngredientItem(
+                    SectionName: null,
+                    Quantity: 1m,
+                    MaxQuantity: null,
+                    Unit: "pinch",
+                    CanonicalFoodName: "null",
+                    DisplayName: "salt and pepper to taste",
+                    PreparationNote: null,
+                    IsOptional: false,
+                    OriginalRawText: "salt and pepper to taste"
+                ),
+                new LlmExtractedIngredientItem(
+                    SectionName: null,
+                    Quantity: null,
+                    MaxQuantity: null,
+                    Unit: null,
+                    CanonicalFoodName: "none",
+                    DisplayName: "optional garnish",
+                    PreparationNote: null,
+                    IsOptional: true,
+                    OriginalRawText: "optional garnish"
+                ),
+            ],
+            Steps: [new LlmExtractedStepItem(null, "Stir ingredients.")]
+        );
+
+        var draft = RecipeDraftNormalizer.Normalize(
+            raw,
+            catalogFoods: catalogWithNullItem,
+            tags: [],
+            sourceUrl: null,
+            fallbackSourceName: null,
+            fallbackSourceAuthor: null,
+            coverImagePath: null,
+            thumbnailImagePath: null
+        );
+
+        Assert.AreEqual(2, draft.Ingredients?.Count);
+
+        var ing1 = draft.Ingredients![0];
+        Assert.IsNull(
+            ing1.MatchedFoodItemId,
+            "Placeholder canonical name should not match catalog item 'Null'."
+        );
+        Assert.IsFalse(
+            ing1.CreateNewFoodItem,
+            "Should not create a new food item from placeholder name."
+        );
+        Assert.AreNotEqual(
+            "Null",
+            ing1.ProposedFoodItemName,
+            "Proposed food name should never be 'Null'."
+        );
+
+        var ing2 = draft.Ingredients![1];
+        Assert.IsNull(ing2.MatchedFoodItemId);
+        Assert.IsFalse(ing2.CreateNewFoodItem);
+        Assert.AreNotEqual("None", ing2.ProposedFoodItemName);
+        Assert.IsNull(
+            draft.Ingredients![0].MaxQuantity,
+            "0 max quantity should be normalized to null."
+        );
+    }
+
+    [TestMethod]
+    [DataRow(
+        "WHY THIS RECIPE WORKS\r\n\r\nTraditional chili con carne often relies on chili powder, which can taste stale and muddy. We wanted a deeply flavored, robust chili.",
+        "Traditional chili con carne often relies on chili powder, which can taste stale and muddy. We wanted a deeply flavored, robust chili."
+    )]
+    [DataRow(
+        "Why This Recipe Works: We toasted ancho and chipotle chiles and ground them ourselves.",
+        "We toasted ancho and chipotle chiles and ground them ourselves."
+    )]
+    [DataRow(
+        "Why This Recipe Works - Over low heat, onions take nearly an hour to caramelize.",
+        "Over low heat, onions take nearly an hour to caramelize."
+    )]
+    [DataRow("WHY THIS RECIPE WORKS", null)]
+    [DataRow(
+        "A classic French onion soup topped with toasted baguette and melted Gruyere.",
+        "A classic French onion soup topped with toasted baguette and melted Gruyere."
+    )]
+    [DataRow(null, null)]
+    public void NormalizeDescription_StripsAtkPrefixAndPreservesVerbatimNarrative(
+        string? input,
+        string? expected
+    )
+    {
+        var result = RecipeDraftNormalizer.NormalizeDescription(input);
+        Assert.AreEqual(expected, result);
+    }
+
+    [TestMethod]
+    public void TryExtractAtkHeadnote_ExtractsVerbatimHeadnoteBetweenHeaderAndTerminator()
+    {
+        var rawText = """
+            SLOW-COOKER BEEF CHILI
+            WHY THIS RECIPE WORKS
+            Traditional chili con carne often relies on chili powder, which can taste stale and muddy. We wanted a deeply flavored, robust chili that highlighted the real flavor of whole dried chiles. We toasted ancho and chipotle chiles and ground them ourselves with cumin, coriander, and oregano. For the beef, chuck roast cut into bite-sized pieces provided far better texture than ground beef.
+
+            SERVES 6 TO 8
+            TOTAL TIME: 7 to 8 hours on low or 5 to 6 hours on high
+            BEFORE YOU BEGIN
+            Look for dried ancho and chipotle chiles in the supermarket.
+
+            INGREDIENTS
+            3 dried ancho chiles
+            """;
+
+        var headnote = RecipeDraftNormalizer.TryExtractAtkHeadnote(rawText);
+
+        Assert.IsNotNull(headnote);
+        Assert.IsTrue(headnote.StartsWith("Traditional chili con carne"));
+        Assert.IsTrue(headnote.EndsWith("far better texture than ground beef."));
+        Assert.IsFalse(headnote.Contains("WHY THIS RECIPE WORKS"));
+        Assert.IsFalse(headnote.Contains("SERVES 6 TO 8"));
+    }
+
+    [TestMethod]
+    public void Normalize_WithRawSourceContainingAtkHeadnote_PrefersVerbatimHeadnoteOverInferiorLlmSummary()
+    {
+        var rawSource = """
+            CLASSIC BEEF CHILI
+            WHY THIS RECIPE WORKS
+            Traditional chili con carne often relies on chili powder, which can taste stale and muddy. We wanted a deeply flavored, robust chili that highlighted the real flavor of whole dried chiles. We toasted ancho and chipotle chiles and ground them ourselves with cumin, coriander, and oregano.
+
+            SERVES 6 TO 8
+            INGREDIENTS
+            1 lb chuck roast
+            """;
+
+        var rawPayload = new LlmExtractedRecipePayload(
+            Title: "Classic Beef Chili",
+            Description: "A hearty beef chili.",
+            BaseServings: 6,
+            YieldDisplay: "6 to 8 servings",
+            PrepTimeMinutes: null,
+            CookTimeMinutes: null,
+            TotalTimeMinutes: null,
+            Difficulty: null,
+            SourceName: "America's Test Kitchen",
+            SourceAuthor: null,
+            ConfidenceScore: 0.95m,
+            SuggestedTagNames: null,
+            Ingredients:
+            [
+                new LlmExtractedIngredientItem(
+                    SectionName: null,
+                    Quantity: 1m,
+                    MaxQuantity: null,
+                    Unit: "lb",
+                    CanonicalFoodName: "beef chuck roast",
+                    DisplayName: "chuck roast",
+                    PreparationNote: null,
+                    IsOptional: false,
+                    OriginalRawText: "1 lb chuck roast"
+                ),
+            ],
+            Steps: [new LlmExtractedStepItem(null, "Cook chili in pot.")]
+        );
+
+        var draft = RecipeDraftNormalizer.Normalize(
+            raw: rawPayload,
+            catalogFoods: [],
+            tags: [],
+            sourceUrl: null,
+            fallbackSourceName: null,
+            fallbackSourceAuthor: null,
+            coverImagePath: null,
+            thumbnailImagePath: null,
+            rawSourceText: rawSource
+        );
+
+        Assert.IsNotNull(draft.Description);
+        Assert.IsTrue(
+            draft.Description.StartsWith("Traditional chili con carne"),
+            "Should use the verbatim ATK headnote from the source text rather than the inferior LLM summary."
+        );
+        Assert.IsFalse(
+            draft.Description.Contains("WHY THIS RECIPE WORKS"),
+            "Boilerplate header should be stripped."
+        );
+    }
 }

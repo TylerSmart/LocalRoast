@@ -20,10 +20,24 @@ public interface IFoodCatalogService
         CancellationToken cancellationToken = default
     );
 
-    Task<bool> DeleteFoodItemAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<bool> DeleteFoodItemAsync(
+        Guid id,
+        bool unlinkFromRecipes = false,
+        CancellationToken cancellationToken = default
+    );
 
     Task<MergeFoodItemsResultDto> MergeFoodItemsAsync(
         MergeFoodItemsRequest request,
+        CancellationToken cancellationToken = default
+    );
+
+    Task<IReadOnlyList<FoodItemRecipeUsageDto>> GetFoodItemRecipesAsync(
+        Guid foodItemId,
+        CancellationToken cancellationToken = default
+    );
+
+    Task<UnlinkFoodItemRecipesResultDto> UnlinkFoodItemRecipesAsync(
+        Guid foodItemId,
         CancellationToken cancellationToken = default
     );
 }

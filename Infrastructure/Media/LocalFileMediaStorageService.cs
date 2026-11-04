@@ -1,4 +1,4 @@
-﻿using App.Core.Exceptions;
+using App.Core.Exceptions;
 using App.Core.Media;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
@@ -673,5 +673,47 @@ public sealed class LocalFileMediaStorageService : IMediaStorageService
                 await msToDispose.DisposeAsync();
             }
         }
+    }
+
+    public Task PurgeAllMediaAsync(CancellationToken cancellationToken = default)
+    {
+        if (Directory.Exists(_uploadsRoot))
+        {
+            var subDirs = new[] { "recipes", "steps", "ingestion", "attachments", "cook-logs" };
+            foreach (var sub in subDirs)
+            {
+                var dirPath = Path.Combine(_uploadsRoot, sub);
+                if (Directory.Exists(dirPath))
+                {
+                    try
+                    {
+                        Directory.Delete(dirPath, recursive: true);
+                        Directory.CreateDirectory(dirPath);
+                    }
+                    catch
+                    {
+                        foreach (
+                            var file in Directory.EnumerateFiles(
+                                dirPath,
+                                "*",
+                                SearchOption.AllDirectories
+                            )
+                        )
+                        {
+                            try
+                            {
+                                File.Delete(file);
+                            }
+                            catch
+                            {
+                                // Ignore locked file
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        return Task.CompletedTask;
     }
 }

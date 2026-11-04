@@ -55,6 +55,9 @@ describe('LlmSettingsService', () => {
       ollamaKeepAlive: '5m',
       requestTimeoutSeconds: 120,
       autoPublishHighConfidenceText: false,
+      enableThinking: false,
+      enableIngestion: true,
+      maxIngestionRetries: 3,
       modifiedAt: null,
     };
 
@@ -84,6 +87,9 @@ describe('LlmSettingsService', () => {
       ollamaKeepAlive: '5m',
       requestTimeoutSeconds: 120,
       autoPublishHighConfidenceText: false,
+      enableThinking: false,
+      enableIngestion: true,
+      maxIngestionRetries: 3,
       modifiedAt: '2026-10-26T12:00:00Z',
     };
 
@@ -91,6 +97,33 @@ describe('LlmSettingsService', () => {
     const req = httpMock.expectOne('/api/llm-settings');
     expect(req.request.method).toBe('PUT');
     expect(req.request.body).toEqual(request);
+    req.flush(mockResponse);
+
+    const result = await promise;
+    expect(result).toEqual(mockResponse);
+  });
+
+  it('sets ingestion enabled via POST /api/llm-settings/set-ingestion-enabled', async () => {
+    const mockResponse: LlmSettingsDto = {
+      provider: 'Ollama',
+      baseUrl: 'http://localhost:11434',
+      hasApiKey: false,
+      apiKeyMasked: null,
+      textModel: 'qwen2.5:14b',
+      visionModel: null,
+      ollamaKeepAlive: '5m',
+      requestTimeoutSeconds: 120,
+      autoPublishHighConfidenceText: false,
+      enableThinking: false,
+      enableIngestion: false,
+      maxIngestionRetries: 3,
+      modifiedAt: '2026-10-26T12:00:00Z',
+    };
+
+    const promise = firstValueFrom(service.setIngestionEnabled(false));
+    const req = httpMock.expectOne('/api/llm-settings/set-ingestion-enabled?enabled=false');
+    expect(req.request.method).toBe('POST');
+    expect(req.request.body).toBeNull();
     req.flush(mockResponse);
 
     const result = await promise;

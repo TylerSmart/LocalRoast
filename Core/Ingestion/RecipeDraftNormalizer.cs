@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
+using App.Core.FoodCatalog;
 using App.Core.Recipes;
 
 namespace App.Core.Ingestion;
@@ -55,6 +56,104 @@ public static class RecipeDraftNormalizer
         };
     }
 
+    public static (decimal? Quantity, decimal? MaxQuantity) NormalizeQuantities(
+        decimal? rawQuantity,
+        decimal? rawMaxQuantity
+    )
+    {
+        var quantity = rawQuantity is > 0m ? rawQuantity : null;
+        var maxQuantity = rawMaxQuantity is > 0m ? rawMaxQuantity : null;
+
+        if (maxQuantity.HasValue && !quantity.HasValue)
+        {
+            quantity = maxQuantity;
+            maxQuantity = null;
+        }
+        else if (maxQuantity.HasValue && quantity.HasValue)
+        {
+            if (maxQuantity.Value < quantity.Value)
+            {
+                (quantity, maxQuantity) = (maxQuantity, quantity);
+            }
+            else if (maxQuantity.Value == quantity.Value)
+            {
+                maxQuantity = null;
+            }
+        }
+
+        return (quantity, maxQuantity);
+    }
+
+    private static readonly Regex WhyThisRecipeWorksPrefixRegex = new(
+        @"^\s*(?:why\s+this\s+recipe\s+works|why\s+it\s+works)\s*[:\-\u2013\u2014.]*\s*",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled
+    );
+
+    private static readonly Regex AtkHeaderMatchRegex = new(
+        @"(?:^|\r?\n)\s*(?:why\s+this\s+recipe\s+works|why\s+it\s+works)\s*[:\-\u2013\u2014.]*\s*",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled
+    );
+
+    private static readonly Regex AtkTerminatorRegex = new(
+        @"(?:\r?\n)\s*(?:"
+            + @"(?:SERVES|Serves|MAKES|Makes|YIELD|Yield)\b"
+            + @"|(?:BEFORE\s+YOU\s+BEGIN|Before\s+You\s+Begin)\b"
+            + @"|(?:TOTAL\s+TIME|Total\s+Time|PREP\s+TIME|Prep\s+Time|COOK\s+TIME|Cook\s+Time|TIME)\b"
+            + @"|(?:INGREDIENTS|Ingredients)\b"
+            + @"|(?:INSTRUCTIONS|Instructions|DIRECTIONS|Directions)\b"
+            + @"|(?:NOTES?|Notes?|NOTE)\b"
+            + @"|\d+(?:[\/\.]\d+)?\s*(?:cups?|tbsp|tablespoons?|tsp|teaspoons?|pounds?|lbs?|oz|ounces?|cloves?|cans?|bunch(?:es)?|slices?|stalks?)\b"
+            + @")",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled
+    );
+
+    public static string? NormalizeDescription(string? rawDescription)
+    {
+        if (string.IsNullOrWhiteSpace(rawDescription))
+        {
+            return null;
+        }
+
+        var cleaned = rawDescription.Trim();
+
+        while (WhyThisRecipeWorksPrefixRegex.IsMatch(cleaned))
+        {
+            cleaned = WhyThisRecipeWorksPrefixRegex.Replace(cleaned, "").TrimStart();
+        }
+
+        cleaned = cleaned.TrimStart(':', '-', '–', '—', '.', ' ', '\t', '\r', '\n').TrimEnd();
+
+        return string.IsNullOrWhiteSpace(cleaned) ? null : cleaned;
+    }
+
+    public static string? TryExtractAtkHeadnote(string? rawText)
+    {
+        if (string.IsNullOrWhiteSpace(rawText))
+        {
+            return null;
+        }
+
+        var headerMatch = AtkHeaderMatchRegex.Match(rawText);
+        if (!headerMatch.Success)
+        {
+            return null;
+        }
+
+        var startIndex = headerMatch.Index + headerMatch.Length;
+        if (startIndex >= rawText.Length)
+        {
+            return null;
+        }
+
+        var remaining = rawText[startIndex..];
+        var terminatorMatch = AtkTerminatorRegex.Match(remaining);
+
+        var candidate = terminatorMatch.Success ? remaining[..terminatorMatch.Index] : remaining;
+
+        var cleaned = NormalizeDescription(candidate);
+        return string.IsNullOrWhiteSpace(cleaned) || cleaned.Length < 15 ? null : cleaned;
+    }
+
     public static IngestionExtractedDraftDto Normalize(
         LlmExtractedRecipePayload raw,
         IReadOnlyList<CatalogFoodLookupItem> catalogFoods,
@@ -68,7 +167,8 @@ public static class RecipeDraftNormalizer
         int? fallbackSourceBookPage = null,
         bool retainSourceAttachments = true,
         string? extractedModel = null,
-        IReadOnlyList<Guid>? fallbackCollectionIds = null
+        IReadOnlyList<Guid>? fallbackCollectionIds = null,
+        string? rawSourceText = null
     )
     {
         var title = string.IsNullOrWhiteSpace(raw.Title) ? "Untitled Recipe" : raw.Title.Trim();
@@ -111,14 +211,24 @@ public static class RecipeDraftNormalizer
         foreach (var rawIng in rawIngredients)
         {
             var (unit, customUnit) = NormalizeUnit(rawIng.Unit);
-            var displayName = string.IsNullOrWhiteSpace(rawIng.DisplayName)
-                ? "Ingredient"
-                : rawIng.DisplayName.Trim();
+            var (cleanQuantity, cleanMaxQuantity) = NormalizeQuantities(
+                rawIng.Quantity,
+                rawIng.MaxQuantity
+            );
+            var cleanCanonical = FoodNameSanitizer.SanitizeFoodName(rawIng.CanonicalFoodName);
+            var cleanDisplayName = FoodNameSanitizer.SanitizeFoodName(rawIng.DisplayName);
+            var displayName = !string.IsNullOrWhiteSpace(rawIng.DisplayName)
+                ? rawIng.DisplayName.Trim()
+                : "Ingredient";
             var candidateFoodName = !string.IsNullOrWhiteSpace(rawIng.CanonicalFoodName)
-                ? rawIng.CanonicalFoodName.Trim()
-                : displayName;
+                ? cleanCanonical
+                : cleanDisplayName;
 
-            var match = FindMatchingFoodItem(candidateFoodName, catalogFoods);
+            CatalogFoodLookupItem? match = null;
+            if (!string.IsNullOrWhiteSpace(candidateFoodName))
+            {
+                match = FindMatchingFoodItem(candidateFoodName, catalogFoods);
+            }
 
             if (match is not null)
             {
@@ -127,8 +237,8 @@ public static class RecipeDraftNormalizer
                         SectionName: string.IsNullOrWhiteSpace(rawIng.SectionName)
                             ? null
                             : rawIng.SectionName.Trim(),
-                        Quantity: rawIng.Quantity,
-                        MaxQuantity: rawIng.MaxQuantity,
+                        Quantity: cleanQuantity,
+                        MaxQuantity: cleanMaxQuantity,
                         Unit: unit,
                         CustomUnitName: customUnit,
                         MatchedFoodItemId: match.Id,
@@ -148,7 +258,7 @@ public static class RecipeDraftNormalizer
                     )
                 );
             }
-            else
+            else if (!string.IsNullOrWhiteSpace(candidateFoodName))
             {
                 var proposedName = ToTitleCase(candidateFoodName);
 
@@ -157,8 +267,8 @@ public static class RecipeDraftNormalizer
                         SectionName: string.IsNullOrWhiteSpace(rawIng.SectionName)
                             ? null
                             : rawIng.SectionName.Trim(),
-                        Quantity: rawIng.Quantity,
-                        MaxQuantity: rawIng.MaxQuantity,
+                        Quantity: cleanQuantity,
+                        MaxQuantity: cleanMaxQuantity,
                         Unit: unit,
                         CustomUnitName: customUnit,
                         MatchedFoodItemId: null,
@@ -167,6 +277,34 @@ public static class RecipeDraftNormalizer
                         ProposedFoodItemName: proposedName,
                         SuggestedIsPantryStaple: rawIng.SuggestedIsPantryStaple,
                         CreateNewFoodItem: true,
+                        DisplayName: displayName,
+                        PreparationNote: string.IsNullOrWhiteSpace(rawIng.PreparationNote)
+                            ? null
+                            : rawIng.PreparationNote.Trim(),
+                        IsOptional: rawIng.IsOptional,
+                        OriginalRawText: string.IsNullOrWhiteSpace(rawIng.OriginalRawText)
+                            ? null
+                            : rawIng.OriginalRawText.Trim()
+                    )
+                );
+            }
+            else
+            {
+                normalizedIngredients.Add(
+                    new IngestionDraftIngredientDto(
+                        SectionName: string.IsNullOrWhiteSpace(rawIng.SectionName)
+                            ? null
+                            : rawIng.SectionName.Trim(),
+                        Quantity: cleanQuantity,
+                        MaxQuantity: cleanMaxQuantity,
+                        Unit: unit,
+                        CustomUnitName: customUnit,
+                        MatchedFoodItemId: null,
+                        MatchedFoodItemName: null,
+                        IsNewFoodItem: false,
+                        ProposedFoodItemName: null,
+                        SuggestedIsPantryStaple: false,
+                        CreateNewFoodItem: false,
                         DisplayName: displayName,
                         PreparationNote: string.IsNullOrWhiteSpace(rawIng.PreparationNote)
                             ? null
@@ -296,9 +434,22 @@ public static class RecipeDraftNormalizer
             confidence = Math.Min(confidence, 0.25m);
         } //
 
+        var normalizedDescription = NormalizeDescription(raw.Description);
+        var atkHeadnote = TryExtractAtkHeadnote(rawSourceText);
+        if (!string.IsNullOrWhiteSpace(atkHeadnote))
+        {
+            if (
+                string.IsNullOrWhiteSpace(normalizedDescription)
+                || atkHeadnote.Length > (normalizedDescription.Length * 1.5)
+            )
+            {
+                normalizedDescription = atkHeadnote;
+            }
+        }
+
         return new IngestionExtractedDraftDto(
             Title: title,
-            Description: string.IsNullOrWhiteSpace(raw.Description) ? null : raw.Description.Trim(),
+            Description: normalizedDescription,
             BaseServings: baseServings,
             YieldDisplay: string.IsNullOrWhiteSpace(raw.YieldDisplay)
                 ? null
@@ -330,14 +481,21 @@ public static class RecipeDraftNormalizer
         IReadOnlyList<CatalogFoodLookupItem> catalogFoods
     )
     {
-        var norm = rawName.Trim().ToLowerInvariant();
-        if (string.IsNullOrWhiteSpace(norm))
+        if (string.IsNullOrWhiteSpace(rawName) || !FoodNameSanitizer.IsValidFoodName(rawName))
         {
             return null;
         }
 
+        var norm = rawName.Trim().ToLowerInvariant();
+        var validCatalogFoods = catalogFoods
+            .Where(f =>
+                FoodNameSanitizer.IsValidFoodName(f.NormalizedName)
+                && FoodNameSanitizer.IsValidFoodName(f.Name)
+            )
+            .ToList();
+
         // 1. Direct match
-        var direct = catalogFoods.FirstOrDefault(f =>
+        var direct = validCatalogFoods.FirstOrDefault(f =>
             f.NormalizedName == norm || f.NormalizedAliases.Contains(norm)
         );
         if (direct is not null)
@@ -347,7 +505,7 @@ public static class RecipeDraftNormalizer
 
         // 2. Bidirectional singularized match
         var singular = Singularize(norm);
-        var singMatch = catalogFoods.FirstOrDefault(f =>
+        var singMatch = validCatalogFoods.FirstOrDefault(f =>
             Singularize(f.NormalizedName) == singular
             || f.NormalizedAliases.Any(a => Singularize(a) == singular)
         );

@@ -23,3 +23,14 @@ export interface ChangePasswordRequest {
 export interface UpdateThemeSettingsRequest {
   settings: ThemeConfig;
 }
+
+export interface ResetAppDataResultDto {
+  deletedRecipesCount: number;
+  deletedMealPlansCount: number;
+  deletedShoppingListsCount: number;
+  deletedIngestionJobsCount: number;
+  deletedFoodItemsCount: number;
+  deletedTagsCount: number;
+  deletedCollectionsCount: number;
+  resetAt: string;
+}

@@ -149,6 +149,9 @@ public sealed class WebRecipeScraperTests
                     contentLength
                 )
             );
+
+        public Task PurgeAllMediaAsync(CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
     }
 
     [TestMethod]

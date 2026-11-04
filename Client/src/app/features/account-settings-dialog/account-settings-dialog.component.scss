@@ -125,6 +125,75 @@
   padding-top: 4px;
 }
 
+.data-management-tab {
+  padding: 16px 4px 8px;
+}
+
+.danger-zone-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px 18px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--mat-sys-error) 40%, transparent);
+  background-color: var(--mat-sys-surface-container-low);
+
+  .danger-zone-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+  }
+
+  .danger-zone-icon-badge {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    background-color: var(--mat-sys-error-container);
+    color: var(--mat-sys-on-error-container);
+    flex-shrink: 0;
+
+    mat-icon {
+      font-size: 22px;
+      width: 22px;
+      height: 22px;
+    }
+  }
+
+  .danger-zone-info {
+    flex: 1;
+
+    .danger-title {
+      margin: 0 0 4px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--mat-sys-error);
+    }
+
+    .danger-description {
+      margin: 0;
+      font-size: 0.8125rem;
+      line-height: 1.45;
+      color: var(--mat-sys-on-surface-variant);
+    }
+  }
+
+  .danger-zone-actions {
+    display: flex;
+    justify-content: flex-end;
+
+    .reset-data-button {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border-color: var(--mat-sys-error);
+      color: var(--mat-sys-error);
+    }
+  }
+}
+
 .account-dialog-actions {
   padding: 12px 20px 16px !important;
   border-top: 1px solid var(--mat-sys-outline-variant);

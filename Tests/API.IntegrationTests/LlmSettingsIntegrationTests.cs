@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using App.Core.Authentication;
 using App.Core.Ingestion;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace App.API.IntegrationTests;
@@ -81,7 +82,9 @@ public sealed class LlmSettingsIntegrationTests
             VisionModel: "qwen2.5vl:7b",
             OllamaKeepAlive: "10m",
             RequestTimeoutSeconds: 60,
-            AutoPublishHighConfidenceText: true
+            AutoPublishHighConfidenceText: true,
+            EnableThinking: true,
+            MaxIngestionRetries: 5
         );
 
         var putResponse = await _client.PutAsJsonAsync("/api/llm-settings", request);
@@ -96,6 +99,8 @@ public sealed class LlmSettingsIntegrationTests
         StringAssert.EndsWith(updated.ApiKeyMasked, "5678");
         Assert.AreEqual("gemma-2-9b-it", updated.TextModel);
         Assert.IsTrue(updated.AutoPublishHighConfidenceText);
+        Assert.IsTrue(updated.EnableThinking);
+        Assert.AreEqual(5, updated.MaxIngestionRetries);
 
         // Update without providing ApiKey again -> preserves existing key
         var secondRequest = new UpdateLlmSettingsRequest(
@@ -175,5 +180,62 @@ public sealed class LlmSettingsIntegrationTests
         Assert.IsNotNull(result);
         Assert.IsFalse(result.IsReachable);
         Assert.IsNotNull(result.ErrorMessage);
+    }
+
+    [TestMethod]
+    public async Task SetIngestionEnabled_TogglesState_AndRevertsWorkingJobsToQueued()
+    {
+        await AuthenticateAsync(_client);
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<App.Data.AppDbContext>();
+            var job = new App.Data.Entities.IngestionJob
+            {
+                Channel = IngestionChannel.RawText,
+                Status = IngestionJobStatus.Extracting,
+                DisplayTitle = "In-Flight Recipe",
+                RawText = "1 cup flour\nMix and bake.",
+                CreatedBy = "test-user",
+                ModifiedBy = "test-user",
+            };
+            db.IngestionJobs.Add(job);
+            await db.SaveChangesAsync();
+        }
+
+        // Toggle off
+        var disableResponse = await _client.PostAsync(
+            "/api/llm-settings/set-ingestion-enabled?enabled=false",
+            null
+        );
+        Assert.AreEqual(HttpStatusCode.OK, disableResponse.StatusCode);
+
+        var disabled = await disableResponse.Content.ReadFromJsonAsync<LlmSettingsDto>();
+        Assert.IsNotNull(disabled);
+        Assert.IsFalse(disabled.EnableIngestion);
+
+        // Verify the job was reverted to Queued
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<App.Data.AppDbContext>();
+            var job =
+                await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.FirstAsync(
+                    db.IngestionJobs,
+                    j => j.DisplayTitle == "In-Flight Recipe"
+                );
+            Assert.AreEqual(IngestionJobStatus.Queued, job.Status);
+            StringAssert.Contains(job.StatusDetail, "Paused");
+        }
+
+        // Toggle back on
+        var enableResponse = await _client.PostAsync(
+            "/api/llm-settings/set-ingestion-enabled?enabled=true",
+            null
+        );
+        Assert.AreEqual(HttpStatusCode.OK, enableResponse.StatusCode);
+
+        var enabled = await enableResponse.Content.ReadFromJsonAsync<LlmSettingsDto>();
+        Assert.IsNotNull(enabled);
+        Assert.IsTrue(enabled.EnableIngestion);
     }
 }

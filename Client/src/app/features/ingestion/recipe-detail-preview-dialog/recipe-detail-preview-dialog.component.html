@@ -1,0 +1,47 @@
+<div class="dialog-header">
+  <div class="header-title-group">
+    <mat-icon class="header-icon">visibility</mat-icon>
+    <h2 mat-dialog-title class="dialog-title">Recipe Detail Preview</h2>
+    <span class="preview-tag">Preview</span>
+  </div>
+  <button
+    mat-icon-button
+    type="button"
+    (click)="close()"
+    aria-label="Close recipe preview dialog"
+    class="close-dialog-btn"
+  >
+    <mat-icon>close</mat-icon>
+  </button>
+</div>
+
+<mat-dialog-content class="preview-dialog-content">
+  <app-recipe-detail-preview
+    [recipe]="data.recipe"
+    [showPreviewBanner]="false"
+    [showPublishButton]="false"
+  ></app-recipe-detail-preview>
+</mat-dialog-content>
+
+<mat-dialog-actions align="end" class="preview-dialog-actions">
+  <button mat-button type="button" (click)="close()" class="back-btn">Back to Edit</button>
+
+  @if (data.canPublish !== false) {
+    <button
+      mat-flat-button
+      color="primary"
+      type="button"
+      (click)="publish()"
+      [disabled]="data.isPublishing"
+      class="publish-btn"
+      aria-label="Approve and publish recipe from dialog"
+    >
+      @if (data.isPublishing) {
+        <mat-spinner diameter="18" class="inline-spinner"></mat-spinner>
+      } @else {
+        <mat-icon>check_circle</mat-icon>
+      }
+      <span>Approve & Publish</span>
+    </button>
+  }
+</mat-dialog-actions>

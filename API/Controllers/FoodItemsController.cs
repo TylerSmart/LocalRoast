@@ -1,4 +1,4 @@
-using App.Core.Exceptions;
+﻿using App.Core.Exceptions;
 using App.Core.FoodCatalog;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -112,11 +112,19 @@ public sealed class FoodItemsController(IFoodCatalogService foodCatalogService) 
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
-    public async Task<IActionResult> DeleteFoodItem(Guid id, CancellationToken cancellationToken)
+    public async Task<IActionResult> DeleteFoodItem(
+        Guid id,
+        [FromQuery] bool unlinkFromRecipes = false,
+        CancellationToken cancellationToken = default
+    )
     {
         try
         {
-            var deleted = await foodCatalogService.DeleteFoodItemAsync(id, cancellationToken);
+            var deleted = await foodCatalogService.DeleteFoodItemAsync(
+                id,
+                unlinkFromRecipes,
+                cancellationToken
+            );
             return deleted ? NoContent() : NotFound();
         }
         catch (ConflictException ex)
@@ -126,6 +134,58 @@ public sealed class FoodItemsController(IFoodCatalogService foodCatalogService) 
                 {
                     Status = StatusCodes.Status409Conflict,
                     Title = ex.Title,
+                    Detail = ex.Message,
+                }
+            );
+        }
+    }
+
+    [HttpGet("{id:guid}/recipes")]
+    [ProducesResponseType(typeof(IReadOnlyList<FoodItemRecipeUsageDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetFoodItemRecipes(
+        Guid id,
+        CancellationToken cancellationToken
+    )
+    {
+        try
+        {
+            var recipes = await foodCatalogService.GetFoodItemRecipesAsync(id, cancellationToken);
+            return Ok(recipes);
+        }
+        catch (NotFoundException ex)
+        {
+            return NotFound(
+                new ProblemDetails
+                {
+                    Status = StatusCodes.Status404NotFound,
+                    Title = "Not Found",
+                    Detail = ex.Message,
+                }
+            );
+        }
+    }
+
+    [HttpPost("{id:guid}/unlink-recipes")]
+    [ProducesResponseType(typeof(UnlinkFoodItemRecipesResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> UnlinkFoodItemRecipes(
+        Guid id,
+        CancellationToken cancellationToken
+    )
+    {
+        try
+        {
+            var result = await foodCatalogService.UnlinkFoodItemRecipesAsync(id, cancellationToken);
+            return Ok(result);
+        }
+        catch (NotFoundException ex)
+        {
+            return NotFound(
+                new ProblemDetails
+                {
+                    Status = StatusCodes.Status404NotFound,
+                    Title = "Not Found",
                     Detail = ex.Message,
                 }
             );

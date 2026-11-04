@@ -1,4 +1,4 @@
-import { Component, OnInit, computed, inject, signal } from '@angular/core';
+﻿import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { FormControl, ReactiveFormsModule } from '@angular/forms';
 import {
   MatAutocompleteModule,
@@ -50,10 +50,35 @@ export class FridgeMatcherComponent implements OnInit {
   protected readonly errorMessage = signal<string | null>(null);
   protected readonly formatMinutes = formatMinutes;
 
+  private static readonly DISALLOWED_NAMES = new Set([
+    'null',
+    'none',
+    'n/a',
+    'na',
+    'undefined',
+    'unknown',
+    'nil',
+    'empty',
+    'ingredient',
+    'ingredients',
+    'food',
+    'food item',
+    'item',
+    '-',
+    '--',
+  ]);
+
+  private isPlaceholderFood(name: string): boolean {
+    const trimmed = name?.trim().toLowerCase();
+    return !trimmed || FridgeMatcherComponent.DISALLOWED_NAMES.has(trimmed);
+  }
+
   protected readonly filteredFoodItems = computed(() => {
     const query = this.searchControl.value.trim().toLowerCase();
     const selectedIds = new Set(this.selectedFoodItems().map((f) => f.id));
-    const available = this.foodItems().filter((item) => !selectedIds.has(item.id));
+    const available = this.foodItems().filter(
+      (item) => !selectedIds.has(item.id) && !this.isPlaceholderFood(item.name),
+    );
 
     if (!query) {
       return available.slice(0, 15);
@@ -73,7 +98,10 @@ export class FridgeMatcherComponent implements OnInit {
     const selectedIds = new Set(this.selectedFoodItems().map((f) => f.id));
     // Suggest non-staple items first, up to 10
     return this.foodItems()
-      .filter((item) => !selectedIds.has(item.id) && !item.isPantryStaple)
+      .filter(
+        (item) =>
+          !selectedIds.has(item.id) && !item.isPantryStaple && !this.isPlaceholderFood(item.name),
+      )
       .slice(0, 10);
   });
 

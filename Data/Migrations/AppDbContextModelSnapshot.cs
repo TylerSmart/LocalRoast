@@ -259,6 +259,15 @@ namespace App.Data.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("nvarchar(256)");
 
+                    b.Property<bool>("EnableIngestion")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("EnableThinking")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("MaxIngestionRetries")
+                        .HasColumnType("int");
+
                     b.Property<DateTimeOffset>("ModifiedAt")
                         .HasColumnType("datetimeoffset");
 

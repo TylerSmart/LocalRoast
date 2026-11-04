@@ -1,0 +1,121 @@
+<h2 mat-dialog-title class="dialog-title">
+  <div class="title-with-badge">
+    <mat-icon class="title-icon">menu_book</mat-icon>
+    <span>Recipes using "{{ data.foodItem.name }}"</span>
+    @if (!isLoading() && recipes().length > 0) {
+      <span class="count-badge">{{ recipes().length }}</span>
+    }
+  </div>
+</h2>
+
+<mat-dialog-content class="dialog-content">
+  @if (errorMessage()) {
+    <div class="error-banner" role="alert">
+      <mat-icon>error</mat-icon>
+      <span>{{ errorMessage() }}</span>
+      <button mat-button (click)="loadRecipes()">Retry</button>
+    </div>
+  }
+
+  @if (unlinkedResult()) {
+    <div class="success-banner" role="status">
+      <mat-icon>check_circle</mat-icon>
+      <div class="banner-text">
+        <strong>Unlinked successfully!</strong>
+        <p>
+          Cleared references to "{{ data.foodItem.name }}" across
+          {{ unlinkedResult()?.unlinkedRecipeCount }}
+          {{ unlinkedResult()?.unlinkedRecipeCount === 1 ? 'recipe' : 'recipes' }} ({{
+            unlinkedResult()?.unlinkedIngredientCount
+          }}
+          ingredients).
+        </p>
+      </div>
+    </div>
+  }
+
+  @if (isLoading()) {
+    <div class="loading-state">
+      <mat-spinner diameter="36"></mat-spinner>
+      <p>Finding recipes referencing this ingredient...</p>
+    </div>
+  } @else if (recipes().length === 0 && !unlinkedResult()) {
+    <div class="empty-state">
+      <mat-icon class="empty-icon">restaurant</mat-icon>
+      <p>No published recipes currently reference this food item.</p>
+    </div>
+  } @else if (recipes().length > 0) {
+    <div class="recipes-list">
+      @for (recipe of recipes(); track recipe.recipeId) {
+        <div class="recipe-usage-row">
+          @if (recipe.thumbnailImagePath) {
+            <img
+              [src]="recipe.thumbnailImagePath"
+              [alt]="recipe.recipeTitle"
+              class="recipe-thumbnail"
+              loading="lazy"
+            />
+          } @else {
+            <div class="recipe-thumbnail placeholder">
+              <mat-icon>restaurant_menu</mat-icon>
+            </div>
+          }
+
+          <div class="recipe-info">
+            <div class="recipe-top">
+              <button
+                type="button"
+                class="recipe-name-link"
+                (click)="navigateToRecipe(recipe.recipeId)"
+              >
+                {{ recipe.recipeTitle }}
+              </button>
+            </div>
+
+            <div class="ingredient-names-row">
+              <span class="referenced-as-label">Referenced as:</span>
+              <div class="names-chips">
+                @for (ingName of recipe.ingredientDisplayNames; track ingName) {
+                  <span class="ingredient-chip">{{ ingName }}</span>
+                }
+              </div>
+            </div>
+          </div>
+
+          <div class="recipe-actions">
+            <button
+              mat-stroked-button
+              (click)="navigateToRecipe(recipe.recipeId)"
+              aria-label="Open recipe"
+            >
+              <mat-icon>visibility</mat-icon>
+              <span>View</span>
+            </button>
+          </div>
+        </div>
+      }
+    </div>
+  }
+</mat-dialog-content>
+
+<mat-dialog-actions align="end" class="dialog-actions">
+  @if (recipes().length > 0 && !unlinkedResult()) {
+    <button
+      mat-stroked-button
+      color="warn"
+      class="unlink-all-btn"
+      [disabled]="isUnlinking()"
+      (click)="unlinkAll()"
+      aria-label="Unlink ingredient from all recipes"
+    >
+      @if (isUnlinking()) {
+        <mat-spinner diameter="18" class="button-spinner"></mat-spinner>
+      } @else {
+        <mat-icon>link_off</mat-icon>
+      }
+      <span>{{ isUnlinking() ? 'Unlinking...' : 'Unlink All (' + recipes().length + ')' }}</span>
+    </button>
+  }
+  <span class="actions-spacer"></span>
+  <button mat-button (click)="close()">Close</button>
+</mat-dialog-actions>

@@ -37,6 +37,12 @@ export class LlmSettingsService {
     );
   }
 
+  setIngestionEnabled(enabled: boolean): Observable<LlmSettingsDto> {
+    return this.http.post<LlmSettingsDto>(apiUrl('/llm-settings/set-ingestion-enabled'), null, {
+      params: { enabled: String(enabled) },
+    });
+  }
+
   async openLlmSettingsDialog(): Promise<MatDialogRef<unknown> | undefined> {
     if (!this.dialog) {
       return undefined;

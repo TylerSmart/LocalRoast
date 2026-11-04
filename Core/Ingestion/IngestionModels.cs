@@ -1,4 +1,5 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 using App.Core.Recipes;
 
 namespace App.Core.Ingestion;
@@ -30,45 +31,51 @@ public record WebScrapeResult(
 );
 
 // Raw JSON contract returned by Ollama / OpenAI-compatible Text/Vision LLM
-public record LlmExtractedTimerItem(int DurationSeconds, string Label);
+public record LlmExtractedTimerItem(
+    [property: JsonConverter(typeof(FlexibleIntJsonConverter))] int DurationSeconds,
+    string? Label = null
+);
 
 public record LlmExtractedIngredientItem(
     string? SectionName,
-    decimal? Quantity,
-    decimal? MaxQuantity,
+    [property: JsonConverter(typeof(FlexibleNullableDecimalJsonConverter))] decimal? Quantity,
+    [property: JsonConverter(typeof(FlexibleNullableDecimalJsonConverter))] decimal? MaxQuantity,
     string? Unit,
     string? CanonicalFoodName,
-    string DisplayName,
-    string? PreparationNote,
-    bool IsOptional,
-    string? OriginalRawText,
+    string? DisplayName = null,
+    string? PreparationNote = null,
+    bool IsOptional = false,
+    string? OriginalRawText = null,
     bool SuggestedIsPantryStaple = false
 );
 
 public record LlmExtractedStepItem(
     string? SectionName,
-    string Instruction,
-    IReadOnlyList<int>? IngredientIndices,
-    IReadOnlyList<LlmExtractedTimerItem>? Timers
+    string? Instruction = null,
+    IReadOnlyList<int>? IngredientIndices = null,
+    IReadOnlyList<LlmExtractedTimerItem>? Timers = null
 );
 
 public record LlmExtractedRecipePayload(
-    string Title,
-    string? Description,
-    decimal? BaseServings,
-    string? YieldDisplay,
-    int? PrepTimeMinutes,
-    int? CookTimeMinutes,
-    int? TotalTimeMinutes,
-    string? Difficulty,
-    string? SourceName,
-    string? SourceAuthor,
-    decimal? ConfidenceScore,
-    IReadOnlyList<string>? SuggestedTagNames,
-    IReadOnlyList<LlmExtractedIngredientItem>? Ingredients,
-    IReadOnlyList<LlmExtractedStepItem>? Steps,
+    string? Title = null,
+    string? Description = null,
+    [property: JsonConverter(typeof(FlexibleNullableDecimalJsonConverter))]
+        decimal? BaseServings = null,
+    string? YieldDisplay = null,
+    [property: JsonConverter(typeof(FlexibleNullableIntJsonConverter))] int? PrepTimeMinutes = null,
+    [property: JsonConverter(typeof(FlexibleNullableIntJsonConverter))] int? CookTimeMinutes = null,
+    [property: JsonConverter(typeof(FlexibleNullableIntJsonConverter))]
+        int? TotalTimeMinutes = null,
+    string? Difficulty = null,
+    string? SourceName = null,
+    string? SourceAuthor = null,
+    [property: JsonConverter(typeof(FlexibleNullableDecimalJsonConverter))]
+        decimal? ConfidenceScore = null,
+    IReadOnlyList<string>? SuggestedTagNames = null,
+    IReadOnlyList<LlmExtractedIngredientItem>? Ingredients = null,
+    IReadOnlyList<LlmExtractedStepItem>? Steps = null,
     string? SourceBookTitle = null,
-    int? SourceBookPage = null,
+    [property: JsonConverter(typeof(FlexibleNullableIntJsonConverter))] int? SourceBookPage = null,
     string? ExtractedModel = null
 );
 
@@ -245,3 +252,10 @@ public record IngestionJobDetailDto(
 }
 
 public record RetryWaitingJobsResultDto(int RequeuedCount);
+
+public sealed record RetryBatchJobsRequest(
+    IReadOnlyList<Guid>? JobIds = null,
+    string? Filter = null
+);
+
+public sealed record RetryBatchJobsResultDto(int RequeuedCount);

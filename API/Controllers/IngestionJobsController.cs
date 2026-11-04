@@ -443,6 +443,21 @@ public sealed class IngestionJobsController(IIngestionService ingestionService) 
         return Ok(result);
     }
 
+    [HttpPost("retry-batch")]
+    [ProducesResponseType(typeof(RetryBatchJobsResultDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> RetryBatchJobs(
+        [FromBody] RetryBatchJobsRequest request,
+        CancellationToken cancellationToken
+    )
+    {
+        var result = await ingestionService.RetryBatchJobsAsync(
+            request.JobIds,
+            request.Filter,
+            cancellationToken
+        );
+        return Ok(result);
+    }
+
     [HttpDelete("{id:guid}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]

@@ -22,6 +22,12 @@ public sealed class LlmDefaultsOptions
 
     public bool AutoPublishHighConfidenceText { get; set; }
 
+    public bool EnableThinking { get; set; } = false;
+
+    public int MaxIngestionRetries { get; set; } = 3;
+
+    public bool EnableIngestion { get; set; } = true;
+
     public bool EnableBackgroundWorker { get; set; } = true;
 
     public int WorkerPollIntervalSeconds { get; set; } = 3;
@@ -39,6 +45,9 @@ public record LlmSettingsDto(
     string OllamaKeepAlive,
     int RequestTimeoutSeconds,
     bool AutoPublishHighConfidenceText,
+    bool EnableThinking,
+    int MaxIngestionRetries,
+    bool EnableIngestion,
     DateTimeOffset? ModifiedAt
 );
 
@@ -50,7 +59,10 @@ public record EffectiveLlmConnectionConfig(
     string? VisionModel,
     string OllamaKeepAlive,
     int RequestTimeoutSeconds,
-    bool AutoPublishHighConfidenceText
+    bool AutoPublishHighConfidenceText,
+    bool EnableThinking = false,
+    int MaxIngestionRetries = 3,
+    bool EnableIngestion = true
 );
 
 public record UpdateLlmSettingsRequest(
@@ -62,7 +74,10 @@ public record UpdateLlmSettingsRequest(
     [MaxLength(200)] string? VisionModel = null,
     [MaxLength(32)] string OllamaKeepAlive = "5m",
     [Range(5, 600)] int RequestTimeoutSeconds = 120,
-    bool AutoPublishHighConfidenceText = false
+    bool AutoPublishHighConfidenceText = false,
+    bool EnableThinking = false,
+    [Range(0, 10)] int MaxIngestionRetries = 3,
+    bool EnableIngestion = true
 );
 
 public record TestLlmConnectionRequest(

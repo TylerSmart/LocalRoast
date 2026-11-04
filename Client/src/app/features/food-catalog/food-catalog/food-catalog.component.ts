@@ -15,6 +15,10 @@ import { FoodItemDto, MergeFoodItemsResultDto } from '../../../core/models/food-
 import { FoodCatalogService } from '../../../core/services/food-catalog/food-catalog.service';
 import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialog/confirm-dialog.component';
 import { FoodItemDialogComponent } from '../food-item-dialog/food-item-dialog.component';
+import {
+  FoodItemRecipesDialogComponent,
+  FoodItemRecipesDialogResult,
+} from '../food-item-recipes-dialog/food-item-recipes-dialog.component';
 import { MergeFoodItemsDialogComponent } from '../merge-food-items-dialog/merge-food-items-dialog.component';
 
 @Component({
@@ -156,12 +160,38 @@ export class FoodCatalogComponent implements OnInit {
       });
   }
 
+  viewReferencedRecipes(item: FoodItemDto): void {
+    const dialogRef = this.dialog.open<
+      FoodItemRecipesDialogComponent,
+      { foodItem: FoodItemDto },
+      FoodItemRecipesDialogResult
+    >(FoodItemRecipesDialogComponent, {
+      data: { foodItem: item },
+      width: '600px',
+      maxWidth: '90vw',
+    });
+
+    dialogRef.afterClosed().subscribe((result) => {
+      if (result?.unlinked) {
+        this.items.update((list) =>
+          list.map((i) => (i.id === item.id ? { ...i, referencedRecipeCount: 0 } : i)),
+        );
+      }
+    });
+  }
+
   deleteItem(item: FoodItemDto): void {
+    const hasRecipes = item.referencedRecipeCount > 0;
+    const message = hasRecipes
+      ? `"${item.name}" is currently used in ${item.referencedRecipeCount} ${item.referencedRecipeCount === 1 ? 'recipe' : 'recipes'}. Deleting it will unlink it from all referencing recipes. Are you sure you want to proceed?`
+      : `Are you sure you want to delete "${item.name}"?`;
+    const confirmText = hasRecipes ? 'Unlink & Delete' : 'Delete';
+
     const confirmRef = this.dialog.open(ConfirmDialogComponent, {
       data: {
         title: 'Delete Food Item',
-        message: `Are you sure you want to delete "${item.name}"?`,
-        confirmText: 'Delete',
+        message,
+        confirmText,
         isDestructive: true,
       },
     });
@@ -171,7 +201,7 @@ export class FoodCatalogComponent implements OnInit {
         return;
       }
 
-      this.catalogService.deleteFoodItem(item.id).subscribe({
+      this.catalogService.deleteFoodItem(item.id, hasRecipes).subscribe({
         next: () => {
           this.items.update((list) => list.filter((i) => i.id !== item.id));
           this.snackBar.open(`Deleted "${item.name}"`, 'Close', { duration: 3000 });

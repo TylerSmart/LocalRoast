@@ -26,6 +26,12 @@ public sealed class HouseholdLlmSettings : IAuditable
 
     public bool AutoPublishHighConfidenceText { get; set; }
 
+    public bool EnableThinking { get; set; }
+
+    public int MaxIngestionRetries { get; set; } = 3;
+
+    public bool EnableIngestion { get; set; } = true;
+
     public DateTimeOffset CreatedAt { get; set; }
 
     public string CreatedBy { get; set; } = "System";

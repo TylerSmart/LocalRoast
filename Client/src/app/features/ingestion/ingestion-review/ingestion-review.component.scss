@@ -265,6 +265,65 @@
 }
 
 .draft-editor-pane {
+  .draft-pane-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1.25rem;
+    padding: 0.4rem 0.6rem;
+    border-radius: 10px;
+    background-color: var(--mat-sys-surface-container-high, #ece6f0);
+    border: 1px solid var(--mat-sys-outline-variant, #cac4d0);
+
+    .pane-view-toggle {
+      display: inline-flex;
+      gap: 0.35rem;
+
+      .view-toggle-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        padding: 0.45rem 0.85rem;
+        border-radius: 8px;
+        border: none;
+        background: transparent;
+        color: var(--mat-sys-on-surface-variant, #49454f);
+        font-size: 0.85rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.15s ease-in-out;
+
+        mat-icon {
+          font-size: 1.1rem;
+          width: 1.1rem;
+          height: 1.1rem;
+        }
+
+        &:hover {
+          background-color: var(--mat-sys-surface-container-highest, #e6e0e9);
+        }
+
+        &.active {
+          background-color: var(--mat-sys-surface, #ffffff);
+          color: var(--mat-sys-primary, #6750a4);
+          box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+      }
+    }
+
+    .open-modal-preview-btn {
+      color: var(--mat-sys-on-surface-variant, #49454f);
+    }
+  }
+
+  .inline-preview-pane {
+    background-color: var(--mat-sys-surface, #ffffff);
+    border: 1px solid var(--mat-sys-outline-variant, #cac4d0);
+    border-radius: 12px;
+    padding: 1.25rem;
+  }
+
   .draft-form {
     display: flex;
     flex-direction: column;
@@ -445,8 +504,8 @@
     border-radius: 12px;
     font-size: 0.75rem;
     font-weight: 700;
-    background-color: #fff3e0;
-    color: #e65100;
+    background-color: var(--mat-sys-tertiary-container, #ffd8e4);
+    color: var(--mat-sys-on-tertiary-container, #31111d);
 
     mat-icon {
       font-size: 0.85rem;
@@ -463,11 +522,14 @@
   align-items: center;
   padding: 0.5rem 0.75rem;
   border-radius: 6px;
-  background-color: #fff8e1;
-  border: 1px dashed #ffe082;
+  background-color: var(--mat-sys-surface-container-high, #ece6f0);
+  border: 1px dashed var(--mat-sys-outline-variant, #cac4d0);
+  border-left: 3px solid var(--mat-sys-tertiary, #7d5260);
+  color: var(--mat-sys-on-surface, #1c1b1f);
 
   .pantry-staple-checkbox {
     font-size: 0.85rem;
+    color: var(--mat-sys-on-surface, inherit);
   }
 }
 

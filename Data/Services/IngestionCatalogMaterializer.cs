@@ -1,5 +1,6 @@
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
 using App.Core.Exceptions;
+using App.Core.FoodCatalog;
 using App.Core.Ingestion;
 using App.Core.Recipes;
 using App.Data.Entities;
@@ -39,6 +40,12 @@ internal static class IngestionCatalogMaterializer
     )
     {
         var cleanName = proposedFoodItemName.Trim();
+        if (!FoodNameSanitizer.IsValidFoodName(cleanName))
+        {
+            throw new DomainValidationException(
+                $"Cannot create or resolve a food item with invalid placeholder name '{cleanName}'."
+            );
+        }
         if (cleanName.Length > 150)
         {
             cleanName = cleanName[..150].Trim();

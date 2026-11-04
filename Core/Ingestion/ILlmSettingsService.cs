@@ -17,4 +17,9 @@ public interface ILlmSettingsService
         TestLlmConnectionRequest request,
         CancellationToken cancellationToken = default
     );
+
+    Task<LlmSettingsDto> SetIngestionEnabledAsync(
+        bool enabled,
+        CancellationToken cancellationToken = default
+    );
 }

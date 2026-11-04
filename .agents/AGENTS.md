@@ -33,7 +33,7 @@
 - [Domain Rules](rules/domain.md): Application-specific domain entities and business invariants (customized per fork).
 - [Backend (.NET 10 & EF Core) Rules](rules/backend-dotnet.md): Controller routing, `IAuditable`, DTOs, DI registration, and `ProblemDetails` exception mapping.
 - [Frontend (Angular 22) Rules](rules/frontend-angular.md): Strict external `.ts`/`.html`/`.scss` component files, `@Service()`, signals, Material 3 tokens, and responsive design.
-- [Commands, Testing & Formatting Rules](rules/commands-and-testing.md): Exact CLI syntax for `.NET 10` `Microsoft.Testing.Platform`, EF migrations, CSharpier, ESLint, and Prettier.
+- [Commands, Testing & Formatting Rules](rules/commands-and-testing.md): Exact CLI syntax for `.NET 10` `Microsoft.Testing.Platform`, EF migrations, CSharpier, ESLint, Prettier, and **mandatory Playwright E2E test verification on all UI/client-facing changes**.
 
 ---
 

@@ -285,4 +285,191 @@ public sealed class FoodCatalogIntegrationTests
         );
         Assert.AreEqual(HttpStatusCode.Unauthorized, mergeRes.StatusCode);
     }
+
+    [TestMethod]
+    public async Task CreateFoodItem_WithDisallowedOrPlaceholderName_ReturnsBadRequest()
+    {
+        await RegisterAndAuthenticateAsync(
+            _client,
+            "invalid_food_user@example.com",
+            "invalidfooduser"
+        );
+
+        var disallowedNames = new[] { "Null", "null", "none", "n/a", "undefined", "item", "--" };
+
+        foreach (var disallowed in disallowedNames)
+        {
+            var res = await _client.PostAsJsonAsync(
+                "/api/food-items",
+                new CreateFoodItemRequest(disallowed)
+            );
+            Assert.AreEqual(
+                HttpStatusCode.BadRequest,
+                res.StatusCode,
+                $"Food item name '{disallowed}' should be rejected as bad request."
+            );
+        }
+    }
+
+    [TestMethod]
+    public async Task GetFoodItemRecipes_ReturnsReferencingRecipes_AndIngredientDisplayNames()
+    {
+        await RegisterAndAuthenticateAsync(_client, "usage_user@example.com", "usageuser");
+
+        var createFood = await (
+            await _client.PostAsJsonAsync(
+                "/api/food-items",
+                new CreateFoodItemRequest("Fresh Basil")
+            )
+        ).Content.ReadFromJsonAsync<FoodItemDto>();
+        Assert.IsNotNull(createFood);
+
+        var recipeReq = new UpsertRecipeRequest(
+            Title: "Caprese Salad",
+            Description: "Fresh salad",
+            Ingredients:
+            [
+                new RecipeIngredientInput(
+                    SectionName: null,
+                    Quantity: 6m,
+                    MaxQuantity: null,
+                    Unit: MeasurementUnit.Custom,
+                    CustomUnitName: "leaves",
+                    FoodItemId: createFood.Id,
+                    LinkedRecipeId: null,
+                    DisplayName: "fresh basil leaves, torn",
+                    PreparationNote: "torn"
+                ),
+            ],
+            Steps:
+            [
+                new RecipeStepInput(
+                    SectionName: null,
+                    Instruction: "Scatter basil over tomatoes.",
+                    IngredientIndices: [0]
+                ),
+            ]
+        );
+        var recipeRes = await _client.PostAsJsonAsync("/api/recipes", recipeReq);
+        Assert.AreEqual(HttpStatusCode.Created, recipeRes.StatusCode);
+
+        var usageRes = await _client.GetAsync($"/api/food-items/{createFood.Id}/recipes");
+        Assert.AreEqual(HttpStatusCode.OK, usageRes.StatusCode);
+
+        var usages = await usageRes.Content.ReadFromJsonAsync<List<FoodItemRecipeUsageDto>>();
+        Assert.IsNotNull(usages);
+        Assert.AreEqual(1, usages.Count);
+        Assert.AreEqual("Caprese Salad", usages[0].RecipeTitle);
+        Assert.IsTrue(usages[0].IngredientDisplayNames.Contains("fresh basil leaves, torn"));
+    }
+
+    [TestMethod]
+    public async Task UnlinkFoodItemRecipes_ClearsIngredientReferences_AndAllowsNormalDeletion()
+    {
+        await RegisterAndAuthenticateAsync(_client, "unlink_user@example.com", "unlinkuser");
+
+        var createFood = await (
+            await _client.PostAsJsonAsync(
+                "/api/food-items",
+                new CreateFoodItemRequest("To Be Unlinked")
+            )
+        ).Content.ReadFromJsonAsync<FoodItemDto>();
+        Assert.IsNotNull(createFood);
+
+        var recipeReq = new UpsertRecipeRequest(
+            Title: "Unlink Test Recipe",
+            Description: "Unlink test",
+            Ingredients:
+            [
+                new RecipeIngredientInput(
+                    SectionName: null,
+                    Quantity: 1m,
+                    MaxQuantity: null,
+                    Unit: MeasurementUnit.Pinch,
+                    CustomUnitName: null,
+                    FoodItemId: createFood.Id,
+                    LinkedRecipeId: null,
+                    DisplayName: "a pinch of something",
+                    PreparationNote: null
+                ),
+            ],
+            Steps: [new RecipeStepInput(null, "Mix.", [0])]
+        );
+        var recipeRes = await _client.PostAsJsonAsync("/api/recipes", recipeReq);
+        Assert.AreEqual(HttpStatusCode.Created, recipeRes.StatusCode);
+
+        // Delete without unlinking fails with 409
+        var deleteBlockedRes = await _client.DeleteAsync($"/api/food-items/{createFood.Id}");
+        Assert.AreEqual(HttpStatusCode.Conflict, deleteBlockedRes.StatusCode);
+
+        // Call unlink endpoint
+        var unlinkRes = await _client.PostAsync(
+            $"/api/food-items/{createFood.Id}/unlink-recipes",
+            null
+        );
+        Assert.AreEqual(HttpStatusCode.OK, unlinkRes.StatusCode);
+
+        var unlinkResult =
+            await unlinkRes.Content.ReadFromJsonAsync<UnlinkFoodItemRecipesResultDto>();
+        Assert.IsNotNull(unlinkResult);
+        Assert.AreEqual(1, unlinkResult.UnlinkedRecipeCount);
+        Assert.AreEqual(1, unlinkResult.UnlinkedIngredientCount);
+
+        // Recipes usage is now empty
+        var usageRes = await _client.GetAsync($"/api/food-items/{createFood.Id}/recipes");
+        Assert.AreEqual(HttpStatusCode.OK, usageRes.StatusCode);
+        var usages = await usageRes.Content.ReadFromJsonAsync<List<FoodItemRecipeUsageDto>>();
+        Assert.IsNotNull(usages);
+        Assert.AreEqual(0, usages.Count);
+
+        // Now deletion succeeds with 204
+        var deleteRes = await _client.DeleteAsync($"/api/food-items/{createFood.Id}");
+        Assert.AreEqual(HttpStatusCode.NoContent, deleteRes.StatusCode);
+    }
+
+    [TestMethod]
+    public async Task DeleteFoodItem_WithUnlinkFromRecipesTrue_SucceedsDirectly()
+    {
+        await RegisterAndAuthenticateAsync(_client, "forcedel_user@example.com", "forcedeluser");
+
+        var createFood = await (
+            await _client.PostAsJsonAsync(
+                "/api/food-items",
+                new CreateFoodItemRequest("Direct Force Delete")
+            )
+        ).Content.ReadFromJsonAsync<FoodItemDto>();
+        Assert.IsNotNull(createFood);
+
+        var recipeReq = new UpsertRecipeRequest(
+            Title: "Force Delete Test Recipe",
+            Description: "Force delete",
+            Ingredients:
+            [
+                new RecipeIngredientInput(
+                    SectionName: null,
+                    Quantity: 1m,
+                    MaxQuantity: null,
+                    Unit: MeasurementUnit.Pinch,
+                    CustomUnitName: null,
+                    FoodItemId: createFood.Id,
+                    LinkedRecipeId: null,
+                    DisplayName: "mystery ingredient",
+                    PreparationNote: null
+                ),
+            ],
+            Steps: [new RecipeStepInput(null, "Cook.", [0])]
+        );
+        var recipeRes = await _client.PostAsJsonAsync("/api/recipes", recipeReq);
+        Assert.AreEqual(HttpStatusCode.Created, recipeRes.StatusCode);
+
+        // Delete with unlinkFromRecipes=true
+        var deleteRes = await _client.DeleteAsync(
+            $"/api/food-items/{createFood.Id}?unlinkFromRecipes=true"
+        );
+        Assert.AreEqual(HttpStatusCode.NoContent, deleteRes.StatusCode);
+
+        // Verify item is gone
+        var getRes = await _client.GetAsync($"/api/food-items/{createFood.Id}");
+        Assert.AreEqual(HttpStatusCode.NotFound, getRes.StatusCode);
+    }
 }
