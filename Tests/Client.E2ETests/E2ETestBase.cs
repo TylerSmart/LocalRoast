@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Playwright;
@@ -70,6 +71,13 @@ public abstract class E2ETestBase : PageTest
         };
     }
 
+    /// <summary>
+    /// True when a debugger is attached (e.g. "Debug Test" in Visual Studio) or PWDEBUG=1 is set.
+    /// Disables Playwright action/navigation timeouts so stepping through breakpoints never times out.
+    /// </summary>
+    protected static bool IsInteractiveDebugSession =>
+        Debugger.IsAttached || Environment.GetEnvironmentVariable("PWDEBUG") == "1";
+
     [TestInitialize]
     public async Task E2ETestInitializeAsync()
     {
@@ -77,8 +85,10 @@ public abstract class E2ETestBase : PageTest
         _serverLogCursor = AssemblyInitializer.GetServerLogCursor();
 
         SetDefaultExpectTimeout(DefaultExpectTimeoutMs);
-        Context.SetDefaultTimeout(DefaultActionTimeoutMs);
-        Context.SetDefaultNavigationTimeout(DefaultNavigationTimeoutMs);
+        Context.SetDefaultTimeout(IsInteractiveDebugSession ? 0 : DefaultActionTimeoutMs);
+        Context.SetDefaultNavigationTimeout(
+            IsInteractiveDebugSession ? 0 : DefaultNavigationTimeoutMs
+        );
 
         await RegisterPageSessionAsync(Context, Page, "primary");
     }
@@ -168,8 +178,10 @@ public abstract class E2ETestBase : PageTest
             }
         );
 
-        context.SetDefaultTimeout(DefaultActionTimeoutMs);
-        context.SetDefaultNavigationTimeout(DefaultNavigationTimeoutMs);
+        context.SetDefaultTimeout(IsInteractiveDebugSession ? 0 : DefaultActionTimeoutMs);
+        context.SetDefaultNavigationTimeout(
+            IsInteractiveDebugSession ? 0 : DefaultNavigationTimeoutMs
+        );
 
         var page = await context.NewPageAsync();
         await RegisterPageSessionAsync(context, page, label);

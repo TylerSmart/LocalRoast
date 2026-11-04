@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 namespace App.Client.E2ETests;
 
 [TestClass]
@@ -17,6 +19,15 @@ public static class AssemblyInitializer
     [AssemblyInitialize]
     public static async Task AssemblyInit(TestContext context)
     {
+        // Automatically launch a visible browser window when debugging E2E tests from Visual Studio / IDE
+        if (
+            Debugger.IsAttached
+            && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("HEADED"))
+        )
+        {
+            Environment.SetEnvironmentVariable("HEADED", "1");
+        }
+
         _server = await PlaywrightServerFixture.StartAsync();
     }
 
