@@ -99,6 +99,13 @@ public sealed class CookLogServiceTests
             CancellationToken cancellationToken = default
         ) => throw new NotImplementedException();
 
+        public Task<SavedRecipeAttachmentFileDto> SaveIngestionSourceTextAsync(
+            string text,
+            string originalFileName,
+            string jobToken,
+            CancellationToken cancellationToken = default
+        ) => throw new NotImplementedException();
+
         public Task PurgeAllMediaAsync(CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
     }

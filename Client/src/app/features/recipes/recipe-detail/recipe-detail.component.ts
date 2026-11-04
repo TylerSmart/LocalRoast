@@ -445,6 +445,18 @@ export class RecipeDetailComponent implements OnInit {
     return this.recipe()?.linkedSubRecipes.find((s) => s.id === subRecipeId);
   }
 
+  isTextAttachment(att: RecipeAttachmentDto): boolean {
+    if (!att) return false;
+    const name = (att.fileName || '').toLowerCase();
+    const type = (att.contentType || '').toLowerCase();
+    return (
+      type === 'text/plain' ||
+      type === 'text/markdown' ||
+      name.endsWith('.txt') ||
+      name.endsWith('.md')
+    );
+  }
+
   openAttachmentViewer(initialIndex = 0): void {
     const attachments = this.recipe()?.attachments || [];
     if (attachments.length === 0) return;

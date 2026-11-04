@@ -12,15 +12,20 @@ namespace App.Infrastructure.Media;
 public sealed class LocalFileMediaStorageService : IMediaStorageService
 {
     private readonly MediaStorageOptions _options;
+
     private readonly string _uploadsRoot;
+
     private static readonly WebpEncoder WebpLossyEncoder = new()
     {
         Quality = 82,
+
         FileFormat = WebpFileFormatType.Lossy,
     };
+
     private static readonly WebpEncoder WebpScanEncoder = new()
     {
         Quality = 85,
+
         FileFormat = WebpFileFormatType.Lossy,
     };
 
@@ -30,13 +35,16 @@ public sealed class LocalFileMediaStorageService : IMediaStorageService
     )
     {
         ArgumentNullException.ThrowIfNull(options);
+
         ArgumentNullException.ThrowIfNull(hostEnvironment);
 
         _options = options.Value;
+
         _uploadsRoot = MediaStorageOptions.ResolveUploadsRoot(
             _options.UploadsPath,
             hostEnvironment.ContentRootPath
         );
+
         Directory.CreateDirectory(_uploadsRoot);
     }
 
@@ -52,11 +60,15 @@ public sealed class LocalFileMediaStorageService : IMediaStorageService
         using var image = await LoadAndNormalizeImageAsync(content, cancellationToken);
 
         var token = Guid.NewGuid().ToString("N");
+
         var recipesDir = Path.Combine(_uploadsRoot, "recipes");
+
         Directory.CreateDirectory(recipesDir);
 
         // Generate thumbnail first by cloning before modifying original image
+
         var thumbPath = Path.Combine(recipesDir, $"{token}-thumb.webp");
+
         using (
             var thumb = image.Clone(ctx =>
             {
@@ -73,13 +85,16 @@ public sealed class LocalFileMediaStorageService : IMediaStorageService
         }
 
         // Generate cover variant
+
         var coverPath = Path.Combine(recipesDir, $"{token}-cover.webp");
+
         if (image.Width > 1600 || image.Height > 1200)
         {
             image.Mutate(ctx =>
                 ctx.Resize(new ResizeOptions { Size = new Size(1600, 1200), Mode = ResizeMode.Max })
             );
         }
+
         await image.SaveAsync(coverPath, WebpLossyEncoder, cancellationToken);
 
         return new UploadedRecipeCoverDto(
@@ -100,16 +115,20 @@ public sealed class LocalFileMediaStorageService : IMediaStorageService
         using var image = await LoadAndNormalizeImageAsync(content, cancellationToken);
 
         var token = Guid.NewGuid().ToString("N");
+
         var stepsDir = Path.Combine(_uploadsRoot, "steps");
+
         Directory.CreateDirectory(stepsDir);
 
         var stepPath = Path.Combine(stepsDir, $"{token}.webp");
+
         if (image.Width > 1200 || image.Height > 900)
         {
             image.Mutate(ctx =>
                 ctx.Resize(new ResizeOptions { Size = new Size(1200, 900), Mode = ResizeMode.Max })
             );
         }
+
         await image.SaveAsync(stepPath, WebpLossyEncoder, cancellationToken);
 
         return new UploadedMediaDto($"/api/uploads/steps/{token}.webp");
@@ -130,12 +149,15 @@ public sealed class LocalFileMediaStorageService : IMediaStorageService
         using var image = await LoadAndNormalizeImageAsync(content, cancellationToken);
 
         var ingestionDir = Path.Combine(_uploadsRoot, "ingestion");
+
         Directory.CreateDirectory(ingestionDir);
 
         string? thumbUrl = null;
+
         if (generateThumbnail)
         {
             var thumbPath = Path.Combine(ingestionDir, $"{jobToken}-thumb.webp");
+
             using var thumb = image.Clone(ctx =>
             {
                 if (image.Width > 600 || image.Height > 450)
@@ -145,7 +167,9 @@ public sealed class LocalFileMediaStorageService : IMediaStorageService
                     );
                 }
             });
+
             await thumb.SaveAsync(thumbPath, WebpLossyEncoder, cancellationToken);
+
             thumbUrl = $"/api/uploads/ingestion/{jobToken}-thumb.webp";
         }
 
@@ -157,9 +181,11 @@ public sealed class LocalFileMediaStorageService : IMediaStorageService
         }
 
         var pagePath = Path.Combine(ingestionDir, $"{jobToken}-p{pageNumber}.webp");
+
         await image.SaveAsync(pagePath, WebpScanEncoder, cancellationToken);
 
         var fileInfo = new FileInfo(pagePath);
+
         return new SavedIngestionImageDto(
             $"/api/uploads/ingestion/{jobToken}-p{pageNumber}.webp",
             thumbUrl,
@@ -185,17 +211,20 @@ public sealed class LocalFileMediaStorageService : IMediaStorageService
         if (contentLength > _options.MaxPdfUploadBytes)
         {
             var maxMb = _options.MaxPdfUploadBytes / (1024 * 1024);
+
             throw new DomainValidationException(
                 $"Uploaded PDF exceeds the maximum allowed size of {maxMb} MB."
             );
         }
 
         var ingestionDir = Path.Combine(_uploadsRoot, "ingestion");
+
         Directory.CreateDirectory(ingestionDir);
 
         var pdfPath = Path.Combine(ingestionDir, $"{jobToken}.pdf");
 
         // Validate PDF magic header: %PDF-
+
         await using (
             var fs = new FileStream(
                 pdfPath,
@@ -217,8 +246,11 @@ public sealed class LocalFileMediaStorageService : IMediaStorageService
             }
 
             fs.Position = 0;
+
             var header = new byte[5];
+
             var bytesRead = await fs.ReadAsync(header.AsMemory(0, 5), cancellationToken);
+
             if (
                 bytesRead < 5
                 || header[0] != 0x25
@@ -235,6 +267,7 @@ public sealed class LocalFileMediaStorageService : IMediaStorageService
         }
 
         var fileInfo = new FileInfo(pdfPath);
+
         return new SavedIngestionPdfDto($"/api/uploads/ingestion/{jobToken}.pdf", fileInfo.Length);
     }
 
@@ -244,6 +277,7 @@ public sealed class LocalFileMediaStorageService : IMediaStorageService
     )
     {
         var fullPath = ResolvePhysicalPath(mediaUrlPath);
+
         if (!File.Exists(fullPath))
         {
             throw new NotFoundException($"Media file '{mediaUrlPath}' was not found on disk.");
@@ -257,6 +291,7 @@ public sealed class LocalFileMediaStorageService : IMediaStorageService
             4096,
             useAsync: true
         );
+
         return Task.FromResult(fs);
     }
 
@@ -267,12 +302,14 @@ public sealed class LocalFileMediaStorageService : IMediaStorageService
     )
     {
         var fullPath = ResolvePhysicalPath(mediaUrlPath);
+
         if (!File.Exists(fullPath))
         {
             throw new NotFoundException($"Media file '{mediaUrlPath}' was not found on disk.");
         }
 
         using var image = await Image.LoadAsync(fullPath, cancellationToken);
+
         if (image.Width > maxDimensionPx || image.Height > maxDimensionPx)
         {
             image.Mutate(ctx =>
@@ -280,6 +317,7 @@ public sealed class LocalFileMediaStorageService : IMediaStorageService
                     new ResizeOptions
                     {
                         Size = new Size(maxDimensionPx, maxDimensionPx),
+
                         Mode = ResizeMode.Max,
                     }
                 )
@@ -287,7 +325,9 @@ public sealed class LocalFileMediaStorageService : IMediaStorageService
         }
 
         using var ms = new MemoryStream();
+
         await image.SaveAsJpegAsync(ms, new JpegEncoder { Quality = 85 }, cancellationToken);
+
         return ms.ToArray();
     }
 
@@ -297,6 +337,7 @@ public sealed class LocalFileMediaStorageService : IMediaStorageService
     )
     {
         var fullPath = ResolvePhysicalPath(sourceMediaUrlPath);
+
         if (!File.Exists(fullPath))
         {
             throw new NotFoundException(
@@ -307,10 +348,13 @@ public sealed class LocalFileMediaStorageService : IMediaStorageService
         using var image = await Image.LoadAsync(fullPath, cancellationToken);
 
         var token = Guid.NewGuid().ToString("N");
+
         var recipesDir = Path.Combine(_uploadsRoot, "recipes");
+
         Directory.CreateDirectory(recipesDir);
 
         var thumbPath = Path.Combine(recipesDir, $"{token}-thumb.webp");
+
         using (
             var thumb = image.Clone(ctx =>
             {
@@ -327,12 +371,14 @@ public sealed class LocalFileMediaStorageService : IMediaStorageService
         }
 
         var coverPath = Path.Combine(recipesDir, $"{token}-cover.webp");
+
         if (image.Width > 1600 || image.Height > 1200)
         {
             image.Mutate(ctx =>
                 ctx.Resize(new ResizeOptions { Size = new Size(1600, 1200), Mode = ResizeMode.Max })
             );
         }
+
         await image.SaveAsync(coverPath, WebpLossyEncoder, cancellationToken);
 
         return new UploadedRecipeCoverDto(
@@ -347,6 +393,7 @@ public sealed class LocalFileMediaStorageService : IMediaStorageService
     )
     {
         var fullSourcePath = ResolvePhysicalPath(sourceMediaUrlPath);
+
         if (!File.Exists(fullSourcePath))
         {
             throw new NotFoundException(
@@ -355,16 +402,38 @@ public sealed class LocalFileMediaStorageService : IMediaStorageService
         }
 
         var attachmentsDir = Path.Combine(_uploadsRoot, "attachments");
+
         Directory.CreateDirectory(attachmentsDir);
 
         var ext = Path.GetExtension(fullSourcePath).ToLowerInvariant();
+
         var token = Guid.NewGuid().ToString("N");
+
         var destFileName = $"{token}{ext}";
+
         var destPath = Path.Combine(attachmentsDir, destFileName);
 
         File.Copy(fullSourcePath, destPath, overwrite: true);
 
-        var contentType = ext == ".pdf" ? "application/pdf" : "image/webp";
+        var contentType = ext switch
+        {
+            ".pdf" => "application/pdf",
+
+            ".txt" => "text/plain",
+
+            ".md" => "text/markdown",
+
+            ".html" or ".htm" => "text/html",
+
+            ".webp" => "image/webp",
+
+            ".png" => "image/png",
+
+            ".jpg" or ".jpeg" => "image/jpeg",
+
+            _ => "application/octet-stream",
+        };
+
         var fileInfo = new FileInfo(destPath);
 
         return Task.FromResult(
@@ -391,7 +460,16 @@ public sealed class LocalFileMediaStorageService : IMediaStorageService
                 StringComparison.OrdinalIgnoreCase
             ) || string.Equals(contentType, "application/pdf", StringComparison.OrdinalIgnoreCase);
 
+        var rawExt = Path.GetExtension(originalFileName).ToLowerInvariant();
+
+        var isText =
+            rawExt == ".txt"
+            || rawExt == ".md"
+            || string.Equals(contentType, "text/plain", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(contentType, "text/markdown", StringComparison.OrdinalIgnoreCase);
+
         var attachmentsDir = Path.Combine(_uploadsRoot, "attachments");
+
         Directory.CreateDirectory(attachmentsDir);
 
         var token = Guid.NewGuid().ToString("N");
@@ -402,15 +480,18 @@ public sealed class LocalFileMediaStorageService : IMediaStorageService
             {
                 throw new DomainValidationException("Uploaded file cannot be empty.");
             }
+
             if (contentLength > _options.MaxPdfUploadBytes)
             {
                 var maxMb = _options.MaxPdfUploadBytes / (1024 * 1024);
+
                 throw new DomainValidationException(
                     $"Uploaded PDF exceeds the maximum allowed size of {maxMb} MB."
                 );
             }
 
             var destPath = Path.Combine(attachmentsDir, $"{token}.pdf");
+
             await using (
                 var fs = new FileStream(
                     destPath,
@@ -423,9 +504,13 @@ public sealed class LocalFileMediaStorageService : IMediaStorageService
             )
             {
                 await content.CopyToAsync(fs, cancellationToken);
+
                 fs.Position = 0;
+
                 var header = new byte[5];
+
                 var read = await fs.ReadAsync(header.AsMemory(0, 5), cancellationToken);
+
                 if (
                     read < 5
                     || header[0] != 0x25
@@ -442,18 +527,59 @@ public sealed class LocalFileMediaStorageService : IMediaStorageService
             }
 
             var fileInfo = new FileInfo(destPath);
+
             return new SavedRecipeAttachmentFileDto(
                 $"/api/uploads/attachments/{token}.pdf",
                 "application/pdf",
                 fileInfo.Length
             );
         }
+        else if (isText)
+        {
+            if (contentLength <= 0)
+            {
+                throw new DomainValidationException("Uploaded file cannot be empty.");
+            }
+
+            if (contentLength > 5 * 1024 * 1024)
+            {
+                throw new DomainValidationException("Uploaded text attachment cannot exceed 5 MB.");
+            }
+
+            var textExt = rawExt == ".md" ? ".md" : ".txt";
+
+            var destPath = Path.Combine(attachmentsDir, $"{token}{textExt}");
+
+            await using (
+                var fs = new FileStream(
+                    destPath,
+                    FileMode.Create,
+                    FileAccess.ReadWrite,
+                    FileShare.None,
+                    4096,
+                    useAsync: true
+                )
+            )
+            {
+                await content.CopyToAsync(fs, cancellationToken);
+            }
+
+            var fileInfo = new FileInfo(destPath);
+
+            return new SavedRecipeAttachmentFileDto(
+                $"/api/uploads/attachments/{token}{textExt}",
+                textExt == ".md" ? "text/markdown" : "text/plain",
+                fileInfo.Length
+            );
+        }
         else
         {
             ValidateImageContentLength(contentLength);
+
             using var image = await LoadAndNormalizeImageAsync(content, cancellationToken);
 
             var destPath = Path.Combine(attachmentsDir, $"{token}.webp");
+
             if (image.Width > 2000 || image.Height > 2400)
             {
                 image.Mutate(ctx =>
@@ -462,15 +588,50 @@ public sealed class LocalFileMediaStorageService : IMediaStorageService
                     )
                 );
             }
+
             await image.SaveAsync(destPath, WebpScanEncoder, cancellationToken);
 
             var fileInfo = new FileInfo(destPath);
+
             return new SavedRecipeAttachmentFileDto(
                 $"/api/uploads/attachments/{token}.webp",
                 "image/webp",
                 fileInfo.Length
             );
         }
+    }
+
+    public async Task<SavedRecipeAttachmentFileDto> SaveIngestionSourceTextAsync(
+        string text,
+        string originalFileName,
+        string jobToken,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var ingestionDir = Path.Combine(_uploadsRoot, "ingestion");
+
+        Directory.CreateDirectory(ingestionDir);
+
+        var ext = Path.GetExtension(originalFileName).ToLowerInvariant();
+
+        if (string.IsNullOrWhiteSpace(ext) || ext != ".md")
+        {
+            ext = ".txt";
+        }
+
+        var fileName = $"{jobToken}{ext}";
+
+        var destPath = Path.Combine(ingestionDir, fileName);
+
+        await File.WriteAllTextAsync(destPath, text, System.Text.Encoding.UTF8, cancellationToken);
+
+        var fileInfo = new FileInfo(destPath);
+
+        return new SavedRecipeAttachmentFileDto(
+            $"/api/uploads/ingestion/{fileName}",
+            ext == ".md" ? "text/markdown" : "text/plain",
+            fileInfo.Length
+        );
     }
 
     public async Task<UploadedCookLogPhotoDto> SaveCookLogPhotoAsync(
@@ -485,10 +646,13 @@ public sealed class LocalFileMediaStorageService : IMediaStorageService
         using var image = await LoadAndNormalizeImageAsync(content, cancellationToken);
 
         var token = Guid.NewGuid().ToString("N");
+
         var cookLogsDir = Path.Combine(_uploadsRoot, "cook-logs");
+
         Directory.CreateDirectory(cookLogsDir);
 
         var thumbPath = Path.Combine(cookLogsDir, "$token-thumb.webp");
+
         using (
             var thumb = image.Clone(ctx =>
             {
@@ -505,12 +669,14 @@ public sealed class LocalFileMediaStorageService : IMediaStorageService
         }
 
         var photoPath = Path.Combine(cookLogsDir, "$token-photo.webp");
+
         if (image.Width > 1600 || image.Height > 1200)
         {
             image.Mutate(ctx =>
                 ctx.Resize(new ResizeOptions { Size = new Size(1600, 1200), Mode = ResizeMode.Max })
             );
         }
+
         await image.SaveAsync(photoPath, WebpLossyEncoder, cancellationToken);
 
         return new UploadedCookLogPhotoDto(
@@ -530,12 +696,14 @@ public sealed class LocalFileMediaStorageService : IMediaStorageService
         }
 
         const string prefix = "/api/uploads/";
+
         if (!mediaUrlPath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
         {
             return Task.CompletedTask;
         }
 
         var relative = mediaUrlPath[prefix.Length..].TrimStart('/', '\\');
+
         var fullPath = Path.GetFullPath(Path.Combine(_uploadsRoot, relative));
 
         var rootWithSep = _uploadsRoot.EndsWith(Path.DirectorySeparatorChar)
@@ -570,6 +738,7 @@ public sealed class LocalFileMediaStorageService : IMediaStorageService
         }
 
         const string prefix = "/api/uploads/";
+
         if (!mediaUrlPath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
         {
             throw new DomainValidationException(
@@ -578,6 +747,7 @@ public sealed class LocalFileMediaStorageService : IMediaStorageService
         }
 
         var relative = mediaUrlPath[prefix.Length..].TrimStart('/', '\\');
+
         var fullPath = Path.GetFullPath(Path.Combine(_uploadsRoot, relative));
 
         var rootWithSep = _uploadsRoot.EndsWith(Path.DirectorySeparatorChar)
@@ -602,6 +772,7 @@ public sealed class LocalFileMediaStorageService : IMediaStorageService
         if (contentLength > _options.MaxUploadBytes)
         {
             var maxMb = _options.MaxUploadBytes / (1024 * 1024);
+
             throw new DomainValidationException(
                 $"Uploaded file exceeds the maximum allowed size of {maxMb} MB."
             );
@@ -614,6 +785,7 @@ public sealed class LocalFileMediaStorageService : IMediaStorageService
     )
     {
         MemoryStream? msToDispose = null;
+
         MemoryStream seekableStream;
 
         if (content is MemoryStream memStream && memStream.CanSeek)
@@ -623,15 +795,20 @@ public sealed class LocalFileMediaStorageService : IMediaStorageService
         else
         {
             msToDispose = new MemoryStream();
+
             await content.CopyToAsync(msToDispose, cancellationToken);
+
             msToDispose.Position = 0;
+
             seekableStream = msToDispose;
         }
 
         try
         {
             Image image;
+
             var startPos = seekableStream.Position;
+
             try
             {
                 image = await Image.LoadAsync(seekableStream, cancellationToken);
@@ -640,14 +817,21 @@ public sealed class LocalFileMediaStorageService : IMediaStorageService
                 when (ex is UnknownImageFormatException or InvalidImageContentException)
             {
                 // Fall back to Magick.NET for HEIC / HEIF
+
                 seekableStream.Position = startPos;
+
                 try
                 {
                     using var magick = new ImageMagick.MagickImage(seekableStream);
+
                     magick.AutoOrient();
+
                     using var pngMs = new MemoryStream();
+
                     await magick.WriteAsync(pngMs, ImageMagick.MagickFormat.Png, cancellationToken);
+
                     pngMs.Position = 0;
+
                     image = await Image.LoadAsync(pngMs, cancellationToken);
                 }
                 catch (Exception magickEx) when (magickEx is not DomainValidationException)
@@ -659,9 +843,13 @@ public sealed class LocalFileMediaStorageService : IMediaStorageService
             }
 
             // Apply EXIF orientation and strip metadata
+
             image.Mutate(ctx => ctx.AutoOrient());
+
             image.Metadata.ExifProfile = null;
+
             image.Metadata.IptcProfile = null;
+
             image.Metadata.XmpProfile = null;
 
             return image;
@@ -680,14 +868,17 @@ public sealed class LocalFileMediaStorageService : IMediaStorageService
         if (Directory.Exists(_uploadsRoot))
         {
             var subDirs = new[] { "recipes", "steps", "ingestion", "attachments", "cook-logs" };
+
             foreach (var sub in subDirs)
             {
                 var dirPath = Path.Combine(_uploadsRoot, sub);
+
                 if (Directory.Exists(dirPath))
                 {
                     try
                     {
                         Directory.Delete(dirPath, recursive: true);
+
                         Directory.CreateDirectory(dirPath);
                     }
                     catch

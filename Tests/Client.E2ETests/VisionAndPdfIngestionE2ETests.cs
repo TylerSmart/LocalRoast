@@ -448,7 +448,7 @@ public sealed class VisionAndPdfIngestionE2ETests : E2ETestBase
 
         // Toggle to Structured Draft pane
         await switcher
-            .Locator("button.switcher-pill", new() { HasText = "Structured Draft" })
+            .Locator("button.switcher-pill", new() { HasText = "Edit Draft" })
             .ClickAsync();
         await Expect(Page.Locator(".draft-editor-pane")).ToBeVisibleAsync();
     }

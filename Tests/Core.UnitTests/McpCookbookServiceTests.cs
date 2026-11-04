@@ -15,7 +15,9 @@ namespace App.Core.UnitTests;
 public sealed class McpCookbookServiceTests
 {
     private AppDbContext _dbContext = null!;
+
     private McpCookbookService _service = null!;
+
     private RecipeService _recipeService = null!;
 
     private sealed class DummyMediaStorageService : IMediaStorageService
@@ -128,6 +130,20 @@ public sealed class McpCookbookServiceTests
                 )
             );
 
+        public Task<SavedRecipeAttachmentFileDto> SaveIngestionSourceTextAsync(
+            string text,
+            string originalFileName,
+            string jobToken,
+            CancellationToken cancellationToken = default
+        ) =>
+            Task.FromResult(
+                new SavedRecipeAttachmentFileDto(
+                    $"/api/uploads/ingestion/{jobToken}.txt",
+                    "text/plain",
+                    text.Length
+                )
+            );
+
         public Task PurgeAllMediaAsync(CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
     }
@@ -162,10 +178,15 @@ public sealed class McpCookbookServiceTests
             .Options;
 
         _dbContext = new AppDbContext(options);
+
         var mediaService = new DummyMediaStorageService();
+
         _recipeService = new RecipeService(_dbContext, mediaService);
+
         var taxonomyService = new TaxonomyService(_dbContext);
+
         var queueSignal = new DummyIngestionQueueSignal();
+
         var ingestionService = new IngestionService(
             _dbContext,
             _recipeService,
@@ -181,19 +202,27 @@ public sealed class McpCookbookServiceTests
         );
 
         // Seed basic food items
+
         var garlic = new FoodItem
         {
             Id = Guid.NewGuid(),
+
             Name = "Garlic",
+
             NormalizedName = "garlic",
+
             IsPantryStaple = false,
         };
+
         garlic.Aliases.Add(
             new FoodItemAlias
             {
                 Id = Guid.NewGuid(),
+
                 FoodItemId = garlic.Id,
+
                 Alias = "Garlic Cloves",
+
                 NormalizedAlias = "garlic cloves",
             }
         );
@@ -201,12 +230,16 @@ public sealed class McpCookbookServiceTests
         var salt = new FoodItem
         {
             Id = Guid.NewGuid(),
+
             Name = "Kosher Salt",
+
             NormalizedName = "kosher salt",
+
             IsPantryStaple = true,
         };
 
         _dbContext.FoodItems.AddRange(garlic, salt);
+
         _dbContext.SaveChanges();
     }
 
@@ -214,6 +247,7 @@ public sealed class McpCookbookServiceTests
     public void Cleanup()
     {
         _dbContext.Database.EnsureDeleted();
+
         _dbContext.Dispose();
     }
 
@@ -223,7 +257,9 @@ public sealed class McpCookbookServiceTests
         var taxonomy = await _service.GetHouseholdTaxonomyAsync();
 
         Assert.IsNotNull(taxonomy);
+
         Assert.IsTrue(taxonomy.SupportedUnits.Contains("tbsp"));
+
         Assert.IsTrue(taxonomy.SupportedUnits.Contains("cup"));
     }
 
@@ -268,15 +304,23 @@ public sealed class McpCookbookServiceTests
         var recipe = await _service.SaveStructuredRecipeAsync(request);
 
         Assert.IsNotNull(recipe);
+
         Assert.AreEqual("Garlic Butter Pasta", recipe.Title);
+
         Assert.AreEqual(RecipeStatus.Published, recipe.Status);
+
         Assert.AreEqual(2, recipe.Ingredients.Count);
+
         Assert.AreEqual(2, recipe.Steps.Count);
 
         // Auto-detected timers
+
         Assert.AreEqual(1, recipe.Steps[0].Timers.Count);
+
         Assert.AreEqual(600, recipe.Steps[0].Timers[0].DurationSeconds);
+
         Assert.AreEqual(1, recipe.Steps[1].Timers.Count);
+
         Assert.AreEqual(180, recipe.Steps[1].Timers[0].DurationSeconds);
     }
 
@@ -296,12 +340,15 @@ public sealed class McpCookbookServiceTests
         );
 
         var results = await _service.SearchRecipesAsync(new McpRecipeSearchRequest(Query: "tacos"));
+
         Assert.AreEqual(1, results.Count);
+
         Assert.AreEqual("Spicy Tacos", results[0].Title);
 
         var emptyResults = await _service.SearchRecipesAsync(
             new McpRecipeSearchRequest(Query: "nonexistent")
         );
+
         Assert.AreEqual(0, emptyResults.Count);
     }
 
@@ -334,9 +381,13 @@ public sealed class McpCookbookServiceTests
         var detail = await _service.GetRecipeAsync(slug: created.Slug);
 
         Assert.IsNotNull(detail);
+
         Assert.AreEqual(created.Id, detail.Id);
+
         Assert.AreEqual(1, detail.Steps.Count);
+
         Assert.AreEqual(1, detail.Steps[0].StepIngredients.Count);
+
         Assert.AreEqual("Garlic", detail.Steps[0].StepIngredients[0].DisplayName);
     }
 
@@ -364,12 +415,19 @@ public sealed class McpCookbookServiceTests
         ]);
 
         Assert.IsNotNull(matchResult);
+
         Assert.AreEqual(1, matchResult.ResolvedIngredients.Count);
+
         Assert.AreEqual("garlic cloves", matchResult.ResolvedIngredients[0].InputName);
+
         Assert.AreEqual("Garlic", matchResult.ResolvedIngredients[0].CanonicalName);
+
         Assert.AreEqual(1, matchResult.UnresolvedIngredientNames.Count);
+
         Assert.AreEqual("mystery spice", matchResult.UnresolvedIngredientNames[0]);
+
         Assert.AreEqual(1, matchResult.Matches.Count);
+
         Assert.AreEqual("Garlic Soup", matchResult.Matches[0].Recipe.Title);
     }
 
@@ -381,6 +439,7 @@ public sealed class McpCookbookServiceTests
         );
 
         Assert.IsNotNull(textJob);
+
         Assert.AreEqual(IngestionChannel.RawText, textJob.Channel);
 
         await Assert.ThrowsAsync<DomainValidationException>(() =>
@@ -396,35 +455,55 @@ public sealed class McpCookbookServiceTests
         var recipe = new Recipe
         {
             Id = Guid.NewGuid(),
+
             Title = "Grandmas Meatloaf",
+
             Slug = "grandmas-meatloaf",
+
             Status = RecipeStatus.Published,
+
             BaseServings = 4,
+
             TimesCooked = 1,
+
             AverageRating = 5.0m,
+
             RatingCount = 1,
+
             LastCookedAt = DateTimeOffset.UtcNow.AddDays(-10),
         };
+
         _dbContext.Recipes.Add(recipe);
 
         var log = new CookLog
         {
             Id = Guid.NewGuid(),
+
             RecipeId = recipe.Id,
+
             CookedByDisplayName = "Grandpa",
+
             CookedAt = DateTimeOffset.UtcNow.AddDays(-10),
+
             Rating = 5,
+
             Notes = "Added a pinch of nutmeg to the glaze. Delicious!",
         };
+
         _dbContext.CookLogs.Add(log);
+
         await _dbContext.SaveChangesAsync();
 
         var result = await _service.GetRecipeAsync(recipe.Id);
 
         Assert.IsNotNull(result);
+
         Assert.AreEqual(1, result.CookHistoryNotes.Count);
+
         Assert.AreEqual("Grandpa", result.CookHistoryNotes[0].CookedBy);
+
         Assert.AreEqual(5, result.CookHistoryNotes[0].Rating);
+
         Assert.AreEqual(
             "Added a pinch of nutmeg to the glaze. Delicious!",
             result.CookHistoryNotes[0].Notes
@@ -437,41 +516,63 @@ public sealed class McpCookbookServiceTests
         var recipe = new Recipe
         {
             Id = Guid.NewGuid(),
+
             Title = "Chicken Curry",
+
             Slug = "chicken-curry",
+
             Status = RecipeStatus.Published,
+
             BaseServings = 4,
+
             TimesCooked = 3,
+
             AverageRating = 4.8m,
+
             RatingCount = 2,
+
             LastCookedAt = DateTimeOffset.UtcNow.AddDays(-90),
         };
+
         _dbContext.Recipes.Add(recipe);
 
         var log = new CookLog
         {
             Id = Guid.NewGuid(),
+
             RecipeId = recipe.Id,
+
             CookedByDisplayName = "Chef",
+
             CookedAt = DateTimeOffset.UtcNow.AddDays(-90),
+
             Rating = 5,
+
             Notes = "Used smoked paprika and extra coconut cream.",
         };
+
         _dbContext.CookLogs.Add(log);
+
         await _dbContext.SaveChangesAsync();
 
         // Search by cook log note keyword
+
         var searchResults = await _service.SearchRecipesAsync(
             new McpRecipeSearchRequest(Query: "coconut cream")
         );
+
         Assert.AreEqual(1, searchResults.Count);
+
         Assert.AreEqual("Chicken Curry", searchResults[0].Title);
 
         // Search forgotten favorites
+
         var forgottenResults = await _service.SearchRecipesAsync(
             new McpRecipeSearchRequest(ForgottenFavoritesOnly: true, ForgottenDaysThreshold: 60)
         );
+
         Assert.AreEqual(1, forgottenResults.Count);
+
         Assert.AreEqual("Chicken Curry", forgottenResults[0].Title);
     }
 }

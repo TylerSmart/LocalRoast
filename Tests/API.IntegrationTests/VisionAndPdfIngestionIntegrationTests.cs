@@ -14,12 +14,14 @@ namespace App.API.IntegrationTests;
 public sealed class VisionAndPdfIngestionIntegrationTests
 {
     private AppWebApplicationFactory _factory = null!;
+
     private HttpClient _client = null!;
 
     [TestInitialize]
     public void Setup()
     {
         _factory = new AppWebApplicationFactory();
+
         _client = _factory.CreateClient();
     }
 
@@ -27,38 +29,49 @@ public sealed class VisionAndPdfIngestionIntegrationTests
     public void Cleanup()
     {
         _client.Dispose();
+
         _factory.Dispose();
     }
 
     private static async Task<AuthResponse> AuthenticateAsync(HttpClient client)
     {
         var email = $"chef_{Guid.NewGuid():N}@example.com";
+
         var username = $"chef_{Guid.NewGuid():N}"[..12];
+
         var register = new RegisterRequest(email, username, "KitchenSecret123!");
+
         var response = await client.PostAsJsonAsync("/api/auth/register", register);
+
         Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
 
         var auth = await response.Content.ReadFromJsonAsync<AuthResponse>();
+
         Assert.IsNotNull(auth);
 
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
             "Bearer",
             auth.Token
         );
+
         return auth;
     }
 
     private static byte[] CreateSampleImageBytes(int width = 400, int height = 300)
     {
         using var image = new Image<Rgba32>(width, height);
+
         using var ms = new MemoryStream();
+
         image.SaveAsPng(ms);
+
         return ms.ToArray();
     }
 
     private static byte[] CreateSamplePdfBytes(string content = "Sample Recipe Book")
     {
         var raw = "%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n" + content;
+
         return System.Text.Encoding.ASCII.GetBytes(raw);
     }
 
@@ -66,7 +79,9 @@ public sealed class VisionAndPdfIngestionIntegrationTests
     public async Task EnqueueImages_Unauthenticated_ReturnsUnauthorized()
     {
         using var content = new MultipartFormDataContent();
+
         var resp = await _client.PostAsync("/api/ingestion/jobs/images", content);
+
         Assert.AreEqual(HttpStatusCode.Unauthorized, resp.StatusCode);
     }
 
@@ -76,7 +91,9 @@ public sealed class VisionAndPdfIngestionIntegrationTests
         await AuthenticateAsync(_client);
 
         using var form = new MultipartFormDataContent();
+
         var img1 = CreateSampleImageBytes();
+
         var img2 = CreateSampleImageBytes();
 
         form.Add(
@@ -98,25 +115,37 @@ public sealed class VisionAndPdfIngestionIntegrationTests
         );
 
         form.Add(new StringContent("Modern Baking"), "sourceBookTitle");
+
         form.Add(new StringContent("45"), "sourceBookPage");
 
         var response = await _client.PostAsync("/api/ingestion/jobs/images", form);
+
         Assert.AreEqual(HttpStatusCode.Accepted, response.StatusCode);
 
         var jobSummary = await response.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
+
         Assert.IsNotNull(jobSummary);
+
         Assert.AreEqual(IngestionChannel.Images, jobSummary.Channel);
+
         Assert.AreEqual(2, jobSummary.SourceFileCount);
+
         StringAssert.Contains(jobSummary.DisplayTitle, "Modern Baking");
 
         // Verify detail endpoint
+
         var detailResp = await _client.GetAsync($"/api/ingestion/jobs/{jobSummary.Id}");
+
         Assert.AreEqual(HttpStatusCode.OK, detailResp.StatusCode);
 
         var detail = await detailResp.Content.ReadFromJsonAsync<IngestionJobDetailDto>();
+
         Assert.IsNotNull(detail);
+
         Assert.AreEqual(2, detail.SourceFiles.Count);
+
         Assert.AreEqual("Modern Baking", detail.SourceBookTitle);
+
         Assert.AreEqual(45, detail.SourceBookPage);
     }
 
@@ -126,6 +155,7 @@ public sealed class VisionAndPdfIngestionIntegrationTests
         await AuthenticateAsync(_client);
 
         using var form = new MultipartFormDataContent();
+
         var pdfBytes = CreateSamplePdfBytes();
 
         form.Add(
@@ -140,12 +170,17 @@ public sealed class VisionAndPdfIngestionIntegrationTests
         form.Add(new StringContent("Holiday Desserts"), "sourceBookTitle");
 
         var response = await _client.PostAsync("/api/ingestion/jobs/pdf", form);
+
         Assert.AreEqual(HttpStatusCode.Accepted, response.StatusCode);
 
         var jobSummary = await response.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
+
         Assert.IsNotNull(jobSummary);
+
         Assert.AreEqual(IngestionChannel.Pdf, jobSummary.Channel);
+
         Assert.AreEqual(1, jobSummary.SourceFileCount);
+
         StringAssert.Contains(jobSummary.DisplayTitle, "Holiday Desserts");
     }
 
@@ -155,7 +190,9 @@ public sealed class VisionAndPdfIngestionIntegrationTests
         await AuthenticateAsync(_client);
 
         using var form = new MultipartFormDataContent();
+
         var pdfBytes1 = CreateSamplePdfBytes();
+
         var pdfBytes2 = CreateSamplePdfBytes();
 
         form.Add(
@@ -179,13 +216,19 @@ public sealed class VisionAndPdfIngestionIntegrationTests
         form.Add(new StringContent("Family Recipe Box"), "sourceBookTitle");
 
         var response = await _client.PostAsync("/api/ingestion/jobs/pdf/bulk", form);
+
         Assert.AreEqual(HttpStatusCode.Accepted, response.StatusCode);
 
         var jobs = await response.Content.ReadFromJsonAsync<List<IngestionJobSummaryDto>>();
+
         Assert.IsNotNull(jobs);
+
         Assert.AreEqual(2, jobs.Count);
+
         Assert.IsTrue(jobs.All(j => j.Channel == IngestionChannel.Pdf));
+
         StringAssert.Contains(jobs[0].DisplayTitle, "Family Recipe Box");
+
         StringAssert.Contains(jobs[1].DisplayTitle, "Family Recipe Box");
     }
 
@@ -195,7 +238,9 @@ public sealed class VisionAndPdfIngestionIntegrationTests
         await AuthenticateAsync(_client);
 
         using var form = new MultipartFormDataContent();
+
         var img1 = CreateSampleImageBytes();
+
         form.Add(
             new ByteArrayContent(img1)
             {
@@ -206,19 +251,26 @@ public sealed class VisionAndPdfIngestionIntegrationTests
         );
 
         var enqResp = await _client.PostAsync("/api/ingestion/jobs/images", form);
+
         var jobSummary = await enqResp.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
+
         Assert.IsNotNull(jobSummary);
 
         var promoteReq = new PromotePageToCoverRequest(PageNumber: 1);
+
         var promoteResp = await _client.PostAsJsonAsync(
             $"/api/ingestion/jobs/{jobSummary.Id}/cover-from-page",
             promoteReq
         );
 
         Assert.AreEqual(HttpStatusCode.OK, promoteResp.StatusCode);
+
         var updatedJob = await promoteResp.Content.ReadFromJsonAsync<IngestionJobDetailDto>();
+
         Assert.IsNotNull(updatedJob);
+
         Assert.IsNotNull(updatedJob.DownloadedCoverImagePath);
+
         StringAssert.StartsWith(updatedJob.DownloadedCoverImagePath, "/api/uploads/recipes/");
     }
 
@@ -228,6 +280,7 @@ public sealed class VisionAndPdfIngestionIntegrationTests
         await AuthenticateAsync(_client);
 
         // 1. Create a recipe
+
         var createReq = new UpsertRecipeRequest(
             Title: "Grandma's Pie",
             Description: "Delicious apple pie",
@@ -238,14 +291,21 @@ public sealed class VisionAndPdfIngestionIntegrationTests
         );
 
         var createResp = await _client.PostAsJsonAsync("/api/recipes", createReq);
+
         Assert.AreEqual(HttpStatusCode.Created, createResp.StatusCode);
+
         var recipe = await createResp.Content.ReadFromJsonAsync<RecipeDetailDto>();
+
         Assert.IsNotNull(recipe);
+
         Assert.AreEqual(0, recipe.Attachments.Count);
 
         // 2. Upload an attachment
+
         using var form = new MultipartFormDataContent();
+
         var pdfBytes = CreateSamplePdfBytes();
+
         form.Add(
             new ByteArrayContent(pdfBytes)
             {
@@ -254,33 +314,51 @@ public sealed class VisionAndPdfIngestionIntegrationTests
             "file",
             "original-scanned-card.pdf"
         );
+
         form.Add(new StringContent("Handwritten Note"), "label");
 
         var attachResp = await _client.PostAsync($"/api/recipes/{recipe.Id}/attachments", form);
+
         Assert.AreEqual(HttpStatusCode.Created, attachResp.StatusCode);
+
         var attachment = await attachResp.Content.ReadFromJsonAsync<RecipeAttachmentDto>();
+
         Assert.IsNotNull(attachment);
+
         Assert.AreEqual("original-scanned-card.pdf", attachment.FileName);
+
         Assert.AreEqual("Handwritten Note", attachment.Label);
+
         StringAssert.StartsWith(attachment.MediaUrlPath, "/api/uploads/attachments/");
 
         // 3. Verify recipe includes attachment
+
         var getResp = await _client.GetAsync($"/api/recipes/{recipe.Id}");
+
         var recipeWithAttach = await getResp.Content.ReadFromJsonAsync<RecipeDetailDto>();
+
         Assert.IsNotNull(recipeWithAttach);
+
         Assert.AreEqual(1, recipeWithAttach.Attachments.Count);
+
         Assert.AreEqual(attachment.Id, recipeWithAttach.Attachments[0].Id);
 
         // 4. Delete attachment
+
         var delResp = await _client.DeleteAsync(
             $"/api/recipes/{recipe.Id}/attachments/{attachment.Id}"
         );
+
         Assert.AreEqual(HttpStatusCode.NoContent, delResp.StatusCode);
 
         // 5. Verify deleted from recipe
+
         var getAfterDel = await _client.GetAsync($"/api/recipes/{recipe.Id}");
+
         var recipeAfterDel = await getAfterDel.Content.ReadFromJsonAsync<RecipeDetailDto>();
+
         Assert.IsNotNull(recipeAfterDel);
+
         Assert.AreEqual(0, recipeAfterDel.Attachments.Count);
     }
 
@@ -288,12 +366,15 @@ public sealed class VisionAndPdfIngestionIntegrationTests
     public async Task RecipeAttachments_Unauthenticated_ReturnsUnauthorized()
     {
         using var form = new MultipartFormDataContent();
+
         var resp = await _client.PostAsync($"/api/recipes/{Guid.NewGuid()}/attachments", form);
+
         Assert.AreEqual(HttpStatusCode.Unauthorized, resp.StatusCode);
 
         var delResp = await _client.DeleteAsync(
             $"/api/recipes/{Guid.NewGuid()}/attachments/{Guid.NewGuid()}"
         );
+
         Assert.AreEqual(HttpStatusCode.Unauthorized, delResp.StatusCode);
     }
 
@@ -303,7 +384,9 @@ public sealed class VisionAndPdfIngestionIntegrationTests
         await AuthenticateAsync(_client);
 
         using var form = new MultipartFormDataContent();
+
         var img1 = CreateSampleImageBytes();
+
         var img2 = CreateSampleImageBytes();
 
         form.Add(
@@ -327,11 +410,15 @@ public sealed class VisionAndPdfIngestionIntegrationTests
         form.Add(new StringContent("Heritage Baking"), "sourceBookTitle");
 
         var postResp = await _client.PostAsync("/api/ingestion/jobs/images", form);
+
         Assert.AreEqual(HttpStatusCode.Accepted, postResp.StatusCode);
+
         var jobSummary = await postResp.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
+
         Assert.IsNotNull(jobSummary);
 
         // Approve and publish with RetainSourceAttachments = true
+
         var draft = new IngestionExtractedDraftDto(
             Title: "Heritage Scones",
             Description: "Rich and buttery",
@@ -352,13 +439,158 @@ public sealed class VisionAndPdfIngestionIntegrationTests
             $"/api/ingestion/jobs/{jobSummary.Id}/approve",
             draft
         );
+
         Assert.AreEqual(HttpStatusCode.Created, approveResp.StatusCode);
+
         var approvedRecipe = await approveResp.Content.ReadFromJsonAsync<RecipeDetailDto>();
+
         Assert.IsNotNull(approvedRecipe);
 
         var getResp = await _client.GetAsync($"/api/recipes/{approvedRecipe.Id}");
+
         var fetchedRecipe = await getResp.Content.ReadFromJsonAsync<RecipeDetailDto>();
+
         Assert.IsNotNull(fetchedRecipe);
+
         Assert.AreEqual(2, fetchedRecipe.Attachments.Count);
+    }
+
+    [TestMethod]
+    public async Task RawTextIngestion_ApproveJob_WithRetainSourceAttachments_PromotesTextAttachmentToPublishedRecipe()
+    {
+        await AuthenticateAsync(_client);
+
+        var rawText =
+            "Title: ATK Classic Roast Chicken\nCookbook: The Complete ATK Cookbook\n\nIngredients:\n- 1 whole chicken\n- 2 tbsp olive oil\n\nInstructions:\n1. Roast at 425F for 60 mins.";
+
+        var enqueueReq = new EnqueueRawTextIngestionRequest(
+            RawText: rawText,
+            TitleHint: "ATK Classic Roast Chicken",
+            SourceName: "America's Test Kitchen",
+            SourceAuthor: "America's Test Kitchen",
+            SourceBookTitle: "The Complete ATK Cookbook",
+            SourceBookPage: 120
+        );
+
+        var postResp = await _client.PostAsJsonAsync("/api/ingestion/jobs/text", enqueueReq);
+
+        Assert.AreEqual(HttpStatusCode.Accepted, postResp.StatusCode);
+
+        var jobSummary = await postResp.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
+
+        Assert.IsNotNull(jobSummary);
+
+        Assert.AreEqual(1, jobSummary.SourceFileCount);
+
+        // Approve with RetainSourceAttachments = true
+
+        var draft = new IngestionExtractedDraftDto(
+            Title: "ATK Classic Roast Chicken",
+            Description: "Crispy skin and juicy meat",
+            BaseServings: 4,
+            Ingredients:
+            [
+                new IngestionDraftIngredientDto(
+                    DisplayName: "Whole chicken",
+                    Quantity: 1,
+                    Unit: App.Core.Recipes.MeasurementUnit.Cup
+                ),
+            ],
+            Steps: [new IngestionDraftStepDto(Instruction: "Roast at 425F.")],
+            RetainSourceAttachments: true
+        );
+
+        var approveResp = await _client.PostAsJsonAsync(
+            $"/api/ingestion/jobs/{jobSummary.Id}/approve",
+            draft
+        );
+
+        Assert.AreEqual(HttpStatusCode.Created, approveResp.StatusCode);
+
+        var approvedRecipe = await approveResp.Content.ReadFromJsonAsync<RecipeDetailDto>();
+
+        Assert.IsNotNull(approvedRecipe);
+
+        var getResp = await _client.GetAsync($"/api/recipes/{approvedRecipe.Id}");
+
+        var fetchedRecipe = await getResp.Content.ReadFromJsonAsync<RecipeDetailDto>();
+
+        Assert.IsNotNull(fetchedRecipe);
+
+        Assert.AreEqual(1, fetchedRecipe.Attachments.Count);
+
+        var att = fetchedRecipe.Attachments[0];
+
+        Assert.AreEqual("text/plain", att.ContentType);
+
+        Assert.AreEqual("Original Source Text", att.Label);
+
+        // Verify attachment file is served statically with raw text content
+
+        var textResp = await _client.GetAsync(att.MediaUrlPath);
+
+        Assert.AreEqual(HttpStatusCode.OK, textResp.StatusCode);
+
+        var textBody = await textResp.Content.ReadAsStringAsync();
+
+        Assert.IsTrue(textBody.Contains("ATK Classic Roast Chicken"));
+
+        Assert.IsTrue(textBody.Contains("Roast at 425F for 60 mins."));
+    }
+
+    [TestMethod]
+    public async Task DirectAttachmentUpload_WithTextFile_Succeeds()
+    {
+        await AuthenticateAsync(_client);
+
+        var createReq = new UpsertRecipeRequest(
+            Title: "Grandma's Notes Recipe",
+            Description: "Family treasure",
+            Status: RecipeStatus.Published,
+            BaseServings: 4,
+            Ingredients: [new RecipeIngredientInput(DisplayName: "Flour", Quantity: 2)],
+            Steps: [new RecipeStepInput(Instruction: "Mix and bake.")]
+        );
+        var createResp = await _client.PostAsJsonAsync("/api/recipes", createReq);
+        Assert.AreEqual(HttpStatusCode.Created, createResp.StatusCode);
+        var recipe = await createResp.Content.ReadFromJsonAsync<RecipeDetailDto>();
+        Assert.IsNotNull(recipe);
+
+        using var form = new MultipartFormDataContent();
+
+        var textBytes = System.Text.Encoding.UTF8.GetBytes(
+            "Old hand-typed recipe notes: bake slow, cool completely."
+        );
+
+        form.Add(
+            new ByteArrayContent(textBytes)
+            {
+                Headers = { ContentType = new MediaTypeHeaderValue("text/plain") },
+            },
+            "file",
+            "notes.txt"
+        );
+
+        form.Add(new StringContent("Original Source Notes"), "label");
+
+        var uploadResp = await _client.PostAsync($"/api/recipes/{recipe.Id}/attachments", form);
+
+        Assert.AreEqual(HttpStatusCode.Created, uploadResp.StatusCode);
+
+        var createdAtt = await uploadResp.Content.ReadFromJsonAsync<RecipeAttachmentDto>();
+
+        Assert.IsNotNull(createdAtt);
+
+        Assert.AreEqual("text/plain", createdAtt.ContentType);
+
+        Assert.AreEqual("Original Source Notes", createdAtt.Label);
+
+        var getResp = await _client.GetAsync(createdAtt.MediaUrlPath);
+
+        Assert.AreEqual(HttpStatusCode.OK, getResp.StatusCode);
+
+        var fetchedBody = await getResp.Content.ReadAsStringAsync();
+
+        Assert.IsTrue(fetchedBody.Contains("Old hand-typed recipe notes"));
     }
 }

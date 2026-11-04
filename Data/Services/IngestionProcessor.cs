@@ -65,6 +65,7 @@ public sealed class IngestionProcessor(
     public async Task<bool> ProcessNextQueuedJobAsync(CancellationToken cancellationToken = default)
     {
         var config = await llmSettingsService.GetEffectiveConfigAsync(cancellationToken);
+
         if (!config.EnableIngestion)
         {
             return false;
@@ -95,6 +96,7 @@ public sealed class IngestionProcessor(
     )
     {
         var initialConfig = await llmSettingsService.GetEffectiveConfigAsync(cancellationToken);
+
         if (!initialConfig.EnableIngestion)
         {
             return false;
@@ -111,7 +113,9 @@ public sealed class IngestionProcessor(
         }
 
         using var activeCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
         using var activeRegistration = queueSignal.RegisterActiveJobExecution(job.Id, activeCts);
+
         var jobCt = activeCts.Token;
 
         try
@@ -696,10 +700,13 @@ public sealed class IngestionProcessor(
             );
 
             job.Status = IngestionJobStatus.Queued;
+
             job.NextRetryAt = null;
+
             job.StatusDetail = "Paused. Queued to resume when ingestion is enabled.";
 
             await dbContext.SaveChangesAsync(CancellationToken.None);
+
             return false;
         }
         catch (LlmHostUnavailableException ex)
@@ -739,9 +746,11 @@ public sealed class IngestionProcessor(
             job.AttemptCount++;
 
             int maxRetries;
+
             try
             {
                 var cfg = await llmSettingsService.GetEffectiveConfigAsync(cancellationToken);
+
                 maxRetries = cfg.MaxIngestionRetries;
             }
             catch
@@ -752,8 +761,11 @@ public sealed class IngestionProcessor(
             if (job.AttemptCount <= maxRetries)
             {
                 var delaySeconds = Math.Min(60, 5 * (1 << Math.Min(job.AttemptCount - 1, 4)));
+
                 job.Status = IngestionJobStatus.Queued;
+
                 job.NextRetryAt = DateTimeOffset.UtcNow.AddSeconds(delaySeconds);
+
                 job.StatusDetail =
                     $"Attempt {job.AttemptCount}/{maxRetries} failed: {ex.Message}. Retrying shortly...";
 
@@ -767,6 +779,7 @@ public sealed class IngestionProcessor(
                 );
 
                 await dbContext.SaveChangesAsync(cancellationToken);
+
                 return false;
             }
 
@@ -778,7 +791,9 @@ public sealed class IngestionProcessor(
             );
 
             job.Status = IngestionJobStatus.Failed;
+
             job.NextRetryAt = null;
+
             job.StatusDetail = ex.Message;
 
             await dbContext.SaveChangesAsync(cancellationToken);
@@ -1012,6 +1027,8 @@ public sealed class IngestionProcessor(
             ExtractedModel: job.ExtractedModel
         );
 
+        RecipeDetailDto createdRecipe;
+
         if (job.ResultingRecipeId.HasValue)
         {
             var existingRecipe = await dbContext.Recipes.FirstOrDefaultAsync(
@@ -1029,12 +1046,39 @@ public sealed class IngestionProcessor(
 
                 if (updated is not null)
                 {
-                    return updated;
+                    createdRecipe = updated;
+                }
+                else
+                {
+                    createdRecipe = await recipeService.CreateRecipeAsync(
+                        upsertRequest,
+                        cancellationToken
+                    );
                 }
             }
+            else
+            {
+                createdRecipe = await recipeService.CreateRecipeAsync(
+                    upsertRequest,
+                    cancellationToken
+                );
+            }
+        }
+        else
+        {
+            createdRecipe = await recipeService.CreateRecipeAsync(upsertRequest, cancellationToken);
         }
 
-        return await recipeService.CreateRecipeAsync(upsertRequest, cancellationToken);
+        await IngestionCatalogMaterializer.PromoteOrAttachSourceFilesAsync(
+            dbContext,
+            mediaStorageService,
+            job,
+            draft,
+            createdRecipe.Id,
+            cancellationToken
+        );
+
+        return createdRecipe;
     }
 
     public static string BuildNormalizedWebText(ScrapedWebRecipePayload payload)

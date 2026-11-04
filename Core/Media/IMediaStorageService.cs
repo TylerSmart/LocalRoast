@@ -65,6 +65,13 @@ public interface IMediaStorageService
         CancellationToken cancellationToken = default
     );
 
+    Task<SavedRecipeAttachmentFileDto> SaveIngestionSourceTextAsync(
+        string text,
+        string originalFileName,
+        string jobToken,
+        CancellationToken cancellationToken = default
+    );
+
     Task PurgeAllMediaAsync(CancellationToken cancellationToken = default);
 
     Task<UploadedCookLogPhotoDto> SaveCookLogPhotoAsync(

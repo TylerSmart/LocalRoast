@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using App.Core.Exceptions;
 using App.Core.FoodCatalog;
 using App.Core.Ingestion;
@@ -915,13 +915,49 @@ public sealed class IngestionService(
             initialCollectionsJson = JsonSerializer.Serialize(distinctCollections, JsonOptions);
         }
 
+        var jobToken = Guid.NewGuid();
+
+        var jobTokenStr = jobToken.ToString("N");
+
+        var cleanFileName = string.Join("_", displayTitle.Split(Path.GetInvalidFileNameChars()))
+            .Trim();
+
+        if (cleanFileName.Length > 80)
+            cleanFileName = cleanFileName[..80].Trim();
+
+        var fileName = $"{cleanFileName}.txt";
+
+        var savedText = await mediaStorageService.SaveIngestionSourceTextAsync(
+            trimmed,
+            fileName,
+            jobTokenStr,
+            cancellationToken
+        );
+
+        var sourceFiles = new List<IngestionSourceFileDto>
+        {
+            new(
+                PageNumber: 1,
+                OriginalFileName: fileName,
+                UrlPath: savedText.MediaUrlPath,
+                ContentType: "text/plain",
+                FileSizeBytes: savedText.FileSizeBytes
+            ),
+        };
+
         var job = new IngestionJob
         {
+            Id = jobToken,
+
             Channel = IngestionChannel.RawText,
 
             Status = IngestionJobStatus.Queued,
 
             RawText = trimmed,
+
+            NormalizedSourceText = trimmed,
+
+            SourceFilesJson = JsonSerializer.Serialize(sourceFiles, JsonOptions),
 
             DisplayTitle = displayTitle,
 
@@ -970,7 +1006,7 @@ public sealed class IngestionService(
             SubmittedByUsername: null,
             CreatedAt: job.CreatedAt,
             ModifiedAt: job.ModifiedAt,
-            SourceFileCount: 0,
+            SourceFileCount: sourceFiles.Count,
             ExtractedModel: job.ExtractedModel
         );
     }
@@ -1190,89 +1226,14 @@ public sealed class IngestionService(
             createdRecipe = await recipeService.CreateRecipeAsync(upsertRequest, cancellationToken);
         }
 
-        if (draft.RetainSourceAttachments && !string.IsNullOrWhiteSpace(job.SourceFilesJson))
-        {
-            var hasAttachments = await dbContext.RecipeAttachments.AnyAsync(
-                a => a.RecipeId == createdRecipe.Id,
-                cancellationToken
-            );
-
-            if (!hasAttachments)
-                try
-                {
-                    var sourceFiles = JsonSerializer.Deserialize<List<IngestionSourceFileDto>>(
-                        job.SourceFilesJson,
-                        JsonOptions
-                    );
-
-                    if (sourceFiles is { Count: > 0 })
-                    {
-                        foreach (var sf in sourceFiles)
-                        {
-                            var promoted =
-                                await mediaStorageService.PromoteIngestionFileToAttachmentAsync(
-                                    sf.UrlPath,
-                                    cancellationToken
-                                );
-
-                            dbContext.RecipeAttachments.Add(
-                                new RecipeAttachment
-                                {
-                                    Id = Guid.NewGuid(),
-
-                                    RecipeId = createdRecipe.Id,
-
-                                    SortOrder = sf.PageNumber,
-
-                                    FileName = sf.OriginalFileName,
-
-                                    MediaUrlPath = promoted.MediaUrlPath,
-
-                                    ContentType = promoted.ContentType,
-
-                                    FileSizeBytes = promoted.FileSizeBytes,
-
-                                    Label =
-                                        sf.PageNumber == 1
-                                            ? "Source Cover / Page"
-                                            : $"Source Page {sf.PageNumber}",
-                                }
-                            );
-                        }
-
-                        await dbContext.SaveChangesAsync(cancellationToken);
-                    }
-                }
-                catch
-                {
-                    // Non-blocking attachment promotion failure
-                }
-        }
-        else if (!draft.RetainSourceAttachments && !string.IsNullOrWhiteSpace(job.SourceFilesJson))
-        {
-            try
-            {
-                var sourceFiles = JsonSerializer.Deserialize<List<IngestionSourceFileDto>>(
-                    job.SourceFilesJson,
-                    JsonOptions
-                );
-
-                if (sourceFiles is { Count: > 0 })
-                {
-                    foreach (var sf in sourceFiles)
-                    {
-                        await mediaStorageService.DeleteMediaFileAsync(
-                            sf.UrlPath,
-                            cancellationToken
-                        );
-                    }
-                }
-            }
-            catch
-            {
-                // ignore
-            }
-        }
+        await IngestionCatalogMaterializer.PromoteOrAttachSourceFilesAsync(
+            dbContext,
+            mediaStorageService,
+            job,
+            draft,
+            createdRecipe.Id,
+            cancellationToken
+        );
 
         job.Status = IngestionJobStatus.Published;
 

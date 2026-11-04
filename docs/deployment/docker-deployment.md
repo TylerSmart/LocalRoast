@@ -152,6 +152,9 @@ services:
       # Authentication__Oidc__AuthorizationEndpoint: "https://accounts.google.com/o/oauth2/v2/auth"
       # Authentication__Oidc__TokenEndpoint: "https://oauth2.googleapis.com/token"
       # Authentication__Oidc__UserInfoEndpoint: "https://openidconnect.googleapis.com/v1/userinfo"
+    volumes:
+      # Persistent storage for recipe photos, PDFs, attachments, and thumbnails
+      - uploads_data:/data/uploads
     depends_on:
       sqlserver:
         condition: service_healthy
@@ -179,6 +182,7 @@ services:
 
 volumes:
   sqlserver_data:
+  uploads_data:
 ```
 
 > [!NOTE]

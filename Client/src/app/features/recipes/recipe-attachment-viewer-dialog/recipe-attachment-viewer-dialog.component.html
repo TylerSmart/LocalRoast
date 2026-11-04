@@ -2,7 +2,15 @@
   <!-- Dialog Header -->
   <div class="dialog-header">
     <div class="header-left">
-      <mat-icon class="header-icon">{{ isPdf() ? 'picture_as_pdf' : 'image' }}</mat-icon>
+      <mat-icon class="header-icon">
+        @if (isPdf()) {
+          picture_as_pdf
+        } @else if (isText()) {
+          description
+        } @else {
+          image
+        }
+      </mat-icon>
       <div class="header-titles">
         <h2 class="dialog-title">
           {{ currentAttachment()?.label || currentAttachment()?.fileName || 'Recipe Attachment' }}
@@ -17,7 +25,7 @@
 
     <!-- Header Actions -->
     <div class="header-actions">
-      @if (!isPdf()) {
+      @if (!isPdf() && !isText()) {
         <button
           mat-icon-button
           type="button"
@@ -55,6 +63,18 @@
           matTooltip="Rotate 90° Clockwise"
         >
           <mat-icon>rotate_right</mat-icon>
+        </button>
+      }
+
+      @if (isText() && textContent()) {
+        <button
+          mat-icon-button
+          type="button"
+          (click)="copyText()"
+          [matTooltip]="copied() ? 'Copied!' : 'Copy Text'"
+          aria-label="Copy source text"
+        >
+          <mat-icon>{{ copied() ? 'check' : 'content_copy' }}</mat-icon>
         </button>
       }
 
@@ -109,6 +129,17 @@
                 </a>
               </div>
             </object>
+          </div>
+        } @else if (isText()) {
+          <div class="text-viewer-pane">
+            @if (isLoadingText()) {
+              <div class="text-loading">
+                <mat-spinner diameter="36"></mat-spinner>
+                <p>Loading source text...</p>
+              </div>
+            } @else {
+              <pre class="text-content">{{ textContent() }}</pre>
+            }
           </div>
         } @else {
           <div class="image-viewer-pane">

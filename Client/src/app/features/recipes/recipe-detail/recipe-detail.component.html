@@ -527,7 +527,7 @@
             <input
               #attachmentFileInput
               type="file"
-              accept="image/*,application/pdf"
+              accept="image/*,application/pdf,text/plain,text/markdown,.txt,.md"
               (change)="onAttachmentSelected($event)"
               class="hidden-file-input"
             />
@@ -562,6 +562,10 @@
                       @if (att.contentType === 'application/pdf' || att.fileName.endsWith('.pdf')) {
                         <div class="pdf-thumb-placeholder">
                           <mat-icon>picture_as_pdf</mat-icon>
+                        </div>
+                      } @else if (isTextAttachment(att)) {
+                        <div class="text-thumb-placeholder">
+                          <mat-icon>description</mat-icon>
                         </div>
                       } @else {
                         <img [src]="att.mediaUrlPath" [alt]="att.fileName" loading="lazy" />

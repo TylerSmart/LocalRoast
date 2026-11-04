@@ -357,13 +357,19 @@
                   </mat-form-field>
                 </div>
 
-                @if (job()?.channel === 'Images' || job()?.channel === 'Pdf') {
-                  <div class="attachment-retention-row">
-                    <mat-checkbox formControlName="retainSourceAttachments">
-                      <span>Retain source scans/PDF as recipe attachments upon publishing</span>
-                    </mat-checkbox>
-                  </div>
-                }
+                <div class="attachment-retention-row">
+                  <mat-checkbox formControlName="retainSourceAttachments">
+                    <span>
+                      @if (job()?.channel === 'Images') {
+                        Retain source scans as recipe attachments upon publishing
+                      } @else if (job()?.channel === 'Pdf') {
+                        Retain source PDF as recipe attachment upon publishing
+                      } @else {
+                        Retain original source text as recipe attachment upon publishing
+                      }
+                    </span>
+                  </mat-checkbox>
+                </div>
 
                 <!-- Yield & Timing Row -->
                 <div class="form-row three-cols">
