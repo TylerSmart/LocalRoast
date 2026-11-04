@@ -61,6 +61,31 @@ public sealed class CookModeAndCookLogsE2ETests : E2ETestBase
                 configurable: true,
                 writable: true
             });
+
+            class MockSpeechRecognition {
+                constructor() {
+                    this.continuous = false;
+                    this.interimResults = false;
+                    this.lang = 'en-US';
+                    this.onresult = null;
+                    this.onerror = null;
+                    this.onend = null;
+                    this.onstart = null;
+                }
+                start() {
+                    if (this.onstart) setTimeout(() => this.onstart(), 5);
+                }
+                stop() {
+                    if (this.onend) setTimeout(() => this.onend(), 5);
+                }
+                abort() {
+                    if (this.onend) setTimeout(() => this.onend(), 5);
+                }
+            }
+            window.SpeechRecognition = MockSpeechRecognition;
+            window.webkitSpeechRecognition = MockSpeechRecognition;
+
+
         "
         );
 
@@ -151,6 +176,35 @@ public sealed class CookModeAndCookLogsE2ETests : E2ETestBase
         var stepSpeakBtn = Page.Locator(".step-speak-btn");
         await Expect(stepSpeakBtn).ToBeVisibleAsync();
         await stepSpeakBtn.ClickAsync();
+
+        // Verify Voice Control Pill is visible and toggles persistence
+        var voiceControlPill = Page.Locator(".voice-control-pill-btn");
+        await Expect(voiceControlPill).ToBeVisibleAsync();
+        await Expect(voiceControlPill).ToContainTextAsync("Mic OFF");
+
+        // Click to enable voice control
+        await voiceControlPill.ClickAsync();
+        await Expect(voiceControlPill).ToContainTextAsync("Mic ON");
+        await Expect(voiceControlPill).ToHaveClassAsync(new Regex(".*is-active.*"));
+
+        var isVoicePersistedEnabled = await Page.EvaluateAsync<string>(
+            "() => localStorage.getItem('local-roast:cook-voice-control-enabled')"
+        );
+        Assert.AreEqual("true", isVoicePersistedEnabled);
+
+        // Verify voice feedback strip is visible
+        var feedbackStrip = Page.Locator(".voice-feedback-strip");
+        await Expect(feedbackStrip).ToBeVisibleAsync();
+
+        // Toggle voice control back off
+        await voiceControlPill.ClickAsync();
+        await Expect(voiceControlPill).ToContainTextAsync("Mic OFF");
+        await Expect(voiceControlPill).Not.ToHaveClassAsync(new Regex(".*is-active.*"));
+
+        var isVoicePersistedDisabled = await Page.EvaluateAsync<string>(
+            "() => localStorage.getItem('local-roast:cook-voice-control-enabled')"
+        );
+        Assert.AreEqual("false", isVoicePersistedDisabled);
 
         // Verify Step 1 is active
         await Expect(Page.Locator(".step-counter")).ToContainTextAsync("Step 1 of 2");

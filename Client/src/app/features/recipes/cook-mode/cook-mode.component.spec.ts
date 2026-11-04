@@ -9,6 +9,11 @@ import { KitchenTimerService } from '../../../core/services/kitchen-timer/kitche
 import { RecipeService } from '../../../core/services/recipe/recipe.service';
 import { WakeLockService } from '../../../core/services/wake-lock/wake-lock.service';
 import { SpeechNarrationService } from '../../../core/services/speech-narration/speech-narration.service';
+import {
+  VoiceCommandEvent,
+  VoiceControlService,
+} from '../../../core/services/voice-control/voice-control.service';
+import { Subject } from 'rxjs';
 import { AiKitchenHelperService } from '../../../core/services/ai-helpers/ai-kitchen-helper.service';
 import { IngredientSubstitutionDialogComponent } from '../ingredient-substitution-dialog/ingredient-substitution-dialog.component';
 import { CookModeComponent } from './cook-mode.component';
@@ -51,6 +56,20 @@ describe('CookModeComponent', () => {
     speakStep: ReturnType<typeof vi.fn>;
     speakText: ReturnType<typeof vi.fn>;
     stop: ReturnType<typeof vi.fn>;
+  };
+  let isVoiceListeningSignal: WritableSignal<boolean>;
+  let commandSubject: Subject<VoiceCommandEvent>;
+  let mockVoiceControlService: {
+    isSupported: ReturnType<typeof vi.fn>;
+    isListening: () => boolean;
+    isEnabled: () => boolean;
+    lastFeedback: ReturnType<typeof vi.fn>;
+    errorMessage: ReturnType<typeof vi.fn>;
+    toggleListening: ReturnType<typeof vi.fn>;
+    startListening: ReturnType<typeof vi.fn>;
+    stopListening: ReturnType<typeof vi.fn>;
+    setFeedback: ReturnType<typeof vi.fn>;
+    command$: Subject<VoiceCommandEvent>;
   };
 
   const mockRecipe: RecipeDetailDto = {
@@ -200,6 +219,26 @@ describe('CookModeComponent', () => {
       speakText: vi.fn(),
       stop: vi.fn(),
     };
+    isVoiceListeningSignal = signal(false);
+    commandSubject = new Subject<VoiceCommandEvent>();
+    mockVoiceControlService = {
+      isSupported: vi.fn().mockReturnValue(true),
+      isListening: () => isVoiceListeningSignal(),
+      isEnabled: () => isVoiceListeningSignal(),
+      lastFeedback: vi.fn().mockReturnValue(null),
+      errorMessage: vi.fn().mockReturnValue(null),
+      toggleListening: vi.fn(() => {
+        isVoiceListeningSignal.update((v) => !v);
+        return isVoiceListeningSignal();
+      }),
+      startListening: vi.fn(() => {
+        isVoiceListeningSignal.set(true);
+        return true;
+      }),
+      stopListening: vi.fn(() => isVoiceListeningSignal.set(false)),
+      setFeedback: vi.fn(),
+      command$: commandSubject,
+    };
     const mockAiHelperService = {
       checkStatus: vi
         .fn()
@@ -215,6 +254,7 @@ describe('CookModeComponent', () => {
         { provide: WakeLockService, useValue: mockWakeLockService },
         { provide: KitchenTimerService, useValue: mockKitchenTimerService },
         { provide: SpeechNarrationService, useValue: mockSpeechNarrationService },
+        { provide: VoiceControlService, useValue: mockVoiceControlService },
         { provide: MatDialog, useValue: mockDialog },
         { provide: Router, useValue: mockRouter },
         { provide: AiKitchenHelperService, useValue: mockAiHelperService },
@@ -363,5 +403,81 @@ describe('CookModeComponent', () => {
     mockSpeechNarrationService.stop.mockClear();
     fixture.destroy();
     expect(mockSpeechNarrationService.stop).toHaveBeenCalled();
+  });
+
+  it('toggles voice control listening via toggleVoiceControl()', () => {
+    expect(mockVoiceControlService.isListening()).toBe(false);
+
+    component['toggleVoiceControl']();
+    expect(mockVoiceControlService.toggleListening).toHaveBeenCalled();
+    expect(mockVoiceControlService.isListening()).toBe(true);
+  });
+
+  it('handles "next" voice command by advancing step', () => {
+    expect(component['activeStepIndex']()).toBe(0);
+
+    commandSubject.next({ action: 'next', transcript: 'next step', matchedKeyword: 'next' });
+    expect(component['activeStepIndex']()).toBe(1);
+  });
+
+  it('handles "previous" voice command by returning to previous step', () => {
+    component['goToStep'](1);
+    expect(component['activeStepIndex']()).toBe(1);
+
+    commandSubject.next({ action: 'previous', transcript: 'go back', matchedKeyword: 'previous' });
+    expect(component['activeStepIndex']()).toBe(0);
+  });
+
+  it('handles "repeat" voice command by speaking the active step', () => {
+    mockSpeechNarrationService.speakStep.mockClear();
+
+    commandSubject.next({
+      action: 'repeat',
+      transcript: 'repeat please',
+      matchedKeyword: 'repeat',
+    });
+
+    expect(mockSpeechNarrationService.speakStep).toHaveBeenCalledWith(
+      1,
+      'Brown ground beef in a large pot over medium heat.',
+      'Brown Meat',
+    );
+  });
+
+  it('handles "check" voice command by toggling active step checked', () => {
+    const stepId = mockRecipe.steps[0].id;
+    expect(component['checkedSteps']()[stepId]).toBeFalsy();
+
+    commandSubject.next({ action: 'check', transcript: 'done', matchedKeyword: 'check' });
+    expect(component['checkedSteps']()[stepId]).toBe(true);
+  });
+
+  it('handles "timer" voice command by starting active step timer', () => {
+    commandSubject.next({ action: 'timer', transcript: 'start timer', matchedKeyword: 'timer' });
+
+    expect(mockKitchenTimerService.startTimer).toHaveBeenCalledWith(
+      'rec-1',
+      'Beef Chili',
+      'Brown Beef',
+      600,
+      1,
+    );
+    expect(mockVoiceControlService.setFeedback).toHaveBeenCalledWith('Started timer: Brown Beef');
+  });
+
+  it('handles "help" voice command by toggling help cheatsheet', () => {
+    expect(component['showVoiceHelp']()).toBe(false);
+
+    commandSubject.next({ action: 'help', transcript: 'help', matchedKeyword: 'help' });
+    expect(component['showVoiceHelp']()).toBe(true);
+  });
+
+  it('stops voice listening and cleans up subscription on component destroy or exit', () => {
+    component['exitCookMode']();
+    expect(mockVoiceControlService.stopListening).toHaveBeenCalled();
+
+    mockVoiceControlService.stopListening.mockClear();
+    fixture.destroy();
+    expect(mockVoiceControlService.stopListening).toHaveBeenCalled();
   });
 });

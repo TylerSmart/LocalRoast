@@ -84,6 +84,33 @@
           </button>
         }
 
+        <!-- Hands-Free Voice Control (STT) Toggle -->
+        @if (voiceControlService.isSupported()) {
+          <button
+            type="button"
+            class="voice-control-pill-btn"
+            [class.is-active]="voiceControlService.isListening()"
+            (click)="toggleVoiceControl()"
+            [matTooltip]="
+              voiceControlService.isListening()
+                ? 'Voice Control is ON (Listening). Click to turn OFF.'
+                : 'Voice Control is OFF (Hands-free commands). Click to turn ON.'
+            "
+            [attr.aria-label]="
+              voiceControlService.isListening()
+                ? 'Disable hands-free voice commands'
+                : 'Enable hands-free voice commands'
+            "
+          >
+            <mat-icon class="voice-icon">
+              {{ voiceControlService.isListening() ? 'mic' : 'mic_off' }}
+            </mat-icon>
+            <span class="voice-label">
+              {{ voiceControlService.isListening() ? 'Mic ON' : 'Mic OFF' }}
+            </span>
+          </button>
+        }
+
         <!-- Servings Stepper -->
         <div class="servings-stepper" aria-label="Adjust servings">
           <button
@@ -140,6 +167,69 @@
         </button>
       </div>
     </header>
+
+    <!-- Voice Recognition Feedback / Status Pill -->
+    @if (voiceControlService.lastFeedback() || voiceControlService.errorMessage()) {
+      <div class="voice-feedback-strip">
+        @if (voiceControlService.lastFeedback()) {
+          <div class="voice-feedback-pill" role="status" aria-live="polite">
+            <mat-icon class="feedback-icon">graphic_eq</mat-icon>
+            <span class="feedback-text">{{ voiceControlService.lastFeedback() }}</span>
+          </div>
+        }
+        @if (voiceControlService.errorMessage()) {
+          <div class="voice-error-pill" role="alert">
+            <mat-icon class="feedback-icon">error_outline</mat-icon>
+            <span class="feedback-text">{{ voiceControlService.errorMessage() }}</span>
+          </div>
+        }
+        <button type="button" mat-button class="voice-help-toggle-btn" (click)="toggleVoiceHelp()">
+          <mat-icon>help_outline</mat-icon>
+          <span>Commands</span>
+        </button>
+      </div>
+    }
+
+    <!-- Expandable Voice Commands Cheat Sheet -->
+    @if (showVoiceHelp()) {
+      <div class="voice-help-card">
+        <div class="help-header">
+          <div class="help-title">
+            <mat-icon>mic</mat-icon>
+            <strong>Hands-Free Voice Commands</strong>
+          </div>
+          <button mat-icon-button (click)="toggleVoiceHelp()" aria-label="Close voice help">
+            <mat-icon>close</mat-icon>
+          </button>
+        </div>
+        <div class="help-grid">
+          <div class="help-cmd-item">
+            <code>"Next"</code> or <code>"Next step"</code>
+            <span>Advances to the next recipe step</span>
+          </div>
+          <div class="help-cmd-item">
+            <code>"Back"</code> or <code>"Previous"</code>
+            <span>Returns to the previous recipe step</span>
+          </div>
+          <div class="help-cmd-item">
+            <code>"Repeat"</code> or <code>"Read step"</code>
+            <span>Reads current step instruction aloud</span>
+          </div>
+          <div class="help-cmd-item">
+            <code>"Start timer"</code> or <code>"Timer"</code>
+            <span>Starts timer on the current step</span>
+          </div>
+          <div class="help-cmd-item">
+            <code>"Done"</code> or <code>"Check"</code>
+            <span>Marks active step as completed</span>
+          </div>
+          <div class="help-cmd-item">
+            <code>"Stop"</code>
+            <span>Cancels current voice narration</span>
+          </div>
+        </div>
+      </div>
+    }
 
     <!-- Latest Kitchen Note Banner (Dismissible) -->
     @if (latestTweakNote() && !isNoteCalloutDismissed()) {

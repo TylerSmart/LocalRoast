@@ -23,6 +23,11 @@ import { KitchenTimerService } from '../../../core/services/kitchen-timer/kitche
 import { RecipeService } from '../../../core/services/recipe/recipe.service';
 import { WakeLockService } from '../../../core/services/wake-lock/wake-lock.service';
 import { SpeechNarrationService } from '../../../core/services/speech-narration/speech-narration.service';
+import {
+  VoiceCommandEvent,
+  VoiceControlService,
+} from '../../../core/services/voice-control/voice-control.service';
+import { Subscription } from 'rxjs';
 import { AiKitchenHelperService } from '../../../core/services/ai-helpers/ai-kitchen-helper.service';
 import { IngredientSubstitutionDialogComponent } from '../ingredient-substitution-dialog/ingredient-substitution-dialog.component';
 import {
@@ -78,8 +83,12 @@ export class CookModeComponent implements OnInit, OnDestroy {
   protected readonly wakeLockService = inject(WakeLockService);
   protected readonly kitchenTimerService = inject(KitchenTimerService);
   protected readonly speechNarrationService = inject(SpeechNarrationService);
+  protected readonly voiceControlService = inject(VoiceControlService);
   protected readonly aiHelper = inject(AiKitchenHelperService);
   private readonly dialog = inject(MatDialog);
+
+  protected readonly showVoiceHelp = signal<boolean>(false);
+  private voiceSub?: Subscription;
 
   protected readonly recipe = signal<RecipeDetailDto | null>(null);
   protected readonly isLoading = signal<boolean>(true);
@@ -243,6 +252,14 @@ export class CookModeComponent implements OnInit, OnDestroy {
       this.fromSource.set('meal-plan');
     }
 
+    this.voiceSub = this.voiceControlService.command$.subscribe((cmd) => {
+      this.handleVoiceCommand(cmd);
+    });
+
+    if (this.voiceControlService.isEnabled()) {
+      this.voiceControlService.startListening();
+    }
+
     void this.wakeLockService.acquire();
     this.loadRecipe(recipeId);
   }
@@ -250,6 +267,8 @@ export class CookModeComponent implements OnInit, OnDestroy {
   ngOnDestroy(): void {
     void this.wakeLockService.release();
     this.speechNarrationService.stop();
+    this.voiceControlService.stopListening();
+    this.voiceSub?.unsubscribe();
   }
 
   private loadRecipe(id: string): void {
@@ -433,6 +452,7 @@ export class CookModeComponent implements OnInit, OnDestroy {
 
   protected exitCookMode(): void {
     this.speechNarrationService.stop();
+    this.voiceControlService.stopListening();
     const r = this.recipe();
     if (this.fromSource() === 'meal-plan') {
       void this.router.navigate(['/meal-plan']);
@@ -472,6 +492,55 @@ export class CookModeComponent implements OnInit, OnDestroy {
       this.speechNarrationService.stop();
     } else {
       this.narrateCurrentStep();
+    }
+  }
+
+  protected toggleVoiceControl(): void {
+    this.voiceControlService.toggleListening();
+  }
+
+  protected toggleVoiceHelp(): void {
+    this.showVoiceHelp.update((v) => !v);
+  }
+
+  protected handleVoiceCommand(cmd: VoiceCommandEvent): void {
+    switch (cmd.action) {
+      case 'next':
+        this.nextStep();
+        break;
+      case 'previous':
+        this.prevStep();
+        break;
+      case 'repeat':
+        this.narrateCurrentStep();
+        break;
+      case 'timer':
+        this.startCurrentStepFirstTimer();
+        break;
+      case 'check': {
+        const current = this.currentStep();
+        if (current) {
+          this.toggleStepChecked(current.step.id);
+        }
+        break;
+      }
+      case 'help':
+        this.showVoiceHelp.set(true);
+        break;
+      case 'stop':
+        this.speechNarrationService.stop();
+        break;
+    }
+  }
+
+  protected startCurrentStepFirstTimer(): void {
+    const current = this.currentStep();
+    if (current && current.step.timers.length > 0) {
+      const timer = current.step.timers[0];
+      this.startStepTimer(timer, current.step.stepNumber);
+      this.voiceControlService.setFeedback(`Started timer: ${timer.label}`);
+    } else {
+      this.voiceControlService.setFeedback('No timer on this step', 2500);
     }
   }
 }
