@@ -84,6 +84,12 @@ public sealed class FoodCatalogE2ETests : E2ETestBase
                 ? "Unmark pantry staple"
                 : "Mark as pantry staple";
         await Expect(stapleBtn).ToHaveAttributeAsync("aria-label", expectedNextLabel);
+        var starIcon = stapleBtn.Locator("mat-icon");
+        await Expect(starIcon).ToHaveClassAsync(new Regex(".*staple-active.*"));
+        var fontVariation = await starIcon.EvaluateAsync<string>(
+            "el => getComputedStyle(el).fontVariationSettings"
+        );
+        Assert.Contains("\"FILL\" 1", fontVariation);
 
         // Search by Alias
         var searchInput = Page.Locator(".search-field input");

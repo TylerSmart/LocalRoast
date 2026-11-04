@@ -69,6 +69,10 @@ describe('FoodCatalogComponent', () => {
     expect(text).toContain('Olive Oil');
     expect(text).toContain('Garlic');
     expect(text).toContain('2 list items');
+    const filledStars = fixture.nativeElement.querySelectorAll(
+      'mat-icon.staple-active.icon-filled',
+    );
+    expect(filledStars.length).toBe(1);
   });
 
   it('filters items by search query', () => {

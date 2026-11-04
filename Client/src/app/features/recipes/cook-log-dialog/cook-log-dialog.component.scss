@@ -97,6 +97,10 @@
 
   &.is-filled {
     color: var(--app-warning, #f59e0b);
+
+    .star-icon {
+      font-variation-settings: 'FILL' 1;
+    }
   }
 
   .star-icon {

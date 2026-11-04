@@ -656,6 +656,7 @@
 
     mat-icon {
       color: var(--mat-sys-tertiary, #7d5260);
+      font-variation-settings: 'FILL' 1;
     }
   }
 }
@@ -676,6 +677,7 @@
       font-size: 0.9rem;
       width: 0.9rem;
       height: 0.9rem;
+      font-variation-settings: 'FILL' 1;
     }
   }
 }

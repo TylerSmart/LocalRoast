@@ -81,14 +81,21 @@ describe('CookLogDialogComponent', () => {
 
   it('selects and toggles rating stars', () => {
     component['setRating'](5);
+    fixture.detectChanges();
     expect(component['selectedRating']()).toBe(5);
+    const filledIcons = fixture.nativeElement.querySelectorAll('.star-icon.icon-filled');
+    expect(filledIcons.length).toBe(5);
 
     // Clicking same rating clears it
     component['setRating'](5);
+    fixture.detectChanges();
     expect(component['selectedRating']()).toBeNull();
+    expect(fixture.nativeElement.querySelectorAll('.star-icon.icon-filled').length).toBe(0);
 
     component['setRating'](4);
+    fixture.detectChanges();
     expect(component['selectedRating']()).toBe(4);
+    expect(fixture.nativeElement.querySelectorAll('.star-icon.icon-filled').length).toBe(4);
     component['clearRating']();
     expect(component['selectedRating']()).toBeNull();
   });

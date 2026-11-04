@@ -26,7 +26,7 @@
             (click)="setRating(star)"
             [attr.aria-label]="star + ' stars'"
           >
-            <mat-icon class="star-icon">
+            <mat-icon class="star-icon" [class.icon-filled]="(selectedRating() ?? 0) >= star">
               {{ (selectedRating() ?? 0) >= star ? 'star' : 'star_outline' }}
             </mat-icon>
           </button>

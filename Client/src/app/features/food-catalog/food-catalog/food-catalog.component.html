@@ -121,7 +121,10 @@
                     item.isPantryStaple ? 'Unmark pantry staple' : 'Mark as pantry staple'
                   "
                 >
-                  <mat-icon [class.staple-active]="item.isPantryStaple">
+                  <mat-icon
+                    [class.staple-active]="item.isPantryStaple"
+                    [class.icon-filled]="item.isPantryStaple"
+                  >
                     {{ item.isPantryStaple ? 'star' : 'star_border' }}
                   </mat-icon>
                 </button>
