@@ -79,6 +79,36 @@
     min-width: 0;
   }
 
+  .queue-search-field {
+    width: 260px;
+    flex-shrink: 0;
+
+    .search-form-field {
+      width: 100%;
+
+      ::ng-deep .mat-mdc-text-field-wrapper {
+        height: 40px;
+        padding-top: 0;
+        padding-bottom: 0;
+      }
+
+      ::ng-deep .mat-mdc-form-field-flex {
+        height: 40px;
+        align-items: center;
+      }
+
+      ::ng-deep .mat-mdc-form-field-infix {
+        padding-top: 0;
+        padding-bottom: 0;
+        min-height: unset;
+      }
+
+      ::ng-deep .mat-mdc-form-field-subscript-wrapper {
+        display: none;
+      }
+    }
+  }
+
   .queue-toolbar-actions {
     display: flex;
     align-items: center;
@@ -605,6 +635,10 @@
     font-size: 0.9rem;
     max-width: 400px;
   }
+
+  .clear-search-btn {
+    margin-top: 0.25rem;
+  }
 }
 
 .inline-spinner {
@@ -651,6 +685,10 @@
     flex-direction: column;
     align-items: stretch;
     gap: 0.75rem;
+
+    .queue-search-field {
+      width: 100%;
+    }
 
     .queue-toolbar-actions {
       display: flex;

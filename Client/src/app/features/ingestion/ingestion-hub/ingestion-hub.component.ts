@@ -179,27 +179,62 @@ export class IngestionHubComponent implements OnInit {
     () => this.jobs().filter((j) => j.status === 'Published').length,
   );
 
+  readonly searchQuery = signal<string>('');
+
   readonly filteredJobs = computed(() => {
+    let list: IngestionJobSummaryDto[];
     const all = this.jobs();
     switch (this.filter()) {
       case 'ReadyForReview':
-        return all.filter((j) => j.status === 'ReadyForReview');
+        list = all.filter((j) => j.status === 'ReadyForReview');
+        break;
       case 'ActiveWaiting':
-        return all.filter(
+        list = all.filter(
           (j) =>
             j.status === 'Queued' ||
             j.status === 'Preprocessing' ||
             j.status === 'Extracting' ||
             j.status === 'WaitingForLlmHost',
         );
+        break;
       case 'Published':
-        return all.filter((j) => j.status === 'Published');
+        list = all.filter((j) => j.status === 'Published');
+        break;
       case 'Failed':
-        return all.filter((j) => j.status === 'Failed');
+        list = all.filter((j) => j.status === 'Failed');
+        break;
       default:
-        return all;
+        list = all;
+        break;
     }
+
+    const query = this.searchQuery().trim().toLowerCase();
+    if (!query) {
+      return list;
+    }
+
+    return list.filter((j) => {
+      const title = j.displayTitle?.toLowerCase() ?? '';
+      const url = j.sourceUrl?.toLowerCase() ?? '';
+      const detail = j.statusDetail?.toLowerCase() ?? '';
+      const model = j.extractedModel?.toLowerCase() ?? '';
+      return (
+        title.includes(query) ||
+        url.includes(query) ||
+        detail.includes(query) ||
+        model.includes(query)
+      );
+    });
   });
+
+  onSearchInput(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    this.searchQuery.set(input.value);
+  }
+
+  clearSearch(): void {
+    this.searchQuery.set('');
+  }
 
   ngOnInit(): void {
     this.loadJobs();

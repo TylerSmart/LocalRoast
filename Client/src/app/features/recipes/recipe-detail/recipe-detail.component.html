@@ -68,6 +68,31 @@
             <span>Print Recipe</span>
           </button>
           <mat-divider></mat-divider>
+          @if (recipe()!.ingestionJobId) {
+            <a
+              mat-menu-item
+              [routerLink]="['/ingest/review', recipe()!.ingestionJobId]"
+              aria-label="View original ingestion item"
+              class="view-ingestion-menu-item"
+            >
+              <mat-icon>rate_review</mat-icon>
+              <span>View Ingestion Item</span>
+            </a>
+            <button
+              mat-menu-item
+              type="button"
+              (click)="rerunIngestion()"
+              [disabled]="isRerunningIngestion()"
+              aria-label="Re-run ingestion extraction"
+              class="rerun-ingestion-menu-item"
+            >
+              <mat-icon>refresh</mat-icon>
+              <span>{{
+                isRerunningIngestion() ? 'Re-queueing...' : 'Re-run Ingestion Extraction'
+              }}</span>
+            </button>
+            <mat-divider></mat-divider>
+          }
           <a
             mat-menu-item
             [routerLink]="['/recipes', recipe()!.id, 'edit']"
@@ -148,7 +173,21 @@
 
       <!-- Metadata summary row -->
       <div class="recipe-stats-strip">
-        @if (recipe()!.extractedModel) {
+        @if (recipe()!.ingestionJobId) {
+          <a
+            [routerLink]="['/ingest/review', recipe()!.ingestionJobId]"
+            class="stat-pill model-stat link-pill"
+            matTooltip="View original ingestion item and extraction review"
+            aria-label="View ingestion item"
+          >
+            <span class="stat-label">Model</span>
+            <span class="stat-value">
+              <mat-icon class="stat-icon">smart_toy</mat-icon>
+              <span>{{ recipe()!.extractedModel || 'Ingested' }}</span>
+              <mat-icon class="external-link-icon">open_in_new</mat-icon>
+            </span>
+          </a>
+        } @else if (recipe()!.extractedModel) {
           <div class="stat-pill model-stat">
             <span class="stat-label">Model</span>
             <span class="stat-value">

@@ -173,6 +173,39 @@ describe('IngestionHubComponent', () => {
     expect(component.filteredJobs()).toHaveLength(3);
   });
 
+  it('filters jobs by search query matching title or url and clears search', () => {
+    component.setFilter('All');
+    expect(component.filteredJobs()).toHaveLength(3);
+
+    // Search by title
+    component.searchQuery.set('Tofu');
+    expect(component.filteredJobs()).toHaveLength(1);
+    expect(component.filteredJobs()[0].id).toBe('job-1');
+
+    // Search by URL (specific to /tofu)
+    component.searchQuery.set('/tofu');
+    expect(component.filteredJobs()).toHaveLength(1);
+    expect(component.filteredJobs()[0].id).toBe('job-1');
+
+    // Search by shared domain (example.com)
+    component.searchQuery.set('example.com');
+    expect(component.filteredJobs()).toHaveLength(2);
+
+    // Search by model
+    component.searchQuery.set('llama3:8b');
+    expect(component.filteredJobs()).toHaveLength(1);
+    expect(component.filteredJobs()[0].id).toBe('job-3');
+
+    // Search with non-matching query
+    component.searchQuery.set('NonExistentJob');
+    expect(component.filteredJobs()).toHaveLength(0);
+
+    // Clear search
+    component.clearSearch();
+    expect(component.searchQuery()).toBe('');
+    expect(component.filteredJobs()).toHaveLength(3);
+  });
+
   it('enqueues web URLs and clears form', () => {
     component.urlForm.controls.urlsText.setValue(
       'https://example.com/tofu\nhttps://example.com/soup',

@@ -252,10 +252,11 @@ describe('RecipeDetailComponent', () => {
     component.closePhotoLightbox();
     expect(component['previewPhotoUrl']()).toBeNull();
   });
-  it('displays extracted model pill in stats strip when recipe was ingested', () => {
+  it('displays extracted model pill in stats strip when recipe was ingested and links to ingestion review', () => {
     const modelPill = fixture.nativeElement.querySelector('.stat-pill.model-stat');
     expect(modelPill).toBeTruthy();
     expect(modelPill.textContent).toContain('llama3.2-vision');
+    expect(modelPill.getAttribute('href')).toContain('/ingest/review/job-100');
   });
 
   it('reruns ingestion and navigates to /ingest when rerun button is clicked', () => {
