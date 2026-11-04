@@ -553,32 +553,6 @@
       </button>
     </div>
 
-    <!-- Real-time Ingestion Search -->
-    <div class="queue-search-field">
-      <mat-form-field appearance="outline" subscriptSizing="dynamic" class="search-form-field">
-        <mat-icon matPrefix>search</mat-icon>
-        <input
-          matInput
-          type="text"
-          placeholder="Search jobs..."
-          [value]="searchQuery()"
-          (input)="onSearchInput($event)"
-          aria-label="Search ingestion jobs"
-        />
-        @if (searchQuery()) {
-          <button
-            mat-icon-button
-            matSuffix
-            type="button"
-            (click)="clearSearch()"
-            aria-label="Clear search"
-          >
-            <mat-icon>close</mat-icon>
-          </button>
-        }
-      </mat-form-field>
-    </div>
-
     <div class="queue-toolbar-actions">
       <button
         mat-stroked-button
@@ -679,6 +653,32 @@
         </mat-menu>
       </div>
     </div>
+  </div>
+
+  <!-- Real-time Ingestion Search (Dedicated Line) -->
+  <div class="queue-search-row">
+    <mat-form-field appearance="outline" subscriptSizing="dynamic" class="search-form-field">
+      <mat-icon matPrefix>search</mat-icon>
+      <input
+        matInput
+        type="text"
+        placeholder="Search jobs by recipe title, URL, model, or status..."
+        [value]="searchQuery()"
+        (input)="onSearchInput($event)"
+        aria-label="Search ingestion jobs"
+      />
+      @if (searchQuery()) {
+        <button
+          mat-icon-button
+          matSuffix
+          type="button"
+          (click)="clearSearch()"
+          aria-label="Clear search"
+        >
+          <mat-icon>close</mat-icon>
+        </button>
+      }
+    </mat-form-field>
   </div>
 
   <!-- Job List -->
