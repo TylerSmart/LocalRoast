@@ -445,16 +445,6 @@
                         />
                       </mat-form-field>
 
-                      <mat-form-field appearance="outline" class="form-field aisle-field">
-                        <mat-label>Grocery Aisle</mat-label>
-                        <mat-select formControlName="suggestedStoreAisleId">
-                          <mat-option [value]="null">None / Unassigned</mat-option>
-                          @for (aisle of storeAisles(); track aisle.id) {
-                            <mat-option [value]="aisle.id">{{ aisle.name }}</mat-option>
-                          }
-                        </mat-select>
-                      </mat-form-field>
-
                       <mat-checkbox
                         formControlName="suggestedIsPantryStaple"
                         class="pantry-staple-checkbox"

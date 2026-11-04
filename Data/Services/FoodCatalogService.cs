@@ -30,28 +30,12 @@ public sealed class FoodCatalogService(
         return trimmed.ToLowerInvariant();
     }
 
-    public async Task<IReadOnlyList<StoreAisleDto>> GetStoreAislesAsync(
-        CancellationToken cancellationToken = default
-    )
-    {
-        return await dbContext
-            .StoreAisles.AsNoTracking()
-            .OrderBy(a => a.SortOrder)
-            .Select(a => new StoreAisleDto(a.Id, a.Name, a.SortOrder, a.IsSystemSeeded))
-            .ToListAsync(cancellationToken);
-    }
-
     public async Task<IReadOnlyList<FoodItemDto>> GetFoodItemsAsync(
         FoodItemQueryParameters query,
         CancellationToken cancellationToken = default
     )
     {
         var q = dbContext.FoodItems.AsNoTracking().AsQueryable();
-
-        if (query.StoreAisleId.HasValue)
-        {
-            q = q.Where(f => f.DefaultStoreAisleId == query.StoreAisleId.Value);
-        }
 
         if (query.IsPantryStaple.HasValue)
         {
@@ -71,9 +55,6 @@ public sealed class FoodCatalogService(
             .Select(f => new FoodItemDto(
                 f.Id,
                 f.Name,
-                f.DefaultStoreAisleId,
-                f.DefaultStoreAisle != null ? f.DefaultStoreAisle.Name : null,
-                f.DefaultStoreAisle != null ? (int?)f.DefaultStoreAisle.SortOrder : null,
                 f.IsPantryStaple,
                 f.Aliases.Select(a => a.Alias).ToList(),
                 f.RecipeIngredients.Select(ri => ri.RecipeId).Distinct().Count(),
@@ -95,9 +76,6 @@ public sealed class FoodCatalogService(
             .Select(f => new FoodItemDto(
                 f.Id,
                 f.Name,
-                f.DefaultStoreAisleId,
-                f.DefaultStoreAisle != null ? f.DefaultStoreAisle.Name : null,
-                f.DefaultStoreAisle != null ? (int?)f.DefaultStoreAisle.SortOrder : null,
                 f.IsPantryStaple,
                 f.Aliases.Select(a => a.Alias).ToList(),
                 f.RecipeIngredients.Select(ri => ri.RecipeId).Distinct().Count(),
@@ -127,18 +105,6 @@ public sealed class FoodCatalogService(
             throw new ConflictException(
                 $"A food item or alias with the name '{request.Name}' already exists."
             );
-        }
-
-        if (request.DefaultStoreAisleId.HasValue)
-        {
-            var aisleExists = await dbContext.StoreAisles.AnyAsync(
-                a => a.Id == request.DefaultStoreAisleId.Value,
-                cancellationToken
-            );
-            if (!aisleExists)
-            {
-                throw new DomainValidationException("Selected store aisle does not exist.");
-            }
         }
 
         var cleanAliases = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -183,7 +149,6 @@ public sealed class FoodCatalogService(
         {
             Name = request.Name.Trim(),
             NormalizedName = normName,
-            DefaultStoreAisleId = request.DefaultStoreAisleId,
             IsPantryStaple = request.IsPantryStaple,
         };
 
@@ -237,18 +202,6 @@ public sealed class FoodCatalogService(
             }
         }
 
-        if (request.DefaultStoreAisleId.HasValue)
-        {
-            var aisleExists = await dbContext.StoreAisles.AnyAsync(
-                a => a.Id == request.DefaultStoreAisleId.Value,
-                cancellationToken
-            );
-            if (!aisleExists)
-            {
-                throw new DomainValidationException("Selected store aisle does not exist.");
-            }
-        }
-
         var cleanAliases = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         if (request.Aliases is not null)
         {
@@ -289,7 +242,6 @@ public sealed class FoodCatalogService(
 
         foodItem.Name = request.Name.Trim();
         foodItem.NormalizedName = normName;
-        foodItem.DefaultStoreAisleId = request.DefaultStoreAisleId;
         foodItem.IsPantryStaple = request.IsPantryStaple;
 
         var existingAliases = foodItem.Aliases.ToList();
@@ -409,20 +361,6 @@ public sealed class FoodCatalogService(
         await using var tx = dbContext.Database.IsRelational()
             ? await dbContext.Database.BeginTransactionAsync(cancellationToken)
             : null;
-
-        // Aisle inheritance
-        if (!target.DefaultStoreAisleId.HasValue)
-        {
-            var inheritedAisleId = sources
-                .OrderBy(s => distinctSourceIds.IndexOf(s.Id))
-                .Select(s => s.DefaultStoreAisleId)
-                .FirstOrDefault(id => id.HasValue);
-
-            if (inheritedAisleId.HasValue)
-            {
-                target.DefaultStoreAisleId = inheritedAisleId.Value;
-            }
-        }
 
         // Re-point RecipeIngredients
         var repointedRecipeIngredients = await dbContext

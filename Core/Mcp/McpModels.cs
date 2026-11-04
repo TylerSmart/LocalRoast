@@ -1,5 +1,4 @@
 using System.ComponentModel.DataAnnotations;
-using App.Core.FoodCatalog;
 using App.Core.MealPlans;
 using App.Core.Recipes;
 using App.Core.Shopping;
@@ -95,7 +94,6 @@ public sealed record McpIngredientMatchResponseDto(
 public sealed record McpHouseholdTaxonomyDto(
     IReadOnlyList<CollectionDto> Collections,
     IReadOnlyList<TagDto> Tags,
-    IReadOnlyList<StoreAisleDto> StoreAisles,
     IReadOnlyList<string> SupportedUnits
 );
 
@@ -115,7 +113,6 @@ public sealed record McpStructuredIngredientInput(
     [MaxLength(200)] string? PreparationNote = null,
     bool IsOptional = false,
     [MaxLength(500)] string? OriginalRawText = null,
-    [MaxLength(100)] string? SuggestedAisleName = null,
     bool IsPantryStaple = false
 );
 

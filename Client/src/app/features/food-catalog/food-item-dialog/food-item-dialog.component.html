@@ -29,17 +29,6 @@
       }
     </mat-form-field>
 
-    <!-- Default Store Aisle -->
-    <mat-form-field appearance="outline" class="full-width">
-      <mat-label>Default Store Aisle</mat-label>
-      <mat-select formControlName="defaultStoreAisleId">
-        <mat-option [value]="''">-- No Aisle Assigned --</mat-option>
-        @for (aisle of aisles(); track aisle.id) {
-          <mat-option [value]="aisle.id">{{ aisle.name }}</mat-option>
-        }
-      </mat-select>
-    </mat-form-field>
-
     <!-- Pantry Staple Toggle -->
     <div class="checkbox-row">
       <mat-checkbox formControlName="isPantryStaple"> Always stocked pantry staple </mat-checkbox>

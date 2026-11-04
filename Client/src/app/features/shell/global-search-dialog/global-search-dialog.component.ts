@@ -70,7 +70,7 @@ export class GlobalSearchDialogComponent implements OnInit {
       id: 'action-catalog',
       type: 'action',
       title: 'Food Catalog',
-      subtitle: 'Manage ingredients, staples & aisles',
+      subtitle: 'Manage ingredients & pantry staples',
       icon: 'kitchen',
       route: '/catalog',
     },

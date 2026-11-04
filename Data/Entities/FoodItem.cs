@@ -8,8 +8,6 @@ public sealed class FoodItem : IAuditable
 
     public string NormalizedName { get; set; } = string.Empty;
 
-    public Guid? DefaultStoreAisleId { get; set; }
-
     public bool IsPantryStaple { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; }
@@ -19,8 +17,6 @@ public sealed class FoodItem : IAuditable
     public DateTimeOffset ModifiedAt { get; set; }
 
     public string ModifiedBy { get; set; } = "System";
-
-    public StoreAisle? DefaultStoreAisle { get; set; }
 
     public ICollection<FoodItemAlias> Aliases { get; set; } = new List<FoodItemAlias>();
 

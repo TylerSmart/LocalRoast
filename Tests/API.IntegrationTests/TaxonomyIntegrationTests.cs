@@ -48,23 +48,39 @@ public sealed class TaxonomyIntegrationTests
     }
 
     [TestMethod]
-    public async Task GetCollectionsAndTags_ReturnsSeededItems()
+    public async Task GetCollectionsAndTags_StartEmpty_AndSupportCategoryFiltering()
     {
         await RegisterAndAuthenticateAsync(_client, "tax1@example.com", "tax1");
 
-        // Collections start empty (no starter collections seeded)
+        // Collections start empty
         var collRes = await _client.GetAsync("/api/collections");
         Assert.AreEqual(HttpStatusCode.OK, collRes.StatusCode);
         var collections = await collRes.Content.ReadFromJsonAsync<IReadOnlyList<CollectionDto>>();
         Assert.IsNotNull(collections);
-        Assert.IsFalse(collections.Any(c => c.IsSystemSeeded));
+        Assert.AreEqual(0, collections.Count);
 
-        // Seeded tags
+        // Tags start empty
+        var initialTagRes = await _client.GetAsync("/api/tags");
+        Assert.AreEqual(HttpStatusCode.OK, initialTagRes.StatusCode);
+        var initialTags = await initialTagRes.Content.ReadFromJsonAsync<IReadOnlyList<TagDto>>();
+        Assert.IsNotNull(initialTags);
+        Assert.AreEqual(0, initialTags.Count);
+
+        // Create tags in different categories
+        await _client.PostAsJsonAsync(
+            "/api/tags",
+            new UpsertTagRequest("Vegetarian", TagCategory.Dietary, 10)
+        );
+        await _client.PostAsJsonAsync(
+            "/api/tags",
+            new UpsertTagRequest("Sheet Pan", TagCategory.Equipment, 20)
+        );
+
         var tagRes = await _client.GetAsync("/api/tags");
         Assert.AreEqual(HttpStatusCode.OK, tagRes.StatusCode);
         var tags = await tagRes.Content.ReadFromJsonAsync<IReadOnlyList<TagDto>>();
         Assert.IsNotNull(tags);
-        Assert.IsTrue(tags.Count >= 20);
+        Assert.AreEqual(2, tags.Count);
         Assert.IsTrue(tags.Any(t => t.Name == "Vegetarian" && t.Category == TagCategory.Dietary));
         Assert.IsTrue(tags.Any(t => t.Name == "Sheet Pan" && t.Category == TagCategory.Equipment));
 
@@ -73,6 +89,7 @@ public sealed class TaxonomyIntegrationTests
         Assert.AreEqual(HttpStatusCode.OK, dietaryRes.StatusCode);
         var dietaryTags = await dietaryRes.Content.ReadFromJsonAsync<IReadOnlyList<TagDto>>();
         Assert.IsNotNull(dietaryTags);
+        Assert.AreEqual(1, dietaryTags.Count);
         Assert.IsTrue(dietaryTags.All(t => t.Category == TagCategory.Dietary));
     }
 

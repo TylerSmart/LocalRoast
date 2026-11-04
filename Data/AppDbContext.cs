@@ -7,8 +7,6 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
 {
     public DbSet<User> Users => Set<User>();
 
-    public DbSet<StoreAisle> StoreAisles => Set<StoreAisle>();
-
     public DbSet<FoodItem> FoodItems => Set<FoodItem>();
 
     public DbSet<FoodItemAlias> FoodItemAliases => Set<FoodItemAlias>();

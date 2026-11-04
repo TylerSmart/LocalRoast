@@ -593,6 +593,95 @@ public abstract class E2ETestBase : PageTest
         return (username, email);
     }
 
+    protected async Task EnsureFoodItemExistsViaApiAsync(
+        string name,
+        bool isPantryStaple = false,
+        string[]? aliases = null
+    )
+    {
+        await Page.EvaluateAsync(
+            @"async ({ name, isPantryStaple, aliases }) => {
+                const tokenKey = Object.keys(localStorage).find(k => k.endsWith('-token'));
+                const token = tokenKey ? localStorage.getItem(tokenKey) : null;
+                await fetch('/api/food-items', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({
+                        name,
+                        isPantryStaple,
+                        aliases: aliases ?? []
+                    })
+                });
+            }",
+            new
+            {
+                name,
+                isPantryStaple,
+                aliases = aliases ?? [],
+            }
+        );
+    }
+
+    protected async Task EnsureTagExistsViaApiAsync(
+        string name,
+        string category = "Dietary",
+        int sortOrder = 0
+    )
+    {
+        await Page.EvaluateAsync(
+            @"async ({ name, category, sortOrder }) => {
+                const tokenKey = Object.keys(localStorage).find(k => k.endsWith('-token'));
+                const token = tokenKey ? localStorage.getItem(tokenKey) : null;
+                await fetch('/api/tags', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({
+                        name,
+                        category,
+                        sortOrder
+                    })
+                });
+            }",
+            new
+            {
+                name,
+                category,
+                sortOrder,
+            }
+        );
+    }
+
+    protected async Task EnsureShoppingListExistsViaApiAsync(
+        string name = "Weekly Groceries",
+        bool isPinned = true
+    )
+    {
+        await Page.EvaluateAsync(
+            @"async ({ name, isPinned }) => {
+                const tokenKey = Object.keys(localStorage).find(k => k.endsWith('-token'));
+                const token = tokenKey ? localStorage.getItem(tokenKey) : null;
+                await fetch('/api/shopping-lists', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({
+                        name,
+                        isPinned
+                    })
+                });
+            }",
+            new { name, isPinned }
+        );
+    }
+
     private sealed class TrackedPageSession(IBrowserContext context, IPage page, string label)
     {
         private readonly Lock _lock = new();

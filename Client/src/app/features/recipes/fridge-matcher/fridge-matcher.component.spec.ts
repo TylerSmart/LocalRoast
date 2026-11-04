@@ -15,9 +15,6 @@ describe('FridgeMatcherComponent', () => {
     {
       id: 'fi-1',
       name: 'Chicken Thighs',
-      defaultStoreAisleId: null,
-      defaultStoreAisleName: null,
-      defaultStoreAisleSortOrder: null,
       isPantryStaple: false,
       aliases: ['Boneless Chicken Thighs'],
       referencedRecipeCount: 2,
@@ -27,9 +24,6 @@ describe('FridgeMatcherComponent', () => {
     {
       id: 'fi-2',
       name: 'Lime',
-      defaultStoreAisleId: null,
-      defaultStoreAisleName: null,
-      defaultStoreAisleSortOrder: null,
       isPantryStaple: false,
       aliases: ['Lime Juice'],
       referencedRecipeCount: 3,
@@ -39,9 +33,6 @@ describe('FridgeMatcherComponent', () => {
     {
       id: 'fi-3',
       name: 'Kosher Salt',
-      defaultStoreAisleId: null,
-      defaultStoreAisleName: null,
-      defaultStoreAisleSortOrder: null,
       isPantryStaple: true,
       aliases: [],
       referencedRecipeCount: 10,

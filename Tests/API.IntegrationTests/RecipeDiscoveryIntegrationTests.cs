@@ -70,11 +70,21 @@ public sealed class RecipeDiscoveryIntegrationTests
         var projectsColl = await projectsRes.Content.ReadFromJsonAsync<CollectionDto>();
         Assert.IsNotNull(projectsColl);
 
-        var tagRes = await _client.GetAsync("/api/tags");
-        var tags = await tagRes.Content.ReadFromJsonAsync<IReadOnlyList<TagDto>>();
-        Assert.IsNotNull(tags);
-        var vegTag = tags.First(t => t.Name == "Vegetarian");
-        var sheetPanTag = tags.First(t => t.Name == "Sheet Pan");
+        var vegTagRes = await _client.PostAsJsonAsync(
+            "/api/tags",
+            new UpsertTagRequest("Vegetarian", TagCategory.Dietary, 10)
+        );
+        Assert.AreEqual(HttpStatusCode.Created, vegTagRes.StatusCode);
+        var vegTag = await vegTagRes.Content.ReadFromJsonAsync<TagDto>();
+        Assert.IsNotNull(vegTag);
+
+        var sheetPanTagRes = await _client.PostAsJsonAsync(
+            "/api/tags",
+            new UpsertTagRequest("Sheet Pan", TagCategory.Equipment, 20)
+        );
+        Assert.AreEqual(HttpStatusCode.Created, sheetPanTagRes.StatusCode);
+        var sheetPanTag = await sheetPanTagRes.Content.ReadFromJsonAsync<TagDto>();
+        Assert.IsNotNull(sheetPanTag);
 
         // Create Recipe 1: In Weeknight Staples, has Vegetarian AND Sheet Pan
         var recipe1Req = new UpsertRecipeRequest(
@@ -187,16 +197,23 @@ public sealed class RecipeDiscoveryIntegrationTests
     {
         await RegisterAndAuthenticateAsync(_client, "disc3@example.com", "disc3");
 
-        // Fetch seeded food items
-        var foodRes = await _client.GetAsync("/api/food-items");
-        var foodItems = await foodRes.Content.ReadFromJsonAsync<IReadOnlyList<FoodItemDto>>();
-        Assert.IsNotNull(foodItems);
+        async Task<FoodItemDto> CreateFoodAsync(string name, bool isPantryStaple = false)
+        {
+            var res = await _client.PostAsJsonAsync(
+                "/api/food-items",
+                new CreateFoodItemRequest(name, IsPantryStaple: isPantryStaple)
+            );
+            Assert.AreEqual(HttpStatusCode.Created, res.StatusCode);
+            var dto = await res.Content.ReadFromJsonAsync<FoodItemDto>();
+            Assert.IsNotNull(dto);
+            return dto;
+        }
 
-        var chicken = foodItems.First(f => f.Name == "Chicken Thighs");
-        var lime = foodItems.First(f => f.Name == "Lime");
-        var cilantro = foodItems.First(f => f.Name == "Cilantro");
-        var onion = foodItems.First(f => f.Name == "Yellow Onion");
-        var salt = foodItems.First(f => f.Name == "Kosher Salt"); // Pantry staple
+        var chicken = await CreateFoodAsync("Chicken Thighs");
+        var lime = await CreateFoodAsync("Lime");
+        var cilantro = await CreateFoodAsync("Cilantro");
+        var onion = await CreateFoodAsync("Yellow Onion");
+        var salt = await CreateFoodAsync("Kosher Salt", isPantryStaple: true);
 
         // Recipe A: Chicken + Lime + Kosher Salt -> 2 on-hand matched, 0 non-staples needed
         var recipeAReq = new UpsertRecipeRequest(

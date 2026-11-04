@@ -112,7 +112,6 @@ export interface IngestionDraftIngredientDto {
   matchedFoodItemName: string | null;
   isNewFoodItem: boolean;
   proposedFoodItemName: string | null;
-  suggestedStoreAisleId: string | null;
   suggestedIsPantryStaple: boolean;
 }
 

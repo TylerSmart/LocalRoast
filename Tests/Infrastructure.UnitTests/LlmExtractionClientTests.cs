@@ -140,7 +140,7 @@ public sealed class LlmExtractionClientTests
             {
                 "message": {
                     "role": "assistant",
-                    "content": "{\"title\":\"Skillet Rosemary Chicken\",\"description\":\"Crisp chicken with fresh rosemary.\",\"baseServings\":4,\"yieldDisplay\":\"4 portions\",\"prepTimeMinutes\":10,\"cookTimeMinutes\":25,\"totalTimeMinutes\":35,\"difficulty\":\"Medium\",\"sourceName\":\"Chef Daily\",\"sourceAuthor\":\"Elena\",\"confidenceScore\":0.92,\"suggestedTagNames\":[\"Main\",\"One-Pot\"],\"ingredients\":[{\"sectionName\":null,\"quantity\":4,\"maxQuantity\":null,\"unit\":\"whole\",\"canonicalFoodName\":\"chicken thighs\",\"displayName\":\"bone-in chicken thighs\",\"preparationNote\":null,\"isOptional\":false,\"originalRawText\":\"4 bone-in chicken thighs\",\"suggestedAisleName\":\"Meat & Seafood\",\"suggestedIsPantryStaple\":false}],\"steps\":[{\"sectionName\":null,\"instruction\":\"Sear chicken in olive oil for 8 minutes per side.\",\"ingredientIndices\":[0],\"timers\":[{\"durationSeconds\":480,\"label\":\"Sear\"}]}]}"
+                    "content": "{\"title\":\"Skillet Rosemary Chicken\",\"description\":\"Crisp chicken with fresh rosemary.\",\"baseServings\":4,\"yieldDisplay\":\"4 portions\",\"prepTimeMinutes\":10,\"cookTimeMinutes\":25,\"totalTimeMinutes\":35,\"difficulty\":\"Medium\",\"sourceName\":\"Chef Daily\",\"sourceAuthor\":\"Elena\",\"confidenceScore\":0.92,\"suggestedTagNames\":[\"Main\",\"One-Pot\"],\"ingredients\":[{\"sectionName\":null,\"quantity\":4,\"maxQuantity\":null,\"unit\":\"whole\",\"canonicalFoodName\":\"chicken thighs\",\"displayName\":\"bone-in chicken thighs\",\"preparationNote\":null,\"isOptional\":false,\"originalRawText\":\"4 bone-in chicken thighs\",\"suggestedIsPantryStaple\":false}],\"steps\":[{\"sectionName\":null,\"instruction\":\"Sear chicken in olive oil for 8 minutes per side.\",\"ingredientIndices\":[0],\"timers\":[{\"durationSeconds\":480,\"label\":\"Sear\"}]}]}"
                 }
             }
             """;
@@ -172,7 +172,6 @@ public sealed class LlmExtractionClientTests
 
         var context = new LlmExtractionContext(
             SourceContent: "Title: Skillet Rosemary Chicken\nIngredients: 4 bone-in chicken thighs",
-            AvailableAisleNames: ["Meat & Seafood", "Produce"],
             AvailableTagNames: ["Main", "One-Pot"]
         );
 
@@ -208,7 +207,7 @@ public sealed class LlmExtractionClientTests
             AutoPublishHighConfidenceText: false
         );
 
-        var context = new LlmExtractionContext("Some recipe", [], []);
+        var context = new LlmExtractionContext("Some recipe", []);
 
         await Assert.ThrowsAsync<LlmHostUnavailableException>(async () =>
         {
@@ -267,7 +266,6 @@ public sealed class LlmExtractionClientTests
         var context = new LlmVisionExtractionContext(
             Images: [new LlmVisionImageInput(1, "image/jpeg", "bW9ja2Jhc2U2NA==")],
             SupplementalHintText: "Book: Family Heirlooms",
-            AvailableAisleNames: ["Baking"],
             AvailableTagNames: ["Breakfast"]
         );
 
@@ -334,7 +332,6 @@ public sealed class LlmExtractionClientTests
         var context = new LlmVisionExtractionContext(
             Images: [new LlmVisionImageInput(1, "image/jpeg", "bW9ja2Jhc2U2NA==")],
             SupplementalHintText: null,
-            AvailableAisleNames: ["Baking"],
             AvailableTagNames: ["Breads"]
         );
 
@@ -398,7 +395,6 @@ public sealed class LlmExtractionClientTests
 
         var context = new LlmExtractionContext(
             SourceContent: "Title: Mango Tango Tacos\nIngredients: 1 lb ground beef",
-            AvailableAisleNames: ["Meat & Seafood"],
             AvailableTagNames: ["Mexican"]
         );
 
@@ -567,7 +563,7 @@ public sealed class LlmExtractionClientTests
         {
             await client.ExtractRecipeFromTextAsync(
                 config,
-                new LlmExtractionContext("Title: Coconut Chicken Curry", [], [])
+                new LlmExtractionContext("Title: Coconut Chicken Curry", [])
             );
         });
 
@@ -610,7 +606,7 @@ public sealed class LlmExtractionClientTests
         {
             await client.ExtractRecipeFromTextAsync(
                 config,
-                new LlmExtractionContext("Title: Coconut Chicken Curry", [], [])
+                new LlmExtractionContext("Title: Coconut Chicken Curry", [])
             );
         });
 
@@ -655,7 +651,7 @@ public sealed class LlmExtractionClientTests
         {
             await client.ExtractRecipeFromTextAsync(
                 config,
-                new LlmExtractionContext("Title: Coconut Chicken Curry", [], [])
+                new LlmExtractionContext("Title: Coconut Chicken Curry", [])
             );
         });
 

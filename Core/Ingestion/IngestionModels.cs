@@ -42,7 +42,6 @@ public record LlmExtractedIngredientItem(
     string? PreparationNote,
     bool IsOptional,
     string? OriginalRawText,
-    string? SuggestedAisleName,
     bool SuggestedIsPantryStaple = false
 );
 
@@ -84,7 +83,6 @@ public record IngestionDraftIngredientDto(
     string? MatchedFoodItemName = null,
     bool IsNewFoodItem = false,
     [MaxLength(150)] string? ProposedFoodItemName = null,
-    Guid? SuggestedStoreAisleId = null,
     bool SuggestedIsPantryStaple = false,
     bool CreateNewFoodItem = true,
     [Required, MaxLength(200)] string DisplayName = "",

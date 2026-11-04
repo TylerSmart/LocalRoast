@@ -94,7 +94,6 @@ public sealed class MockMultimodalServer : IAsyncDisposable
                               "quantity": 2,
                               "unit": "Cup",
                               "canonicalFoodName": "All-Purpose Flour",
-                              "suggestedAisleName": "Spices & Baking",
                               "isPantryStaple": true,
                               "originalRawText": "2 cups all-purpose flour"
                             },
@@ -104,7 +103,6 @@ public sealed class MockMultimodalServer : IAsyncDisposable
                               "quantity": 1,
                               "unit": "Cup",
                               "canonicalFoodName": "Blueberries",
-                              "suggestedAisleName": "Produce",
                               "isPantryStaple": false,
                               "originalRawText": "1 cup fresh blueberries"
                             }
@@ -140,7 +138,6 @@ public sealed class MockMultimodalServer : IAsyncDisposable
                               "quantity": 500,
                               "unit": "G",
                               "canonicalFoodName": "Bread Flour",
-                              "suggestedAisleName": "Spices & Baking",
                               "isPantryStaple": true,
                               "originalRawText": "500g bread flour"
                             }

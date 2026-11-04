@@ -19,13 +19,6 @@ public sealed class FoodItemConfiguration : IEntityTypeConfiguration<FoodItem>
 
         builder.HasIndex(f => f.IsPantryStaple);
 
-        builder
-            .HasOne(f => f.DefaultStoreAisle)
-            .WithMany(a => a.FoodItems)
-            .HasForeignKey(f => f.DefaultStoreAisleId)
-            .IsRequired(false)
-            .OnDelete(DeleteBehavior.Restrict);
-
         builder.Property(f => f.CreatedBy).IsRequired().HasMaxLength(256);
         builder.Property(f => f.ModifiedBy).IsRequired().HasMaxLength(256);
     }

@@ -40,7 +40,6 @@ public sealed class OpenApiIntegrationTests
         StringAssert.Contains(content, "/recipes");
         StringAssert.Contains(content, "/food-items");
         StringAssert.Contains(content, "/food-items/merge");
-        StringAssert.Contains(content, "/store-aisles");
         StringAssert.Contains(content, "/collections");
         StringAssert.Contains(content, "/tags");
         StringAssert.Contains(content, "/media");

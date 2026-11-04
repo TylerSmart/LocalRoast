@@ -32,7 +32,7 @@ import { MatSelectModule } from '@angular/material/select';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
-import { FoodItemDto, StoreAisleDto } from '../../../core/models/food-catalog.models';
+import { FoodItemDto } from '../../../core/models/food-catalog.models';
 import type {
   IngestionDraftIngredientDto,
   IngestionDraftStepDto,
@@ -95,7 +95,6 @@ export class IngestionReviewComponent implements OnInit {
   readonly mobilePane = signal<'source' | 'draft'>('draft');
   readonly isPromotingCover = signal<boolean>(false);
 
-  readonly storeAisles = signal<StoreAisleDto[]>([]);
   readonly foodItems = signal<FoodItemDto[]>([]);
   readonly collections = signal<CollectionDto[]>([]);
   readonly tags = signal<TagDto[]>([]);
@@ -144,11 +143,6 @@ export class IngestionReviewComponent implements OnInit {
   }
 
   private loadCatalogData(): void {
-    this.foodCatalogService
-      .getStoreAisles()
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({ next: (aisles) => this.storeAisles.set(aisles) });
-
     this.foodCatalogService
       .getFoodItems()
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -268,7 +262,6 @@ export class IngestionReviewComponent implements OnInit {
         item?.proposedFoodItemName ?? item?.displayName ?? '',
         [Validators.required],
       ],
-      suggestedStoreAisleId: [item?.suggestedStoreAisleId ?? null],
       suggestedIsPantryStaple: [item?.suggestedIsPantryStaple ?? false],
     });
 
@@ -400,7 +393,6 @@ export class IngestionReviewComponent implements OnInit {
           matchedFoodItemName: val.matchedFoodItemName || null,
           isNewFoodItem: !val.matchedFoodItemId,
           proposedFoodItemName: val.proposedFoodItemName?.trim() || val.displayName.trim(),
-          suggestedStoreAisleId: val.suggestedStoreAisleId || null,
           suggestedIsPantryStaple: Boolean(val.suggestedIsPantryStaple),
         };
       },

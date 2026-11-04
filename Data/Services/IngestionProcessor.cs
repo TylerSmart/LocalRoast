@@ -1,6 +1,5 @@
 using System.Text.Json;
 using App.Core.Exceptions;
-using App.Core.FoodCatalog;
 using App.Core.Ingestion;
 using App.Core.Media;
 using App.Core.Recipes;
@@ -247,12 +246,6 @@ public sealed class IngestionProcessor(
 
             var config = await llmSettingsService.GetEffectiveConfigAsync(cancellationToken);
 
-            var aisles = await dbContext
-                .StoreAisles.AsNoTracking()
-                .OrderBy(a => a.SortOrder)
-                .Select(a => new CatalogAisleLookupItem(a.Id, a.Name, a.NormalizedName))
-                .ToListAsync(cancellationToken);
-
             var tags = await dbContext
                 .Tags.AsNoTracking()
                 .Select(t => new CatalogTagLookupItem(t.Id, t.Name, t.NormalizedName, t.Slug))
@@ -264,13 +257,11 @@ public sealed class IngestionProcessor(
                     f.Id,
                     f.Name,
                     f.NormalizedName,
-                    f.DefaultStoreAisleId,
                     f.IsPantryStaple,
                     f.Aliases.Select(a => a.NormalizedAlias).ToList()
                 ))
                 .ToListAsync(cancellationToken);
 
-            var aisleNames = aisles.Select(a => a.Name).ToList();
             var tagNames = tags.Select(t => t.Name).ToList();
 
             // Determine if Vision or Text pipeline is needed
@@ -382,7 +373,6 @@ public sealed class IngestionProcessor(
                 var visionContext = new LlmVisionExtractionContext(
                     Images: imageInputs,
                     SupplementalHintText: hintText,
-                    AvailableAisleNames: aisleNames,
                     AvailableTagNames: tagNames
                 );
 
@@ -405,7 +395,6 @@ public sealed class IngestionProcessor(
 
                 var extractionContext = new LlmExtractionContext(
                     SourceContent: job.NormalizedSourceText ?? job.RawText ?? "",
-                    AvailableAisleNames: aisleNames,
                     AvailableTagNames: tagNames
                 );
 
@@ -443,7 +432,6 @@ public sealed class IngestionProcessor(
             var draft = RecipeDraftNormalizer.Normalize(
                 raw: rawExtracted,
                 catalogFoods: catalogFoods,
-                aisles: aisles,
                 tags: tags,
                 sourceUrl: job.SourceUrl,
                 fallbackSourceName: fallbackSourceName,
@@ -685,7 +673,6 @@ public sealed class IngestionProcessor(
                         {
                             Name = cleanName,
                             NormalizedName = normName,
-                            DefaultStoreAisleId = ing.SuggestedStoreAisleId,
                             IsPantryStaple = ing.SuggestedIsPantryStaple,
                         };
                         dbContext.FoodItems.Add(newFoodItem);

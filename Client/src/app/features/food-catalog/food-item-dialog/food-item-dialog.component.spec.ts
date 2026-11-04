@@ -1,7 +1,7 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { MAT_DIALOG_DATA, MatDialogRef } from '@angular/material/dialog';
 import { of } from 'rxjs';
-import { FoodItemDto, StoreAisleDto } from '../../../core/models/food-catalog.models';
+import { FoodItemDto } from '../../../core/models/food-catalog.models';
 import { FoodCatalogService } from '../../../core/services/food-catalog/food-catalog.service';
 import { FoodItemDialogComponent, FoodItemDialogData } from './food-item-dialog.component';
 
@@ -11,12 +11,6 @@ describe('FoodItemDialogComponent', () => {
   let mockDialogRef: { close: ReturnType<typeof vi.fn> };
 
   const mockCatalogService = {
-    getStoreAisles: vi.fn().mockReturnValue(
-      of([
-        { id: 'a-1', name: 'Baking', sortOrder: 1, isSystemSeeded: true },
-        { id: 'a-2', name: 'Produce', sortOrder: 2, isSystemSeeded: true },
-      ] as StoreAisleDto[]),
-    ),
     createFoodItem: vi.fn(),
     updateFoodItem: vi.fn(),
   };
@@ -51,9 +45,6 @@ describe('FoodItemDialogComponent', () => {
     const saved: FoodItemDto = {
       id: 'f-1',
       name: 'Brown Sugar',
-      defaultStoreAisleId: null,
-      defaultStoreAisleName: null,
-      defaultStoreAisleSortOrder: null,
       isPantryStaple: true,
       aliases: ['Dark Brown Sugar'],
       referencedRecipeCount: 0,

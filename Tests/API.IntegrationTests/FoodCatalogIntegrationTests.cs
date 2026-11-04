@@ -49,31 +49,35 @@ public sealed class FoodCatalogIntegrationTests
     }
 
     [TestMethod]
-    public async Task GetStoreAisles_ReturnsSeededDefaultAisles()
-    {
-        await RegisterAndAuthenticateAsync(_client, "aisle_user@example.com", "aisleuser");
-
-        var response = await _client.GetAsync("/api/store-aisles");
-        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
-
-        var aisles = await response.Content.ReadFromJsonAsync<List<StoreAisleDto>>();
-        Assert.IsNotNull(aisles);
-        Assert.IsTrue(aisles.Count >= 13);
-        Assert.IsTrue(aisles.Any(a => a.Name == "Produce" && a.IsSystemSeeded));
-        Assert.IsTrue(aisles.Any(a => a.Name == "Spices & Baking" && a.IsSystemSeeded));
-    }
-
-    [TestMethod]
-    public async Task GetFoodItems_ReturnsSeededPantryStaplesAndSupportsAliasSearch()
+    public async Task GetFoodItems_StartsEmpty_AndSupportsPantryStaplesAndAliasSearch()
     {
         await RegisterAndAuthenticateAsync(_client, "staples_user@example.com", "staplesuser");
+
+        var initialResponse = await _client.GetAsync("/api/food-items");
+        Assert.AreEqual(HttpStatusCode.OK, initialResponse.StatusCode);
+        var initialItems = await initialResponse.Content.ReadFromJsonAsync<List<FoodItemDto>>();
+        Assert.IsNotNull(initialItems);
+        Assert.AreEqual(0, initialItems.Count);
+
+        await _client.PostAsJsonAsync(
+            "/api/food-items",
+            new CreateFoodItemRequest("Kosher Salt", IsPantryStaple: true, Aliases: ["Salt"])
+        );
+        await _client.PostAsJsonAsync(
+            "/api/food-items",
+            new CreateFoodItemRequest(
+                "Green Onion",
+                IsPantryStaple: false,
+                Aliases: ["Scallion", "Spring Onion"]
+            )
+        );
 
         var allItemsResponse = await _client.GetAsync("/api/food-items");
         Assert.AreEqual(HttpStatusCode.OK, allItemsResponse.StatusCode);
 
         var allItems = await allItemsResponse.Content.ReadFromJsonAsync<List<FoodItemDto>>();
         Assert.IsNotNull(allItems);
-        Assert.IsTrue(allItems.Count >= 18);
+        Assert.AreEqual(2, allItems.Count);
         Assert.IsTrue(allItems.Any(f => f.Name == "Kosher Salt" && f.IsPantryStaple));
 
         // Search by alias "scallion" -> should find "Green Onion"
@@ -90,16 +94,9 @@ public sealed class FoodCatalogIntegrationTests
     {
         await RegisterAndAuthenticateAsync(_client, "catalog_user@example.com", "cataloguser");
 
-        var aisles = await (await _client.GetAsync("/api/store-aisles")).Content.ReadFromJsonAsync<
-            List<StoreAisleDto>
-        >();
-        Assert.IsNotNull(aisles);
-        var produceAisle = aisles.First(a => a.Name == "Produce");
-
         // Create
         var createReq = new CreateFoodItemRequest(
             Name: "Avocado",
-            DefaultStoreAisleId: produceAisle.Id,
             IsPantryStaple: false,
             Aliases: ["Hass Avocado", "Alligator Pear"]
         );
@@ -109,14 +106,12 @@ public sealed class FoodCatalogIntegrationTests
         var created = await createRes.Content.ReadFromJsonAsync<FoodItemDto>();
         Assert.IsNotNull(created);
         Assert.AreEqual("Avocado", created.Name);
-        Assert.AreEqual(produceAisle.Id, created.DefaultStoreAisleId);
         Assert.IsFalse(created.IsPantryStaple);
         Assert.AreEqual(2, created.Aliases.Count);
 
         // Update & toggle pantry staple
         var updateReq = new UpdateFoodItemRequest(
             Name: "Avocado",
-            DefaultStoreAisleId: produceAisle.Id,
             IsPantryStaple: true,
             Aliases: ["Hass Avocado"]
         );
@@ -134,8 +129,18 @@ public sealed class FoodCatalogIntegrationTests
     {
         await RegisterAndAuthenticateAsync(_client, "conflict_user@example.com", "conflictuser");
 
-        // Duplicate of existing seeded item
-        var dupReq = new CreateFoodItemRequest("Kosher Salt");
+        var seedRes = await _client.PostAsJsonAsync(
+            "/api/food-items",
+            new CreateFoodItemRequest(
+                "Green Onion",
+                IsPantryStaple: false,
+                Aliases: ["Scallion", "Spring Onion"]
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Created, seedRes.StatusCode);
+
+        // Duplicate of existing item
+        var dupReq = new CreateFoodItemRequest("Green Onion");
         var dupRes = await _client.PostAsJsonAsync("/api/food-items", dupReq);
         Assert.AreEqual(HttpStatusCode.Conflict, dupRes.StatusCode);
 

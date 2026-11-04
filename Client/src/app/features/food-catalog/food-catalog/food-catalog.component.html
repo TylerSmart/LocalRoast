@@ -4,8 +4,7 @@
     <div class="header-titles">
       <h1 class="page-title">Canonical Food Catalog</h1>
       <p class="page-subtitle">
-        Manage household food items, store aisles, and pantry staples referenced across your
-        cookbook.
+        Manage household food items and pantry staples referenced across your cookbook.
       </p>
     </div>
     <div class="header-actions">
@@ -51,17 +50,6 @@
         }
       </mat-form-field>
 
-      <!-- Store Aisle Filter -->
-      <mat-form-field appearance="outline" class="aisle-field" subscriptSizing="dynamic">
-        <mat-label>Filter by Store Aisle</mat-label>
-        <mat-select [ngModel]="selectedAisleId()" (ngModelChange)="selectedAisleId.set($event)">
-          <mat-option [value]="''">All Aisles</mat-option>
-          @for (aisle of aisles(); track aisle.id) {
-            <mat-option [value]="aisle.id">{{ aisle.name }}</mat-option>
-          }
-        </mat-select>
-      </mat-form-field>
-
       <!-- Pantry Staples Only Toggle -->
       <div class="staple-toggle-container">
         <mat-slide-toggle
@@ -97,7 +85,7 @@
         <mat-icon class="empty-icon">kitchen</mat-icon>
         <h3>No food items found</h3>
         <p>
-          @if (searchQuery() || selectedAisleId() || onlyPantryStaples()) {
+          @if (searchQuery() || onlyPantryStaples()) {
             Try adjusting your search query or filters.
           } @else {
             Get started by adding your first staple ingredient to the catalog!
@@ -119,12 +107,6 @@
               <div class="item-header">
                 <div class="name-block">
                   <h3 class="item-name">{{ item.name }}</h3>
-                  @if (item.defaultStoreAisleName) {
-                    <span class="aisle-badge">
-                      <mat-icon class="badge-icon">shopping_cart</mat-icon>
-                      {{ item.defaultStoreAisleName }}
-                    </span>
-                  }
                 </div>
 
                 <!-- Pantry Staple Button -->

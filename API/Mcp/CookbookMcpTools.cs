@@ -125,7 +125,7 @@ public sealed class CookbookMcpTools(IMcpCookbookService mcpCookbookService)
 
     [McpServerTool(Name = "list_collections_and_tags", ReadOnly = true)]
     [Description(
-        "List all household collections, categorized tags, store aisles, and supported measurement unit codes."
+        "List all household collections, categorized tags, and supported measurement unit codes."
     )]
     public Task<CallToolResult> ListCollectionsAndTagsAsync(
         ClaimsPrincipal? user = null,

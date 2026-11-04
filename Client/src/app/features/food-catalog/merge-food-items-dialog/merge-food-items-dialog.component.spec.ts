@@ -17,9 +17,6 @@ describe('MergeFoodItemsDialogComponent', () => {
     {
       id: 'target-1',
       name: 'Yellow Onion',
-      defaultStoreAisleId: 'a-1',
-      defaultStoreAisleName: 'Produce',
-      defaultStoreAisleSortOrder: 1,
       isPantryStaple: true,
       aliases: ['Spanish Onion'],
       referencedRecipeCount: 3,
@@ -30,9 +27,6 @@ describe('MergeFoodItemsDialogComponent', () => {
     {
       id: 'source-1',
       name: 'Brown Onion',
-      defaultStoreAisleId: 'a-1',
-      defaultStoreAisleName: 'Produce',
-      defaultStoreAisleSortOrder: 1,
       isPantryStaple: false,
       aliases: [],
       referencedRecipeCount: 2,

@@ -64,18 +64,18 @@ public sealed class ShoppingListsIntegrationTests
     }
 
     [TestMethod]
-    public async Task GetShoppingLists_ReturnsSeededWeeklyGroceries_AndSupportsCrud()
+    public async Task GetShoppingLists_StartsEmpty_AndSupportsCrud()
     {
         await RegisterAndAuthenticateAsync(_client, "cook1@example.com", "Cook One");
 
-        // 1. Initial GET returns seeded "Weekly Groceries"
+        // 1. Initial GET returns empty list on fresh deployment
         var initialResponse = await _client.GetAsync("/api/shopping-lists");
         Assert.AreEqual(HttpStatusCode.OK, initialResponse.StatusCode);
         var initialLists = await initialResponse.Content.ReadFromJsonAsync<
             List<ShoppingListSummaryDto>
         >();
         Assert.IsNotNull(initialLists);
-        Assert.IsTrue(initialLists.Any(l => l.Name == "Weekly Groceries" && l.IsPinned));
+        Assert.AreEqual(0, initialLists.Count);
 
         // 2. Create new list "Costco Run"
         var createResponse = await _client.PostAsJsonAsync(
@@ -201,16 +201,22 @@ public sealed class ShoppingListsIntegrationTests
     {
         await RegisterAndAuthenticateAsync(_client, "planner@example.com", "Chef Planner");
 
-        // 1. Get seeded Garlic and Olive Oil from Food Catalog
-        var catalogRes = await _client.GetAsync("/api/food-items?search=Garlic");
-        var garlicList = await catalogRes.Content.ReadFromJsonAsync<List<FoodItemDto>>();
-        Assert.IsNotNull(garlicList);
-        var garlic = garlicList.First(f => f.Name == "Garlic");
+        // 1. Create Garlic and Olive Oil in Food Catalog
+        var garlicRes = await _client.PostAsJsonAsync(
+            "/api/food-items",
+            new CreateFoodItemRequest("Garlic", IsPantryStaple: false)
+        );
+        Assert.AreEqual(HttpStatusCode.Created, garlicRes.StatusCode);
+        var garlic = await garlicRes.Content.ReadFromJsonAsync<FoodItemDto>();
+        Assert.IsNotNull(garlic);
 
-        var oilRes = await _client.GetAsync("/api/food-items?search=Olive Oil");
-        var oilList = await oilRes.Content.ReadFromJsonAsync<List<FoodItemDto>>();
-        Assert.IsNotNull(oilList);
-        var oliveOil = oilList.First(f => f.Name == "Extra-Virgin Olive Oil");
+        var oilRes = await _client.PostAsJsonAsync(
+            "/api/food-items",
+            new CreateFoodItemRequest("Extra-Virgin Olive Oil", IsPantryStaple: true)
+        );
+        Assert.AreEqual(HttpStatusCode.Created, oilRes.StatusCode);
+        var oliveOil = await oilRes.Content.ReadFromJsonAsync<FoodItemDto>();
+        Assert.IsNotNull(oliveOil);
 
         // 2. Create Recipe A (Tacos, 4 servings: 2 cloves garlic, 2 tbsp olive oil)
         var recipeARes = await _client.PostAsJsonAsync(

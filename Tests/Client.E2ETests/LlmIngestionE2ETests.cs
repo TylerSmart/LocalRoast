@@ -83,7 +83,6 @@ public sealed class MockLanLlmAndBlogServer : IAsyncDisposable
                           "quantity": 2,
                           "unit": "Clove",
                           "matchedFoodName": "Garlic",
-                          "suggestedStoreAisleName": "Produce",
                           "isPantryStaple": true,
                           "originalRawText": "2 cloves garlic, minced"
                         },
@@ -92,7 +91,6 @@ public sealed class MockLanLlmAndBlogServer : IAsyncDisposable
                           "displayName": "Toasted Sesame Oil",
                           "quantity": 2,
                           "unit": "Tbsp",
-                          "suggestedStoreAisleName": "Spices & Baking",
                           "isPantryStaple": false,
                           "originalRawText": "2 tbsp toasted sesame oil"
                         }
@@ -212,6 +210,7 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await using var mockServer = await MockLanLlmAndBlogServer.StartAsync();
 
         await RegisterAndLoginAsync();
+        await EnsureFoodItemExistsViaApiAsync("Garlic", isPantryStaple: false);
 
         // 1. Open LLM Provider Settings dialog via user menu
         await Page.Locator(".user-profile-btn").ClickAsync();

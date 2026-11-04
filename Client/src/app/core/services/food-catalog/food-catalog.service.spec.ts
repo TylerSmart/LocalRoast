@@ -2,7 +2,7 @@ import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { firstValueFrom } from 'rxjs';
-import { FoodItemDto, StoreAisleDto } from '../../models/food-catalog.models';
+import { FoodItemDto } from '../../models/food-catalog.models';
 import { FoodCatalogService } from './food-catalog.service';
 
 describe('FoodCatalogService', () => {
@@ -22,20 +22,6 @@ describe('FoodCatalogService', () => {
     httpMock.verify();
   });
 
-  it('fetches aisles via GET /api/store-aisles', async () => {
-    const aisles: StoreAisleDto[] = [
-      { id: '1', name: 'Produce', sortOrder: 1, isSystemSeeded: true },
-    ];
-
-    const promise = firstValueFrom(service.getStoreAisles());
-    const req = httpMock.expectOne('/api/store-aisles');
-    expect(req.request.method).toBe('GET');
-    req.flush(aisles);
-
-    const result = await promise;
-    expect(result).toEqual(aisles);
-  });
-
   it('fetches items with query parameters via GET /api/food-items', async () => {
     const promise = firstValueFrom(
       service.getFoodItems({ search: 'garlic', isPantryStaple: true }),
@@ -52,9 +38,6 @@ describe('FoodCatalogService', () => {
     const item: FoodItemDto = {
       id: 'f-1',
       name: 'Shallot',
-      defaultStoreAisleId: null,
-      defaultStoreAisleName: null,
-      defaultStoreAisleSortOrder: null,
       isPantryStaple: false,
       aliases: ['French Shallot'],
       referencedRecipeCount: 0,

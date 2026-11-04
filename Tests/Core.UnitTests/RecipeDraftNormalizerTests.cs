@@ -10,30 +10,9 @@ public sealed class RecipeDraftNormalizerTests
 {
     private readonly List<CatalogFoodLookupItem> _catalogFoods =
     [
-        new(
-            Guid.NewGuid(),
-            "Garlic",
-            "garlic",
-            Guid.NewGuid(),
-            false,
-            ["garlic clove", "garlic cloves"]
-        ),
-        new(
-            Guid.NewGuid(),
-            "Yellow Onion",
-            "yellow onion",
-            Guid.NewGuid(),
-            false,
-            ["onion", "sweet onion"]
-        ),
-        new(Guid.NewGuid(), "Kosher Salt", "kosher salt", Guid.NewGuid(), true, ["salt"]),
-    ];
-
-    private readonly List<CatalogAisleLookupItem> _aisles =
-    [
-        new(Guid.NewGuid(), "Produce", "produce"),
-        new(Guid.NewGuid(), "Spices & Baking", "spices & baking"),
-        new(Guid.NewGuid(), "Other", "other"),
+        new(Guid.NewGuid(), "Garlic", "garlic", false, ["garlic clove", "garlic cloves"]),
+        new(Guid.NewGuid(), "Yellow Onion", "yellow onion", false, ["onion", "sweet onion"]),
+        new(Guid.NewGuid(), "Kosher Salt", "kosher salt", true, ["salt"]),
     ];
 
     private readonly List<CatalogTagLookupItem> _tags =
@@ -89,8 +68,7 @@ public sealed class RecipeDraftNormalizerTests
                     DisplayName: "garlic cloves, minced",
                     PreparationNote: "minced",
                     IsOptional: false,
-                    OriginalRawText: "4 cloves garlic, minced",
-                    SuggestedAisleName: "Produce"
+                    OriginalRawText: "4 cloves garlic, minced"
                 ),
             ],
             Steps:
@@ -107,7 +85,6 @@ public sealed class RecipeDraftNormalizerTests
         var draft = RecipeDraftNormalizer.Normalize(
             raw,
             _catalogFoods,
-            _aisles,
             _tags,
             sourceUrl: "https://example.com/garlic-rice",
             fallbackSourceName: null,
@@ -133,7 +110,7 @@ public sealed class RecipeDraftNormalizerTests
     }
 
     [TestMethod]
-    public void Normalize_UnmatchedFoodItem_FlagsNewWithSuggestedAisle()
+    public void Normalize_UnmatchedFoodItem_FlagsNew()
     {
         var raw = new LlmExtractedRecipePayload(
             Title: "Miso Glazed Tofu",
@@ -159,8 +136,7 @@ public sealed class RecipeDraftNormalizerTests
                     DisplayName: "white miso paste",
                     PreparationNote: null,
                     IsOptional: false,
-                    OriginalRawText: "2 tbsp white miso paste",
-                    SuggestedAisleName: "International"
+                    OriginalRawText: "2 tbsp white miso paste"
                 ),
             ],
             Steps:
@@ -177,7 +153,6 @@ public sealed class RecipeDraftNormalizerTests
         var draft = RecipeDraftNormalizer.Normalize(
             raw,
             _catalogFoods,
-            _aisles,
             _tags,
             sourceUrl: null,
             fallbackSourceName: null,
@@ -192,7 +167,6 @@ public sealed class RecipeDraftNormalizerTests
         Assert.IsTrue(ing.CreateNewFoodItem);
         Assert.IsNull(ing.MatchedFoodItemId);
         Assert.AreEqual("White Miso Paste", ing.ProposedFoodItemName);
-        Assert.AreEqual(_aisles[2].Id, ing.SuggestedStoreAisleId); // fallback to "Other"
     }
 
     [TestMethod]

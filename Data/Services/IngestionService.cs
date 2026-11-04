@@ -37,7 +37,7 @@ public sealed class IngestionService(
             cancellationToken
         );
 
-        var waitingForHostCount = await dbContext.IngestionJobs.CountAsync(
+        var waitingForLlmHostCount = await dbContext.IngestionJobs.CountAsync(
             j => j.Status == IngestionJobStatus.WaitingForLlmHost,
             cancellationToken
         );
@@ -50,7 +50,7 @@ public sealed class IngestionService(
         return new IngestionQueueSummaryDto(
             ReadyForReviewCount: readyForReviewCount,
             ActiveProcessingCount: activeProcessingCount,
-            WaitingForLlmHostCount: waitingForHostCount,
+            WaitingForLlmHostCount: waitingForLlmHostCount,
             FailedCount: failedCount
         );
     }
@@ -955,25 +955,10 @@ public sealed class IngestionService(
                     }
                     else
                     {
-                        if (ing.SuggestedStoreAisleId.HasValue)
-                        {
-                            var aisleExists = await dbContext.StoreAisles.AnyAsync(
-                                a => a.Id == ing.SuggestedStoreAisleId.Value,
-                                cancellationToken
-                            );
-                            if (!aisleExists)
-                            {
-                                throw new DomainValidationException(
-                                    $"Suggested store aisle '{ing.SuggestedStoreAisleId}' does not exist."
-                                );
-                            }
-                        }
-
                         var newFoodItem = new FoodItem
                         {
                             Name = cleanName,
                             NormalizedName = normName,
-                            DefaultStoreAisleId = ing.SuggestedStoreAisleId,
                             IsPantryStaple = ing.SuggestedIsPantryStaple,
                         };
                         dbContext.FoodItems.Add(newFoodItem);

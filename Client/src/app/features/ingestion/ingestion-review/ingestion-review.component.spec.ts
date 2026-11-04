@@ -5,7 +5,7 @@ import { MatDialog } from '@angular/material/dialog';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { ActivatedRoute, Router, provideRouter } from '@angular/router';
 import { of } from 'rxjs';
-import { FoodItemDto, StoreAisleDto } from '../../../core/models/food-catalog.models';
+import { FoodItemDto } from '../../../core/models/food-catalog.models';
 import type { IngestionJobDetailDto } from '../../../core/models/ingestion.models';
 import { RecipeDetailDto } from '../../../core/models/recipe.models';
 import { CollectionDto, TagDto } from '../../../core/models/taxonomy.models';
@@ -27,7 +27,6 @@ describe('IngestionReviewComponent', () => {
     retryJob: ReturnType<typeof vi.fn>;
   };
   let mockFoodCatalogService: {
-    getStoreAisles: ReturnType<typeof vi.fn>;
     getFoodItems: ReturnType<typeof vi.fn>;
   };
   let mockTaxonomyService: {
@@ -98,7 +97,6 @@ describe('IngestionReviewComponent', () => {
           matchedFoodItemName: 'Tofu',
           isNewFoodItem: false,
           proposedFoodItemName: 'Tofu',
-          suggestedStoreAisleId: 'aisle-1',
           suggestedIsPantryStaple: false,
         },
         {
@@ -116,7 +114,6 @@ describe('IngestionReviewComponent', () => {
           matchedFoodItemName: null,
           isNewFoodItem: true,
           proposedFoodItemName: 'Toasted Sesame Oil',
-          suggestedStoreAisleId: 'aisle-2',
           suggestedIsPantryStaple: true,
         },
       ],
@@ -150,18 +147,10 @@ describe('IngestionReviewComponent', () => {
     modifiedAt: '2026-10-26T12:00:00Z',
   };
 
-  const sampleAisles: StoreAisleDto[] = [
-    { id: 'aisle-1', name: 'Produce', sortOrder: 1, isSystemSeeded: true },
-    { id: 'aisle-2', name: 'Spices & Baking', sortOrder: 2, isSystemSeeded: false },
-  ];
-
   const sampleFoodItems: FoodItemDto[] = [
     {
       id: 'food-1',
       name: 'Tofu',
-      defaultStoreAisleId: 'aisle-1',
-      defaultStoreAisleName: 'Produce',
-      defaultStoreAisleSortOrder: 1,
       isPantryStaple: false,
       referencedRecipeCount: 2,
       aliases: [],
@@ -210,7 +199,6 @@ describe('IngestionReviewComponent', () => {
     };
 
     mockFoodCatalogService = {
-      getStoreAisles: vi.fn().mockReturnValue(of(sampleAisles)),
       getFoodItems: vi.fn().mockReturnValue(of(sampleFoodItems)),
     };
 

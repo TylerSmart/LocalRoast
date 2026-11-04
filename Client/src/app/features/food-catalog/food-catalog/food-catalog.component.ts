@@ -8,15 +8,10 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
-import { MatSelectModule } from '@angular/material/select';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatTooltipModule } from '@angular/material/tooltip';
-import {
-  FoodItemDto,
-  MergeFoodItemsResultDto,
-  StoreAisleDto,
-} from '../../../core/models/food-catalog.models';
+import { FoodItemDto, MergeFoodItemsResultDto } from '../../../core/models/food-catalog.models';
 import { FoodCatalogService } from '../../../core/services/food-catalog/food-catalog.service';
 import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialog/confirm-dialog.component';
 import { FoodItemDialogComponent } from '../food-item-dialog/food-item-dialog.component';
@@ -30,7 +25,6 @@ import { MergeFoodItemsDialogComponent } from '../merge-food-items-dialog/merge-
     MatIconModule,
     MatFormFieldModule,
     MatInputModule,
-    MatSelectModule,
     MatSlideToggleModule,
     MatChipsModule,
     MatTooltipModule,
@@ -46,23 +40,17 @@ export class FoodCatalogComponent implements OnInit {
   private readonly snackBar = inject(MatSnackBar);
 
   protected readonly items = signal<FoodItemDto[]>([]);
-  protected readonly aisles = signal<StoreAisleDto[]>([]);
   protected readonly searchQuery = signal<string>('');
-  protected readonly selectedAisleId = signal<string>('');
   protected readonly onlyPantryStaples = signal<boolean>(false);
   protected readonly isLoading = signal<boolean>(false);
   protected readonly errorMessage = signal<string | null>(null);
 
   protected readonly filteredItems = computed(() => {
     const query = this.searchQuery().toLowerCase().trim();
-    const aisleId = this.selectedAisleId();
     const onlyStaples = this.onlyPantryStaples();
 
     return this.items().filter((item) => {
       if (onlyStaples && !item.isPantryStaple) {
-        return false;
-      }
-      if (aisleId && item.defaultStoreAisleId !== aisleId) {
         return false;
       }
       if (!query) {
@@ -71,22 +59,12 @@ export class FoodCatalogComponent implements OnInit {
 
       const matchName = item.name.toLowerCase().includes(query);
       const matchAlias = item.aliases.some((a) => a.toLowerCase().includes(query));
-      const matchAisle = (item.defaultStoreAisleName || '').toLowerCase().includes(query);
-      return matchName || matchAlias || matchAisle;
+      return matchName || matchAlias;
     });
   });
 
   ngOnInit(): void {
-    this.loadAisles();
     this.loadItems();
-  }
-
-  loadAisles(): void {
-    this.catalogService.getStoreAisles().subscribe({
-      next: (list) => {
-        this.aisles.set(list.sort((a, b) => a.sortOrder - b.sortOrder));
-      },
-    });
   }
 
   loadItems(): void {
@@ -161,7 +139,6 @@ export class FoodCatalogComponent implements OnInit {
     this.catalogService
       .updateFoodItem(item.id, {
         name: item.name,
-        defaultStoreAisleId: item.defaultStoreAisleId,
         isPantryStaple: nextStaple,
         aliases: item.aliases,
       })

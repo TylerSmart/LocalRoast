@@ -2,7 +2,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { MatDialog } from '@angular/material/dialog';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { of } from 'rxjs';
-import { FoodItemDto, StoreAisleDto } from '../../../core/models/food-catalog.models';
+import { FoodItemDto } from '../../../core/models/food-catalog.models';
 import { FoodCatalogService } from '../../../core/services/food-catalog/food-catalog.service';
 import { FoodCatalogComponent } from './food-catalog.component';
 
@@ -14,9 +14,6 @@ describe('FoodCatalogComponent', () => {
     {
       id: 'f-1',
       name: 'Olive Oil',
-      defaultStoreAisleId: 'a-1',
-      defaultStoreAisleName: 'Oils & Vinegars',
-      defaultStoreAisleSortOrder: 1,
       isPantryStaple: true,
       aliases: ['EVOO'],
       referencedRecipeCount: 3,
@@ -27,9 +24,6 @@ describe('FoodCatalogComponent', () => {
     {
       id: 'f-2',
       name: 'Garlic',
-      defaultStoreAisleId: 'a-2',
-      defaultStoreAisleName: 'Produce',
-      defaultStoreAisleSortOrder: 2,
       isPantryStaple: false,
       aliases: [],
       referencedRecipeCount: 5,
@@ -39,14 +33,8 @@ describe('FoodCatalogComponent', () => {
     },
   ];
 
-  const sampleAisles: StoreAisleDto[] = [
-    { id: 'a-1', name: 'Oils & Vinegars', sortOrder: 1, isSystemSeeded: true },
-    { id: 'a-2', name: 'Produce', sortOrder: 2, isSystemSeeded: true },
-  ];
-
   const mockCatalogService = {
     getFoodItems: vi.fn().mockReturnValue(of(sampleItems)),
-    getStoreAisles: vi.fn().mockReturnValue(of(sampleAisles)),
     updateFoodItem: vi.fn(),
     deleteFoodItem: vi.fn(),
   };

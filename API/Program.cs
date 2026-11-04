@@ -8,7 +8,6 @@ using App.Core;
 using App.Core.Authentication;
 using App.Core.Shopping;
 using App.Data;
-using App.Data.Seeding;
 using App.Infrastructure;
 using App.Infrastructure.Media;
 using Microsoft.AspNetCore.Authorization;
@@ -195,8 +194,6 @@ using (var scope = app.Services.CreateScope())
     {
         db.Database.Migrate();
     }
-
-    await HouseholdCatalogSeeder.SeedAsync(db);
 }
 
 app.UseSerilogRequestLogging(options =>

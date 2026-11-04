@@ -8,36 +8,37 @@ public sealed class FoodCatalogE2ETests : E2ETestBase
 {
     [TestMethod]
     [Timeout(DefaultTestTimeoutMs)]
-    public async Task FoodCatalog_DisplaysSeededAislesAndStaples_AndFiltersByAisle()
+    public async Task FoodCatalog_DisplaysCreatedItems_AndFiltersByPantryStaplesAndSearch()
     {
         await RegisterAndLoginAsync();
+        await EnsureFoodItemExistsViaApiAsync(
+            "Extra-Virgin Olive Oil",
+            isPantryStaple: true,
+            aliases: ["EVOO", "Olive Oil"]
+        );
+        await EnsureFoodItemExistsViaApiAsync("Garlic", isPantryStaple: false);
 
         // Navigate to Catalog
         await Page.Locator("nav.desktop-nav a", new() { HasText = "Food Catalog" }).ClickAsync();
         await Expect(Page).ToHaveURLAsync(new Regex(".*/catalog.*"));
         await Expect(Page.Locator(".page-title")).ToContainTextAsync("Canonical Food Catalog");
 
-        // Verify seeded staple item cards are displayed
-        await Expect(Page.Locator(".food-item-card", new() { HasText = "Olive Oil" }))
+        // Verify created item cards are displayed
+        await Expect(Page.Locator(".food-item-card", new() { HasText = "Extra-Virgin Olive Oil" }))
             .ToBeVisibleAsync();
         await Expect(Page.Locator(".food-item-card", new() { HasText = "Garlic" }))
             .ToBeVisibleAsync();
 
-        // Filter by Produce aisle
-        await Page.Locator("mat-select", new() { HasText = "All Aisles" }).ClickAsync();
-        await Page.Locator("mat-option", new() { HasText = "Produce" }).ClickAsync();
-        await Expect(Page.Locator("mat-option")).ToHaveCountAsync(0);
-
-        // Garlic should still be visible; Olive Oil should disappear
-        await Expect(Page.Locator(".food-item-card", new() { HasText = "Garlic" }))
+        // Filter by Pantry Staples Only
+        await Page.Locator("mat-slide-toggle button").ClickAsync();
+        await Expect(Page.Locator(".food-item-card", new() { HasText = "Extra-Virgin Olive Oil" }))
             .ToBeVisibleAsync();
-        await Expect(Page.Locator(".food-item-card", new() { HasText = "Olive Oil" }))
+        await Expect(Page.Locator(".food-item-card", new() { HasText = "Garlic" }))
             .Not.ToBeVisibleAsync();
 
-        // Reset filter to All Aisles
-        await Page.Locator("mat-select", new() { HasText = "Produce" }).ClickAsync();
-        await Page.Locator("mat-option", new() { HasText = "All Aisles" }).ClickAsync();
-        await Expect(Page.Locator(".food-item-card", new() { HasText = "Olive Oil" }))
+        // Reset Pantry Staples filter
+        await Page.Locator("mat-slide-toggle button").ClickAsync();
+        await Expect(Page.Locator(".food-item-card", new() { HasText = "Garlic" }))
             .ToBeVisibleAsync();
     }
 

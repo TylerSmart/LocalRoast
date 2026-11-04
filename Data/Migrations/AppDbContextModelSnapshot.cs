@@ -157,9 +157,6 @@ namespace App.Data.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("nvarchar(256)");
 
-                    b.Property<Guid?>("DefaultStoreAisleId")
-                        .HasColumnType("uniqueidentifier");
-
                     b.Property<bool>("IsPantryStaple")
                         .HasColumnType("bit");
 
@@ -182,8 +179,6 @@ namespace App.Data.Migrations
                         .HasColumnType("nvarchar(150)");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("DefaultStoreAisleId");
 
                     b.HasIndex("IsPantryStaple");
 
@@ -1388,54 +1383,6 @@ namespace App.Data.Migrations
                     b.ToTable("ShoppingListItemSources", (string)null);
                 });
 
-            modelBuilder.Entity("App.Data.Entities.StoreAisle", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<string>("CreatedBy")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
-
-                    b.Property<bool>("IsSystemSeeded")
-                        .HasColumnType("bit");
-
-                    b.Property<DateTimeOffset>("ModifiedAt")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<string>("ModifiedBy")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<string>("NormalizedName")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<int>("SortOrder")
-                        .HasColumnType("int");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("NormalizedName")
-                        .IsUnique();
-
-                    b.HasIndex("SortOrder");
-
-                    b.ToTable("StoreAisles", (string)null);
-                });
-
             modelBuilder.Entity("App.Data.Entities.Tag", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1579,16 +1526,6 @@ namespace App.Data.Migrations
                     b.Navigation("CookedByUser");
 
                     b.Navigation("Recipe");
-                });
-
-            modelBuilder.Entity("App.Data.Entities.FoodItem", b =>
-                {
-                    b.HasOne("App.Data.Entities.StoreAisle", "DefaultStoreAisle")
-                        .WithMany("FoodItems")
-                        .HasForeignKey("DefaultStoreAisleId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.Navigation("DefaultStoreAisle");
                 });
 
             modelBuilder.Entity("App.Data.Entities.FoodItemAlias", b =>
@@ -1882,11 +1819,6 @@ namespace App.Data.Migrations
             modelBuilder.Entity("App.Data.Entities.ShoppingListItem", b =>
                 {
                     b.Navigation("Sources");
-                });
-
-            modelBuilder.Entity("App.Data.Entities.StoreAisle", b =>
-                {
-                    b.Navigation("FoodItems");
                 });
 
             modelBuilder.Entity("App.Data.Entities.Tag", b =>

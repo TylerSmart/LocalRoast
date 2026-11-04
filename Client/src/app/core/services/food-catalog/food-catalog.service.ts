@@ -8,7 +8,6 @@ import {
   FoodItemQueryParameters,
   MergeFoodItemsRequest,
   MergeFoodItemsResultDto,
-  StoreAisleDto,
   UpdateFoodItemRequest,
 } from '../../models/food-catalog.models';
 
@@ -16,17 +15,10 @@ import {
 export class FoodCatalogService {
   private readonly http = inject(HttpClient);
 
-  getStoreAisles(): Observable<StoreAisleDto[]> {
-    return this.http.get<StoreAisleDto[]>(apiUrl('/store-aisles'));
-  }
-
   getFoodItems(query?: FoodItemQueryParameters): Observable<FoodItemDto[]> {
     let params = new HttpParams();
     if (query?.search) {
       params = params.set('search', query.search);
-    }
-    if (query?.storeAisleId) {
-      params = params.set('storeAisleId', query.storeAisleId);
     }
     if (query?.isPantryStaple !== undefined && query?.isPantryStaple !== null) {
       params = params.set('isPantryStaple', query.isPantryStaple.toString());

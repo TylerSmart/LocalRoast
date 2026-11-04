@@ -1,6 +1,4 @@
-﻿using System.Globalization;
 using App.Core.Exceptions;
-using App.Core.FoodCatalog;
 using App.Core.Ingestion;
 using App.Core.Mcp;
 using App.Core.Recipes;
@@ -14,7 +12,6 @@ public sealed class McpCookbookService(
     IRecipeService recipeService,
     IIngestionService ingestionService,
     ITaxonomyService taxonomyService,
-    IFoodCatalogService foodCatalogService,
     TimeProvider? timeProvider = null
 ) : IMcpCookbookService
 {
@@ -364,7 +361,6 @@ public sealed class McpCookbookService(
     {
         var collections = await taxonomyService.GetCollectionsAsync(cancellationToken);
         var tags = await taxonomyService.GetTagsAsync(null, cancellationToken);
-        var aisles = await foodCatalogService.GetStoreAislesAsync(cancellationToken);
 
         var units = new[]
         {
@@ -391,7 +387,7 @@ public sealed class McpCookbookService(
             "custom",
         };
 
-        return new McpHouseholdTaxonomyDto(collections, tags, aisles, units);
+        return new McpHouseholdTaxonomyDto(collections, tags, units);
     }
 
     public async Task<IngestionJobSummaryDto> EnqueueIngestionAsync(
@@ -453,9 +449,6 @@ public sealed class McpCookbookService(
             }
         }
 
-        var storeAisles = await dbContext.StoreAisles.ToListAsync(cancellationToken);
-        var otherAisle = storeAisles.FirstOrDefault(a => a.NormalizedName == "other");
-
         var allFoodItems = await dbContext
             .FoodItems.Include(f => f.Aliases)
             .ToListAsync(cancellationToken);
@@ -498,15 +491,10 @@ public sealed class McpCookbookService(
                     }
                     else
                     {
-                        var suggestedAisleId =
-                            ResolveSuggestedAisle(ing.SuggestedAisleName, storeAisles)
-                            ?? otherAisle?.Id;
-
                         var newFoodItem = new FoodItem
                         {
                             Name = proposedName,
                             NormalizedName = normName,
-                            DefaultStoreAisleId = suggestedAisleId,
                             IsPantryStaple = ing.IsPantryStaple,
                         };
 
@@ -810,22 +798,6 @@ public sealed class McpCookbookService(
             return word[..^1];
         }
         return word;
-    }
-
-    private static Guid? ResolveSuggestedAisle(string? name, IEnumerable<StoreAisle> aisles)
-    {
-        if (string.IsNullOrWhiteSpace(name))
-        {
-            return null;
-        }
-
-        var norm = name.Trim().ToLowerInvariant();
-        var direct = aisles.FirstOrDefault(a =>
-            a.NormalizedName == norm
-            || a.NormalizedName.Contains(norm)
-            || norm.Contains(a.NormalizedName)
-        );
-        return direct?.Id;
     }
 
     private static string ToTitleCase(string text)

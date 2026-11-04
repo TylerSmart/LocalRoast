@@ -39,9 +39,6 @@
           @for (item of allItems(); track item.id) {
             <mat-option [value]="item.id">
               {{ item.name }}
-              @if (item.defaultStoreAisleName) {
-                <span class="aisle-hint">({{ item.defaultStoreAisleName }})</span>
-              }
             </mat-option>
           }
         </mat-select>

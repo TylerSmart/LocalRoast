@@ -2,7 +2,6 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using App.Core.Authentication;
-using App.Core.FoodCatalog;
 using App.Core.Ingestion;
 using App.Core.Recipes;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -136,14 +135,6 @@ public sealed class IngestionIntegrationTests
         var job = await enqueue.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
         Assert.IsNotNull(job);
 
-        // Get Store Aisles to pick an aisle
-        var aislesResp = await _client.GetAsync("/api/store-aisles");
-        var aisles = await aislesResp.Content.ReadFromJsonAsync<IReadOnlyList<StoreAisleDto>>();
-        Assert.IsNotNull(aisles);
-        var spicesAisle =
-            aisles.FirstOrDefault(a => a.Name.Contains("Spices") || a.Name.Contains("Other"))
-            ?? aisles[0];
-
         // 2. Save draft
         var uniqueFoodName = $"Sesame Paste {Guid.NewGuid():N}"[..20];
         var draft = new IngestionExtractedDraftDto(
@@ -174,7 +165,6 @@ public sealed class IngestionIntegrationTests
                     MatchedFoodItemName: null,
                     IsNewFoodItem: true,
                     ProposedFoodItemName: uniqueFoodName,
-                    SuggestedStoreAisleId: spicesAisle.Id,
                     SuggestedIsPantryStaple: false,
                     CreateNewFoodItem: true,
                     DisplayName: uniqueFoodName,

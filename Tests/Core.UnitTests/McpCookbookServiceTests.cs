@@ -1,5 +1,4 @@
-﻿using App.Core.Exceptions;
-using App.Core.FoodCatalog;
+using App.Core.Exceptions;
 using App.Core.Ingestion;
 using App.Core.Mcp;
 using App.Core.Media;
@@ -150,7 +149,6 @@ public sealed class McpCookbookServiceTests
         _dbContext = new AppDbContext(options);
         var mediaService = new DummyMediaStorageService();
         _recipeService = new RecipeService(_dbContext, mediaService);
-        var foodCatalogService = new FoodCatalogService(_dbContext);
         var taxonomyService = new TaxonomyService(_dbContext);
         var queueSignal = new DummyIngestionQueueSignal();
         var ingestionService = new IngestionService(
@@ -164,33 +162,15 @@ public sealed class McpCookbookServiceTests
             _dbContext,
             _recipeService,
             ingestionService,
-            taxonomyService,
-            foodCatalogService
+            taxonomyService
         );
 
-        // Seed basic aisle and food items
-        var produceAisle = new StoreAisle
-        {
-            Id = Guid.NewGuid(),
-            Name = "Produce",
-            NormalizedName = "produce",
-            SortOrder = 1,
-        };
-        var pantryAisle = new StoreAisle
-        {
-            Id = Guid.NewGuid(),
-            Name = "Pantry",
-            NormalizedName = "pantry",
-            SortOrder = 2,
-        };
-        _dbContext.StoreAisles.AddRange(produceAisle, pantryAisle);
-
+        // Seed basic food items
         var garlic = new FoodItem
         {
             Id = Guid.NewGuid(),
             Name = "Garlic",
             NormalizedName = "garlic",
-            DefaultStoreAisleId = produceAisle.Id,
             IsPantryStaple = false,
         };
         garlic.Aliases.Add(
@@ -208,7 +188,6 @@ public sealed class McpCookbookServiceTests
             Id = Guid.NewGuid(),
             Name = "Kosher Salt",
             NormalizedName = "kosher salt",
-            DefaultStoreAisleId = pantryAisle.Id,
             IsPantryStaple = true,
         };
 
@@ -224,12 +203,11 @@ public sealed class McpCookbookServiceTests
     }
 
     [TestMethod]
-    public async Task GetHouseholdTaxonomyAsync_ReturnsAislesUnitsAndTaxonomy()
+    public async Task GetHouseholdTaxonomyAsync_ReturnsUnitsAndTaxonomy()
     {
         var taxonomy = await _service.GetHouseholdTaxonomyAsync();
 
         Assert.IsNotNull(taxonomy);
-        Assert.IsTrue(taxonomy.StoreAisles.Count >= 2);
         Assert.IsTrue(taxonomy.SupportedUnits.Contains("tbsp"));
         Assert.IsTrue(taxonomy.SupportedUnits.Contains("cup"));
     }

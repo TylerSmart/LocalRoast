@@ -175,6 +175,8 @@ public sealed class SignalRCoShoppingAndMcpE2ETests : E2ETestBase
     public async Task McpMilestone3Tools_PlanMeals_GenerateShoppingList_UpsertAndCheckItems_UpdatesBrowserLive()
     {
         await RegisterAndLoginAsync();
+        await EnsureFoodItemExistsViaApiAsync("Garlic", isPantryStaple: false);
+        await EnsureFoodItemExistsViaApiAsync("Kosher Salt", isPantryStaple: true);
 
         // 1. Open user menu and mint a Personal Access Token via UI
         await Page.Locator(".user-profile-btn").ClickAsync();
@@ -491,6 +493,7 @@ public sealed class SignalRCoShoppingAndMcpE2ETests : E2ETestBase
     {
         await Page.SetViewportSizeAsync(360, 640);
         await RegisterAndLoginAsync();
+        await EnsureShoppingListExistsViaApiAsync("Weekly Groceries", isPinned: true);
 
         // Navigate via mobile bottom nav Shop tab
         var shopTab = Page.Locator("a.mobile-tab[aria-label='Shop']");

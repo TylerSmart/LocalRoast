@@ -52,6 +52,10 @@ public sealed class ShoppingListsE2ETests : E2ETestBase
     public async Task ShoppingList_GenerateFromMealPlan_ConsolidatesUnits_ExcludesLeftoversAndPantryStaples_AndPreventsDuplicates()
     {
         await RegisterAndLoginAsync();
+        await EnsureFoodItemExistsViaApiAsync("Extra-Virgin Olive Oil", isPantryStaple: true);
+        await EnsureFoodItemExistsViaApiAsync("Garlic", isPantryStaple: false);
+        await EnsureFoodItemExistsViaApiAsync("Yellow Onion", isPantryStaple: false);
+        await EnsureShoppingListExistsViaApiAsync("Weekly Groceries", isPinned: true);
 
         var recipeATitle = $"Taco Recipe {Guid.NewGuid():N}"[..18];
         var recipeBTitle = $"Salsa Recipe {Guid.NewGuid():N}"[..18];
@@ -215,6 +219,7 @@ public sealed class ShoppingListsE2ETests : E2ETestBase
     public async Task ShoppingList_MultipleNamedLists_QuickAdd_Edit_CheckOffAndClear()
     {
         await RegisterAndLoginAsync();
+        await EnsureShoppingListExistsViaApiAsync("Weekly Groceries", isPinned: true);
 
         await Page.Locator("nav.desktop-nav a", new() { HasText = "Shop" }).ClickAsync();
         await Expect(Page).ToHaveURLAsync(new Regex(".*/shopping.*"));
@@ -262,14 +267,14 @@ public sealed class ShoppingListsE2ETests : E2ETestBase
         await itemDialog.Locator("input[formcontrolname='quantity']").FillAsync("2");
         await itemDialog
             .Locator("input[formcontrolname='notes']")
-            .FillAsync("Bulk pack from aisle 4");
+            .FillAsync("Bulk pack from warehouse");
         await itemDialog.Locator("button", new() { HasText = "Save Changes" }).ClickAsync();
         await Expect(itemDialog).Not.ToBeVisibleAsync();
 
         // Verify updated badge and notes
         await Expect(paperTowelsRow.Locator(".item-qty-badge")).ToContainTextAsync("2");
         await Expect(paperTowelsRow.Locator(".item-notes"))
-            .ToContainTextAsync("Bulk pack from aisle 4");
+            .ToContainTextAsync("Bulk pack from warehouse");
 
         // 4. Check off "Paper Towels"
         await paperTowelsRow.Locator("mat-checkbox").ClickAsync();
@@ -316,6 +321,7 @@ public sealed class ShoppingListsE2ETests : E2ETestBase
     public async Task ShoppingList_AddFromRecipeDetail_AndMobileViewport_360px_RendersCleanly()
     {
         await RegisterAndLoginAsync();
+        await EnsureShoppingListExistsViaApiAsync("Weekly Groceries", isPinned: true);
 
         var recipeTitle = $"Mojito Chicken {Guid.NewGuid():N}"[..18];
 

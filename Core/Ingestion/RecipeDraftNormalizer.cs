@@ -8,12 +8,9 @@ public record CatalogFoodLookupItem(
     Guid Id,
     string Name,
     string NormalizedName,
-    Guid? DefaultStoreAisleId,
     bool IsPantryStaple,
     IReadOnlyList<string> NormalizedAliases
 );
-
-public record CatalogAisleLookupItem(Guid Id, string Name, string NormalizedName);
 
 public record CatalogTagLookupItem(Guid Id, string Name, string NormalizedName, string Slug);
 
@@ -61,7 +58,6 @@ public static class RecipeDraftNormalizer
     public static IngestionExtractedDraftDto Normalize(
         LlmExtractedRecipePayload raw,
         IReadOnlyList<CatalogFoodLookupItem> catalogFoods,
-        IReadOnlyList<CatalogAisleLookupItem> aisles,
         IReadOnlyList<CatalogTagLookupItem> tags,
         string? sourceUrl,
         string? fallbackSourceName,
@@ -108,9 +104,6 @@ public static class RecipeDraftNormalizer
             ? raw.SourceBookPage
             : fallbackSourceBookPage;
 
-        // Find "Other" aisle as fallback
-        var otherAisle = aisles.FirstOrDefault(a => a.NormalizedName == "other");
-
         var normalizedIngredients = new List<IngestionDraftIngredientDto>();
         var rawIngredients = raw.Ingredients ?? [];
 
@@ -141,7 +134,6 @@ public static class RecipeDraftNormalizer
                         MatchedFoodItemName: match.Name,
                         IsNewFoodItem: false,
                         ProposedFoodItemName: null,
-                        SuggestedStoreAisleId: match.DefaultStoreAisleId,
                         SuggestedIsPantryStaple: match.IsPantryStaple,
                         CreateNewFoodItem: false,
                         DisplayName: displayName,
@@ -158,8 +150,6 @@ public static class RecipeDraftNormalizer
             else
             {
                 var proposedName = ToTitleCase(candidateFoodName);
-                var suggestedAisleId =
-                    ResolveSuggestedAisle(rawIng.SuggestedAisleName, aisles) ?? otherAisle?.Id;
 
                 normalizedIngredients.Add(
                     new IngestionDraftIngredientDto(
@@ -174,7 +164,6 @@ public static class RecipeDraftNormalizer
                         MatchedFoodItemName: null,
                         IsNewFoodItem: true,
                         ProposedFoodItemName: proposedName,
-                        SuggestedStoreAisleId: suggestedAisleId,
                         SuggestedIsPantryStaple: rawIng.SuggestedIsPantryStaple,
                         CreateNewFoodItem: true,
                         DisplayName: displayName,
@@ -355,25 +344,6 @@ public static class RecipeDraftNormalizer
             return word[..^1];
         }
         return word;
-    }
-
-    private static Guid? ResolveSuggestedAisle(
-        string? suggestedAisleName,
-        IReadOnlyList<CatalogAisleLookupItem> aisles
-    )
-    {
-        if (string.IsNullOrWhiteSpace(suggestedAisleName))
-        {
-            return null;
-        }
-
-        var norm = suggestedAisleName.Trim().ToLowerInvariant();
-        var direct = aisles.FirstOrDefault(a =>
-            a.NormalizedName == norm
-            || a.NormalizedName.Contains(norm)
-            || norm.Contains(a.NormalizedName)
-        );
-        return direct?.Id;
     }
 
     private static string ToTitleCase(string text)

@@ -2,10 +2,6 @@ namespace App.Core.FoodCatalog;
 
 public interface IFoodCatalogService
 {
-    Task<IReadOnlyList<StoreAisleDto>> GetStoreAislesAsync(
-        CancellationToken cancellationToken = default
-    );
-
     Task<IReadOnlyList<FoodItemDto>> GetFoodItemsAsync(
         FoodItemQueryParameters query,
         CancellationToken cancellationToken = default

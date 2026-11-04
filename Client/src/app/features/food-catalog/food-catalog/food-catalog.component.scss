@@ -51,11 +51,6 @@
   min-width: 240px;
 }
 
-.aisle-field {
-  flex: 1.5;
-  min-width: 200px;
-}
-
 .staple-toggle-container {
   display: flex;
   align-items: center;
@@ -142,24 +137,6 @@
     font-weight: 600;
   }
 
-  .aisle-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.25rem;
-    font-size: 0.75rem;
-    color: var(--mat-sys-primary, #6750a4);
-    background-color: var(--mat-sys-primary-container, #eaddff);
-    padding: 0.15rem 0.5rem;
-    border-radius: 1rem;
-    width: fit-content;
-
-    .badge-icon {
-      font-size: 0.875rem;
-      width: 0.875rem;
-      height: 0.875rem;
-    }
-  }
-
   .staple-active {
     color: #e6a700;
   }
@@ -232,8 +209,7 @@
     align-items: stretch;
   }
 
-  .search-field,
-  .aisle-field {
+  .search-field {
     width: 100%;
   }
 }

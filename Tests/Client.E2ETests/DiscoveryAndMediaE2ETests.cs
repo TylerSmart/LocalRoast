@@ -15,6 +15,8 @@ public sealed class DiscoveryAndMediaE2ETests : E2ETestBase
     public async Task RecipeMediaAndTaxonomy_UploadPhotosAndOrganize_FiltersInCookbook()
     {
         await RegisterAndLoginAsync();
+        await EnsureTagExistsViaApiAsync("Vegetarian", "Dietary", 1);
+        await EnsureTagExistsViaApiAsync("Sheet Pan", "Equipment", 2);
 
         // 1. Create a custom Collection from the Cookbook collections strip
         await Page.Locator(".add-collection-pill").ClickAsync();
@@ -61,7 +63,7 @@ public sealed class DiscoveryAndMediaE2ETests : E2ETestBase
         // Select the newly created Collection
         await Page.Locator("mat-chip-option", new() { HasText = collectionName }).ClickAsync();
 
-        // Select seeded Tags: "Vegetarian" and "Sheet Pan"
+        // Select created Tags: "Vegetarian" and "Sheet Pan"
         await Page.Locator("mat-chip-option", new() { HasText = "Vegetarian" }).ClickAsync();
         await Page.Locator("mat-chip-option", new() { HasText = "Sheet Pan" }).ClickAsync();
 
@@ -148,6 +150,12 @@ public sealed class DiscoveryAndMediaE2ETests : E2ETestBase
     public async Task FridgeMatcherAndGlobalSearch_RanksRecipesIgnoringPantryStaples_AndNavigatesViaCmdK()
     {
         await RegisterAndLoginAsync();
+        await EnsureFoodItemExistsViaApiAsync("Chicken Thighs", isPantryStaple: false);
+        await EnsureFoodItemExistsViaApiAsync("Lime", isPantryStaple: false);
+        await EnsureFoodItemExistsViaApiAsync("Cilantro", isPantryStaple: false);
+        await EnsureFoodItemExistsViaApiAsync("Yellow Onion", isPantryStaple: false);
+        await EnsureFoodItemExistsViaApiAsync("Kosher Salt", isPantryStaple: true);
+        await EnsureFoodItemExistsViaApiAsync("Extra-Virgin Olive Oil", isPantryStaple: true);
 
         // 1. Create Recipe A: Uses Chicken Thighs, Lime, Kosher Salt, Extra-Virgin Olive Oil (2 staples)
         await Page.Locator("a[routerlink='/recipes/new']").First.ClickAsync();
@@ -298,28 +306,21 @@ public sealed class DiscoveryAndMediaE2ETests : E2ETestBase
         );
         Assert.IsFalse(
             hasHorizontalScroll,
-            "Cookbook page should not overflow horizontally at 360px."
+            "Cookbook should have zero horizontal scrolling at 360px width."
         );
 
-        // 3. Tap Matcher in mobile bottom bar
+        // 3. Tap Matcher tab and verify mobile layout
         await mobileNav.Locator(".mobile-tab", new() { HasText = "Matcher" }).ClickAsync();
         await Expect(Page).ToHaveURLAsync(new Regex(".*/matcher.*"));
+        await Expect(Page.Locator(".page-title")).ToContainTextAsync("Use Up Ingredients");
 
-        hasHorizontalScroll = await Page.EvaluateAsync<bool>(
+        var matcherHasOverflow = await Page.EvaluateAsync<bool>(
             "() => document.documentElement.scrollWidth > document.documentElement.clientWidth"
         );
         Assert.IsFalse(
-            hasHorizontalScroll,
-            "Matcher page should not overflow horizontally at 360px."
+            matcherHasOverflow,
+            "Matcher should have zero horizontal scrolling at 360px width."
         );
-
-        // Tap a suggested ingredient pill if present
-        var suggestionPill = Page.Locator(".suggestion-pill").First;
-        if (await suggestionPill.IsVisibleAsync())
-        {
-            await suggestionPill.ClickAsync();
-            await Expect(Page.Locator("mat-chip-row")).ToBeVisibleAsync();
-        }
 
         // 4. Open Global Search Dialog via mobile top-bar search button
         var mobileSearchBtn = Page.Locator("button.mobile-search-btn");

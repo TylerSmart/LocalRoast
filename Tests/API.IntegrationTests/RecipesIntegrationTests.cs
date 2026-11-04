@@ -2,7 +2,6 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using App.Core.Authentication;
-using App.Core.FoodCatalog;
 using App.Core.Recipes;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -447,12 +446,29 @@ public sealed class RecipesIntegrationTests
     {
         await RegisterAndAuthenticateAsync(_client, "edit_test_chef@example.com", "edittestchef");
 
-        // Fetch tags and create two test collections
+        // Create test tags and collections
+        await _client.PostAsJsonAsync(
+            "/api/tags",
+            new UpsertTagRequest("Gluten-Free", TagCategory.Dietary, 10)
+        );
+        await _client.PostAsJsonAsync(
+            "/api/tags",
+            new UpsertTagRequest("Cast Iron", TagCategory.Equipment, 20)
+        );
+        await _client.PostAsJsonAsync(
+            "/api/tags",
+            new UpsertTagRequest("Side", TagCategory.Course, 30)
+        );
+        await _client.PostAsJsonAsync(
+            "/api/tags",
+            new UpsertTagRequest("Southern", TagCategory.Cuisine, 40)
+        );
+
         var tags = await (await _client.GetAsync("/api/tags")).Content.ReadFromJsonAsync<
             IReadOnlyList<TagDto>
         >();
         Assert.IsNotNull(tags);
-        Assert.IsTrue(tags.Count >= 3);
+        Assert.IsTrue(tags.Count >= 4);
 
         await _client.PostAsJsonAsync(
             "/api/collections",
@@ -519,11 +535,7 @@ public sealed class RecipesIntegrationTests
         Assert.AreEqual(2, created.Ingredients.Count);
 
         // 2. Update the recipe: change title, keep 2 tags and replace 1 tag, keep 1 collection and remove 1 collection, add an ingredient
-        var updatedTagIds = new List<Guid> { initialTagIds[0], initialTagIds[1] };
-        if (tags.Count > 3)
-        {
-            updatedTagIds.Add(tags[3].Id);
-        }
+        var updatedTagIds = new List<Guid> { initialTagIds[0], initialTagIds[1], tags[3].Id };
         var updatedCollectionIds = new List<Guid> { initialCollectionIds[0] };
 
         var updateReq = new UpsertRecipeRequest(

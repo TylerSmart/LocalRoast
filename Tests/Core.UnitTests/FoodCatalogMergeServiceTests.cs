@@ -82,22 +82,13 @@ public sealed class FoodCatalogMergeServiceTests
     }
 
     [TestMethod]
-    public async Task MergeFoodItems_RepointsRecipeIngredients_AndPreservesAliases_AndInheritsAisle()
+    public async Task MergeFoodItems_RepointsRecipeIngredients_AndPreservesAliases()
     {
-        var aisle = new StoreAisle
-        {
-            Id = Guid.NewGuid(),
-            Name = "Produce",
-            SortOrder = 1,
-        };
-        _dbContext.StoreAisles.Add(aisle);
-
         var target = new FoodItem
         {
             Id = Guid.NewGuid(),
             Name = "Green Onion",
             NormalizedName = "green onion",
-            DefaultStoreAisleId = null,
         };
         _dbContext.FoodItems.Add(target);
 
@@ -106,7 +97,6 @@ public sealed class FoodCatalogMergeServiceTests
             Id = Guid.NewGuid(),
             Name = "Scallion",
             NormalizedName = "scallion",
-            DefaultStoreAisleId = aisle.Id,
         };
         source1.Aliases.Add(
             new FoodItemAlias
@@ -175,7 +165,6 @@ public sealed class FoodCatalogMergeServiceTests
         var refreshedTarget = await _dbContext
             .FoodItems.Include(f => f.Aliases)
             .FirstAsync(f => f.Id == target.Id);
-        Assert.AreEqual(aisle.Id, refreshedTarget.DefaultStoreAisleId);
         Assert.AreEqual(3, refreshedTarget.Aliases.Count);
 
         // Sources should be removed

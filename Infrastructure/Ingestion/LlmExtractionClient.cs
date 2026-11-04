@@ -789,11 +789,6 @@ public sealed class LlmExtractionClient(HttpClient httpClient) : ILlmExtractionC
 
     private static string BuildExtractionSystemPrompt(LlmExtractionContext context)
     {
-        var aisleList =
-            context.AvailableAisleNames.Count > 0
-                ? string.Join(", ", context.AvailableAisleNames)
-                : "Produce, Bakery, Deli, Meat & Seafood, Dairy & Eggs, Canned & Jarred, Dry Goods & Pasta, International, Spices & Baking, Frozen, Beverages, Household, Other";
-
         var tagList =
             context.AvailableTagNames.Count > 0
                 ? string.Join(", ", context.AvailableTagNames)
@@ -816,7 +811,6 @@ Rules:
    - "preparationNote": preparation instructions (e.g. "finely diced", "room temperature").
    - "isOptional": boolean flag.
    - "originalRawText": verbatim line as originally written.
-   - "suggestedAisleName": choose the best matching grocery aisle from: [{{aisleList}}].
 4. Steps:
    - "sectionName": optional section header (e.g. "Prepare the Marinade").
    - "instruction": full clear step instruction text.
@@ -832,11 +826,6 @@ Rules:
 
     private static string BuildVisionExtractionSystemPrompt(LlmVisionExtractionContext context)
     {
-        var aisleList =
-            context.AvailableAisleNames.Count > 0
-                ? string.Join(", ", context.AvailableAisleNames)
-                : "Produce, Bakery, Deli, Meat & Seafood, Dairy & Eggs, Canned & Jarred, Dry Goods & Pasta, International, Spices & Baking, Frozen, Beverages, Household, Other";
-
         var tagList =
             context.AvailableTagNames.Count > 0
                 ? string.Join(", ", context.AvailableTagNames)
@@ -860,7 +849,6 @@ Rules:
    - "preparationNote": preparation instructions (e.g. "finely diced", "room temperature").
    - "isOptional": boolean flag.
    - "originalRawText": verbatim line as originally printed.
-   - "suggestedAisleName": choose the best matching grocery aisle from: [{{aisleList}}].
 5. Steps:
    - "sectionName": optional section header (e.g. "Prepare the Marinade").
    - "instruction": full clear step instruction text.
@@ -1007,7 +995,6 @@ Household Cookbook Catalog:
                             preparationNote = new { type = "string" },
                             isOptional = new { type = "boolean" },
                             originalRawText = new { type = "string" },
-                            suggestedAisleName = new { type = "string" },
                             suggestedIsPantryStaple = new { type = "boolean" },
                         },
                         required = new[] { "displayName" },
