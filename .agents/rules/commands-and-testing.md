@@ -12,6 +12,8 @@ On **every** code implementation, you MUST:
    - **Playwright E2E Tests:** `Tests/Client.E2ETests` for end-to-end user-facing feature flows:
      - Tests inherit from `E2ETestBase` and connect to `AssemblyInitializer.ServerUrl` (a background API child process serving `Client/dist/App.Client/browser` with in-memory DB).
      - Configured with `[assembly: DoNotParallelize]` for deterministic, reliable browser execution.
+     - Every `[TestMethod]` MUST include `[Timeout(DefaultTestTimeoutMs, CooperativeCancellation = true)]` so no E2E test can hang indefinitely.
+     - On failure, `E2ETestBase` automatically saves debug artifacts (`screenshot.png`, `video.webm`, `page.html`, `page-data.json`, `console.log`, `network-errors.log`, `trace.zip`, and `api-server.log`) to the git-ignored `Tests/Client.E2ETests/DebugArtifacts/` directory.
      - Every phase delivering or updating user-facing UI **MUST** implement dedicated E2E tests in `Tests/Client.E2ETests/<Feature>E2ETests.cs` validating:
        1. Core user journeys and authenticated CRUD flows.
        2. Interactive dialogs, filters, toggles, and calculations.

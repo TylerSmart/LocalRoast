@@ -27,6 +27,7 @@ public sealed class MealPlanE2ETests : E2ETestBase
     }
 
     [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
     public async Task MealPlan_ScheduleFromRecipeDetail_AndAddMultiDishLeftoversAndNotes()
     {
         await RegisterAndLoginAsync();
@@ -174,6 +175,7 @@ public sealed class MealPlanE2ETests : E2ETestBase
     }
 
     [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
     public async Task MealPlan_WeekTemplates_SaveCurrentWeek_NavigateAndApplyMergeAndReplace()
     {
         await RegisterAndLoginAsync();
@@ -291,6 +293,7 @@ public sealed class MealPlanE2ETests : E2ETestBase
     }
 
     [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
     public async Task MealPlan_MonthlyOverview_AndMobileViewport_360px_RendersCleanly()
     {
         await RegisterAndLoginAsync();

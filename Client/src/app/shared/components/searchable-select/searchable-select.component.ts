@@ -121,6 +121,7 @@ export class SearchableSelectComponent implements OnInit, OnDestroy, ControlValu
   private blurTimeoutId?: ReturnType<typeof setTimeout>;
   private reopenTimeoutId?: ReturnType<typeof setTimeout>;
   private isDestroyed = false;
+  private suppressNextFocusOpen = false;
 
   // CVA callbacks
   private onChange: (val: unknown) => void = () => undefined;
@@ -317,6 +318,10 @@ export class SearchableSelectComponent implements OnInit, OnDestroy, ControlValu
   }
 
   onFocus(): void {
+    if (this.suppressNextFocusOpen) {
+      this.suppressNextFocusOpen = false;
+      return;
+    }
     const trig = this.trigger();
     if (trig && !trig.panelOpen) {
       trig.openPanel();
@@ -358,7 +363,11 @@ export class SearchableSelectComponent implements OnInit, OnDestroy, ControlValu
       this.searchTerm.set('');
       this.onChange(selectedValue);
       this.selectionChange.emit(selectedValue);
+      this.suppressNextFocusOpen = true;
       this.trigger()?.closePanel();
+      setTimeout(() => {
+        this.suppressNextFocusOpen = false;
+      }, 100);
     } else {
       const current = [...this.selectedValues()];
       const idx = current.indexOf(selectedValue);
@@ -388,7 +397,13 @@ export class SearchableSelectComponent implements OnInit, OnDestroy, ControlValu
 
   onHostClick(event: MouseEvent): void {
     const target = event.target as HTMLElement;
-    if (target.closest('.action-btn')) return;
+    if (
+      target.closest(
+        '.action-btn, mat-option, mat-optgroup, .mat-mdc-autocomplete-panel, .cdk-overlay-pane, .cdk-overlay-popover',
+      )
+    ) {
+      return;
+    }
     if (this.disabled()) return;
     this.inputRef()?.nativeElement.focus();
     const trig = this.trigger();

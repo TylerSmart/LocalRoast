@@ -7,6 +7,7 @@ namespace App.Client.E2ETests;
 public sealed class PrintAndShareE2ETests : E2ETestBase
 {
     [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
     public async Task ShareLink_CreateOpenInUnauthenticatedContextScaleAndRevoke_EnforcesStrictBoundaries()
     {
         await RegisterAndLoginAsync();
@@ -83,8 +84,7 @@ public sealed class PrintAndShareE2ETests : E2ETestBase
         Assert.IsNotNull(shareUrl, "Expected share URL href to be populated.");
 
         // 4. Launch brand-new unauthenticated browser context
-        await using var guestContext = await Browser.NewContextAsync();
-        var guestPage = await guestContext.NewPageAsync();
+        var (_, guestPage) = await CreateIsolatedPageAsync("guest");
         await guestPage.GotoAsync(shareUrl);
 
         // 5. Verify unauthenticated public recipe view
@@ -126,6 +126,7 @@ public sealed class PrintAndShareE2ETests : E2ETestBase
     }
 
     [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
     public async Task PrintView_RecipeDetailAndPublicShare_AppliesCrispPrintMediaStylesAndTriggersPrint()
     {
         await RegisterAndLoginAsync();
@@ -207,6 +208,7 @@ public sealed class PrintAndShareE2ETests : E2ETestBase
     }
 
     [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
     public async Task PrintAndShare_MobileViewport_360px_RendersDialogAndPublicPageWithoutOverflow()
     {
         await Page.SetViewportSizeAsync(360, 640);

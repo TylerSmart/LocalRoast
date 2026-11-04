@@ -376,3 +376,9 @@ logs/
 
 API/App_Data/
 .angular/
+
+# Playwright & E2E failure debug artifacts
+[Dd]ebug[Aa]rtifacts/
+e2e-artifacts/
+playwright-report/
+test-results/

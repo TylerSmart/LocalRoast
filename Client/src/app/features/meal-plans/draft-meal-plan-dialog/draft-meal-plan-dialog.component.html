@@ -171,7 +171,7 @@
                           [matDatepicker]="candidateDatePicker"
                           [id]="'date-' + item.id"
                           class="candidate-date-input"
-                          [ngModel]="coerceToDateLocal(item.scheduledDate)"
+                          [value]="item.scheduledDateObj"
                           (dateChange)="updateScheduledDate(item.id, $event.value)"
                         />
                         <mat-datepicker-toggle

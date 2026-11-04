@@ -11,6 +11,7 @@ public sealed class DiscoveryAndMediaE2ETests : E2ETestBase
     );
 
     [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
     public async Task RecipeMediaAndTaxonomy_UploadPhotosAndOrganize_FiltersInCookbook()
     {
         await RegisterAndLoginAsync();
@@ -143,6 +144,7 @@ public sealed class DiscoveryAndMediaE2ETests : E2ETestBase
     }
 
     [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
     public async Task FridgeMatcherAndGlobalSearch_RanksRecipesIgnoringPantryStaples_AndNavigatesViaCmdK()
     {
         await RegisterAndLoginAsync();
@@ -272,6 +274,7 @@ public sealed class DiscoveryAndMediaE2ETests : E2ETestBase
     }
 
     [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
     public async Task DiscoveryAndMatcher_MobileViewport_360px_RendersAndNavigatesCleanly()
     {
         await RegisterAndLoginAsync();

@@ -37,6 +37,7 @@ export interface DraftMealCandidateFormItem {
   recipeId: string;
   recipe: MealPlanRecipeBadgeDto;
   scheduledDate: string;
+  scheduledDateObj: Date;
   slot: MealSlot;
   targetServings: number;
   isOnDeck: boolean;
@@ -70,7 +71,6 @@ export class DraftMealPlanDialogComponent {
   private readonly snackBar = inject(MatSnackBar);
 
   readonly slots = MEAL_SLOTS;
-  readonly coerceToDateLocal = coerceToDateLocal;
   readonly useTouchDatepicker = shouldUseTouchDatepicker();
   readonly presets = [
     'Quick weeknight dinners (<30 min)',
@@ -117,17 +117,21 @@ export class DraftMealPlanDialogComponent {
       .subscribe({
         next: (response) => {
           this.draftResponse.set(response);
-          const items: DraftMealCandidateFormItem[] = response.candidates.map((c, idx) => ({
-            id: `${c.recipeId}-${idx}`,
-            selected: true,
-            recipeId: c.recipeId,
-            recipe: c.recipe,
-            scheduledDate: c.scheduledDate || this.data.weekStartDate,
-            slot: (c.slot as MealSlot) || this.defaultSlot(),
-            targetServings: c.targetServings || c.recipe.baseServings || 4,
-            isOnDeck: c.isOnDeck || this.placeOnDeck(),
-            rationale: c.rationale,
-          }));
+          const items: DraftMealCandidateFormItem[] = response.candidates.map((c, idx) => {
+            const scheduledDate = c.scheduledDate || this.data.weekStartDate;
+            return {
+              id: `${c.recipeId}-${idx}`,
+              selected: true,
+              recipeId: c.recipeId,
+              recipe: c.recipe,
+              scheduledDate,
+              scheduledDateObj: coerceToDateLocal(scheduledDate),
+              slot: (c.slot as MealSlot) || this.defaultSlot(),
+              targetServings: c.targetServings || c.recipe.baseServings || 4,
+              isOnDeck: c.isOnDeck || this.placeOnDeck(),
+              rationale: c.rationale,
+            };
+          });
           this.candidateItems.set(items);
           this.isLoading.set(false);
         },
@@ -149,8 +153,11 @@ export class DraftMealPlanDialogComponent {
   updateScheduledDate(id: string, date: Date | string | null): void {
     const iso = coerceToIsoDateLocal(date);
     if (!iso) return;
+    const dateObj = coerceToDateLocal(iso);
     this.candidateItems.update((items) =>
-      items.map((item) => (item.id === id ? { ...item, scheduledDate: iso } : item)),
+      items.map((item) =>
+        item.id === id ? { ...item, scheduledDate: iso, scheduledDateObj: dateObj } : item,
+      ),
     );
   }
 

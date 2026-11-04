@@ -253,6 +253,7 @@ public sealed class VisionAndPdfIngestionE2ETests : E2ETestBase
     }
 
     [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
     public async Task MultiImageIngestion_UploadReviewPromoteCoverAndRetainAttachments_CreatesRecipe()
     {
         await using var mockServer = await MockMultimodalServer.StartAsync();
@@ -353,6 +354,7 @@ public sealed class VisionAndPdfIngestionE2ETests : E2ETestBase
     }
 
     [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
     public async Task OfflineVisionHost_ShowsWaitingBannerAndRecoversOnRetry()
     {
         await using var mockServer = await MockMultimodalServer.StartAsync();
@@ -400,6 +402,7 @@ public sealed class VisionAndPdfIngestionE2ETests : E2ETestBase
     }
 
     [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
     public async Task MobileViewport_CameraScanAndSplitReviewPanes_OperateSmoothly()
     {
         await using var mockServer = await MockMultimodalServer.StartAsync();

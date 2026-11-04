@@ -11,6 +11,7 @@ namespace App.Client.E2ETests;
 public sealed class McpAndPatE2ETests : E2ETestBase
 {
     [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
     public async Task PersonalAccessToken_MintInUI_ExecuteMcpTools_VerifyCookbookAttributionAndLastUsed()
     {
         var (username, _) = await RegisterAndLoginAsync();
@@ -183,6 +184,7 @@ public sealed class McpAndPatE2ETests : E2ETestBase
     }
 
     [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
     public async Task PersonalAccessToken_RevokeInUI_ImmediatelyBlocksMcpAccessAndRestEndpointsRejectPat()
     {
         await RegisterAndLoginAsync();
@@ -254,6 +256,7 @@ public sealed class McpAndPatE2ETests : E2ETestBase
     }
 
     [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
     public async Task PersonalAccessToken_MobileViewport_360px_DialogTabsAndSnippetRenderCleanly()
     {
         // Set mobile viewport 360x640

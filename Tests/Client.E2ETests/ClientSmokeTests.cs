@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text.RegularExpressions;
 using Microsoft.Playwright;
 
@@ -7,6 +8,7 @@ namespace App.Client.E2ETests;
 public sealed class ClientSmokeTests : E2ETestBase
 {
     [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
     public async Task CompleteE2EFlow_Register_CreateCatalogItem_CreateRecipe_ScaleAndConvert_MobileNav()
     {
         // 1. Register and verify authenticated landing on recipes
@@ -96,5 +98,104 @@ public sealed class ClientSmokeTests : E2ETestBase
             .ToBeVisibleAsync();
         await Expect(Page.Locator("nav.mobile-bottom-nav a", new() { HasText = "Catalog" }))
             .ToBeVisibleAsync();
+    }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task FailedTestArtifactCaptureAndTimeoutConfig_SavesVideoScreenshotDomConsoleNetworkTraceAndApiLogs()
+    {
+        // 1. Verify every [TestMethod] in the E2E assembly has a maximum non-cooperative [Timeout] configured
+        var testMethods = typeof(E2ETestBase)
+            .Assembly.GetTypes()
+            .Where(t => t.GetCustomAttribute<TestClassAttribute>() is not null)
+            .SelectMany(t =>
+                t.GetMethods(BindingFlags.Public | BindingFlags.Instance)
+                    .Where(m => m.GetCustomAttribute<TestMethodAttribute>() is not null)
+            )
+            .ToList();
+
+        Assert.IsNotEmpty(testMethods);
+
+        foreach (var method in testMethods)
+        {
+            var timeoutAttr = method.GetCustomAttribute<TimeoutAttribute>();
+            Assert.IsNotNull(
+                timeoutAttr,
+                $"E2E test method '{method.DeclaringType?.Name}.{method.Name}' must have a [Timeout] attribute."
+            );
+            Assert.IsGreaterThan(0, timeoutAttr.Timeout);
+            Assert.IsLessThanOrEqualTo(
+                DefaultTestTimeoutMs,
+                timeoutAttr.Timeout,
+                $"E2E test method '{method.DeclaringType?.Name}.{method.Name}' exceeds maximum allowed timeout ({DefaultTestTimeoutMs}ms)."
+            );
+            Assert.IsFalse(
+                timeoutAttr.CooperativeCancellation,
+                $"E2E test method '{method.DeclaringType?.Name}.{method.Name}' must use hard timeout (CooperativeCancellation = false) so hung Playwright calls abort immediately."
+            );
+        }
+
+        // 2. Navigate to login page and emit console/network activity, then verify artifact capture
+        await Page.GotoAsync($"{ServerUrl}/login");
+        await Expect(Page.Locator(".mat-mdc-tab", new() { HasText = "Create Account" }))
+            .ToBeVisibleAsync();
+        await Page.EvaluateAsync("() => console.warn('Diagnostic warning from E2E verification')");
+
+        var artifactDir = await SaveDebugArtifactsAsync("Verification test", closeContexts: true);
+        try
+        {
+            Assert.IsTrue(Directory.Exists(artifactDir), "Artifact directory should be created.");
+
+            var expectedFiles = new[]
+            {
+                "screenshot.png",
+                "video.webm",
+                "page.html",
+                "page-data.json",
+                "console.log",
+                "network-errors.log",
+                "trace.zip",
+                "api-server.log",
+            };
+
+            foreach (var file in expectedFiles)
+            {
+                var fullPath = Path.Combine(artifactDir, file);
+                Assert.IsTrue(
+                    File.Exists(fullPath),
+                    $"Expected artifact '{file}' to exist at {fullPath}."
+                );
+                Assert.IsGreaterThan(
+                    0L,
+                    new FileInfo(fullPath).Length,
+                    $"Expected artifact '{file}' to be non-empty."
+                );
+            }
+
+            var consoleLog = await File.ReadAllTextAsync(Path.Combine(artifactDir, "console.log"));
+            Assert.Contains("Diagnostic warning from E2E verification", consoleLog);
+
+            var pageDataJson = await File.ReadAllTextAsync(
+                Path.Combine(artifactDir, "page-data.json")
+            );
+            Assert.Contains("/login", pageDataJson);
+        }
+        finally
+        {
+            if (Directory.Exists(artifactDir))
+            {
+                Directory.Delete(artifactDir, recursive: true);
+            }
+
+            var parentRunDir = Directory.GetParent(artifactDir)?.FullName;
+            if (
+                !string.IsNullOrEmpty(parentRunDir)
+                && Directory.Exists(parentRunDir)
+                && Directory.GetFileSystemEntries(parentRunDir).Length == 0
+            )
+            {
+                Directory.Delete(parentRunDir);
+            }
+        }
     }
 }

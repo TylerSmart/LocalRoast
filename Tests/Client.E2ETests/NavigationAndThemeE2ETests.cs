@@ -7,6 +7,7 @@ namespace App.Client.E2ETests;
 public sealed class NavigationAndThemeE2ETests : E2ETestBase
 {
     [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
     public async Task AppShell_DesktopNavigation_SwitchesRoutes_AndUpdatesActiveLink()
     {
         await RegisterAndLoginAsync();
@@ -29,6 +30,7 @@ public sealed class NavigationAndThemeE2ETests : E2ETestBase
     }
 
     [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
     public async Task AppShell_MobileNavigation_360pxViewport_RendersBottomBar()
     {
         await RegisterAndLoginAsync();
@@ -55,6 +57,7 @@ public sealed class NavigationAndThemeE2ETests : E2ETestBase
     }
 
     [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
     public async Task ThemeAndUserMenu_OpensDialogs_AndLogsOut()
     {
         var (username, _) = await RegisterAndLoginAsync();

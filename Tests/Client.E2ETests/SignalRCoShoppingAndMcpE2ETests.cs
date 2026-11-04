@@ -36,16 +36,16 @@ public sealed class SignalRCoShoppingAndMcpE2ETests : E2ETestBase
     }
 
     [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
     public async Task SignalR_TwoHouseholdPhones_LiveCoShopping_SyncsAddCheckPromoteClearAndListCreation()
     {
         // User A (Phone 1)
         var (userA, _) = await RegisterAndLoginOnPageAsync(Page);
 
         // User B (Phone 2) in isolated browser context
-        var contextB = await Browser.NewContextAsync();
+        var (contextB, pageB) = await CreateIsolatedPageAsync("phone2");
         try
         {
-            var pageB = await contextB.NewPageAsync();
             var (userB, _) = await RegisterAndLoginOnPageAsync(pageB);
 
             // Both navigate to /shopping
@@ -166,11 +166,12 @@ public sealed class SignalRCoShoppingAndMcpE2ETests : E2ETestBase
         }
         finally
         {
-            await contextB.DisposeAsync();
+            // Managed by E2ETestBase cleanup
         }
     }
 
     [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
     public async Task McpMilestone3Tools_PlanMeals_GenerateShoppingList_UpsertAndCheckItems_UpdatesBrowserLive()
     {
         await RegisterAndLoginAsync();
@@ -485,6 +486,7 @@ public sealed class SignalRCoShoppingAndMcpE2ETests : E2ETestBase
     }
 
     [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
     public async Task SignalRCoShopping_MobileViewport_360px_RendersLiveSyncBadgeAndRecoversFromOffline()
     {
         await Page.SetViewportSizeAsync(360, 640);

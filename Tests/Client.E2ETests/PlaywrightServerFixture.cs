@@ -6,6 +6,8 @@ namespace App.Client.E2ETests;
 
 public sealed class PlaywrightServerFixture : IAsyncDisposable
 {
+    private readonly Lock _logLock = new();
+    private readonly List<string> _serverLogs = [];
     private Process? _process;
     private string? _tempUploadsPath;
 
@@ -16,6 +18,36 @@ public sealed class PlaywrightServerFixture : IAsyncDisposable
         var fixture = new PlaywrightServerFixture();
         await fixture.InitializeAsync();
         return fixture;
+    }
+
+    public int GetLogCursor()
+    {
+        lock (_logLock)
+        {
+            return _serverLogs.Count;
+        }
+    }
+
+    public IReadOnlyList<string> GetLogsSince(int cursor)
+    {
+        lock (_logLock)
+        {
+            var safeCursor = Math.Clamp(cursor, 0, _serverLogs.Count);
+            return _serverLogs.Skip(safeCursor).ToList();
+        }
+    }
+
+    private void AppendLog(string stream, string? line)
+    {
+        if (string.IsNullOrEmpty(line))
+        {
+            return;
+        }
+
+        lock (_logLock)
+        {
+            _serverLogs.Add($"[{DateTime.UtcNow:O}] [{stream}] {line}");
+        }
     }
 
     private async Task InitializeAsync()
@@ -66,8 +98,8 @@ public sealed class PlaywrightServerFixture : IAsyncDisposable
         psi.EnvironmentVariables["MediaStorage__UploadsPath"] = _tempUploadsPath;
 
         _process = new Process { StartInfo = psi };
-        _process.OutputDataReceived += (_, _) => { };
-        _process.ErrorDataReceived += (_, _) => { };
+        _process.OutputDataReceived += (_, e) => AppendLog("STDOUT", e.Data);
+        _process.ErrorDataReceived += (_, e) => AppendLog("STDERR", e.Data);
 
         _process.Start();
         _process.BeginOutputReadLine();
@@ -81,9 +113,9 @@ public sealed class PlaywrightServerFixture : IAsyncDisposable
         {
             if (_process.HasExited)
             {
-                var stderr = await _process.StandardError.ReadToEndAsync();
+                var recentLogs = string.Join(Environment.NewLine, GetLogsSince(0));
                 throw new InvalidOperationException(
-                    $"API host process exited unexpectedly with code {_process.ExitCode}. Stderr: {stderr}"
+                    $"API host process exited unexpectedly with code {_process.ExitCode}. Logs: {recentLogs}"
                 );
             }
 
@@ -121,7 +153,7 @@ public sealed class PlaywrightServerFixture : IAsyncDisposable
         return port;
     }
 
-    private static string FindSolutionRoot()
+    public static string FindSolutionRoot()
     {
         var current = AppContext.BaseDirectory;
         while (!string.IsNullOrEmpty(current))

@@ -48,6 +48,7 @@ public sealed class ShoppingListsE2ETests : E2ETestBase
     }
 
     [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
     public async Task ShoppingList_GenerateFromMealPlan_ConsolidatesUnits_ExcludesLeftoversAndPantryStaples_AndPreventsDuplicates()
     {
         await RegisterAndLoginAsync();
@@ -210,6 +211,7 @@ public sealed class ShoppingListsE2ETests : E2ETestBase
     }
 
     [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
     public async Task ShoppingList_MultipleNamedLists_QuickAdd_Edit_CheckOffAndClear()
     {
         await RegisterAndLoginAsync();
@@ -310,6 +312,7 @@ public sealed class ShoppingListsE2ETests : E2ETestBase
     }
 
     [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
     public async Task ShoppingList_AddFromRecipeDetail_AndMobileViewport_360px_RendersCleanly()
     {
         await RegisterAndLoginAsync();

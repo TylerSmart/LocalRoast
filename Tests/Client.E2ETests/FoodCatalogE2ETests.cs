@@ -7,6 +7,7 @@ namespace App.Client.E2ETests;
 public sealed class FoodCatalogE2ETests : E2ETestBase
 {
     [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
     public async Task FoodCatalog_DisplaysSeededAislesAndStaples_AndFiltersByAisle()
     {
         await RegisterAndLoginAsync();
@@ -25,6 +26,7 @@ public sealed class FoodCatalogE2ETests : E2ETestBase
         // Filter by Produce aisle
         await Page.Locator("mat-select", new() { HasText = "All Aisles" }).ClickAsync();
         await Page.Locator("mat-option", new() { HasText = "Produce" }).ClickAsync();
+        await Expect(Page.Locator("mat-option")).ToHaveCountAsync(0);
 
         // Garlic should still be visible; Olive Oil should disappear
         await Expect(Page.Locator(".food-item-card", new() { HasText = "Garlic" }))
@@ -40,6 +42,7 @@ public sealed class FoodCatalogE2ETests : E2ETestBase
     }
 
     [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
     public async Task FoodCatalog_CreateItem_TogglePantryStaple_AndSearchByAlias()
     {
         await RegisterAndLoginAsync();
@@ -54,8 +57,13 @@ public sealed class FoodCatalogE2ETests : E2ETestBase
         var uniqueName = $"Fresh Herb {Guid.NewGuid():N}"[..20];
         var uniqueAlias = $"Green Magic {Guid.NewGuid():N}"[..18];
 
-        await Page.Locator("input[formcontrolname='name']").FillAsync(uniqueName);
-        await Page.Locator("input[formcontrolname='aliasesText']").FillAsync(uniqueAlias);
+        var nameInput = Page.Locator("input[formcontrolname='name']");
+        var aliasesInput = Page.Locator("input[formcontrolname='aliasesText']");
+        await Expect(nameInput).ToBeFocusedAsync();
+        await nameInput.FillAsync(uniqueName);
+        await Expect(nameInput).ToHaveValueAsync(uniqueName);
+        await aliasesInput.FillAsync(uniqueAlias);
+        await Expect(aliasesInput).ToHaveValueAsync(uniqueAlias);
 
         await Page.Locator("mat-dialog-actions button", new() { HasText = "Create Item" })
             .ClickAsync();

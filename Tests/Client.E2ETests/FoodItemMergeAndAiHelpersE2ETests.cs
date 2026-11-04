@@ -212,6 +212,7 @@ public sealed class FoodItemMergeAndAiHelpersE2ETests : E2ETestBase
     }
 
     [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
     public async Task FoodItemMerge_ConsolidatesDuplicates_UpdatesShoppingReferences_AndAliasesSurvivingItem()
     {
         await RegisterAndLoginAsync();
@@ -283,6 +284,7 @@ public sealed class FoodItemMergeAndAiHelpersE2ETests : E2ETestBase
     }
 
     [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
     public async Task AiIngredientSubstitution_RecipeDetailAndCookMode_WithOfflineResilience()
     {
         await using var mockServer = await MockKitchenAiOllamaServer.StartAsync();
@@ -347,6 +349,7 @@ public sealed class FoodItemMergeAndAiHelpersE2ETests : E2ETestBase
     }
 
     [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
     public async Task DraftWeeklyMealPlan_AppliesGroundedMeals_AndVerifiesMobileResponsiveLayout()
     {
         await using var mockServer = await MockKitchenAiOllamaServer.StartAsync();

@@ -7,6 +7,7 @@ namespace App.Client.E2ETests;
 public sealed class RecipeCookbookE2ETests : E2ETestBase
 {
     [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
     public async Task Recipe_CreateWithSectionsAndTimers_DetailRendersAndScales()
     {
         await RegisterAndLoginAsync();
@@ -78,6 +79,7 @@ public sealed class RecipeCookbookE2ETests : E2ETestBase
     }
 
     [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
     public async Task Recipe_FilterByStatus_AndSearchCookbook()
     {
         await RegisterAndLoginAsync();
@@ -124,6 +126,7 @@ public sealed class RecipeCookbookE2ETests : E2ETestBase
         await Page.Locator("button.filter-toggle-btn").ClickAsync();
         await Page.Locator("mat-select", new() { HasText = "Published" }).ClickAsync();
         await Page.Locator("mat-option", new() { HasText = "Draft / Review" }).ClickAsync();
+        await Expect(Page.Locator("mat-option")).ToHaveCountAsync(0);
         await Expect(Page.Locator(".recipe-card", new() { HasText = draftTitle }))
             .ToBeVisibleAsync();
         await Expect(Page.Locator(".recipe-card", new() { HasText = pubTitle }))
@@ -145,6 +148,7 @@ public sealed class RecipeCookbookE2ETests : E2ETestBase
     }
 
     [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
     public async Task Recipe_EditExistingRecipe_UpdatesSuccessfullyAndRendersDetail()
     {
         await RegisterAndLoginAsync();

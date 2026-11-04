@@ -43,6 +43,7 @@ public sealed class CookModeAndCookLogsE2ETests : E2ETestBase
     }
 
     [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
     public async Task CookMode_WakeLock_LiveScaling_StepNavigation_AndMultiTimers_CompletesAndLogsCook()
     {
         // 1. Install deterministic wake lock spy before loading page
@@ -245,6 +246,7 @@ public sealed class CookModeAndCookLogsE2ETests : E2ETestBase
     }
 
     [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
     public async Task CookLogs_SearchByTweakNote_ForgottenFavoritesFilter_MealPlanStartCooking_AndPublicShareOptIn()
     {
         var (username, email) = await RegisterAndLoginAsync();
@@ -452,11 +454,9 @@ public sealed class CookModeAndCookLogsE2ETests : E2ETestBase
         Assert.IsNotNull(urlWithLogs);
 
         // 7. Verify in isolated unauthenticated context
-        var anonContext = await Browser.NewContextAsync();
+        var (anonContext, anonPage) = await CreateIsolatedPageAsync("anonymous");
         try
         {
-            var anonPage = await anonContext.NewPageAsync();
-
             // Link without logs: notes section is hidden and tweak note does not leak
             await anonPage.GotoAsync(urlNoLogs);
             await Expect(anonPage.Locator(".recipe-title")).ToContainTextAsync(bourguignonTitle);
@@ -491,11 +491,12 @@ public sealed class CookModeAndCookLogsE2ETests : E2ETestBase
         }
         finally
         {
-            await anonContext.CloseAsync();
+            // Managed by E2ETestBase cleanup
         }
     }
 
     [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
     public async Task CookMode_MobileViewport_360px_FullScreenSteps_IngredientsDrawer_AndTimerTray_ZeroOverflow()
     {
         // Set mobile viewport to 360x640 (standard Android phone)

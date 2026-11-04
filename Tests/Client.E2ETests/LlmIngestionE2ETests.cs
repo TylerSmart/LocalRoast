@@ -206,6 +206,7 @@ public sealed class MockLanLlmAndBlogServer : IAsyncDisposable
 public sealed class LlmIngestionE2ETests : E2ETestBase
 {
     [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
     public async Task LlmSettingsAndUrlIngestion_ConfigureOllamaScrapeUrlReviewSideBySideAndPublish_CreatesRecipeAndNewFoodItem()
     {
         await using var mockServer = await MockLanLlmAndBlogServer.StartAsync();
@@ -310,6 +311,7 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
     }
 
     [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
     public async Task OfflineLlmHostResilience_RawTextQueuesAsWaitingForHost_ThenRetryAllWaitingCompletesWhenHostOnline()
     {
         await using var mockServer = await MockLanLlmAndBlogServer.StartAsync();
@@ -380,6 +382,7 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
     }
 
     [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
     public async Task IngestionAndReviewInbox_MobileViewport_360px_SwitchesSourceAndDraftPanesCleanly()
     {
         await using var mockServer = await MockLanLlmAndBlogServer.StartAsync();

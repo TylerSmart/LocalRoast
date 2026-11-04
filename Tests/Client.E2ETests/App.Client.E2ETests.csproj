@@ -5,6 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <EnablePlaywright>true</EnablePlaywright>
+    <NoWarn>$(NoWarn);MSTEST0045</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

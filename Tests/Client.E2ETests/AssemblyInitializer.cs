@@ -9,6 +9,11 @@ public static class AssemblyInitializer
         _server?.ServerUrl
         ?? throw new InvalidOperationException("E2E Test server is not initialized.");
 
+    public static int GetServerLogCursor() => _server?.GetLogCursor() ?? 0;
+
+    public static IReadOnlyList<string> GetServerLogsSince(int cursor) =>
+        _server?.GetLogsSince(cursor) ?? [];
+
     [AssemblyInitialize]
     public static async Task AssemblyInit(TestContext context)
     {
