@@ -472,6 +472,18 @@ describe('CookModeComponent', () => {
     expect(component['showVoiceHelp']()).toBe(true);
   });
 
+  it('debounces rapid voice command actions in component', () => {
+    expect(component['activeStepIndex']()).toBe(0);
+
+    commandSubject.next({ action: 'next', transcript: 'next', matchedKeyword: 'next' });
+    expect(component['activeStepIndex']()).toBe(1);
+
+    // Rapid duplicate event within 800ms debounce window
+    commandSubject.next({ action: 'next', transcript: 'next', matchedKeyword: 'next' });
+    // Still at step 1 because second event was ignored by debounce
+    expect(component['activeStepIndex']()).toBe(1);
+  });
+
   it('stops voice listening and cleans up subscription on component destroy or exit', () => {
     component['exitCookMode']();
     expect(mockVoiceControlService.stopListening).toHaveBeenCalled();

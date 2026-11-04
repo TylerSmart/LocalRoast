@@ -292,6 +292,10 @@ export class CookModeComponent implements OnInit, OnDestroy {
   }
 
   protected onWindowKeydown(event: KeyboardEvent): void {
+    if (event.repeat) {
+      return;
+    }
+
     const target = event.target as HTMLElement | null;
     if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
       return;
@@ -503,7 +507,16 @@ export class CookModeComponent implements OnInit, OnDestroy {
     this.showVoiceHelp.update((v) => !v);
   }
 
+  private lastVoiceCommandTime = 0;
+
   protected handleVoiceCommand(cmd: VoiceCommandEvent): void {
+    const now = Date.now();
+    // Cooldown guard to prevent rapid duplicate voice actions
+    if (now - this.lastVoiceCommandTime < 800) {
+      return;
+    }
+    this.lastVoiceCommandTime = now;
+
     switch (cmd.action) {
       case 'next':
         this.nextStep();

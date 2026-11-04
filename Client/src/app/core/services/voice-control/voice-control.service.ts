@@ -3,6 +3,7 @@ import { Subject } from 'rxjs';
 import { APP_STORAGE_PREFIX } from '../../../app.branding';
 
 export const COOK_VOICE_STORAGE_KEY = `${APP_STORAGE_PREFIX}:cook-voice-control-enabled`;
+export const DEFAULT_VOICE_COMMAND_COOLDOWN_MS = 1200;
 
 export type VoiceCommandAction =
   'next' | 'previous' | 'repeat' | 'timer' | 'check' | 'help' | 'stop';
@@ -61,6 +62,10 @@ declare global {
 export class VoiceControlService {
   private recognition: SpeechRecognitionInstance | null = null;
   private feedbackTimer: ReturnType<typeof setTimeout> | null = null;
+  private cooldownMs = DEFAULT_VOICE_COMMAND_COOLDOWN_MS;
+  private lastCommandTime = 0;
+  private lastProcessedTranscript = '';
+  private lastTranscriptTime = 0;
 
   private readonly _isSupported = signal<boolean>(this.checkSupport());
   readonly isSupported = this._isSupported.asReadonly();
@@ -192,7 +197,18 @@ export class VoiceControlService {
       }
       this.recognition = null;
     }
+    this.resetCooldown();
     this.setFeedback('Voice control stopped', 2000);
+  }
+
+  setCooldownMs(ms: number): void {
+    this.cooldownMs = Math.max(0, ms);
+  }
+
+  resetCooldown(): void {
+    this.lastCommandTime = 0;
+    this.lastProcessedTranscript = '';
+    this.lastTranscriptTime = 0;
   }
 
   private handleRecognitionResult(event: SpeechRecognitionEvent): void {
@@ -201,18 +217,50 @@ export class VoiceControlService {
       return;
     }
 
+    const now = Date.now();
+    // Block recognition during cooldown period
+    if (now - this.lastCommandTime < this.cooldownMs) {
+      return;
+    }
+
     for (let i = event.resultIndex; i < event.results.length; i++) {
       const res = event.results[i];
-      if (res && res[0] && res[0].transcript) {
+      if (!res) continue;
+
+      // Reject interim hypothesis results to prevent premature or repeated multi-triggering
+      if (res.isFinal === false) {
+        continue;
+      }
+
+      if (res[0] && res[0].transcript) {
         const transcript = res[0].transcript;
-        this.processTranscript(transcript);
+        const normalized = transcript.trim().toLowerCase();
+
+        // Suppress exact duplicate transcript received in rapid succession
+        if (normalized === this.lastProcessedTranscript && now - this.lastTranscriptTime < 2000) {
+          continue;
+        }
+
+        const matched = this.processTranscript(transcript, { enforceCooldown: true });
+        if (matched) {
+          // Break immediately after successfully matching a command in this event batch
+          break;
+        }
       }
     }
   }
 
-  processTranscript(transcript: string): VoiceCommandEvent | null {
+  processTranscript(
+    transcript: string,
+    options?: { enforceCooldown?: boolean },
+  ): VoiceCommandEvent | null {
     const raw = transcript.trim();
     if (!raw) return null;
+
+    const now = Date.now();
+    if (options?.enforceCooldown && now - this.lastCommandTime < this.cooldownMs) {
+      return null;
+    }
 
     // Lowercase and strip punctuation
     const normalized = raw
@@ -220,13 +268,27 @@ export class VoiceControlService {
       .replace(/[.,!?;:]/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
+
+    if (
+      options?.enforceCooldown &&
+      normalized === this.lastProcessedTranscript &&
+      now - this.lastTranscriptTime < 2000
+    ) {
+      return null;
+    }
+
     const command = this.matchCommand(normalized, raw);
 
     if (command) {
+      this.lastCommandTime = now;
+      this.lastProcessedTranscript = normalized;
+      this.lastTranscriptTime = now;
       this.setFeedback(`Heard: "${raw}" → ${this.formatActionLabel(command.action)}`, 2500);
       this.command$.next(command);
       return command;
     } else {
+      this.lastProcessedTranscript = normalized;
+      this.lastTranscriptTime = now;
       this.setFeedback(`Heard: "${raw}" (unrecognized command)`, 2500);
       return null;
     }

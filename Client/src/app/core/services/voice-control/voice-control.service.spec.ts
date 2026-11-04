@@ -208,4 +208,78 @@ describe('VoiceControlService', () => {
     expect(emitted.length).toBe(0);
     sub.unsubscribe();
   });
+
+  it('ignores interim results where isFinal is false', () => {
+    const emitted: VoiceCommandEvent[] = [];
+    const sub = service.command$.subscribe((c) => emitted.push(c));
+
+    service.startListening();
+
+    mockRecognitionInstance.onresult?.({
+      resultIndex: 0,
+      results: [
+        {
+          0: { transcript: 'next', confidence: 0.95 },
+          length: 1,
+          isFinal: false,
+        },
+      ],
+    });
+
+    expect(emitted.length).toBe(0);
+    sub.unsubscribe();
+  });
+
+  it('enforces command cooldown window to prevent rapid multi-firing', () => {
+    const emitted: VoiceCommandEvent[] = [];
+    const sub = service.command$.subscribe((c) => emitted.push(c));
+
+    service.startListening();
+
+    // First final "next"
+    mockRecognitionInstance.onresult?.({
+      resultIndex: 0,
+      results: [
+        {
+          0: { transcript: 'next', confidence: 0.95 },
+          length: 1,
+          isFinal: true,
+        },
+      ],
+    });
+
+    expect(emitted.length).toBe(1);
+
+    // Rapid duplicate "next" within cooldown
+    mockRecognitionInstance.onresult?.({
+      resultIndex: 0,
+      results: [
+        {
+          0: { transcript: 'next', confidence: 0.95 },
+          length: 1,
+          isFinal: true,
+        },
+      ],
+    });
+
+    // Still only 1 emission due to cooldown
+    expect(emitted.length).toBe(1);
+
+    // Reset cooldown to simulate cooldown elapsed
+    service.resetCooldown();
+
+    mockRecognitionInstance.onresult?.({
+      resultIndex: 0,
+      results: [
+        {
+          0: { transcript: 'previous', confidence: 0.95 },
+          length: 1,
+          isFinal: true,
+        },
+      ],
+    });
+
+    expect(emitted.length).toBe(2);
+    sub.unsubscribe();
+  });
 });
