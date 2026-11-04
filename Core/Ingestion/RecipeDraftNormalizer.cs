@@ -67,7 +67,8 @@ public static class RecipeDraftNormalizer
         string? fallbackSourceBookTitle = null,
         int? fallbackSourceBookPage = null,
         bool retainSourceAttachments = true,
-        string? extractedModel = null
+        string? extractedModel = null,
+        IReadOnlyList<Guid>? fallbackCollectionIds = null
     )
     {
         var title = string.IsNullOrWhiteSpace(raw.Title) ? "Untitled Recipe" : raw.Title.Trim();
@@ -232,25 +233,57 @@ public static class RecipeDraftNormalizer
             );
         }
 
-        // Suggested tags
+        // Suggested & proposed tags
         var suggestedTagIds = new List<Guid>();
+        var proposedTagNames = new List<string>();
+        var seenProposedTagKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         if (raw.SuggestedTagNames is { Count: > 0 })
         {
-            foreach (var tagName in raw.SuggestedTagNames)
+            foreach (var rawTag in raw.SuggestedTagNames)
             {
-                var normTagName = tagName.Trim().ToLowerInvariant();
+                if (string.IsNullOrWhiteSpace(rawTag))
+                {
+                    continue;
+                }
+
+                var cleanedTag = rawTag.Trim().TrimStart('#').Trim();
+                if (string.IsNullOrWhiteSpace(cleanedTag) || cleanedTag.Length > 80)
+                {
+                    continue;
+                }
+
+                var normTagName = cleanedTag.ToLowerInvariant();
+                var singularTag = Singularize(normTagName);
+
                 var matchedTag = tags.FirstOrDefault(t =>
                     t.NormalizedName == normTagName
+                    || Singularize(t.NormalizedName) == singularTag
                     || t.Slug.Equals(normTagName, StringComparison.OrdinalIgnoreCase)
                     || t.Slug.EndsWith($"-{normTagName}", StringComparison.OrdinalIgnoreCase)
                 );
 
-                if (matchedTag is not null && !suggestedTagIds.Contains(matchedTag.Id))
+                if (matchedTag is not null)
                 {
-                    suggestedTagIds.Add(matchedTag.Id);
+                    if (!suggestedTagIds.Contains(matchedTag.Id))
+                    {
+                        suggestedTagIds.Add(matchedTag.Id);
+                    }
+                }
+                else if (seenProposedTagKeys.Add(singularTag))
+                {
+                    var displayTag = ToTagDisplayCase(cleanedTag);
+                    if (!string.IsNullOrWhiteSpace(displayTag))
+                    {
+                        proposedTagNames.Add(displayTag);
+                    }
                 }
             }
         }
+
+        var suggestedCollectionIds = fallbackCollectionIds is { Count: > 0 }
+            ? fallbackCollectionIds.Distinct().ToList()
+            : [];
 
         var confidence = raw.ConfidenceScore is >= 0.0m and <= 1.0m
             ? raw.ConfidenceScore.Value
@@ -272,7 +305,7 @@ public static class RecipeDraftNormalizer
             SourceAuthor: string.IsNullOrWhiteSpace(sourceAuthor) ? null : sourceAuthor.Trim(),
             CoverImagePath: coverImagePath,
             ThumbnailImagePath: thumbnailImagePath,
-            SuggestedCollectionIds: [],
+            SuggestedCollectionIds: suggestedCollectionIds,
             SuggestedTagIds: suggestedTagIds,
             Ingredients: normalizedIngredients,
             Steps: normalizedSteps,
@@ -280,7 +313,8 @@ public static class RecipeDraftNormalizer
             SourceBookTitle: sourceBookTitle,
             SourceBookPage: sourceBookPage,
             RetainSourceAttachments: retainSourceAttachments,
-            ExtractedModel: extractedModel ?? raw.ExtractedModel
+            ExtractedModel: extractedModel ?? raw.ExtractedModel,
+            ProposedTagNames: proposedTagNames
         );
     }
 
@@ -304,23 +338,21 @@ public static class RecipeDraftNormalizer
             return direct;
         }
 
-        // 2. Singularize
+        // 2. Bidirectional singularized match
         var singular = Singularize(norm);
-        if (singular != norm)
+        var singMatch = catalogFoods.FirstOrDefault(f =>
+            Singularize(f.NormalizedName) == singular
+            || f.NormalizedAliases.Any(a => Singularize(a) == singular)
+        );
+        if (singMatch is not null)
         {
-            var singMatch = catalogFoods.FirstOrDefault(f =>
-                f.NormalizedName == singular || f.NormalizedAliases.Contains(singular)
-            );
-            if (singMatch is not null)
-            {
-                return singMatch;
-            }
+            return singMatch;
         }
 
         return null;
     }
 
-    private static string Singularize(string word)
+    public static string Singularize(string word)
     {
         if (word.EndsWith("ies") && word.Length > 4)
         {
@@ -344,6 +376,127 @@ public static class RecipeDraftNormalizer
             return word[..^1];
         }
         return word;
+    }
+
+    public static string ToTagDisplayCase(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return "";
+        }
+
+        var words = text.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        for (var i = 0; i < words.Length; i++)
+        {
+            var segments = words[i].Split('-', StringSplitOptions.RemoveEmptyEntries);
+            for (var j = 0; j < segments.Length; j++)
+            {
+                var s = segments[j].ToLowerInvariant();
+                segments[j] = char.ToUpperInvariant(s[0]) + s[1..];
+            }
+            words[i] = string.Join('-', segments);
+        }
+        var joined = string.Join(' ', words);
+        return joined.Length > 80 ? joined[..80].Trim() : joined;
+    }
+
+    public static TagCategory InferTagCategory(string tagName)
+    {
+        var norm = Singularize(tagName.Trim().ToLowerInvariant());
+
+        return norm switch
+        {
+            "breakfast"
+            or "brunch"
+            or "lunch"
+            or "dinner"
+            or "main"
+            or "main dish"
+            or "entree"
+            or "side"
+            or "side dish"
+            or "appetizer"
+            or "starter"
+            or "snack"
+            or "dessert"
+            or "beverage"
+            or "drink"
+            or "cocktail"
+            or "soup"
+            or "stew"
+            or "salad"
+            or "sandwich"
+            or "bread"
+            or "sauce"
+            or "condiment"
+            or "dip"
+            or "dressing" => TagCategory.Course,
+
+            "american"
+            or "southern"
+            or "cajun"
+            or "creole"
+            or "tex-mex"
+            or "mexican"
+            or "latin"
+            or "caribbean"
+            or "italian"
+            or "french"
+            or "spanish"
+            or "greek"
+            or "mediterranean"
+            or "middle eastern"
+            or "moroccan"
+            or "indian"
+            or "thai"
+            or "vietnamese"
+            or "chinese"
+            or "japanese"
+            or "korean"
+            or "asian"
+            or "german"
+            or "british"
+            or "irish" => TagCategory.Cuisine,
+
+            "vegetarian"
+            or "vegan"
+            or "gluten-free"
+            or "gluten free"
+            or "dairy-free"
+            or "dairy free"
+            or "nut-free"
+            or "nut free"
+            or "egg-free"
+            or "low-carb"
+            or "low carb"
+            or "keto"
+            or "paleo"
+            or "whole30"
+            or "high-protein"
+            or "healthy" => TagCategory.Dietary,
+
+            "slow cooker"
+            or "instant pot"
+            or "pressure cooker"
+            or "air fryer"
+            or "grill"
+            or "grilling"
+            or "smoker"
+            or "dutch oven"
+            or "sheet pan"
+            or "one-pot"
+            or "one pot"
+            or "skillet"
+            or "cast iron"
+            or "wok"
+            or "sous vide"
+            or "stand mixer"
+            or "food processor"
+            or "blender"
+            or "no-cook" => TagCategory.Equipment,
+
+            _ => TagCategory.Custom,
+        };
     }
 
     private static string ToTitleCase(string text)

@@ -1,13 +1,18 @@
 namespace App.Core.Ingestion;
 
-public record LlmExtractionContext(string SourceContent, IReadOnlyList<string> AvailableTagNames);
+public record LlmExtractionContext(
+    string SourceContent,
+    IReadOnlyList<string> AvailableTagNames,
+    IReadOnlyList<string>? AvailableFoodNames = null
+);
 
 public record LlmVisionImageInput(int PageNumber, string MimeType, string Base64Data);
 
 public record LlmVisionExtractionContext(
     IReadOnlyList<LlmVisionImageInput> Images,
     string? SupplementalHintText,
-    IReadOnlyList<string> AvailableTagNames
+    IReadOnlyList<string> AvailableTagNames,
+    IReadOnlyList<string>? AvailableFoodNames = null
 );
 
 public record LlmSubstitutionContext(

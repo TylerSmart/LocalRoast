@@ -282,6 +282,8 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
 
         var proposedNameInput = draftPane.Locator("input[formcontrolname='proposedFoodItemName']");
         await Expect(proposedNameInput).ToHaveValueAsync("Toasted Sesame Oil");
+        await Expect(draftPane.Locator(".proposed-tag-toggle"))
+            .ToContainTextAsync("+ Quick & Easy");
 
         // 5. Approve & Publish
         await Page.Locator("button[aria-label='Approve and publish recipe']").ClickAsync();
@@ -289,6 +291,7 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         // Should navigate to published recipe view
         await Expect(Page).ToHaveURLAsync(new Regex(".*/recipes/[a-f0-9-]+$"));
         await Expect(Page.Locator(".recipe-title")).ToContainTextAsync("Crispy Sesame Tofu");
+        await Expect(Page.Locator(".hero-tag-badge")).ToContainTextAsync("Quick & Easy");
         await Expect(Page.Locator(".ingredients-column")).ToContainTextAsync("Toasted Sesame Oil");
 
         // 6. Navigate back to /ingest and verify published job can be removed from the ingestion list

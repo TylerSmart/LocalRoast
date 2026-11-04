@@ -244,4 +244,164 @@ public sealed class RecipeDraftNormalizerTests
         );
         StringAssert.Contains(normalizedIncomplete, "Cleaned Page Text:");
     }
+
+    [TestMethod]
+    public void Normalize_EmptyAppCatalogs_ProposesCleanTagsFoodItemsAndPreservesCollections()
+    {
+        var collectionId = Guid.NewGuid();
+        var raw = new LlmExtractedRecipePayload(
+            Title: "Skillet Chicken Parmesan",
+            Description: "Crisp weeknight chicken parmesan.",
+            BaseServings: 4,
+            YieldDisplay: "Serves 4",
+            PrepTimeMinutes: 20,
+            CookTimeMinutes: 25,
+            TotalTimeMinutes: 45,
+            Difficulty: "Medium",
+            SourceName: null,
+            SourceAuthor: null,
+            ConfidenceScore: 0.93m,
+            SuggestedTagNames: ["dinner", "italian", "one-pot", "Italian"],
+            Ingredients:
+            [
+                new(
+                    SectionName: null,
+                    Quantity: 1.5m,
+                    MaxQuantity: null,
+                    Unit: "lb",
+                    CanonicalFoodName: "boneless skinless chicken breast",
+                    DisplayName: "boneless, skinless chicken breasts",
+                    PreparationNote: "pounded to 1/2-inch thickness",
+                    IsOptional: false,
+                    OriginalRawText: "1 1/2 pounds boneless, skinless chicken breasts",
+                    SuggestedIsPantryStaple: false
+                ),
+                new(
+                    SectionName: null,
+                    Quantity: 1m,
+                    MaxQuantity: null,
+                    Unit: "tsp",
+                    CanonicalFoodName: "table salt",
+                    DisplayName: "table salt",
+                    PreparationNote: null,
+                    IsOptional: false,
+                    OriginalRawText: "1 teaspoon table salt",
+                    SuggestedIsPantryStaple: true
+                ),
+            ],
+            Steps:
+            [
+                new(
+                    SectionName: null,
+                    Instruction: "Bake until cheese melts, about 10 minutes.",
+                    IngredientIndices: [0, 1],
+                    Timers: null
+                ),
+            ]
+        );
+
+        var draft = RecipeDraftNormalizer.Normalize(
+            raw: raw,
+            catalogFoods: [],
+            tags: [],
+            sourceUrl: null,
+            fallbackSourceName: "America's Test Kitchen",
+            fallbackSourceAuthor: "America's Test Kitchen",
+            coverImagePath: "/api/uploads/recipes/chicken-parm.webp",
+            thumbnailImagePath: "/api/uploads/recipes/chicken-parm-thumb.webp",
+            fallbackSourceBookTitle: "The Complete America's Test Kitchen TV Show Cookbook",
+            fallbackSourceBookPage: 214,
+            fallbackCollectionIds: [collectionId]
+        );
+
+        Assert.AreEqual(0, draft.SuggestedTagIds?.Count);
+        CollectionAssert.AreEqual(
+            new[] { "Dinner", "Italian", "One-Pot" },
+            draft.ProposedTagNames?.ToArray()
+        );
+        CollectionAssert.AreEqual(new[] { collectionId }, draft.SuggestedCollectionIds?.ToArray());
+        Assert.AreEqual("America's Test Kitchen", draft.SourceName);
+        Assert.AreEqual(214, draft.SourceBookPage);
+        Assert.IsTrue(draft.Ingredients![1].SuggestedIsPantryStaple);
+    }
+
+    [TestMethod]
+    public void Normalize_MixedExistingAndNewTagsAndBidirectionalPluralFoods_MatchesCleanly()
+    {
+        var catalogFoods = new List<CatalogFoodLookupItem>
+        {
+            new(Guid.NewGuid(), "Eggs", "eggs", false, []),
+        };
+        var existingDessertTagId = Guid.NewGuid();
+        var tags = new List<CatalogTagLookupItem>
+        {
+            new(existingDessertTagId, "Dessert", "dessert", "course-dessert"),
+        };
+
+        var raw = new LlmExtractedRecipePayload(
+            Title: "French Silk Pie",
+            Description: null,
+            BaseServings: 8,
+            YieldDisplay: "1 pie",
+            PrepTimeMinutes: 30,
+            CookTimeMinutes: 15,
+            TotalTimeMinutes: 45,
+            Difficulty: "Project",
+            SourceName: null,
+            SourceAuthor: null,
+            ConfidenceScore: 0.91m,
+            SuggestedTagNames: ["Desserts", "French", "Make-Ahead"],
+            Ingredients:
+            [
+                new(
+                    SectionName: null,
+                    Quantity: 4m,
+                    MaxQuantity: null,
+                    Unit: "whole",
+                    CanonicalFoodName: "egg",
+                    DisplayName: "large eggs",
+                    PreparationNote: null,
+                    IsOptional: false,
+                    OriginalRawText: "4 large eggs"
+                ),
+            ],
+            Steps:
+            [
+                new(
+                    SectionName: null,
+                    Instruction: "Whip until silky.",
+                    IngredientIndices: [0],
+                    Timers: null
+                ),
+            ]
+        );
+
+        var draft = RecipeDraftNormalizer.Normalize(
+            raw,
+            catalogFoods,
+            tags,
+            sourceUrl: null,
+            fallbackSourceName: null,
+            fallbackSourceAuthor: null,
+            coverImagePath: null,
+            thumbnailImagePath: null
+        );
+
+        Assert.AreEqual(catalogFoods[0].Id, draft.Ingredients![0].MatchedFoodItemId);
+        CollectionAssert.AreEqual(new[] { existingDessertTagId }, draft.SuggestedTagIds?.ToArray());
+        CollectionAssert.AreEqual(
+            new[] { "French", "Make-Ahead" },
+            draft.ProposedTagNames?.ToArray()
+        );
+    }
+
+    [TestMethod]
+    public void InferTagCategory_MapsCommonCategoriesCorrectly()
+    {
+        Assert.AreEqual(TagCategory.Course, RecipeDraftNormalizer.InferTagCategory("Dinner"));
+        Assert.AreEqual(TagCategory.Cuisine, RecipeDraftNormalizer.InferTagCategory("Italian"));
+        Assert.AreEqual(TagCategory.Dietary, RecipeDraftNormalizer.InferTagCategory("Gluten-Free"));
+        Assert.AreEqual(TagCategory.Equipment, RecipeDraftNormalizer.InferTagCategory("Sheet Pan"));
+        Assert.AreEqual(TagCategory.Custom, RecipeDraftNormalizer.InferTagCategory("Weeknight"));
+    }
 }

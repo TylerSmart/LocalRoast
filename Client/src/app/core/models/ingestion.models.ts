@@ -147,6 +147,7 @@ export interface IngestionExtractedDraftDto {
   sourceBookPage?: number | null;
   retainSourceAttachments?: boolean;
   extractedModel?: string | null;
+  proposedTagNames?: string[] | null;
 }
 
 export interface EnqueueWebUrlIngestionRequest {
@@ -156,6 +157,14 @@ export interface EnqueueWebUrlIngestionRequest {
 export interface EnqueueRawTextIngestionRequest {
   rawText: string;
   titleHint?: string | null;
+  sourceName?: string | null;
+  sourceAuthor?: string | null;
+  sourceBookTitle?: string | null;
+  sourceBookPage?: number | null;
+  coverImagePath?: string | null;
+  thumbnailImagePath?: string | null;
+  collectionIds?: string[] | null;
+  autoPublish?: boolean;
 }
 
 export interface EnqueuePdfBatchMetadata {

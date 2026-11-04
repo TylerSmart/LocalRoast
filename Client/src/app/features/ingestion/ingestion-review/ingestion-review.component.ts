@@ -98,8 +98,10 @@ export class IngestionReviewComponent implements OnInit {
   readonly foodItems = signal<FoodItemDto[]>([]);
   readonly collections = signal<CollectionDto[]>([]);
   readonly tags = signal<TagDto[]>([]);
+  readonly proposedTagNames = signal<string[]>([]);
   readonly selectedCollectionIds = signal<Set<string>>(new Set());
   readonly selectedTagIds = signal<Set<string>>(new Set());
+  readonly selectedProposedTagNames = signal<Set<string>>(new Set());
 
   readonly form = this.fb.group({
     title: ['', [Validators.required, Validators.maxLength(200)]],
@@ -222,6 +224,15 @@ export class IngestionReviewComponent implements OnInit {
     }
     if (draft.suggestedTagIds && draft.suggestedTagIds.length > 0) {
       this.selectedTagIds.set(new Set(draft.suggestedTagIds));
+    } else {
+      this.selectedTagIds.set(new Set());
+    }
+    if (draft.proposedTagNames && draft.proposedTagNames.length > 0) {
+      this.proposedTagNames.set([...draft.proposedTagNames]);
+      this.selectedProposedTagNames.set(new Set(draft.proposedTagNames));
+    } else {
+      this.proposedTagNames.set([]);
+      this.selectedProposedTagNames.set(new Set());
     }
 
     this.ingredientsArray.clear();
@@ -367,6 +378,16 @@ export class IngestionReviewComponent implements OnInit {
     this.selectedTagIds.set(next);
   }
 
+  toggleProposedTag(name: string): void {
+    const next = new Set(this.selectedProposedTagNames());
+    if (next.has(name)) {
+      next.delete(name);
+    } else {
+      next.add(name);
+    }
+    this.selectedProposedTagNames.set(next);
+  }
+
   setMobilePane(pane: 'source' | 'draft'): void {
     this.mobilePane.set(pane);
   }
@@ -452,6 +473,7 @@ export class IngestionReviewComponent implements OnInit {
       retainSourceAttachments: Boolean(raw.retainSourceAttachments),
       suggestedCollectionIds: Array.from(this.selectedCollectionIds()),
       suggestedTagIds: Array.from(this.selectedTagIds()),
+      proposedTagNames: Array.from(this.selectedProposedTagNames()),
       ingredients,
       steps,
       confidenceScore: this.job()?.confidenceScore ?? 0.8,

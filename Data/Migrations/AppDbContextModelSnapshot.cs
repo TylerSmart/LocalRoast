@@ -310,6 +310,9 @@ namespace App.Data.Migrations
                     b.Property<int>("AttemptCount")
                         .HasColumnType("int");
 
+                    b.Property<bool>("AutoPublish")
+                        .HasColumnType("bit");
+
                     b.Property<string>("Channel")
                         .IsRequired()
                         .HasMaxLength(32)
@@ -348,6 +351,10 @@ namespace App.Data.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
+                    b.Property<string>("InitialCollectionIdsJson")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
                     b.Property<DateTimeOffset>("ModifiedAt")
                         .HasColumnType("datetimeoffset");
 
@@ -381,6 +388,10 @@ namespace App.Data.Migrations
                         .HasMaxLength(200000)
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("SourceAuthor")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
                     b.Property<int?>("SourceBookPage")
                         .HasColumnType("int");
 
@@ -391,6 +402,10 @@ namespace App.Data.Migrations
                     b.Property<string>("SourceFilesJson")
                         .HasMaxLength(200000)
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("SourceName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
 
                     b.Property<string>("SourceUrl")
                         .HasMaxLength(2048)

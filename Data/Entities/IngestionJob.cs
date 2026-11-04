@@ -28,9 +28,17 @@ public sealed class IngestionJob : IAuditable
 
     public string? PdfInspectionJson { get; set; }
 
+    public string? SourceName { get; set; }
+
+    public string? SourceAuthor { get; set; }
+
     public string? SourceBookTitle { get; set; }
 
     public int? SourceBookPage { get; set; }
+
+    public string? InitialCollectionIdsJson { get; set; }
+
+    public bool AutoPublish { get; set; }
 
     public string? ExtractedDraftJson { get; set; }
 

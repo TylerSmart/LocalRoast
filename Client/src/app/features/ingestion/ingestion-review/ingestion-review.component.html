@@ -366,7 +366,7 @@
                 </div>
               }
 
-              @if (tags().length > 0) {
+              @if (tags().length > 0 || proposedTagNames().length > 0) {
                 <div class="taxonomy-chip-strip">
                   <span class="strip-label">Suggested Tags:</span>
                   <div class="chips-row">
@@ -378,6 +378,17 @@
                         (click)="toggleTag(tg.id)"
                       >
                         {{ tg.name }}
+                      </button>
+                    }
+                    @for (propTag of proposedTagNames(); track propTag) {
+                      <button
+                        type="button"
+                        class="chip-toggle proposed-tag-toggle"
+                        [class.selected]="selectedProposedTagNames().has(propTag)"
+                        (click)="toggleProposedTag(propTag)"
+                        [attr.aria-label]="'Toggle new tag ' + propTag"
+                      >
+                        + {{ propTag }}
                       </button>
                     }
                   </div>

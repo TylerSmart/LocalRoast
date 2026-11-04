@@ -362,8 +362,19 @@
 
     &.tag-toggle.selected {
       background-color: var(--mat-sys-secondary, #625b71);
-      color: #ffffff;
+      color: var(--mat-sys-on-secondary, #ffffff);
       border-color: var(--mat-sys-secondary, #625b71);
+    }
+
+    &.proposed-tag-toggle {
+      border-style: dashed;
+
+      &.selected {
+        border-style: solid;
+        background-color: var(--mat-sys-tertiary, #7d5260);
+        color: var(--mat-sys-on-tertiary, #ffffff);
+        border-color: var(--mat-sys-tertiary, #7d5260);
+      }
     }
   }
 }

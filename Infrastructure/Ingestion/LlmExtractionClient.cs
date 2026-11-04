@@ -789,10 +789,14 @@ public sealed class LlmExtractionClient(HttpClient httpClient) : ILlmExtractionC
 
     private static string BuildExtractionSystemPrompt(LlmExtractionContext context)
     {
-        var tagList =
+        var tagRule =
             context.AvailableTagNames.Count > 0
-                ? string.Join(", ", context.AvailableTagNames)
-                : "Main, Side, Breakfast, Lunch, Dessert, Appetizer, Vegetarian, Gluten-Free, Sheet Pan, One-Pot";
+                ? $"SuggestedTagNames: assign 2 to 6 concise, reusable culinary tags (course like \"Dinner\", \"Side\", \"Dessert\", \"Breakfast\"; cuisine like \"Italian\", \"Mexican\", \"Chinese\", \"American\"; dietary like \"Vegetarian\", \"Gluten-Free\"; or method/style like \"Grill\", \"Slow Cooker\", \"Sheet Pan\", \"One-Pot\", \"Baking\", \"Weeknight\"). Reuse applicable tags from Existing Tags: [{string.Join(", ", context.AvailableTagNames)}], and propose new concise Title-Case tags when needed. Avoid overly specific single-recipe tags."
+                : "SuggestedTagNames: propose 2 to 6 concise, reusable Title-Case culinary tags (course like \"Dinner\", \"Side\", \"Dessert\", \"Breakfast\"; cuisine like \"Italian\", \"Mexican\", \"Chinese\", \"American\"; dietary like \"Vegetarian\", \"Gluten-Free\"; or method/style like \"Grill\", \"Slow Cooker\", \"Sheet Pan\", \"One-Pot\", \"Baking\", \"Weeknight\"). Avoid overly specific single-recipe tags.";
+
+        var foodCatalogSection = context.AvailableFoodNames is { Count: > 0 }
+            ? $"\n\nExisting Food Catalog (reuse exact name in \"canonicalFoodName\" whenever semantically identical):\n[{string.Join(", ", context.AvailableFoodNames)}]"
+            : "";
 
         return $$"""
 You are an expert culinary recipe extractor and normalizer.
@@ -806,11 +810,12 @@ Rules:
    - "quantity": numeric decimal or null (e.g. 1.5).
    - "maxQuantity": upper bound if a range was specified (e.g. 2.0 for "1.5 to 2 tbsp"), else null.
    - "unit": normalized unit code (tsp, tbsp, fl_oz, cup, pt, qt, gal, ml, l, oz, lb, g, kg, pinch, dash, clove, can, bunch, slice, whole, or custom unit name).
-   - "canonicalFoodName": the singular canonical ingredient name without preparation or quantities (e.g. "yellow onion", "garlic", "chicken thigh", "olive oil").
-   - "displayName": recipe display name as written (e.g. "extra-virgin olive oil").
-   - "preparationNote": preparation instructions (e.g. "finely diced", "room temperature").
+   - "canonicalFoodName": the singular canonical ingredient name without preparation, brand, or quantities (e.g. "yellow onion", "garlic", "chicken thigh", "all-purpose flour", "unsalted butter"). When an ingredient matches an item in Existing Food Catalog, reuse that exact canonical name.
+   - "displayName": recipe display name as written without leading quantity/unit (e.g. "extra-virgin olive oil").
+   - "preparationNote": preparation instructions or parenthetical weights (e.g. "finely diced", "room temperature", "7 1/2 ounces").
    - "isOptional": boolean flag.
    - "originalRawText": verbatim line as originally written.
+   - "suggestedIsPantryStaple": boolean flag; true ONLY for basic everyday household staples typically kept on hand (water, salt, black pepper, cooking oils, basic vinegars, all-purpose flour, sugar, baking powder/soda, dried spices/herbs, soy sauce), false for fresh produce, meats, dairy, canned goods, and specialty items.
 4. Steps:
    - "sectionName": optional section header (e.g. "Prepare the Marinade").
    - "instruction": full clear step instruction text.
@@ -818,18 +823,22 @@ Rules:
    - "timers": list of timers for any duration in this step:
      - "durationSeconds": integer seconds (e.g. 15 minutes = 900, 1 hour = 3600).
      - "label": short label (e.g. "Simmer", "Bake", "Rest").
-5. SuggestedTagNames: choose applicable tags from: [{{tagList}}].
+5. {{tagRule}}
 6. ConfidenceScore: decimal number between 0.0 and 1.0 representing your extraction confidence.
-7. Output ONLY a single valid JSON object matching the requested schema with no conversational text.
+7. Output ONLY a single valid JSON object matching the requested schema with no conversational text.{{foodCatalogSection}}
 """;
     }
 
     private static string BuildVisionExtractionSystemPrompt(LlmVisionExtractionContext context)
     {
-        var tagList =
+        var tagRule =
             context.AvailableTagNames.Count > 0
-                ? string.Join(", ", context.AvailableTagNames)
-                : "Main, Side, Breakfast, Lunch, Dessert, Appetizer, Vegetarian, Gluten-Free, Sheet Pan, One-Pot";
+                ? $"SuggestedTagNames: assign 2 to 6 concise, reusable culinary tags (course like \"Dinner\", \"Side\", \"Dessert\", \"Breakfast\"; cuisine like \"Italian\", \"Mexican\", \"Chinese\", \"American\"; dietary like \"Vegetarian\", \"Gluten-Free\"; or method/style like \"Grill\", \"Slow Cooker\", \"Sheet Pan\", \"One-Pot\", \"Baking\", \"Weeknight\"). Reuse applicable tags from Existing Tags: [{string.Join(", ", context.AvailableTagNames)}], and propose new concise Title-Case tags when needed. Avoid overly specific single-recipe tags."
+                : "SuggestedTagNames: propose 2 to 6 concise, reusable Title-Case culinary tags (course like \"Dinner\", \"Side\", \"Dessert\", \"Breakfast\"; cuisine like \"Italian\", \"Mexican\", \"Chinese\", \"American\"; dietary like \"Vegetarian\", \"Gluten-Free\"; or method/style like \"Grill\", \"Slow Cooker\", \"Sheet Pan\", \"One-Pot\", \"Baking\", \"Weeknight\"). Avoid overly specific single-recipe tags.";
+
+        var foodCatalogSection = context.AvailableFoodNames is { Count: > 0 }
+            ? $"\n\nExisting Food Catalog (reuse exact name in \"canonicalFoodName\" whenever semantically identical):\n[{string.Join(", ", context.AvailableFoodNames)}]"
+            : "";
 
         return $$"""
 You are an expert culinary vision OCR transcriber and recipe extractor.
@@ -844,11 +853,12 @@ Rules:
    - "quantity": numeric decimal or null (e.g. 1.5).
    - "maxQuantity": upper bound if a range was specified (e.g. 2.0 for "1.5 to 2 tbsp"), else null.
    - "unit": normalized unit code (tsp, tbsp, fl_oz, cup, pt, qt, gal, ml, l, oz, lb, g, kg, pinch, dash, clove, can, bunch, slice, whole, or custom unit name).
-   - "canonicalFoodName": the singular canonical ingredient name without preparation or quantities (e.g. "yellow onion", "garlic", "chicken thigh", "olive oil").
-   - "displayName": recipe display name as written (e.g. "extra-virgin olive oil").
-   - "preparationNote": preparation instructions (e.g. "finely diced", "room temperature").
+   - "canonicalFoodName": the singular canonical ingredient name without preparation, brand, or quantities (e.g. "yellow onion", "garlic", "chicken thigh", "all-purpose flour", "unsalted butter"). When an ingredient matches an item in Existing Food Catalog, reuse that exact canonical name.
+   - "displayName": recipe display name as written without leading quantity/unit (e.g. "extra-virgin olive oil").
+   - "preparationNote": preparation instructions or parenthetical weights (e.g. "finely diced", "room temperature", "7 1/2 ounces").
    - "isOptional": boolean flag.
    - "originalRawText": verbatim line as originally printed.
+   - "suggestedIsPantryStaple": boolean flag; true ONLY for basic everyday household staples typically kept on hand (water, salt, black pepper, cooking oils, basic vinegars, all-purpose flour, sugar, baking powder/soda, dried spices/herbs, soy sauce), false for fresh produce, meats, dairy, canned goods, and specialty items.
 5. Steps:
    - "sectionName": optional section header (e.g. "Prepare the Marinade").
    - "instruction": full clear step instruction text.
@@ -856,9 +866,9 @@ Rules:
    - "timers": list of timers for any duration in this step:
      - "durationSeconds": integer seconds (e.g. 15 minutes = 900, 1 hour = 3600).
      - "label": short label (e.g. "Simmer", "Bake", "Rest").
-6. SuggestedTagNames: choose applicable tags from: [{{tagList}}].
+6. {{tagRule}}
 7. ConfidenceScore: decimal number between 0.0 and 1.0 representing your transcription/extraction confidence.
-8. Output ONLY a single valid JSON object matching the requested schema with no conversational text.
+8. Output ONLY a single valid JSON object matching the requested schema with no conversational text.{{foodCatalogSection}}
 """;
     }
 

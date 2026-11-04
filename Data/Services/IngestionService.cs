@@ -823,12 +823,40 @@ public sealed class IngestionService(
             displayTitle = displayTitle[..200];
         }
 
+        var coverPath = IngestionCatalogMaterializer.ValidateOptionalMediaPath(
+            request.CoverImagePath
+        );
+        var thumbPath =
+            IngestionCatalogMaterializer.ValidateOptionalMediaPath(request.ThumbnailImagePath)
+            ?? coverPath;
+
+        string? initialCollectionsJson = null;
+        if (request.CollectionIds is { Count: > 0 })
+        {
+            var distinctCollections = request.CollectionIds.Distinct().ToList();
+            initialCollectionsJson = JsonSerializer.Serialize(distinctCollections, JsonOptions);
+        }
+
         var job = new IngestionJob
         {
             Channel = IngestionChannel.RawText,
             Status = IngestionJobStatus.Queued,
             RawText = trimmed,
             DisplayTitle = displayTitle,
+            SourceName = string.IsNullOrWhiteSpace(request.SourceName)
+                ? null
+                : request.SourceName.Trim(),
+            SourceAuthor = string.IsNullOrWhiteSpace(request.SourceAuthor)
+                ? null
+                : request.SourceAuthor.Trim(),
+            SourceBookTitle = string.IsNullOrWhiteSpace(request.SourceBookTitle)
+                ? null
+                : request.SourceBookTitle.Trim(),
+            SourceBookPage = request.SourceBookPage,
+            DownloadedCoverImagePath = coverPath,
+            DownloadedThumbnailImagePath = thumbPath,
+            InitialCollectionIdsJson = initialCollectionsJson,
+            AutoPublish = request.AutoPublish,
         };
 
         dbContext.IngestionJobs.Add(job);
@@ -841,7 +869,7 @@ public sealed class IngestionService(
             Status: job.Status,
             DisplayTitle: job.DisplayTitle,
             SourceUrl: null,
-            ThumbnailImagePath: null,
+            ThumbnailImagePath: job.DownloadedThumbnailImagePath,
             ConfidenceScore: null,
             StatusDetail: "Queued for extraction.",
             AttemptCount: 0,
@@ -936,35 +964,12 @@ public sealed class IngestionService(
                     && !string.IsNullOrWhiteSpace(ing.ProposedFoodItemName)
                 )
                 {
-                    var cleanName = ing.ProposedFoodItemName.Trim();
-                    var normName = cleanName.ToLowerInvariant();
-
-                    var existing =
-                        await dbContext.FoodItems.FirstOrDefaultAsync(
-                            f => f.NormalizedName == normName,
-                            cancellationToken
-                        )
-                        ?? await dbContext
-                            .FoodItemAliases.Where(a => a.NormalizedAlias == normName)
-                            .Select(a => a.FoodItem)
-                            .FirstOrDefaultAsync(cancellationToken);
-
-                    if (existing is not null)
-                    {
-                        foodItemId = existing.Id;
-                    }
-                    else
-                    {
-                        var newFoodItem = new FoodItem
-                        {
-                            Name = cleanName,
-                            NormalizedName = normName,
-                            IsPantryStaple = ing.SuggestedIsPantryStaple,
-                        };
-                        dbContext.FoodItems.Add(newFoodItem);
-                        await dbContext.SaveChangesAsync(cancellationToken);
-                        foodItemId = newFoodItem.Id;
-                    }
+                    foodItemId = await IngestionCatalogMaterializer.ResolveOrCreateFoodItemAsync(
+                        dbContext,
+                        ing.ProposedFoodItemName,
+                        ing.SuggestedIsPantryStaple,
+                        cancellationToken
+                    );
                 }
 
                 ingredientsInput.Add(
@@ -1003,7 +1008,15 @@ public sealed class IngestionService(
             }
         }
 
-        // 3. Create published recipe
+        // 3. Resolve & auto-create any proposed tags
+        var resolvedTagIds = await IngestionCatalogMaterializer.ResolveAndMaterializeTagsAsync(
+            dbContext,
+            draft.SuggestedTagIds,
+            draft.ProposedTagNames,
+            cancellationToken
+        );
+
+        // 4. Create published recipe
         var upsertRequest = new UpsertRecipeRequest(
             Title: draft.Title,
             Description: draft.Description,
@@ -1024,7 +1037,7 @@ public sealed class IngestionService(
             CoverImagePath: draft.CoverImagePath,
             ThumbnailImagePath: draft.ThumbnailImagePath,
             CollectionIds: draft.SuggestedCollectionIds,
-            TagIds: draft.SuggestedTagIds,
+            TagIds: resolvedTagIds,
             ExtractedModel: job.ExtractedModel
         );
 

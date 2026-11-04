@@ -23,14 +23,14 @@ Usage:
   # 2. Dry-Run only Chapter 5 (Pasta) with first 5 recipes:
   python scripts/import_atk_epub.py --dry-run --chapter 5 --limit 5
 
-  # 3. Export all 1,600+ recipes to a structured JSON file:
-  python scripts/import_atk_epub.py --output-json atk_recipes.json
+  # 3. Enqueue first 10 recipes into LocalRoast's LLM Ingestion Queue (DEFAULT API mode):
+  python scripts/import_atk_epub.py --email your@email.com --password yourpassword --limit 10
 
-  # 4. Import directly into LocalRoast API (e.g. test with 10 recipes first):
-  python scripts/import_atk_epub.py --import-api --url http://localhost:5041 --username your@email.com --password yourpassword --limit 10
+  # 4. Enqueue full book into LLM Ingestion Queue (creates chapter Collections, uploads dish photos, auto-publishes):
+  python scripts/import_atk_epub.py --email your@email.com --password yourpassword
 
-  # 5. Import full book with photos:
-  python scripts/import_atk_epub.py --import-api --url http://localhost:5041 --username your@email.com --password yourpassword --upload-images
+  # 5. Enqueue into Review Inbox without auto-publishing:
+  python scripts/import_atk_epub.py --email your@email.com --password yourpassword --limit 5 --review-only
 """
 
 import argparse
@@ -354,29 +354,66 @@ def parse_atk_epub(epub_path):
     return final_recipes
 
 
-def format_recipe_for_localroast(r):
+def format_recipe_as_llm_raw_text(r):
+    """Format an extracted recipe dictionary into a clean raw-text document for LLM extraction."""
+    lines = [
+        f"Title: {r['title']}",
+        f"Author: {BOOK_AUTHOR}",
+        f"Source: {BOOK_AUTHOR}",
+        f"Cookbook: {BOOK_TITLE}",
+    ]
+    if r.get("page"):
+        lines.append(f"Page: {r['page']}")
+    if r.get("chapter"):
+        lines.append(f"Chapter: {r['chapter']}")
+    if r.get("yield"):
+        lines.append(f"Yield: {r['yield']} (Base Servings: {r['base_servings']})")
+    else:
+        lines.append(f"Base Servings: {r['base_servings']}")
+
+    if r.get("description"):
+        lines.append("")
+        lines.append("Description & Kitchen Notes:")
+        lines.append(r["description"])
+
+    lines.append("")
+    lines.append("Ingredients:")
+    last_section = None
+    for ing in r["ingredients"]:
+        sec = ing.get("section")
+        if sec and sec != last_section:
+            lines.append(f"\n[{sec}]")
+            last_section = sec
+        lines.append(f"- {ing['text']}")
+
+    lines.append("")
+    lines.append("Instructions:")
+    for i, step_text in enumerate(r["steps"]):
+        clean_step = re.sub(r"^\d+\.\s*", "", step_text)
+        lines.append(f"{i + 1}. {clean_step}")
+
+    return "\n".join(lines)[:99000]
+
+
+def format_recipe_for_localroast(r, collection_id=None):
     """Format an extracted recipe dictionary into LocalRoast UpsertRecipeRequest structure."""
-    # Build ingredients
     ingredients_input = []
     for ing in r["ingredients"]:
         raw = ing["text"]
         ingredients_input.append(
             {
-                "sectionName": ing["section"],
-                "displayName": raw,
-                "originalRawText": raw,
+                "sectionName": ing["section"][:150] if ing["section"] else None,
+                "displayName": raw[:200],
+                "originalRawText": raw[:500],
                 "isOptional": "(optional)" in raw.lower(),
             }
         )
 
-    # Build steps
     steps_input = []
     for i, step_text in enumerate(r["steps"]):
-        # Strip leading number if present (e.g. '1. ')
         clean_step = re.sub(r"^\d+\.\s*", "", step_text)
-        steps_input.append({"stepNumber": i + 1, "instruction": clean_step})
+        steps_input.append({"stepNumber": i + 1, "instruction": clean_step[:4000]})
 
-    # Clean description
     desc = r["description"] or ""
 
     return {
@@ -391,44 +428,126 @@ def format_recipe_for_localroast(r):
         "sourceBookPage": r["page"],
         "ingredients": ingredients_input,
         "steps": steps_input,
-        "collectionNames": [r["chapter"]],
-        "tagNames": ["America's Test Kitchen", "Cookbook"],
+        "collectionIds": [collection_id] if collection_id else [],
+        "_chapter": r["chapter"],
         "_imagePathInZip": r["image_path"],
     }
 
 
-def authenticate_api(api_url, username, password):
+def normalize_api_base(api_url):
+    """Ensure API URL ends with /api."""
+    trimmed = api_url.rstrip("/")
+    if not trimmed.lower().endswith("/api"):
+        trimmed += "/api"
+    return trimmed
+
+
+def api_json_request(method, url, token=None, payload_obj=None):
+    """Helper for authenticated JSON HTTP requests."""
+    headers = {"Accept": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    data = None
+    if payload_obj is not None:
+        headers["Content-Type"] = "application/json"
+        data = json.dumps(payload_obj).encode("utf-8")
+
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    with urllib.request.urlopen(req) as resp:
+        raw = resp.read().decode("utf-8")
+        return json.loads(raw) if raw else None
+
+
+def authenticate_api(api_base, email, password):
     """Login to LocalRoast and obtain a JWT Bearer token."""
-    login_url = f"{api_url.rstrip('/')}/auth/login"
-    payload = json.dumps({"usernameOrEmail": username, "password": password}).encode("utf-8")
-    req = urllib.request.Request(
-        login_url, data=payload, headers={"Content-Type": "application/json"}
-    )
+    login_url = f"{api_base}/auth/login"
     try:
-        with urllib.request.urlopen(req) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            token = data.get("token") or data.get("accessToken")
-            if not token:
-                raise ValueError("No token in login response.")
-            print("Successfully authenticated with LocalRoast API.")
-            return token
+        data = api_json_request("POST", login_url, payload_obj={"email": email, "password": password})
+        token = (data or {}).get("token") or (data or {}).get("accessToken")
+        if not token:
+            raise ValueError("No token in login response.")
+        print("Successfully authenticated with LocalRoast API.")
+        return token
     except urllib.error.HTTPError as e:
         err = e.read().decode("utf-8", errors="ignore")
         raise RuntimeError(f"Authentication failed ({e.code}): {err}")
 
 
-def upload_cover_image(api_url, token, zip_path, image_inner_path):
-    """Extract an image from EPUB zip and upload to /media/recipe-cover."""
-    if not image_inner_path:
+def inspect_llm_settings(api_base, token):
+    """Fetch and display active LLM settings so the user can see which model will run."""
+    try:
+        settings = api_json_request("GET", f"{api_base}/llm-settings", token=token)
+        if settings:
+            provider = settings.get("provider", "Unknown")
+            base_url = settings.get("baseUrl", "")
+            text_model = settings.get("textModel")
+            print(f"LLM Queue Config: Provider={provider} ({base_url}), TextModel={text_model or 'NOT SET'}")
+            if not text_model:
+                print(
+                    "  [!] Warning: No Text Model is selected in LLM Settings yet. "
+                    "Jobs will queue safely and pause in WaitingForLlmHost until you select a Text Model."
+                )
+    except Exception as ex:
+        print(f"  (Notice: could not query /api/llm-settings: {ex})")
+
+
+def ensure_chapter_collections(api_base, token, recipes):
+    """Ensure LocalRoast Collections exist for every ATK chapter in the selection."""
+    chapter_map = {}
+    unique_chapters = []
+    for r in recipes:
+        ch = (r.get("chapter") or "").strip()[:100]
+        if ch and ch not in unique_chapters:
+            unique_chapters.append(ch)
+
+    if not unique_chapters:
+        return chapter_map
+
+    existing = api_json_request("GET", f"{api_base}/collections", token=token) or []
+    by_norm = {c["name"].strip().lower(): c["id"] for c in existing if c.get("name") and c.get("id")}
+
+    created_count = 0
+    for idx, ch in enumerate(unique_chapters):
+        norm = ch.lower()
+        if norm in by_norm:
+            chapter_map[ch] = by_norm[norm]
+        else:
+            created = api_json_request(
+                "POST",
+                f"{api_base}/collections",
+                token=token,
+                payload_obj={
+                    "name": ch,
+                    "description": f"Chapter from {BOOK_TITLE}",
+                    "sortOrder": idx + 1,
+                },
+            )
+            if created and created.get("id"):
+                chapter_map[ch] = created["id"]
+                by_norm[norm] = created["id"]
+                created_count += 1
+
+    print(
+        f"Resolved {len(chapter_map)} chapter collection(s) "
+        f"({created_count} newly created, {len(chapter_map) - created_count} reused)."
+    )
+    return chapter_map
+
+
+def upload_cover_image(api_base, token, zip_handle, image_inner_path):
+    """Extract an image from an open EPUB zip handle and upload to /api/media/recipe-cover."""
+    if not image_inner_path or zip_handle is None:
         return None
     try:
-        with zipfile.ZipFile(zip_path, "r") as z:
-            if image_inner_path not in z.namelist():
-                return None
-            img_bytes = z.read(image_inner_path)
+        if image_inner_path not in zip_handle.namelist():
+            return None
+        img_bytes = zip_handle.read(image_inner_path)
 
         boundary = "----WebKitFormBoundaryLocalRoastImport777"
         filename = os.path.basename(image_inner_path)
+        ext = os.path.splitext(filename)[1].lower()
+        mime = "image/png" if ext == ".png" else "image/webp" if ext == ".webp" else "image/jpeg"
 
         body = io.BytesIO()
         body.write(f"--{boundary}\r\n".encode("utf-8"))
@@ -437,11 +556,11 @@ def upload_cover_image(api_url, token, zip_path, image_inner_path):
                 "utf-8"
             )
         )
-        body.write(b"Content-Type: image/jpeg\r\n\r\n")
+        body.write(f"Content-Type: {mime}\r\n\r\n".encode("utf-8"))
         body.write(img_bytes)
         body.write(f"\r\n--{boundary}--\r\n".encode("utf-8"))
 
-        media_url = f"{api_url.rstrip('/')}/media/recipe-cover"
+        media_url = f"{api_base}/media/recipe-cover"
         req = urllib.request.Request(
             media_url,
             data=body.getvalue(),
@@ -449,34 +568,50 @@ def upload_cover_image(api_url, token, zip_path, image_inner_path):
                 "Authorization": f"Bearer {token}",
                 "Content-Type": f"multipart/form-data; boundary={boundary}",
             },
+            method="POST",
         )
         with urllib.request.urlopen(req) as resp:
-            res_data = json.loads(resp.read().decode("utf-8"))
-            return res_data  # { coverUrlPath, thumbnailUrlPath, width, height }
+            return json.loads(resp.read().decode("utf-8"))  # { coverImagePath, thumbnailImagePath }
     except Exception as ex:
         print(f"    (Notice: image upload failed for {image_inner_path}: {ex})")
         return None
 
 
-def post_recipe_to_api(api_url, token, recipe_payload):
-    """Post structured recipe to LocalRoast POST /recipes."""
-    url = f"{api_url.rstrip('/')}/recipes"
-    # Remove internal metadata key
-    clean_payload = {k: v for k, v in recipe_payload.items() if not k.startswith("_")}
-    payload_bytes = json.dumps(clean_payload).encode("utf-8")
+def enqueue_recipe_to_llm_queue(
+    api_base,
+    token,
+    recipe_dict,
+    collection_id=None,
+    cover_image_path=None,
+    thumbnail_image_path=None,
+    auto_publish=True,
+):
+    """Enqueue a parsed recipe into LocalRoast POST /api/ingestion/jobs/text for LLM extraction."""
+    raw_text = format_recipe_as_llm_raw_text(recipe_dict)
+    payload = {
+        "rawText": raw_text,
+        "titleHint": recipe_dict["title"][:200],
+        "sourceName": BOOK_AUTHOR,
+        "sourceAuthor": BOOK_AUTHOR,
+        "sourceBookTitle": BOOK_TITLE,
+        "sourceBookPage": recipe_dict["page"],
+        "coverImagePath": cover_image_path,
+        "thumbnailImagePath": thumbnail_image_path,
+        "collectionIds": [collection_id] if collection_id else [],
+        "autoPublish": auto_publish,
+    }
+    return api_json_request("POST", f"{api_base}/ingestion/jobs/text", token=token, payload_obj=payload)
 
-    req = urllib.request.Request(
-        url,
-        data=payload_bytes,
-        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-    )
-    with urllib.request.urlopen(req) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+
+def post_recipe_directly_to_api(api_base, token, recipe_payload):
+    """Fallback direct creation to LocalRoast POST /api/recipes (skips LLM queue)."""
+    clean_payload = {k: v for k, v in recipe_payload.items() if not k.startswith("_")}
+    return api_json_request("POST", f"{api_base}/recipes", token=token, payload_obj=clean_payload)
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Extract and import America's Test Kitchen EPUB into LocalRoast."
+        description="Extract and enqueue America's Test Kitchen EPUB into LocalRoast's LLM ingestion queue."
     )
     parser.add_argument(
         "--epub",
@@ -486,7 +621,7 @@ def main():
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Parse and display summary stats and sample recipes without saving.",
+        help="Parse and display summary stats and sample LLM payload without calling the API.",
     )
     parser.add_argument(
         "--chapter",
@@ -497,20 +632,44 @@ def main():
     parser.add_argument(
         "--limit", type=int, default=None, help="Limit number of recipes to process."
     )
+    parser.add_argument(
+        "--offset", type=int, default=0, help="Skip the first N matched recipes (useful for resuming)."
+    )
     parser.add_argument("--output-json", type=str, default=None, help="Export parsed recipes to a JSON file.")
+    parser.add_argument(
+        "--enqueue-llm",
+        action="store_true",
+        default=True,
+        help="Enqueue recipes into LocalRoast's LLM Ingestion Queue (default mode).",
+    )
+    parser.add_argument(
+        "--direct-import",
+        action="store_true",
+        help="Bypass the LLM queue and POST raw unparsed strings directly to /api/recipes.",
+    )
     parser.add_argument(
         "--import-api",
         action="store_true",
-        help="Import recipes directly into LocalRoast via REST API.",
+        help="Trigger API import (also triggered automatically when --email/--username or --token is provided).",
     )
-    parser.add_argument("--url", default="http://localhost:5041", help="LocalRoast API base URL")
-    parser.add_argument("--username", help="LocalRoast username/email")
+    parser.add_argument(
+        "--review-only",
+        action="store_true",
+        help="Hold LLM-extracted recipes in ReadyForReview instead of auto-publishing.",
+    )
+    parser.add_argument("--url", default="http://localhost:5041", help="LocalRoast base URL")
+    parser.add_argument("--email", "--username", dest="email", help="LocalRoast account email")
     parser.add_argument("--password", help="LocalRoast password")
-    parser.add_argument("--token", help="Pre-existing JWT token (optional)")
+    parser.add_argument("--token", help="Pre-existing JWT or PAT token (optional)")
+    parser.add_argument(
+        "--no-images",
+        action="store_true",
+        help="Skip uploading matched EPUB dish cover photos.",
+    )
     parser.add_argument(
         "--upload-images",
         action="store_true",
-        help="Upload matched dish photos to LocalRoast media storage.",
+        help="Upload matched dish photos (enabled by default during API import).",
     )
 
     args = parser.parse_args()
@@ -528,19 +687,24 @@ def main():
         ]
         print(f"Filtered to chapter '{args.chapter}': {len(recipes)} recipes remaining.")
 
-    # Apply limit if requested
+    # Apply offset and limit if requested
+    if args.offset and args.offset > 0:
+        recipes = recipes[args.offset :]
+        print(f"Skipped first {args.offset} recipes ({len(recipes)} remaining).")
+
     if args.limit:
         recipes = recipes[: args.limit]
-        print(f"Limited to first {args.limit} recipes.")
+        print(f"Limited to {len(recipes)} recipes.")
+
+    should_call_api = bool(args.import_api or args.email or args.token) and not args.dry_run
 
     # 2. Dry Run display
-    if args.dry_run or (not args.output_json and not args.import_api):
+    if args.dry_run or (not args.output_json and not should_call_api):
         print("\n" + "=" * 65)
-        print("EPUB EXTRACTION DRY-RUN SUMMARY")
+        print("EPUB EXTRACTION DRY-RUN SUMMARY (DEFAULT MODE: LLM QUEUE)")
         print("=" * 65)
         print(f"Total recipes selected: {len(recipes)}")
 
-        # Breakdown by chapter
         chapter_counts = {}
         for r in recipes:
             chapter_counts[r["chapter"]] = chapter_counts.get(r["chapter"], 0) + 1
@@ -552,32 +716,19 @@ def main():
         images_count = sum(1 for r in recipes if r["image_path"])
         print(f"\nDish photos matched: {images_count} of {len(recipes)} recipes")
 
-        print("\n--- SAMPLE RECIPE (First in selection) ---")
+        print("\n--- SAMPLE LLM QUEUE PAYLOAD (First in selection) ---")
         if recipes:
-            sample = format_recipe_for_localroast(recipes[0])
-            print(f"Title:        {sample['title']}")
-            print(f"Chapter:      {recipes[0]['chapter']}")
-            print(f"Yield:        {sample['yieldDisplay']} (Servings: {sample['baseServings']})")
-            print(f"Page:         {sample['sourceBookPage']}")
-            print(
-                f"Image:        {recipes[0]['image_path'] if recipes[0]['image_path'] else 'None'}"
-            )
-            print(f"Ingredients ({len(sample['ingredients'])}):")
-            for ing in sample["ingredients"][:6]:
-                sec = f"[{ing['sectionName']}] " if ing["sectionName"] else ""
-                print(f"  - {sec}{ing['displayName']}")
-            if len(sample["ingredients"]) > 6:
-                print(f"  ... and {len(sample['ingredients']) - 6} more")
-            print(f"Steps ({len(sample['steps'])}):")
-            for st in sample["steps"][:2]:
-                print(f"  Step {st['stepNumber']}: {st['instruction'][:100]}...")
-            if len(sample["steps"]) > 2:
-                print(f"  ... and {len(sample['steps']) - 2} more steps")
+            sample_raw = format_recipe_as_llm_raw_text(recipes[0])
+            preview_lines = sample_raw.splitlines()[:22]
+            for ln in preview_lines:
+                print(f"  {ln}")
+            if len(sample_raw.splitlines()) > 22:
+                print(f"  ... ({len(sample_raw.splitlines()) - 22} more lines)")
 
         print("=" * 65)
-        if not args.output_json and not args.import_api:
-            print("\nTip: Run with --output-json atk_recipes.json to export,")
-            print("     or with --import-api --username <email> --password <pass> to import directly.")
+        if not args.output_json and not should_call_api:
+            print("\nTip: Enqueue a test batch of 10 recipes into the LLM Ingestion Queue with:")
+            print("     python scripts/import_atk_epub.py --email <email> --password <pass> --limit 10")
         return
 
     # 3. Export to JSON
@@ -587,40 +738,87 @@ def main():
             json.dump(formatted_list, f, indent=2, ensure_ascii=False)
         print(f"\nSuccessfully exported {len(formatted_list)} recipes to {args.output_json}!")
 
-    # 4. Import directly to API
-    if args.import_api:
+    # 4. Import / Enqueue into LocalRoast API (LLM Queue is default)
+    if should_call_api:
+        api_base = normalize_api_base(args.url)
         token = args.token
         if not token:
-            if not args.username or not args.password:
-                print("Error: --username and --password are required for --import-api.")
+            if not args.email or not args.password:
+                print("Error: --email and --password (or --token) are required for API import.")
                 sys.exit(1)
-            token = authenticate_api(args.url, args.username, args.password)
+            token = authenticate_api(api_base, args.email, args.password)
 
-        print(f"\nStarting API import of {len(recipes)} recipes to {args.url}...")
+        use_llm_queue = not args.direct_import
+        upload_images = not args.no_images
+        auto_publish = not args.review_only
+
+        if use_llm_queue:
+            inspect_llm_settings(api_base, token)
+            mode_desc = (
+                "LLM Queue (Auto-Publish ON)"
+                if auto_publish
+                else "LLM Queue (Review Inbox / Auto-Publish OFF)"
+            )
+        else:
+            mode_desc = "Direct Recipe Creation (Bypassing LLM)"
+
+        chapter_collections = ensure_chapter_collections(api_base, token, recipes)
+
+        print(f"\nStarting {mode_desc} for {len(recipes)} recipe(s) -> {api_base}...")
         success_count = 0
         error_count = 0
 
-        for i, r in enumerate(recipes):
-            payload = format_recipe_for_localroast(r)
-            title = payload["title"]
-            print(f"[{i+1}/{len(recipes)}] Importing: {title}...", end="", flush=True)
+        with zipfile.ZipFile(args.epub, "r") as epub_zip:
+            for i, r in enumerate(recipes):
+                title = r["title"][:200]
+                ch = (r.get("chapter") or "").strip()[:100]
+                col_id = chapter_collections.get(ch)
+                action_verb = "Queueing" if use_llm_queue else "Importing"
+                print(f"[{i+1}/{len(recipes)}] {action_verb}: {title}...", end="", flush=True)
 
-            # Upload image if available and requested
-            if args.upload_images and r["image_path"]:
-                uploaded = upload_cover_image(args.url, token, args.epub, r["image_path"])
-                if uploaded:
-                    payload["coverImagePath"] = uploaded.get("coverUrlPath")
-                    payload["thumbnailImagePath"] = uploaded.get("thumbnailUrlPath")
+                cover_path = None
+                thumb_path = None
+                if upload_images and r["image_path"]:
+                    uploaded = upload_cover_image(api_base, token, epub_zip, r["image_path"])
+                    if uploaded:
+                        cover_path = uploaded.get("coverImagePath")
+                        thumb_path = uploaded.get("thumbnailImagePath")
 
-            try:
-                created = post_recipe_to_api(args.url, token, payload)
-                success_count += 1
-                print(f" Done! (ID: {created.get('id')})")
-            except Exception as ex:
-                error_count += 1
-                print(f" FAILED: {ex}")
+                try:
+                    if use_llm_queue:
+                        job = enqueue_recipe_to_llm_queue(
+                            api_base,
+                            token,
+                            r,
+                            collection_id=col_id,
+                            cover_image_path=cover_path,
+                            thumbnail_image_path=thumb_path,
+                            auto_publish=auto_publish,
+                        )
+                        success_count += 1
+                        print(f" Queued! (Job ID: {job.get('id')})")
+                    else:
+                        payload = format_recipe_for_localroast(r, collection_id=col_id)
+                        if cover_path:
+                            payload["coverImagePath"] = cover_path
+                            payload["thumbnailImagePath"] = thumb_path
+                        created = post_recipe_directly_to_api(api_base, token, payload)
+                        success_count += 1
+                        print(f" Created! (Recipe ID: {created.get('id')})")
+                except urllib.error.HTTPError as http_ex:
+                    error_count += 1
+                    err_body = http_ex.read().decode("utf-8", errors="ignore")
+                    print(f" FAILED ({http_ex.code}): {err_body}")
+                except Exception as ex:
+                    error_count += 1
+                    print(f" FAILED: {ex}")
 
-        print(f"\nImport finished! {success_count} succeeded, {error_count} failed.")
+        print(f"\nFinished! {success_count} succeeded, {error_count} failed.")
+        if use_llm_queue and success_count > 0:
+            print(
+                "Background worker is now extracting recipes sequentially, reusing and creating "
+                "canonical FoodItems and Tags as each recipe completes."
+            )
 
 
 if __name__ == "__main__":

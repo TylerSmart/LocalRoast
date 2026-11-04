@@ -657,4 +657,53 @@ public sealed class LlmExtractionClientTests
 
         StringAssert.Contains(ex.Message, "finish_reason: length");
     }
+
+    [TestMethod]
+    public async Task ExtractRecipeFromTextAsync_IncludesExistingFoodCatalogAndTagReuseCreationRules()
+    {
+        var ollamaResponse = """
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "{\"title\":\"Garlic Pasta\",\"ingredients\":[{\"displayName\":\"garlic\",\"canonicalFoodName\":\"Garlic\"}],\"steps\":[{\"instruction\":\"Boil pasta.\"}]}"
+                }
+            }
+            """;
+
+        string capturedBody = "";
+        var handler = new MockHttpMessageHandler(req =>
+        {
+            capturedBody = req.Content!.ReadAsStringAsync().Result;
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(ollamaResponse, Encoding.UTF8, "application/json"),
+            };
+        });
+
+        var client = new LlmExtractionClient(new HttpClient(handler));
+        var config = new EffectiveLlmConnectionConfig(
+            Provider: LlmProvider.Ollama,
+            BaseUrl: "http://localhost:11434",
+            ApiKey: null,
+            TextModel: "qwen2.5:14b",
+            VisionModel: null,
+            OllamaKeepAlive: "5m",
+            RequestTimeoutSeconds: 30,
+            AutoPublishHighConfidenceText: true
+        );
+
+        var context = new LlmExtractionContext(
+            SourceContent: "Title: Garlic Pasta",
+            AvailableTagNames: ["Dinner", "Italian"],
+            AvailableFoodNames: ["Garlic", "Unsalted Butter", "Kosher Salt"]
+        );
+
+        await client.ExtractRecipeFromTextAsync(config, context);
+
+        StringAssert.Contains(capturedBody, "Existing Food Catalog");
+        StringAssert.Contains(capturedBody, "Unsalted Butter");
+        StringAssert.Contains(capturedBody, "Existing Tags: [Dinner, Italian]");
+        StringAssert.Contains(capturedBody, "propose new concise Title-Case tags");
+        StringAssert.Contains(capturedBody, "suggestedIsPantryStaple");
+    }
 }

@@ -121,14 +121,23 @@ public record IngestionExtractedDraftDto(
     [MaxLength(200)] string? SourceBookTitle = null,
     [Range(1, 10000)] int? SourceBookPage = null,
     bool RetainSourceAttachments = true,
-    [MaxLength(200)] string? ExtractedModel = null
+    [MaxLength(200)] string? ExtractedModel = null,
+    IReadOnlyList<string>? ProposedTagNames = null
 );
 
 public record EnqueueWebUrlIngestionRequest([Required] IReadOnlyList<string> Urls);
 
 public record EnqueueRawTextIngestionRequest(
     [Required, MaxLength(100000)] string RawText,
-    [MaxLength(200)] string? TitleHint = null
+    [MaxLength(200)] string? TitleHint = null,
+    [MaxLength(200)] string? SourceName = null,
+    [MaxLength(200)] string? SourceAuthor = null,
+    [MaxLength(200)] string? SourceBookTitle = null,
+    [Range(1, 10000)] int? SourceBookPage = null,
+    [MaxLength(500)] string? CoverImagePath = null,
+    [MaxLength(500)] string? ThumbnailImagePath = null,
+    IReadOnlyList<Guid>? CollectionIds = null,
+    bool AutoPublish = false
 );
 
 public sealed record IngestionUploadFileStream(

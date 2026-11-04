@@ -263,6 +263,13 @@ public sealed class IngestionProcessor(
                 .ToListAsync(cancellationToken);
 
             var tagNames = tags.Select(t => t.Name).ToList();
+            var availableFoodNames = await dbContext
+                .FoodItems.AsNoTracking()
+                .OrderByDescending(f => f.RecipeIngredients.Count)
+                .ThenBy(f => f.Name)
+                .Select(f => f.Name)
+                .Take(500)
+                .ToListAsync(cancellationToken);
 
             // Determine if Vision or Text pipeline is needed
             var requiresVision = job.Channel == IngestionChannel.Images;
@@ -373,7 +380,8 @@ public sealed class IngestionProcessor(
                 var visionContext = new LlmVisionExtractionContext(
                     Images: imageInputs,
                     SupplementalHintText: hintText,
-                    AvailableTagNames: tagNames
+                    AvailableTagNames: tagNames,
+                    AvailableFoodNames: availableFoodNames
                 );
 
                 rawExtracted = await llmClient.ExtractRecipeFromImagesAsync(
@@ -395,7 +403,8 @@ public sealed class IngestionProcessor(
 
                 var extractionContext = new LlmExtractionContext(
                     SourceContent: job.NormalizedSourceText ?? job.RawText ?? "",
-                    AvailableTagNames: tagNames
+                    AvailableTagNames: tagNames,
+                    AvailableFoodNames: availableFoodNames
                 );
 
                 rawExtracted = await llmClient.ExtractRecipeFromTextAsync(
@@ -410,8 +419,8 @@ public sealed class IngestionProcessor(
                 return false;
             }
 
-            string? fallbackSourceName = null;
-            string? fallbackSourceAuthor = null;
+            string? fallbackSourceName = job.SourceName;
+            string? fallbackSourceAuthor = job.SourceAuthor;
             if (!string.IsNullOrWhiteSpace(job.ScrapedPageJson))
             {
                 try
@@ -420,8 +429,33 @@ public sealed class IngestionProcessor(
                         job.ScrapedPageJson,
                         JsonOptions
                     );
-                    fallbackSourceName = page?.SiteName;
-                    fallbackSourceAuthor = page?.Author;
+                    fallbackSourceName ??= page?.SiteName;
+                    fallbackSourceAuthor ??= page?.Author;
+                }
+                catch
+                {
+                    // Ignore parse error
+                }
+            }
+
+            IReadOnlyList<Guid>? fallbackCollectionIds = null;
+            if (!string.IsNullOrWhiteSpace(job.InitialCollectionIdsJson))
+            {
+                try
+                {
+                    var parsedIds = JsonSerializer.Deserialize<List<Guid>>(
+                        job.InitialCollectionIdsJson,
+                        JsonOptions
+                    );
+                    if (parsedIds is { Count: > 0 })
+                    {
+                        var distinctIds = parsedIds.Distinct().ToList();
+                        fallbackCollectionIds = await dbContext
+                            .Collections.AsNoTracking()
+                            .Where(c => distinctIds.Contains(c.Id))
+                            .Select(c => c.Id)
+                            .ToListAsync(cancellationToken);
+                    }
                 }
                 catch
                 {
@@ -443,7 +477,8 @@ public sealed class IngestionProcessor(
                 retainSourceAttachments: job.Channel
                     is IngestionChannel.Images
                         or IngestionChannel.Pdf,
-                extractedModel: modelUsed
+                extractedModel: modelUsed,
+                fallbackCollectionIds: fallbackCollectionIds
             );
 
             job.ExtractedModel = modelUsed;
@@ -462,15 +497,15 @@ public sealed class IngestionProcessor(
 
             // Auto-Publish check
             var canAutoPublish =
-                config.AutoPublishHighConfidenceText
+                (config.AutoPublishHighConfidenceText || job.AutoPublish)
                 && (
                     job.Channel == IngestionChannel.WebUrl
                     || job.Channel == IngestionChannel.RawText
                 )
                 && !string.IsNullOrWhiteSpace(draft.Title)
-                && (draft.Ingredients?.Count ?? 0) >= 2
+                && (draft.Ingredients?.Count ?? 0) >= (job.AutoPublish ? 1 : 2)
                 && (draft.Steps?.Count ?? 0) >= 1
-                && draft.ConfidenceScore >= 0.85m;
+                && draft.ConfidenceScore >= (job.AutoPublish ? 0.60m : 0.85m);
 
             if (canAutoPublish)
             {
@@ -650,35 +685,12 @@ public sealed class IngestionProcessor(
                     && !string.IsNullOrWhiteSpace(ing.ProposedFoodItemName)
                 )
                 {
-                    var cleanName = ing.ProposedFoodItemName.Trim();
-                    var normName = cleanName.ToLowerInvariant();
-
-                    var existing =
-                        await dbContext.FoodItems.FirstOrDefaultAsync(
-                            f => f.NormalizedName == normName,
-                            cancellationToken
-                        )
-                        ?? await dbContext
-                            .FoodItemAliases.Where(a => a.NormalizedAlias == normName)
-                            .Select(a => a.FoodItem)
-                            .FirstOrDefaultAsync(cancellationToken);
-
-                    if (existing is not null)
-                    {
-                        foodItemId = existing.Id;
-                    }
-                    else
-                    {
-                        var newFoodItem = new FoodItem
-                        {
-                            Name = cleanName,
-                            NormalizedName = normName,
-                            IsPantryStaple = ing.SuggestedIsPantryStaple,
-                        };
-                        dbContext.FoodItems.Add(newFoodItem);
-                        await dbContext.SaveChangesAsync(cancellationToken);
-                        foodItemId = newFoodItem.Id;
-                    }
+                    foodItemId = await IngestionCatalogMaterializer.ResolveOrCreateFoodItemAsync(
+                        dbContext,
+                        ing.ProposedFoodItemName,
+                        ing.SuggestedIsPantryStaple,
+                        cancellationToken
+                    );
                 }
 
                 ingredientsInput.Add(
@@ -717,7 +729,15 @@ public sealed class IngestionProcessor(
             }
         }
 
-        // 3. Create published recipe
+        // 3. Resolve & auto-create any proposed tags
+        var resolvedTagIds = await IngestionCatalogMaterializer.ResolveAndMaterializeTagsAsync(
+            dbContext,
+            draft.SuggestedTagIds,
+            draft.ProposedTagNames,
+            cancellationToken
+        );
+
+        // 4. Create published recipe
         var upsertRequest = new UpsertRecipeRequest(
             Title: draft.Title,
             Description: draft.Description,
@@ -731,14 +751,14 @@ public sealed class IngestionProcessor(
             SourceUrl: draft.SourceUrl,
             SourceName: draft.SourceName,
             SourceAuthor: draft.SourceAuthor,
-            SourceBookTitle: null,
-            SourceBookPage: null,
+            SourceBookTitle: draft.SourceBookTitle,
+            SourceBookPage: draft.SourceBookPage,
             Ingredients: ingredientsInput,
             Steps: stepsInput,
             CoverImagePath: draft.CoverImagePath,
             ThumbnailImagePath: draft.ThumbnailImagePath,
             CollectionIds: draft.SuggestedCollectionIds,
-            TagIds: draft.SuggestedTagIds,
+            TagIds: resolvedTagIds,
             ExtractedModel: job.ExtractedModel
         );
 

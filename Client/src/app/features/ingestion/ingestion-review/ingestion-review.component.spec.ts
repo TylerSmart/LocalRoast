@@ -340,4 +340,28 @@ describe('IngestionReviewComponent', () => {
     expect(badge).toBeTruthy();
     expect(badge.textContent).toContain('gpt-4o');
   });
+
+  it('displays and toggles proposed new tags even when tag catalog is empty', () => {
+    mockTaxonomyService.getTags.mockReturnValue(of([]));
+    const jobWithProposedTags: IngestionJobDetailDto = {
+      ...sampleJob,
+      extractedDraft: {
+        ...sampleJob.extractedDraft!,
+        suggestedTagIds: [],
+        proposedTagNames: ['Italian', 'Weeknight'],
+      },
+    };
+    mockIngestionService.getJobById.mockReturnValue(of(jobWithProposedTags));
+
+    component.ngOnInit();
+    fixture.detectChanges();
+
+    const proposedButtons = fixture.nativeElement.querySelectorAll('.proposed-tag-toggle');
+    expect(proposedButtons.length).toBe(2);
+    expect(proposedButtons[0].textContent).toContain('+ Italian');
+
+    component.toggleProposedTag('Weeknight');
+    const payload = component.buildDraftPayload();
+    expect(payload.proposedTagNames).toEqual(['Italian']);
+  });
 });

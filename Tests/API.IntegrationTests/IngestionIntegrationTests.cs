@@ -2,8 +2,11 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using App.Core.Authentication;
+using App.Core.FoodCatalog;
 using App.Core.Ingestion;
 using App.Core.Recipes;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace App.API.IntegrationTests;
@@ -382,5 +385,304 @@ public sealed class IngestionIntegrationTests
         Assert.AreEqual("Enhanced Sourdough Pizza", fetchedRecipe.Title);
         Assert.AreEqual("qwen2.5:14b", fetchedRecipe.ExtractedModel);
         Assert.AreEqual(job.Id, fetchedRecipe.IngestionJobId);
+    }
+
+    [TestMethod]
+    public async Task EnqueueRawText_InvalidCoverImagePath_ReturnsBadRequest()
+    {
+        await AuthenticateAsync(_client);
+
+        var response = await _client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest(
+                RawText: "Title: Test\nIngredients: 1 cup water",
+                CoverImagePath: "https://external.example.com/cover.jpg"
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [TestMethod]
+    public async Task SequentialRawTextQueueOnEmptyApp_AutoCreatesAndReusesFoodItemsTagsAndPreservesBookMetadata()
+    {
+        var capturedContexts = new List<LlmExtractionContext>();
+        var fakeLlm = new FakeSequentialLlmExtractionClient(ctx =>
+        {
+            capturedContexts.Add(ctx);
+            if (ctx.SourceContent.Contains("Classic Roast Chicken", StringComparison.Ordinal))
+            {
+                return new LlmExtractedRecipePayload(
+                    Title: "Classic Roast Chicken",
+                    Description: "Crisp-skinned roast chicken.",
+                    BaseServings: 4m,
+                    YieldDisplay: "Serves 4",
+                    PrepTimeMinutes: 15,
+                    CookTimeMinutes: 60,
+                    TotalTimeMinutes: 75,
+                    Difficulty: "Medium",
+                    SourceName: null,
+                    SourceAuthor: null,
+                    ConfidenceScore: 0.94m,
+                    SuggestedTagNames: ["Dinner", "American", "Weeknight"],
+                    Ingredients:
+                    [
+                        new LlmExtractedIngredientItem(
+                            SectionName: null,
+                            Quantity: 1m,
+                            MaxQuantity: null,
+                            Unit: "whole",
+                            CanonicalFoodName: "whole chicken",
+                            DisplayName: "whole broiler-fryer chicken",
+                            PreparationNote: "giblets removed",
+                            IsOptional: false,
+                            OriginalRawText: "1 (4-pound) whole chicken",
+                            SuggestedIsPantryStaple: false
+                        ),
+                        new LlmExtractedIngredientItem(
+                            SectionName: null,
+                            Quantity: 1m,
+                            MaxQuantity: null,
+                            Unit: "tbsp",
+                            CanonicalFoodName: "kosher salt",
+                            DisplayName: "kosher salt",
+                            PreparationNote: null,
+                            IsOptional: false,
+                            OriginalRawText: "1 tablespoon kosher salt",
+                            SuggestedIsPantryStaple: true
+                        ),
+                    ],
+                    Steps:
+                    [
+                        new LlmExtractedStepItem(
+                            SectionName: null,
+                            Instruction: "Roast chicken for 60 minutes.",
+                            IngredientIndices: [0, 1],
+                            Timers: [new LlmExtractedTimerItem(3600, "Roast")]
+                        ),
+                    ]
+                );
+            }
+
+            return new LlmExtractedRecipePayload(
+                Title: "Skillet Lemon Chicken",
+                Description: "Bright weeknight skillet chicken.",
+                BaseServings: 4m,
+                YieldDisplay: "Serves 4",
+                PrepTimeMinutes: 10,
+                CookTimeMinutes: 20,
+                TotalTimeMinutes: 30,
+                Difficulty: "Easy",
+                SourceName: null,
+                SourceAuthor: null,
+                ConfidenceScore: 0.92m,
+                SuggestedTagNames: ["Dinner", "Weeknight", "Mediterranean"],
+                Ingredients:
+                [
+                    new LlmExtractedIngredientItem(
+                        SectionName: null,
+                        Quantity: 1m,
+                        MaxQuantity: null,
+                        Unit: "tsp",
+                        CanonicalFoodName: "Kosher Salt",
+                        DisplayName: "kosher salt",
+                        PreparationNote: null,
+                        IsOptional: false,
+                        OriginalRawText: "1 teaspoon kosher salt",
+                        SuggestedIsPantryStaple: true
+                    ),
+                    new LlmExtractedIngredientItem(
+                        SectionName: null,
+                        Quantity: 1m,
+                        MaxQuantity: null,
+                        Unit: "whole",
+                        CanonicalFoodName: "lemon",
+                        DisplayName: "lemon, sliced",
+                        PreparationNote: "sliced",
+                        IsOptional: false,
+                        OriginalRawText: "1 lemon, sliced",
+                        SuggestedIsPantryStaple: false
+                    ),
+                ],
+                Steps:
+                [
+                    new LlmExtractedStepItem(
+                        SectionName: null,
+                        Instruction: "Sear with salt and lemon for 10 minutes.",
+                        IngredientIndices: [0, 1],
+                        Timers: [new LlmExtractedTimerItem(600, "Sear")]
+                    ),
+                ]
+            );
+        });
+
+        await using var customFactory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Llm:TextModel", "qwen2.5:14b");
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ILlmExtractionClient>();
+                services.AddSingleton<ILlmExtractionClient>(fakeLlm);
+            });
+        });
+
+        using var client = customFactory.CreateClient();
+        await AuthenticateAsync(client);
+
+        // Create chapter collection (just like import_atk_epub.py does on an empty app)
+        var colResp = await client.PostAsJsonAsync(
+            "/api/collections",
+            new UpsertCollectionRequest("Poultry", "ATK Chapter", 1)
+        );
+        Assert.AreEqual(HttpStatusCode.Created, colResp.StatusCode);
+        var poultryCol = await colResp.Content.ReadFromJsonAsync<CollectionDto>();
+        Assert.IsNotNull(poultryCol);
+
+        // Enqueue Recipe #1 and Recipe #2 with AutoPublish = true (even though global AutoPublishHighConfidenceText is false)
+        var job1Resp = await client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest(
+                RawText: "Title: Classic Roast Chicken\nIngredients:\n- 1 whole chicken\n- 1 tbsp kosher salt",
+                TitleHint: "Classic Roast Chicken",
+                SourceName: "America's Test Kitchen",
+                SourceAuthor: "America's Test Kitchen",
+                SourceBookTitle: "The Complete America's Test Kitchen TV Show Cookbook",
+                SourceBookPage: 142,
+                CoverImagePath: "/api/uploads/recipes/roast-chicken.webp",
+                ThumbnailImagePath: "/api/uploads/recipes/roast-chicken-thumb.webp",
+                CollectionIds: [poultryCol.Id],
+                AutoPublish: true
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Accepted, job1Resp.StatusCode);
+        var job1 = await job1Resp.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
+        Assert.IsNotNull(job1);
+
+        var job2Resp = await client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest(
+                RawText: "Title: Skillet Lemon Chicken\nIngredients:\n- 1 tsp kosher salt\n- 1 lemon",
+                TitleHint: "Skillet Lemon Chicken",
+                SourceName: "America's Test Kitchen",
+                SourceAuthor: "America's Test Kitchen",
+                SourceBookTitle: "The Complete America's Test Kitchen TV Show Cookbook",
+                SourceBookPage: 155,
+                CollectionIds: [poultryCol.Id],
+                AutoPublish: true
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Accepted, job2Resp.StatusCode);
+        var job2 = await job2Resp.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
+        Assert.IsNotNull(job2);
+
+        // Process Job #1 then Job #2 sequentially
+        using (var scope1 = customFactory.Services.CreateScope())
+        {
+            var processor1 = scope1.ServiceProvider.GetRequiredService<IIngestionProcessor>();
+            Assert.IsTrue(await processor1.ProcessNextQueuedJobAsync());
+        }
+        using (var scope2 = customFactory.Services.CreateScope())
+        {
+            var processor2 = scope2.ServiceProvider.GetRequiredService<IIngestionProcessor>();
+            Assert.IsTrue(await processor2.ProcessNextQueuedJobAsync());
+        }
+
+        // Verify Job #1 ran with empty catalogs, and Job #2 received Job #1's newly created tags & food items!
+        Assert.AreEqual(2, capturedContexts.Count);
+        Assert.AreEqual(0, capturedContexts[0].AvailableTagNames.Count);
+        Assert.AreEqual(0, capturedContexts[0].AvailableFoodNames?.Count ?? 0);
+
+        CollectionAssert.AreEquivalent(
+            new[] { "Dinner", "American", "Weeknight" },
+            capturedContexts[1].AvailableTagNames.ToArray()
+        );
+        CollectionAssert.AreEquivalent(
+            new[] { "Whole Chicken", "Kosher Salt" },
+            capturedContexts[1].AvailableFoodNames!.ToArray()
+        );
+
+        // Verify FoodItems catalog has exactly 3 deduplicated items (Kosher Salt reused, marked as pantry staple)
+        var foods = await client.GetFromJsonAsync<IReadOnlyList<FoodItemDto>>("/api/food-items");
+        Assert.IsNotNull(foods);
+        Assert.AreEqual(3, foods.Count);
+        var salt = foods.Single(f => f.Name == "Kosher Salt");
+        Assert.IsTrue(salt.IsPantryStaple);
+
+        // Verify Tags catalog has exactly 4 deduplicated tags with inferred categories
+        var allTags = await client.GetFromJsonAsync<IReadOnlyList<TagDto>>("/api/tags");
+        Assert.IsNotNull(allTags);
+        Assert.AreEqual(4, allTags.Count);
+        Assert.AreEqual(TagCategory.Course, allTags.Single(t => t.Name == "Dinner").Category);
+        Assert.AreEqual(TagCategory.Cuisine, allTags.Single(t => t.Name == "American").Category);
+        Assert.AreEqual(
+            TagCategory.Cuisine,
+            allTags.Single(t => t.Name == "Mediterranean").Category
+        );
+        Assert.AreEqual(TagCategory.Custom, allTags.Single(t => t.Name == "Weeknight").Category);
+
+        // Verify Recipe #1 preserved book metadata, cover image, chapter collection, and auto-created tags/foods
+        var job1Detail = await client.GetFromJsonAsync<IngestionJobDetailDto>(
+            $"/api/ingestion/jobs/{job1.Id}"
+        );
+        Assert.IsNotNull(job1Detail?.ResultingRecipeId);
+
+        var recipe1 = await client.GetFromJsonAsync<RecipeDetailDto>(
+            $"/api/recipes/{job1Detail.ResultingRecipeId}"
+        );
+        Assert.IsNotNull(recipe1);
+        Assert.AreEqual(
+            "The Complete America's Test Kitchen TV Show Cookbook",
+            recipe1.SourceBookTitle
+        );
+        Assert.AreEqual(142, recipe1.SourceBookPage);
+        Assert.AreEqual("America's Test Kitchen", recipe1.SourceName);
+        Assert.AreEqual("/api/uploads/recipes/roast-chicken.webp", recipe1.CoverImagePath);
+        Assert.AreEqual(1, recipe1.Collections.Count);
+        Assert.AreEqual("Poultry", recipe1.Collections[0].Name);
+        Assert.AreEqual(3, recipe1.Tags.Count);
+    }
+
+    private sealed class FakeSequentialLlmExtractionClient(
+        Func<LlmExtractionContext, LlmExtractedRecipePayload> handler
+    ) : ILlmExtractionClient
+    {
+        public Task<LlmConnectionTestResultDto> ProbeAndListModelsAsync(
+            EffectiveLlmConnectionConfig config,
+            int timeoutSeconds = 15,
+            CancellationToken cancellationToken = default
+        ) =>
+            Task.FromResult(
+                new LlmConnectionTestResultDto(
+                    true,
+                    config.Provider,
+                    config.BaseUrl,
+                    5,
+                    ["qwen2.5:14b"],
+                    null
+                )
+            );
+
+        public Task<LlmExtractedRecipePayload> ExtractRecipeFromTextAsync(
+            EffectiveLlmConnectionConfig config,
+            LlmExtractionContext context,
+            CancellationToken cancellationToken = default
+        ) => Task.FromResult(handler(context));
+
+        public Task<LlmExtractedRecipePayload> ExtractRecipeFromImagesAsync(
+            EffectiveLlmConnectionConfig config,
+            LlmVisionExtractionContext context,
+            CancellationToken cancellationToken = default
+        ) => throw new NotImplementedException();
+
+        public Task<LlmSubstitutionPayload> SuggestIngredientSubstitutionsAsync(
+            EffectiveLlmConnectionConfig config,
+            LlmSubstitutionContext context,
+            CancellationToken cancellationToken = default
+        ) => throw new NotImplementedException();
+
+        public Task<LlmDraftMealPlanPayload> DraftWeeklyMealPlanAsync(
+            EffectiveLlmConnectionConfig config,
+            LlmDraftMealPlanContext context,
+            CancellationToken cancellationToken = default
+        ) => throw new NotImplementedException();
     }
 }
