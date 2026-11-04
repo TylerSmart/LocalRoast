@@ -50,6 +50,40 @@
           </span>
         </div>
 
+        <!-- Voice Step Narration (TTS) Toggle -->
+        @if (speechNarrationService.isSupported()) {
+          <button
+            type="button"
+            class="narration-pill-btn"
+            [class.is-active]="speechNarrationService.isEnabled()"
+            [class.is-speaking]="speechNarrationService.isSpeaking()"
+            (click)="toggleNarration()"
+            [matTooltip]="
+              speechNarrationService.isEnabled()
+                ? 'Voice Narration is ON (auto-reads each step). Click to turn OFF.'
+                : 'Voice Narration is OFF. Click to turn ON auto-reading.'
+            "
+            [attr.aria-label]="
+              speechNarrationService.isEnabled()
+                ? 'Disable step voice narration'
+                : 'Enable step voice narration'
+            "
+          >
+            <mat-icon class="narration-icon">
+              {{
+                speechNarrationService.isEnabled()
+                  ? speechNarrationService.isSpeaking()
+                    ? 'volume_up'
+                    : 'volume_down'
+                  : 'volume_off'
+              }}
+            </mat-icon>
+            <span class="narration-label">
+              {{ speechNarrationService.isEnabled() ? 'Voice ON' : 'Voice OFF' }}
+            </span>
+          </button>
+        }
+
         <!-- Servings Stepper -->
         <div class="servings-stepper" aria-label="Adjust servings">
           <button
@@ -277,6 +311,27 @@
               <p class="instruction-text" [class.is-done]="checkedSteps()[currentStep()!.step.id]">
                 {{ currentStep()!.step.instruction }}
               </p>
+              @if (speechNarrationService.isSupported()) {
+                <button
+                  type="button"
+                  mat-icon-button
+                  class="step-speak-btn"
+                  [class.is-speaking]="speechNarrationService.isSpeaking()"
+                  (click)="toggleStepAudioManual()"
+                  [matTooltip]="
+                    speechNarrationService.isSpeaking() ? 'Stop reading' : 'Read step aloud'
+                  "
+                  [attr.aria-label]="
+                    speechNarrationService.isSpeaking()
+                      ? 'Stop reading step aloud'
+                      : 'Read step aloud'
+                  "
+                >
+                  <mat-icon>{{
+                    speechNarrationService.isSpeaking() ? 'stop_circle' : 'volume_up'
+                  }}</mat-icon>
+                </button>
+              }
             </div>
 
             <!-- Scaled Ingredient Callouts for this Step -->

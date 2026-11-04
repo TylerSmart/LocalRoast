@@ -22,6 +22,7 @@ import {
 import { KitchenTimerService } from '../../../core/services/kitchen-timer/kitchen-timer.service';
 import { RecipeService } from '../../../core/services/recipe/recipe.service';
 import { WakeLockService } from '../../../core/services/wake-lock/wake-lock.service';
+import { SpeechNarrationService } from '../../../core/services/speech-narration/speech-narration.service';
 import { AiKitchenHelperService } from '../../../core/services/ai-helpers/ai-kitchen-helper.service';
 import { IngredientSubstitutionDialogComponent } from '../ingredient-substitution-dialog/ingredient-substitution-dialog.component';
 import {
@@ -76,6 +77,7 @@ export class CookModeComponent implements OnInit, OnDestroy {
   private readonly recipeService = inject(RecipeService);
   protected readonly wakeLockService = inject(WakeLockService);
   protected readonly kitchenTimerService = inject(KitchenTimerService);
+  protected readonly speechNarrationService = inject(SpeechNarrationService);
   protected readonly aiHelper = inject(AiKitchenHelperService);
   private readonly dialog = inject(MatDialog);
 
@@ -247,6 +249,7 @@ export class CookModeComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     void this.wakeLockService.release();
+    this.speechNarrationService.stop();
   }
 
   private loadRecipe(id: string): void {
@@ -260,6 +263,7 @@ export class CookModeComponent implements OnInit, OnDestroy {
           this.targetServings.set(data.baseServings);
         }
         this.isLoading.set(false);
+        this.narrateCurrentStepIfEnabled();
       },
       error: (err) => {
         this.errorMessage.set(err?.error?.detail || err?.error?.title || 'Failed to load recipe.');
@@ -285,6 +289,7 @@ export class CookModeComponent implements OnInit, OnDestroy {
     const current = this.activeStepIndex();
     if (current > 0) {
       this.activeStepIndex.set(current - 1);
+      this.narrateCurrentStepIfEnabled();
     }
   }
 
@@ -292,7 +297,9 @@ export class CookModeComponent implements OnInit, OnDestroy {
     const current = this.activeStepIndex();
     if (current < this.totalStepsCount() - 1) {
       this.activeStepIndex.set(current + 1);
+      this.narrateCurrentStepIfEnabled();
     } else {
+      this.speechNarrationService.stop();
       this.openCookLogDialog();
     }
   }
@@ -300,6 +307,7 @@ export class CookModeComponent implements OnInit, OnDestroy {
   protected goToStep(index: number): void {
     if (index >= 0 && index < this.totalStepsCount()) {
       this.activeStepIndex.set(index);
+      this.narrateCurrentStepIfEnabled();
     }
   }
 
@@ -400,6 +408,7 @@ export class CookModeComponent implements OnInit, OnDestroy {
   }
 
   protected openCookLogDialog(): void {
+    this.speechNarrationService.stop();
     const r = this.recipe();
     if (!r) return;
 
@@ -423,6 +432,7 @@ export class CookModeComponent implements OnInit, OnDestroy {
   }
 
   protected exitCookMode(): void {
+    this.speechNarrationService.stop();
     const r = this.recipe();
     if (this.fromSource() === 'meal-plan') {
       void this.router.navigate(['/meal-plan']);
@@ -430,6 +440,38 @@ export class CookModeComponent implements OnInit, OnDestroy {
       void this.router.navigate(['/recipes', r.id]);
     } else {
       void this.router.navigate(['/recipes']);
+    }
+  }
+
+  protected narrateCurrentStep(): void {
+    const step = this.currentStep();
+    if (step) {
+      this.speechNarrationService.speakStep(
+        step.step.stepNumber,
+        step.step.instruction,
+        step.step.sectionName,
+      );
+    }
+  }
+
+  protected narrateCurrentStepIfEnabled(): void {
+    if (this.speechNarrationService.isEnabled()) {
+      this.narrateCurrentStep();
+    }
+  }
+
+  protected toggleNarration(): void {
+    const isNowEnabled = this.speechNarrationService.toggleNarration();
+    if (isNowEnabled) {
+      this.narrateCurrentStep();
+    }
+  }
+
+  protected toggleStepAudioManual(): void {
+    if (this.speechNarrationService.isSpeaking()) {
+      this.speechNarrationService.stop();
+    } else {
+      this.narrateCurrentStep();
     }
   }
 }

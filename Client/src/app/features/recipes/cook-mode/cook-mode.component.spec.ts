@@ -1,5 +1,5 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { signal } from '@angular/core';
+import { WritableSignal, signal } from '@angular/core';
 import { MatDialog } from '@angular/material/dialog';
 import { ActivatedRoute, Router } from '@angular/router';
 import { of } from 'rxjs';
@@ -8,6 +8,7 @@ import { RecipeDetailDto } from '../../../core/models/recipe.models';
 import { KitchenTimerService } from '../../../core/services/kitchen-timer/kitchen-timer.service';
 import { RecipeService } from '../../../core/services/recipe/recipe.service';
 import { WakeLockService } from '../../../core/services/wake-lock/wake-lock.service';
+import { SpeechNarrationService } from '../../../core/services/speech-narration/speech-narration.service';
 import { AiKitchenHelperService } from '../../../core/services/ai-helpers/ai-kitchen-helper.service';
 import { IngredientSubstitutionDialogComponent } from '../ingredient-substitution-dialog/ingredient-substitution-dialog.component';
 import { CookModeComponent } from './cook-mode.component';
@@ -38,6 +39,18 @@ describe('CookModeComponent', () => {
   };
   let mockRouter: {
     navigate: ReturnType<typeof vi.fn>;
+  };
+  let isNarrationEnabledSignal: WritableSignal<boolean>;
+  let isSpeakingSignal: WritableSignal<boolean>;
+  let mockSpeechNarrationService: {
+    isSupported: ReturnType<typeof vi.fn>;
+    isEnabled: () => boolean;
+    isSpeaking: () => boolean;
+    toggleNarration: ReturnType<typeof vi.fn>;
+    setEnabled: (val: boolean) => void;
+    speakStep: ReturnType<typeof vi.fn>;
+    speakText: ReturnType<typeof vi.fn>;
+    stop: ReturnType<typeof vi.fn>;
   };
 
   const mockRecipe: RecipeDetailDto = {
@@ -172,6 +185,21 @@ describe('CookModeComponent', () => {
     mockRouter = {
       navigate: vi.fn().mockResolvedValue(true),
     };
+    isNarrationEnabledSignal = signal(false);
+    isSpeakingSignal = signal(false);
+    mockSpeechNarrationService = {
+      isSupported: vi.fn().mockReturnValue(true),
+      isEnabled: () => isNarrationEnabledSignal(),
+      isSpeaking: () => isSpeakingSignal(),
+      toggleNarration: vi.fn(() => {
+        isNarrationEnabledSignal.update((v) => !v);
+        return isNarrationEnabledSignal();
+      }),
+      setEnabled: (val: boolean) => isNarrationEnabledSignal.set(val),
+      speakStep: vi.fn(),
+      speakText: vi.fn(),
+      stop: vi.fn(),
+    };
     const mockAiHelperService = {
       checkStatus: vi
         .fn()
@@ -186,6 +214,7 @@ describe('CookModeComponent', () => {
         { provide: RecipeService, useValue: mockRecipeService },
         { provide: WakeLockService, useValue: mockWakeLockService },
         { provide: KitchenTimerService, useValue: mockKitchenTimerService },
+        { provide: SpeechNarrationService, useValue: mockSpeechNarrationService },
         { provide: MatDialog, useValue: mockDialog },
         { provide: Router, useValue: mockRouter },
         { provide: AiKitchenHelperService, useValue: mockAiHelperService },
@@ -276,5 +305,63 @@ describe('CookModeComponent', () => {
       width: '540px',
       maxWidth: '95vw',
     });
+  });
+
+  it('toggles voice narration and speaks current step when enabled', () => {
+    expect(mockSpeechNarrationService.isEnabled()).toBe(false);
+
+    component['toggleNarration']();
+
+    expect(mockSpeechNarrationService.toggleNarration).toHaveBeenCalled();
+    expect(mockSpeechNarrationService.speakStep).toHaveBeenCalledWith(
+      1,
+      'Brown ground beef in a large pot over medium heat.',
+      'Brown Meat',
+    );
+  });
+
+  it('automatically narrates subsequent steps when moving next/prev if narration is enabled', () => {
+    mockSpeechNarrationService.setEnabled(true);
+    mockSpeechNarrationService.speakStep.mockClear();
+
+    component['nextStep']();
+    expect(component['activeStepIndex']()).toBe(1);
+    expect(mockSpeechNarrationService.speakStep).toHaveBeenCalledWith(
+      2,
+      'Stir in chili powder and simmer gently.',
+      'Simmer',
+    );
+
+    mockSpeechNarrationService.speakStep.mockClear();
+    component['prevStep']();
+    expect(component['activeStepIndex']()).toBe(0);
+    expect(mockSpeechNarrationService.speakStep).toHaveBeenCalledWith(
+      1,
+      'Brown ground beef in a large pot over medium heat.',
+      'Brown Meat',
+    );
+  });
+
+  it('toggles manual step audio on the step card', () => {
+    component['toggleStepAudioManual']();
+    expect(mockSpeechNarrationService.speakStep).toHaveBeenCalledWith(
+      1,
+      'Brown ground beef in a large pot over medium heat.',
+      'Brown Meat',
+    );
+
+    // If currently speaking, clicking manual audio button stops it
+    isSpeakingSignal.set(true);
+    component['toggleStepAudioManual']();
+    expect(mockSpeechNarrationService.stop).toHaveBeenCalled();
+  });
+
+  it('stops speech narration when exiting cook mode or destroying component', () => {
+    component['exitCookMode']();
+    expect(mockSpeechNarrationService.stop).toHaveBeenCalled();
+
+    mockSpeechNarrationService.stop.mockClear();
+    fixture.destroy();
+    expect(mockSpeechNarrationService.stop).toHaveBeenCalled();
   });
 });

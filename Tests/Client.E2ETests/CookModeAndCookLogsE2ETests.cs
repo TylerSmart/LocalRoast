@@ -131,6 +131,27 @@ public sealed class CookModeAndCookLogsE2ETests : E2ETestBase
         await Expect(wakeLockPill).ToBeVisibleAsync();
         await Expect(wakeLockPill).ToContainTextAsync("Screen Awake");
 
+        // Verify Voice Narration Pill is visible and toggles persistence
+        var narrationPill = Page.Locator(".narration-pill-btn");
+        await Expect(narrationPill).ToBeVisibleAsync();
+        await Expect(narrationPill).ToContainTextAsync("Voice OFF");
+
+        // Click to enable voice narration
+        await narrationPill.ClickAsync();
+        await Expect(narrationPill).ToContainTextAsync("Voice ON");
+        await Expect(narrationPill).ToHaveClassAsync(new Regex(".*is-active.*"));
+
+        // Verify local storage persistence
+        var isPersistedEnabled = await Page.EvaluateAsync<string>(
+            "() => localStorage.getItem('local-roast:cook-narration-enabled')"
+        );
+        Assert.AreEqual("true", isPersistedEnabled);
+
+        // Verify Step Card has manual read aloud button
+        var stepSpeakBtn = Page.Locator(".step-speak-btn");
+        await Expect(stepSpeakBtn).ToBeVisibleAsync();
+        await stepSpeakBtn.ClickAsync();
+
         // Verify Step 1 is active
         await Expect(Page.Locator(".step-counter")).ToContainTextAsync("Step 1 of 2");
 
@@ -191,6 +212,15 @@ public sealed class CookModeAndCookLogsE2ETests : E2ETestBase
         // 6. Navigate to Step 2 using keyboard ArrowRight
         await Page.Keyboard.PressAsync("ArrowRight");
         await Expect(Page.Locator(".step-counter")).ToContainTextAsync("Step 2 of 2");
+
+        // Toggle narration back off and verify persistence
+        await narrationPill.ClickAsync();
+        await Expect(narrationPill).ToContainTextAsync("Voice OFF");
+        await Expect(narrationPill).Not.ToHaveClassAsync(new Regex(".*is-active.*"));
+        var isPersistedDisabled = await Page.EvaluateAsync<string>(
+            "() => localStorage.getItem('local-roast:cook-narration-enabled')"
+        );
+        Assert.AreEqual("false", isPersistedDisabled);
 
         // Final step button reads "Finish & Log Cook"
         var finishBtn = Page.Locator("button.next-btn");
