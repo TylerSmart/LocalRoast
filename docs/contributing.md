@@ -164,6 +164,10 @@ Always commit generated files in `Data/Migrations/` in the same commit as the en
 
 ---
 
+- **Visual E2E Debugging & Failure Artifacts**: See the [Playwright E2E Testing & Debugging Guide](e2e-testing-and-debugging.md) for instructions on stepping through E2E tests with a live browser window in Visual Studio, using `playwright.headed.runsettings`, launching the Playwright Inspector, and inspecting failure artifacts in `Tests/Client.E2ETests/DebugArtifacts/`.
+
+---
+
 ## Commit & Branch Guidelines
 
 - **Branch Naming**: `feature/<short-description>`, `fix/<short-description>`, `docs/<short-description>`, `chore/<short-description>`
