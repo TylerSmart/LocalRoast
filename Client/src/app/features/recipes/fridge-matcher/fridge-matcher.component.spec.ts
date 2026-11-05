@@ -69,6 +69,59 @@ describe('FridgeMatcherComponent', () => {
     expect(component['foodItems']().length).toBe(3);
   });
 
+  it('updates filtered options reactively when search control value changes', () => {
+    // Initial state: empty query shows available items ordered by usage
+    expect(component['filteredFoodItems']().length).toBe(3);
+
+    // Typing a query reactively filters to matching items
+    component['searchControl'].setValue('Lim');
+    expect(component['filteredFoodItems']().length).toBe(1);
+    expect(component['filteredFoodItems']()[0].name).toBe('Lime');
+
+    // Matching an alias reactively updates
+    component['searchControl'].setValue('Boneless');
+    expect(component['filteredFoodItems']().length).toBe(1);
+    expect(component['filteredFoodItems']()[0].name).toBe('Chicken Thighs');
+
+    // Non-matching query yields empty results
+    component['searchControl'].setValue('Dragonfruit');
+    expect(component['filteredFoodItems']().length).toBe(0);
+
+    // Clearing search restores options
+    component.clearSearchInput();
+    expect(component['searchControl'].value).toBe('');
+    expect(component['filteredFoodItems']().length).toBe(3);
+  });
+
+  it('ranks popular suggestions by referencedRecipeCount descending and excludes items with 0 recipes or staples', () => {
+    component['foodItems'].set([
+      ...mockFoodItems,
+      {
+        id: 'fi-4',
+        name: 'Dragonfruit',
+        isPantryStaple: false,
+        aliases: [],
+        referencedRecipeCount: 0,
+        createdAt: '2026-01-01T00:00:00Z',
+        modifiedAt: '2026-01-01T00:00:00Z',
+      },
+      {
+        id: 'fi-5',
+        name: 'Avocado',
+        isPantryStaple: false,
+        aliases: [],
+        referencedRecipeCount: 5,
+        createdAt: '2026-01-01T00:00:00Z',
+        modifiedAt: '2026-01-01T00:00:00Z',
+      },
+    ]);
+
+    const suggested = component['suggestedFoodItems']();
+    // Expected order: Avocado (5), Lime (3), Chicken Thighs (2)
+    // Dragonfruit (0) is excluded; Kosher Salt (staple) is excluded
+    expect(suggested.map((i) => i.name)).toEqual(['Avocado', 'Lime', 'Chicken Thighs']);
+  });
+
   it('adds food item and triggers recipe matching', () => {
     const matchResults: IngredientMatchResultDto[] = [
       {
