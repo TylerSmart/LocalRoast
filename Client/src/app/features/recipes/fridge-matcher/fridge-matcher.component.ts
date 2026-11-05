@@ -1,4 +1,5 @@
-﻿import { Component, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, OnInit, computed, inject, signal } from '@angular/core';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { FormControl, ReactiveFormsModule } from '@angular/forms';
 import {
   MatAutocompleteModule,
@@ -40,6 +41,9 @@ export class FridgeMatcherComponent implements OnInit {
   private readonly router = inject(Router);
 
   protected readonly searchControl = new FormControl<string>('', { nonNullable: true });
+  protected readonly searchQuery = toSignal(this.searchControl.valueChanges, {
+    initialValue: this.searchControl.value,
+  });
 
   protected readonly foodItems = signal<FoodItemDto[]>([]);
   protected readonly selectedFoodItems = signal<FoodItemDto[]>([]);
@@ -74,14 +78,23 @@ export class FridgeMatcherComponent implements OnInit {
   }
 
   protected readonly filteredFoodItems = computed(() => {
-    const query = this.searchControl.value.trim().toLowerCase();
+    const raw = this.searchQuery();
+    const query = (typeof raw === 'string' ? raw : '').trim().toLowerCase();
     const selectedIds = new Set(this.selectedFoodItems().map((f) => f.id));
     const available = this.foodItems().filter(
       (item) => !selectedIds.has(item.id) && !this.isPlaceholderFood(item.name),
     );
 
     if (!query) {
-      return available.slice(0, 15);
+      return available
+        .slice()
+        .sort((a, b) => {
+          if (b.referencedRecipeCount !== a.referencedRecipeCount) {
+            return b.referencedRecipeCount - a.referencedRecipeCount;
+          }
+          return a.name.localeCompare(b.name);
+        })
+        .slice(0, 15);
     }
 
     return available
@@ -91,16 +104,36 @@ export class FridgeMatcherComponent implements OnInit {
         }
         return item.aliases.some((alias) => alias.toLowerCase().includes(query));
       })
+      .sort((a, b) => {
+        const aName = a.name.toLowerCase();
+        const bName = b.name.toLowerCase();
+        const aStarts =
+          aName.startsWith(query) || a.aliases.some((al) => al.toLowerCase().startsWith(query));
+        const bStarts =
+          bName.startsWith(query) || b.aliases.some((al) => al.toLowerCase().startsWith(query));
+        if (aStarts && !bStarts) return -1;
+        if (!aStarts && bStarts) return 1;
+
+        if (b.referencedRecipeCount !== a.referencedRecipeCount) {
+          return b.referencedRecipeCount - a.referencedRecipeCount;
+        }
+        return a.name.localeCompare(b.name);
+      })
       .slice(0, 15);
   });
 
   protected readonly suggestedFoodItems = computed(() => {
     const selectedIds = new Set(this.selectedFoodItems().map((f) => f.id));
-    // Suggest non-staple items first, up to 10
     return this.foodItems()
       .filter(
         (item) =>
-          !selectedIds.has(item.id) && !item.isPantryStaple && !this.isPlaceholderFood(item.name),
+          !selectedIds.has(item.id) &&
+          !item.isPantryStaple &&
+          !this.isPlaceholderFood(item.name) &&
+          item.referencedRecipeCount > 0,
+      )
+      .sort(
+        (a, b) => b.referencedRecipeCount - a.referencedRecipeCount || a.name.localeCompare(b.name),
       )
       .slice(0, 10);
   });
@@ -125,7 +158,13 @@ export class FridgeMatcherComponent implements OnInit {
 
   onOptionSelected(event: MatAutocompleteSelectedEvent): void {
     const item = event.option.value as FoodItemDto;
-    this.addFoodItem(item);
+    if (item && item.id) {
+      this.addFoodItem(item);
+    }
+    this.searchControl.setValue('');
+  }
+
+  clearSearchInput(): void {
     this.searchControl.setValue('');
   }
 

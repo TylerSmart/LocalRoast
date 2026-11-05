@@ -32,7 +32,22 @@
           placeholder="e.g. Chicken, Lime, Eggs..."
           aria-label="Search ingredients to match"
         />
-        <mat-autocomplete #auto="matAutocomplete" (optionSelected)="onOptionSelected($event)">
+        @if (searchQuery()) {
+          <button
+            mat-icon-button
+            matSuffix
+            type="button"
+            (click)="clearSearchInput()"
+            aria-label="Clear search"
+          >
+            <mat-icon>close</mat-icon>
+          </button>
+        }
+        <mat-autocomplete
+          #auto="matAutocomplete"
+          [autoActiveFirstOption]="true"
+          (optionSelected)="onOptionSelected($event)"
+        >
           @for (item of filteredFoodItems(); track item.id) {
             <mat-option [value]="item">
               <span class="option-name">{{ item.name }}</span>
@@ -40,6 +55,12 @@
                 <span class="option-aliases">({{ item.aliases.join(', ') }})</span>
               }
             </mat-option>
+          } @empty {
+            @if (searchQuery().trim()) {
+              <mat-option disabled class="no-options-message">
+                No ingredients found matching "{{ searchQuery().trim() }}"
+              </mat-option>
+            }
           }
         </mat-autocomplete>
       </mat-form-field>

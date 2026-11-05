@@ -59,6 +59,11 @@
   margin-left: 6px;
 }
 
+.no-options-message {
+  font-style: italic;
+  color: var(--mat-sys-outline, #79747e);
+}
+
 .selected-section {
   margin-top: 12px;
   padding-top: 12px;
