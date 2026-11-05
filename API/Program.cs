@@ -224,6 +224,7 @@ using (var scope = app.Services.CreateScope())
     var mediaStorage = scope.ServiceProvider.GetRequiredService<IMediaStorageService>();
 
     await IngestionCatalogMaterializer.BackfillMissingSourceAttachmentsAsync(db, mediaStorage);
+    await IngestionCatalogMaterializer.CleanLegacyCorruptedIngredientUnitsAsync(db);
 }
 
 app.UseSerilogRequestLogging(options =>

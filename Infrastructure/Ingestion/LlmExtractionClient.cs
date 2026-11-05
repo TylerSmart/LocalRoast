@@ -855,9 +855,9 @@ Rules:
 3. SourceName & SourceAuthor: extract publication/blog name and author if present. SourceBookTitle & SourceBookPage: extract cookbook title and page number if visible.
 4. Ingredients:
    - "sectionName": optional group name (e.g. "For the Marinade", "For the Sauce").
-   - "quantity": numeric decimal greater than 0, or null if unmeasured / to taste (e.g. 1.5). NEVER output 0 or negative numbers.
+   - "quantity": numeric decimal greater than 0, or null if unmeasured / to taste (e.g. 1.5). When an ingredient specifies an unnumbered count like "Pinch cayenne pepper", "A pinch of salt", "Dash hot sauce", or "Clove garlic", quantity MUST be 1 (e.g. quantity: 1, unit: "pinch"). NEVER output fractional decimals like 0.01 or 0 for a pinch or dash. NEVER output 0 or negative numbers.
    - "maxQuantity": upper bound if a range was specified (e.g. 2.0 for "1.5 to 2 tbsp"), else null.
-   - "unit": normalized unit code (tsp, tbsp, fl_oz, cup, pt, qt, gal, ml, l, oz, lb, g, kg, pinch, dash, clove, can, bunch, slice, whole, or custom unit name).
+   - "unit": normalized unit code (tsp, tbsp, fl_oz, cup, pt, qt, gal, ml, l, oz, lb, g, kg, pinch, dash, clove, can, bunch, slice, whole, or custom unit name). If unmeasured or no unit exists (e.g. unmeasured salt and pepper), set unit to null. NEVER output "null", "none", or placeholder strings as the unit.
    - "canonicalFoodName": the singular canonical ingredient name without preparation, brand, or quantities (e.g. "yellow onion", "garlic", "chicken thigh", "all-purpose flour", "unsalted butter"). When an ingredient matches an item in Existing Food Catalog, reuse that exact canonical name. NEVER output "null", "none", or placeholder words (leave empty or null if unclassified).
    - "displayName": recipe display name as written without leading quantity/unit (e.g. "extra-virgin olive oil").
    - "preparationNote": preparation instructions or parenthetical weights (e.g. "finely diced", "room temperature", "7 1/2 ounces").
@@ -899,9 +899,9 @@ Rules:
 4. SourceBookTitle & SourceBookPage: if visible in headers, footers, or margins, extract the cookbook title and page number. SourceAuthor / SourceName: extract author or chef attribution if printed.
 5. Ingredients:
    - "sectionName": optional group name (e.g. "For the Marinade", "For the Sauce").
-   - "quantity": numeric decimal greater than 0, or null if unmeasured / to taste (e.g. 1.5). NEVER output 0 or negative numbers.
+   - "quantity": numeric decimal greater than 0, or null if unmeasured / to taste (e.g. 1.5). When an ingredient specifies an unnumbered count like "Pinch cayenne pepper", "A pinch of salt", "Dash hot sauce", or "Clove garlic", quantity MUST be 1 (e.g. quantity: 1, unit: "pinch"). NEVER output fractional decimals like 0.01 or 0 for a pinch or dash. NEVER output 0 or negative numbers.
    - "maxQuantity": upper bound if a range was specified (e.g. 2.0 for "1.5 to 2 tbsp"), else null.
-   - "unit": normalized unit code (tsp, tbsp, fl_oz, cup, pt, qt, gal, ml, l, oz, lb, g, kg, pinch, dash, clove, can, bunch, slice, whole, or custom unit name).
+   - "unit": normalized unit code (tsp, tbsp, fl_oz, cup, pt, qt, gal, ml, l, oz, lb, g, kg, pinch, dash, clove, can, bunch, slice, whole, or custom unit name). If unmeasured or no unit exists (e.g. unmeasured salt and pepper), set unit to null. NEVER output "null", "none", or placeholder strings as the unit.
    - "canonicalFoodName": the singular canonical ingredient name without preparation, brand, or quantities (e.g. "yellow onion", "garlic", "chicken thigh", "all-purpose flour", "unsalted butter"). When an ingredient matches an item in Existing Food Catalog, reuse that exact canonical name. NEVER output "null", "none", or placeholder words (leave empty or null if unclassified).
    - "displayName": recipe display name as written without leading quantity/unit (e.g. "extra-virgin olive oil").
    - "preparationNote": preparation instructions or parenthetical weights (e.g. "finely diced", "room temperature", "7 1/2 ounces").

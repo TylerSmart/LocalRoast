@@ -1,4 +1,4 @@
-﻿using App.Core.Exceptions;
+using App.Core.Exceptions;
 using App.Core.FoodCatalog;
 using App.Core.Ingestion;
 using App.Core.Mcp;
@@ -506,12 +506,21 @@ public sealed class McpCookbookService(
                     }
                 }
 
+                var quantity = ing.Quantity;
+                if (
+                    (unit is MeasurementUnit.Pinch or MeasurementUnit.Dash)
+                    && (quantity is null or <= 0.1m)
+                )
+                {
+                    quantity = 1m;
+                }
+
                 ingredientsInput.Add(
                     new RecipeIngredientInput(
                         SectionName: string.IsNullOrWhiteSpace(ing.SectionName)
                             ? null
                             : ing.SectionName.Trim(),
-                        Quantity: ing.Quantity,
+                        Quantity: quantity,
                         MaxQuantity: ing.MaxQuantity,
                         Unit: unit,
                         CustomUnitName: customUnit,
