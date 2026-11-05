@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using App.Core.Common;
 using App.Core.Exceptions;
 using App.Core.MealPlans;
 using App.Core.Media;
@@ -20,6 +21,29 @@ public sealed partial class RecipeService(
         RecipeQueryParameters query,
         CancellationToken cancellationToken = default
     )
+    {
+        var q = BuildRecipeQuery(query);
+        return await ProjectToSummary(q).ToListAsync(cancellationToken);
+    }
+
+    public async Task<PagedResultDto<RecipeSummaryDto>> GetRecipesPagedAsync(
+        RecipeQueryParameters query,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var q = BuildRecipeQuery(query);
+        var totalCount = await q.CountAsync(cancellationToken);
+
+        var page = Math.Max(1, query.Page ?? 1);
+        var pageSize = Math.Clamp(query.PageSize ?? 24, 1, 200);
+
+        var items = await ProjectToSummary(q.Skip((page - 1) * pageSize).Take(pageSize))
+            .ToListAsync(cancellationToken);
+
+        return new PagedResultDto<RecipeSummaryDto>(items, totalCount, page, pageSize);
+    }
+
+    private IQueryable<Recipe> BuildRecipeQuery(RecipeQueryParameters query)
     {
         var q = dbContext.Recipes.AsNoTracking().AsQueryable();
 
@@ -106,61 +130,62 @@ public sealed partial class RecipeService(
             );
         }
 
-        var orderedQuery = query.ForgottenFavoritesOnly
+        return query.ForgottenFavoritesOnly
             ? q.OrderBy(r => r.LastCookedAt)
                 .ThenByDescending(r => r.AverageRating)
                 .ThenByDescending(r => r.TimesCooked)
                 .ThenByDescending(r => r.ModifiedAt)
             : q.OrderByDescending(r => r.ModifiedAt);
+    }
 
-        return await orderedQuery
-            .Select(r => new RecipeSummaryDto(
-                r.Id,
-                r.Title,
-                r.Slug,
-                r.Description,
-                r.Status,
-                r.BaseServings,
-                r.YieldDisplay,
-                r.PrepTimeMinutes,
-                r.CookTimeMinutes,
-                r.TotalTimeMinutes,
-                r.Difficulty,
-                r.SourceName,
-                r.ThumbnailImagePath,
-                r.Ingredients.Count,
-                r.Steps.Count,
-                r.TimesCooked,
-                r.AverageRating,
-                r.CreatedAt,
-                r.ModifiedAt,
-                r.RecipeCollections.OrderBy(rc => rc.Collection.SortOrder)
-                    .ThenBy(rc => rc.Collection.Name)
-                    .Select(rc => new RecipeCollectionBadgeDto(
-                        rc.Collection.Id,
-                        rc.Collection.Name,
-                        rc.Collection.Slug
-                    ))
-                    .ToList(),
-                r.RecipeTags.OrderBy(rt => rt.Tag.Category)
-                    .ThenBy(rt => rt.Tag.SortOrder)
-                    .ThenBy(rt => rt.Tag.Name)
-                    .Select(rt => new RecipeTagBadgeDto(
-                        rt.Tag.Id,
-                        rt.Tag.Name,
-                        rt.Tag.Slug,
-                        rt.Tag.Category
-                    ))
-                    .ToList(),
-                r.LastCookedAt,
-                r.RatingCount,
-                r.CookLogs.OrderByDescending(cl => cl.CookedAt)
-                    .ThenByDescending(cl => cl.CreatedAt)
-                    .Where(cl => cl.Notes != null && cl.Notes.Trim() != "")
-                    .Select(cl => cl.Notes)
-                    .FirstOrDefault()
-            ))
-            .ToListAsync(cancellationToken);
+    private static IQueryable<RecipeSummaryDto> ProjectToSummary(IQueryable<Recipe> query)
+    {
+        return query.Select(r => new RecipeSummaryDto(
+            r.Id,
+            r.Title,
+            r.Slug,
+            r.Description,
+            r.Status,
+            r.BaseServings,
+            r.YieldDisplay,
+            r.PrepTimeMinutes,
+            r.CookTimeMinutes,
+            r.TotalTimeMinutes,
+            r.Difficulty,
+            r.SourceName,
+            r.ThumbnailImagePath,
+            r.Ingredients.Count,
+            r.Steps.Count,
+            r.TimesCooked,
+            r.AverageRating,
+            r.CreatedAt,
+            r.ModifiedAt,
+            r.RecipeCollections.OrderBy(rc => rc.Collection.SortOrder)
+                .ThenBy(rc => rc.Collection.Name)
+                .Select(rc => new RecipeCollectionBadgeDto(
+                    rc.Collection.Id,
+                    rc.Collection.Name,
+                    rc.Collection.Slug
+                ))
+                .ToList(),
+            r.RecipeTags.OrderBy(rt => rt.Tag.Category)
+                .ThenBy(rt => rt.Tag.SortOrder)
+                .ThenBy(rt => rt.Tag.Name)
+                .Select(rt => new RecipeTagBadgeDto(
+                    rt.Tag.Id,
+                    rt.Tag.Name,
+                    rt.Tag.Slug,
+                    rt.Tag.Category
+                ))
+                .ToList(),
+            r.LastCookedAt,
+            r.RatingCount,
+            r.CookLogs.OrderByDescending(cl => cl.CookedAt)
+                .ThenByDescending(cl => cl.CreatedAt)
+                .Where(cl => cl.Notes != null && cl.Notes.Trim() != "")
+                .Select(cl => cl.Notes)
+                .FirstOrDefault()
+        ));
     }
 
     public async Task<RecipeDetailDto?> GetRecipeByIdAsync(

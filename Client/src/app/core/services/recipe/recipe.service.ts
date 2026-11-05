@@ -1,3 +1,4 @@
+import type { PagedResultDto } from '../../models/pagination.models';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Service, inject } from '@angular/core';
 import { Observable } from 'rxjs';
@@ -19,6 +20,50 @@ import {
 @Service()
 export class RecipeService {
   private readonly http = inject(HttpClient);
+
+  getRecipesPaged(query: RecipeQueryParameters): Observable<PagedResultDto<RecipeSummaryDto>> {
+    let params = new HttpParams();
+    if (query?.page !== undefined && query?.page !== null) {
+      params = params.set('page', query.page.toString());
+    }
+    if (query?.pageSize !== undefined && query?.pageSize !== null) {
+      params = params.set('pageSize', query.pageSize.toString());
+    }
+    if (query?.search) {
+      params = params.set('search', query.search);
+    }
+    if (query?.status) {
+      params = params.set('status', query.status);
+    }
+    if (query?.difficulty) {
+      params = params.set('difficulty', query.difficulty);
+    }
+    if (query?.maxTotalTimeMinutes !== undefined && query?.maxTotalTimeMinutes !== null) {
+      params = params.set('maxTotalTimeMinutes', query.maxTotalTimeMinutes.toString());
+    }
+    if (query?.foodItemId) {
+      params = params.set('foodItemId', query.foodItemId);
+    }
+    if (query?.collectionId) {
+      params = params.set('collectionId', query.collectionId);
+    }
+    if (query?.tagIds && query.tagIds.length > 0) {
+      for (const tagId of query.tagIds) {
+        params = params.append('tagIds', tagId);
+      }
+    }
+    if (query?.minRating !== undefined && query?.minRating !== null) {
+      params = params.set('minRating', query.minRating.toString());
+    }
+    if (query?.forgottenFavoritesOnly !== undefined && query?.forgottenFavoritesOnly !== null) {
+      params = params.set('forgottenFavoritesOnly', query.forgottenFavoritesOnly.toString());
+    }
+    if (query?.forgottenDaysThreshold !== undefined && query?.forgottenDaysThreshold !== null) {
+      params = params.set('forgottenDaysThreshold', query.forgottenDaysThreshold.toString());
+    }
+
+    return this.http.get<PagedResultDto<RecipeSummaryDto>>(apiUrl('/recipes'), { params });
+  }
 
   getRecipes(query?: RecipeQueryParameters): Observable<RecipeSummaryDto[]> {
     let params = new HttpParams();

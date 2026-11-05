@@ -1,4 +1,14 @@
-import { Component, OnInit, computed, inject, signal } from '@angular/core';
+import {
+  Component,
+  DestroyRef,
+  ElementRef,
+  OnInit,
+  computed,
+  effect,
+  inject,
+  signal,
+  viewChild,
+} from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
@@ -53,6 +63,38 @@ import { TagDialogComponent, TagDialogData } from '../tag-dialog/tag-dialog.comp
   styleUrl: './recipe-list.component.scss',
 })
 export class RecipeListComponent implements OnInit {
+  constructor() {
+    effect(() => {
+      const sentinel = this.scrollSentinel()?.nativeElement;
+      if (!sentinel) return;
+
+      if (this.observer) {
+        this.observer.disconnect();
+      }
+
+      if (typeof IntersectionObserver !== 'undefined') {
+        this.observer = new IntersectionObserver(
+          (entries) => {
+            if (
+              entries[0]?.isIntersecting &&
+              !this.isLoading() &&
+              !this.isLoadingMore() &&
+              this.hasMore()
+            ) {
+              this.loadMoreRecipes();
+            }
+          },
+          { rootMargin: '300px' },
+        );
+        this.observer.observe(sentinel);
+      }
+    });
+
+    this.destroyRef.onDestroy(() => {
+      this.observer?.disconnect();
+    });
+  }
+
   private readonly recipeService = inject(RecipeService);
   private readonly taxonomyService = inject(TaxonomyService);
   private readonly dialog = inject(MatDialog);
@@ -75,6 +117,14 @@ export class RecipeListComponent implements OnInit {
   protected readonly selectedStatus = signal<RecipeStatus | 'All'>('Published');
   protected readonly selectedDifficulty = signal<RecipeDifficulty | 'All'>('All');
   protected readonly maxTimeMinutes = signal<number | null>(null);
+  protected readonly currentPage = signal<number>(1);
+  protected readonly pageSize = signal<number>(24);
+  protected readonly totalCount = signal<number>(0);
+  protected readonly isLoadingMore = signal<boolean>(false);
+  protected readonly hasMore = computed(() => this.recipes().length < this.totalCount());
+  protected readonly scrollSentinel = viewChild<ElementRef<HTMLElement>>('scrollSentinel');
+  private readonly destroyRef = inject(DestroyRef);
+  private observer: IntersectionObserver | null = null;
   protected readonly selectedCollectionId = signal<string | null>(null);
   protected readonly selectedTagIds = signal<string[]>([]);
   protected readonly forgottenFavoritesOnly = signal<boolean>(false);
@@ -119,54 +169,7 @@ export class RecipeListComponent implements OnInit {
     );
   });
 
-  protected readonly filteredRecipes = computed(() => {
-    const query = this.searchQuery().toLowerCase().trim();
-    const status = this.selectedStatus();
-    const difficulty = this.selectedDifficulty();
-    const maxTime = this.maxTimeMinutes();
-    const collectionId = this.selectedCollectionId();
-    const tagIds = this.selectedTagIds();
-
-    return this.recipes().filter((r) => {
-      if (status !== 'All' && r.status !== status) {
-        return false;
-      }
-      if (difficulty !== 'All' && r.difficulty !== difficulty) {
-        return false;
-      }
-      if (maxTime !== null && (r.totalTimeMinutes === null || r.totalTimeMinutes > maxTime)) {
-        return false;
-      }
-      if (collectionId !== null && !r.collections.some((c) => c.id === collectionId)) {
-        return false;
-      }
-      if (tagIds.length > 0 && !tagIds.every((tid) => r.tags.some((t) => t.id === tid))) {
-        return false;
-      }
-      if (
-        this.minRating() !== null &&
-        (r.averageRating === null ||
-          r.averageRating === undefined ||
-          r.averageRating < this.minRating()!)
-      ) {
-        return false;
-      }
-      if (this.forgottenFavoritesOnly()) {
-        const isFavorite =
-          (r.averageRating !== null && r.averageRating >= 4.0) || r.timesCooked >= 2;
-        if (!isFavorite) return false;
-      }
-      if (!query) {
-        return true;
-      }
-      const matchTitle = r.title.toLowerCase().includes(query);
-      const matchDesc = (r.description || '').toLowerCase().includes(query);
-      const matchSource = (r.sourceName || '').toLowerCase().includes(query);
-      const matchColl = r.collections.some((c) => c.name.toLowerCase().includes(query));
-      const matchTag = r.tags.some((t) => t.name.toLowerCase().includes(query));
-      return matchTitle || matchDesc || matchSource || matchColl || matchTag;
-    });
-  });
+  protected readonly filteredRecipes = computed(() => this.recipes());
 
   ngOnInit(): void {
     this.loadTaxonomy();
@@ -189,13 +192,19 @@ export class RecipeListComponent implements OnInit {
     });
   }
 
-  loadRecipes(): void {
-    this.isLoading.set(true);
-    this.errorMessage.set(null);
-
-    const params: RecipeQueryParameters = {};
+  private buildQueryParams(page: number): RecipeQueryParameters {
+    const params: RecipeQueryParameters = {
+      page,
+      pageSize: this.pageSize(),
+    };
     if (this.selectedStatus() !== 'All') {
       params.status = this.selectedStatus() as RecipeStatus;
+    }
+    if (this.selectedDifficulty() !== 'All') {
+      params.difficulty = this.selectedDifficulty() as RecipeDifficulty;
+    }
+    if (this.maxTimeMinutes() !== null) {
+      params.maxTotalTimeMinutes = this.maxTimeMinutes();
     }
     if (this.selectedCollectionId()) {
       params.collectionId = this.selectedCollectionId();
@@ -213,10 +222,18 @@ export class RecipeListComponent implements OnInit {
     if (searchVal) {
       params.search = searchVal;
     }
+    return params;
+  }
 
-    this.recipeService.getRecipes(params).subscribe({
-      next: (list) => {
-        this.recipes.set(list);
+  loadRecipes(): void {
+    this.currentPage.set(1);
+    this.isLoading.set(true);
+    this.errorMessage.set(null);
+
+    this.recipeService.getRecipesPaged(this.buildQueryParams(1)).subscribe({
+      next: (res) => {
+        this.recipes.set(res.items);
+        this.totalCount.set(res.totalCount);
         this.isLoading.set(false);
       },
       error: (err: { error?: { detail?: string; title?: string } }) => {
@@ -224,6 +241,27 @@ export class RecipeListComponent implements OnInit {
         this.errorMessage.set(
           err?.error?.detail || err?.error?.title || 'Failed to load cookbook recipes.',
         );
+      },
+    });
+  }
+
+  loadMoreRecipes(): void {
+    if (this.isLoading() || this.isLoadingMore() || !this.hasMore()) {
+      return;
+    }
+
+    const nextPage = this.currentPage() + 1;
+    this.isLoadingMore.set(true);
+
+    this.recipeService.getRecipesPaged(this.buildQueryParams(nextPage)).subscribe({
+      next: (res) => {
+        this.currentPage.set(nextPage);
+        this.recipes.update((prev) => [...prev, ...res.items]);
+        this.totalCount.set(res.totalCount);
+        this.isLoadingMore.set(false);
+      },
+      error: () => {
+        this.isLoadingMore.set(false);
       },
     });
   }

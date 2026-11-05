@@ -1,3 +1,4 @@
+using App.Core.Common;
 using App.Core.Exceptions;
 using App.Core.Recipes;
 using Microsoft.AspNetCore.Authorization;
@@ -11,12 +12,19 @@ namespace App.API.Controllers;
 public sealed class RecipesController(IRecipeService recipeService) : ControllerBase
 {
     [HttpGet]
+    [ProducesResponseType(typeof(PagedResultDto<RecipeSummaryDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(IReadOnlyList<RecipeSummaryDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetRecipes(
         [FromQuery] RecipeQueryParameters query,
         CancellationToken cancellationToken
     )
     {
+        if (query.Page.HasValue || query.PageSize.HasValue)
+        {
+            var paged = await recipeService.GetRecipesPagedAsync(query, cancellationToken);
+            return Ok(paged);
+        }
+
         var recipes = await recipeService.GetRecipesAsync(query, cancellationToken);
         return Ok(recipes);
     }

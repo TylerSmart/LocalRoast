@@ -14,7 +14,12 @@ public record FoodItemDto(
     int ReferencedShoppingListItemCount = 0
 );
 
-public record FoodItemQueryParameters(string? Search = null, bool? IsPantryStaple = null);
+public record FoodItemQueryParameters(
+    string? Search = null,
+    bool? IsPantryStaple = null,
+    int? Page = null,
+    int? PageSize = null
+);
 
 public record CreateFoodItemRequest(
     [Required, MaxLength(150)] string Name,

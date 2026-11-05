@@ -2,7 +2,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { MatDialog } from '@angular/material/dialog';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { of } from 'rxjs';
-import { FoodItemDto } from '../../../core/models/food-catalog.models';
+import { FoodItemDto, FoodItemQueryParameters } from '../../../core/models/food-catalog.models';
 import { FoodCatalogService } from '../../../core/services/food-catalog/food-catalog.service';
 import { FoodCatalogComponent } from './food-catalog.component';
 
@@ -35,6 +35,28 @@ describe('FoodCatalogComponent', () => {
 
   const mockCatalogService = {
     getFoodItems: vi.fn().mockReturnValue(of(sampleItems)),
+    getFoodItemsPaged: vi.fn().mockImplementation((query?: FoodItemQueryParameters) => {
+      let filtered = sampleItems;
+      if (query?.isPantryStaple) {
+        filtered = filtered.filter((i) => i.isPantryStaple);
+      }
+      if (query?.search) {
+        const s = query.search.toLowerCase();
+        filtered = filtered.filter(
+          (i) =>
+            i.name.toLowerCase().includes(s) || i.aliases.some((a) => a.toLowerCase().includes(s)),
+        );
+      }
+      return of({
+        items: filtered,
+        totalCount: filtered.length,
+        pageNumber: 1,
+        pageSize: 30,
+        totalPages: 1,
+        hasPreviousPage: false,
+        hasNextPage: false,
+      });
+    }),
     updateFoodItem: vi.fn(),
     deleteFoodItem: vi.fn(),
   };
@@ -76,14 +98,15 @@ describe('FoodCatalogComponent', () => {
   });
 
   it('filters items by search query', () => {
-    component['searchQuery'].set('evoo');
+    component.onSearchChange('evoo');
+    component.loadItems();
     fixture.detectChanges();
     expect(component['filteredItems']().length).toBe(1);
     expect(component['filteredItems']()[0].name).toBe('Olive Oil');
   });
 
   it('filters items by pantry staples toggle', () => {
-    component['onlyPantryStaples'].set(true);
+    component.onStaplesToggleChange(true);
     fixture.detectChanges();
     expect(component['filteredItems']().length).toBe(1);
     expect(component['filteredItems']()[0].name).toBe('Olive Oil');

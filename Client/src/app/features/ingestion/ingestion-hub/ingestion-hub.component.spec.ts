@@ -3,7 +3,12 @@ import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { of } from 'rxjs';
-import type { IngestionJobSummaryDto } from '../../../core/models/ingestion.models';
+import { signal, Signal } from '@angular/core';
+import type {
+  IngestionJobSummaryDto,
+  IngestionJobStatus,
+  IngestionQueueSummaryDto,
+} from '../../../core/models/ingestion.models';
 import { IngestionService } from '../../../core/services/ingestion/ingestion.service';
 import { LlmSettingsService } from '../../../core/services/llm-settings/llm-settings.service';
 import { IngestionHubComponent } from './ingestion-hub.component';
@@ -13,6 +18,8 @@ describe('IngestionHubComponent', () => {
   let fixture: ComponentFixture<IngestionHubComponent>;
   let mockIngestionService: {
     getJobs: ReturnType<typeof vi.fn>;
+    getJobsPaged: ReturnType<typeof vi.fn>;
+    summary: Signal<IngestionQueueSummaryDto>;
     enqueueUrls: ReturnType<typeof vi.fn>;
     enqueueRawText: ReturnType<typeof vi.fn>;
     retryJob: ReturnType<typeof vi.fn>;
@@ -86,6 +93,56 @@ describe('IngestionHubComponent', () => {
     localStorage.clear();
     mockIngestionService = {
       getJobs: vi.fn().mockReturnValue(of(sampleJobs)),
+      getJobsPaged: vi
+        .fn()
+        .mockImplementation(
+          (
+            status?: IngestionJobStatus | null,
+            search?: string | null,
+            page?: number | null,
+            pageSize?: number | null,
+            activeWaiting?: boolean | null,
+          ) => {
+            let filtered = sampleJobs;
+            if (status) {
+              filtered = filtered.filter((j) => j.status === status);
+            } else if (activeWaiting) {
+              filtered = filtered.filter(
+                (j) =>
+                  j.status === 'Queued' ||
+                  j.status === 'Preprocessing' ||
+                  j.status === 'Extracting' ||
+                  j.status === 'WaitingForLlmHost',
+              );
+            }
+            if (search) {
+              const s = search.toLowerCase();
+              filtered = filtered.filter(
+                (j) =>
+                  j.displayTitle.toLowerCase().includes(s) ||
+                  (j.sourceUrl && j.sourceUrl.toLowerCase().includes(s)) ||
+                  (j.extractedModel && j.extractedModel.toLowerCase().includes(s)),
+              );
+            }
+            return of({
+              items: filtered,
+              totalCount: filtered.length,
+              pageNumber: page || 1,
+              pageSize: pageSize || 25,
+              totalPages: 1,
+              hasPreviousPage: false,
+              hasNextPage: false,
+            });
+          },
+        ),
+      summary: signal({
+        readyForReviewCount: 1,
+        activeProcessingCount: 0,
+        waitingForLlmHostCount: 1,
+        failedCount: 0,
+        allCount: 3,
+        publishedCount: 1,
+      }),
       enqueueUrls: vi.fn().mockReturnValue(of([sampleJobs[0]])),
       enqueueRawText: vi.fn().mockReturnValue(of(sampleJobs[1])),
       retryJob: vi.fn().mockReturnValue(of(sampleJobs[1])),
@@ -149,7 +206,7 @@ describe('IngestionHubComponent', () => {
   });
 
   it('renders loaded jobs and computes review and waiting counts', () => {
-    expect(mockIngestionService.getJobs).toHaveBeenCalled();
+    expect(mockIngestionService.getJobsPaged).toHaveBeenCalled();
     expect(component.jobs()).toHaveLength(3);
     expect(component.reviewCount()).toBe(1);
     expect(component.waitingJobs()).toHaveLength(1);
@@ -179,25 +236,30 @@ describe('IngestionHubComponent', () => {
 
     // Search by title
     component.searchQuery.set('Tofu');
+    component.loadJobs();
     expect(component.filteredJobs()).toHaveLength(1);
     expect(component.filteredJobs()[0].id).toBe('job-1');
 
     // Search by URL (specific to /tofu)
     component.searchQuery.set('/tofu');
+    component.loadJobs();
     expect(component.filteredJobs()).toHaveLength(1);
     expect(component.filteredJobs()[0].id).toBe('job-1');
 
     // Search by shared domain (example.com)
     component.searchQuery.set('example.com');
+    component.loadJobs();
     expect(component.filteredJobs()).toHaveLength(2);
 
     // Search by model
     component.searchQuery.set('llama3:8b');
+    component.loadJobs();
     expect(component.filteredJobs()).toHaveLength(1);
     expect(component.filteredJobs()[0].id).toBe('job-3');
 
     // Search with non-matching query
     component.searchQuery.set('NonExistentJob');
+    component.loadJobs();
     expect(component.filteredJobs()).toHaveLength(0);
 
     // Clear search
@@ -276,13 +338,13 @@ describe('IngestionHubComponent', () => {
   });
 
   it('triggers refresh and resets countdown on manualRefresh', () => {
-    mockIngestionService.getJobs.mockClear();
+    mockIngestionService.getJobsPaged.mockClear();
     mockIngestionService.refreshSummary.mockClear();
 
     component.remainingSeconds.set(5);
     component.manualRefresh();
 
-    expect(mockIngestionService.getJobs).toHaveBeenCalled();
+    expect(mockIngestionService.getJobsPaged).toHaveBeenCalled();
     expect(mockIngestionService.refreshSummary).toHaveBeenCalled();
     expect(component.remainingSeconds()).toBe(15);
   });

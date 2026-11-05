@@ -39,12 +39,12 @@
         <input
           matInput
           [ngModel]="searchQuery()"
-          (ngModelChange)="searchQuery.set($event)"
+          (ngModelChange)="onSearchChange($event)"
           placeholder="e.g. olive oil, garlic"
           autocomplete="off"
         />
         @if (searchQuery()) {
-          <button mat-icon-button matSuffix (click)="searchQuery.set('')" aria-label="Clear search">
+          <button mat-icon-button matSuffix (click)="clearSearch()" aria-label="Clear search">
             <mat-icon>close</mat-icon>
           </button>
         }
@@ -54,7 +54,7 @@
       <div class="staple-toggle-container">
         <mat-slide-toggle
           [checked]="onlyPantryStaples()"
-          (change)="onlyPantryStaples.set($event.checked)"
+          (change)="onStaplesToggleChange($event.checked)"
           color="primary"
         >
           Pantry Staples Only
@@ -212,6 +212,19 @@
           </mat-card>
         }
       </div>
+
+      @if (totalCount() > 0) {
+        <mat-paginator
+          [length]="totalCount()"
+          [pageSize]="pageSize()"
+          [pageIndex]="pageIndex()"
+          [pageSizeOptions]="[15, 30, 60, 120]"
+          [showFirstLastButtons]="true"
+          (page)="onPageChange($event)"
+          aria-label="Select page of food items"
+          class="catalog-paginator"
+        ></mat-paginator>
+      }
     }
   }
 </div>

@@ -2,8 +2,8 @@
   <div class="title-with-badge">
     <mat-icon class="title-icon">menu_book</mat-icon>
     <span>Recipes using "{{ data.foodItem.name }}"</span>
-    @if (!isLoading() && recipes().length > 0) {
-      <span class="count-badge">{{ recipes().length }}</span>
+    @if (!isLoading() && totalCount() > 0) {
+      <span class="count-badge">{{ totalCount() }}</span>
     }
   </div>
 </h2>
@@ -95,6 +95,30 @@
         </div>
       }
     </div>
+
+    @if (hasMore()) {
+      <div class="load-more-container">
+        <div #scrollSentinel class="scroll-sentinel"></div>
+        <button
+          mat-stroked-button
+          type="button"
+          (click)="loadMoreRecipes()"
+          [disabled]="isLoadingMore()"
+          class="load-more-btn"
+          aria-label="Load more referencing recipes"
+        >
+          @if (isLoadingMore()) {
+            <mat-spinner diameter="16" class="inline-spinner"></mat-spinner>
+            <span>Loading more...</span>
+          } @else {
+            <span class="load-more-content">
+              <mat-icon class="load-more-icon">expand_more</mat-icon>
+              <span>Load More Recipes ({{ totalCount() - recipes().length }} remaining)</span>
+            </span>
+          }
+        </button>
+      </div>
+    }
   }
 </mat-dialog-content>
 
@@ -113,7 +137,7 @@
       } @else {
         <mat-icon>link_off</mat-icon>
       }
-      <span>{{ isUnlinking() ? 'Unlinking...' : 'Unlink All (' + recipes().length + ')' }}</span>
+      <span>{{ isUnlinking() ? 'Unlinking...' : 'Unlink All (' + totalCount() + ')' }}</span>
     </button>
   }
   <span class="actions-spacer"></span>

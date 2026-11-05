@@ -41,6 +41,27 @@ describe('RecipeListComponent', () => {
 
   const mockRecipeService = {
     getRecipes: vi.fn().mockReturnValue(of(sampleRecipes)),
+    getRecipesPaged: vi.fn().mockImplementation((query?: RecipeQueryParameters) => {
+      let filtered = sampleRecipes;
+      if (query?.search) {
+        const s = query.search.toLowerCase();
+        filtered = filtered.filter(
+          (r) =>
+            r.title.toLowerCase().includes(s) ||
+            r.tags.some((t) => t.name.toLowerCase().includes(s)) ||
+            r.collections.some((c) => c.name.toLowerCase().includes(s)),
+        );
+      }
+      return of({
+        items: filtered,
+        totalCount: filtered.length,
+        pageNumber: query?.page || 1,
+        pageSize: query?.pageSize || 24,
+        totalPages: 1,
+        hasPreviousPage: false,
+        hasNextPage: false,
+      });
+    }),
     deleteRecipe: vi.fn(),
   };
 
@@ -96,11 +117,13 @@ describe('RecipeListComponent', () => {
   });
 
   it('filters recipes by search query matching tags or collections', () => {
-    component['searchQuery'].set('Italian');
+    component.onSearchChange('Italian');
+    component.loadRecipes();
     fixture.detectChanges();
     expect(component['filteredRecipes']().length).toBe(1);
 
-    component['searchQuery'].set('NonExistent');
+    component.onSearchChange('NonExistent');
+    component.loadRecipes();
     fixture.detectChanges();
     expect(component['filteredRecipes']().length).toBe(0);
   });
@@ -119,13 +142,13 @@ describe('RecipeListComponent', () => {
   it('toggles forgotten favorites and applies min rating', () => {
     component.toggleForgottenFavorites();
     expect(component['forgottenFavoritesOnly']()).toBe(true);
-    expect(mockRecipeService.getRecipes).toHaveBeenCalledWith(
+    expect(mockRecipeService.getRecipesPaged).toHaveBeenCalledWith(
       expect.objectContaining({ forgottenFavoritesOnly: true }),
     );
 
     component.onMinRatingChange(4);
     expect(component['minRating']()).toBe(4);
-    expect(mockRecipeService.getRecipes).toHaveBeenCalledWith(
+    expect(mockRecipeService.getRecipesPaged).toHaveBeenCalledWith(
       expect.objectContaining({ minRating: 4 }),
     );
   });

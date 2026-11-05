@@ -187,6 +187,8 @@ export interface RecipeQueryParameters {
   minRating?: number | null;
   forgottenFavoritesOnly?: boolean;
   forgottenDaysThreshold?: number;
+  page?: number;
+  pageSize?: number;
 }
 
 export interface RecipeIngredientInput {

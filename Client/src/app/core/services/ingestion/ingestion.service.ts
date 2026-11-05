@@ -1,3 +1,4 @@
+import type { PagedResultDto } from '../../models/pagination.models';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Service, computed, inject, signal } from '@angular/core';
 import { Observable, tap } from 'rxjs';
@@ -41,6 +42,29 @@ export class IngestionService {
     return this.http
       .get<IngestionQueueSummaryDto>(apiUrl('/ingestion/jobs/summary'))
       .pipe(tap((summary) => this.summary.set(summary)));
+  }
+
+  getJobsPaged(
+    status?: IngestionJobStatus | null,
+    search?: string | null,
+    page = 1,
+    pageSize = 25,
+    activeWaiting = false,
+  ): Observable<PagedResultDto<IngestionJobSummaryDto>> {
+    let params = new HttpParams().set('page', page.toString()).set('pageSize', pageSize.toString());
+
+    if (activeWaiting) {
+      params = params.set('activeWaiting', 'true');
+    } else if (status) {
+      params = params.set('status', status);
+    }
+    if (search && search.trim()) {
+      params = params.set('search', search.trim());
+    }
+
+    return this.http.get<PagedResultDto<IngestionJobSummaryDto>>(apiUrl('/ingestion/jobs'), {
+      params,
+    });
   }
 
   getJobs(status?: IngestionJobStatus): Observable<IngestionJobSummaryDto[]> {

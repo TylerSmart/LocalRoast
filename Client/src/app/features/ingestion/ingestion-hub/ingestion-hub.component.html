@@ -464,14 +464,12 @@
   </mat-card>
 
   <!-- Offline Host Resilience Banner -->
-  @if (waitingJobs().length > 0) {
+  @if (waitingCount() > 0) {
     <div class="waiting-host-banner" role="status">
       <div class="banner-icon-content">
         <mat-icon class="banner-icon">power_off</mat-icon>
         <div class="banner-text">
-          <h3 class="banner-title">
-            {{ waitingJobs().length }} recipe(s) waiting for local LLM host
-          </h3>
+          <h3 class="banner-title">{{ waitingCount() }} recipe(s) waiting for local LLM host</h3>
           <p class="banner-description">
             Your web pages and recipe photos are safely downloaded on this server. When your GPU
             workstation or local Ollama/LM Studio host is online, extraction will automatically
@@ -513,7 +511,7 @@
         (click)="setFilter('All')"
       >
         <span>All</span>
-        <span class="count-badge">{{ jobs().length }}</span>
+        <span class="count-badge">{{ allCount() }}</span>
       </button>
       <button
         type="button"
@@ -531,7 +529,7 @@
         (click)="setFilter('ActiveWaiting')"
       >
         <span>Active & Waiting</span>
-        <span class="count-badge">{{ activeJobs().length }}</span>
+        <span class="count-badge">{{ activeCount() }}</span>
       </button>
       <button
         type="button"
@@ -820,5 +818,18 @@
         </mat-card>
       }
     </div>
+
+    @if (totalCount() > 0) {
+      <mat-paginator
+        [length]="totalCount()"
+        [pageSize]="pageSize()"
+        [pageIndex]="pageIndex()"
+        [pageSizeOptions]="[10, 25, 50, 100]"
+        [showFirstLastButtons]="true"
+        (page)="onPageChange($event)"
+        aria-label="Select page of ingestion jobs"
+        class="queue-paginator"
+      ></mat-paginator>
+    }
   }
 </div>

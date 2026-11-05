@@ -12,6 +12,8 @@ export interface FoodItemDto {
 export interface FoodItemQueryParameters {
   search?: string | null;
   isPantryStaple?: boolean | null;
+  page?: number;
+  pageSize?: number;
 }
 
 export interface CreateFoodItemRequest {

@@ -183,6 +183,8 @@ export interface IngestionQueueSummaryDto {
   activeProcessingCount: number;
   waitingForLlmHostCount: number;
   failedCount: number;
+  allCount?: number;
+  publishedCount?: number;
 }
 
 export interface IngestionJobSummaryDto {

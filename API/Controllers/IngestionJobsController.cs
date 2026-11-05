@@ -1,3 +1,4 @@
+using App.Core.Common;
 using App.Core.Exceptions;
 using App.Core.Ingestion;
 using App.Core.Recipes;
@@ -20,12 +21,32 @@ public sealed class IngestionJobsController(IIngestionService ingestionService) 
     }
 
     [HttpGet]
+    [ProducesResponseType(typeof(PagedResultDto<IngestionJobSummaryDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(IReadOnlyList<IngestionJobSummaryDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetJobs(
         [FromQuery] IngestionJobStatus? status,
-        CancellationToken cancellationToken
+        [FromQuery] string? search,
+        [FromQuery] int? page,
+        [FromQuery] int? pageSize,
+        [FromQuery] bool activeWaiting = false,
+        CancellationToken cancellationToken = default
     )
     {
+        if (page.HasValue || pageSize.HasValue)
+        {
+            var paged = await ingestionService.GetJobsPagedAsync(
+                new IngestionJobQueryParameters(
+                    status,
+                    search,
+                    page ?? 1,
+                    pageSize ?? 25,
+                    activeWaiting
+                ),
+                cancellationToken
+            );
+            return Ok(paged);
+        }
+
         var jobs = await ingestionService.GetJobsAsync(status, cancellationToken);
         return Ok(jobs);
     }

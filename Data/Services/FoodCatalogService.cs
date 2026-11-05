@@ -1,4 +1,5 @@
 using System.Text.Json;
+using App.Core.Common;
 using App.Core.Exceptions;
 using App.Core.FoodCatalog;
 using App.Core.Ingestion;
@@ -28,6 +29,49 @@ public sealed class FoodCatalogService(
             throw new DomainValidationException("Value cannot be empty.");
         }
         return trimmed.ToLowerInvariant();
+    }
+
+    public async Task<PagedResultDto<FoodItemDto>> GetFoodItemsPagedAsync(
+        FoodItemQueryParameters query,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var q = dbContext.FoodItems.AsNoTracking().AsQueryable();
+
+        if (query.IsPantryStaple.HasValue)
+        {
+            q = q.Where(f => f.IsPantryStaple == query.IsPantryStaple.Value);
+        }
+
+        if (!string.IsNullOrWhiteSpace(query.Search))
+        {
+            var norm = query.Search.Trim().ToLowerInvariant();
+            q = q.Where(f =>
+                f.NormalizedName.Contains(norm)
+                || f.Aliases.Any(a => a.NormalizedAlias.Contains(norm))
+            );
+        }
+
+        var totalCount = await q.CountAsync(cancellationToken);
+        var page = Math.Max(1, query.Page ?? 1);
+        var pageSize = Math.Clamp(query.PageSize ?? 30, 1, 200);
+
+        var items = await q.OrderBy(f => f.Name)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(f => new FoodItemDto(
+                f.Id,
+                f.Name,
+                f.IsPantryStaple,
+                f.Aliases.Select(a => a.Alias).ToList(),
+                f.RecipeIngredients.Select(ri => ri.RecipeId).Distinct().Count(),
+                f.CreatedAt,
+                f.ModifiedAt,
+                f.ShoppingListItems.Count()
+            ))
+            .ToListAsync(cancellationToken);
+
+        return new PagedResultDto<FoodItemDto>(items, totalCount, page, pageSize);
     }
 
     public async Task<IReadOnlyList<FoodItemDto>> GetFoodItemsAsync(
@@ -331,6 +375,45 @@ public sealed class FoodCatalogService(
         dbContext.FoodItems.Remove(foodItem);
         await dbContext.SaveChangesAsync(cancellationToken);
         return true;
+    }
+
+    public async Task<PagedResultDto<FoodItemRecipeUsageDto>> GetFoodItemRecipesPagedAsync(
+        Guid foodItemId,
+        int page = 1,
+        int pageSize = 20,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var exists = await dbContext.FoodItems.AnyAsync(f => f.Id == foodItemId, cancellationToken);
+        if (!exists)
+        {
+            throw new NotFoundException($"Food item '{foodItemId}' was not found.");
+        }
+
+        var q = dbContext
+            .Recipes.AsNoTracking()
+            .Where(r => r.Ingredients.Any(i => i.FoodItemId == foodItemId));
+
+        var totalCount = await q.CountAsync(cancellationToken);
+        var pageNum = Math.Max(1, page);
+        var size = Math.Clamp(pageSize, 1, 100);
+
+        var items = await q.OrderBy(r => r.Title)
+            .Skip((pageNum - 1) * size)
+            .Take(size)
+            .Select(r => new FoodItemRecipeUsageDto(
+                r.Id,
+                r.Title,
+                r.Slug,
+                r.ThumbnailImagePath,
+                r.Status,
+                r.Ingredients.Where(i => i.FoodItemId == foodItemId)
+                    .Select(i => i.DisplayName)
+                    .ToList()
+            ))
+            .ToListAsync(cancellationToken);
+
+        return new PagedResultDto<FoodItemRecipeUsageDto>(items, totalCount, pageNum, size);
     }
 
     public async Task<IReadOnlyList<FoodItemRecipeUsageDto>> GetFoodItemRecipesAsync(

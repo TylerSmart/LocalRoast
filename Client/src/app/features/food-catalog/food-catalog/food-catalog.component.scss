@@ -245,3 +245,10 @@
     width: 100%;
   }
 }
+
+.catalog-paginator {
+  margin-top: 1.5rem;
+  border-radius: 12px;
+  background-color: var(--mat-sys-surface-container-low, #f7f2fa);
+  border: 1px solid var(--mat-sys-outline-variant, #cac4d0);
+}

@@ -144,7 +144,9 @@ public record RecipeQueryParameters(
     Guid[]? TagIds = null,
     decimal? MinRating = null,
     bool ForgottenFavoritesOnly = false,
-    int ForgottenDaysThreshold = 60
+    int ForgottenDaysThreshold = 60,
+    int? Page = null,
+    int? PageSize = null
 );
 
 public record RecipeIngredientInput(

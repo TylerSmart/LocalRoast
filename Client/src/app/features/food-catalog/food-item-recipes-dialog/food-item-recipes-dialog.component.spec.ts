@@ -49,6 +49,17 @@ describe('FoodItemRecipesDialogComponent', () => {
 
   const mockCatalogService = {
     getFoodItemRecipes: vi.fn(),
+    getFoodItemRecipesPaged: vi.fn().mockReturnValue(
+      of({
+        items: mockRecipes,
+        totalCount: mockRecipes.length,
+        pageNumber: 1,
+        pageSize: 15,
+        totalPages: 1,
+        hasPreviousPage: false,
+        hasNextPage: false,
+      }),
+    ),
     unlinkFoodItemRecipes: vi.fn(),
   };
 
@@ -66,7 +77,17 @@ describe('FoodItemRecipesDialogComponent', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
-    mockCatalogService.getFoodItemRecipes.mockReturnValue(of(mockRecipes));
+    mockCatalogService.getFoodItemRecipesPaged.mockReturnValue(
+      of({
+        items: mockRecipes,
+        totalCount: mockRecipes.length,
+        pageNumber: 1,
+        pageSize: 15,
+        totalPages: 1,
+        hasPreviousPage: false,
+        hasNextPage: false,
+      }),
+    );
 
     await TestBed.configureTestingModule({
       imports: [FoodItemRecipesDialogComponent],
@@ -85,7 +106,7 @@ describe('FoodItemRecipesDialogComponent', () => {
   });
 
   it('loads and displays referencing recipes on init', () => {
-    expect(mockCatalogService.getFoodItemRecipes).toHaveBeenCalledWith('food-123');
+    expect(mockCatalogService.getFoodItemRecipesPaged).toHaveBeenCalledWith('food-123', 1, 15);
     expect(component.isLoading()).toBe(false);
     expect(component.recipes().length).toBe(2);
     expect(component.recipes()[0].recipeTitle).toBe('Crispy Salmon');
@@ -117,7 +138,7 @@ describe('FoodItemRecipesDialogComponent', () => {
   });
 
   it('handles load error gracefully', () => {
-    mockCatalogService.getFoodItemRecipes.mockReturnValue(
+    mockCatalogService.getFoodItemRecipesPaged.mockReturnValue(
       throwError(() => ({ error: { detail: 'Server error' } })),
     );
 

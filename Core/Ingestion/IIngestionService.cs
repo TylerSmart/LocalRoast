@@ -1,3 +1,4 @@
+using App.Core.Common;
 using App.Core.Recipes;
 
 namespace App.Core.Ingestion;
@@ -8,6 +9,11 @@ public interface IIngestionService
 
     Task<IReadOnlyList<IngestionJobSummaryDto>> GetJobsAsync(
         IngestionJobStatus? status = null,
+        CancellationToken cancellationToken = default
+    );
+
+    Task<PagedResultDto<IngestionJobSummaryDto>> GetJobsPagedAsync(
+        IngestionJobQueryParameters parameters,
         CancellationToken cancellationToken = default
     );
 

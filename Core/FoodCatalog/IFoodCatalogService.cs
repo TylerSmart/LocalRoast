@@ -1,8 +1,15 @@
+using App.Core.Common;
+
 namespace App.Core.FoodCatalog;
 
 public interface IFoodCatalogService
 {
     Task<IReadOnlyList<FoodItemDto>> GetFoodItemsAsync(
+        FoodItemQueryParameters query,
+        CancellationToken cancellationToken = default
+    );
+
+    Task<PagedResultDto<FoodItemDto>> GetFoodItemsPagedAsync(
         FoodItemQueryParameters query,
         CancellationToken cancellationToken = default
     );
@@ -33,6 +40,13 @@ public interface IFoodCatalogService
 
     Task<IReadOnlyList<FoodItemRecipeUsageDto>> GetFoodItemRecipesAsync(
         Guid foodItemId,
+        CancellationToken cancellationToken = default
+    );
+
+    Task<PagedResultDto<FoodItemRecipeUsageDto>> GetFoodItemRecipesPagedAsync(
+        Guid foodItemId,
+        int page = 1,
+        int pageSize = 20,
         CancellationToken cancellationToken = default
     );
 

@@ -463,6 +463,30 @@
           </mat-card>
         }
       </div>
+
+      @if (hasMore()) {
+        <div class="load-more-container">
+          <div #scrollSentinel class="scroll-sentinel"></div>
+          <button
+            mat-stroked-button
+            type="button"
+            (click)="loadMoreRecipes()"
+            [disabled]="isLoadingMore()"
+            class="load-more-btn"
+            aria-label="Load more recipes"
+          >
+            @if (isLoadingMore()) {
+              <mat-spinner diameter="18" class="inline-spinner"></mat-spinner>
+              <span>Loading more recipes...</span>
+            } @else {
+              <span class="load-more-content">
+                <mat-icon class="load-more-icon">expand_more</mat-icon>
+                <span>Load More Recipes ({{ totalCount() - recipes().length }} remaining)</span>
+              </span>
+            }
+          </button>
+        </div>
+      }
     }
   }
 </div>

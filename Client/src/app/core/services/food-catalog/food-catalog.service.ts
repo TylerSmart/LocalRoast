@@ -1,3 +1,4 @@
+import type { PagedResultDto } from '../../models/pagination.models';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Service, inject } from '@angular/core';
 import { Observable } from 'rxjs';
@@ -16,6 +17,24 @@ import {
 @Service()
 export class FoodCatalogService {
   private readonly http = inject(HttpClient);
+
+  getFoodItemsPaged(query?: FoodItemQueryParameters): Observable<PagedResultDto<FoodItemDto>> {
+    let params = new HttpParams();
+    if (query?.page !== undefined && query?.page !== null) {
+      params = params.set('page', query.page.toString());
+    }
+    if (query?.pageSize !== undefined && query?.pageSize !== null) {
+      params = params.set('pageSize', query.pageSize.toString());
+    }
+    if (query?.search) {
+      params = params.set('search', query.search);
+    }
+    if (query?.isPantryStaple !== undefined && query?.isPantryStaple !== null) {
+      params = params.set('isPantryStaple', query.isPantryStaple.toString());
+    }
+
+    return this.http.get<PagedResultDto<FoodItemDto>>(apiUrl('/food-items'), { params });
+  }
 
   getFoodItems(query?: FoodItemQueryParameters): Observable<FoodItemDto[]> {
     let params = new HttpParams();
@@ -51,6 +70,21 @@ export class FoodCatalogService {
 
   mergeFoodItems(request: MergeFoodItemsRequest): Observable<MergeFoodItemsResultDto> {
     return this.http.post<MergeFoodItemsResultDto>(apiUrl('/food-items/merge'), request);
+  }
+
+  getFoodItemRecipesPaged(
+    id: string,
+    page = 1,
+    pageSize = 20,
+  ): Observable<PagedResultDto<FoodItemRecipeUsageDto>> {
+    const params = new HttpParams()
+      .set('page', page.toString())
+      .set('pageSize', pageSize.toString());
+
+    return this.http.get<PagedResultDto<FoodItemRecipeUsageDto>>(
+      apiUrl(`/food-items/${id}/recipes`),
+      { params },
+    );
   }
 
   getFoodItemRecipes(id: string): Observable<FoodItemRecipeUsageDto[]> {

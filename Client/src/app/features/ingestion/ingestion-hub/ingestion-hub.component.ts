@@ -20,6 +20,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
 import { MatMenuModule } from '@angular/material/menu';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatPaginatorModule, PageEvent } from '@angular/material/paginator';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { RouterLink } from '@angular/router';
 import { interval } from 'rxjs';
@@ -63,6 +64,7 @@ export const REFRESH_OPTIONS: RefreshOption[] = [
     MatInputModule,
     MatIconModule,
     MatMenuModule,
+    MatPaginatorModule,
     MatProgressSpinnerModule,
     MatTooltipModule,
   ],
@@ -87,6 +89,10 @@ export class IngestionHubComponent implements OnInit {
 
   readonly activeTab = signal<'urls' | 'text' | 'images' | 'pdf'>('urls');
   readonly filter = signal<IngestionFilter>('All');
+  readonly pageIndex = signal<number>(0);
+  readonly pageSize = signal<number>(25);
+  readonly totalCount = signal<number>(0);
+  private searchTimer: ReturnType<typeof setTimeout> | null = null;
   readonly jobs = signal<IngestionJobSummaryDto[]>([]);
   readonly isLoading = signal<boolean>(true);
   readonly isSubmitting = signal<boolean>(false);
@@ -155,14 +161,17 @@ export class IngestionHubComponent implements OnInit {
     });
   }
 
-  readonly reviewCount = computed(
-    () => this.jobs().filter((j) => j.status === 'ReadyForReview').length,
-  );
-
+  readonly allCount = computed(() => this.ingestionService.summary().allCount ?? 0);
+  readonly reviewCount = computed(() => this.ingestionService.summary().readyForReviewCount);
+  readonly waitingCount = computed(() => this.ingestionService.summary().waitingForLlmHostCount);
   readonly waitingJobs = computed(() =>
     this.jobs().filter((j) => j.status === 'WaitingForLlmHost'),
   );
-
+  readonly activeCount = computed(
+    () =>
+      this.ingestionService.summary().activeProcessingCount +
+      this.ingestionService.summary().waitingForLlmHostCount,
+  );
   readonly activeJobs = computed(() =>
     this.jobs().filter(
       (j) =>
@@ -172,68 +181,33 @@ export class IngestionHubComponent implements OnInit {
         j.status === 'WaitingForLlmHost',
     ),
   );
-
-  readonly failedCount = computed(() => this.jobs().filter((j) => j.status === 'Failed').length);
-
-  readonly publishedCount = computed(
-    () => this.jobs().filter((j) => j.status === 'Published').length,
-  );
+  readonly failedCount = computed(() => this.ingestionService.summary().failedCount);
+  readonly publishedCount = computed(() => this.ingestionService.summary().publishedCount ?? 0);
 
   readonly searchQuery = signal<string>('');
 
-  readonly filteredJobs = computed(() => {
-    let list: IngestionJobSummaryDto[];
-    const all = this.jobs();
-    switch (this.filter()) {
-      case 'ReadyForReview':
-        list = all.filter((j) => j.status === 'ReadyForReview');
-        break;
-      case 'ActiveWaiting':
-        list = all.filter(
-          (j) =>
-            j.status === 'Queued' ||
-            j.status === 'Preprocessing' ||
-            j.status === 'Extracting' ||
-            j.status === 'WaitingForLlmHost',
-        );
-        break;
-      case 'Published':
-        list = all.filter((j) => j.status === 'Published');
-        break;
-      case 'Failed':
-        list = all.filter((j) => j.status === 'Failed');
-        break;
-      default:
-        list = all;
-        break;
-    }
-
-    const query = this.searchQuery().trim().toLowerCase();
-    if (!query) {
-      return list;
-    }
-
-    return list.filter((j) => {
-      const title = j.displayTitle?.toLowerCase() ?? '';
-      const url = j.sourceUrl?.toLowerCase() ?? '';
-      const detail = j.statusDetail?.toLowerCase() ?? '';
-      const model = j.extractedModel?.toLowerCase() ?? '';
-      return (
-        title.includes(query) ||
-        url.includes(query) ||
-        detail.includes(query) ||
-        model.includes(query)
-      );
-    });
-  });
+  readonly filteredJobs = computed(() => this.jobs());
 
   onSearchInput(event: Event): void {
     const input = event.target as HTMLInputElement;
     this.searchQuery.set(input.value);
+    if (this.searchTimer) clearTimeout(this.searchTimer);
+    this.searchTimer = setTimeout(() => {
+      this.pageIndex.set(0);
+      this.executeRefresh();
+    }, 300);
   }
 
   clearSearch(): void {
     this.searchQuery.set('');
+    this.pageIndex.set(0);
+    this.executeRefresh();
+  }
+
+  onPageChange(event: PageEvent): void {
+    this.pageIndex.set(event.pageIndex);
+    this.pageSize.set(event.pageSize);
+    this.executeRefresh();
   }
 
   ngOnInit(): void {
@@ -302,12 +276,39 @@ export class IngestionHubComponent implements OnInit {
 
   private executeRefresh(): void {
     this.isRefreshing.set(true);
+    let status: IngestionJobStatus | null = null;
+    let activeWaiting = false;
+
+    switch (this.filter()) {
+      case 'ReadyForReview':
+        status = 'ReadyForReview';
+        break;
+      case 'ActiveWaiting':
+        activeWaiting = true;
+        break;
+      case 'Published':
+        status = 'Published';
+        break;
+      case 'Failed':
+        status = 'Failed';
+        break;
+      default:
+        break;
+    }
+
     this.ingestionService
-      .getJobs()
+      .getJobsPaged(
+        status,
+        this.searchQuery().trim() || null,
+        this.pageIndex() + 1,
+        this.pageSize(),
+        activeWaiting,
+      )
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (jobs) => {
-          this.jobs.set(jobs);
+        next: (res) => {
+          this.jobs.set(res.items);
+          this.totalCount.set(res.totalCount);
           this.isLoading.set(false);
           this.isRefreshing.set(false);
           this.ingestionService.refreshSummary();
@@ -347,6 +348,8 @@ export class IngestionHubComponent implements OnInit {
 
   setFilter(filter: IngestionFilter): void {
     this.filter.set(filter);
+    this.pageIndex.set(0);
+    this.executeRefresh();
   }
 
   setActiveTab(tab: 'urls' | 'text' | 'images' | 'pdf'): void {

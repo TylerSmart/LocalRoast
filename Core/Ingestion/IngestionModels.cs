@@ -196,7 +196,17 @@ public record IngestionQueueSummaryDto(
     int ReadyForReviewCount,
     int ActiveProcessingCount,
     int WaitingForLlmHostCount,
-    int FailedCount
+    int FailedCount,
+    int AllCount = 0,
+    int PublishedCount = 0
+);
+
+public record IngestionJobQueryParameters(
+    IngestionJobStatus? Status = null,
+    string? Search = null,
+    int PageNumber = 1,
+    int PageSize = 25,
+    bool ActiveWaitingOnly = false
 );
 
 public record IngestionJobSummaryDto(

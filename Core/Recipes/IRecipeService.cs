@@ -1,8 +1,15 @@
+using App.Core.Common;
+
 namespace App.Core.Recipes;
 
 public interface IRecipeService
 {
     Task<IReadOnlyList<RecipeSummaryDto>> GetRecipesAsync(
+        RecipeQueryParameters query,
+        CancellationToken cancellationToken = default
+    );
+
+    Task<PagedResultDto<RecipeSummaryDto>> GetRecipesPagedAsync(
         RecipeQueryParameters query,
         CancellationToken cancellationToken = default
     );

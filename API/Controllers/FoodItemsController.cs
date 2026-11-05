@@ -1,4 +1,5 @@
-﻿using App.Core.Exceptions;
+using App.Core.Common;
+using App.Core.Exceptions;
 using App.Core.FoodCatalog;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -11,12 +12,19 @@ namespace App.API.Controllers;
 public sealed class FoodItemsController(IFoodCatalogService foodCatalogService) : ControllerBase
 {
     [HttpGet]
+    [ProducesResponseType(typeof(PagedResultDto<FoodItemDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(IReadOnlyList<FoodItemDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetFoodItems(
         [FromQuery] FoodItemQueryParameters query,
         CancellationToken cancellationToken
     )
     {
+        if (query.Page.HasValue || query.PageSize.HasValue)
+        {
+            var paged = await foodCatalogService.GetFoodItemsPagedAsync(query, cancellationToken);
+            return Ok(paged);
+        }
+
         var items = await foodCatalogService.GetFoodItemsAsync(query, cancellationToken);
         return Ok(items);
     }
@@ -141,15 +149,29 @@ public sealed class FoodItemsController(IFoodCatalogService foodCatalogService) 
     }
 
     [HttpGet("{id:guid}/recipes")]
+    [ProducesResponseType(typeof(PagedResultDto<FoodItemRecipeUsageDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(IReadOnlyList<FoodItemRecipeUsageDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetFoodItemRecipes(
         Guid id,
+        [FromQuery] int? page,
+        [FromQuery] int? pageSize,
         CancellationToken cancellationToken
     )
     {
         try
         {
+            if (page.HasValue || pageSize.HasValue)
+            {
+                var paged = await foodCatalogService.GetFoodItemRecipesPagedAsync(
+                    id,
+                    page ?? 1,
+                    pageSize ?? 20,
+                    cancellationToken
+                );
+                return Ok(paged);
+            }
+
             var recipes = await foodCatalogService.GetFoodItemRecipesAsync(id, cancellationToken);
             return Ok(recipes);
         }

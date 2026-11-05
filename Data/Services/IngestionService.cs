@@ -1,4 +1,5 @@
 using System.Text.Json;
+using App.Core.Common;
 using App.Core.Exceptions;
 using App.Core.FoodCatalog;
 using App.Core.Ingestion;
@@ -48,12 +49,132 @@ public sealed class IngestionService(
             cancellationToken
         );
 
+        var allCount = await dbContext.IngestionJobs.CountAsync(
+            j => j.Status != IngestionJobStatus.Discarded,
+            cancellationToken
+        );
+
+        var publishedCount = await dbContext.IngestionJobs.CountAsync(
+            j => j.Status == IngestionJobStatus.Published,
+            cancellationToken
+        );
+
         return new IngestionQueueSummaryDto(
             ReadyForReviewCount: readyForReviewCount,
             ActiveProcessingCount: activeProcessingCount,
             WaitingForLlmHostCount: waitingForLlmHostCount,
-            FailedCount: failedCount
+            FailedCount: failedCount,
+            AllCount: allCount,
+            PublishedCount: publishedCount
         );
+    }
+
+    public async Task<PagedResultDto<IngestionJobSummaryDto>> GetJobsPagedAsync(
+        IngestionJobQueryParameters parameters,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var query = dbContext.IngestionJobs.AsNoTracking().AsQueryable();
+
+        if (parameters.ActiveWaitingOnly)
+        {
+            query = query.Where(j =>
+                j.Status == IngestionJobStatus.Queued
+                || j.Status == IngestionJobStatus.Preprocessing
+                || j.Status == IngestionJobStatus.Extracting
+                || j.Status == IngestionJobStatus.WaitingForLlmHost
+            );
+        }
+        else if (parameters.Status.HasValue)
+        {
+            query = query.Where(j => j.Status == parameters.Status.Value);
+        }
+        else
+        {
+            query = query.Where(j => j.Status != IngestionJobStatus.Discarded);
+        }
+
+        if (!string.IsNullOrWhiteSpace(parameters.Search))
+        {
+            var term = parameters.Search.Trim();
+            query = query.Where(j =>
+                j.DisplayTitle.Contains(term)
+                || (j.SourceUrl != null && j.SourceUrl.Contains(term))
+                || (j.StatusDetail != null && j.StatusDetail.Contains(term))
+                || (j.ExtractedModel != null && j.ExtractedModel.Contains(term))
+                || (j.ResultingRecipe != null && j.ResultingRecipe.Title.Contains(term))
+            );
+        }
+
+        var totalCount = await query.CountAsync(cancellationToken);
+        var page = Math.Max(1, parameters.PageNumber);
+        var pageSize = Math.Clamp(parameters.PageSize, 1, 200);
+
+        var jobs = await query
+            .Include(j => j.ResultingRecipe)
+            .OrderByDescending(j => j.CreatedAt)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(cancellationToken);
+
+        var userIds = jobs.Select(j => Guid.TryParse(j.CreatedBy, out var uid) ? uid : (Guid?)null)
+            .Where(uid => uid.HasValue)
+            .Select(uid => uid!.Value)
+            .Distinct()
+            .ToList();
+
+        var usernames =
+            userIds.Count > 0
+                ? await dbContext
+                    .Users.AsNoTracking()
+                    .Where(u => userIds.Contains(u.Id))
+                    .ToDictionaryAsync(u => u.Id.ToString(), u => u.Username, cancellationToken)
+                : new Dictionary<string, string>();
+
+        var items = jobs.Select(j =>
+            {
+                var fileCount = 0;
+                if (!string.IsNullOrWhiteSpace(j.SourceFilesJson))
+                {
+                    try
+                    {
+                        var files = JsonSerializer.Deserialize<List<IngestionSourceFileDto>>(
+                            j.SourceFilesJson,
+                            JsonOptions
+                        );
+                        fileCount = files?.Count ?? 0;
+                    }
+                    catch
+                    {
+                        // ignore
+                    }
+                }
+
+                return new IngestionJobSummaryDto(
+                    Id: j.Id,
+                    Channel: j.Channel,
+                    Status: j.Status,
+                    DisplayTitle: j.DisplayTitle,
+                    SourceUrl: j.SourceUrl,
+                    ThumbnailImagePath: j.DownloadedThumbnailImagePath,
+                    ConfidenceScore: j.ConfidenceScore,
+                    StatusDetail: j.StatusDetail,
+                    AttemptCount: j.AttemptCount,
+                    NextRetryAt: j.NextRetryAt,
+                    ResultingRecipeId: j.ResultingRecipeId,
+                    ResultingRecipeSlug: j.ResultingRecipe?.Slug,
+                    SubmittedByUsername: usernames.TryGetValue(j.CreatedBy, out var name)
+                        ? name
+                        : null,
+                    CreatedAt: j.CreatedAt,
+                    ModifiedAt: j.ModifiedAt,
+                    SourceFileCount: fileCount,
+                    ExtractedModel: j.ExtractedModel
+                );
+            })
+            .ToList();
+
+        return new PagedResultDto<IngestionJobSummaryDto>(items, totalCount, page, pageSize);
     }
 
     public async Task<IReadOnlyList<IngestionJobSummaryDto>> GetJobsAsync(
