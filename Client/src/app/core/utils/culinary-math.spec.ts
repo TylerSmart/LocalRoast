@@ -30,6 +30,11 @@ describe('culinary-math', () => {
       expect(formatNumber(2.98, false)).toBe('3');
     });
 
+    it('should format small non-zero amounts without rounding to 0', () => {
+      expect(formatNumber(0.01, false)).toBe('0.01');
+      expect(formatNumber(0.02, false)).toBe('0.02');
+    });
+
     it('should format metric numbers with rounding >= 10 and decimals < 10', () => {
       expect(formatNumber(250.3, true)).toBe('250');
       expect(formatNumber(15.7, true)).toBe('16');
@@ -98,6 +103,13 @@ describe('culinary-math', () => {
       expect(getUnitLabel('Pinch', null, 2)).toBe('pinches');
       expect(getUnitLabel('Whole', null, 2)).toBe('');
       expect(getUnitLabel('Custom', 'heaping scoop', 1)).toBe('heaping scoop');
+    });
+
+    it('should suppress placeholder custom unit names like null, none, n/a', () => {
+      expect(getUnitLabel('Custom', 'null', null)).toBe('');
+      expect(getUnitLabel('Custom', 'none', null)).toBe('');
+      expect(getUnitLabel('Custom', 'N/A', null)).toBe('');
+      expect(getUnitLabel('Custom', 'undefined', null)).toBe('');
     });
   });
 

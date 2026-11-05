@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using App.Core.Common;
 using App.Core.Exceptions;
+using App.Core.Ingestion;
 using App.Core.MealPlans;
 using App.Core.Media;
 using App.Core.Recipes;
@@ -1065,16 +1066,39 @@ public sealed partial class RecipeService(
         for (var i = 0; i < ingredientsInput.Count; i++)
         {
             var input = ingredientsInput[i];
+            var unit = input.Unit;
+            var customUnitName =
+                unit == MeasurementUnit.Custom ? input.CustomUnitName?.Trim() : null;
+            if (
+                unit == MeasurementUnit.Custom
+                && (
+                    string.IsNullOrWhiteSpace(customUnitName)
+                    || RecipeDraftNormalizer.IsDisallowedUnitPlaceholder(customUnitName)
+                )
+            )
+            {
+                unit = null;
+                customUnitName = null;
+            }
+
+            var quantity = input.Quantity;
+            if (
+                (unit is MeasurementUnit.Pinch or MeasurementUnit.Dash)
+                && (quantity is null or <= 0.1m)
+            )
+            {
+                quantity = 1m;
+            }
+
             var entity = new RecipeIngredient
             {
                 RecipeId = recipe.Id,
                 SortOrder = i,
                 SectionName = input.SectionName?.Trim(),
-                Quantity = input.Quantity,
+                Quantity = quantity,
                 MaxQuantity = input.MaxQuantity,
-                Unit = input.Unit,
-                CustomUnitName =
-                    input.Unit == MeasurementUnit.Custom ? input.CustomUnitName?.Trim() : null,
+                Unit = unit,
+                CustomUnitName = customUnitName,
                 FoodItemId = input.FoodItemId,
                 LinkedRecipeId = input.LinkedRecipeId,
                 DisplayName = input.DisplayName.Trim(),

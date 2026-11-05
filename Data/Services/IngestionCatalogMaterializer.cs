@@ -535,4 +535,59 @@ public static class IngestionCatalogMaterializer
             // Non-blocking background backfill
         }
     }
+
+    public static async Task CleanLegacyCorruptedIngredientUnitsAsync(
+        AppDbContext dbContext,
+        CancellationToken cancellationToken = default
+    )
+    {
+        try
+        {
+            var corruptedCustomIngredients = await dbContext
+                .RecipeIngredients.Where(ri =>
+                    ri.Unit == MeasurementUnit.Custom
+                    && (
+                        ri.CustomUnitName == null
+                        || ri.CustomUnitName == "null"
+                        || ri.CustomUnitName == "none"
+                        || ri.CustomUnitName == "nil"
+                        || ri.CustomUnitName == "n/a"
+                        || ri.CustomUnitName == "undefined"
+                        || ri.CustomUnitName == "-"
+                        || ri.CustomUnitName == "--"
+                    )
+                )
+                .ToListAsync(cancellationToken);
+
+            var corruptedPinchIngredients = await dbContext
+                .RecipeIngredients.Where(ri =>
+                    (ri.Unit == MeasurementUnit.Pinch || ri.Unit == MeasurementUnit.Dash)
+                    && ri.Quantity != null
+                    && ri.Quantity <= 0.1m
+                )
+                .ToListAsync(cancellationToken);
+
+            if (corruptedCustomIngredients.Count == 0 && corruptedPinchIngredients.Count == 0)
+            {
+                return;
+            }
+
+            foreach (var ing in corruptedCustomIngredients)
+            {
+                ing.Unit = null;
+                ing.CustomUnitName = null;
+            }
+
+            foreach (var ing in corruptedPinchIngredients)
+            {
+                ing.Quantity = 1m;
+            }
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch
+        {
+            // Non-blocking backfill
+        }
+    }
 }

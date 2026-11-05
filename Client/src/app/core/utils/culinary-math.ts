@@ -116,8 +116,16 @@ export function getUnitLabel(
       return isPlural ? 'slices' : 'slice';
     case 'Whole':
       return '';
-    case 'Custom':
-      return customUnitName || '';
+    case 'Custom': {
+      if (!customUnitName) {
+        return '';
+      }
+      const lower = customUnitName.trim().toLowerCase();
+      if (['null', 'none', 'n/a', 'na', 'undefined', 'nil', '-', '--', '???', '?'].includes(lower)) {
+        return '';
+      }
+      return customUnitName;
+    }
     default:
       return '';
   }
@@ -145,7 +153,7 @@ export function formatNumber(value: number, isMetric: boolean): string {
   }
 
   if (frac < 0.04) {
-    return whole.toString();
+    return whole > 0 ? whole.toString() : Number(value.toFixed(2)).toString();
   }
 
   let matchedFraction: string | null = null;

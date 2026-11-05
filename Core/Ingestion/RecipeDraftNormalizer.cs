@@ -17,6 +17,57 @@ public record CatalogTagLookupItem(Guid Id, string Name, string NormalizedName, 
 
 public static class RecipeDraftNormalizer
 {
+    private static readonly HashSet<string> DisallowedUnitPlaceholders = new(
+        StringComparer.OrdinalIgnoreCase
+    )
+    {
+        "null",
+        "none",
+        "nil",
+        "n/a",
+        "na",
+        "undefined",
+        "unknown",
+        "empty",
+        "-",
+        "--",
+        "???",
+        "?",
+        "to taste",
+        "taste",
+        "as needed",
+        "optional",
+        "to-taste",
+        "at taste",
+    };
+
+    private static readonly Regex LeadingPinchRegex = new(
+        @"^[\s\-*•]*(?:a\s+)?pinch(?:\s+of)?\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled
+    );
+
+    private static readonly Regex LeadingDashRegex = new(
+        @"^[\s\-*•]*(?:a\s+)?dash(?:\s+of)?\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled
+    );
+
+    public static bool IsDisallowedUnitPlaceholder(string? unit)
+    {
+        if (string.IsNullOrWhiteSpace(unit))
+        {
+            return true;
+        }
+
+        var trimmed = unit.Trim();
+        return DisallowedUnitPlaceholders.Contains(trimmed);
+    }
+
+    private static string StripLeadingUnitPrefix(string displayName, Regex regex)
+    {
+        var cleaned = regex.Replace(displayName, "").Trim();
+        return string.IsNullOrWhiteSpace(cleaned) ? displayName : cleaned;
+    }
+
     public static (MeasurementUnit? Unit, string? CustomUnitName) NormalizeUnit(string? rawUnit)
     {
         if (string.IsNullOrWhiteSpace(rawUnit))
@@ -25,7 +76,16 @@ public static class RecipeDraftNormalizer
         }
 
         var trimmed = rawUnit.Trim();
+        if (DisallowedUnitPlaceholders.Contains(trimmed))
+        {
+            return (null, null);
+        }
+
         var lower = trimmed.ToLowerInvariant();
+        if (DisallowedUnitPlaceholders.Contains(lower))
+        {
+            return (null, null);
+        }
 
         return lower switch
         {
@@ -224,6 +284,68 @@ public static class RecipeDraftNormalizer
                 ? cleanCanonical
                 : cleanDisplayName;
 
+            var prepNote = string.IsNullOrWhiteSpace(rawIng.PreparationNote)
+                ? null
+                : rawIng.PreparationNote.Trim();
+
+            if (prepNote is null && !string.IsNullOrWhiteSpace(rawIng.Unit))
+            {
+                var trimmedUnit = rawIng.Unit.Trim().ToLowerInvariant();
+                if (trimmedUnit is "to taste" or "taste" or "as needed")
+                {
+                    prepNote = trimmedUnit;
+                }
+            }
+
+            // If the unit is Pinch or Dash and quantity is missing or tiny (<= 0.1, e.g. LLM 0.01 artifact for "pinch"), default quantity to 1.
+            if (
+                (unit is MeasurementUnit.Pinch or MeasurementUnit.Dash)
+                && (cleanQuantity is null or <= 0.1m)
+            )
+            {
+                cleanQuantity = 1m;
+            }
+            // If unit is Tsp and quantity is tiny (<= 0.05, e.g. LLM 0.01 tsp artifact for a pinch), convert to 1 pinch.
+            else if (unit is MeasurementUnit.Tsp && cleanQuantity is <= 0.05m)
+            {
+                unit = MeasurementUnit.Pinch;
+                customUnit = null;
+                cleanQuantity = 1m;
+            }
+            // For other units or unmeasured ingredients, quantities <= 0.05 are LLM float hallucinations for "unmeasured" or "a pinch"
+            else if (cleanQuantity is <= 0.05m)
+            {
+                cleanQuantity = null;
+            }
+
+            // If unit was not detected, but the original text or display name starts with "pinch" or "dash", infer the unit and count
+            if (unit is null)
+            {
+                var textToCheck = !string.IsNullOrWhiteSpace(rawIng.OriginalRawText)
+                    ? rawIng.OriginalRawText
+                    : displayName;
+
+                var pinchMatch = LeadingPinchRegex.Match(textToCheck);
+                if (pinchMatch.Success)
+                {
+                    unit = MeasurementUnit.Pinch;
+                    customUnit = null;
+                    cleanQuantity = (cleanQuantity is null or <= 0.1m) ? 1m : cleanQuantity;
+                    displayName = StripLeadingUnitPrefix(displayName, LeadingPinchRegex);
+                }
+                else
+                {
+                    var dashMatch = LeadingDashRegex.Match(textToCheck);
+                    if (dashMatch.Success)
+                    {
+                        unit = MeasurementUnit.Dash;
+                        customUnit = null;
+                        cleanQuantity = (cleanQuantity is null or <= 0.1m) ? 1m : cleanQuantity;
+                        displayName = StripLeadingUnitPrefix(displayName, LeadingDashRegex);
+                    }
+                }
+            }
+
             CatalogFoodLookupItem? match = null;
             if (!string.IsNullOrWhiteSpace(candidateFoodName))
             {
@@ -248,9 +370,7 @@ public static class RecipeDraftNormalizer
                         SuggestedIsPantryStaple: match.IsPantryStaple,
                         CreateNewFoodItem: false,
                         DisplayName: displayName,
-                        PreparationNote: string.IsNullOrWhiteSpace(rawIng.PreparationNote)
-                            ? null
-                            : rawIng.PreparationNote.Trim(),
+                        PreparationNote: prepNote,
                         IsOptional: rawIng.IsOptional,
                         OriginalRawText: string.IsNullOrWhiteSpace(rawIng.OriginalRawText)
                             ? null
@@ -278,9 +398,7 @@ public static class RecipeDraftNormalizer
                         SuggestedIsPantryStaple: rawIng.SuggestedIsPantryStaple,
                         CreateNewFoodItem: true,
                         DisplayName: displayName,
-                        PreparationNote: string.IsNullOrWhiteSpace(rawIng.PreparationNote)
-                            ? null
-                            : rawIng.PreparationNote.Trim(),
+                        PreparationNote: prepNote,
                         IsOptional: rawIng.IsOptional,
                         OriginalRawText: string.IsNullOrWhiteSpace(rawIng.OriginalRawText)
                             ? null
@@ -306,9 +424,7 @@ public static class RecipeDraftNormalizer
                         SuggestedIsPantryStaple: false,
                         CreateNewFoodItem: false,
                         DisplayName: displayName,
-                        PreparationNote: string.IsNullOrWhiteSpace(rawIng.PreparationNote)
-                            ? null
-                            : rawIng.PreparationNote.Trim(),
+                        PreparationNote: prepNote,
                         IsOptional: rawIng.IsOptional,
                         OriginalRawText: string.IsNullOrWhiteSpace(rawIng.OriginalRawText)
                             ? null

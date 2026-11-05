@@ -42,6 +42,249 @@ public sealed class RecipeDraftNormalizerTests
     }
 
     [TestMethod]
+    public void NormalizeUnit_DisallowedPlaceholderStrings_NormalizesToNull()
+    {
+        string[] placeholders =
+        [
+            "null",
+            "none",
+            "nil",
+            "n/a",
+            "N/A",
+            "undefined",
+            "-",
+            "--",
+            "to taste",
+            "as needed",
+        ];
+        foreach (var placeholder in placeholders)
+        {
+            var (unit, customName) = RecipeDraftNormalizer.NormalizeUnit(placeholder);
+            Assert.IsNull(unit, $"Expected null unit for placeholder '{placeholder}'");
+            Assert.IsNull(customName, $"Expected null customName for placeholder '{placeholder}'");
+        }
+    }
+
+    [TestMethod]
+    public void Normalize_PinchWithTinyQuantityOrNull_NormalizesToOnePinch()
+    {
+        var raw = new LlmExtractedRecipePayload(
+            Title: "Simple Shrimp Scampi",
+            Description: null,
+            BaseServings: 4,
+            YieldDisplay: "4 servings",
+            PrepTimeMinutes: null,
+            CookTimeMinutes: null,
+            TotalTimeMinutes: null,
+            Difficulty: "Easy",
+            SourceName: "America's Test Kitchen",
+            SourceAuthor: "America's Test Kitchen",
+            ConfidenceScore: 0.95m,
+            SuggestedTagNames: [],
+            Ingredients:
+            [
+                new(
+                    SectionName: null,
+                    Quantity: 0.01m, // Hallucinated small float for a pinch
+                    MaxQuantity: null,
+                    Unit: "pinch",
+                    CanonicalFoodName: "cayenne pepper",
+                    DisplayName: "cayenne pepper",
+                    PreparationNote: null,
+                    IsOptional: false,
+                    OriginalRawText: "- Pinch cayenne pepper"
+                ),
+            ],
+            Steps: [new(null, "Cook shrimp.", [], [])]
+        );
+
+        var draft = RecipeDraftNormalizer.Normalize(
+            raw,
+            _catalogFoods,
+            _tags,
+            null,
+            null,
+            null,
+            null,
+            null
+        );
+
+        Assert.IsNotNull(draft.Ingredients);
+        Assert.AreEqual(1, draft.Ingredients.Count);
+        var ing = draft.Ingredients[0];
+        Assert.AreEqual(MeasurementUnit.Pinch, ing.Unit);
+        Assert.AreEqual(1m, ing.Quantity);
+        Assert.IsNull(ing.CustomUnitName);
+    }
+
+    [TestMethod]
+    public void Normalize_DisallowedUnitPlaceholderOnUnmeasuredSaltAndPepper_NormalizesUnitToNull()
+    {
+        var raw = new LlmExtractedRecipePayload(
+            Title: "Simple Shrimp Scampi",
+            Description: null,
+            BaseServings: 4,
+            YieldDisplay: "4 servings",
+            PrepTimeMinutes: null,
+            CookTimeMinutes: null,
+            TotalTimeMinutes: null,
+            Difficulty: "Easy",
+            SourceName: "America's Test Kitchen",
+            SourceAuthor: "America's Test Kitchen",
+            ConfidenceScore: 0.95m,
+            SuggestedTagNames: [],
+            Ingredients:
+            [
+                new(
+                    SectionName: null,
+                    Quantity: null,
+                    MaxQuantity: null,
+                    Unit: "null", // LLM output string "null" for unmeasured unit
+                    CanonicalFoodName: "salt",
+                    DisplayName: "salt",
+                    PreparationNote: null,
+                    IsOptional: false,
+                    OriginalRawText: "- Table salt and ground black pepper"
+                ),
+                new(
+                    SectionName: null,
+                    Quantity: null,
+                    MaxQuantity: null,
+                    Unit: "none",
+                    CanonicalFoodName: "black pepper",
+                    DisplayName: "black pepper",
+                    PreparationNote: null,
+                    IsOptional: false,
+                    OriginalRawText: "- Table salt and ground black pepper"
+                ),
+            ],
+            Steps: [new(null, "Cook shrimp.", [], [])]
+        );
+
+        var draft = RecipeDraftNormalizer.Normalize(
+            raw,
+            _catalogFoods,
+            _tags,
+            null,
+            null,
+            null,
+            null,
+            null
+        );
+
+        Assert.IsNotNull(draft.Ingredients);
+        Assert.AreEqual(2, draft.Ingredients.Count);
+        Assert.IsNull(draft.Ingredients[0].Unit);
+        Assert.IsNull(draft.Ingredients[0].CustomUnitName);
+        Assert.IsNull(draft.Ingredients[1].Unit);
+        Assert.IsNull(draft.Ingredients[1].CustomUnitName);
+    }
+
+    [TestMethod]
+    public void Normalize_InferPinchFromOriginalRawTextWhenUnitNull_SetsPinchUnitAndQuantityOne()
+    {
+        var raw = new LlmExtractedRecipePayload(
+            Title: "Simple Shrimp Scampi",
+            Description: null,
+            BaseServings: 4,
+            YieldDisplay: "4 servings",
+            PrepTimeMinutes: null,
+            CookTimeMinutes: null,
+            TotalTimeMinutes: null,
+            Difficulty: "Easy",
+            SourceName: "America's Test Kitchen",
+            SourceAuthor: "America's Test Kitchen",
+            ConfidenceScore: 0.95m,
+            SuggestedTagNames: [],
+            Ingredients:
+            [
+                new(
+                    SectionName: null,
+                    Quantity: null,
+                    MaxQuantity: null,
+                    Unit: null,
+                    CanonicalFoodName: "cayenne pepper",
+                    DisplayName: "pinch cayenne pepper",
+                    PreparationNote: null,
+                    IsOptional: false,
+                    OriginalRawText: "- Pinch cayenne pepper"
+                ),
+            ],
+            Steps: [new(null, "Cook shrimp.", [], [])]
+        );
+
+        var draft = RecipeDraftNormalizer.Normalize(
+            raw,
+            _catalogFoods,
+            _tags,
+            null,
+            null,
+            null,
+            null,
+            null
+        );
+
+        Assert.IsNotNull(draft.Ingredients);
+        Assert.AreEqual(1, draft.Ingredients.Count);
+        var ing = draft.Ingredients[0];
+        Assert.AreEqual(MeasurementUnit.Pinch, ing.Unit);
+        Assert.AreEqual(1m, ing.Quantity);
+        Assert.AreEqual("cayenne pepper", ing.DisplayName);
+    }
+
+    [TestMethod]
+    public void Normalize_UnitToTaste_NormalizesUnitToNullAndSetsPreparationNote()
+    {
+        var raw = new LlmExtractedRecipePayload(
+            Title: "Simple Scampi",
+            Description: null,
+            BaseServings: 4,
+            YieldDisplay: "4 servings",
+            PrepTimeMinutes: null,
+            CookTimeMinutes: null,
+            TotalTimeMinutes: null,
+            Difficulty: "Easy",
+            SourceName: null,
+            SourceAuthor: null,
+            ConfidenceScore: 0.95m,
+            SuggestedTagNames: [],
+            Ingredients:
+            [
+                new(
+                    SectionName: null,
+                    Quantity: null,
+                    MaxQuantity: null,
+                    Unit: "to taste",
+                    CanonicalFoodName: "salt",
+                    DisplayName: "table salt",
+                    PreparationNote: null,
+                    IsOptional: false,
+                    OriginalRawText: "Table salt to taste"
+                ),
+            ],
+            Steps: [new(null, "Season.", [], [])]
+        );
+
+        var draft = RecipeDraftNormalizer.Normalize(
+            raw,
+            _catalogFoods,
+            _tags,
+            null,
+            null,
+            null,
+            null,
+            null
+        );
+
+        Assert.IsNotNull(draft.Ingredients);
+        Assert.AreEqual(1, draft.Ingredients.Count);
+        var ing = draft.Ingredients[0];
+        Assert.IsNull(ing.Unit);
+        Assert.IsNull(ing.CustomUnitName);
+        Assert.AreEqual("to taste", ing.PreparationNote);
+    }
+
+    [TestMethod]
     public void Normalize_ExistingFoodItemMatched_BindsExistingIdAndNotNew()
     {
         var raw = new LlmExtractedRecipePayload(

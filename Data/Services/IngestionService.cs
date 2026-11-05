@@ -1235,9 +1235,20 @@ public sealed class IngestionService(
 
                 var cleanUnit =
                     ing.Unit == MeasurementUnit.Custom
-                    && string.IsNullOrWhiteSpace(ing.CustomUnitName)
+                    && (
+                        string.IsNullOrWhiteSpace(ing.CustomUnitName)
+                        || RecipeDraftNormalizer.IsDisallowedUnitPlaceholder(ing.CustomUnitName)
+                    )
                         ? null
                         : ing.Unit;
+
+                if (
+                    (cleanUnit is MeasurementUnit.Pinch or MeasurementUnit.Dash)
+                    && (cleanQty is null or <= 0.1m)
+                )
+                {
+                    cleanQty = 1m;
+                }
 
                 ingredientsInput.Add(
                     new RecipeIngredientInput(
