@@ -181,8 +181,10 @@ public sealed class MealPlanE2ETests : E2ETestBase
         await RegisterAndLoginAsync();
         await Page.Locator("nav.desktop-nav a", new() { HasText = "Meal Plan" }).ClickAsync();
         await Expect(Page).ToHaveURLAsync(new Regex(".*/meal-plan.*"));
+        await Page.Locator("mat-button-toggle[value='week'] button").ClickAsync();
 
-        // Navigate 1 week ahead to an isolated, fresh week
+        // Rolling drafts can span next week; use a period beyond that horizon.
+        await Page.Locator("button[aria-label='Next period']").ClickAsync();
         await Page.Locator("button[aria-label='Next period']").ClickAsync();
         await Expect(Page.Locator(".meal-entry-card")).ToHaveCountAsync(0);
 
@@ -299,6 +301,7 @@ public sealed class MealPlanE2ETests : E2ETestBase
         await RegisterAndLoginAsync();
         await Page.Locator("nav.desktop-nav a", new() { HasText = "Meal Plan" }).ClickAsync();
         await Expect(Page).ToHaveURLAsync(new Regex(".*/meal-plan.*"));
+        await Page.Locator("mat-button-toggle[value='week'] button").ClickAsync();
 
         // Clear current week if any entries exist from prior tests
         if (await Page.Locator("button.clear-week-btn").IsVisibleAsync())

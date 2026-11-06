@@ -70,6 +70,7 @@ export interface MealPlanRangeResponseDto {
 }
 
 export interface CreateMealPlanEntryRequest {
+  sourceDraftEntryIndex?: number;
   entryType?: MealPlanEntryType;
   isOnDeck?: boolean;
   weekStartDate?: string | null;

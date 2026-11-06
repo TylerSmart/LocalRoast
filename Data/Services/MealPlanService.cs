@@ -125,6 +125,22 @@ public sealed class MealPlanService(AppDbContext dbContext, TimeProvider? timePr
         CancellationToken cancellationToken = default
     )
     {
+        if (request.SourceDraftEntryIndex.HasValue)
+        {
+            throw new DomainValidationException(
+                "Draft source indices are only supported when applying a draft."
+            );
+        }
+        var entry = await StageEntryAsync(request, cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return MapEntryDto(entry);
+    }
+
+    private async Task<MealPlanEntry> StageEntryAsync(
+        CreateMealPlanEntryRequest request,
+        CancellationToken cancellationToken
+    )
+    {
         var (weekStartDate, scheduledDate, slot) = ValidateAndResolvePlacement(
             request.IsOnDeck,
             request.WeekStartDate,
@@ -175,9 +191,7 @@ public sealed class MealPlanService(AppDbContext dbContext, TimeProvider? timePr
         };
 
         dbContext.MealPlanEntries.Add(entry);
-        await dbContext.SaveChangesAsync(cancellationToken);
-
-        return MapEntryDto(entry);
+        return entry;
     }
 
     public async Task<MealPlanEntryDto?> UpdateEntryAsync(
@@ -494,22 +508,66 @@ public sealed class MealPlanService(AppDbContext dbContext, TimeProvider? timePr
 
         var weekSunday = MealPlanDateHelper.NormalizeToSunday(request.WeekStartDate);
 
-        foreach (var entryRequest in request.Entries)
+        for (var index = 0; index < request.Entries.Count; index++)
         {
-            var req = entryRequest;
-            if (req.IsOnDeck && !req.WeekStartDate.HasValue)
+            var req = request.Entries[index];
+            if (
+                req.SourceDraftEntryIndex is { } sourceIndex
+                && (
+                    sourceIndex < 0
+                    || sourceIndex >= index
+                    || req.EntryType != MealPlanEntryType.Leftovers
+                    || req.SourceMealPlanEntryId.HasValue
+                    || request.Entries[sourceIndex].EntryType != MealPlanEntryType.Recipe
+                    || request.Entries[sourceIndex].IsOnDeck
+                    || req.IsOnDeck
+                    || req.ScheduledDate <= request.Entries[sourceIndex].ScheduledDate
+                    || (
+                        req.RecipeId.HasValue
+                        && req.RecipeId != request.Entries[sourceIndex].RecipeId
+                    )
+                )
+            )
             {
-                req = req with { WeekStartDate = weekSunday };
+                throw new DomainValidationException(
+                    "Draft leftovers must reference an earlier cooking entry with the same recipe and an earlier date."
+                );
             }
-            else if (!req.IsOnDeck && req.ScheduledDate.HasValue && !req.WeekStartDate.HasValue)
-            {
-                req = req with
-                {
-                    WeekStartDate = MealPlanDateHelper.NormalizeToSunday(req.ScheduledDate.Value),
-                };
-            }
+        }
 
-            await CreateEntryAsync(req, cancellationToken);
+        var stagedEntries = new List<MealPlanEntry>();
+        var saved = false;
+        try
+        {
+            foreach (var entryRequest in request.Entries)
+            {
+                var req = entryRequest;
+                if (req.SourceDraftEntryIndex is { } sourceIndex)
+                {
+                    req = req with
+                    {
+                        SourceMealPlanEntryId = stagedEntries[sourceIndex].Id,
+                        SourceDraftEntryIndex = null,
+                    };
+                }
+                if (req.IsOnDeck && !req.WeekStartDate.HasValue)
+                {
+                    req = req with { WeekStartDate = weekSunday };
+                }
+                stagedEntries.Add(await StageEntryAsync(req, cancellationToken));
+            }
+            await dbContext.SaveChangesAsync(cancellationToken);
+            saved = true;
+        }
+        finally
+        {
+            if (!saved)
+            {
+                foreach (var entry in stagedEntries)
+                {
+                    dbContext.Entry(entry).State = EntityState.Detached;
+                }
+            }
         }
 
         return await GetWeekAsync(weekSunday, cancellationToken);
@@ -632,9 +690,11 @@ public sealed class MealPlanService(AppDbContext dbContext, TimeProvider? timePr
                         );
                     }
 
-                    var sourceEntry = await dbContext
-                        .MealPlanEntries.Include(s => s.Recipe)
-                        .FirstOrDefaultAsync(s => s.Id == sourceId.Value, cancellationToken);
+                    var sourceEntry =
+                        dbContext.MealPlanEntries.Local.FirstOrDefault(s => s.Id == sourceId.Value)
+                        ?? await dbContext
+                            .MealPlanEntries.Include(s => s.Recipe)
+                            .FirstOrDefaultAsync(s => s.Id == sourceId.Value, cancellationToken);
 
                     if (sourceEntry is null)
                     {
@@ -730,6 +790,17 @@ public sealed class MealPlanService(AppDbContext dbContext, TimeProvider? timePr
         CancellationToken cancellationToken
     )
     {
+        var stagedMax = dbContext
+            .MealPlanEntries.Local.Where(e =>
+                e.IsOnDeck == isOnDeck
+                && (
+                    isOnDeck
+                        ? e.WeekStartDate == weekStartDate
+                        : e.ScheduledDate == scheduledDate && e.Slot == slot
+                )
+            )
+            .Select(e => (int?)e.SortOrder)
+            .Max();
         if (isOnDeck)
         {
             var max = await dbContext
@@ -737,7 +808,7 @@ public sealed class MealPlanService(AppDbContext dbContext, TimeProvider? timePr
                 .Select(e => (int?)e.SortOrder)
                 .MaxAsync(cancellationToken);
 
-            return (max ?? -1) + 1;
+            return Math.Max(max ?? -1, stagedMax ?? -1) + 1;
         }
         else
         {
@@ -748,7 +819,7 @@ public sealed class MealPlanService(AppDbContext dbContext, TimeProvider? timePr
                 .Select(e => (int?)e.SortOrder)
                 .MaxAsync(cancellationToken);
 
-            return (max ?? -1) + 1;
+            return Math.Max(max ?? -1, stagedMax ?? -1) + 1;
         }
     }
 

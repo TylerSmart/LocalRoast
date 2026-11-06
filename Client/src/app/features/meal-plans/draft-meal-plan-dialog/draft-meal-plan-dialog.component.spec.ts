@@ -1,8 +1,8 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { MAT_DIALOG_DATA, MatDialogRef } from '@angular/material/dialog';
 import { MatSnackBar } from '@angular/material/snack-bar';
-import { of, throwError } from 'rxjs';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { Subject, of, throwError } from 'rxjs';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DraftMealPlanResponseDto } from '../../../core/models/ai-helper.models';
 import { MealPlanWeekDto } from '../../../core/models/meal-plan.models';
 import { AiKitchenHelperService } from '../../../core/services/ai-helpers/ai-kitchen-helper.service';
@@ -79,6 +79,7 @@ describe('DraftMealPlanDialogComponent', () => {
   };
 
   beforeEach(async () => {
+    vi.setSystemTime(new Date(2026, 10, 1, 12));
     mockDialogRef = { close: vi.fn() };
     mockSnackBar = { open: vi.fn() };
     mockAiHelperService = {
@@ -105,6 +106,7 @@ describe('DraftMealPlanDialogComponent', () => {
     component = fixture.componentInstance;
     fixture.detectChanges();
   });
+  afterEach(() => vi.useRealTimers());
 
   it('initializes with default values', () => {
     expect(component.prompt()).toBe('');
@@ -129,6 +131,8 @@ describe('DraftMealPlanDialogComponent', () => {
       mealCount: 4,
       defaultSlot: 'Dinner',
       placeOnDeck: false,
+      servingsPerMeal: 4,
+      todayDate: '2026-11-01',
     });
 
     expect(component.candidateItems().length).toBe(2);
@@ -158,6 +162,141 @@ describe('DraftMealPlanDialogComponent', () => {
 
     expect(component.candidateItems()[0].selected).toBe(false);
     expect(component.selectedCount()).toBe(1);
+  });
+
+  it('clamps a past requested start to today', () => {
+    component.data.weekStartDate = '2026-10-01';
+    component.prompt.set('Dinner');
+    component.submitDraft();
+    expect(mockAiHelperService.draftWeeklyMealPlan).toHaveBeenCalledWith(
+      expect.objectContaining({
+        weekStartDate: '2026-11-01',
+        todayDate: '2026-11-01',
+      }),
+    );
+    component.data.weekStartDate = '2026-11-02';
+  });
+
+  it('retries only one recipe and preserves all selection, date, servings and leftover settings', () => {
+    component.prompt.set('Dinner');
+    component.submitDraft();
+    const [original, other] = component.candidateItems();
+    component.updateServings(original.id, 3);
+    component.toggleCandidate(other.id);
+    const before = component.candidateItems();
+    const pending = new Subject<DraftMealPlanResponseDto>();
+    mockAiHelperService.draftWeeklyMealPlan.mockReturnValue(pending);
+    component.retryCandidate(original.id);
+    expect(component.retryingCandidateId()).toBe(original.id);
+    expect(component.isBusy()).toBe(true);
+    expect(mockAiHelperService.draftWeeklyMealPlan).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        mealCount: 1,
+        placeOnDeck: true,
+        excludedRecipeIds: ['rec-1', 'rec-2'],
+      }),
+    );
+    component.applySelectedMeals();
+    expect(mockMealPlanService.applyDraftEntries).not.toHaveBeenCalled();
+    pending.next({
+      ...mockDraftResponse,
+      candidates: [
+        {
+          ...mockDraftResponse.candidates[0],
+          recipeId: 'rec-3',
+          recipe: { ...mockDraftResponse.candidates[0].recipe, id: 'rec-3', title: 'New Dinner' },
+        },
+      ],
+    });
+    expect(component.candidateItems()[1]).toEqual(before[1]);
+    expect(component.candidateItems()[0]).toEqual({
+      ...before[0],
+      recipeId: 'rec-3',
+      recipe: { ...mockDraftResponse.candidates[0].recipe, id: 'rec-3', title: 'New Dinner' },
+    });
+    expect(component.retryingCandidateId()).toBeNull();
+  });
+
+  it('preserves candidates and shows an error when individual retry fails', () => {
+    component.prompt.set('Dinner');
+    component.submitDraft();
+    const before = component.candidateItems();
+    mockAiHelperService.draftWeeklyMealPlan.mockReturnValue(
+      throwError(() => ({
+        error: { detail: 'No alternatives remain' },
+      })),
+    );
+    component.retryCandidate(before[0].id);
+    expect(component.candidateItems()).toEqual(before);
+    expect(component.errorMessage()).toBe('No alternatives remain');
+    expect(component.isBusy()).toBe(false);
+  });
+
+  it('applies linked leftovers once and scales cooking servings when household portions change', () => {
+    mockAiHelperService.draftWeeklyMealPlan.mockReturnValue(
+      of({
+        ...mockDraftResponse,
+        candidates: [
+          {
+            ...mockDraftResponse.candidates[0],
+            targetServings: 12,
+            leftoverDates: ['2026-11-04', '2026-11-05'],
+          },
+        ],
+      }),
+    );
+    component.prompt.set('Dinner');
+    component.submitDraft();
+    const item = component.candidateItems()[0];
+    expect(component.selectedMealCount()).toBe(3);
+    fixture.detectChanges();
+    expect(
+      (fixture.nativeElement as HTMLElement).querySelector('.apply-draft-btn')?.textContent,
+    ).toContain('Add Selected Meals (3)');
+    component.updateServings(item.id, 2);
+    expect(component.candidateItems()[0].targetServings).toBe(6);
+    component.updateScheduledDate(item.id, '2026-10-31');
+    expect(component.candidateItems()[0].scheduledDate).toBe('2026-11-03');
+    component.updateScheduledDate(item.id, '2026-11-05');
+    expect(component.candidateItems()[0].scheduledDate).toBe('2026-11-03');
+    component.applySelectedMeals();
+    expect(mockMealPlanService.applyDraftEntries).not.toHaveBeenCalled();
+    component.updateScheduledDate(item.id, '2026-11-03');
+    component.applySelectedMeals();
+    const applied = mockMealPlanService.applyDraftEntries.mock.calls[0][0];
+    expect(applied.entries).toHaveLength(3);
+    expect(applied.entries[0].targetServings).toBe(6);
+    expect(applied.entries[1]).toEqual(
+      expect.objectContaining({
+        entryType: 'Leftovers',
+        recipeId: 'rec-1',
+        targetServings: 2,
+        scheduledDate: '2026-11-04',
+        sourceDraftEntryIndex: 0,
+      }),
+    );
+    expect(applied.entries[2].sourceDraftEntryIndex).toBe(0);
+  });
+
+  it('does not apply stale servings after an invalid edit', () => {
+    component.prompt.set('Dinner');
+    component.submitDraft();
+    const item = component.candidateItems()[0];
+    component.updateServings(item.id, 0);
+    component.applySelectedMeals();
+    expect(mockMealPlanService.applyDraftEntries).not.toHaveBeenCalled();
+    expect(component.hasInvalidSelection()).toBe(true);
+    component.updateServings(item.id, 2);
+    expect(component.hasInvalidSelection()).toBe(false);
+  });
+
+  it('refuses to apply dates that have become past while the dialog was open', () => {
+    component.prompt.set('Dinner');
+    component.submitDraft();
+    vi.setSystemTime(new Date(2026, 10, 9, 12));
+    component.applySelectedMeals();
+    expect(mockMealPlanService.applyDraftEntries).not.toHaveBeenCalled();
+    expect(component.errorMessage()).toContain('past dates');
   });
 
   it('applies selected meals, calls mealPlanService.applyDraftEntries, and closes dialog', () => {

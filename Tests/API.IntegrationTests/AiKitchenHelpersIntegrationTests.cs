@@ -7,6 +7,7 @@ using App.Core.FoodCatalog;
 using App.Core.Ingestion;
 using App.Core.MealPlans;
 using App.Core.Recipes;
+using App.Core.Shopping;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -382,9 +383,16 @@ public sealed class AiKitchenHelpersIntegrationTests
         Assert.AreEqual("Greek Yogurt", subResult.Substitutions[0].Label);
 
         // 4. Test Draft Weekly Meal Plan (strictly grounded)
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
         var draftRes = await client.PostAsJsonAsync(
             "/api/ai-helpers/draft-meal-plan",
-            new DraftWeeklyMealPlanRequest(Prompt: "Healthy Dinners", MealCount: 1)
+            new DraftWeeklyMealPlanRequest(
+                WeekStartDate: today.AddDays(-3),
+                Prompt: "Healthy Dinners",
+                MealCount: 1,
+                ServingsPerMeal: 2,
+                TodayDate: today
+            )
         );
         Assert.AreEqual(HttpStatusCode.OK, draftRes.StatusCode);
         var draftResult = await draftRes.Content.ReadFromJsonAsync<DraftMealPlanResponseDto>();
@@ -393,28 +401,79 @@ public sealed class AiKitchenHelpersIntegrationTests
         Assert.AreEqual(1, draftResult.Candidates.Count);
         Assert.AreEqual(recipe.Id, draftResult.Candidates[0].RecipeId);
         Assert.AreEqual("Test Grounded Recipe", draftResult.Candidates[0].Recipe.Title);
+        Assert.AreEqual(today, draftResult.WeekStartDate);
+        Assert.AreEqual(today.AddDays(6), draftResult.WeekEndDate);
+        Assert.AreEqual(14m, draftResult.Candidates[0].TargetServings);
+        Assert.AreEqual(6, draftResult.Candidates[0].LeftoverDates!.Count);
+
+        var alternativeRes = await client.PostAsJsonAsync(
+            "/api/recipes",
+            new UpsertRecipeRequest(Title: "Alternative Dinner")
+        );
+        Assert.AreEqual(HttpStatusCode.Created, alternativeRes.StatusCode);
+        var alternative = await alternativeRes.Content.ReadFromJsonAsync<RecipeDetailDto>();
+        Assert.IsNotNull(alternative);
+        fakeLlm.DraftResult = new([
+            new LlmDraftMealProposalItem(
+                0,
+                alternative.Title,
+                0,
+                "Dinner",
+                true,
+                4,
+                "Another option"
+            ),
+        ]);
+        var retryRes = await client.PostAsJsonAsync(
+            "/api/ai-helpers/draft-meal-plan",
+            new DraftWeeklyMealPlanRequest(
+                Prompt: "Healthy Dinners",
+                MealCount: 1,
+                PlaceOnDeck: true,
+                ExcludedRecipeIds: [recipe.Id]
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.OK, retryRes.StatusCode);
+        var replacement = await retryRes.Content.ReadFromJsonAsync<DraftMealPlanResponseDto>();
+        Assert.IsNotNull(replacement);
+        Assert.AreEqual(alternative.Id, replacement.Candidates[0].RecipeId);
+        Assert.AreEqual(0, replacement.Candidates[0].LeftoverDates!.Count);
+        var noAlternatives = await client.PostAsJsonAsync(
+            "/api/ai-helpers/draft-meal-plan",
+            new DraftWeeklyMealPlanRequest(
+                Prompt: "Healthy Dinners",
+                MealCount: 1,
+                PlaceOnDeck: true,
+                ExcludedRecipeIds: [recipe.Id, alternative.Id]
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.BadRequest, noAlternatives.StatusCode);
 
         // 5. Test Apply Draft Meal Plan
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
-        var monday = today.AddDays(-(int)today.DayOfWeek + (int)DayOfWeek.Monday);
+        var candidate = draftResult.Candidates[0];
+        var draftEntries = new List<CreateMealPlanEntryRequest>
+        {
+            new(
+                ScheduledDate: candidate.ScheduledDate,
+                Slot: candidate.Slot,
+                RecipeId: candidate.RecipeId,
+                TargetServings: candidate.TargetServings
+            ),
+        };
+        draftEntries.AddRange(
+            candidate.LeftoverDates!.Select(date => new CreateMealPlanEntryRequest(
+                EntryType: MealPlanEntryType.Leftovers,
+                ScheduledDate: date,
+                Slot: candidate.Slot,
+                RecipeId: candidate.RecipeId,
+                TargetServings: 2,
+                SourceDraftEntryIndex: 0
+            ))
+        );
 
         var applyRes = await client.PostAsJsonAsync(
             "/api/meal-plans/week/apply-draft",
-            new ApplyDraftMealPlanRequest(
-                WeekStartDate: monday,
-                Entries:
-                [
-                    new CreateMealPlanEntryRequest(
-                        EntryType: MealPlanEntryType.Recipe,
-                        WeekStartDate: monday,
-                        ScheduledDate: draftResult.Candidates[0].ScheduledDate,
-                        Slot: draftResult.Candidates[0].Slot,
-                        RecipeId: draftResult.Candidates[0].RecipeId,
-                        TargetServings: draftResult.Candidates[0].TargetServings,
-                        Notes: draftResult.Candidates[0].Rationale
-                    ),
-                ]
-            )
+            new ApplyDraftMealPlanRequest(WeekStartDate: today, Entries: draftEntries)
         );
         Assert.AreEqual(HttpStatusCode.OK, applyRes.StatusCode);
         var weekResult = await applyRes.Content.ReadFromJsonAsync<MealPlanWeekDto>();
@@ -422,5 +481,53 @@ public sealed class AiKitchenHelpersIntegrationTests
         Assert.IsTrue(
             weekResult.Days.SelectMany(d => d.Entries).Any(e => e.Recipe?.Id == recipe.Id)
         );
+        var rangeRes = await client.GetAsync(
+            $"/api/meal-plans?startDate={today:yyyy-MM-dd}&endDate={today.AddDays(6):yyyy-MM-dd}"
+        );
+        var range = await rangeRes.Content.ReadFromJsonAsync<MealPlanRangeResponseDto>();
+        Assert.IsNotNull(range);
+        Assert.AreEqual(7, range.ScheduledEntries.Count);
+        var cookingEntry = range.ScheduledEntries.Single(e => !e.IsLeftovers);
+        Assert.IsTrue(
+            range
+                .ScheduledEntries.Where(e => e.IsLeftovers)
+                .All(e => e.SourceMealPlanEntryId == cookingEntry.Id && e.TargetServings == 2)
+        );
+
+        var listRes = await client.PostAsJsonAsync(
+            "/api/shopping-lists",
+            new CreateShoppingListRequest("Draft Groceries")
+        );
+        var list = await listRes.Content.ReadFromJsonAsync<ShoppingListDetailDto>();
+        Assert.IsNotNull(list);
+        var previewRes = await client.PostAsJsonAsync(
+            $"/api/shopping-lists/{list.Id}/generate/meal-plan/preview",
+            new GenerateFromMealPlanRequest(today, today.AddDays(6), IncludeOnDeck: false)
+        );
+        Assert.AreEqual(HttpStatusCode.OK, previewRes.StatusCode);
+        var preview =
+            await previewRes.Content.ReadFromJsonAsync<ShoppingListGenerationPreviewDto>();
+        Assert.IsNotNull(preview);
+        Assert.AreEqual(1, preview.EligibleMealsCount);
+        Assert.AreEqual(6, preview.IgnoredLeftoversCount);
+        Assert.AreEqual(3.5m, preview.ActiveCandidateItems.Single().Quantity);
+
+        var invalidApplyRes = await client.PostAsJsonAsync(
+            "/api/meal-plans/week/apply-draft",
+            new ApplyDraftMealPlanRequest(
+                today,
+                [
+                    new(ScheduledDate: today, Slot: MealSlot.Lunch, RecipeId: recipe.Id),
+                    new(
+                        EntryType: MealPlanEntryType.Leftovers,
+                        ScheduledDate: today.AddDays(1),
+                        Slot: MealSlot.Lunch,
+                        RecipeId: recipe.Id,
+                        SourceDraftEntryIndex: 1
+                    ),
+                ]
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.BadRequest, invalidApplyRes.StatusCode);
     }
 }

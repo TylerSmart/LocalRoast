@@ -108,7 +108,7 @@
       flex-wrap: wrap;
 
       .meal-count-field {
-        width: 120px;
+        width: 160px;
       }
 
       .default-slot-field {
@@ -288,6 +288,12 @@
           line-height: 1.35;
           color: var(--mat-sys-on-surface-variant);
           font-style: italic;
+          overflow-wrap: anywhere;
+        }
+
+        .retry-candidate-btn {
+          align-self: flex-start;
+          max-width: 100%;
         }
 
         .candidate-schedule-controls {

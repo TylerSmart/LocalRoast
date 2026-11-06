@@ -76,6 +76,93 @@ public sealed class MealPlanServiceTests
     }
 
     [TestMethod]
+    public async Task ApplyDraft_LinksLeftoversAcrossWeeks_AndAssignsDistinctSortOrders()
+    {
+        var start = new DateOnly(2026, 11, 7);
+        await _service.ApplyDraftEntriesAsync(
+            new(
+                start,
+                [
+                    new(
+                        ScheduledDate: start,
+                        Slot: MealSlot.Dinner,
+                        RecipeId: _recipe1.Id,
+                        TargetServings: 8
+                    ),
+                    new(
+                        EntryType: MealPlanEntryType.Leftovers,
+                        ScheduledDate: start.AddDays(1),
+                        Slot: MealSlot.Dinner,
+                        RecipeId: _recipe1.Id,
+                        TargetServings: 4,
+                        SourceDraftEntryIndex: 0
+                    ),
+                    new(
+                        ScheduledDate: start,
+                        Slot: MealSlot.Dinner,
+                        RecipeId: _recipe2.Id,
+                        TargetServings: 4
+                    ),
+                ]
+            )
+        );
+        var range = await _service.GetRangeAsync(start, start.AddDays(1));
+        var cooked = range.ScheduledEntries.Single(e =>
+            !e.IsLeftovers && e.Recipe!.Id == _recipe1.Id
+        );
+        var leftovers = range.ScheduledEntries.Single(e => e.IsLeftovers);
+        Assert.AreEqual(cooked.Id, leftovers.SourceMealPlanEntryId);
+        Assert.AreEqual(4m, leftovers.TargetServings);
+        Assert.AreEqual(new DateOnly(2026, 11, 8), leftovers.WeekStartDate);
+        CollectionAssert.AreEqual(
+            new[] { 0, 1 },
+            range.ScheduledEntries.Where(e => !e.IsLeftovers).Select(e => e.SortOrder).ToArray()
+        );
+    }
+
+    [TestMethod]
+    public async Task ApplyDraft_InvalidEntryOrSourceLeavesNoPartiallySavedMeals()
+    {
+        var start = new DateOnly(2026, 11, 5);
+        await Assert.ThrowsAsync<DomainValidationException>(() =>
+            _service.ApplyDraftEntriesAsync(
+                new(
+                    start,
+                    [
+                        new(ScheduledDate: start, Slot: MealSlot.Dinner, RecipeId: _recipe1.Id),
+                        new(
+                            ScheduledDate: start.AddDays(1),
+                            Slot: MealSlot.Dinner,
+                            RecipeId: Guid.NewGuid()
+                        ),
+                    ]
+                )
+            )
+        );
+        await _dbContext.SaveChangesAsync();
+        Assert.AreEqual(0, await _dbContext.MealPlanEntries.CountAsync());
+
+        await Assert.ThrowsAsync<DomainValidationException>(() =>
+            _service.ApplyDraftEntriesAsync(
+                new(
+                    start,
+                    [
+                        new(ScheduledDate: start, Slot: MealSlot.Dinner, RecipeId: _recipe1.Id),
+                        new(
+                            EntryType: MealPlanEntryType.Leftovers,
+                            ScheduledDate: start.AddDays(1),
+                            Slot: MealSlot.Dinner,
+                            RecipeId: _recipe2.Id,
+                            SourceDraftEntryIndex: 0
+                        ),
+                    ]
+                )
+            )
+        );
+        Assert.AreEqual(0, await _dbContext.MealPlanEntries.CountAsync());
+    }
+
+    [TestMethod]
     public async Task CreateEntryAsync_Recipe_OnDeck_Succeeds()
     {
         var request = new CreateMealPlanEntryRequest(

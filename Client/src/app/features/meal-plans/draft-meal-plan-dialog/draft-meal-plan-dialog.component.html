@@ -2,7 +2,7 @@
   <div class="dialog-header">
     <div class="title-wrap">
       <mat-icon class="ai-header-icon">auto_awesome</mat-icon>
-      <h2 mat-dialog-title class="dialog-title">Draft Weekly Meal Plan</h2>
+      <h2 mat-dialog-title class="dialog-title">Draft Seven-Day Meal Plan</h2>
     </div>
     <button mat-icon-button type="button" (click)="close()" aria-label="Close dialog">
       <mat-icon>close</mat-icon>
@@ -47,16 +47,30 @@
 
       <div class="form-row-params">
         <mat-form-field appearance="outline" class="meal-count-field" subscriptSizing="dynamic">
-          <mat-label>Meals</mat-label>
+          <mat-label>{{ placeOnDeck() ? 'Recipe suggestions' : 'Times to cook' }}</mat-label>
           <mat-select [ngModel]="mealCount()" (ngModelChange)="mealCount.set($event)">
-            <mat-option [value]="1">1 meal</mat-option>
-            <mat-option [value]="2">2 meals</mat-option>
-            <mat-option [value]="3">3 meals</mat-option>
-            <mat-option [value]="4">4 meals</mat-option>
-            <mat-option [value]="5">5 meals</mat-option>
-            <mat-option [value]="6">6 meals</mat-option>
-            <mat-option [value]="7">7 meals</mat-option>
+            <mat-option [value]="1">1</mat-option>
+            <mat-option [value]="2">2</mat-option>
+            <mat-option [value]="3">3</mat-option>
+            <mat-option [value]="4">4</mat-option>
+            <mat-option [value]="5">5</mat-option>
+            <mat-option [value]="6">6</mat-option>
+            <mat-option [value]="7">7</mat-option>
           </mat-select>
+        </mat-form-field>
+
+        <mat-form-field appearance="outline" subscriptSizing="dynamic">
+          <mat-label>Servings per meal</mat-label>
+          <input
+            matInput
+            class="household-servings-input"
+            type="number"
+            min="0.25"
+            max="999"
+            step="0.25"
+            [ngModel]="servingsPerMeal()"
+            (ngModelChange)="servingsPerMeal.set($event)"
+          />
         </mat-form-field>
 
         <mat-form-field appearance="outline" class="default-slot-field" subscriptSizing="dynamic">
@@ -84,7 +98,7 @@
           color="primary"
           class="draft-submit-btn"
           (click)="submitDraft()"
-          [disabled]="isLoading() || !prompt().trim()"
+          [disabled]="isBusy() || !prompt().trim()"
         >
           @if (isLoading()) {
             <mat-spinner diameter="18" class="inline-spinner"></mat-spinner>
@@ -94,6 +108,12 @@
           <span>{{ isLoading() ? 'Drafting...' : 'Draft Plan' }}</span>
         </button>
       </div>
+      @if (!placeOnDeck()) {
+        <p class="section-desc">
+          Choose how many times to cook. Planned leftovers cover the remaining unplanned dates in
+          the next seven days; cooking servings include those portions.
+        </p>
+      }
     </div>
 
     @if (errorMessage()) {
@@ -119,6 +139,7 @@
                 <mat-checkbox
                   class="candidate-checkbox"
                   [checked]="item.selected"
+                  [disabled]="isBusy()"
                   (change)="toggleCandidate(item.id)"
                   [attr.aria-label]="'Select ' + item.recipe.title"
                 ></mat-checkbox>
@@ -150,12 +171,34 @@
                     }
                     <span class="badge servings-badge">
                       <mat-icon>group</mat-icon>
-                      {{ item.recipe.baseServings }} servings
+                      Cook {{ item.targetServings }} servings
                     </span>
                   </div>
                 </div>
 
                 <p class="candidate-rationale">{{ item.rationale }}</p>
+                @if (item.leftoverDates.length) {
+                  <p class="candidate-rationale">
+                    Leftovers: {{ item.leftoverDates.join(', ') }}. Refrigerate promptly; freeze
+                    portions needed more than three days after cooking.
+                  </p>
+                }
+                <button
+                  type="button"
+                  mat-stroked-button
+                  class="retry-candidate-btn"
+                  (click)="retryCandidate(item.id)"
+                  [disabled]="isBusy()"
+                  [attr.aria-label]="'Retry suggestion for ' + item.recipe.title"
+                >
+                  @if (retryingCandidateId() === item.id) {
+                    <mat-spinner diameter="18"></mat-spinner>
+                    Retrying...
+                  } @else {
+                    <mat-icon>refresh</mat-icon>
+                  }
+                  <span>{{ retryingCandidateId() === item.id ? '' : 'Try another recipe' }}</span>
+                </button>
 
                 <div class="candidate-schedule-controls">
                   @if (!item.isOnDeck) {
@@ -172,6 +215,9 @@
                           [id]="'date-' + item.id"
                           class="candidate-date-input"
                           [value]="item.scheduledDateObj"
+                          [min]="minDate()"
+                          [max]="maxCookingDate(item)"
+                          [disabled]="isBusy()"
                           (dateChange)="updateScheduledDate(item.id, $event.value)"
                         />
                         <mat-datepicker-toggle
@@ -191,6 +237,7 @@
                         [id]="'slot-' + item.id"
                         class="candidate-slot-select"
                         [value]="item.slot"
+                        [disabled]="isBusy()"
                         (change)="updateSlot(item.id, $any($event.target).value)"
                       >
                         @for (slot of slots; track slot.value) {
@@ -203,14 +250,18 @@
                   }
 
                   <div class="control-item">
-                    <label class="control-label" [for]="'servings-' + item.id">Servings</label>
+                    <label class="control-label" [for]="'servings-' + item.id"
+                      >Servings per meal</label
+                    >
                     <input
                       type="number"
                       [id]="'servings-' + item.id"
                       class="candidate-servings-input"
-                      min="1"
-                      max="50"
-                      [value]="item.targetServings"
+                      min="0.25"
+                      max="999"
+                      step="0.25"
+                      [value]="item.servingsPerMeal"
+                      [disabled]="isBusy()"
                       (change)="updateServings(item.id, +$any($event.target).value)"
                     />
                   </div>
@@ -232,7 +283,7 @@
         mat-flat-button
         color="primary"
         class="apply-draft-btn"
-        [disabled]="selectedCount() === 0 || isSubmitting()"
+        [disabled]="selectedCount() === 0 || isBusy() || hasInvalidSelection()"
         (click)="applySelectedMeals()"
       >
         @if (isSubmitting()) {
@@ -241,7 +292,7 @@
           <mat-icon>playlist_add_check</mat-icon>
         }
         <span>{{
-          isSubmitting() ? 'Adding to Plan...' : 'Add Selected Meals (' + selectedCount() + ')'
+          isSubmitting() ? 'Adding to Plan...' : 'Add Selected Meals (' + selectedMealCount() + ')'
         }}</span>
       </button>
     }

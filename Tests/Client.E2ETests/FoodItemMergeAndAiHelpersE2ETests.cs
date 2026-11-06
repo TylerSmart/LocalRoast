@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -70,30 +71,57 @@ public sealed class MockKitchenAiOllamaServer : IAsyncDisposable
                     || bodyText.Contains("meal planning")
                 )
                 {
-                    payloadJson = """
-                        {
-                          "proposals": [
+                    using var body = JsonDocument.Parse(bodyText);
+                    var prompt = body
+                        .RootElement.GetProperty("messages")
+                        .EnumerateArray()
+                        .Last(m => m.GetProperty("role").GetString() == "user")
+                        .GetProperty("content")
+                        .GetString()!;
+                    var requested = int.Parse(
+                        Regex
+                            .Match(
+                                prompt,
+                                @"Requested Number of Cooking Occasions \(not counting leftovers\): (\d+)"
+                            )
+                            .Groups[1]
+                            .Value
+                    );
+                    var catalog = Regex
+                        .Matches(
+                            prompt,
+                            @"^\[(\d+)\] (.+?) \| BaseServings:",
+                            RegexOptions.Multiline
+                        )
+                        .OrderBy(match =>
+                            match.Groups[2].Value switch
                             {
-                              "catalogIndex": 0,
-                              "recipeTitle": "Tuscan Garlic Chicken",
-                              "dayOffset": 1,
-                              "slot": "Dinner",
-                              "isOnDeck": false,
-                              "targetServings": 4,
-                              "rationale": "High-protein family favorite from cookbook."
-                            },
-                            {
-                              "catalogIndex": 1,
-                              "recipeTitle": "Veggie Stir Fry",
-                              "dayOffset": 3,
-                              "slot": "Dinner",
-                              "isOnDeck": false,
-                              "targetServings": 4,
-                              "rationale": "Quick fresh weeknight dinner."
+                                "Tuscan Garlic Chicken" => 0,
+                                "Veggie Stir Fry" => 1,
+                                "Lentil Soup" => 2,
+                                _ => 3,
                             }
-                          ]
+                        )
+                        .ToArray();
+                    payloadJson = JsonSerializer.Serialize(
+                        new
+                        {
+                            proposals = Enumerable
+                                .Range(0, requested)
+                                .Select(i => new
+                                {
+                                    catalogIndex = int.Parse(
+                                        catalog[i % catalog.Length].Groups[1].Value
+                                    ),
+                                    recipeTitle = catalog[i % catalog.Length].Groups[2].Value,
+                                    dayOffset = i,
+                                    slot = "Dinner",
+                                    isOnDeck = false,
+                                    targetServings = 4,
+                                    rationale = "High-protein family favorite from cookbook.",
+                                }),
                         }
-                        """;
+                    );
                 }
                 else
                 {
@@ -357,7 +385,7 @@ public sealed class FoodItemMergeAndAiHelpersE2ETests : E2ETestBase
         await RegisterAndLoginAsync();
         await ConfigureLlmProviderAsync(mockServer.BaseUrl);
 
-        // Ensure 2 cookbook recipes exist for grounded proposals
+        // Three recipes allow a two-suggestion draft and a distinct replacement.
         await CreateRecipeWithIngredientAsync(
             "Tuscan Garlic Chicken",
             "Chicken Breast",
@@ -368,10 +396,38 @@ public sealed class FoodItemMergeAndAiHelpersE2ETests : E2ETestBase
             "Bell Pepper",
             "Stir fry vegetables over high heat."
         );
+        await CreateRecipeWithIngredientAsync("Lentil Soup", "Lentils", "Simmer until tender.");
 
         // 1. Navigate to Meal Plan
         await Page.Locator("nav.desktop-nav a", new() { HasText = "Meal Plan" }).ClickAsync();
         await Expect(Page).ToHaveURLAsync(new Regex(".*/meal-plan.*"));
+        await Expect(Page.Locator("mat-button-toggle[value='next7'] button"))
+            .ToHaveAttributeAsync("aria-checked", "true");
+        await Expect(Page.Locator(".week-days-grid .day-column")).ToHaveCountAsync(7);
+        await Expect(Page.Locator(".week-days-grid .day-column").First)
+            .ToHaveClassAsync(new Regex("is-today"));
+
+        // The E2E server shares household plans between tests. Clear both weeks in this horizon.
+        await Page.Locator("mat-button-toggle[value='week'] button").ClickAsync();
+        for (var week = 0; week < 2; week++)
+        {
+            await Expect(Page.Locator(".week-days-grid")).ToBeVisibleAsync();
+            if (await Page.Locator("button.clear-week-btn").IsVisibleAsync())
+            {
+                await Page.Locator("button.clear-week-btn").ClickAsync();
+                await Page.Locator("mat-dialog-container button", new() { HasText = "Clear Week" })
+                    .ClickAsync();
+                await Expect(Page.Locator("mat-dialog-container")).Not.ToBeVisibleAsync();
+                await Expect(Page.Locator(".week-days-grid")).ToBeVisibleAsync();
+            }
+            if (week == 0)
+            {
+                await Page.Locator("button[aria-label='Next period']").ClickAsync();
+            }
+        }
+        await Page.Locator("button.today-btn").ClickAsync();
+        await Page.Locator("mat-button-toggle[value='next7'] button").ClickAsync();
+        await Expect(Page.Locator(".meal-entry-card")).ToHaveCountAsync(0);
 
         // Verify Draft Week AI button is visible
         var draftWeekBtn = Page.Locator(".draft-week-ai-btn");
@@ -385,6 +441,9 @@ public sealed class FoodItemMergeAndAiHelpersE2ETests : E2ETestBase
         // 2. Select Preset Idea Chip
         var presetChip = draftDialog.Locator(".preset-chip").First;
         await presetChip.ClickAsync();
+        await draftDialog.Locator(".meal-count-field mat-select").ClickAsync();
+        await Page.GetByRole(AriaRole.Option, new() { Name = "2", Exact = true }).ClickAsync();
+        await draftDialog.Locator(".household-servings-input").FillAsync("2");
 
         // Click Draft Plan
         var draftSubmitBtn = draftDialog.Locator(".draft-submit-btn");
@@ -398,6 +457,32 @@ public sealed class FoodItemMergeAndAiHelpersE2ETests : E2ETestBase
             .ToContainTextAsync("Tuscan Garlic Chicken");
         await Expect(draftDialog.Locator(".candidate-rationale").First)
             .ToContainTextAsync("High-protein family favorite");
+        await Expect(candidateCards.First.Locator(".servings-badge"))
+            .ToContainTextAsync("Cook 8 servings");
+        await Expect(candidateCards.Nth(1).Locator(".servings-badge"))
+            .ToContainTextAsync("Cook 6 servings");
+        await Expect(candidateCards.First).ToContainTextAsync("Leftovers:");
+        var originalDates = await draftDialog
+            .Locator(".candidate-date-input")
+            .EvaluateAllAsync<string[]>("inputs => inputs.map(input => input.value)");
+
+        mockServer.SimulateOffline = true;
+        await candidateCards.First.Locator(".retry-candidate-btn").ClickAsync();
+        await Expect(draftDialog.Locator(".error-banner")).ToBeVisibleAsync();
+        await Expect(draftDialog.Locator(".candidate-title").First)
+            .ToContainTextAsync("Tuscan Garlic Chicken");
+        mockServer.SimulateOffline = false;
+        await candidateCards.First.Locator(".retry-candidate-btn").ClickAsync();
+        await Expect(draftDialog.Locator(".candidate-title").First)
+            .ToContainTextAsync("Lentil Soup");
+        await Expect(draftDialog.Locator(".candidate-title").Nth(1))
+            .ToContainTextAsync("Veggie Stir Fry");
+        var retriedDates = await draftDialog
+            .Locator(".candidate-date-input")
+            .EvaluateAllAsync<string[]>("inputs => inputs.map(input => input.value)");
+        CollectionAssert.AreEqual(originalDates, retriedDates);
+        await Expect(candidateCards.First.Locator(".servings-badge"))
+            .ToContainTextAsync("Cook 8 servings");
 
         // Deselect second candidate
         var secondCheckbox = candidateCards.Nth(1).Locator(".candidate-checkbox");
@@ -405,14 +490,18 @@ public sealed class FoodItemMergeAndAiHelpersE2ETests : E2ETestBase
 
         // 3. Apply Selected Meals
         var applyBtn = draftDialog.Locator(".apply-draft-btn");
-        await Expect(applyBtn).ToContainTextAsync("Add Selected Meals (1)");
+        await Expect(applyBtn).ToContainTextAsync("Add Selected Meals (4)");
         await applyBtn.ClickAsync();
 
         await Expect(draftDialog).Not.ToBeVisibleAsync();
 
         // 4. Verify scheduled meal appears on calendar
-        await Expect(Page.Locator(".meal-entry-card", new() { HasText = "Tuscan Garlic Chicken" }))
-            .ToBeVisibleAsync();
+        await Expect(Page.Locator(".meal-entry-card", new() { HasText = "Lentil Soup" }))
+            .ToHaveCountAsync(4);
+        await Expect(Page.Locator(".meal-entry-card .leftovers-badge")).ToHaveCountAsync(3);
+        await Page.ReloadAsync();
+        await Expect(Page.Locator(".meal-entry-card", new() { HasText = "Lentil Soup" }))
+            .ToHaveCountAsync(4);
 
         // 5. Test 360px Mobile Viewport Responsiveness (zero horizontal scroll overflow)
         await Page.SetViewportSizeAsync(360, 740);
@@ -433,6 +522,14 @@ public sealed class FoodItemMergeAndAiHelpersE2ETests : E2ETestBase
         // Re-open Draft dialog in 360px viewport and verify zero overflow
         await Page.Locator(".draft-week-ai-btn").ClickAsync();
         await Expect(draftDialog).ToBeVisibleAsync();
+        await draftDialog.Locator(".preset-chip").First.ClickAsync();
+        await draftDialog.Locator(".meal-count-field mat-select").ClickAsync();
+        await Page.GetByRole(AriaRole.Option, new() { Name = "1", Exact = true }).ClickAsync();
+        await draftDialog.Locator(".draft-submit-btn").ClickAsync();
+        await Expect(draftDialog.Locator(".candidate-card")).ToHaveCountAsync(1);
+        await draftDialog.Locator(".retry-candidate-btn").ClickAsync();
+        await Expect(draftDialog.Locator(".candidate-title")).ToContainTextAsync("Veggie Stir Fry");
+        await Expect(draftDialog.Locator(".error-banner")).Not.ToBeVisibleAsync();
 
         var dialogScrollWidth = await Page.EvaluateAsync<int>(
             "() => document.querySelector('.draft-dialog-container').scrollWidth"
