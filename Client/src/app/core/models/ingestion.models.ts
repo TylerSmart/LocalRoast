@@ -119,6 +119,8 @@ export interface IngestionDraftIngredientDto {
   isNewFoodItem: boolean;
   proposedFoodItemName: string | null;
   suggestedIsPantryStaple: boolean;
+  isRecipeReference?: boolean;
+  referencedRecipeTitle?: string | null;
 }
 
 export interface IngestionDraftStepDto {

@@ -79,6 +79,102 @@ describe('RecipeEditorComponent', () => {
     expect(component.ingredientsArray.length).toBe(1);
   });
 
+  it('loads unresolved recipe references and clears them when linked to a saved recipe', () => {
+    const referencedTitle = 'Foolproof All-Butter Dough';
+    const recipeDetail: RecipeDetailDto = {
+      id: 'parent-recipe',
+      title: 'Blueberry Pie',
+      slug: 'blueberry-pie',
+      description: null,
+      status: 'Published',
+      baseServings: 8,
+      yieldDisplay: null,
+      prepTimeMinutes: null,
+      cookTimeMinutes: null,
+      totalTimeMinutes: null,
+      difficulty: null,
+      sourceUrl: null,
+      sourceName: null,
+      sourceAuthor: null,
+      sourceBookTitle: null,
+      sourceBookPage: null,
+      coverImagePath: null,
+      thumbnailImagePath: null,
+      timesCooked: 0,
+      lastCookedAt: null,
+      averageRating: null,
+      ingredients: [
+        {
+          id: 'component-ingredient',
+          sortOrder: 0,
+          sectionName: null,
+          quantity: 1,
+          maxQuantity: null,
+          unit: 'Custom',
+          customUnitName: 'recipe',
+          foodItemId: null,
+          foodItemName: null,
+          isPantryStaple: false,
+          linkedRecipeId: null,
+          linkedRecipeTitle: null,
+          linkedRecipeSlug: null,
+          displayName: referencedTitle,
+          preparationNote: null,
+          isOptional: false,
+          originalRawText: null,
+          unresolvedRecipeTitle: referencedTitle,
+        },
+      ],
+      steps: [],
+      linkedSubRecipes: [],
+      createdAt: '2026-01-01T00:00:00Z',
+      createdBy: 'test-user',
+      modifiedAt: '2026-01-01T00:00:00Z',
+      modifiedBy: 'test-user',
+      collections: [],
+      tags: [],
+    };
+    const savedSubRecipe: RecipeSummaryDto = {
+      id: 'saved-sub-recipe',
+      title: referencedTitle,
+      slug: 'foolproof-all-butter-dough',
+      description: null,
+      status: 'Published',
+      baseServings: 1,
+      yieldDisplay: null,
+      prepTimeMinutes: null,
+      cookTimeMinutes: null,
+      totalTimeMinutes: null,
+      difficulty: null,
+      sourceName: null,
+      thumbnailImagePath: null,
+      ingredientCount: 0,
+      stepCount: 0,
+      timesCooked: 0,
+      averageRating: null,
+      createdAt: '2026-01-01T00:00:00Z',
+      modifiedAt: '2026-01-01T00:00:00Z',
+      collections: [],
+      tags: [],
+    };
+
+    mockRecipeService.getRecipes.mockReturnValueOnce(of([savedSubRecipe]));
+    component.populateForm(recipeDetail);
+    component.loadSubRecipes();
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain('Not in the cookbook yet');
+    expect(component.ingredientsArray.at(0).get('unresolvedRecipeTitle')?.value).toBe(
+      referencedTitle,
+    );
+
+    component.onSubRecipeSelected(0, savedSubRecipe.id);
+    fixture.detectChanges();
+
+    expect(component.ingredientsArray.at(0).get('linkedRecipeId')?.value).toBe(savedSubRecipe.id);
+    expect(component.ingredientsArray.at(0).get('unresolvedRecipeTitle')?.value).toBeNull();
+  });
+
   it('submits valid recipe creation', () => {
     const savedDetail: RecipeDetailDto = {
       id: 'new-1',

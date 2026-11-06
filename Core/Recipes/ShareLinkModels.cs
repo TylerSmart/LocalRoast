@@ -38,7 +38,8 @@ public record PublicRecipeIngredientDto(
     string? LinkedSubRecipeTitle,
     string DisplayName,
     string? PreparationNote,
-    bool IsOptional
+    bool IsOptional,
+    string? UnresolvedRecipeTitle = null
 );
 
 public record PublicSubRecipeDto(

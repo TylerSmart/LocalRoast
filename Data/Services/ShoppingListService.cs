@@ -1177,11 +1177,14 @@ public sealed class ShoppingListService(
                 continue;
             }
 
-            var foodItemId = ing.FoodItemId;
-            var foodItemName = ing.FoodItem?.Name;
+            var isUnresolvedRecipeReference = !string.IsNullOrWhiteSpace(ing.UnresolvedRecipeTitle);
+            var foodItemId = isUnresolvedRecipeReference ? null : ing.FoodItemId;
+            var foodItemName = isUnresolvedRecipeReference
+                ? ing.UnresolvedRecipeTitle
+                : ing.FoodItem?.Name;
             var isPantryStaple = ing.FoodItem?.IsPantryStaple ?? false;
 
-            if (foodItemId is null)
+            if (foodItemId is null && !isUnresolvedRecipeReference)
             {
                 var normName = ing.DisplayName.Trim().ToLowerInvariant();
                 var matched = await dbContext

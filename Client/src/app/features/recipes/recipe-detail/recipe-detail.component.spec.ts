@@ -162,6 +162,44 @@ describe('RecipeDetailComponent', () => {
     expect(text).toContain('8 min');
   });
 
+  it('identifies an unresolved recipe component and explains how to link it', async () => {
+    mockRecipeService.getRecipeById.mockReturnValueOnce(
+      of({
+        ...sampleRecipe,
+        ingredients: [
+          ...sampleRecipe.ingredients,
+          {
+            id: 'i-3',
+            sortOrder: 2,
+            sectionName: null,
+            quantity: 1,
+            maxQuantity: null,
+            unit: 'Custom',
+            customUnitName: 'recipe',
+            foodItemId: null,
+            foodItemName: null,
+            isPantryStaple: false,
+            linkedRecipeId: null,
+            linkedRecipeTitle: null,
+            linkedRecipeSlug: null,
+            displayName: 'Foolproof All-Butter Dough',
+            preparationNote: null,
+            isOptional: false,
+            originalRawText: '1 recipe Foolproof All-Butter Dough',
+            unresolvedRecipeTitle: 'Foolproof All-Butter Dough',
+          },
+        ],
+      }),
+    );
+
+    component.loadRecipe('r-1');
+    fixture.detectChanges();
+
+    const warning = fixture.nativeElement.querySelector('.unresolved-recipe-reference');
+    expect(warning?.textContent).toContain('Foolproof All-Butter Dough');
+    expect(warning?.textContent).toContain('Edit this recipe to link it');
+  });
+
   it('opens organize dialog on openOrganizeDialog()', () => {
     component.openOrganizeDialog();
     expect(mockDialog.open).toHaveBeenCalled();

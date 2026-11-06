@@ -473,6 +473,14 @@
                       </mat-expansion-panel>
                     }
                   }
+                  @if (item.ingredient.unresolvedRecipeTitle) {
+                    <p class="unresolved-recipe-reference">
+                      <mat-icon>info</mat-icon>
+                      Recipe component not linked yet. Edit this recipe to link it once "{{
+                        item.ingredient.unresolvedRecipeTitle
+                      }}" is in your cookbook.
+                    </p>
+                  }
                 </li>
               }
             </ul>

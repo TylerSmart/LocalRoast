@@ -80,6 +80,62 @@ public sealed class RecipeCookbookE2ETests : E2ETestBase
 
     [TestMethod]
     [Timeout(DefaultTestTimeoutMs)]
+    public async Task UnresolvedRecipeComponent_IsVisibleAndCanBeLinkedLater()
+    {
+        await RegisterAndLoginAsync();
+
+        var recipeTitle = $"Blueberry Pie {Guid.NewGuid():N}"[..24];
+        const string referencedRecipeTitle = "Foolproof All-Butter Dough";
+        var recipeId = await Page.EvaluateAsync<string>(
+            """
+            async ({ recipeTitle, referencedRecipeTitle }) => {
+              const tokenKey = Object.keys(localStorage).find((key) => key.endsWith('-token'));
+              const token = tokenKey ? localStorage.getItem(tokenKey) : null;
+              const response = await fetch('/api/recipes', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({
+                  title: recipeTitle,
+                  status: 'Published',
+                  baseServings: 8,
+                  ingredients: [
+                    {
+                      quantity: 1,
+                      unit: 'Custom',
+                      customUnitName: 'recipe',
+                      displayName: referencedRecipeTitle,
+                      unresolvedRecipeTitle: referencedRecipeTitle,
+                    },
+                  ],
+                  steps: [],
+                }),
+              });
+              if (!response.ok) {
+                throw new Error(`Failed to create test recipe: ${await response.text()}`);
+              }
+              return (await response.json()).id;
+            }
+            """,
+            new { recipeTitle, referencedRecipeTitle }
+        );
+
+        await Page.SetViewportSizeAsync(360, 800);
+        await Page.GotoAsync($"{ServerUrl}/recipes/{recipeId}");
+        var warning = Page.Locator(".unresolved-recipe-reference");
+        await Expect(warning).ToContainTextAsync(referencedRecipeTitle);
+        await Expect(warning).ToContainTextAsync("Edit this recipe to link it");
+
+        await Page.GotoAsync($"{ServerUrl}/recipes/{recipeId}/edit");
+        await Expect(Page.Locator(".unresolved-recipe-hint"))
+            .ToContainTextAsync(referencedRecipeTitle);
+        await Expect(Page.Locator("app-searchable-select").First).ToBeVisibleAsync();
+    }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
     public async Task Recipe_FilterByStatus_AndSearchCookbook()
     {
         await RegisterAndLoginAsync();

@@ -98,6 +98,7 @@ export interface RecipeIngredientDto {
   preparationNote: string | null;
   isOptional: boolean;
   originalRawText: string | null;
+  unresolvedRecipeTitle?: string | null;
 }
 
 export interface RecipeStepTimerDto {
@@ -203,6 +204,7 @@ export interface RecipeIngredientInput {
   preparationNote?: string | null;
   isOptional?: boolean;
   originalRawText?: string | null;
+  unresolvedRecipeTitle?: string | null;
 }
 
 export interface RecipeStepTimerInput {
@@ -312,6 +314,7 @@ export interface RecipePreviewIngredient {
   isOptional?: boolean;
   isPantryStaple?: boolean;
   matchedFoodItemName?: string | null;
+  unresolvedRecipeTitle?: string | null;
 }
 
 export interface RecipePreviewStep {

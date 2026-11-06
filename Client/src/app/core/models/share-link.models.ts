@@ -41,6 +41,7 @@ export interface PublicRecipeIngredientDto {
   displayName: string;
   preparationNote: string | null;
   isOptional: boolean;
+  unresolvedRecipeTitle?: string | null;
 }
 
 export interface PublicSubRecipeDto {

@@ -64,7 +64,8 @@ public record RecipeIngredientDto(
     string DisplayName,
     string? PreparationNote,
     bool IsOptional,
-    string? OriginalRawText
+    string? OriginalRawText,
+    string? UnresolvedRecipeTitle = null
 );
 
 public record RecipeStepTimerDto(Guid Id, int SortOrder, int DurationSeconds, string Label);
@@ -160,7 +161,8 @@ public record RecipeIngredientInput(
     [Required, MaxLength(200)] string DisplayName = "",
     [MaxLength(200)] string? PreparationNote = null,
     bool IsOptional = false,
-    [MaxLength(500)] string? OriginalRawText = null
+    [MaxLength(500)] string? OriginalRawText = null,
+    [MaxLength(200)] string? UnresolvedRecipeTitle = null
 );
 
 public record RecipeStepTimerInput(

@@ -351,7 +351,14 @@ public sealed class LlmExtractionClientTests
                 "description": "Flavorful beef tacos with fresh mango.",
                 "baseServings": 4,
                 "ingredients": [
-                    { "displayName": "1 lb ground beef", "canonicalFoodName": "ground beef", "quantity": 1, "unit": "lb" }
+                    { "displayName": "ground beef", "canonicalFoodName": "ground beef", "quantity": 1, "unit": "lb" },
+                    {
+                        "displayName": "Foolproof All-Butter Dough",
+                        "isRecipeReference": true,
+                        "referencedRecipeTitle": "Foolproof All-Butter Dough",
+                        "quantity": 1,
+                        "unit": "recipe"
+                    }
                 ],
                 "steps": [
                     { "instruction": "Brown beef in a skillet." }
@@ -375,6 +382,8 @@ public sealed class LlmExtractionClientTests
             var body = req.Content!.ReadAsStringAsync().Result;
             StringAssert.Contains(body, "\"json_schema\"");
             StringAssert.Contains(body, "\"recipe_extraction\"");
+            StringAssert.Contains(body, "\"isRecipeReference\"");
+            StringAssert.Contains(body, "\"referencedRecipeTitle\"");
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(openAiResponse, Encoding.UTF8, "application/json"),
@@ -402,7 +411,9 @@ public sealed class LlmExtractionClientTests
 
         Assert.AreEqual("Mango Tango Tacos", result.Title);
         Assert.AreEqual(4, result.BaseServings);
-        Assert.AreEqual(1, result.Ingredients?.Count);
+        Assert.AreEqual(2, result.Ingredients?.Count);
+        Assert.IsTrue(result.Ingredients![1].IsRecipeReference);
+        Assert.AreEqual("Foolproof All-Butter Dough", result.Ingredients[1].ReferencedRecipeTitle);
     }
 
     [TestMethod]

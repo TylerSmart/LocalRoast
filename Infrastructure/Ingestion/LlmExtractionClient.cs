@@ -863,6 +863,9 @@ Rules:
    - "preparationNote": preparation instructions or parenthetical weights (e.g. "finely diced", "room temperature", "7 1/2 ounces").
    - "isOptional": boolean flag.
    - "originalRawText": verbatim line as originally written.
+   - "isRecipeReference": true only when the ingredient is another prepared recipe or component (e.g. "1 recipe Foolproof All-Butter Dough"); otherwise false.
+   - "referencedRecipeTitle": component recipe's title without quantity or editorial notes, or null when "isRecipeReference" is false.
+   - For recipe references, do not classify the component as a food item; keep its title in "displayName" and leave "canonicalFoodName" empty.
    - "suggestedIsPantryStaple": boolean flag; true ONLY for basic everyday household staples typically kept on hand (water, salt, black pepper, cooking oils, basic vinegars, all-purpose flour, sugar, baking powder/soda, dried spices/herbs, soy sauce), false for fresh produce, meats, dairy, canned goods, and specialty items.
 5. Steps:
    - "sectionName": optional section header (e.g. "Prepare the Marinade").
@@ -907,6 +910,9 @@ Rules:
    - "preparationNote": preparation instructions or parenthetical weights (e.g. "finely diced", "room temperature", "7 1/2 ounces").
    - "isOptional": boolean flag.
    - "originalRawText": verbatim line as originally printed.
+   - "isRecipeReference": true only when the ingredient is another prepared recipe or component (e.g. "1 recipe Foolproof All-Butter Dough"); otherwise false.
+   - "referencedRecipeTitle": component recipe's title without quantity or editorial notes, or null when "isRecipeReference" is false.
+   - For recipe references, do not classify the component as a food item; keep its title in "displayName" and leave "canonicalFoodName" empty.
    - "suggestedIsPantryStaple": boolean flag; true ONLY for basic everyday household staples typically kept on hand (water, salt, black pepper, cooking oils, basic vinegars, all-purpose flour, sugar, baking powder/soda, dried spices/herbs, soy sauce), false for fresh produce, meats, dairy, canned goods, and specialty items.
 6. Steps:
    - "sectionName": optional section header (e.g. "Prepare the Marinade").
@@ -1060,6 +1066,8 @@ Household Cookbook Catalog:
                             isOptional = new { type = "boolean" },
                             originalRawText = new { type = "string" },
                             suggestedIsPantryStaple = new { type = "boolean" },
+                            isRecipeReference = new { type = "boolean" },
+                            referencedRecipeTitle = new { type = "string" },
                         },
                         required = new[] { "displayName" },
                     },

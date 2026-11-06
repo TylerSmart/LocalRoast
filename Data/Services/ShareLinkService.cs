@@ -379,7 +379,8 @@ public sealed class ShareLinkService(AppDbContext dbContext, TimeProvider? timeP
             isPublishedSubRecipe ? i.LinkedRecipe?.Title : null,
             i.DisplayName,
             i.PreparationNote,
-            i.IsOptional
+            i.IsOptional,
+            i.UnresolvedRecipeTitle
         );
     }
 

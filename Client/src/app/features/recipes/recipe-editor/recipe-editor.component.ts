@@ -56,6 +56,7 @@ interface IngredientFormValue {
   customUnitName?: string | null;
   foodItemId?: string | null;
   linkedRecipeId?: string | null;
+  unresolvedRecipeTitle?: string | null;
   displayName: string;
   preparationNote?: string | null;
   isOptional?: boolean;
@@ -316,7 +317,7 @@ export class RecipeEditorComponent implements OnInit {
       const isSubRecipe = !!ing.linkedRecipeId;
       const group = this.fb.group({
         id: [ing.id],
-        isSubRecipe: [isSubRecipe],
+        isSubRecipe: [isSubRecipe || !!ing.unresolvedRecipeTitle],
         sectionName: [ing.sectionName ?? '', Validators.maxLength(150)],
         quantity: [ing.quantity],
         maxQuantity: [ing.maxQuantity],
@@ -324,6 +325,7 @@ export class RecipeEditorComponent implements OnInit {
         customUnitName: [ing.customUnitName ?? '', Validators.maxLength(50)],
         foodItemId: [ing.foodItemId],
         linkedRecipeId: [ing.linkedRecipeId],
+        unresolvedRecipeTitle: [ing.unresolvedRecipeTitle ?? null],
         displayName: [ing.displayName, [Validators.required, Validators.maxLength(200)]],
         preparationNote: [ing.preparationNote ?? '', Validators.maxLength(200)],
         isOptional: [ing.isOptional],
@@ -589,6 +591,7 @@ export class RecipeEditorComponent implements OnInit {
       customUnitName: ['', Validators.maxLength(50)],
       foodItemId: [null],
       linkedRecipeId: [null],
+      unresolvedRecipeTitle: [null],
       displayName: ['', [Validators.required, Validators.maxLength(200)]],
       preparationNote: ['', Validators.maxLength(200)],
       isOptional: [false],
@@ -624,6 +627,8 @@ export class RecipeEditorComponent implements OnInit {
         foodItemId: item.id,
         displayName: item.name,
         linkedRecipeId: null,
+        unresolvedRecipeTitle: null,
+        isSubRecipe: false,
       });
     }
   }
@@ -634,8 +639,10 @@ export class RecipeEditorComponent implements OnInit {
     if (recipe && ingGroup) {
       ingGroup.patchValue({
         linkedRecipeId: recipe.id,
+        unresolvedRecipeTitle: null,
         displayName: recipe.title,
         foodItemId: null,
+        isSubRecipe: true,
       });
     }
   }
@@ -743,6 +750,10 @@ export class RecipeEditorComponent implements OnInit {
       customUnitName: ing.unit === 'Custom' ? ing.customUnitName?.trim() || null : null,
       foodItemId: !ing.isSubRecipe && ing.foodItemId ? ing.foodItemId : null,
       linkedRecipeId: ing.isSubRecipe && ing.linkedRecipeId ? ing.linkedRecipeId : null,
+      unresolvedRecipeTitle:
+        ing.isSubRecipe && !ing.linkedRecipeId
+          ? ing.unresolvedRecipeTitle?.trim() || ing.displayName.trim()
+          : null,
       displayName: ing.displayName.trim(),
       preparationNote: ing.preparationNote?.trim() || null,
       isOptional: !!ing.isOptional,

@@ -281,6 +281,13 @@ export class IngestionReviewComponent implements OnInit {
       matchedFoodItemId: [item?.matchedFoodItemId ?? null],
       matchedFoodItemName: [item?.matchedFoodItemName ?? null],
       isNewFoodItem: [item?.isNewFoodItem ?? !item?.matchedFoodItemId],
+      isRecipeReference: [item?.isRecipeReference ?? !!item?.referencedRecipeTitle],
+      referencedRecipeTitle: [
+        item?.referencedRecipeTitle ?? null,
+        item?.isRecipeReference || item?.referencedRecipeTitle
+          ? [Validators.required, Validators.maxLength(200)]
+          : [Validators.maxLength(200)],
+      ],
       proposedFoodItemName: [
         item?.proposedFoodItemName ?? item?.displayName ?? '',
         [Validators.required],
@@ -309,6 +316,38 @@ export class IngestionReviewComponent implements OnInit {
 
   removeIngredient(index: number): void {
     this.ingredientsArray.removeAt(index);
+  }
+
+  onRecipeReferenceToggled(index: number, isRecipeReference: boolean): void {
+    const group = this.ingredientsArray.at(index);
+    if (!group) return;
+
+    const titleControl = group.get('referencedRecipeTitle');
+    if (isRecipeReference) {
+      group.patchValue(
+        {
+          referencedRecipeTitle: titleControl?.value || group.get('displayName')?.value || null,
+          matchedFoodItemId: null,
+          matchedFoodItemName: null,
+          isNewFoodItem: false,
+          suggestedIsPantryStaple: false,
+        },
+        { emitEvent: false },
+      );
+      titleControl?.setValidators([Validators.required, Validators.maxLength(200)]);
+    } else {
+      group.patchValue(
+        {
+          referencedRecipeTitle: null,
+          isNewFoodItem: !group.get('matchedFoodItemId')?.value,
+          proposedFoodItemName:
+            group.get('proposedFoodItemName')?.value || group.get('displayName')?.value,
+        },
+        { emitEvent: false },
+      );
+      titleControl?.setValidators([Validators.maxLength(200)]);
+    }
+    titleControl?.updateValueAndValidity({ emitEvent: false });
   }
 
   addStep(step?: Partial<IngestionDraftStepDto>): void {
@@ -465,11 +504,14 @@ export class IngestionReviewComponent implements OnInit {
         maxQuantity: ing.maxQuantity,
         unit: ing.unit,
         customUnitName: ing.customUnitName,
-        displayName: ing.displayName,
+        displayName: ing.isRecipeReference
+          ? ing.referencedRecipeTitle || ing.displayName
+          : ing.displayName,
         preparationNote: ing.preparationNote,
         isOptional: ing.isOptional,
         isPantryStaple: ing.suggestedIsPantryStaple,
         matchedFoodItemName: ing.matchedFoodItemName || ing.proposedFoodItemName,
+        unresolvedRecipeTitle: ing.isRecipeReference ? ing.referencedRecipeTitle : null,
       })),
       steps: (draft.steps || []).map((st, i) => ({
         id: `step-${i}`,
@@ -525,14 +567,22 @@ export class IngestionReviewComponent implements OnInit {
             val.maxQuantity !== null && val.maxQuantity !== '' ? Number(val.maxQuantity) : null,
           unit: val.unit || null,
           customUnitName: val.customUnitName?.trim() || null,
-          displayName: val.displayName.trim(),
+          displayName: val.isRecipeReference
+            ? val.referencedRecipeTitle?.trim() || val.displayName.trim()
+            : val.displayName.trim(),
           preparationNote: val.preparationNote?.trim() || null,
           isOptional: Boolean(val.isOptional),
-          matchedFoodItemId: val.matchedFoodItemId || null,
-          matchedFoodItemName: val.matchedFoodItemName || null,
-          isNewFoodItem: !val.matchedFoodItemId,
-          proposedFoodItemName: val.proposedFoodItemName?.trim() || val.displayName.trim(),
-          suggestedIsPantryStaple: Boolean(val.suggestedIsPantryStaple),
+          isRecipeReference: Boolean(val.isRecipeReference),
+          referencedRecipeTitle: val.isRecipeReference
+            ? val.referencedRecipeTitle?.trim() || null
+            : null,
+          matchedFoodItemId: val.isRecipeReference ? null : val.matchedFoodItemId || null,
+          matchedFoodItemName: val.isRecipeReference ? null : val.matchedFoodItemName || null,
+          isNewFoodItem: !val.isRecipeReference && !val.matchedFoodItemId,
+          proposedFoodItemName: val.isRecipeReference
+            ? null
+            : val.proposedFoodItemName?.trim() || val.displayName.trim(),
+          suggestedIsPantryStaple: !val.isRecipeReference && Boolean(val.suggestedIsPantryStaple),
         };
       },
     );

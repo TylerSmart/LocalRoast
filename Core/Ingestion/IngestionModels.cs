@@ -46,7 +46,9 @@ public record LlmExtractedIngredientItem(
     string? PreparationNote = null,
     bool IsOptional = false,
     string? OriginalRawText = null,
-    bool SuggestedIsPantryStaple = false
+    bool SuggestedIsPantryStaple = false,
+    bool IsRecipeReference = false,
+    string? ReferencedRecipeTitle = null
 );
 
 public record LlmExtractedStepItem(
@@ -95,7 +97,9 @@ public record IngestionDraftIngredientDto(
     [Required, MaxLength(200)] string DisplayName = "",
     [MaxLength(200)] string? PreparationNote = null,
     bool IsOptional = false,
-    [MaxLength(500)] string? OriginalRawText = null
+    [MaxLength(500)] string? OriginalRawText = null,
+    bool IsRecipeReference = false,
+    [MaxLength(200)] string? ReferencedRecipeTitle = null
 );
 
 public record IngestionDraftStepDto(

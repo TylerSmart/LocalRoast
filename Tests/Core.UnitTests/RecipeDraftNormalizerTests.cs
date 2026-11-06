@@ -413,6 +413,49 @@ public sealed class RecipeDraftNormalizerTests
     }
 
     [TestMethod]
+    public void Normalize_RecipeReference_PreservesTitleWithoutCreatingFoodItem()
+    {
+        var raw = new LlmExtractedRecipePayload(
+            Title: "Double-Crust Pie",
+            Ingredients:
+            [
+                new(
+                    SectionName: null,
+                    Quantity: 1,
+                    MaxQuantity: null,
+                    Unit: "recipe",
+                    CanonicalFoodName: null,
+                    DisplayName: "Foolproof All-Butter Dough for Double-Crust Pie",
+                    OriginalRawText: "1 recipe Foolproof All-Butter Dough for Double-Crust Pie (this page)"
+                ),
+            ],
+            Steps: []
+        );
+
+        var draft = RecipeDraftNormalizer.Normalize(
+            raw,
+            _catalogFoods,
+            _tags,
+            sourceUrl: null,
+            fallbackSourceName: null,
+            fallbackSourceAuthor: null,
+            coverImagePath: null,
+            thumbnailImagePath: null
+        );
+
+        var ingredient = draft.Ingredients!.Single();
+        Assert.IsTrue(ingredient.IsRecipeReference);
+        Assert.AreEqual(
+            "Foolproof All-Butter Dough for Double-Crust Pie",
+            ingredient.ReferencedRecipeTitle
+        );
+        Assert.IsFalse(ingredient.IsNewFoodItem);
+        Assert.IsFalse(ingredient.CreateNewFoodItem);
+        Assert.IsNull(ingredient.MatchedFoodItemId);
+        Assert.IsNull(ingredient.ProposedFoodItemName);
+    }
+
+    [TestMethod]
     public void BuildNormalizedWebText_CompleteJsonLd_OmitsCleanedBodyTextClutter()
     {
         var payload = new ScrapedWebRecipePayload(

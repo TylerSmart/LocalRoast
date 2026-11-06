@@ -101,6 +101,24 @@ public static class IngestionCatalogMaterializer
         return newFoodItem.Id;
     }
 
+    public static async Task<Guid?> ResolveRecipeReferenceAsync(
+        AppDbContext dbContext,
+        string title,
+        Guid? excludedRecipeId,
+        CancellationToken cancellationToken
+    )
+    {
+        var normalizedTitle = title.Trim().ToUpperInvariant();
+        return await dbContext
+            .Recipes.AsNoTracking()
+            .Where(r =>
+                r.Title.ToUpper() == normalizedTitle
+                && (!excludedRecipeId.HasValue || r.Id != excludedRecipeId.Value)
+            )
+            .Select(r => (Guid?)r.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
     public static async Task<IReadOnlyList<Guid>> ResolveAndMaterializeTagsAsync(
         AppDbContext dbContext,
         IReadOnlyList<Guid>? suggestedTagIds,

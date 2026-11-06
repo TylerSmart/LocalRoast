@@ -494,7 +494,12 @@
 
                     <!-- Matched FoodItem vs New FoodItem Banner -->
                     <div class="food-item-binding-strip">
-                      @if (ingGroup.get('matchedFoodItemId')?.value) {
+                      @if (ingGroup.get('isRecipeReference')?.value) {
+                        <div class="matched-food-pill recipe-reference-pill">
+                          <mat-icon>restaurant_menu</mat-icon>
+                          <span>Recipe component (not a food item)</span>
+                        </div>
+                      } @else if (ingGroup.get('matchedFoodItemId')?.value) {
                         <div class="matched-food-pill">
                           <mat-icon>link</mat-icon>
                           <span
@@ -513,8 +518,33 @@
                       }
                     </div>
 
+                    <mat-checkbox
+                      formControlName="isRecipeReference"
+                      (change)="onRecipeReferenceToggled($index, $event.checked)"
+                    >
+                      This ingredient is another recipe
+                    </mat-checkbox>
+
+                    @if (ingGroup.get('isRecipeReference')?.value) {
+                      <mat-form-field appearance="outline" class="form-field proposed-name-field">
+                        <mat-label>Referenced Recipe Title</mat-label>
+                        <input
+                          matInput
+                          formControlName="referencedRecipeTitle"
+                          placeholder="e.g. Foolproof All-Butter Dough"
+                          required
+                        />
+                        <mat-hint>
+                          It will link automatically if this recipe is already in your cookbook.
+                        </mat-hint>
+                      </mat-form-field>
+                    }
+
                     <!-- New Food Item Configuration Fields -->
-                    @if (!ingGroup.get('matchedFoodItemId')?.value) {
+                    @if (
+                      !ingGroup.get('isRecipeReference')?.value &&
+                      !ingGroup.get('matchedFoodItemId')?.value
+                    ) {
                       <div class="new-item-row">
                         <mat-form-field appearance="outline" class="form-field proposed-name-field">
                           <mat-label>Canonical Food Item Name</mat-label>

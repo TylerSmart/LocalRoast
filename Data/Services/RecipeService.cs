@@ -379,7 +379,8 @@ public sealed partial class RecipeService(
             i.DisplayName,
             i.PreparationNote,
             i.IsOptional,
-            i.OriginalRawText
+            i.OriginalRawText,
+            i.UnresolvedRecipeTitle
         );
     }
 
@@ -945,6 +946,16 @@ public sealed partial class RecipeService(
                         "An ingredient cannot be both a FoodItem and a Sub-Recipe."
                     );
                 }
+
+                if (
+                    !string.IsNullOrWhiteSpace(ing.UnresolvedRecipeTitle)
+                    && (ing.FoodItemId.HasValue || ing.LinkedRecipeId.HasValue)
+                )
+                {
+                    throw new DomainValidationException(
+                        "An unresolved recipe reference cannot also be linked to a FoodItem or recipe."
+                    );
+                }
             }
         }
 
@@ -1101,6 +1112,9 @@ public sealed partial class RecipeService(
                 CustomUnitName = customUnitName,
                 FoodItemId = input.FoodItemId,
                 LinkedRecipeId = input.LinkedRecipeId,
+                UnresolvedRecipeTitle = string.IsNullOrWhiteSpace(input.UnresolvedRecipeTitle)
+                    ? null
+                    : input.UnresolvedRecipeTitle.Trim(),
                 DisplayName = input.DisplayName.Trim(),
                 PreparationNote = input.PreparationNote?.Trim(),
                 IsOptional = input.IsOptional,
