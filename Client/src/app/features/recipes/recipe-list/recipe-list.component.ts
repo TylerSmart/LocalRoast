@@ -22,6 +22,7 @@ import { MatSelectModule } from '@angular/material/select';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { ActivatedRoute, RouterLink } from '@angular/router';
+import { Subscription } from 'rxjs';
 import {
   RecipeDifficulty,
   RecipeQueryParameters,
@@ -92,6 +93,9 @@ export class RecipeListComponent implements OnInit {
 
     this.destroyRef.onDestroy(() => {
       this.observer?.disconnect();
+      this.clearSearchTimer();
+      this.recipesRequest?.unsubscribe();
+      this.loadMoreRequest?.unsubscribe();
     });
   }
 
@@ -121,7 +125,8 @@ export class RecipeListComponent implements OnInit {
   protected readonly pageSize = signal<number>(24);
   protected readonly totalCount = signal<number>(0);
   protected readonly isLoadingMore = signal<boolean>(false);
-  protected readonly hasMore = computed(() => this.recipes().length < this.totalCount());
+  protected readonly hasMore = signal<boolean>(false);
+  protected readonly fuzzySearch = signal<boolean>(false);
   protected readonly scrollSentinel = viewChild<ElementRef<HTMLElement>>('scrollSentinel');
   private readonly destroyRef = inject(DestroyRef);
   private observer: IntersectionObserver | null = null;
@@ -132,6 +137,8 @@ export class RecipeListComponent implements OnInit {
   protected readonly filtersExpanded = signal<boolean>(false);
   protected readonly tagsManagerExpanded = signal<boolean>(false);
   private searchTimer: ReturnType<typeof setTimeout> | null = null;
+  private recipesRequest: Subscription | null = null;
+  private loadMoreRequest: Subscription | null = null;
 
   protected readonly isLoading = signal<boolean>(false);
   protected readonly errorMessage = signal<string | null>(null);
@@ -196,6 +203,8 @@ export class RecipeListComponent implements OnInit {
     const params: RecipeQueryParameters = {
       page,
       pageSize: this.pageSize(),
+      includeTotalCount: page === 1,
+      fuzzySearch: page > 1 && this.fuzzySearch(),
     };
     if (this.selectedStatus() !== 'All') {
       params.status = this.selectedStatus() as RecipeStatus;
@@ -226,18 +235,29 @@ export class RecipeListComponent implements OnInit {
   }
 
   loadRecipes(): void {
+    this.clearSearchTimer();
+    this.recipesRequest?.unsubscribe();
+    this.loadMoreRequest?.unsubscribe();
+    this.loadMoreRequest = null;
     this.currentPage.set(1);
+    this.totalCount.set(0);
+    this.hasMore.set(false);
+    this.fuzzySearch.set(false);
     this.isLoading.set(true);
+    this.isLoadingMore.set(false);
     this.errorMessage.set(null);
 
-    this.recipeService.getRecipesPaged(this.buildQueryParams(1)).subscribe({
+    this.recipesRequest = this.recipeService.getRecipesPaged(this.buildQueryParams(1)).subscribe({
       next: (res) => {
         this.recipes.set(res.items);
-        this.totalCount.set(res.totalCount);
+        this.totalCount.set(res.totalCount ?? res.items.length);
+        this.hasMore.set(res.hasMore);
+        this.fuzzySearch.set(res.isFuzzySearch);
         this.isLoading.set(false);
       },
       error: (err: { error?: { detail?: string; title?: string } }) => {
         this.isLoading.set(false);
+        this.hasMore.set(false);
         this.errorMessage.set(
           err?.error?.detail || err?.error?.title || 'Failed to load cookbook recipes.',
         );
@@ -253,17 +273,23 @@ export class RecipeListComponent implements OnInit {
     const nextPage = this.currentPage() + 1;
     this.isLoadingMore.set(true);
 
-    this.recipeService.getRecipesPaged(this.buildQueryParams(nextPage)).subscribe({
-      next: (res) => {
-        this.currentPage.set(nextPage);
-        this.recipes.update((prev) => [...prev, ...res.items]);
-        this.totalCount.set(res.totalCount);
-        this.isLoadingMore.set(false);
-      },
-      error: () => {
-        this.isLoadingMore.set(false);
-      },
-    });
+    this.loadMoreRequest = this.recipeService
+      .getRecipesPaged(this.buildQueryParams(nextPage))
+      .subscribe({
+        next: (res) => {
+          this.currentPage.set(nextPage);
+          this.recipes.update((prev) => [...prev, ...res.items]);
+          if (res.totalCount !== null) {
+            this.totalCount.set(res.totalCount);
+          }
+          this.hasMore.set(res.hasMore);
+          this.fuzzySearch.set(res.isFuzzySearch);
+          this.isLoadingMore.set(false);
+        },
+        error: () => {
+          this.isLoadingMore.set(false);
+        },
+      });
   }
 
   selectCollection(id: string | null): void {
@@ -282,10 +308,18 @@ export class RecipeListComponent implements OnInit {
 
   onSearchChange(val: string): void {
     this.searchQuery.set(val);
-    if (this.searchTimer) clearTimeout(this.searchTimer);
+    this.clearSearchTimer();
     this.searchTimer = setTimeout(() => {
+      this.searchTimer = null;
       this.loadRecipes();
     }, 300);
+  }
+
+  private clearSearchTimer(): void {
+    if (this.searchTimer) {
+      clearTimeout(this.searchTimer);
+      this.searchTimer = null;
+    }
   }
 
   toggleForgottenFavorites(): void {

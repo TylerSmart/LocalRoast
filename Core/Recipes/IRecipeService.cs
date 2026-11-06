@@ -1,5 +1,3 @@
-using App.Core.Common;
-
 namespace App.Core.Recipes;
 
 public interface IRecipeService
@@ -9,7 +7,7 @@ public interface IRecipeService
         CancellationToken cancellationToken = default
     );
 
-    Task<PagedResultDto<RecipeSummaryDto>> GetRecipesPagedAsync(
+    Task<RecipePagedResultDto> GetRecipesPagedAsync(
         RecipeQueryParameters query,
         CancellationToken cancellationToken = default
     );

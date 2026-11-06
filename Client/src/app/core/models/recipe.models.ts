@@ -189,6 +189,20 @@ export interface RecipeQueryParameters {
   forgottenDaysThreshold?: number;
   page?: number;
   pageSize?: number;
+  includeTotalCount?: boolean;
+  fuzzySearch?: boolean;
+}
+
+export interface RecipePagedResultDto {
+  items: RecipeSummaryDto[];
+  totalCount: number | null;
+  pageNumber: number;
+  pageSize: number;
+  totalPages: number | null;
+  hasPreviousPage: boolean;
+  hasNextPage: boolean;
+  hasMore: boolean;
+  isFuzzySearch: boolean;
 }
 
 export interface RecipeIngredientInput {

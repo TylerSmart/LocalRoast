@@ -1,4 +1,3 @@
-import type { PagedResultDto } from '../../models/pagination.models';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Service, inject } from '@angular/core';
 import { Observable } from 'rxjs';
@@ -10,6 +9,7 @@ import {
   IngredientMatchResultDto,
   RecipeAttachmentDto,
   RecipeDetailDto,
+  RecipePagedResultDto,
   RecipeQueryParameters,
   RecipeSummaryDto,
   UpdateRecipeOrganizationRequest,
@@ -21,7 +21,7 @@ import {
 export class RecipeService {
   private readonly http = inject(HttpClient);
 
-  getRecipesPaged(query: RecipeQueryParameters): Observable<PagedResultDto<RecipeSummaryDto>> {
+  getRecipesPaged(query: RecipeQueryParameters): Observable<RecipePagedResultDto> {
     let params = new HttpParams();
     if (query?.page !== undefined && query?.page !== null) {
       params = params.set('page', query.page.toString());
@@ -61,8 +61,14 @@ export class RecipeService {
     if (query?.forgottenDaysThreshold !== undefined && query?.forgottenDaysThreshold !== null) {
       params = params.set('forgottenDaysThreshold', query.forgottenDaysThreshold.toString());
     }
+    if (query?.includeTotalCount !== undefined && query?.includeTotalCount !== null) {
+      params = params.set('includeTotalCount', query.includeTotalCount.toString());
+    }
+    if (query?.fuzzySearch !== undefined && query?.fuzzySearch !== null) {
+      params = params.set('fuzzySearch', query.fuzzySearch.toString());
+    }
 
-    return this.http.get<PagedResultDto<RecipeSummaryDto>>(apiUrl('/recipes'), { params });
+    return this.http.get<RecipePagedResultDto>(apiUrl('/recipes'), { params });
   }
 
   getRecipes(query?: RecipeQueryParameters): Observable<RecipeSummaryDto[]> {

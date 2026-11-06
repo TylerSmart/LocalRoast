@@ -115,7 +115,7 @@ public sealed class PaginationIntegrationTests
         var pagedResp = await _client.GetAsync("/api/recipes?page=1&pageSize=2");
         Assert.AreEqual(HttpStatusCode.OK, pagedResp.StatusCode);
 
-        var paged = await pagedResp.Content.ReadFromJsonAsync<PagedResultDto<RecipeSummaryDto>>();
+        var paged = await pagedResp.Content.ReadFromJsonAsync<RecipePagedResultDto>();
         Assert.IsNotNull(paged);
         Assert.AreEqual(1, paged.PageNumber);
         Assert.AreEqual(2, paged.PageSize);

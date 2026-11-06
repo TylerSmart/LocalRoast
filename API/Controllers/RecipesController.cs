@@ -1,4 +1,3 @@
-using App.Core.Common;
 using App.Core.Exceptions;
 using App.Core.Recipes;
 using Microsoft.AspNetCore.Authorization;
@@ -12,7 +11,7 @@ namespace App.API.Controllers;
 public sealed class RecipesController(IRecipeService recipeService) : ControllerBase
 {
     [HttpGet]
-    [ProducesResponseType(typeof(PagedResultDto<RecipeSummaryDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(RecipePagedResultDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(IReadOnlyList<RecipeSummaryDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetRecipes(
         [FromQuery] RecipeQueryParameters query,

@@ -1,5 +1,6 @@
+using System.Globalization;
+using System.Text;
 using System.Text.RegularExpressions;
-using App.Core.Common;
 using App.Core.Exceptions;
 using App.Core.Ingestion;
 using App.Core.MealPlans;
@@ -24,24 +25,266 @@ public sealed partial class RecipeService(
     )
     {
         var q = BuildRecipeQuery(query);
-        return await ProjectToSummary(q).ToListAsync(cancellationToken);
+        var recipes = await ProjectToSummary(q).ToListAsync(cancellationToken);
+        return recipes.Count > 0 || string.IsNullOrWhiteSpace(query.Search)
+            ? recipes
+            : await GetFuzzyRecipeMatchesAsync(query, cancellationToken);
     }
 
-    public async Task<PagedResultDto<RecipeSummaryDto>> GetRecipesPagedAsync(
+    public async Task<RecipePagedResultDto> GetRecipesPagedAsync(
         RecipeQueryParameters query,
         CancellationToken cancellationToken = default
     )
     {
         var q = BuildRecipeQuery(query);
-        var totalCount = await q.CountAsync(cancellationToken);
-
         var page = Math.Max(1, query.Page ?? 1);
         var pageSize = Math.Clamp(query.PageSize ?? 24, 1, 200);
+        var isFuzzySearch = query.FuzzySearch && !string.IsNullOrWhiteSpace(query.Search);
+        int? totalCount =
+            query.IncludeTotalCount && !isFuzzySearch
+                ? await q.CountAsync(cancellationToken)
+                : null;
 
-        var items = await ProjectToSummary(q.Skip((page - 1) * pageSize).Take(pageSize))
+        if (isFuzzySearch)
+        {
+            var fuzzyMatches = await GetFuzzyRecipeMatchesAsync(query, cancellationToken);
+            return CreateFuzzyPage(fuzzyMatches, query, page, pageSize);
+        }
+
+        if (
+            (totalCount == 0 && !string.IsNullOrWhiteSpace(query.Search))
+            || (
+                totalCount is null
+                && page == 1
+                && !string.IsNullOrWhiteSpace(query.Search)
+                && !await q.AnyAsync(cancellationToken)
+            )
+        )
+        {
+            var fuzzyMatches = await GetFuzzyRecipeMatchesAsync(query, cancellationToken);
+            return CreateFuzzyPage(fuzzyMatches, query, page, pageSize, isFuzzySearch: true);
+        }
+
+        var skip = (int)Math.Min(int.MaxValue, (long)(page - 1) * pageSize);
+        var items = await ProjectToSummary(
+                q.Skip(skip).Take(pageSize + (totalCount is null ? 1 : 0))
+            )
             .ToListAsync(cancellationToken);
 
-        return new PagedResultDto<RecipeSummaryDto>(items, totalCount, page, pageSize);
+        var hasMore = totalCount.HasValue
+            ? (long)page * pageSize < totalCount.Value
+            : items.Count > pageSize;
+        if (items.Count > pageSize)
+        {
+            items.RemoveAt(pageSize);
+        }
+
+        return new RecipePagedResultDto(items, totalCount, page, pageSize, hasMore);
+    }
+
+    private async Task<IReadOnlyList<RecipeSummaryDto>> GetFuzzyRecipeMatchesAsync(
+        RecipeQueryParameters query,
+        CancellationToken cancellationToken
+    )
+    {
+        var searchTokens = NormalizeSearchTokens(query.Search);
+        if (searchTokens.Length == 0 || searchTokens.All(token => token.Length < 5))
+        {
+            return [];
+        }
+
+        var unsearchedQuery = BuildRecipeQuery(query with { Search = null });
+        var candidates = await unsearchedQuery
+            .Select(recipe => new { recipe.Id, recipe.Title })
+            .ToListAsync(cancellationToken);
+
+        var matchedIds = candidates
+            .Select(
+                (candidate, order) =>
+                    new
+                    {
+                        candidate.Id,
+                        Order = order,
+                        EditDistance = GetTitleMatchDistance(searchTokens, candidate.Title),
+                    }
+            )
+            .Where(match => match.EditDistance.HasValue)
+            .OrderBy(match => match.EditDistance)
+            .ThenBy(match => match.Order)
+            .Select(match => match.Id)
+            .ToArray();
+
+        if (matchedIds.Length == 0)
+        {
+            return [];
+        }
+
+        var matchedQuery = unsearchedQuery.Where(recipe => matchedIds.Contains(recipe.Id));
+        var summaries = await ProjectToSummary(matchedQuery).ToListAsync(cancellationToken);
+        var summariesById = summaries.ToDictionary(recipe => recipe.Id);
+        return matchedIds.Select(id => summariesById[id]).ToArray();
+    }
+
+    private static RecipePagedResultDto CreateFuzzyPage(
+        IReadOnlyList<RecipeSummaryDto> matches,
+        RecipeQueryParameters query,
+        int page,
+        int pageSize,
+        bool isFuzzySearch = true
+    )
+    {
+        var skip = (int)Math.Min(int.MaxValue, (long)(page - 1) * pageSize);
+        var items = matches.Skip(skip).Take(pageSize).ToArray();
+        return new RecipePagedResultDto(
+            items,
+            query.IncludeTotalCount ? matches.Count : null,
+            page,
+            pageSize,
+            (long)page * pageSize < matches.Count,
+            isFuzzySearch
+        );
+    }
+
+    private static string[] NormalizeSearchTokens(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return [];
+        }
+
+        var decomposed = value.Normalize(NormalizationForm.FormD);
+        var normalized = new StringBuilder(decomposed.Length);
+        foreach (var character in decomposed)
+        {
+            if (CharUnicodeInfo.GetUnicodeCategory(character) == UnicodeCategory.NonSpacingMark)
+            {
+                continue;
+            }
+
+            normalized.Append(
+                char.IsLetterOrDigit(character) ? char.ToLowerInvariant(character) : ' '
+            );
+        }
+
+        return normalized.ToString().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+    }
+
+    private static int? GetTitleMatchDistance(string[] searchTokens, string title)
+    {
+        var titleTokens = NormalizeSearchTokens(title);
+        if (searchTokens.Length == 0 || searchTokens.Length > titleTokens.Length)
+        {
+            return null;
+        }
+
+        var usedTitleTokens = new bool[titleTokens.Length];
+        var totalEditDistance = 0;
+        var fuzzyTokenCount = 0;
+
+        foreach (var searchToken in searchTokens)
+        {
+            var exactMatchIndex = -1;
+            for (var index = 0; index < titleTokens.Length; index++)
+            {
+                if (!usedTitleTokens[index] && titleTokens[index] == searchToken)
+                {
+                    exactMatchIndex = index;
+                    break;
+                }
+            }
+
+            if (exactMatchIndex >= 0)
+            {
+                usedTitleTokens[exactMatchIndex] = true;
+                continue;
+            }
+
+            if (searchToken.Length < 5 || fuzzyTokenCount > 0)
+            {
+                return null;
+            }
+
+            var closestMatchIndex = -1;
+            var closestEditDistance = 2;
+            for (var index = 0; index < titleTokens.Length; index++)
+            {
+                if (usedTitleTokens[index])
+                {
+                    continue;
+                }
+
+                var editDistance = GetEditDistanceAtMostOne(searchToken, titleTokens[index]);
+                if (editDistance < closestEditDistance)
+                {
+                    closestMatchIndex = index;
+                    closestEditDistance = editDistance;
+                }
+            }
+
+            if (closestMatchIndex < 0)
+            {
+                return null;
+            }
+
+            usedTitleTokens[closestMatchIndex] = true;
+            fuzzyTokenCount++;
+            totalEditDistance += closestEditDistance;
+        }
+
+        return totalEditDistance;
+    }
+
+    private static int GetEditDistanceAtMostOne(string left, string right)
+    {
+        if (left == right)
+        {
+            return 0;
+        }
+
+        if (Math.Abs(left.Length - right.Length) > 1)
+        {
+            return 2;
+        }
+
+        if (left.Length == right.Length)
+        {
+            var differences = 0;
+            for (var index = 0; index < left.Length; index++)
+            {
+                if (left[index] != right[index] && ++differences > 1)
+                {
+                    return 2;
+                }
+            }
+
+            return differences;
+        }
+
+        var shorter = left.Length < right.Length ? left : right;
+        var longer = left.Length < right.Length ? right : left;
+        var shorterIndex = 0;
+        var longerIndex = 0;
+        var hasSkippedCharacter = false;
+
+        while (shorterIndex < shorter.Length && longerIndex < longer.Length)
+        {
+            if (shorter[shorterIndex] == longer[longerIndex])
+            {
+                shorterIndex++;
+                longerIndex++;
+            }
+            else if (hasSkippedCharacter)
+            {
+                return 2;
+            }
+            else
+            {
+                hasSkippedCharacter = true;
+                longerIndex++;
+            }
+        }
+
+        return 1;
     }
 
     private IQueryable<Recipe> BuildRecipeQuery(RecipeQueryParameters query)
@@ -136,7 +379,8 @@ public sealed partial class RecipeService(
                 .ThenByDescending(r => r.AverageRating)
                 .ThenByDescending(r => r.TimesCooked)
                 .ThenByDescending(r => r.ModifiedAt)
-            : q.OrderByDescending(r => r.ModifiedAt);
+                .ThenByDescending(r => r.Id)
+            : q.OrderByDescending(r => r.ModifiedAt).ThenByDescending(r => r.Id);
     }
 
     private static IQueryable<RecipeSummaryDto> ProjectToSummary(IQueryable<Recipe> query)

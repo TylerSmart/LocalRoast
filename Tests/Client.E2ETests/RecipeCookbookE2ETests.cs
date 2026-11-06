@@ -145,6 +145,11 @@ public sealed class RecipeCookbookE2ETests : E2ETestBase
         await Expect(Page.Locator(".recipe-card", new() { HasText = pubTitle })).ToBeVisibleAsync();
         await Expect(Page.Locator(".recipe-card", new() { HasText = draftTitle }))
             .Not.ToBeVisibleAsync();
+
+        await searchInput.FillAsync(
+            pubTitle.Replace("Risotto", "Risoto", StringComparison.Ordinal)
+        );
+        await Expect(Page.Locator(".recipe-card", new() { HasText = pubTitle })).ToBeVisibleAsync();
     }
 
     [TestMethod]

@@ -2,8 +2,12 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { MatDialog } from '@angular/material/dialog';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { provideRouter } from '@angular/router';
-import { of } from 'rxjs';
-import { RecipeSummaryDto } from '../../../core/models/recipe.models';
+import { Subject, of } from 'rxjs';
+import {
+  RecipePagedResultDto,
+  RecipeQueryParameters,
+  RecipeSummaryDto,
+} from '../../../core/models/recipe.models';
 import { CollectionDto, TagDto } from '../../../core/models/taxonomy.models';
 import { RecipeService } from '../../../core/services/recipe/recipe.service';
 import { TaxonomyService } from '../../../core/services/taxonomy/taxonomy.service';
@@ -60,6 +64,8 @@ describe('RecipeListComponent', () => {
         totalPages: 1,
         hasPreviousPage: false,
         hasNextPage: false,
+        hasMore: false,
+        isFuzzySearch: false,
       });
     }),
     deleteRecipe: vi.fn(),
@@ -126,6 +132,44 @@ describe('RecipeListComponent', () => {
     component.loadRecipes();
     fixture.detectChanges();
     expect(component['filteredRecipes']().length).toBe(0);
+  });
+
+  it('cancels stale recipe requests when a new search starts', () => {
+    const staleResponse = new Subject<RecipePagedResultDto>();
+    const latestResponse = new Subject<RecipePagedResultDto>();
+    mockRecipeService.getRecipesPaged
+      .mockReturnValueOnce(staleResponse)
+      .mockReturnValueOnce(latestResponse);
+
+    component.loadRecipes();
+    component.loadRecipes();
+
+    expect(staleResponse.observers).toHaveLength(0);
+
+    latestResponse.next({
+      items: sampleRecipes,
+      totalCount: 1,
+      pageNumber: 1,
+      pageSize: 24,
+      totalPages: 1,
+      hasPreviousPage: false,
+      hasNextPage: false,
+      hasMore: false,
+      isFuzzySearch: false,
+    });
+    expect(component['recipes']()).toEqual(sampleRecipes);
+  });
+
+  it('loads subsequent pages without requesting another total count', () => {
+    component['recipes'].set(sampleRecipes);
+    component['totalCount'].set(25);
+    component['hasMore'].set(true);
+
+    component.loadMoreRecipes();
+
+    expect(mockRecipeService.getRecipesPaged).toHaveBeenLastCalledWith(
+      expect.objectContaining({ page: 2, includeTotalCount: false }),
+    );
   });
 
   it('resets filters on clearFilters()', () => {

@@ -146,8 +146,29 @@ public record RecipeQueryParameters(
     bool ForgottenFavoritesOnly = false,
     int ForgottenDaysThreshold = 60,
     int? Page = null,
-    int? PageSize = null
+    int? PageSize = null,
+    bool IncludeTotalCount = true,
+    bool FuzzySearch = false
 );
+
+public record RecipePagedResultDto(
+    IReadOnlyList<RecipeSummaryDto> Items,
+    int? TotalCount,
+    int PageNumber,
+    int PageSize,
+    bool HasMore,
+    bool IsFuzzySearch = false
+)
+{
+    public int? TotalPages =>
+        TotalCount.HasValue && PageSize > 0
+            ? (int)Math.Ceiling((double)TotalCount.Value / PageSize)
+            : null;
+
+    public bool HasPreviousPage => PageNumber > 1;
+
+    public bool HasNextPage => HasMore;
+}
 
 public record RecipeIngredientInput(
     [MaxLength(150)] string? SectionName = null,
