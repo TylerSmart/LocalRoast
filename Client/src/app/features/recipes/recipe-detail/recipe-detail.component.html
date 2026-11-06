@@ -39,6 +39,12 @@
         </button>
 
         <mat-menu #recipeActionsMenu="matMenu" xPosition="before">
+          @if (aiHelper.isAvailable()) {
+            <button mat-menu-item (click)="openKitchenQuestion()">
+              <mat-icon>auto_awesome</mat-icon>
+              <span>Ask Kitchen AI</span>
+            </button>
+          }
           <button mat-menu-item (click)="openPlanMealDialog()" aria-label="Plan meal">
             <mat-icon>calendar_month</mat-icon>
             <span>Plan Meal</span>
@@ -439,6 +445,24 @@
                     </button>
                   }
 
+                  @if (aiHelper.isAvailable()) {
+                    <button
+                      type="button"
+                      mat-icon-button
+                      class="explain-ing-btn no-print"
+                      matTooltip="Ask AI about this ingredient"
+                      [attr.aria-label]="'Ask AI about ' + item.ingredient.displayName"
+                      (click)="
+                        openKitchenQuestion({
+                          recipeIngredientId: item.ingredient.id,
+                          ingredientName: item.ingredient.displayName,
+                        })
+                      "
+                    >
+                      <mat-icon>help_outline</mat-icon>
+                    </button>
+                  }
+
                   <!-- Linked Sub-Recipe inline expansion if applicable -->
                   @if (item.ingredient.linkedRecipeId) {
                     @if (getSubRecipe(item.ingredient.linkedRecipeId); as subRecipe) {
@@ -499,6 +523,23 @@
                   <div class="step-header">
                     <span class="step-number-circle">{{ stepItem.step.stepNumber }}</span>
                     <p class="step-instruction-text">{{ stepItem.step.instruction }}</p>
+                    @if (aiHelper.isAvailable()) {
+                      <button
+                        type="button"
+                        mat-icon-button
+                        class="explain-step-btn no-print"
+                        matTooltip="Explain this step"
+                        [attr.aria-label]="'Ask AI about step ' + stepItem.step.stepNumber"
+                        (click)="
+                          openKitchenQuestion({
+                            recipeStepId: stepItem.step.id,
+                            stepNumber: stepItem.step.stepNumber,
+                          })
+                        "
+                      >
+                        <mat-icon>help_outline</mat-icon>
+                      </button>
+                    }
                   </div>
 
                   <!-- Step Reference Photo -->

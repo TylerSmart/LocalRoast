@@ -111,6 +111,18 @@
           </button>
         }
 
+        @if (aiHelper.isAvailable()) {
+          <button
+            type="button"
+            mat-stroked-button
+            class="kitchen-ai-general-btn"
+            (click)="openKitchenQuestion()"
+          >
+            <mat-icon>auto_awesome</mat-icon>
+            <span>Ask Kitchen AI</span>
+          </button>
+        }
+
         <!-- Servings Stepper -->
         <div class="servings-stepper" aria-label="Adjust servings">
           <button
@@ -337,6 +349,27 @@
                         <mat-icon>auto_awesome</mat-icon>
                       </button>
                     }
+                    @if (aiHelper.isAvailable()) {
+                      <button
+                        type="button"
+                        mat-icon-button
+                        class="cook-explain-btn desktop-explain-btn"
+                        matTooltip="Ask AI about this ingredient"
+                        [attr.aria-label]="'Ask AI about ' + item.ingredient.displayName"
+                        (keydown)="$event.stopPropagation()"
+                        (click)="
+                          openKitchenQuestion(
+                            {
+                              recipeIngredientId: item.ingredient.id,
+                              ingredientName: item.ingredient.displayName,
+                            },
+                            $event
+                          )
+                        "
+                      >
+                        <mat-icon>help_outline</mat-icon>
+                      </button>
+                    }
                   </li>
                 }
               </ul>
@@ -435,6 +468,23 @@
                 </button>
               }
             </div>
+
+            @if (aiHelper.isAvailable()) {
+              <button
+                type="button"
+                mat-stroked-button
+                class="step-ai-explain-btn"
+                (click)="
+                  openKitchenQuestion({
+                    recipeStepId: currentStep()!.step.id,
+                    stepNumber: currentStep()!.step.stepNumber,
+                  })
+                "
+              >
+                <mat-icon>help_outline</mat-icon>
+                Explain this step
+              </button>
+            }
 
             <!-- Scaled Ingredient Callouts for this Step -->
             @if (currentStep()!.ingredientCallouts.length > 0) {
@@ -714,6 +764,27 @@
                         (click)="openIngredientSubstitution(item, $event)"
                       >
                         <mat-icon>auto_awesome</mat-icon>
+                      </button>
+                    }
+                    @if (aiHelper.isAvailable()) {
+                      <button
+                        type="button"
+                        mat-icon-button
+                        class="cook-explain-btn mobile-explain-btn"
+                        matTooltip="Ask AI about this ingredient"
+                        [attr.aria-label]="'Ask AI about ' + item.ingredient.displayName"
+                        (keydown)="$event.stopPropagation()"
+                        (click)="
+                          openKitchenQuestion(
+                            {
+                              recipeIngredientId: item.ingredient.id,
+                              ingredientName: item.ingredient.displayName,
+                            },
+                            $event
+                          )
+                        "
+                      >
+                        <mat-icon>help_outline</mat-icon>
                       </button>
                     }
                   </li>

@@ -36,6 +36,17 @@ public record LlmSubstitutionOptionItem(
 
 public record LlmSubstitutionPayload(IReadOnlyList<LlmSubstitutionOptionItem>? Substitutions);
 
+public record LlmKitchenQuestionContext(
+    string Question,
+    string? RecipeTitle,
+    string? RecipeDescription,
+    IReadOnlyList<string> RecipeIngredients,
+    string? IngredientName,
+    string? IngredientPreparationNote,
+    int? StepNumber,
+    string? StepInstruction
+);
+
 public record LlmCookbookRecipeCandidate(
     int CatalogIndex,
     Guid RecipeId,
@@ -95,6 +106,12 @@ public interface ILlmExtractionClient
     Task<LlmSubstitutionPayload> SuggestIngredientSubstitutionsAsync(
         EffectiveLlmConnectionConfig config,
         LlmSubstitutionContext context,
+        CancellationToken cancellationToken = default
+    );
+
+    Task<string> AnswerKitchenQuestionAsync(
+        EffectiveLlmConnectionConfig config,
+        LlmKitchenQuestionContext context,
         CancellationToken cancellationToken = default
     );
 

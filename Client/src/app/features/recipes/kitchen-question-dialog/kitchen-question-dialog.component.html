@@ -1,0 +1,75 @@
+<div class="dialog-header">
+  <div class="title-row">
+    <mat-icon>auto_awesome</mat-icon>
+    <h2 mat-dialog-title>Ask Kitchen AI</h2>
+  </div>
+  <button type="button" mat-icon-button (click)="close()" aria-label="Close Kitchen AI">
+    <mat-icon>close</mat-icon>
+  </button>
+</div>
+
+<form [formGroup]="questionForm" (ngSubmit)="ask()">
+  <mat-dialog-content class="dialog-content">
+    @if (data.recipeTitle) {
+      <div class="context-summary">
+        <span
+          >Recipe: <strong>{{ data.recipeTitle }}</strong></span
+        >
+        @if (data.ingredientName) {
+          <span
+            >Ingredient: <strong>{{ data.ingredientName }}</strong></span
+          >
+        }
+        @if (data.stepNumber) {
+          <span
+            >Step: <strong>{{ data.stepNumber }}</strong></span
+          >
+        }
+      </div>
+    }
+
+    <mat-form-field appearance="outline" class="question-field">
+      <mat-label>Cooking question</mat-label>
+      <textarea
+        matInput
+        formControlName="question"
+        [readonly]="isLoading()"
+        maxlength="600"
+        rows="3"
+        placeholder="What is a julienne cut? How do I peel a kiwi?"
+      ></textarea>
+      <mat-hint align="end">{{ question.value.length }} / 600</mat-hint>
+      @if (question.touched && question.invalid) {
+        <mat-error>Enter a cooking question of up to 600 characters.</mat-error>
+      }
+    </mat-form-field>
+
+    @if (isLoading()) {
+      <div class="loading-state" role="status" aria-live="polite">
+        <mat-spinner diameter="32" aria-label="Waiting for Kitchen AI"></mat-spinner>
+        <span>Asking Kitchen AI...</span>
+      </div>
+    } @else if (errorMessage()) {
+      <div class="error-banner" role="alert">
+        <mat-icon>error_outline</mat-icon>
+        <span>{{ errorMessage() }}</span>
+      </div>
+    } @else if (answer(); as result) {
+      <section class="answer-card" aria-live="polite">
+        <h3>Answer</h3>
+        <p class="answer-text">{{ result.answer }}</p>
+        <p class="model-label">Model: {{ result.modelUsed }}</p>
+      </section>
+    }
+
+    <p class="safety-note">AI can make mistakes. Verify important food-safety advice.</p>
+  </mat-dialog-content>
+
+  <mat-dialog-actions align="end" class="dialog-actions">
+    <button type="button" mat-button (click)="close()">Close</button>
+    <button type="submit" mat-flat-button [disabled]="isLoading() || question.invalid">
+      <mat-icon>auto_awesome</mat-icon>
+      {{ errorMessage() ? 'Try again' : 'Ask AI' }}
+    </button>
+  </mat-dialog-actions>
+</form>

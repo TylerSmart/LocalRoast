@@ -4,9 +4,11 @@ import { TestBed } from '@angular/core/testing';
 import { firstValueFrom } from 'rxjs';
 import {
   AiHelperStatusDto,
+  AskKitchenQuestionRequest,
   DraftMealPlanResponseDto,
   DraftWeeklyMealPlanRequest,
   IngredientSubstitutionResponseDto,
+  KitchenAnswerDto,
   SuggestIngredientSubstitutionsRequest,
 } from '../../models/ai-helper.models';
 import { AiKitchenHelperService } from './ai-kitchen-helper.service';
@@ -116,5 +118,25 @@ describe('AiKitchenHelperService', () => {
 
     const result = await promise;
     expect(result).toEqual(mockResponse);
+  });
+
+  it('posts a cooking question with its recipe context', async () => {
+    const request: AskKitchenQuestionRequest = {
+      question: 'What is julienne?',
+      recipeId: 'recipe-1',
+      recipeStepId: 'step-1',
+    };
+    const response: KitchenAnswerDto = {
+      answer: 'Cut into thin matchsticks.',
+      modelUsed: 'llama3',
+    };
+
+    const promise = firstValueFrom(service.askKitchenQuestion(request));
+    const req = httpMock.expectOne('/api/ai-helpers/kitchen-question');
+    expect(req.request.method).toBe('POST');
+    expect(req.request.body).toEqual(request);
+    req.flush(response);
+
+    expect(await promise).toEqual(response);
   });
 });

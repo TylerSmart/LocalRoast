@@ -9,6 +9,7 @@ import { RecipeService } from '../../../core/services/recipe/recipe.service';
 import { IngestionService } from '../../../core/services/ingestion/ingestion.service';
 import { AiKitchenHelperService } from '../../../core/services/ai-helpers/ai-kitchen-helper.service';
 import { RecipeShareDialogComponent } from '../recipe-share-dialog/recipe-share-dialog.component';
+import { KitchenQuestionDialogComponent } from '../kitchen-question-dialog/kitchen-question-dialog.component';
 import { RecipeDetailComponent } from './recipe-detail.component';
 
 describe('RecipeDetailComponent', () => {
@@ -148,6 +149,40 @@ describe('RecipeDetailComponent', () => {
     component = fixture.componentInstance;
     component.loadRecipe('r-1');
     fixture.detectChanges();
+  });
+
+  it('opens Kitchen AI with the selected ingredient, step, or recipe', () => {
+    mockDialog.open.mockClear();
+    const ingredientButton: HTMLButtonElement =
+      fixture.nativeElement.querySelector('.explain-ing-btn');
+    ingredientButton.click();
+    expect(mockDialog.open).toHaveBeenLastCalledWith(
+      KitchenQuestionDialogComponent,
+      expect.objectContaining({
+        data: expect.objectContaining({
+          recipeId: 'r-1',
+          recipeIngredientId: 'i-1',
+          ingredientName: 'Egg Noodles',
+        }),
+      }),
+    );
+
+    const stepButton: HTMLButtonElement = fixture.nativeElement.querySelector('.explain-step-btn');
+    stepButton.click();
+    expect(mockDialog.open).toHaveBeenLastCalledWith(
+      KitchenQuestionDialogComponent,
+      expect.objectContaining({
+        data: expect.objectContaining({ recipeId: 'r-1', recipeStepId: 's-1', stepNumber: 1 }),
+      }),
+    );
+
+    component.openKitchenQuestion();
+    expect(mockDialog.open).toHaveBeenLastCalledWith(
+      KitchenQuestionDialogComponent,
+      expect.objectContaining({
+        data: { recipeId: 'r-1', recipeTitle: sampleRecipe.title },
+      }),
+    );
   });
 
   it('renders recipe title, collections, tags, ingredients, and step instructions', () => {

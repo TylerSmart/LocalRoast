@@ -1,5 +1,6 @@
 ﻿using System.Net;
 using System.Text;
+using System.Text.Json;
 using App.Core.Exceptions;
 using App.Core.Ingestion;
 using App.Infrastructure.Ingestion;
@@ -20,6 +21,22 @@ public sealed class LlmExtractionClientTests
         )
         {
             return Task.FromResult(handlerFunc(request));
+        }
+    }
+
+    private sealed class CancellationAwareHttpMessageHandler : HttpMessageHandler
+    {
+        public TaskCompletionSource Started { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken
+        )
+        {
+            Started.TrySetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return new HttpResponseMessage(HttpStatusCode.OK);
         }
     }
 
@@ -457,6 +474,250 @@ public sealed class LlmExtractionClientTests
         Assert.AreEqual(1, result.Substitutions.Count);
         Assert.AreEqual("Greek Yogurt", result.Substitutions[0].Label);
     }
+
+    [TestMethod]
+    [DataRow(LlmProvider.Ollama)]
+    [DataRow(LlmProvider.OpenAiCompatible)]
+    public async Task AnswerKitchenQuestionAsync_UsesConfiguredProviderAndRecipeContext(
+        LlmProvider provider
+    )
+    {
+        var content = "```json\n{\"answer\":\"Cut into thin matchsticks.\"}\n```";
+        var response =
+            provider == LlmProvider.Ollama
+                ? JsonSerializer.Serialize(new { message = new { role = "assistant", content } })
+                : JsonSerializer.Serialize(
+                    new
+                    {
+                        choices = new[] { new { message = new { role = "assistant", content } } },
+                    }
+                );
+
+        var handler = new MockHttpMessageHandler(req =>
+        {
+            Assert.AreEqual(
+                provider == LlmProvider.Ollama ? "/api/chat" : "/v1/chat/completions",
+                req.RequestUri!.AbsolutePath
+            );
+            using var body = JsonDocument.Parse(req.Content!.ReadAsStringAsync().Result);
+            var root = body.RootElement;
+            var messages = root.GetProperty("messages");
+            var system = messages[0].GetProperty("content").GetString();
+            var user = messages[1].GetProperty("content").GetString();
+            Assert.IsNotNull(system);
+            Assert.IsNotNull(user);
+            StringAssert.Contains(system, "ingredient list may be incomplete");
+            StringAssert.Contains(user, "What does julienne mean?");
+            StringAssert.Contains(user, "Peeled carrots");
+            StringAssert.Contains(user, "Julienne the carrots.");
+            StringAssert.EndsWith(user, "What does julienne mean?");
+
+            if (provider == LlmProvider.Ollama)
+            {
+                Assert.AreEqual(
+                    4096,
+                    root.GetProperty("options").GetProperty("num_predict").GetInt32()
+                );
+                Assert.IsTrue(
+                    root.GetProperty("format")
+                        .GetProperty("properties")
+                        .TryGetProperty("answer", out _)
+                );
+            }
+            else
+            {
+                Assert.AreEqual("Bearer", req.Headers.Authorization?.Scheme);
+                Assert.AreEqual(4096, root.GetProperty("max_tokens").GetInt32());
+                Assert.AreEqual(
+                    "kitchen_answer",
+                    root.GetProperty("response_format")
+                        .GetProperty("json_schema")
+                        .GetProperty("name")
+                        .GetString()
+                );
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(response, Encoding.UTF8, "application/json"),
+            };
+        });
+
+        var client = new LlmExtractionClient(new HttpClient(handler));
+        var config = CreateKitchenQuestionConfig(provider);
+        var context = new LlmKitchenQuestionContext(
+            Question: "What does julienne mean?",
+            RecipeTitle: "Carrot Salad",
+            RecipeDescription: "A crisp salad",
+            RecipeIngredients: ["Carrots", "Lemon"],
+            IngredientName: "Carrots",
+            IngredientPreparationNote: "Peeled carrots",
+            StepNumber: 1,
+            StepInstruction: "Julienne the carrots."
+        );
+
+        var answer = await client.AnswerKitchenQuestionAsync(config, context);
+
+        Assert.AreEqual("Cut into thin matchsticks.", answer);
+    }
+
+    [TestMethod]
+    [DataRow("null")]
+    [DataRow("{}")]
+    [DataRow("{\"answer\":\"   \"}")]
+    [DataRow("{\"answer\":42}")]
+    [DataRow("not JSON")]
+    public async Task AnswerKitchenQuestionAsync_RejectsEmptyOrMalformedModelOutput(string content)
+    {
+        var response = JsonSerializer.Serialize(
+            new { message = new { role = "assistant", content } }
+        );
+        var handler = new MockHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(response, Encoding.UTF8, "application/json"),
+        });
+        var client = new LlmExtractionClient(new HttpClient(handler));
+
+        await Assert.ThrowsAsync<DomainValidationException>(() =>
+            client.AnswerKitchenQuestionAsync(
+                CreateKitchenQuestionConfig(LlmProvider.Ollama),
+                new LlmKitchenQuestionContext(
+                    "What is aquafaba?",
+                    null,
+                    null,
+                    [],
+                    null,
+                    null,
+                    null,
+                    null
+                )
+            )
+        );
+    }
+
+    [TestMethod]
+    public async Task AnswerKitchenQuestionAsync_ReportsMalformedProviderResponseAndOfflineHost()
+    {
+        var malformedHandler = new MockHttpMessageHandler(_ => new HttpResponseMessage(
+            HttpStatusCode.OK
+        )
+        {
+            Content = new StringContent("not JSON", Encoding.UTF8, "application/json"),
+        });
+        var offlineHandler = new MockHttpMessageHandler(_ => new HttpResponseMessage(
+            HttpStatusCode.ServiceUnavailable
+        ));
+        var context = new LlmKitchenQuestionContext(
+            "What is aquafaba?",
+            null,
+            null,
+            [],
+            null,
+            null,
+            null,
+            null
+        );
+        var config = CreateKitchenQuestionConfig(LlmProvider.Ollama);
+
+        await Assert.ThrowsAsync<DomainValidationException>(() =>
+            new LlmExtractionClient(new HttpClient(malformedHandler)).AnswerKitchenQuestionAsync(
+                config,
+                context
+            )
+        );
+        await Assert.ThrowsAsync<LlmHostUnavailableException>(() =>
+            new LlmExtractionClient(new HttpClient(offlineHandler)).AnswerKitchenQuestionAsync(
+                config,
+                context
+            )
+        );
+        await Assert.ThrowsAsync<LlmHostUnavailableException>(() =>
+            new LlmExtractionClient(new HttpClient(offlineHandler)).AnswerKitchenQuestionAsync(
+                config with
+                {
+                    TextModel = null,
+                },
+                context
+            )
+        );
+    }
+
+    [TestMethod]
+    [DataRow(LlmProvider.Ollama, "[]")]
+    [DataRow(LlmProvider.OpenAiCompatible, "{}")]
+    [DataRow(LlmProvider.OpenAiCompatible, "{\"choices\":[]}")]
+    [DataRow(LlmProvider.OpenAiCompatible, "{\"choices\":[null]}")]
+    [DataRow(LlmProvider.OpenAiCompatible, "{\"choices\":[{\"message\":\"invalid\"}]}")]
+    public async Task AnswerKitchenQuestionAsync_RejectsInvalidProviderEnvelopes(
+        LlmProvider provider,
+        string response
+    )
+    {
+        var handler = new MockHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(response, Encoding.UTF8, "application/json"),
+        });
+        var client = new LlmExtractionClient(new HttpClient(handler));
+        var context = new LlmKitchenQuestionContext(
+            "What is aquafaba?",
+            null,
+            null,
+            [],
+            null,
+            null,
+            null,
+            null
+        );
+
+        var error = await Assert.ThrowsAsync<DomainValidationException>(() =>
+            client.AnswerKitchenQuestionAsync(CreateKitchenQuestionConfig(provider), context)
+        );
+        Assert.IsTrue(
+            error.Message.Contains("invalid", StringComparison.OrdinalIgnoreCase)
+                || error.Message.Contains("empty answer", StringComparison.OrdinalIgnoreCase)
+        );
+    }
+
+    [TestMethod]
+    public async Task AnswerKitchenQuestionAsync_CancellationAbortsTheProviderRequest()
+    {
+        using var handler = new CancellationAwareHttpMessageHandler();
+        using var httpClient = new HttpClient(handler);
+        using var cancellation = new CancellationTokenSource();
+        var client = new LlmExtractionClient(httpClient);
+        var context = new LlmKitchenQuestionContext(
+            "What is aquafaba?",
+            null,
+            null,
+            [],
+            null,
+            null,
+            null,
+            null
+        );
+
+        var pending = client.AnswerKitchenQuestionAsync(
+            CreateKitchenQuestionConfig(LlmProvider.Ollama),
+            context,
+            cancellation.Token
+        );
+        await handler.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        cancellation.Cancel();
+
+        await Assert.ThrowsAsync<TaskCanceledException>(() => pending);
+    }
+
+    private static EffectiveLlmConnectionConfig CreateKitchenQuestionConfig(LlmProvider provider) =>
+        new(
+            Provider: provider,
+            BaseUrl: "http://localhost:1234",
+            ApiKey: provider == LlmProvider.OpenAiCompatible ? "test-key" : null,
+            TextModel: "test-model",
+            VisionModel: null,
+            OllamaKeepAlive: "5m",
+            RequestTimeoutSeconds: 30,
+            AutoPublishHighConfidenceText: false
+        );
 
     [TestMethod]
     public async Task DraftWeeklyMealPlanAsync_OpenAiCompatible_ReturnsParsedProposals()

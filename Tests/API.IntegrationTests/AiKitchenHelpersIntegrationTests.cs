@@ -54,6 +54,8 @@ public sealed class AiKitchenHelpersIntegrationTests
     {
         public bool ProbeReachable { get; set; } = true;
         public bool ThrowUnavailable { get; set; }
+        public LlmKitchenQuestionContext? LastKitchenQuestionContext { get; private set; }
+        public string KitchenAnswer { get; set; } = "Julienne means cutting into thin matchsticks.";
         public LlmSubstitutionPayload SubstitutionResult { get; set; } =
             new([
                 new LlmSubstitutionOptionItem(
@@ -140,6 +142,21 @@ public sealed class AiKitchenHelpersIntegrationTests
             }
             return Task.FromResult(DraftResult);
         }
+
+        public Task<string> AnswerKitchenQuestionAsync(
+            EffectiveLlmConnectionConfig config,
+            LlmKitchenQuestionContext context,
+            CancellationToken cancellationToken = default
+        )
+        {
+            if (ThrowUnavailable)
+            {
+                throw new LlmHostUnavailableException("Host offline");
+            }
+
+            LastKitchenQuestionContext = context;
+            return Task.FromResult(KitchenAnswer);
+        }
     }
 
     [TestMethod]
@@ -159,6 +176,12 @@ public sealed class AiKitchenHelpersIntegrationTests
             new DraftWeeklyMealPlanRequest(Prompt: "Fast dinners")
         );
         Assert.AreEqual(HttpStatusCode.Unauthorized, draftRes.StatusCode);
+
+        var questionRes = await _client.PostAsJsonAsync(
+            "/api/ai-helpers/kitchen-question",
+            new AskKitchenQuestionRequest("What is aquafaba?")
+        );
+        Assert.AreEqual(HttpStatusCode.Unauthorized, questionRes.StatusCode);
 
         var applyRes = await _client.PostAsJsonAsync(
             "/api/meal-plans/week/apply-draft",
@@ -188,6 +211,149 @@ public sealed class AiKitchenHelpersIntegrationTests
         Assert.IsNotNull(status);
         Assert.IsFalse(status.IsAvailable);
         Assert.IsNotNull(status.UnavailableReason);
+
+        var question = await _client.PostAsJsonAsync(
+            "/api/ai-helpers/kitchen-question",
+            new AskKitchenQuestionRequest("What is aquafaba?")
+        );
+        Assert.AreEqual(HttpStatusCode.ServiceUnavailable, question.StatusCode);
+    }
+
+    [TestMethod]
+    public async Task AskKitchenQuestion_ValidatesContextAndReturnsExplicitFailures()
+    {
+        var fakeLlm = new MockLlmExtractionClient();
+        using var factory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureServices(services =>
+            {
+                var descriptor = services.FirstOrDefault(d =>
+                    d.ServiceType == typeof(ILlmExtractionClient)
+                );
+                if (descriptor != null)
+                {
+                    services.Remove(descriptor);
+                }
+                services.AddSingleton<ILlmExtractionClient>(fakeLlm);
+            });
+        });
+        using var client = factory.CreateClient();
+        await AuthenticateAsync(client);
+        var settings = await client.PutAsJsonAsync(
+            "/api/llm-settings",
+            new UpdateLlmSettingsRequest(
+                Provider: LlmProvider.Ollama,
+                BaseUrl: "http://localhost:11434",
+                ApiKey: null,
+                TextModel: "llama3",
+                VisionModel: null,
+                RequestTimeoutSeconds: 30
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.OK, settings.StatusCode);
+
+        var recipeResponse = await client.PostAsJsonAsync(
+            "/api/recipes",
+            new UpsertRecipeRequest(
+                Title: "Kiwi Salad",
+                Ingredients:
+                [
+                    new RecipeIngredientInput(
+                        Quantity: 1,
+                        Unit: MeasurementUnit.Whole,
+                        DisplayName: "Kiwi",
+                        PreparationNote: "peeled"
+                    ),
+                ],
+                Steps:
+                [
+                    new RecipeStepInput(Instruction: "Julienne the kiwi.", IngredientIndices: [0]),
+                ]
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Created, recipeResponse.StatusCode);
+        var recipe = await recipeResponse.Content.ReadFromJsonAsync<RecipeDetailDto>();
+        Assert.IsNotNull(recipe);
+
+        var general = await client.PostAsJsonAsync(
+            "/api/ai-helpers/kitchen-question",
+            new AskKitchenQuestionRequest("What is aquafaba?")
+        );
+        Assert.AreEqual(HttpStatusCode.OK, general.StatusCode);
+        var generalAnswer = await general.Content.ReadFromJsonAsync<KitchenAnswerDto>();
+        Assert.IsNotNull(generalAnswer);
+        Assert.AreEqual("llama3", generalAnswer.ModelUsed);
+        Assert.IsNull(fakeLlm.LastKitchenQuestionContext?.RecipeTitle);
+
+        var contextual = await client.PostAsJsonAsync(
+            "/api/ai-helpers/kitchen-question",
+            new AskKitchenQuestionRequest(
+                "Explain this step.",
+                recipe.Id,
+                recipe.Ingredients[0].Id,
+                recipe.Steps[0].Id
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.OK, contextual.StatusCode);
+        var answer = await contextual.Content.ReadFromJsonAsync<KitchenAnswerDto>();
+        Assert.IsNotNull(answer);
+        StringAssert.Contains(answer.Answer, "thin matchsticks");
+        Assert.AreEqual("Kiwi", fakeLlm.LastKitchenQuestionContext?.IngredientName);
+        Assert.AreEqual("peeled", fakeLlm.LastKitchenQuestionContext?.IngredientPreparationNote);
+        Assert.AreEqual("Julienne the kiwi.", fakeLlm.LastKitchenQuestionContext?.StepInstruction);
+
+        foreach (
+            var invalidRequest in new[]
+            {
+                new AskKitchenQuestionRequest(" "),
+                new AskKitchenQuestionRequest(new string('x', 601)),
+                new AskKitchenQuestionRequest("Help", RecipeIngredientId: recipe.Ingredients[0].Id),
+                new AskKitchenQuestionRequest("Help", RecipeId: Guid.Empty),
+            }
+        )
+        {
+            var invalid = await client.PostAsJsonAsync(
+                "/api/ai-helpers/kitchen-question",
+                invalidRequest
+            );
+            Assert.AreEqual(HttpStatusCode.BadRequest, invalid.StatusCode);
+        }
+
+        foreach (
+            var missingRequest in new[]
+            {
+                new AskKitchenQuestionRequest("Help", Guid.NewGuid()),
+                new AskKitchenQuestionRequest("Help", recipe.Id, Guid.NewGuid()),
+                new AskKitchenQuestionRequest(
+                    "Help",
+                    RecipeId: recipe.Id,
+                    RecipeStepId: Guid.NewGuid()
+                ),
+            }
+        )
+        {
+            var missing = await client.PostAsJsonAsync(
+                "/api/ai-helpers/kitchen-question",
+                missingRequest
+            );
+            Assert.AreEqual(HttpStatusCode.NotFound, missing.StatusCode);
+        }
+
+        fakeLlm.KitchenAnswer = " ";
+        var empty = await client.PostAsJsonAsync(
+            "/api/ai-helpers/kitchen-question",
+            new AskKitchenQuestionRequest("What is julienne?")
+        );
+        Assert.AreEqual(HttpStatusCode.BadRequest, empty.StatusCode);
+        StringAssert.Contains(await empty.Content.ReadAsStringAsync(), "empty answer");
+
+        fakeLlm.ThrowUnavailable = true;
+        var offline = await client.PostAsJsonAsync(
+            "/api/ai-helpers/kitchen-question",
+            new AskKitchenQuestionRequest("What is julienne?")
+        );
+        Assert.AreEqual(HttpStatusCode.ServiceUnavailable, offline.StatusCode);
+        StringAssert.Contains(await offline.Content.ReadAsStringAsync(), "Host offline");
     }
 
     [TestMethod]

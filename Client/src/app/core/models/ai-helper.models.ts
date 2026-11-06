@@ -33,6 +33,18 @@ export interface IngredientSubstitutionResponseDto {
   substitutions: IngredientSubstitutionOptionDto[];
 }
 
+export interface AskKitchenQuestionRequest {
+  question: string;
+  recipeId?: string;
+  recipeIngredientId?: string;
+  recipeStepId?: string;
+}
+
+export interface KitchenAnswerDto {
+  answer: string;
+  modelUsed: string;
+}
+
 export interface DraftWeeklyMealPlanRequest {
   weekStartDate?: string | null;
   prompt: string;

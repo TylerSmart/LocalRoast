@@ -48,8 +48,11 @@ public sealed class AiKitchenHelperServiceTests
         public bool ProbeReachable { get; set; } = true;
         public LlmSubstitutionPayload SubstitutionResult { get; set; } = new([]);
         public LlmDraftMealPlanPayload DraftResult { get; set; } = new([]);
+        public string KitchenAnswer { get; set; } = "Cut the vegetable into thin matchsticks.";
         public LlmSubstitutionContext? LastSubstitutionContext { get; private set; }
         public LlmDraftMealPlanContext? LastDraftContext { get; private set; }
+        public LlmKitchenQuestionContext? LastKitchenQuestionContext { get; private set; }
+        public CancellationToken LastKitchenQuestionCancellationToken { get; private set; }
 
         public Task<LlmConnectionTestResultDto> ProbeAndListModelsAsync(
             EffectiveLlmConnectionConfig config,
@@ -99,6 +102,18 @@ public sealed class AiKitchenHelperServiceTests
         {
             LastDraftContext = context;
             return Task.FromResult(DraftResult);
+        }
+
+        public Task<string> AnswerKitchenQuestionAsync(
+            EffectiveLlmConnectionConfig config,
+            LlmKitchenQuestionContext context,
+            CancellationToken cancellationToken = default
+        )
+        {
+            LastKitchenQuestionContext = context;
+            LastKitchenQuestionCancellationToken = cancellationToken;
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(KitchenAnswer);
         }
     }
 
@@ -162,6 +177,205 @@ public sealed class AiKitchenHelperServiceTests
         Assert.AreEqual("qwen2.5:14b", status.TextModel);
         Assert.AreEqual(42, status.LatencyMs);
         Assert.IsNull(status.UnavailableReason);
+    }
+
+    [TestMethod]
+    public async Task AskKitchenQuestionAsync_GeneralQuestion_DoesNotRequireARecipe()
+    {
+        _llmClient.KitchenAnswer = "  Aquafaba is the liquid from cooked chickpeas.  ";
+
+        var result = await _service.AskKitchenQuestionAsync(
+            new AskKitchenQuestionRequest("  What is aquafaba?  ")
+        );
+
+        Assert.AreEqual("Aquafaba is the liquid from cooked chickpeas.", result.Answer);
+        Assert.AreEqual("qwen2.5:14b", result.ModelUsed);
+        var context = _llmClient.LastKitchenQuestionContext;
+        Assert.IsNotNull(context);
+        Assert.AreEqual("What is aquafaba?", context.Question);
+        Assert.IsNull(context.RecipeTitle);
+        Assert.IsNull(context.IngredientName);
+        Assert.IsNull(context.StepInstruction);
+        Assert.IsEmpty(context.RecipeIngredients);
+    }
+
+    [TestMethod]
+    public async Task AskKitchenQuestionAsync_UsesOnlyTheSelectedRecipeContext()
+    {
+        var recipe = new Recipe
+        {
+            Title = "Kiwi Salad",
+            Slug = "kiwi-salad",
+            Description = "A fresh salad",
+        };
+        var ingredient = new RecipeIngredient
+        {
+            RecipeId = recipe.Id,
+            DisplayName = "Kiwi",
+            PreparationNote = "peeled and sliced",
+            SortOrder = 0,
+        };
+        var step = new RecipeStep
+        {
+            RecipeId = recipe.Id,
+            StepNumber = 1,
+            Instruction = "Julienne the peeled kiwi.",
+        };
+        recipe.Ingredients.Add(ingredient);
+        recipe.Steps.Add(step);
+        var otherRecipe = new Recipe { Title = "Unrelated Recipe", Slug = "unrelated" };
+        var foreignIngredient = new RecipeIngredient
+        {
+            RecipeId = otherRecipe.Id,
+            DisplayName = "Unrelated ingredient",
+        };
+        var foreignStep = new RecipeStep
+        {
+            RecipeId = otherRecipe.Id,
+            StepNumber = 1,
+            Instruction = "Unrelated instruction.",
+        };
+        otherRecipe.Ingredients.Add(foreignIngredient);
+        otherRecipe.Steps.Add(foreignStep);
+        _dbContext.Recipes.AddRange(recipe, otherRecipe);
+        await _dbContext.SaveChangesAsync();
+
+        var response = await _service.AskKitchenQuestionAsync(
+            new AskKitchenQuestionRequest(
+                "How should I prepare this?",
+                recipe.Id,
+                ingredient.Id,
+                step.Id
+            )
+        );
+
+        Assert.AreEqual("Cut the vegetable into thin matchsticks.", response.Answer);
+        var context = _llmClient.LastKitchenQuestionContext;
+        Assert.IsNotNull(context);
+        Assert.AreEqual(recipe.Title, context.RecipeTitle);
+        Assert.AreEqual(recipe.Description, context.RecipeDescription);
+        CollectionAssert.AreEqual(new[] { "Kiwi" }, context.RecipeIngredients.ToArray());
+        Assert.AreEqual("Kiwi", context.IngredientName);
+        Assert.AreEqual("peeled and sliced", context.IngredientPreparationNote);
+        Assert.AreEqual(1, context.StepNumber);
+        Assert.AreEqual(step.Instruction, context.StepInstruction);
+
+        await Assert.ThrowsAsync<NotFoundException>(() =>
+            _service.AskKitchenQuestionAsync(
+                new AskKitchenQuestionRequest("Explain this.", recipe.Id, foreignIngredient.Id)
+            )
+        );
+        await Assert.ThrowsAsync<NotFoundException>(() =>
+            _service.AskKitchenQuestionAsync(
+                new AskKitchenQuestionRequest(
+                    "Explain this.",
+                    RecipeId: recipe.Id,
+                    RecipeStepId: foreignStep.Id
+                )
+            )
+        );
+        await Assert.ThrowsAsync<NotFoundException>(() =>
+            _service.AskKitchenQuestionAsync(
+                new AskKitchenQuestionRequest("Explain this.", Guid.NewGuid())
+            )
+        );
+    }
+
+    [TestMethod]
+    public async Task AskKitchenQuestionAsync_ValidatesQuestionAndContextIdentifiers()
+    {
+        foreach (var question in new[] { "", "   ", new string('x', 601) })
+        {
+            await Assert.ThrowsAsync<DomainValidationException>(() =>
+                _service.AskKitchenQuestionAsync(new AskKitchenQuestionRequest(question))
+            );
+        }
+
+        var exactlyAtLimit = await _service.AskKitchenQuestionAsync(
+            new AskKitchenQuestionRequest(new string('x', 600))
+        );
+        Assert.IsFalse(string.IsNullOrWhiteSpace(exactlyAtLimit.Answer));
+
+        foreach (
+            var request in new[]
+            {
+                new AskKitchenQuestionRequest("Help", RecipeId: Guid.Empty),
+                new AskKitchenQuestionRequest("Help", RecipeIngredientId: Guid.NewGuid()),
+                new AskKitchenQuestionRequest("Help", RecipeStepId: Guid.NewGuid()),
+                new AskKitchenQuestionRequest(
+                    "Help",
+                    RecipeId: Guid.NewGuid(),
+                    RecipeIngredientId: Guid.Empty
+                ),
+                new AskKitchenQuestionRequest(
+                    "Help",
+                    RecipeId: Guid.NewGuid(),
+                    RecipeStepId: Guid.Empty
+                ),
+            }
+        )
+        {
+            await Assert.ThrowsAsync<DomainValidationException>(() =>
+                _service.AskKitchenQuestionAsync(request)
+            );
+        }
+    }
+
+    [TestMethod]
+    public async Task AskKitchenQuestionAsync_BoundsRecipeIngredientContext()
+    {
+        var recipe = new Recipe { Title = "Large Recipe", Slug = "large-recipe" };
+        for (var index = 0; index < 35; index++)
+        {
+            recipe.Ingredients.Add(
+                new RecipeIngredient
+                {
+                    RecipeId = recipe.Id,
+                    SortOrder = index,
+                    DisplayName = $"Ingredient {index}",
+                }
+            );
+        }
+        _dbContext.Recipes.Add(recipe);
+        await _dbContext.SaveChangesAsync();
+
+        await _service.AskKitchenQuestionAsync(new AskKitchenQuestionRequest("Help", recipe.Id));
+
+        var context = _llmClient.LastKitchenQuestionContext;
+        Assert.IsNotNull(context);
+        Assert.HasCount(30, context.RecipeIngredients);
+        Assert.AreEqual("Ingredient 0", context.RecipeIngredients[0]);
+        Assert.AreEqual("Ingredient 29", context.RecipeIngredients[29]);
+    }
+
+    [TestMethod]
+    public async Task AskKitchenQuestionAsync_ReportsUnavailableAndEmptyAnswers()
+    {
+        _settingsService.Config = _settingsService.Config with { TextModel = null };
+        await Assert.ThrowsAsync<LlmHostUnavailableException>(() =>
+            _service.AskKitchenQuestionAsync(new AskKitchenQuestionRequest("What is aquafaba?"))
+        );
+
+        _settingsService.Config = _settingsService.Config with { TextModel = "model" };
+        _llmClient.KitchenAnswer = "  ";
+        await Assert.ThrowsAsync<DomainValidationException>(() =>
+            _service.AskKitchenQuestionAsync(new AskKitchenQuestionRequest("What is aquafaba?"))
+        );
+    }
+
+    [TestMethod]
+    public async Task AskKitchenQuestionAsync_PropagatesCancellation()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() =>
+            _service.AskKitchenQuestionAsync(
+                new AskKitchenQuestionRequest("What is aquafaba?"),
+                cts.Token
+            )
+        );
+        Assert.AreEqual(cts.Token, _llmClient.LastKitchenQuestionCancellationToken);
     }
 
     [TestMethod]

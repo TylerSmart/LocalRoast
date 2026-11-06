@@ -356,6 +356,12 @@
 
   mat-checkbox {
     flex: 1;
+    min-width: 0;
+  }
+
+  .explain-ing-btn {
+    flex-shrink: 0;
+    color: var(--mat-sys-primary);
   }
 
   .substitute-ing-btn {
@@ -489,10 +495,18 @@
   }
 
   .step-instruction-text {
+    flex: 1;
+    min-width: 0;
     margin: 0;
     font-size: 1rem;
     line-height: 1.6;
     color: var(--mat-sys-on-surface, #1c1b1f);
+    overflow-wrap: anywhere;
+  }
+
+  .explain-step-btn {
+    flex-shrink: 0;
+    color: var(--mat-sys-primary);
   }
 }
 

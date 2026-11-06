@@ -34,6 +34,10 @@ import { Subscription } from 'rxjs';
 import { AiKitchenHelperService } from '../../../core/services/ai-helpers/ai-kitchen-helper.service';
 import { IngredientSubstitutionDialogComponent } from '../ingredient-substitution-dialog/ingredient-substitution-dialog.component';
 import {
+  KitchenQuestionDialogComponent,
+  KitchenQuestionDialogData,
+} from '../kitchen-question-dialog/kitchen-question-dialog.component';
+import {
   FormattedQuantityResult,
   formatCountdown,
   formatDuration,
@@ -92,6 +96,7 @@ export class CookModeComponent implements OnInit, OnDestroy {
 
   protected readonly showVoiceHelp = signal<boolean>(false);
   private voiceSub?: Subscription;
+  private kitchenQuestionOpen = false;
 
   protected readonly recipe = signal<RecipeDetailDto | null>(null);
   protected readonly isLoading = signal<boolean>(true);
@@ -295,7 +300,7 @@ export class CookModeComponent implements OnInit, OnDestroy {
   }
 
   protected onWindowKeydown(event: KeyboardEvent): void {
-    if (event.repeat) {
+    if (event.repeat || this.kitchenQuestionOpen) {
       return;
     }
 
@@ -369,6 +374,24 @@ export class CookModeComponent implements OnInit, OnDestroy {
     if (item) {
       this.openIngredientSubstitution(item, event);
     }
+  }
+
+  openKitchenQuestion(context: Partial<KitchenQuestionDialogData> = {}, event?: Event): void {
+    event?.stopPropagation();
+    const recipe = this.recipe();
+    if (!recipe) return;
+
+    const ref = this.dialog.open(KitchenQuestionDialogComponent, {
+      width: '560px',
+      maxWidth: 'calc(100vw - 24px)',
+      maxHeight: '90vh',
+      autoFocus: 'textarea',
+      data: { ...context, recipeId: recipe.id, recipeTitle: recipe.title },
+    });
+    this.kitchenQuestionOpen = true;
+    ref.afterClosed().subscribe(() => {
+      this.kitchenQuestionOpen = false;
+    });
   }
 
   protected toggleStepChecked(stepId: string): void {

@@ -193,6 +193,103 @@ public sealed class AiKitchenHelperService(
         );
     }
 
+    public async Task<KitchenAnswerDto> AskKitchenQuestionAsync(
+        AskKitchenQuestionRequest request,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (string.IsNullOrWhiteSpace(request.Question) || request.Question.Length > 600)
+        {
+            throw new DomainValidationException(
+                "A cooking question of at most 600 characters is required."
+            );
+        }
+
+        if (
+            request.RecipeId == Guid.Empty
+            || request.RecipeIngredientId == Guid.Empty
+            || request.RecipeStepId == Guid.Empty
+        )
+        {
+            throw new DomainValidationException("Recipe context IDs must not be empty.");
+        }
+
+        if (
+            request.RecipeId is null
+            && (request.RecipeIngredientId is not null || request.RecipeStepId is not null)
+        )
+        {
+            throw new DomainValidationException(
+                "A recipe ID is required when specifying an ingredient or step."
+            );
+        }
+
+        Recipe? recipe = null;
+        RecipeIngredient? ingredient = null;
+        RecipeStep? step = null;
+        if (request.RecipeId is not null)
+        {
+            recipe = await dbContext
+                .Recipes.AsNoTracking()
+                .Include(r => r.Ingredients)
+                .Include(r => r.Steps)
+                .FirstOrDefaultAsync(r => r.Id == request.RecipeId, cancellationToken);
+
+            if (recipe is null)
+            {
+                throw new NotFoundException("Recipe not found.");
+            }
+
+            if (request.RecipeIngredientId is not null)
+            {
+                ingredient =
+                    recipe.Ingredients.FirstOrDefault(i => i.Id == request.RecipeIngredientId)
+                    ?? throw new NotFoundException("Recipe ingredient not found.");
+            }
+
+            if (request.RecipeStepId is not null)
+            {
+                step =
+                    recipe.Steps.FirstOrDefault(s => s.Id == request.RecipeStepId)
+                    ?? throw new NotFoundException("Recipe step not found.");
+            }
+        }
+
+        var config = await llmSettingsService.GetEffectiveConfigAsync(cancellationToken);
+        if (string.IsNullOrWhiteSpace(config.TextModel))
+        {
+            throw new LlmHostUnavailableException(
+                "No Text LLM model is configured in LLM Settings."
+            );
+        }
+
+        var context = new LlmKitchenQuestionContext(
+            Question: request.Question.Trim(),
+            RecipeTitle: recipe?.Title,
+            RecipeDescription: recipe?.Description,
+            RecipeIngredients: recipe
+                ?.Ingredients.OrderBy(i => i.SortOrder)
+                .Take(30)
+                .Select(i => i.DisplayName)
+                .ToList()
+                ?? [],
+            IngredientName: ingredient?.DisplayName,
+            IngredientPreparationNote: ingredient?.PreparationNote,
+            StepNumber: step?.StepNumber,
+            StepInstruction: step?.Instruction
+        );
+
+        var answer = await llmClient.AnswerKitchenQuestionAsync(config, context, cancellationToken);
+        if (string.IsNullOrWhiteSpace(answer))
+        {
+            throw new DomainValidationException("The AI returned an empty answer. Please retry.");
+        }
+
+        return new KitchenAnswerDto(answer.Trim(), config.TextModel.Trim());
+    }
+
     public async Task<DraftMealPlanResponseDto> DraftWeeklyMealPlanAsync(
         DraftWeeklyMealPlanRequest request,
         CancellationToken cancellationToken = default

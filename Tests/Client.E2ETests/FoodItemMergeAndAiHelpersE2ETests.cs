@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -14,6 +15,7 @@ public sealed class MockKitchenAiOllamaServer : IAsyncDisposable
     private readonly WebApplication _app;
     public string BaseUrl { get; }
     public bool SimulateOffline { get; set; }
+    public string? LastKitchenPrompt { get; private set; }
 
     private MockKitchenAiOllamaServer(WebApplication app, string baseUrl)
     {
@@ -62,9 +64,23 @@ public sealed class MockKitchenAiOllamaServer : IAsyncDisposable
 
                 using var reader = new StreamReader(request.Body);
                 var bodyText = await reader.ReadToEndAsync();
+                using var body = JsonDocument.Parse(bodyText);
+                var formatProperties = body
+                    .RootElement.GetProperty("format")
+                    .GetProperty("properties");
 
                 string payloadJson;
-                if (
+                if (formatProperties.TryGetProperty("answer", out _))
+                {
+                    server.LastKitchenPrompt = body
+                        .RootElement.GetProperty("messages")[1]
+                        .GetProperty("content")
+                        .GetString();
+                    payloadJson = """
+                        { "answer": "Julienne means slicing food into thin matchsticks." }
+                        """;
+                }
+                else if (
                     bodyText.Contains("draft_meal_plan")
                     || bodyText.Contains("proposals")
                     || bodyText.Contains("meal planning")
@@ -184,7 +200,8 @@ public sealed class FoodItemMergeAndAiHelpersE2ETests : E2ETestBase
         string title,
         string ingredientName,
         string instruction = "Heat skillet and cook ingredients thoroughly for 5 minutes.",
-        int baseServings = 4
+        int baseServings = 4,
+        string? preparationNote = null
     )
     {
         await Page.Locator("nav.desktop-nav a", new() { HasText = "Cookbook" }).ClickAsync();
@@ -196,6 +213,11 @@ public sealed class FoodItemMergeAndAiHelpersE2ETests : E2ETestBase
             .FillAsync(baseServings.ToString());
         await Page.Locator("input[formcontrolname='displayName']").First.FillAsync(ingredientName);
         await Page.Locator("input[formcontrolname='quantity']").First.FillAsync("1");
+        if (preparationNote is not null)
+        {
+            await Page.Locator("input[formcontrolname='preparationNote']")
+                .First.FillAsync(preparationNote);
+        }
         await Page.Locator("textarea[formcontrolname='instruction']").First.FillAsync(instruction);
 
         // Add a step timer so cook mode has rich step content
@@ -346,6 +368,121 @@ public sealed class FoodItemMergeAndAiHelpersE2ETests : E2ETestBase
 
         // Verify substitute button cleanly hides when offline
         await Expect(Page.Locator(".substitute-ing-btn")).Not.ToBeVisibleAsync();
+        await Expect(Page.Locator(".explain-ing-btn")).Not.ToBeVisibleAsync();
+        await Expect(Page.Locator(".explain-step-btn")).Not.ToBeVisibleAsync();
+    }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task KitchenAi_AnswersIngredientStepAndGeneralQuestions_OnDesktopAndMobile()
+    {
+        await using var mockServer = await MockKitchenAiOllamaServer.StartAsync();
+        await RegisterAndLoginAsync();
+        await ConfigureLlmProviderAsync(mockServer.BaseUrl);
+        await CreateRecipeWithIngredientAsync(
+            "Kiwi Salad",
+            "Kiwi",
+            "Julienne the peeled kiwi.",
+            preparationNote: "peeled and sliced"
+        );
+
+        var dialog = Page.Locator("app-kitchen-question-dialog");
+        await Page.Locator(".explain-ing-btn").First.ClickAsync();
+        await Expect(dialog.Locator(".answer-text")).ToContainTextAsync("thin matchsticks");
+        Assert.IsNotNull(mockServer.LastKitchenPrompt);
+        StringAssert.Contains(mockServer.LastKitchenPrompt, "Kiwi");
+        StringAssert.Contains(mockServer.LastKitchenPrompt, "peeled and sliced");
+
+        await dialog.Locator("textarea").FillAsync("How do I peel a kiwi?");
+        mockServer.SimulateOffline = true;
+        await dialog.Locator("button[type='submit']").ClickAsync();
+        await Expect(dialog.Locator("[role='alert']")).ToBeVisibleAsync();
+        mockServer.SimulateOffline = false;
+        await dialog.Locator("button[type='submit']").ClickAsync();
+        await Expect(dialog.Locator(".answer-text")).ToContainTextAsync("thin matchsticks");
+        Assert.IsNotNull(mockServer.LastKitchenPrompt);
+        StringAssert.Contains(mockServer.LastKitchenPrompt, "How do I peel a kiwi?");
+        await dialog.Locator("button[aria-label='Close Kitchen AI']").ClickAsync();
+
+        await Page.Locator(".explain-step-btn").First.ClickAsync();
+        await Expect(dialog.Locator(".answer-text")).ToBeVisibleAsync();
+        Assert.IsNotNull(mockServer.LastKitchenPrompt);
+        StringAssert.Contains(mockServer.LastKitchenPrompt, "Julienne the peeled kiwi.");
+        await dialog.Locator("button[aria-label='Close Kitchen AI']").ClickAsync();
+
+        await Page.Locator("button[aria-label='More recipe actions']").ClickAsync();
+        await Page.GetByRole(AriaRole.Menuitem, new() { Name = "Ask Kitchen AI" }).ClickAsync();
+        await dialog.Locator("textarea").FillAsync("What is aquafaba?");
+        await dialog.Locator("button[type='submit']").ClickAsync();
+        await Expect(dialog.Locator(".answer-text")).ToBeVisibleAsync();
+        Assert.IsNotNull(mockServer.LastKitchenPrompt);
+        StringAssert.Contains(mockServer.LastKitchenPrompt, "What is aquafaba?");
+        await dialog.Locator("button[aria-label='Close Kitchen AI']").ClickAsync();
+
+        await Page.SetViewportSizeAsync(360, 740);
+        await Page.Locator(".explain-ing-btn").First.ClickAsync();
+        await Expect(dialog.Locator(".answer-text")).ToBeVisibleAsync();
+        Assert.IsLessThanOrEqualTo(
+            await dialog.EvaluateAsync<int>("el => el.clientWidth"),
+            await dialog.EvaluateAsync<int>("el => el.scrollWidth"),
+            "Kitchen AI dialog must fit on a 360px recipe page."
+        );
+        Assert.IsLessThanOrEqualTo(
+            360,
+            await Page.EvaluateAsync<int>("() => document.documentElement.scrollWidth"),
+            "Recipe detail must not overflow horizontally at 360px."
+        );
+        await dialog.Locator("button[aria-label='Close Kitchen AI']").ClickAsync();
+        await Page.SetViewportSizeAsync(1280, 720);
+
+        await Page.Locator(".start-cooking-btn").ClickAsync();
+        await Page.Locator(".desktop-explain-btn").First.ClickAsync();
+        await Expect(dialog.Locator(".answer-text")).ToBeVisibleAsync();
+        await dialog.Locator("button[aria-label='Close Kitchen AI']").ClickAsync();
+        await Expect(Page.Locator(".cook-ingredients-pane .ingredient-item").First)
+            .Not.ToHaveClassAsync(new Regex("is-checked"));
+
+        await Page.Locator(".step-ai-explain-btn").ClickAsync();
+        await Expect(dialog.Locator(".answer-text")).ToBeVisibleAsync();
+        Assert.IsNotNull(mockServer.LastKitchenPrompt);
+        StringAssert.Contains(mockServer.LastKitchenPrompt, "Julienne the peeled kiwi.");
+        await dialog.Locator("button[aria-label='Close Kitchen AI']").ClickAsync();
+
+        await Page.SetViewportSizeAsync(360, 740);
+        await Page.Locator(".mobile-ingredients-btn").ClickAsync();
+        await Page.Locator(".mobile-explain-btn").First.ClickAsync();
+        await Expect(dialog.Locator(".answer-text")).ToBeVisibleAsync();
+        Assert.IsNotNull(mockServer.LastKitchenPrompt);
+        StringAssert.Contains(mockServer.LastKitchenPrompt, "peeled and sliced");
+        await Expect(Page.Locator(".mobile-ingredients-drawer .ingredient-item").First)
+            .Not.ToHaveClassAsync(new Regex("is-checked"));
+
+        var dialogScrollWidth = await dialog.EvaluateAsync<int>("el => el.scrollWidth");
+        var dialogClientWidth = await dialog.EvaluateAsync<int>("el => el.clientWidth");
+        Assert.IsLessThanOrEqualTo(
+            dialogClientWidth,
+            dialogScrollWidth,
+            "Kitchen AI dialog must not overflow horizontally at 360px."
+        );
+        var pageScrollWidth = await Page.EvaluateAsync<int>(
+            "() => document.documentElement.scrollWidth"
+        );
+        Assert.IsLessThanOrEqualTo(360, pageScrollWidth);
+        await dialog.Locator("button[aria-label='Close Kitchen AI']").ClickAsync();
+        await Page.Locator(
+                ".mobile-ingredients-drawer button[aria-label='Close ingredients drawer']"
+            )
+            .ClickAsync();
+
+        await Page.Locator(".kitchen-ai-general-btn").ClickAsync();
+        await dialog.Locator("textarea").FillAsync("What is aquafaba?");
+        await dialog.Locator("button[type='submit']").ClickAsync();
+        await Expect(dialog.Locator(".answer-text")).ToBeVisibleAsync();
+        await dialog.Locator("button[aria-label='Close Kitchen AI']").ClickAsync();
+
+        await Page.Locator(".step-ai-explain-btn").ClickAsync();
+        await Expect(dialog.Locator(".answer-text")).ToBeVisibleAsync();
+        await dialog.Locator("button[aria-label='Close Kitchen AI']").ClickAsync();
     }
 
     [TestMethod]

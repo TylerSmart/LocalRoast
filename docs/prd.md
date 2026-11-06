@@ -171,10 +171,11 @@ flowchart LR
   - Live **"Test Connection & Refresh Models"** button querying available models on the host.
   - Independent **Text Model** and **Vision Model** dropdown selectors (allowing a fast 7B–14B text model for URLs/text and a dedicated vision model like `qwen2.5vl` or `gemma3` for cookbook photos).
 - **Targeted 1-Click AI Kitchen Helpers (No Chat Bloat):**
-  - LocalRoast intentionally omits an embedded chatbot drawer (delegating open-ended chat to external MCP clients).
-  - When the LLM host is online, LocalRoast enables two focused 1-click actions that gracefully hide/disable when the LLM host is offline:
+  - LocalRoast uses focused helpers rather than a persistent chatbot drawer or saved chat history.
+  - When the LLM host is online, LocalRoast enables three focused actions that gracefully hide/disable when the LLM host is offline:
     1. **Suggest Ingredient Substitution:** Tap an ingredient in a recipe or Cook Mode (e.g., *"Out of buttermilk"*) to get 2–3 culinary substitution ratios tailored to that specific dish.
     2. **Draft Weekly Meal Plan:** Provide quick constraints on the calendar (e.g., *"4 weeknight dinners under 35 minutes, prioritize chicken thighs and recipes we haven't made recently"*) to propose candidate meals strictly from your saved household cookbook.
+    3. **Ask Kitchen AI:** Ask a cooking question from recipe detail or Cook Mode, or request an explanation of a specific ingredient, preparation note, or step. Each ephemeral question uses the configured text model and only the relevant recipe context; failures can be retried.
 
 ---
 
@@ -322,4 +323,4 @@ flowchart LR
 - **Milestone 3 — Meal Planning Calendar, Smart Shopping Lists & Real-Time Co-Shopping:**
   - Multi-slot Weekly/Monthly Meal Plan Calendar (multi-dish slots, custom serving overrides, `Leftovers` shopping exclusion, freeform notes, **"On-Deck"** flexible weekly tray, reusable Week Templates), Multiple Named Flat Shopping Lists with unit-consolidated generation + recipe provenance badges + Pantry Staples separation, `SignalR` real-time co-shopping sync, and expanding `/api/mcp` with meal-plan and shopping-list tools.
 - **Milestone 4 — Hands-Free Cook Mode, Cook Logs & 1-Click AI Kitchen Helpers:**
-  - Wake-locked **Cook Mode** (`navigator.wakeLock`, inline step ingredient callouts, floating multi-timer bar with alerts), **Cook Log** (*"I Made This!"* history, star ratings, tweak notes, dish photos, and *"Forgotten Favorites"* discovery filter), `FoodItem` duplicate-merge management tools, and graceful 1-click local LLM helpers (*Ingredient Substitutions* & *Draft Week Meal Plan*).
+  - Wake-locked **Cook Mode** (`navigator.wakeLock`, inline step ingredient callouts, floating multi-timer bar with alerts), **Cook Log** (*"I Made This!"* history, star ratings, tweak notes, dish photos, and *"Forgotten Favorites"* discovery filter), `FoodItem` duplicate-merge management tools, and focused LLM helpers (*Ingredient Substitutions*, *Draft Week Meal Plan*, and *Ask Kitchen AI*).

@@ -74,6 +74,11 @@
     white-space: nowrap;
     padding: 0 1rem !important;
   }
+
+  .kitchen-ai-general-btn {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
 }
 
 /* Wake Lock Pill */
@@ -565,6 +570,12 @@
       min-width: 0;
       line-height: 1.45;
       font-size: 0.95rem;
+      overflow-wrap: anywhere;
+    }
+
+    .cook-explain-btn {
+      flex-shrink: 0;
+      color: var(--mat-sys-primary);
     }
 
     &.is-checked {
@@ -722,16 +733,22 @@
     }
 
     .instruction-text {
+      min-width: 0;
       margin: 0;
       font-size: 1.5rem;
       line-height: 1.5;
       font-weight: 500;
       color: var(--mat-sys-on-surface);
+      overflow-wrap: anywhere;
 
       &.is-done {
         opacity: 0.6;
         text-decoration: line-through;
       }
+    }
+
+    .step-ai-explain-btn {
+      align-self: flex-start;
     }
 
     .step-speak-btn {

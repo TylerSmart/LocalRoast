@@ -762,6 +762,12 @@ public sealed class IngestionIntegrationTests
             CancellationToken cancellationToken = default
         ) => throw new NotImplementedException();
 
+        public Task<string> AnswerKitchenQuestionAsync(
+            EffectiveLlmConnectionConfig config,
+            LlmKitchenQuestionContext context,
+            CancellationToken cancellationToken = default
+        ) => throw new NotImplementedException();
+
         public Task<LlmDraftMealPlanPayload> DraftWeeklyMealPlanAsync(
             EffectiveLlmConnectionConfig config,
             LlmDraftMealPlanContext context,

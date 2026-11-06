@@ -16,6 +16,7 @@ import {
 import { Subject } from 'rxjs';
 import { AiKitchenHelperService } from '../../../core/services/ai-helpers/ai-kitchen-helper.service';
 import { IngredientSubstitutionDialogComponent } from '../ingredient-substitution-dialog/ingredient-substitution-dialog.component';
+import { KitchenQuestionDialogComponent } from '../kitchen-question-dialog/kitchen-question-dialog.component';
 import { CookModeComponent } from './cook-mode.component';
 
 describe('CookModeComponent', () => {
@@ -288,6 +289,46 @@ describe('CookModeComponent', () => {
     expect(component['recipe']()?.title).toBe('Beef Chili');
     expect(component['targetServings']()).toBe(8);
     expect(component['scaleFactor']()).toBe(2);
+  });
+
+  it('opens ingredient and step explanations without checking the ingredient', () => {
+    const ingredientButton: HTMLButtonElement =
+      fixture.nativeElement.querySelector('.desktop-explain-btn');
+    ingredientButton.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    ingredientButton.click();
+    expect(component['checkedIngredients']()['ing-1']).toBeUndefined();
+    expect(mockDialog.open).toHaveBeenLastCalledWith(
+      KitchenQuestionDialogComponent,
+      expect.objectContaining({
+        data: expect.objectContaining({
+          recipeId: 'rec-1',
+          recipeIngredientId: 'ing-1',
+          ingredientName: 'Ground Beef',
+        }),
+      }),
+    );
+
+    const stepButton: HTMLButtonElement =
+      fixture.nativeElement.querySelector('.step-ai-explain-btn');
+    stepButton.click();
+    expect(mockDialog.open).toHaveBeenLastCalledWith(
+      KitchenQuestionDialogComponent,
+      expect.objectContaining({
+        data: expect.objectContaining({ recipeId: 'rec-1', recipeStepId: 'st-1', stepNumber: 1 }),
+      }),
+    );
+  });
+
+  it('does not navigate cook steps with arrow keys while Kitchen AI is open', () => {
+    const closed = new Subject<void>();
+    mockDialog.open.mockReturnValueOnce({ afterClosed: () => closed.asObservable() });
+    component.openKitchenQuestion();
+    component['onWindowKeydown'](new KeyboardEvent('keydown', { key: 'ArrowRight' }));
+    expect(component['activeStepIndex']()).toBe(0);
+
+    closed.next();
+    component['onWindowKeydown'](new KeyboardEvent('keydown', { key: 'ArrowRight' }));
+    expect(component['activeStepIndex']()).toBe(1);
   });
 
   it('navigates through steps using nextStep and prevStep', () => {

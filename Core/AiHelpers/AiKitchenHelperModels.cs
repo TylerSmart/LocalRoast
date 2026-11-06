@@ -38,6 +38,15 @@ public record IngredientSubstitutionResponseDto(
     IReadOnlyList<IngredientSubstitutionOptionDto> Substitutions
 );
 
+public record AskKitchenQuestionRequest(
+    [Required, MaxLength(600)] string Question,
+    Guid? RecipeId = null,
+    Guid? RecipeIngredientId = null,
+    Guid? RecipeStepId = null
+);
+
+public record KitchenAnswerDto(string Answer, string ModelUsed);
+
 public record DraftWeeklyMealPlanRequest(
     DateOnly? WeekStartDate = null,
     [Required, MaxLength(600)] string Prompt = "",

@@ -74,6 +74,61 @@ public sealed class AiKitchenHelpersController(IAiKitchenHelperService aiKitchen
         }
     }
 
+    [HttpPost("kitchen-question")]
+    [ProducesResponseType(typeof(KitchenAnswerDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> AskKitchenQuestion(
+        [FromBody] AskKitchenQuestionRequest request,
+        CancellationToken cancellationToken
+    )
+    {
+        try
+        {
+            var result = await aiKitchenHelperService.AskKitchenQuestionAsync(
+                request,
+                cancellationToken
+            );
+            return Ok(result);
+        }
+        catch (DomainValidationException ex)
+        {
+            return BadRequest(
+                new ProblemDetails
+                {
+                    Status = StatusCodes.Status400BadRequest,
+                    Title = ex.Title,
+                    Detail = ex.Message,
+                }
+            );
+        }
+        catch (NotFoundException ex)
+        {
+            return NotFound(
+                new ProblemDetails
+                {
+                    Status = StatusCodes.Status404NotFound,
+                    Title = "Not Found",
+                    Detail = ex.Message,
+                }
+            );
+        }
+        catch (LlmHostUnavailableException ex)
+        {
+            return StatusCode(
+                StatusCodes.Status503ServiceUnavailable,
+                new ProblemDetails
+                {
+                    Status = StatusCodes.Status503ServiceUnavailable,
+                    Title = "LLM Host Unavailable",
+                    Detail = ex.Message,
+                }
+            );
+        }
+    }
+
     [HttpPost("draft-meal-plan")]
     [ProducesResponseType(typeof(DraftMealPlanResponseDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]

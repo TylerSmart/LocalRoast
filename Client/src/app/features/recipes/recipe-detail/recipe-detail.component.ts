@@ -53,6 +53,10 @@ import { ShoppingListGenerationResultDto } from '../../../core/models/shopping.m
 import { CookLogDialogComponent } from '../cook-log-dialog/cook-log-dialog.component';
 import { AddRecipeToListDialogComponent } from '../../shopping/add-recipe-to-list-dialog/add-recipe-to-list-dialog.component';
 import { IngredientSubstitutionDialogComponent } from '../ingredient-substitution-dialog/ingredient-substitution-dialog.component';
+import {
+  KitchenQuestionDialogComponent,
+  KitchenQuestionDialogData,
+} from '../kitchen-question-dialog/kitchen-question-dialog.component';
 
 export interface ScaledIngredientItem {
   ingredient: RecipeIngredientDto;
@@ -259,6 +263,19 @@ export class RecipeDetailComponent implements OnInit {
         scaledAmountDisplay: item.displayQuantityAndUnit,
         targetServings: this.targetServings(),
       },
+    });
+  }
+
+  openKitchenQuestion(context: Partial<KitchenQuestionDialogData> = {}): void {
+    const recipe = this.recipe();
+    if (!recipe) return;
+
+    this.dialog.open(KitchenQuestionDialogComponent, {
+      width: '560px',
+      maxWidth: 'calc(100vw - 24px)',
+      maxHeight: '90vh',
+      autoFocus: 'textarea',
+      data: { ...context, recipeId: recipe.id, recipeTitle: recipe.title },
     });
   }
 

@@ -4,9 +4,11 @@ import { Observable, catchError, of, tap } from 'rxjs';
 import { apiUrl } from '../../api/api-url';
 import {
   AiHelperStatusDto,
+  AskKitchenQuestionRequest,
   DraftMealPlanResponseDto,
   DraftWeeklyMealPlanRequest,
   IngredientSubstitutionResponseDto,
+  KitchenAnswerDto,
   SuggestIngredientSubstitutionsRequest,
 } from '../../models/ai-helper.models';
 
@@ -59,6 +61,10 @@ export class AiKitchenHelperService {
       apiUrl('/ai-helpers/ingredient-substitutions'),
       request,
     );
+  }
+
+  askKitchenQuestion(request: AskKitchenQuestionRequest): Observable<KitchenAnswerDto> {
+    return this.http.post<KitchenAnswerDto>(apiUrl('/ai-helpers/kitchen-question'), request);
   }
 
   draftWeeklyMealPlan(request: DraftWeeklyMealPlanRequest): Observable<DraftMealPlanResponseDto> {

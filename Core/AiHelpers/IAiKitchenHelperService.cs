@@ -9,6 +9,11 @@ public interface IAiKitchenHelperService
         CancellationToken cancellationToken = default
     );
 
+    Task<KitchenAnswerDto> AskKitchenQuestionAsync(
+        AskKitchenQuestionRequest request,
+        CancellationToken cancellationToken = default
+    );
+
     Task<DraftMealPlanResponseDto> DraftWeeklyMealPlanAsync(
         DraftWeeklyMealPlanRequest request,
         CancellationToken cancellationToken = default
