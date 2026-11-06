@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.IdentityModel.Tokens.Jwt;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -6,17 +7,27 @@ using System.Text.Json;
 using App.Core.Authentication;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.Protocols;
+using Microsoft.IdentityModel.Protocols.OpenIdConnect;
+using Microsoft.IdentityModel.Tokens;
 
 namespace App.Infrastructure.Authentication;
 
 public sealed class OidcService(
     IOptions<OidcOptions> options,
     HttpClient httpClient,
-    ILogger<OidcService> logger
+    ILogger<OidcService> logger,
+    IConfigurationManager<OpenIdConnectConfiguration>? configurationManager = null
 ) : IOidcService
 {
+    private static readonly ConcurrentDictionary<
+        string,
+        IConfigurationManager<OpenIdConnectConfiguration>
+    > ConfigurationManagers = new(StringComparer.OrdinalIgnoreCase);
     private readonly OidcOptions _options = options.Value;
     private readonly JwtSecurityTokenHandler _tokenHandler = new();
+    private readonly IConfigurationManager<OpenIdConnectConfiguration>? _configurationManager =
+        configurationManager ?? GetConfigurationManager(options.Value.Authority);
 
     public OidcConfigurationDto GetConfiguration()
     {
@@ -53,33 +64,21 @@ public sealed class OidcService(
         {
             if (_tokenHandler.CanReadToken(idToken))
             {
-                var jwt = _tokenHandler.ReadJwtToken(idToken);
-
-                var sub = jwt
-                    .Claims.FirstOrDefault(c =>
-                        c.Type == JwtRegisteredClaimNames.Sub || c.Type == ClaimTypes.NameIdentifier
-                    )
-                    ?.Value;
-                var email = jwt
-                    .Claims.FirstOrDefault(c =>
-                        c.Type == JwtRegisteredClaimNames.Email || c.Type == ClaimTypes.Email
-                    )
-                    ?.Value;
-                var name = jwt
-                    .Claims.FirstOrDefault(c =>
-                        c.Type == "name"
-                        || c.Type == ClaimTypes.Name
-                        || c.Type == "preferred_username"
-                    )
-                    ?.Value;
-
-                if (!string.IsNullOrWhiteSpace(sub) && !string.IsNullOrWhiteSpace(email))
+                try
                 {
-                    return new ExternalUserPrincipal(sub, email, name, _options.ProviderName);
+                    var principal = await ValidateJwtAsync(idToken, cancellationToken);
+                    if (principal is not null)
+                    {
+                        return principal;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "OIDC JWT validation failed.");
                 }
             }
 
-            // Fallback for OAuth2 access tokens (e.g. Google ya29... tokens) or when claims are fetched via UserInfo endpoint
+            // UserInfo lets the provider validate opaque access tokens and JWT access tokens.
             var userInfoEndpoint = _options.UserInfoEndpoint;
             if (
                 string.IsNullOrWhiteSpace(userInfoEndpoint)
@@ -214,5 +213,81 @@ public sealed class OidcService(
             logger.LogError(ex, "Exception during OIDC code exchange.");
             return null;
         }
+    }
+
+    private async Task<ExternalUserPrincipal?> ValidateJwtAsync(
+        string token,
+        CancellationToken cancellationToken
+    )
+    {
+        if (_configurationManager is null || string.IsNullOrWhiteSpace(_options.ClientId))
+        {
+            return null;
+        }
+
+        var configuration = await _configurationManager.GetConfigurationAsync(cancellationToken);
+        if (string.IsNullOrWhiteSpace(configuration.Issuer) || configuration.SigningKeys.Count == 0)
+        {
+            logger.LogWarning("OIDC discovery returned no issuer or signing keys.");
+            return null;
+        }
+
+        var validationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidIssuer = configuration.Issuer,
+            ValidateAudience = true,
+            ValidAudience = _options.ClientId,
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKeys = configuration.SigningKeys,
+            RequireSignedTokens = true,
+            ValidateLifetime = true,
+            RequireExpirationTime = true,
+            ClockSkew = TimeSpan.FromMinutes(1),
+        };
+        var principal = _tokenHandler.ValidateToken(token, validationParameters, out _);
+
+        var subject = principal
+            .Claims.FirstOrDefault(c =>
+                c.Type == JwtRegisteredClaimNames.Sub || c.Type == ClaimTypes.NameIdentifier
+            )
+            ?.Value;
+        var email = principal
+            .Claims.FirstOrDefault(c =>
+                c.Type == JwtRegisteredClaimNames.Email || c.Type == ClaimTypes.Email
+            )
+            ?.Value;
+        var name = principal
+            .Claims.FirstOrDefault(c =>
+                c.Type == "name" || c.Type == ClaimTypes.Name || c.Type == "preferred_username"
+            )
+            ?.Value;
+
+        return !string.IsNullOrWhiteSpace(subject) && !string.IsNullOrWhiteSpace(email)
+            ? new ExternalUserPrincipal(subject, email, name, _options.ProviderName)
+            : null;
+    }
+
+    private static IConfigurationManager<OpenIdConnectConfiguration>? GetConfigurationManager(
+        string authority
+    )
+    {
+        if (
+            !Uri.TryCreate(authority, UriKind.Absolute, out var authorityUri)
+            || authorityUri.Scheme != Uri.UriSchemeHttps
+        )
+        {
+            return null;
+        }
+
+        var normalizedAuthority = authority.TrimEnd('/');
+        return ConfigurationManagers.GetOrAdd(
+            normalizedAuthority,
+            static normalizedAuthority => new ConfigurationManager<OpenIdConnectConfiguration>(
+                $"{normalizedAuthority}/.well-known/openid-configuration",
+                new OpenIdConnectConfigurationRetriever(),
+                new HttpDocumentRetriever { RequireHttps = true }
+            )
+        );
     }
 }

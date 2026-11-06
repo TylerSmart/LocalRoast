@@ -128,7 +128,7 @@ public sealed class AuthIntegrationTests
     }
 
     [TestMethod]
-    public async Task ExternalCallback_WithValidIdToken_ProvisionsNewUser()
+    public async Task ExternalCallback_WithUnverifiedIdToken_ReturnsUnauthorized()
     {
         var tokenHandler = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler();
         var idToken = tokenHandler.WriteToken(
@@ -145,31 +145,18 @@ public sealed class AuthIntegrationTests
         var request = new ExternalAuthRequest(Code: null, IdToken: idToken, RedirectUri: null);
         var response = await _client.PostAsJsonAsync("/api/auth/external-callback", request);
 
-        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
-
-        var auth = await response.Content.ReadFromJsonAsync<AuthResponse>();
-        Assert.IsNotNull(auth);
-        Assert.IsFalse(string.IsNullOrWhiteSpace(auth.Token));
-        Assert.AreEqual("oidcuser@example.com", auth.Email);
-
-        // Verify that the user can query /api/auth/me using the returned token
-        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
-            "Bearer",
-            auth.Token
-        );
-        var meResponse = await _client.GetAsync("/api/auth/me");
-        Assert.AreEqual(HttpStatusCode.OK, meResponse.StatusCode);
+        Assert.AreEqual(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
     [TestMethod]
-    public async Task ExternalCallback_WithExistingLocalEmail_LinksAccount()
+    public async Task ExternalCallback_WithUnverifiedTokenMatchingLocalEmail_ReturnsUnauthorized()
     {
         // First, register a local user
         var localReg = new RegisterRequest("linkme@example.com", "localuser", "Password123!");
         var localRegResponse = await _client.PostAsJsonAsync("/api/auth/register", localReg);
         Assert.AreEqual(HttpStatusCode.OK, localRegResponse.StatusCode);
 
-        // Now perform external callback with same email
+        // An unverified token cannot link itself to an existing account by email.
         var tokenHandler = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler();
         var idToken = tokenHandler.WriteToken(
             new System.IdentityModel.Tokens.Jwt.JwtSecurityToken(
@@ -185,12 +172,7 @@ public sealed class AuthIntegrationTests
         var request = new ExternalAuthRequest(Code: null, IdToken: idToken, RedirectUri: null);
         var response = await _client.PostAsJsonAsync("/api/auth/external-callback", request);
 
-        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
-
-        var auth = await response.Content.ReadFromJsonAsync<AuthResponse>();
-        Assert.IsNotNull(auth);
-        Assert.AreEqual("linkme@example.com", auth.Email);
-        Assert.AreEqual("localuser", auth.Username);
+        Assert.AreEqual(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
     [TestMethod]
@@ -238,13 +220,9 @@ public sealed class AuthIntegrationTests
     }
 
     [TestMethod]
-    public async Task ExternalCallback_WithUsernameCollision_AssignsUniqueUsername()
+    public async Task ExternalCallback_WithUnverifiedTokenAndUsernameCollision_ReturnsUnauthorized()
     {
-        // First user
-        var localReg = new RegisterRequest("user1@example.com", "clashname", "Password123!");
-        await _client.PostAsJsonAsync("/api/auth/register", localReg);
-
-        // External user with same base name
+        // An unverified token cannot provision an external user.
         var tokenHandler = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler();
         var idToken = tokenHandler.WriteToken(
             new System.IdentityModel.Tokens.Jwt.JwtSecurityToken(
@@ -260,11 +238,7 @@ public sealed class AuthIntegrationTests
         var request = new ExternalAuthRequest(Code: null, IdToken: idToken, RedirectUri: null);
         var response = await _client.PostAsJsonAsync("/api/auth/external-callback", request);
 
-        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
-        var auth = await response.Content.ReadFromJsonAsync<AuthResponse>();
-        Assert.IsNotNull(auth);
-        Assert.AreNotEqual("clashname", auth.Username);
-        StringAssert.StartsWith(auth.Username, "clashname");
+        Assert.AreEqual(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
     [TestMethod]
@@ -309,7 +283,7 @@ public sealed class AuthIntegrationTests
     }
 
     [TestMethod]
-    public async Task ExternalToken_DirectlyInBearerHeader_AuthenticatesSuccessfully()
+    public async Task UnverifiedJwt_DirectlyInBearerHeader_ReturnsUnauthorized()
     {
         var tokenHandler = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler();
         var externalIdToken = tokenHandler.WriteToken(
@@ -318,7 +292,7 @@ public sealed class AuthIntegrationTests
                 [
                     new System.Security.Claims.Claim("sub", "ext-direct-bearer-user"),
                     new System.Security.Claims.Claim("email", "directbearer@example.com"),
-                    new System.Security.Claims.Claim("name", "Direct Bearer User"),
+                    new System.Security.Claims.Claim("name", "Direct Bearer"),
                 ]
             )
         );
@@ -330,15 +304,9 @@ public sealed class AuthIntegrationTests
         );
 
         var meResponse = await bearerClient.GetAsync("/api/auth/me");
-        Assert.AreEqual(HttpStatusCode.OK, meResponse.StatusCode);
+        Assert.AreEqual(HttpStatusCode.Unauthorized, meResponse.StatusCode);
 
-        var user = await meResponse.Content.ReadFromJsonAsync<CurrentUserDto>();
-        Assert.IsNotNull(user);
-        Assert.AreEqual("directbearer@example.com", user.Email);
-        Assert.AreEqual("Direct Bearer User", user.Username);
-
-        // Second call hits cache
-        var cachedResponse = await bearerClient.GetAsync("/api/auth/me");
-        Assert.AreEqual(HttpStatusCode.OK, cachedResponse.StatusCode);
+        var repeatedResponse = await bearerClient.GetAsync("/api/auth/me");
+        Assert.AreEqual(HttpStatusCode.Unauthorized, repeatedResponse.StatusCode);
     }
 }

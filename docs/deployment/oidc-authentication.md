@@ -119,8 +119,8 @@ In ASP.NET Core, nested configuration properties are specified in environment va
 |----------------------|-------------|------------------|
 | `Authentication__Oidc__Enabled` | Enables external OIDC authentication | `true` |
 | `Authentication__Oidc__ProviderName` | Display name shown on the login button | `Google` |
-| `Authentication__Oidc__Authority` | OIDC Issuer / Authority URL | `https://accounts.google.com` |
-| `Authentication__Oidc__ClientId` | OAuth Client ID from Google Cloud Console | `xxxx.apps.googleusercontent.com` |
+| `Authentication__Oidc__Authority` | HTTPS OIDC issuer / authority URL used for discovery and signing keys | `https://accounts.google.com` |
+| `Authentication__Oidc__ClientId` | OAuth Client ID and expected ID-token audience | `xxxx.apps.googleusercontent.com` |
 | `Authentication__Oidc__ClientSecret` | OAuth Client Secret from Google Cloud Console | `GOCSPX-xxxx` |
 | `Authentication__Oidc__Scope` | Requested OIDC scopes (space-delimited) | `openid profile email` |
 | `Authentication__Oidc__AuthorizationEndpoint` | Provider authorization URL | `https://accounts.google.com/o/oauth2/v2/auth` |

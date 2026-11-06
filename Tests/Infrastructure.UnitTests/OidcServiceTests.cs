@@ -1,9 +1,13 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using System.Security.Cryptography;
 using App.Core.Authentication;
 using App.Infrastructure.Authentication;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.Protocols;
+using Microsoft.IdentityModel.Protocols.OpenIdConnect;
+using Microsoft.IdentityModel.Tokens;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace App.Infrastructure.UnitTests;
@@ -55,23 +59,44 @@ public sealed class OidcServiceTests
     [TestMethod]
     public async Task ValidateIdTokenAsync_WithReadableJwt_ExtractsClaims()
     {
-        var options = new OidcOptions { Enabled = true, ProviderName = "Keycloak" };
+        const string issuer = "https://issuer.example.com";
+        const string clientId = "test-client-id";
+        using var rsa = RSA.Create(2048);
+        var signingKey = new RsaSecurityKey(rsa) { KeyId = "test-key" };
+        var configuration = new OpenIdConnectConfiguration { Issuer = issuer };
+        configuration.SigningKeys.Add(signingKey);
+        var configurationManager = new StaticConfigurationManager<OpenIdConnectConfiguration>(
+            configuration
+        );
+        var options = new OidcOptions
+        {
+            Enabled = true,
+            ProviderName = "Keycloak",
+            Authority = issuer,
+            ClientId = clientId,
+        };
 
         var service = new OidcService(
             Options.Create(options),
             new HttpClient(),
-            NullLogger<OidcService>.Instance
+            NullLogger<OidcService>.Instance,
+            configurationManager
         );
 
         var handler = new JwtSecurityTokenHandler();
         var jwt = handler.WriteToken(
             new JwtSecurityToken(
+                issuer: issuer,
+                audience: clientId,
                 claims:
                 [
                     new Claim(JwtRegisteredClaimNames.Sub, "external-12345"),
                     new Claim(JwtRegisteredClaimNames.Email, "extuser@example.com"),
                     new Claim("name", "External User"),
-                ]
+                ],
+                notBefore: DateTime.UtcNow.AddMinutes(-10),
+                expires: DateTime.UtcNow.AddMinutes(5),
+                signingCredentials: new SigningCredentials(signingKey, SecurityAlgorithms.RsaSha256)
             )
         );
 
@@ -82,6 +107,74 @@ public sealed class OidcServiceTests
         Assert.AreEqual("extuser@example.com", principal.Email);
         Assert.AreEqual("External User", principal.Name);
         Assert.AreEqual("Keycloak", principal.Provider);
+    }
+
+    [TestMethod]
+    public async Task ValidateIdTokenAsync_WithUntrustedJwt_ReturnsNull()
+    {
+        const string issuer = "https://issuer.example.com";
+        const string clientId = "test-client-id";
+        using var rsa = RSA.Create(2048);
+        var signingKey = new RsaSecurityKey(rsa) { KeyId = "test-key" };
+        using var untrustedRsa = RSA.Create(2048);
+        var untrustedKey = new RsaSecurityKey(untrustedRsa) { KeyId = "other-key" };
+        var configuration = new OpenIdConnectConfiguration { Issuer = issuer };
+        configuration.SigningKeys.Add(signingKey);
+        var configurationManager = new StaticConfigurationManager<OpenIdConnectConfiguration>(
+            configuration
+        );
+        var options = new OidcOptions
+        {
+            Enabled = true,
+            ProviderName = "Keycloak",
+            Authority = issuer,
+            ClientId = clientId,
+        };
+        var service = new OidcService(
+            Options.Create(options),
+            new HttpClient(),
+            NullLogger<OidcService>.Instance,
+            configurationManager
+        );
+        var tokenHandler = new JwtSecurityTokenHandler();
+
+        var unsignedToken = tokenHandler.WriteToken(
+            new JwtSecurityToken(
+                issuer: issuer,
+                audience: clientId,
+                claims:
+                [
+                    new Claim(JwtRegisteredClaimNames.Sub, "forged-subject"),
+                    new Claim(JwtRegisteredClaimNames.Email, "victim@example.com"),
+                ]
+            )
+        );
+        var wrongIssuerToken = CreateSignedToken(
+            tokenHandler,
+            signingKey,
+            "https://attacker.example.com",
+            clientId
+        );
+        var wrongAudienceToken = CreateSignedToken(
+            tokenHandler,
+            signingKey,
+            issuer,
+            "another-client-id"
+        );
+        var wrongSignatureToken = CreateSignedToken(tokenHandler, untrustedKey, issuer, clientId);
+        var expiredToken = CreateSignedToken(
+            tokenHandler,
+            signingKey,
+            issuer,
+            clientId,
+            DateTime.UtcNow.AddMinutes(-5)
+        );
+
+        Assert.IsNull(await service.ValidateIdTokenAsync(unsignedToken));
+        Assert.IsNull(await service.ValidateIdTokenAsync(wrongIssuerToken));
+        Assert.IsNull(await service.ValidateIdTokenAsync(wrongAudienceToken));
+        Assert.IsNull(await service.ValidateIdTokenAsync(wrongSignatureToken));
+        Assert.IsNull(await service.ValidateIdTokenAsync(expiredToken));
     }
 
     [TestMethod]
@@ -148,4 +241,26 @@ public sealed class OidcServiceTests
             CancellationToken cancellationToken
         ) => Task.FromResult(handler(request, cancellationToken));
     }
+
+    private static string CreateSignedToken(
+        JwtSecurityTokenHandler tokenHandler,
+        RsaSecurityKey signingKey,
+        string issuer,
+        string audience,
+        DateTime? expires = null
+    ) =>
+        tokenHandler.WriteToken(
+            new JwtSecurityToken(
+                issuer: issuer,
+                audience: audience,
+                claims:
+                [
+                    new Claim(JwtRegisteredClaimNames.Sub, "external-12345"),
+                    new Claim(JwtRegisteredClaimNames.Email, "extuser@example.com"),
+                ],
+                notBefore: DateTime.UtcNow.AddMinutes(-10),
+                expires: expires ?? DateTime.UtcNow.AddMinutes(5),
+                signingCredentials: new SigningCredentials(signingKey, SecurityAlgorithms.RsaSha256)
+            )
+        );
 }
