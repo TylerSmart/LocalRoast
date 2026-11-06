@@ -251,20 +251,12 @@ public sealed class IngestionProcessor(
                         JsonOptions
                     );
 
+                    // Rendered PDF pages are text documents, not food photos, so we
+                    // intentionally leave the cover empty; users can still promote a
+                    // page to the cover manually from the review screen.
                     if (inspection.Summary.ExtractionMode == PdfExtractionMode.DigitalText)
                     {
                         job.NormalizedSourceText = inspection.NormalizedDigitalText;
-                    }
-                    else if (inspection.Summary.RenderedPageImages.Count > 0)
-                    {
-                        job.DownloadedCoverImagePath = inspection
-                            .Summary
-                            .RenderedPageImages[0]
-                            .UrlPath;
-
-                        job.DownloadedThumbnailImagePath =
-                            inspection.GeneratedThumbnailImagePath
-                            ?? inspection.Summary.RenderedPageImages[0].UrlPath;
                     }
 
                     await dbContext.SaveChangesAsync(jobCt);

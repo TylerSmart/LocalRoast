@@ -61,6 +61,7 @@ export const routes: Routes = [
       },
       {
         path: 'meal-plan',
+        data: { fullWidth: true },
         loadComponent: () =>
           import('./features/meal-plans/meal-plan-calendar/meal-plan-calendar.component').then(
             (m) => m.MealPlanCalendarComponent,

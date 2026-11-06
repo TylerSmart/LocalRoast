@@ -146,7 +146,12 @@
   </header>
 
   <!-- Main View Area -->
-  <main class="main-content" id="main-content" tabindex="-1">
+  <main
+    class="main-content"
+    id="main-content"
+    tabindex="-1"
+    [class.full-width]="isFullWidthRoute()"
+  >
     <router-outlet></router-outlet>
   </main>
 

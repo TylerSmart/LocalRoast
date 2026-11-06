@@ -5,7 +5,16 @@ import { MatDividerModule } from '@angular/material/divider';
 import { MatIconModule } from '@angular/material/icon';
 import { MatMenuModule } from '@angular/material/menu';
 import { MatTooltipModule } from '@angular/material/tooltip';
-import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
+import { toSignal } from '@angular/core/rxjs-interop';
+import {
+  ActivatedRouteSnapshot,
+  NavigationEnd,
+  Router,
+  RouterLink,
+  RouterLinkActive,
+  RouterOutlet,
+} from '@angular/router';
+import { filter, map, startWith } from 'rxjs';
 import { APP_BRAND_ICON, APP_NAME } from '../../../app.branding';
 import { AccountService } from '../../../core/services/account/account.service';
 import { AuthService } from '../../../core/services/auth/auth.service';
@@ -27,6 +36,17 @@ const THEME_LABELS: Record<ThemeMode, string> = {
   dark: 'Dark',
   system: 'System',
 };
+
+function hasFullWidthData(route: ActivatedRouteSnapshot): boolean {
+  let current: ActivatedRouteSnapshot | null = route;
+  while (current) {
+    if (current.data['fullWidth'] === true) {
+      return true;
+    }
+    current = current.firstChild;
+  }
+  return false;
+}
 
 @Component({
   imports: [
@@ -56,6 +76,17 @@ export class AppShellComponent implements OnInit {
   protected readonly llmSettingsService = inject(LlmSettingsService);
   protected readonly kitchenTimerService = inject(KitchenTimerService);
   private readonly dialog = inject(MatDialog);
+  private readonly router = inject(Router);
+
+  /** Routes opt out of the centered max-width layout with `data: { fullWidth: true }`. */
+  protected readonly isFullWidthRoute = toSignal(
+    this.router.events.pipe(
+      filter((event) => event instanceof NavigationEnd),
+      startWith(null),
+      map(() => hasFullWidthData(this.router.routerState.snapshot.root)),
+    ),
+    { initialValue: false },
+  );
 
   protected readonly themeIcon = computed(() => THEME_ICONS[this.themeService.mode()]);
   protected readonly themeLabel = computed(() => THEME_LABELS[this.themeService.mode()]);

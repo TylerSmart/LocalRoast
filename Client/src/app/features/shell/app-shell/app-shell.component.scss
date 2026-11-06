@@ -184,6 +184,10 @@
   max-width: var(--app-content-width);
   margin-inline: auto;
   padding: clamp(1.25rem, 3vw, 2.5rem) var(--app-page-gutter) 3rem;
+
+  &.full-width {
+    max-width: none;
+  }
 }
 
 .mobile-bottom-nav {

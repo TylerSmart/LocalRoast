@@ -294,6 +294,44 @@ public sealed class MealPlanE2ETests : E2ETestBase
 
     [TestMethod]
     [Timeout(DefaultTestTimeoutMs)]
+    public async Task MealPlan_WideDesktop_UsesFullWidthAndSingleRowWeek_ButShellStaysCentered()
+    {
+        await Page.SetViewportSizeAsync(1920, 1080);
+        await RegisterAndLoginAsync();
+        await Page.Locator("nav.desktop-nav a", new() { HasText = "Meal Plan" }).ClickAsync();
+        await Expect(Page).ToHaveURLAsync(new Regex(".*/meal-plan.*"));
+        await Expect(Page.Locator(".week-days-grid")).ToBeVisibleAsync();
+
+        var mainWidth = await Page.Locator("main.main-content")
+            .EvaluateAsync<double>("el => el.getBoundingClientRect().width");
+        Assert.IsGreaterThan(1800, mainWidth, "Meal plan should use the full desktop width.");
+
+        // All seven day columns share a single row.
+        var distinctTops = await Page.EvaluateAsync<int>(
+            "() => new Set([...document.querySelectorAll('.week-days-grid .day-column')].map(el => Math.round(el.getBoundingClientRect().top))).size"
+        );
+        Assert.AreEqual(1, distinctTops, "Week days should not wrap on a wide desktop.");
+
+        // Other pages keep the centered max-width layout.
+        await Page.Locator("nav.desktop-nav a[href='/recipes']").ClickAsync();
+        await Expect(Page.Locator("main.main-content"))
+            .Not.ToHaveClassAsync(new Regex(".*full-width.*"));
+        var recipesMainWidth = await Page.Locator("main.main-content")
+            .EvaluateAsync<double>("el => el.getBoundingClientRect().width");
+        Assert.IsLessThanOrEqualTo(1200, recipesMainWidth);
+
+        // Mobile still stacks the week without horizontal overflow.
+        await Page.Locator("nav.desktop-nav a[href='/meal-plan']").ClickAsync();
+        await Page.SetViewportSizeAsync(360, 640);
+        await Expect(Page.Locator(".week-days-grid")).ToBeVisibleAsync();
+        var hasHorizontalOverflow = await Page.EvaluateAsync<bool>(
+            "() => document.documentElement.scrollWidth > window.innerWidth"
+        );
+        Assert.IsFalse(hasHorizontalOverflow, "Meal plan overflows at 360px.");
+    }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
     public async Task MealPlan_MonthlyOverview_AndMobileViewport_360px_RendersCleanly()
     {
         await RegisterAndLoginAsync();

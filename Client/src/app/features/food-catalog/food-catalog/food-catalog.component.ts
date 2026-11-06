@@ -116,6 +116,7 @@ export class FoodCatalogComponent implements OnInit {
     this.pageIndex.set(event.pageIndex);
     this.pageSize.set(event.pageSize);
     this.loadItems();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
   openCreateDialog(): void {

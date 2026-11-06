@@ -232,11 +232,14 @@ app.UseSerilogRequestLogging(options =>
     options.MessageTemplate =
         "HTTP {RequestMethod} {RequestPath} responded {StatusCode} in {Elapsed:0.0000} ms";
 
+    // Successful GETs are dominated by client polling (queue refresh, summaries) and SPA
+    // assets, so they are logged at Debug to keep the rolling log files small.
     options.GetLevel = (httpContext, _, exception) =>
         exception is not null
         || httpContext.Response.StatusCode >= StatusCodes.Status500InternalServerError
             ? LogEventLevel.Error
         : httpContext.Response.StatusCode >= StatusCodes.Status400BadRequest ? LogEventLevel.Warning
+        : HttpMethods.IsGet(httpContext.Request.Method) ? LogEventLevel.Debug
         : LogEventLevel.Information;
 
     options.EnrichDiagnosticContext = (diagnosticContext, httpContext) =>

@@ -152,4 +152,23 @@ describe('RecipeListComponent', () => {
       expect.objectContaining({ minRating: 4 }),
     );
   });
+
+  it('reloads recipes when difficulty or max time filters change', () => {
+    mockRecipeService.getRecipesPaged.mockClear();
+
+    component.onDifficultyChange('Project');
+    expect(mockRecipeService.getRecipesPaged).toHaveBeenLastCalledWith(
+      expect.objectContaining({ difficulty: 'Project', page: 1 }),
+    );
+
+    component.onMaxTimeChange(30);
+    expect(mockRecipeService.getRecipesPaged).toHaveBeenLastCalledWith(
+      expect.objectContaining({ difficulty: 'Project', maxTotalTimeMinutes: 30 }),
+    );
+
+    component.onDifficultyChange('All');
+    expect(mockRecipeService.getRecipesPaged).toHaveBeenLastCalledWith(
+      expect.not.objectContaining({ difficulty: expect.anything() }),
+    );
+  });
 });
