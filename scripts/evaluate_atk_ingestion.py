@@ -183,6 +183,10 @@ def main():
     parser.add_argument("--base-url", default="http://localhost:11434")
     parser.add_argument("--timeout", type=int, default=600)
     parser.add_argument("--thinking", action="store_true")
+    parser.add_argument("--temperature", type=float, help="LLM Settings Temperature (blank in the app = LocalRoast defaults)")
+    parser.add_argument("--top-p", type=float, help="LLM Settings Top P (blank in the app = model default)")
+    parser.add_argument("--top-k", type=int, help="LLM Settings Top K (blank in the app = model default)")
+    parser.add_argument("--context-window", type=int, default=16384, help="LLM Settings Context window (num_ctx and num_predict)")
     parser.add_argument("--ollama-options", default="{}", help="Experimental overrides; recorded in every result")
     parser.add_argument("--output", type=Path, required=True, help="Private results directory; contains source text")
     parser.add_argument("--score-only", action="store_true")
@@ -190,6 +194,14 @@ def main():
     args = parser.parse_args()
     if args.timeout < 15:
         parser.error("--timeout must be at least 15 seconds")
+    if args.temperature is not None and not 0 <= args.temperature <= 2:
+        parser.error("--temperature must be between 0 and 2")
+    if args.top_p is not None and not 0 <= args.top_p <= 1:
+        parser.error("--top-p must be between 0 and 1")
+    if args.top_k is not None and not 1 <= args.top_k <= 1000:
+        parser.error("--top-k must be between 1 and 1000")
+    if not 2048 <= args.context_window <= 65536:
+        parser.error("--context-window must be between 2048 and 65536")
     if not isinstance(json.loads(args.ollama_options), dict):
         parser.error("--ollama-options must be a JSON object")
     cases = json.loads(args.cases.read_text(encoding="utf-8"))
@@ -232,6 +244,8 @@ def main():
             "filesSha256": {str(p.relative_to(ROOT) if p.is_relative_to(ROOT) else p.name):
                             hashlib.sha256(p.read_bytes()).hexdigest() for p in files},
             "models": args.models, "thinking": args.thinking,
+            "sampling": {"temperature": args.temperature, "topP": args.top_p, "topK": args.top_k},
+            "contextWindowTokens": args.context_window,
             "ollamaOptions": json.loads(args.ollama_options),
             "caseIds": [c["id"] for c in cases],
         }
@@ -245,6 +259,8 @@ def main():
                 "dotnet", str(DLL), str(input_path), str(model_dir),
                 args.base_url, model, str(args.timeout), str(args.thinking).lower(),
                 args.ollama_options,
+                *("" if value is None else str(value) for value in (args.temperature, args.top_p, args.top_k)),
+                str(args.context_window),
             ])
             if completed.returncode not in (0, 1):
                 raise RuntimeError(f"Evaluator exited with code {completed.returncode}")

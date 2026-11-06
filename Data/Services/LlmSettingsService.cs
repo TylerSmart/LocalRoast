@@ -41,7 +41,10 @@ public sealed class LlmSettingsService(
                 EnableIngestion: entity.EnableIngestion,
                 ContextWindowTokens: entity.ContextWindowTokens,
                 ModifiedAt: entity.ModifiedAt,
-                OllamaCpuOnly: entity.OllamaCpuOnly
+                OllamaCpuOnly: entity.OllamaCpuOnly,
+                Temperature: entity.Temperature,
+                TopP: entity.TopP,
+                TopK: entity.TopK
             );
         }
 
@@ -61,7 +64,10 @@ public sealed class LlmSettingsService(
             EnableIngestion: opt.EnableIngestion,
             ContextWindowTokens: opt.ContextWindowTokens,
             ModifiedAt: null,
-            OllamaCpuOnly: opt.OllamaCpuOnly
+            OllamaCpuOnly: opt.OllamaCpuOnly,
+            Temperature: opt.Temperature,
+            TopP: opt.TopP,
+            TopK: opt.TopK
         );
     }
 
@@ -91,7 +97,10 @@ public sealed class LlmSettingsService(
                 MaxIngestionRetries: entity.MaxIngestionRetries,
                 EnableIngestion: entity.EnableIngestion,
                 ContextWindowTokens: entity.ContextWindowTokens,
-                OllamaCpuOnly: entity.OllamaCpuOnly
+                OllamaCpuOnly: entity.OllamaCpuOnly,
+                Temperature: entity.Temperature,
+                TopP: entity.TopP,
+                TopK: entity.TopK
             );
         }
 
@@ -109,7 +118,10 @@ public sealed class LlmSettingsService(
             MaxIngestionRetries: opt.MaxIngestionRetries,
             EnableIngestion: opt.EnableIngestion,
             ContextWindowTokens: opt.ContextWindowTokens,
-            OllamaCpuOnly: opt.OllamaCpuOnly
+            OllamaCpuOnly: opt.OllamaCpuOnly,
+            Temperature: opt.Temperature,
+            TopP: opt.TopP,
+            TopK: opt.TopK
         );
     }
 
@@ -163,6 +175,9 @@ public sealed class LlmSettingsService(
         entity.MaxIngestionRetries = request.MaxIngestionRetries;
         entity.EnableIngestion = request.EnableIngestion;
         entity.ContextWindowTokens = request.ContextWindowTokens;
+        entity.Temperature = request.Temperature;
+        entity.TopP = request.TopP;
+        entity.TopK = request.TopK;
 
         await dbContext.SaveChangesAsync(cancellationToken);
 

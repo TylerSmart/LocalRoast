@@ -17,6 +17,9 @@ public sealed class MockLanLlmAndBlogServer : IAsyncDisposable
     public bool SimulateOffline { get; set; }
     public string? ResponsePayload { get; set; }
     public int? LastNumGpu { get; private set; }
+    public double? LastTemperature { get; private set; }
+    public double? LastTopP { get; private set; }
+    public int? LastTopK { get; private set; }
 
     private MockLanLlmAndBlogServer(WebApplication app, string baseUrl)
     {
@@ -63,10 +66,22 @@ public sealed class MockLanLlmAndBlogServer : IAsyncDisposable
             async (HttpRequest request) =>
             {
                 using var body = await JsonDocument.ParseAsync(request.Body);
+                var hasOptions = body.RootElement.TryGetProperty("options", out var options);
                 server.LastNumGpu =
-                    body.RootElement.TryGetProperty("options", out var options)
-                    && options.TryGetProperty("num_gpu", out var numGpu)
+                    hasOptions && options.TryGetProperty("num_gpu", out var numGpu)
                         ? numGpu.GetInt32()
+                        : null;
+                server.LastTemperature =
+                    hasOptions && options.TryGetProperty("temperature", out var temperature)
+                        ? temperature.GetDouble()
+                        : null;
+                server.LastTopP =
+                    hasOptions && options.TryGetProperty("top_p", out var topP)
+                        ? topP.GetDouble()
+                        : null;
+                server.LastTopK =
+                    hasOptions && options.TryGetProperty("top_k", out var topK)
+                        ? topK.GetInt32()
                         : null;
                 if (server.SimulateOffline)
                 {
@@ -923,6 +938,90 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await Expect(dialog).ToBeVisibleAsync();
         await Expect(contextInput).ToHaveValueAsync("16384");
         await Expect(dialog.Locator("#contextWindowSlider")).ToHaveValueAsync("16384");
+        await dialog.Locator("button", new() { HasText = "Cancel" }).ClickAsync();
+        await Expect(dialog).Not.ToBeVisibleAsync();
+    }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task LlmSettingsDialog_SamplingOverridesPersistReachOllamaAndFitMobile()
+    {
+        await using var mockServer = await MockLanLlmAndBlogServer.StartAsync();
+        await RegisterAndLoginAsync();
+        await Page.GotoAsync($"{ServerUrl}/ingest");
+        await Page.Locator(".llm-settings-btn").ClickAsync();
+
+        var dialog = Page.Locator("app-llm-settings-dialog");
+        var temperature = dialog.Locator("input[formcontrolname='temperature']");
+        var topP = dialog.Locator("input[formcontrolname='topP']");
+        var topK = dialog.Locator("input[formcontrolname='topK']");
+        var save = dialog.Locator("button", new() { HasText = "Save Settings" });
+        await dialog.Locator("input[formcontrolname='baseUrl']").FillAsync(mockServer.BaseUrl);
+        await Expect(temperature).ToHaveValueAsync("");
+        await temperature.FillAsync("1");
+        await topP.FillAsync("0.95");
+        await topK.FillAsync("12.5");
+        await Expect(save).ToBeDisabledAsync();
+        await topK.FillAsync("64");
+        await dialog.Locator("input[formcontrolname='textModel']").FillAsync("qwen2.5:14b");
+        await Page.Keyboard.PressAsync("Tab");
+
+        await Page.SetViewportSizeAsync(360, 740);
+        var sampling = dialog.Locator(".sampling-section");
+        await sampling.ScrollIntoViewIfNeededAsync();
+        Assert.IsTrue(
+            await sampling.EvaluateAsync<bool>(
+                """
+                section => {
+                  const bounds = section.getBoundingClientRect();
+                  const inputs = [...section.querySelectorAll('input')].map(i => i.getBoundingClientRect());
+                  return section.scrollWidth <= section.clientWidth
+                    && inputs.every(r => r.left >= bounds.left && r.right <= bounds.right)
+                    && inputs.every((r, i) => i === 0 || r.top >= inputs[i - 1].bottom);
+                }
+                """
+            ),
+            "Sampling fields must stack inside the dialog at 360px."
+        );
+        Assert.IsTrue(
+            await Page.EvaluateAsync<bool>(
+                "document.documentElement.scrollWidth <= window.innerWidth"
+            ),
+            "LLM settings must fit a 360px viewport."
+        );
+        await save.ClickAsync();
+        await Expect(dialog).Not.ToBeVisibleAsync();
+        await Page.SetViewportSizeAsync(1280, 720);
+
+        await Page.Locator(".llm-settings-btn").ClickAsync();
+        await Expect(temperature).ToHaveValueAsync("1");
+        await Expect(topP).ToHaveValueAsync("0.95");
+        await Expect(topK).ToHaveValueAsync("64");
+        await dialog.Locator("button", new() { HasText = "Cancel" }).ClickAsync();
+        await Expect(dialog).Not.ToBeVisibleAsync();
+
+        await Page.Locator("button.tab-pill", new() { HasText = "Paste Raw Text" }).ClickAsync();
+        await Page.Locator("textarea[formcontrolname='rawText']")
+            .FillAsync("Crispy Sesame Tofu with garlic and oil");
+        await Page.Locator("button[aria-label='Queue raw text recipe']").ClickAsync();
+        await WaitForLocatorWithRefreshAsync(Page.Locator("a.review-action-btn").First);
+        Assert.AreEqual(1.0, mockServer.LastTemperature);
+        Assert.AreEqual(0.95, mockServer.LastTopP);
+        Assert.AreEqual(64, mockServer.LastTopK);
+
+        await Page.Locator(".llm-settings-btn").ClickAsync();
+        await Expect(temperature).ToHaveValueAsync("1");
+        await temperature.FillAsync("");
+        await topP.FillAsync("");
+        await topK.FillAsync("");
+        await save.ClickAsync();
+        await Expect(dialog).Not.ToBeVisibleAsync();
+        await Page.Locator(".llm-settings-btn").ClickAsync();
+        await Expect(dialog.Locator("input[formcontrolname='baseUrl']"))
+            .ToHaveValueAsync(mockServer.BaseUrl);
+        await Expect(temperature).ToHaveValueAsync("");
+        await Expect(topP).ToHaveValueAsync("");
+        await Expect(topK).ToHaveValueAsync("");
         await dialog.Locator("button", new() { HasText = "Cancel" }).ClickAsync();
         await Expect(dialog).Not.ToBeVisibleAsync();
     }

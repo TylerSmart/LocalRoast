@@ -93,6 +93,115 @@ public sealed class LlmExtractionClientTests
     }
 
     [TestMethod]
+    [DataRow(LlmProvider.Ollama, false)]
+    [DataRow(LlmProvider.Ollama, true)]
+    [DataRow(LlmProvider.OpenAiCompatible, false)]
+    [DataRow(LlmProvider.OpenAiCompatible, true)]
+    public async Task SamplingOverrides_ApplyToEveryRequestOnlyWhenSet(
+        LlmProvider provider,
+        bool overridden
+    )
+    {
+        var sampling = new List<(double Temperature, double? TopP, int? TopK)>();
+        var handler = new MockHttpMessageHandler(request =>
+        {
+            using var body = JsonDocument.Parse(
+                request.Content!.ReadAsStringAsync().GetAwaiter().GetResult()
+            );
+            var root = body.RootElement;
+            var parameters = provider == LlmProvider.Ollama ? root.GetProperty("options") : root;
+            sampling.Add(
+                (
+                    parameters.GetProperty("temperature").GetDouble(),
+                    parameters.TryGetProperty("top_p", out var topP) ? topP.GetDouble() : null,
+                    parameters.TryGetProperty("top_k", out var topK) ? topK.GetInt32() : null
+                )
+            );
+            var content = sampling.Count switch
+            {
+                3 =>
+                    """{"substitutions":[{"label":"Greek Yogurt","ratioAndAmount":"1 cup","culinaryNotes":"Stir.","flavorOrTextureImpact":"Tangy."}]}""",
+                4 => """{"answer":"Cut into thin matchsticks."}""",
+                _ => """{"title":"Synthetic Starter","ingredients":[],"steps":[]}""",
+            };
+            var message = new { role = "assistant", content };
+            var response =
+                provider == LlmProvider.Ollama
+                    ? JsonSerializer.Serialize(new { message })
+                    : JsonSerializer.Serialize(new { choices = new[] { new { message } } });
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(response, Encoding.UTF8, "application/json"),
+            };
+        });
+        var client = new LlmExtractionClient(new HttpClient(handler));
+        var config = new EffectiveLlmConnectionConfig(
+            provider,
+            provider == LlmProvider.Ollama ? "http://localhost:11434" : "http://localhost:1234",
+            null,
+            "test-text",
+            "test-vision",
+            "5m",
+            30,
+            false,
+            Temperature: overridden ? 1.0 : null,
+            TopP: overridden ? 0.95 : null,
+            TopK: overridden ? 64 : null
+        );
+
+        await client.ExtractRecipeFromTextAsync(
+            config,
+            new LlmExtractionContext("Synthetic source", [])
+        );
+        await client.ExtractRecipeFromImagesAsync(
+            config,
+            new LlmVisionExtractionContext(
+                [new LlmVisionImageInput(1, "image/jpeg", "dGVzdA==")],
+                null,
+                []
+            )
+        );
+        await client.SuggestIngredientSubstitutionsAsync(
+            config,
+            new LlmSubstitutionContext(
+                "Sour Cream Coffee Cake",
+                null,
+                8,
+                "Sour Cream",
+                "1 cup",
+                null,
+                [],
+                [],
+                null
+            )
+        );
+        await client.AnswerKitchenQuestionAsync(
+            config,
+            new LlmKitchenQuestionContext(
+                "What does julienne mean?",
+                null,
+                null,
+                [],
+                null,
+                null,
+                null,
+                null
+            )
+        );
+
+        double[] expectedTemperatures = overridden ? [1, 1, 1, 1] : [0, 0, 0.2, 0.2];
+        CollectionAssert.AreEqual(
+            expectedTemperatures,
+            sampling.Select(s => s.Temperature).ToArray()
+        );
+        foreach (var (_, topP, topK) in sampling)
+        {
+            Assert.AreEqual(overridden ? 0.95 : null, topP);
+            Assert.AreEqual(overridden ? 64 : null, topK);
+        }
+    }
+
+    [TestMethod]
     [DataRow(HttpStatusCode.InternalServerError)]
     [DataRow(HttpStatusCode.ServiceUnavailable)]
     public async Task GemmaMemoryFailure_IsActionableInsteadOfAnOfflineHost(HttpStatusCode status)

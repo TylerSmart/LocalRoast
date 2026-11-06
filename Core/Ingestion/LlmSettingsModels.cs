@@ -28,6 +28,15 @@ public sealed class LlmDefaultsOptions
 
     public bool OllamaCpuOnly { get; set; }
 
+    /// <summary>Null keeps LocalRoast's per-request defaults (0 for recipe extraction, 0.2 for AI helpers).</summary>
+    public double? Temperature { get; set; }
+
+    /// <summary>Null omits top_p so the model's own default applies.</summary>
+    public double? TopP { get; set; }
+
+    /// <summary>Null omits top_k so the model's own default applies.</summary>
+    public int? TopK { get; set; }
+
     public int MaxIngestionRetries { get; set; } = 3;
 
     public bool EnableIngestion { get; set; } = true;
@@ -54,7 +63,10 @@ public record LlmSettingsDto(
     bool EnableIngestion,
     int ContextWindowTokens,
     DateTimeOffset? ModifiedAt,
-    bool OllamaCpuOnly = false
+    bool OllamaCpuOnly = false,
+    double? Temperature = null,
+    double? TopP = null,
+    int? TopK = null
 );
 
 public record EffectiveLlmConnectionConfig(
@@ -70,7 +82,10 @@ public record EffectiveLlmConnectionConfig(
     int MaxIngestionRetries = 3,
     bool EnableIngestion = true,
     int ContextWindowTokens = 8192,
-    bool OllamaCpuOnly = false
+    bool OllamaCpuOnly = false,
+    double? Temperature = null,
+    double? TopP = null,
+    int? TopK = null
 );
 
 public record UpdateLlmSettingsRequest(
@@ -87,7 +102,10 @@ public record UpdateLlmSettingsRequest(
     [Range(0, 10)] int MaxIngestionRetries = 3,
     bool EnableIngestion = true,
     [Range(2048, 65536)] int ContextWindowTokens = 8192,
-    bool OllamaCpuOnly = false
+    bool OllamaCpuOnly = false,
+    [Range(0.0, 2.0)] double? Temperature = null,
+    [Range(0.0, 1.0)] double? TopP = null,
+    [Range(1, 1000)] int? TopK = null
 );
 
 public record TestLlmConnectionRequest(

@@ -230,6 +230,68 @@
           </div>
         }
 
+        <div class="sampling-section" role="group" aria-labelledby="samplingHeading">
+          <div id="samplingHeading" class="sampling-heading">Sampling (optional)</div>
+          <div class="form-row three-cols">
+            <mat-form-field appearance="outline" class="form-field">
+              <mat-label>Temperature</mat-label>
+              <input
+                matInput
+                type="number"
+                formControlName="temperature"
+                min="0"
+                max="2"
+                step="0.05"
+                placeholder="Default"
+                aria-describedby="samplingHint"
+              />
+              @if (form.controls.temperature.invalid) {
+                <mat-error>0 to 2</mat-error>
+              }
+            </mat-form-field>
+
+            <mat-form-field appearance="outline" class="form-field">
+              <mat-label>Top P</mat-label>
+              <input
+                matInput
+                type="number"
+                formControlName="topP"
+                min="0"
+                max="1"
+                step="0.05"
+                placeholder="Default"
+                aria-describedby="samplingHint"
+              />
+              @if (form.controls.topP.invalid) {
+                <mat-error>0 to 1</mat-error>
+              }
+            </mat-form-field>
+
+            <mat-form-field appearance="outline" class="form-field">
+              <mat-label>Top K</mat-label>
+              <input
+                matInput
+                type="number"
+                formControlName="topK"
+                min="1"
+                max="1000"
+                step="1"
+                placeholder="Default"
+                aria-describedby="samplingHint"
+              />
+              @if (form.controls.topK.invalid) {
+                <mat-error>Whole number 1 to 1000</mat-error>
+              }
+            </mat-form-field>
+          </div>
+          <p id="samplingHint" class="sampling-hint">
+            Leave blank for LocalRoast defaults (temperature 0 for recipe extraction, 0.2 for
+            assistant helpers) and the model's own Top P/Top K. Values you set apply to every
+            request. Gemma 4 12B with thinking needs 1 / 0.95 / 64. Some hosted OpenAI-compatible
+            APIs reject Top K.
+          </p>
+        </div>
+
         <!-- Ingestion Enable/Disable Toggle -->
         @if (form.controls.provider.value === 'Ollama') {
           <div class="toggle-section">

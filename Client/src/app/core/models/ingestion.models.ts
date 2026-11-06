@@ -63,6 +63,9 @@ export interface LlmSettingsDto {
   maxIngestionRetries: number;
   modifiedAt: string | null;
   ollamaCpuOnly?: boolean;
+  temperature?: number | null;
+  topP?: number | null;
+  topK?: number | null;
 }
 
 export interface UpdateLlmSettingsRequest {
@@ -80,6 +83,9 @@ export interface UpdateLlmSettingsRequest {
   enableIngestion?: boolean;
   maxIngestionRetries?: number;
   ollamaCpuOnly?: boolean;
+  temperature?: number | null;
+  topP?: number | null;
+  topK?: number | null;
 }
 
 export interface TestLlmConnectionRequest {

@@ -88,6 +88,57 @@ describe('LlmSettingsDialogComponent', () => {
     expect(component.form.controls.enableIngestion.value).toBe(true);
     expect(component.form.controls.maxIngestionRetries.value).toBe(5);
     expect(component.form.controls.ollamaCpuOnly.value).toBe(false);
+    expect(component.form.controls.temperature.value).toBeNull();
+    expect(component.form.controls.topP.value).toBeNull();
+    expect(component.form.controls.topK.value).toBeNull();
+  });
+
+  it('loads saved sampling overrides into the form', () => {
+    mockLlmSettingsService.getSettings.mockReturnValue(
+      of({ ...initialSettings, temperature: 1, topP: 0.95, topK: 64 }),
+    );
+
+    component.loadSettings();
+
+    expect(component.form.controls.temperature.value).toBe(1);
+    expect(component.form.controls.topP.value).toBe(0.95);
+    expect(component.form.controls.topK.value).toBe(64);
+  });
+
+  it('saves sampling overrides and sends blanks as null', () => {
+    component.form.controls.temperature.setValue(1);
+    component.form.controls.topP.setValue(0.95);
+    component.form.controls.topK.setValue(64);
+    component.onSave();
+
+    expect(mockLlmSettingsService.updateSettings).toHaveBeenLastCalledWith(
+      expect.objectContaining({ temperature: 1, topP: 0.95, topK: 64 }),
+    );
+
+    component.form.controls.temperature.setValue(null);
+    component.form.controls.topP.setValue(null);
+    component.form.controls.topK.setValue(null);
+    component.onSave();
+
+    expect(mockLlmSettingsService.updateSettings).toHaveBeenLastCalledWith(
+      expect.objectContaining({ temperature: null, topP: null, topK: null }),
+    );
+  });
+
+  it.each([
+    ['temperature', 2.5],
+    ['temperature', -0.1],
+    ['topP', 1.5],
+    ['topK', 0],
+    ['topK', 12.5],
+    ['topK', 1001],
+  ] as const)('blocks saving when %s is %s', (control, value) => {
+    component.form.controls[control].setValue(value);
+
+    component.onSave();
+
+    expect(component.form.invalid).toBe(true);
+    expect(mockLlmSettingsService.updateSettings).not.toHaveBeenCalled();
   });
 
   it('automatically attempts to pull models on dialog init when baseUrl is configured', () => {

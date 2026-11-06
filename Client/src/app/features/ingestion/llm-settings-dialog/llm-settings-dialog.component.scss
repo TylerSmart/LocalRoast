@@ -85,6 +85,12 @@
     gap: 1rem;
   }
 
+  &.three-cols {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1rem;
+  }
+
   &.api-key-row {
     flex-direction: column;
     gap: 0.25rem;
@@ -204,6 +210,25 @@
   }
 }
 
+.sampling-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  background-color: var(--mat-sys-surface-variant, #f4efe6);
+  border-radius: 8px;
+
+  .sampling-heading {
+    font-weight: 600;
+  }
+
+  .sampling-hint {
+    margin: 0;
+    color: var(--mat-sys-on-surface-variant, #49454f);
+    font-size: 0.8rem;
+  }
+}
+
 .dialog-actions {
   padding: 0.75rem 1.5rem 1.25rem;
   display: flex;
@@ -217,7 +242,8 @@
 }
 
 @media (max-width: 600px) {
-  .form-row.two-cols {
+  .form-row.two-cols,
+  .form-row.three-cols {
     grid-template-columns: 1fr;
     gap: 0.75rem;
   }

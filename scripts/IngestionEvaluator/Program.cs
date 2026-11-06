@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -7,10 +8,10 @@ using App.Core.Exceptions;
 using App.Core.Ingestion;
 using App.Infrastructure.Ingestion;
 
-if (args.Length != 7)
+if (args.Length != 11)
 {
     Console.Error.WriteLine(
-        "Usage: IngestionEvaluator <input.json> <output-dir> <base-url> <model> <timeout-seconds> <thinking> <ollama-options-json>"
+        "Usage: IngestionEvaluator <input.json> <output-dir> <base-url> <model> <timeout-seconds> <thinking> <ollama-options-json> <temperature|\"\"> <top-p|\"\"> <top-k|\"\"> <context-window-tokens>"
     );
     return 2;
 }
@@ -35,7 +36,14 @@ var config = new EffectiveLlmConnectionConfig(
     int.Parse(args[4]),
     false,
     bool.Parse(args[5]),
-    ContextWindowTokens: 16384
+    ContextWindowTokens: int.Parse(args[10], CultureInfo.InvariantCulture),
+    Temperature: string.IsNullOrEmpty(args[7])
+        ? null
+        : double.Parse(args[7], CultureInfo.InvariantCulture),
+    TopP: string.IsNullOrEmpty(args[8])
+        ? null
+        : double.Parse(args[8], CultureInfo.InvariantCulture),
+    TopK: string.IsNullOrEmpty(args[9]) ? null : int.Parse(args[9], CultureInfo.InvariantCulture)
 );
 var overrides =
     JsonNode.Parse(args[6]) as JsonObject
@@ -95,6 +103,10 @@ foreach (var item in cases)
                 item.Title,
                 config.TextModel,
                 config.EnableThinking,
+                config.Temperature,
+                config.TopP,
+                config.TopK,
+                config.ContextWindowTokens,
                 Overrides = overrides,
                 ElapsedSeconds = stopwatch.Elapsed.TotalSeconds,
                 Error = error,

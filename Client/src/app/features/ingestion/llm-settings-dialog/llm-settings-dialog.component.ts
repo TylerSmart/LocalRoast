@@ -93,6 +93,13 @@ export class LlmSettingsDialogComponent implements OnInit {
       Validators.min(0),
       Validators.max(10),
     ]),
+    temperature: this.fb.control<number | null>(null, [Validators.min(0), Validators.max(2)]),
+    topP: this.fb.control<number | null>(null, [Validators.min(0), Validators.max(1)]),
+    topK: this.fb.control<number | null>(null, [
+      Validators.min(1),
+      Validators.max(1000),
+      Validators.pattern(/^\d+$/),
+    ]),
   });
 
   ngOnInit(): void {
@@ -140,6 +147,9 @@ export class LlmSettingsDialogComponent implements OnInit {
             enableThinking: settings.enableThinking ?? false,
             enableIngestion: settings.enableIngestion ?? true,
             maxIngestionRetries: settings.maxIngestionRetries ?? 3,
+            temperature: settings.temperature ?? null,
+            topP: settings.topP ?? null,
+            topK: settings.topK ?? null,
           });
 
           this.isLoading.set(false);
@@ -223,6 +233,9 @@ export class LlmSettingsDialogComponent implements OnInit {
         enableThinking: values.enableThinking,
         enableIngestion: values.enableIngestion,
         maxIngestionRetries: values.maxIngestionRetries,
+        temperature: values.temperature,
+        topP: values.topP,
+        topK: values.topK,
       })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({

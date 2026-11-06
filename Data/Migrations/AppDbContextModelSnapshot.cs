@@ -308,9 +308,18 @@ namespace App.Data.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("nvarchar(32)");
 
+                    b.Property<double?>("Temperature")
+                        .HasColumnType("float");
+
                     b.Property<string>("TextModel")
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
+
+                    b.Property<int?>("TopK")
+                        .HasColumnType("int");
+
+                    b.Property<double?>("TopP")
+                        .HasColumnType("float");
 
                     b.Property<string>("VisionModel")
                         .HasMaxLength(200)

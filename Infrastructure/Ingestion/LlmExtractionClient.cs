@@ -43,6 +43,11 @@ public sealed class LlmExtractionClient(HttpClient httpClient, ILlmRequestGate? 
         },
     };
 
+    private static readonly JsonSerializerOptions OpenAiRequestJsonOptions = new()
+    {
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    };
+
     private sealed record KitchenAnswerPayload(string? Answer);
 
     private sealed record RecipeStepsPayload(IReadOnlyList<LlmExtractedStepItem>? Steps);
@@ -657,7 +662,9 @@ Do not invent ingredients or quantities. Preserve all other correct fields.
                 {
                     model = config.TextModel!.Trim(),
                     stream = false,
-                    temperature,
+                    temperature = config.Temperature ?? temperature,
+                    top_p = config.TopP,
+                    top_k = config.TopK,
                     max_tokens = maxTokens,
                     response_format = new
                     {
@@ -676,7 +683,7 @@ Do not invent ingredients or quantities. Preserve all other correct fields.
                     },
                 };
 
-                var requestJson = JsonSerializer.Serialize(payload);
+                var requestJson = JsonSerializer.Serialize(payload, OpenAiRequestJsonOptions);
                 using var request = new HttpRequestMessage(
                     HttpMethod.Post,
                     $"{normalizedBase}/chat/completions"
@@ -834,7 +841,9 @@ Do not invent ingredients or quantities. Preserve all other correct fields.
                 {
                     model = config.VisionModel.Trim(),
                     stream = false,
-                    temperature = 0,
+                    temperature = config.Temperature ?? 0,
+                    top_p = config.TopP,
+                    top_k = config.TopK,
                     max_tokens = 16384,
                     response_format = new
                     {
@@ -853,7 +862,7 @@ Do not invent ingredients or quantities. Preserve all other correct fields.
                     },
                 };
 
-                var requestJson = JsonSerializer.Serialize(payload);
+                var requestJson = JsonSerializer.Serialize(payload, OpenAiRequestJsonOptions);
                 using var request = new HttpRequestMessage(
                     HttpMethod.Post,
                     $"{normalizedBase}/chat/completions"
@@ -917,11 +926,19 @@ Do not invent ingredients or quantities. Preserve all other correct fields.
     {
         var options = new Dictionary<string, object>
         {
-            ["temperature"] = temperature,
+            ["temperature"] = config.Temperature ?? temperature,
             ["num_ctx"] = config.ContextWindowTokens,
             ["num_predict"] = maxTokens,
             ["repeat_penalty"] = recipeExtraction ? 1.0 : 1.1,
         };
+        if (config.TopP is { } topP)
+        {
+            options["top_p"] = topP;
+        }
+        if (config.TopK is { } topK)
+        {
+            options["top_k"] = topK;
+        }
         if (config.OllamaCpuOnly)
         {
             options["num_gpu"] = 0;

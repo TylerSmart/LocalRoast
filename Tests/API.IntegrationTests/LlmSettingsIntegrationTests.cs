@@ -68,6 +68,9 @@ public sealed class LlmSettingsIntegrationTests
         Assert.IsNull(settings.ApiKeyMasked);
         Assert.AreEqual(8192, settings.ContextWindowTokens);
         Assert.IsFalse(settings.OllamaCpuOnly);
+        Assert.IsNull(settings.Temperature);
+        Assert.IsNull(settings.TopP);
+        Assert.IsNull(settings.TopK);
     }
 
     [TestMethod]
@@ -161,6 +164,86 @@ public sealed class LlmSettingsIntegrationTests
                 .GetEffectiveConfigAsync();
             Assert.AreEqual(enabled, effective.OllamaCpuOnly);
         }
+    }
+
+    [TestMethod]
+    public async Task SamplingOverrides_PersistReachEffectiveConfigurationAndClear()
+    {
+        await AuthenticateAsync(_client);
+
+        var response = await _client.PutAsJsonAsync(
+            "/api/llm-settings",
+            new UpdateLlmSettingsRequest(
+                TextModel: "gemma4:12b",
+                EnableThinking: true,
+                Temperature: 1.0,
+                TopP: 0.95,
+                TopK: 64
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+        var settings = await _client.GetFromJsonAsync<LlmSettingsDto>("/api/llm-settings");
+        Assert.IsNotNull(settings);
+        Assert.AreEqual(1.0, settings.Temperature);
+        Assert.AreEqual(0.95, settings.TopP);
+        Assert.AreEqual(64, settings.TopK);
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var effective = await scope
+                .ServiceProvider.GetRequiredService<ILlmSettingsService>()
+                .GetEffectiveConfigAsync();
+            Assert.AreEqual(1.0, effective.Temperature);
+            Assert.AreEqual(0.95, effective.TopP);
+            Assert.AreEqual(64, effective.TopK);
+        }
+
+        response = await _client.PutAsJsonAsync(
+            "/api/llm-settings",
+            new UpdateLlmSettingsRequest(TextModel: "gemma4:e4b", EnableThinking: true)
+        );
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+        var cleared = await response.Content.ReadFromJsonAsync<LlmSettingsDto>();
+        Assert.IsNotNull(cleared);
+        Assert.IsNull(cleared.Temperature);
+        Assert.IsNull(cleared.TopP);
+        Assert.IsNull(cleared.TopK);
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var effective = await scope
+                .ServiceProvider.GetRequiredService<ILlmSettingsService>()
+                .GetEffectiveConfigAsync();
+            Assert.IsNull(effective.Temperature);
+            Assert.IsNull(effective.TopP);
+            Assert.IsNull(effective.TopK);
+        }
+    }
+
+    [TestMethod]
+    [DataRow(2.01, null, null)]
+    [DataRow(-0.1, null, null)]
+    [DataRow(null, 1.01, null)]
+    [DataRow(null, -0.01, null)]
+    [DataRow(null, null, 0)]
+    [DataRow(null, null, 1001)]
+    public async Task UpdateSettings_OutOfRangeSampling_ReturnsBadRequest(
+        double? temperature,
+        double? topP,
+        int? topK
+    )
+    {
+        await AuthenticateAsync(_client);
+
+        var response = await _client.PutAsJsonAsync(
+            "/api/llm-settings",
+            new UpdateLlmSettingsRequest(Temperature: temperature, TopP: topP, TopK: topK)
+        );
+
+        Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
+        var settings = await _client.GetFromJsonAsync<LlmSettingsDto>("/api/llm-settings");
+        Assert.IsNotNull(settings);
+        Assert.IsNull(settings.Temperature);
+        Assert.IsNull(settings.TopP);
+        Assert.IsNull(settings.TopK);
     }
 
     [TestMethod]

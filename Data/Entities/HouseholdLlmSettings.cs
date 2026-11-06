@@ -32,6 +32,12 @@ public sealed class HouseholdLlmSettings : IAuditable
 
     public bool OllamaCpuOnly { get; set; }
 
+    public double? Temperature { get; set; }
+
+    public double? TopP { get; set; }
+
+    public int? TopK { get; set; }
+
     public int MaxIngestionRetries { get; set; } = 3;
 
     public bool EnableIngestion { get; set; } = true;
