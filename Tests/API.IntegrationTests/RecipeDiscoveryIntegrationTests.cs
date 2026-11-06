@@ -158,6 +158,102 @@ public sealed class RecipeDiscoveryIntegrationTests
     }
 
     [TestMethod]
+    public async Task Recipe_Search_ToleratesDiacriticsPunctuationAndOneMisspelledTitleWord()
+    {
+        await RegisterAndAuthenticateAsync(_client, "search1@example.com", "search1");
+
+        const string title = "Sweet and Saucy Grilled Salmon with Lime-Jalapeño Glaze";
+        var createResponse = await _client.PostAsJsonAsync(
+            "/api/recipes",
+            new UpsertRecipeRequest(Title: title)
+        );
+        Assert.AreEqual(HttpStatusCode.Created, createResponse.StatusCode);
+        var secondCreateResponse = await _client.PostAsJsonAsync(
+            "/api/recipes",
+            new UpsertRecipeRequest(Title: $"{title} with Honey")
+        );
+        Assert.AreEqual(HttpStatusCode.Created, secondCreateResponse.StatusCode);
+
+        var typoSearch = Uri.EscapeDataString(
+            "Sweet and Saucy Grilled Salmon with Lime-Jalapeao Glaze"
+        );
+        var typoResponse = await _client.GetAsync($"/api/recipes?search={typoSearch}");
+        Assert.AreEqual(HttpStatusCode.OK, typoResponse.StatusCode);
+        var typoMatches = await typoResponse.Content.ReadFromJsonAsync<
+            IReadOnlyList<RecipeSummaryDto>
+        >();
+        Assert.IsNotNull(typoMatches);
+        Assert.AreEqual(2, typoMatches.Count);
+        Assert.IsTrue(typoMatches.Any(recipe => recipe.Title == title));
+
+        var accentResponse = await _client.GetAsync(
+            $"/api/recipes?search={Uri.EscapeDataString("Jalapeno Glaze")}&page=1&pageSize=1"
+        );
+        Assert.AreEqual(HttpStatusCode.OK, accentResponse.StatusCode);
+        var accentMatches = await accentResponse.Content.ReadFromJsonAsync<RecipePagedResultDto>();
+        Assert.IsNotNull(accentMatches);
+        Assert.AreEqual(2, accentMatches.TotalCount);
+        Assert.AreEqual(1, accentMatches.Items.Count);
+        Assert.IsTrue(accentMatches.HasMore);
+        Assert.IsTrue(accentMatches.IsFuzzySearch);
+
+        var secondPageResponse = await _client.GetAsync(
+            $"/api/recipes?search={Uri.EscapeDataString("Jalapeno Glaze")}&page=2&pageSize=1&includeTotalCount=false&fuzzySearch=true"
+        );
+        var secondPage = await secondPageResponse.Content.ReadFromJsonAsync<RecipePagedResultDto>();
+        Assert.IsNotNull(secondPage);
+        Assert.IsNull(secondPage.TotalCount);
+        Assert.IsFalse(secondPage.HasMore);
+        Assert.IsTrue(secondPage.IsFuzzySearch);
+        Assert.AreNotEqual(accentMatches.Items[0].Id, secondPage.Items[0].Id);
+    }
+
+    [TestMethod]
+    public async Task Recipe_Pagination_SkipsRepeatedCountsAndKeepsStablePages()
+    {
+        await RegisterAndAuthenticateAsync(_client, "search2@example.com", "search2");
+
+        for (var index = 1; index <= 3; index++)
+        {
+            var createResponse = await _client.PostAsJsonAsync(
+                "/api/recipes",
+                new UpsertRecipeRequest(Title: $"Searchable Recipe {index}")
+            );
+            Assert.AreEqual(HttpStatusCode.Created, createResponse.StatusCode);
+        }
+
+        var pageOneResponse = await _client.GetAsync(
+            "/api/recipes?search=Searchable&page=1&pageSize=1"
+        );
+        var pageOne = await pageOneResponse.Content.ReadFromJsonAsync<RecipePagedResultDto>();
+        Assert.IsNotNull(pageOne);
+        Assert.AreEqual(3, pageOne.TotalCount);
+        Assert.IsTrue(pageOne.HasMore);
+
+        var pageTwoResponse = await _client.GetAsync(
+            "/api/recipes?search=Searchable&page=2&pageSize=1&includeTotalCount=false"
+        );
+        var pageTwo = await pageTwoResponse.Content.ReadFromJsonAsync<RecipePagedResultDto>();
+        Assert.IsNotNull(pageTwo);
+        Assert.IsNull(pageTwo.TotalCount);
+        Assert.IsTrue(pageTwo.HasMore);
+
+        var pageThreeResponse = await _client.GetAsync(
+            "/api/recipes?search=Searchable&page=3&pageSize=1&includeTotalCount=false"
+        );
+        var pageThree = await pageThreeResponse.Content.ReadFromJsonAsync<RecipePagedResultDto>();
+        Assert.IsNotNull(pageThree);
+        Assert.IsNull(pageThree.TotalCount);
+        Assert.IsFalse(pageThree.HasMore);
+        Assert.AreEqual(
+            3,
+            new[] { pageOne.Items[0].Id, pageTwo.Items[0].Id, pageThree.Items[0].Id }
+                .Distinct()
+                .Count()
+        );
+    }
+
+    [TestMethod]
     public async Task Recipe_UpdateOrganization_ModifiesCollectionsAndTags()
     {
         await RegisterAndAuthenticateAsync(_client, "disc2@example.com", "disc2");

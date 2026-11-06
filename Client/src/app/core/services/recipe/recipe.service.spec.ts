@@ -50,6 +50,39 @@ describe('RecipeService', () => {
     expect(result).toEqual([]);
   });
 
+  it('allows recipe pagination requests to skip repeated total counts', async () => {
+    const promise = firstValueFrom(
+      service.getRecipesPaged({
+        page: 2,
+        pageSize: 24,
+        search: 'soup',
+        includeTotalCount: false,
+        fuzzySearch: true,
+      }),
+    );
+    const req = httpMock.expectOne(
+      (request) =>
+        request.url === '/api/recipes' &&
+        request.params.get('page') === '2' &&
+        request.params.get('includeTotalCount') === 'false' &&
+        request.params.get('fuzzySearch') === 'true',
+    );
+
+    expect(req.request.method).toBe('GET');
+    req.flush({
+      items: [],
+      totalCount: null,
+      pageNumber: 2,
+      pageSize: 24,
+      totalPages: null,
+      hasPreviousPage: true,
+      hasNextPage: false,
+      hasMore: false,
+      isFuzzySearch: true,
+    });
+    expect((await promise).totalCount).toBeNull();
+  });
+
   it('fetches recipe detail via GET /api/recipes/:id', async () => {
     const detail: RecipeDetailDto = {
       id: 'r-1',
