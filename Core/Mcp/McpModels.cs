@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using App.Core.FoodCatalog;
 using App.Core.MealPlans;
 using App.Core.Recipes;
 using App.Core.Shopping;
@@ -82,7 +83,8 @@ public sealed record McpResolvedFoodItemDto(
     string InputName,
     Guid FoodItemId,
     string CanonicalName,
-    bool IsPantryStaple
+    bool IsPantryStaple,
+    FoodCategory Category = FoodCategory.Other
 );
 
 public sealed record McpIngredientMatchResponseDto(
@@ -113,7 +115,8 @@ public sealed record McpStructuredIngredientInput(
     [MaxLength(200)] string? PreparationNote = null,
     bool IsOptional = false,
     [MaxLength(500)] string? OriginalRawText = null,
-    bool IsPantryStaple = false
+    bool IsPantryStaple = false,
+    FoodCategory? Category = null
 );
 
 public sealed record McpStructuredStepInput(

@@ -1224,6 +1224,7 @@ public sealed class IngestionService(
                         dbContext,
                         ing.ProposedFoodItemName,
                         ing.SuggestedIsPantryStaple,
+                        ing.SuggestedCategory,
                         cancellationToken
                     );
                 }

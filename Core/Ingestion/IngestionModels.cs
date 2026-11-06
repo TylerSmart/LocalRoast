@@ -1,5 +1,6 @@
-﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations;
 using System.Text.Json.Serialization;
+using App.Core.FoodCatalog;
 using App.Core.Recipes;
 
 namespace App.Core.Ingestion;
@@ -46,7 +47,8 @@ public record LlmExtractedIngredientItem(
     string? PreparationNote = null,
     bool IsOptional = false,
     string? OriginalRawText = null,
-    bool SuggestedIsPantryStaple = false
+    bool SuggestedIsPantryStaple = false,
+    string? SuggestedCategory = null
 );
 
 public record LlmExtractedStepItem(
@@ -95,7 +97,8 @@ public record IngestionDraftIngredientDto(
     [Required, MaxLength(200)] string DisplayName = "",
     [MaxLength(200)] string? PreparationNote = null,
     bool IsOptional = false,
-    [MaxLength(500)] string? OriginalRawText = null
+    [MaxLength(500)] string? OriginalRawText = null,
+    FoodCategory? SuggestedCategory = null
 );
 
 public record IngestionDraftStepDto(

@@ -13,7 +13,13 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
-import { CreateFoodItemRequest, FoodItemDto } from '../../../core/models/food-catalog.models';
+import { MatSelectModule } from '@angular/material/select';
+import {
+  CreateFoodItemRequest,
+  FOOD_CATEGORY_OPTIONS,
+  FoodCategory,
+  FoodItemDto,
+} from '../../../core/models/food-catalog.models';
 import { FoodCatalogService } from '../../../core/services/food-catalog/food-catalog.service';
 
 export interface FoodItemDialogData {
@@ -30,6 +36,7 @@ export interface FoodItemDialogData {
     MatButtonModule,
     MatFormFieldModule,
     MatInputModule,
+    MatSelectModule,
     MatCheckboxModule,
     MatIconModule,
     MatProgressSpinnerModule,
@@ -54,8 +61,11 @@ export class FoodItemDialogComponent {
       [Validators.required, Validators.maxLength(150)],
     ],
     isPantryStaple: [this.data?.item?.isPantryStaple ?? false],
+    category: [(this.data?.item?.category ?? null) as FoodCategory | null],
     aliasesText: [this.data?.item?.aliases ? this.data.item.aliases.join(', ') : ''],
   });
+
+  protected readonly categoryOptions = FOOD_CATEGORY_OPTIONS;
 
   onSave(): void {
     if (this.form.invalid) {
@@ -72,6 +82,7 @@ export class FoodItemDialogComponent {
     const request: CreateFoodItemRequest = {
       name: val.name.trim(),
       isPantryStaple: val.isPantryStaple,
+      category: val.category,
       aliases: rawAliases.length > 0 ? rawAliases : null,
     };
 

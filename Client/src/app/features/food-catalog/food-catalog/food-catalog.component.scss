@@ -1,4 +1,4 @@
-﻿:host {
+:host {
   display: block;
 }
 
@@ -49,6 +49,11 @@
 .search-field {
   flex: 2;
   min-width: 240px;
+}
+
+.category-filter-field {
+  flex: 1;
+  min-width: 200px;
 }
 
 .staple-toggle-container {
@@ -135,6 +140,11 @@
     margin: 0;
     font-size: 1.05rem;
     font-weight: 600;
+  }
+
+  .item-category {
+    font-size: 0.8rem;
+    color: var(--mat-sys-on-surface-variant);
   }
 
   .staple-active {
@@ -241,8 +251,10 @@
     align-items: stretch;
   }
 
-  .search-field {
+  .search-field,
+  .category-filter-field {
     width: 100%;
+    min-width: 0;
   }
 }
 

@@ -525,6 +525,19 @@
                           />
                         </mat-form-field>
 
+                        <mat-form-field appearance="outline" class="form-field category-field">
+                          <mat-label>Shopping category</mat-label>
+                          <mat-select
+                            formControlName="suggestedCategory"
+                            data-testid="ingredient-category-select"
+                          >
+                            <mat-option [value]="null">Auto-detect</mat-option>
+                            @for (option of foodCategoryOptions; track option.value) {
+                              <mat-option [value]="option.value">{{ option.label }}</mat-option>
+                            }
+                          </mat-select>
+                        </mat-form-field>
+
                         <mat-checkbox
                           formControlName="suggestedIsPantryStaple"
                           class="pantry-staple-checkbox"

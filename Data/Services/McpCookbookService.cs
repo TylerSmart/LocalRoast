@@ -332,7 +332,13 @@ public sealed class McpCookbookService(
             if (match is not null)
             {
                 resolved.Add(
-                    new McpResolvedFoodItemDto(rawName, match.Id, match.Name, match.IsPantryStaple)
+                    new McpResolvedFoodItemDto(
+                        rawName,
+                        match.Id,
+                        match.Name,
+                        match.IsPantryStaple,
+                        match.Category ?? FoodCategoryClassifier.Classify(match.Name)
+                    )
                 );
                 matchedFoodIds.Add(match.Id);
             }
@@ -497,6 +503,8 @@ public sealed class McpCookbookService(
                             Name = proposedName,
                             NormalizedName = normName,
                             IsPantryStaple = ing.IsPantryStaple,
+                            Category =
+                                ing.Category ?? FoodCategoryClassifier.Classify(proposedName),
                         };
 
                         dbContext.FoodItems.Add(newFoodItem);

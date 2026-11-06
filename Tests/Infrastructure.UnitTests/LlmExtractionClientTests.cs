@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using System.Text;
 using App.Core.Exceptions;
 using App.Core.Ingestion;
@@ -140,7 +140,7 @@ public sealed class LlmExtractionClientTests
             {
                 "message": {
                     "role": "assistant",
-                    "content": "{\"title\":\"Skillet Rosemary Chicken\",\"description\":\"Crisp chicken with fresh rosemary.\",\"baseServings\":4,\"yieldDisplay\":\"4 portions\",\"prepTimeMinutes\":10,\"cookTimeMinutes\":25,\"totalTimeMinutes\":35,\"difficulty\":\"Medium\",\"sourceName\":\"Chef Daily\",\"sourceAuthor\":\"Elena\",\"confidenceScore\":0.92,\"suggestedTagNames\":[\"Main\",\"One-Pot\"],\"ingredients\":[{\"sectionName\":null,\"quantity\":4,\"maxQuantity\":null,\"unit\":\"whole\",\"canonicalFoodName\":\"chicken thighs\",\"displayName\":\"bone-in chicken thighs\",\"preparationNote\":null,\"isOptional\":false,\"originalRawText\":\"4 bone-in chicken thighs\",\"suggestedIsPantryStaple\":false}],\"steps\":[{\"sectionName\":null,\"instruction\":\"Sear chicken in olive oil for 8 minutes per side.\",\"ingredientIndices\":[0],\"timers\":[{\"durationSeconds\":480,\"label\":\"Sear\"}]}]}"
+                    "content": "{\"title\":\"Skillet Rosemary Chicken\",\"description\":\"Crisp chicken with fresh rosemary.\",\"baseServings\":4,\"yieldDisplay\":\"4 portions\",\"prepTimeMinutes\":10,\"cookTimeMinutes\":25,\"totalTimeMinutes\":35,\"difficulty\":\"Medium\",\"sourceName\":\"Chef Daily\",\"sourceAuthor\":\"Elena\",\"confidenceScore\":0.92,\"suggestedTagNames\":[\"Main\",\"One-Pot\"],\"ingredients\":[{\"sectionName\":null,\"quantity\":4,\"maxQuantity\":null,\"unit\":\"whole\",\"canonicalFoodName\":\"chicken thighs\",\"displayName\":\"bone-in chicken thighs\",\"preparationNote\":null,\"isOptional\":false,\"originalRawText\":\"4 bone-in chicken thighs\",\"suggestedIsPantryStaple\":false,\"suggestedCategory\":\"MeatAndSeafood\"}],\"steps\":[{\"sectionName\":null,\"instruction\":\"Sear chicken in olive oil for 8 minutes per side.\",\"ingredientIndices\":[0],\"timers\":[{\"durationSeconds\":480,\"label\":\"Sear\"}]}]}"
                 }
             }
             """;
@@ -181,6 +181,7 @@ public sealed class LlmExtractionClientTests
         Assert.AreEqual(4, result.BaseServings);
         Assert.AreEqual(1, result.Ingredients?.Count);
         Assert.AreEqual("chicken thighs", result.Ingredients![0].CanonicalFoodName);
+        Assert.AreEqual("MeatAndSeafood", result.Ingredients[0].SuggestedCategory);
         Assert.AreEqual(1, result.Steps?.Count);
         Assert.AreEqual(480, result.Steps![0].Timers![0].DurationSeconds);
     }
@@ -705,6 +706,8 @@ public sealed class LlmExtractionClientTests
         StringAssert.Contains(capturedBody, "Existing Tags: [Dinner, Italian]");
         StringAssert.Contains(capturedBody, "propose new concise Title-Case tags");
         StringAssert.Contains(capturedBody, "suggestedIsPantryStaple");
+        StringAssert.Contains(capturedBody, "suggestedCategory");
+        StringAssert.Contains(capturedBody, "SpicesAndSeasonings");
     }
 
     [TestMethod]

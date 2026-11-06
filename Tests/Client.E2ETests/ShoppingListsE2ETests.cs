@@ -216,6 +216,80 @@ public sealed class ShoppingListsE2ETests : E2ETestBase
 
     [TestMethod]
     [Timeout(DefaultTestTimeoutMs)]
+    public async Task ShoppingList_GroupsItemsByFoodCategory_TogglesFlat_AndFitsAt360px()
+    {
+        await RegisterAndLoginAsync();
+        var listName = $"Category Walk {Guid.NewGuid():N}"[..20];
+
+        await Page.Locator("nav.desktop-nav a", new() { HasText = "Shop" }).ClickAsync();
+        await Expect(Page).ToHaveURLAsync(new Regex(".*/shopping.*"));
+        await Page.Locator("button.new-list-btn").ClickAsync();
+        var listDialog = Page.Locator("mat-dialog-container");
+        await listDialog.Locator("input[formcontrolname='name']").FillAsync(listName);
+        await listDialog
+            .Locator("button[type='submit']", new() { HasText = "Create" })
+            .ClickAsync();
+        await Expect(listDialog).Not.ToBeVisibleAsync();
+        await Expect(Page.Locator(".desktop-list-pills .list-pill.active"))
+            .ToContainTextAsync(listName);
+
+        await Page.SetViewportSizeAsync(360, 740);
+
+        var quickInput = Page.Locator(".quick-add-bar input");
+        var activeCard = Page.Locator(".active-items-card");
+        foreach (
+            var name in new[]
+            {
+                "Curry Powder",
+                "Granny Smith Apples",
+                "Paper Towels",
+                "Romaine Lettuce",
+            }
+        )
+        {
+            await quickInput.FillAsync(name);
+            await Page.Locator("button.quick-add-submit-btn").ClickAsync();
+            await Expect(activeCard.Locator(".shopping-item-row", new() { HasText = name }))
+                .ToBeVisibleAsync();
+        }
+
+        var headings = activeCard.Locator(".category-heading");
+        await Expect(headings).ToHaveCountAsync(3);
+        await Expect(headings.Nth(0)).ToContainTextAsync("Produce");
+        await Expect(headings.Nth(1)).ToContainTextAsync("Spices & Seasonings");
+        await Expect(headings.Nth(2)).ToContainTextAsync("Other");
+
+        var produce = activeCard.Locator("section.category-group[data-category='Produce']");
+        await Expect(produce.Locator(".shopping-item-row")).ToHaveCountAsync(2);
+        await Expect(produce).ToContainTextAsync("Granny Smith Apples");
+        await Expect(produce).ToContainTextAsync("Romaine Lettuce");
+
+        var scrollWidth = await Page.EvaluateAsync<int>(
+            "() => document.documentElement.scrollWidth"
+        );
+        var innerWidth = await Page.EvaluateAsync<int>("() => window.innerWidth");
+        Assert.IsLessThanOrEqualTo(
+            scrollWidth,
+            innerWidth,
+            $"Grouped list overflows at 360px: scrollWidth={scrollWidth}, innerWidth={innerWidth}"
+        );
+
+        var toggle = Page.Locator("[data-testid='group-by-category-toggle']");
+        await toggle.ClickAsync();
+        await Expect(toggle).ToHaveAttributeAsync("aria-pressed", "false");
+        await Expect(headings).ToHaveCountAsync(0);
+        await Expect(activeCard.Locator(".shopping-item-row")).ToHaveCountAsync(4);
+
+        // The flat preference survives a reload.
+        await Page.ReloadAsync();
+        await Expect(Page.Locator("[data-testid='group-by-category-toggle']"))
+            .ToHaveAttributeAsync("aria-pressed", "false");
+        await Page.Locator("[data-testid='group-by-category-toggle']").ClickAsync();
+        await Expect(Page.Locator(".active-items-card .category-heading")).Not.ToHaveCountAsync(0);
+    }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
     public async Task ShoppingList_MultipleNamedLists_QuickAdd_Edit_CheckOffAndClear()
     {
         await RegisterAndLoginAsync();

@@ -18,6 +18,7 @@ describe('FoodCatalogComponent', () => {
       aliases: ['EVOO'],
       referencedRecipeCount: 3,
       referencedShoppingListItemCount: 2,
+      category: 'CondimentsAndSauces',
       createdAt: '2026-01-01T00:00:00Z',
       modifiedAt: '2026-01-01T00:00:00Z',
     },
@@ -28,6 +29,7 @@ describe('FoodCatalogComponent', () => {
       aliases: [],
       referencedRecipeCount: 5,
       referencedShoppingListItemCount: 0,
+      category: 'Produce',
       createdAt: '2026-01-01T00:00:00Z',
       modifiedAt: '2026-01-01T00:00:00Z',
     },
@@ -39,6 +41,9 @@ describe('FoodCatalogComponent', () => {
       let filtered = sampleItems;
       if (query?.isPantryStaple) {
         filtered = filtered.filter((i) => i.isPantryStaple);
+      }
+      if (query?.category) {
+        filtered = filtered.filter((i) => i.category === query.category);
       }
       if (query?.search) {
         const s = query.search.toLowerCase();
@@ -110,6 +115,21 @@ describe('FoodCatalogComponent', () => {
     fixture.detectChanges();
     expect(component['filteredItems']().length).toBe(1);
     expect(component['filteredItems']()[0].name).toBe('Olive Oil');
+  });
+
+  it('shows category labels and filters by category', () => {
+    const labels = Array.from(
+      (fixture.nativeElement as HTMLElement).querySelectorAll('[data-testid="food-item-category"]'),
+    ).map((el) => el.textContent?.trim());
+    expect(labels).toContain('Produce');
+    expect(labels).toContain('Condiments & Sauces');
+
+    component.onCategoryFilterChange('Produce');
+    fixture.detectChanges();
+    expect(mockCatalogService.getFoodItemsPaged).toHaveBeenLastCalledWith(
+      expect.objectContaining({ category: 'Produce' }),
+    );
+    expect(component['filteredItems']().map((i) => i.name)).toEqual(['Garlic']);
   });
 
   it('opens merge dialog when openMergeDialog is called', () => {

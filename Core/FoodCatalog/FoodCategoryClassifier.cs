@@ -1,0 +1,465 @@
+using System.Text.RegularExpressions;
+
+namespace App.Core.FoodCatalog;
+
+/// <summary>
+/// Deterministic keyword-based fallback that guesses a <see cref="FoodCategory"/> from a food
+/// name when no AI suggestion or user choice is available. Rules are evaluated in order, so
+/// specific phrases ("peanut butter", "garlic powder", "frozen peas") win over generic words.
+/// </summary>
+public static partial class FoodCategoryClassifier
+{
+    private static readonly (string[] Terms, FoodCategory Category)[] Rules =
+    [
+        // Explicit storage modifiers first.
+        (["frozen", "ice cream", "popsicle"], FoodCategory.Frozen),
+        (["canned", "tinned", "jarred"], FoodCategory.CannedAndJarred),
+        // Specific phrases that would otherwise be misread by a generic word.
+        (
+            [
+                "peanut butter",
+                "almond butter",
+                "nut butter",
+                "apple butter",
+                "cocoa butter",
+                "egg noodles",
+                "dried fruit",
+                "dried cranberries",
+                "dried apricots",
+            ],
+            FoodCategory.PantryDryGoods
+        ),
+        (
+            [
+                "lemon juice",
+                "lime juice",
+                "lemon zest",
+                "lime zest",
+                "fresh ginger",
+                "fresh thyme",
+                "fresh oregano",
+                "fresh rosemary",
+                "fresh sage",
+            ],
+            FoodCategory.Produce
+        ),
+        (
+            [
+                "coconut milk",
+                "coconut cream",
+                "evaporated milk",
+                "sweetened condensed milk",
+                "condensed milk",
+            ],
+            FoodCategory.CannedAndJarred
+        ),
+        (["buttermilk", "almond milk", "oat milk", "soy milk"], FoodCategory.DairyAndEggs),
+        (
+            [
+                "garlic powder",
+                "onion powder",
+                "garlic salt",
+                "onion salt",
+                "celery salt",
+                "celery seed",
+                "ground ginger",
+                "ginger powder",
+                "dried basil",
+                "dried parsley",
+                "dried dill",
+                "dried rosemary",
+                "dried mint",
+                "chili powder",
+                "curry powder",
+                "red pepper flakes",
+                "chili flakes",
+                "black pepper",
+                "white pepper",
+                "peppercorn",
+                "peppercorns",
+                "seasoning",
+                "bay leaf",
+                "bay leaves",
+            ],
+            FoodCategory.SpicesAndSeasonings
+        ),
+        (
+            [
+                "baking powder",
+                "baking soda",
+                "baking chocolate",
+                "chocolate chips",
+                "cocoa powder",
+                "cornstarch",
+                "corn starch",
+                "vanilla",
+                "yeast",
+                "flour",
+                "brown sugar",
+                "powdered sugar",
+                "confectioners sugar",
+                "granulated sugar",
+                "sugar",
+                "molasses",
+                "sprinkles",
+                "food coloring",
+                "gelatin",
+                "shortening",
+                "cream of tartar",
+            ],
+            FoodCategory.Baking
+        ),
+        (
+            [
+                "chicken broth",
+                "beef broth",
+                "vegetable broth",
+                "chicken stock",
+                "beef stock",
+                "vegetable stock",
+                "broth",
+                "stock",
+                "tomato paste",
+                "tomato sauce",
+                "crushed tomatoes",
+                "diced tomatoes",
+                "whole tomatoes",
+                "beans",
+                "chickpeas",
+                "garbanzo",
+                "artichoke hearts",
+                "olives",
+                "pickles",
+                "capers",
+                "pumpkin puree",
+                "tuna",
+                "jam",
+                "jelly",
+                "preserves",
+            ],
+            FoodCategory.CannedAndJarred
+        ),
+        (
+            [
+                "soy sauce",
+                "fish sauce",
+                "hot sauce",
+                "worcestershire",
+                "sriracha",
+                "ketchup",
+                "mustard",
+                "mayonnaise",
+                "mayo",
+                "vinegar",
+                "oil",
+                "salsa",
+                "barbecue sauce",
+                "bbq sauce",
+                "hoisin",
+                "oyster sauce",
+                "dressing",
+                "honey",
+                "maple syrup",
+                "syrup",
+                "tahini",
+                "sauce",
+                "pesto",
+                "miso",
+                "gochujang",
+                "harissa",
+            ],
+            FoodCategory.CondimentsAndSauces
+        ),
+        (
+            [
+                "salt",
+                "pepper flakes",
+                "paprika",
+                "cumin",
+                "cinnamon",
+                "nutmeg",
+                "oregano",
+                "thyme",
+                "turmeric",
+                "coriander",
+                "cardamom",
+                "cloves",
+                "allspice",
+                "cayenne",
+                "garam masala",
+                "za'atar",
+                "sumac",
+                "fennel seed",
+                "mustard seed",
+                "spice",
+            ],
+            FoodCategory.SpicesAndSeasonings
+        ),
+        (
+            [
+                "chicken",
+                "beef",
+                "pork",
+                "bacon",
+                "sausage",
+                "ham",
+                "turkey",
+                "lamb",
+                "steak",
+                "ground meat",
+                "prosciutto",
+                "salami",
+                "pancetta",
+                "chorizo",
+                "salmon",
+                "shrimp",
+                "fish",
+                "cod",
+                "tilapia",
+                "scallops",
+                "crab",
+                "lobster",
+                "clams",
+                "mussels",
+                "anchovies",
+                "veal",
+                "duck",
+            ],
+            FoodCategory.MeatAndSeafood
+        ),
+        (
+            [
+                "milk",
+                "cream",
+                "half and half",
+                "half-and-half",
+                "butter",
+                "cheese",
+                "parmesan",
+                "mozzarella",
+                "cheddar",
+                "ricotta",
+                "feta",
+                "yogurt",
+                "sour cream",
+                "egg",
+                "eggs",
+                "creme fraiche",
+                "mascarpone",
+                "ghee",
+            ],
+            FoodCategory.DairyAndEggs
+        ),
+        (
+            [
+                "tofu",
+                "tempeh",
+                "hummus",
+                "orange juice",
+                "fresh pasta",
+                "pie crust",
+                "puff pastry",
+                "pizza dough",
+                "kimchi",
+                "sauerkraut",
+            ],
+            FoodCategory.Refrigerated
+        ),
+        (
+            [
+                "bread",
+                "baguette",
+                "buns",
+                "bun",
+                "rolls",
+                "bagel",
+                "bagels",
+                "croissant",
+                "pita",
+                "naan",
+                "tortilla",
+                "tortillas",
+                "brioche",
+                "sourdough",
+                "english muffin",
+            ],
+            FoodCategory.Bakery
+        ),
+        (
+            [
+                "rice",
+                "pasta",
+                "spaghetti",
+                "penne",
+                "macaroni",
+                "noodles",
+                "oats",
+                "oatmeal",
+                "quinoa",
+                "couscous",
+                "lentils",
+                "breadcrumbs",
+                "panko",
+                "cereal",
+                "cornmeal",
+                "polenta",
+                "barley",
+                "nuts",
+                "almonds",
+                "walnuts",
+                "pecans",
+                "cashews",
+                "peanuts",
+                "pine nuts",
+                "raisins",
+                "dates",
+                "seeds",
+                "coconut flakes",
+                "shredded coconut",
+            ],
+            FoodCategory.PantryDryGoods
+        ),
+        (
+            ["chips", "crackers", "pretzels", "popcorn", "cookies", "candy", "granola bar"],
+            FoodCategory.Snacks
+        ),
+        (
+            [
+                "juice",
+                "coffee",
+                "tea",
+                "soda",
+                "sparkling water",
+                "wine",
+                "beer",
+                "vodka",
+                "rum",
+                "bourbon",
+                "whiskey",
+                "tequila",
+                "water",
+            ],
+            FoodCategory.Beverages
+        ),
+        (
+            [
+                "apple",
+                "apples",
+                "banana",
+                "bananas",
+                "orange",
+                "oranges",
+                "lemon",
+                "lemons",
+                "lime",
+                "limes",
+                "berries",
+                "strawberries",
+                "blueberries",
+                "raspberries",
+                "grapes",
+                "avocado",
+                "avocados",
+                "tomato",
+                "tomatoes",
+                "lettuce",
+                "spinach",
+                "kale",
+                "arugula",
+                "cabbage",
+                "onion",
+                "onions",
+                "shallot",
+                "shallots",
+                "scallion",
+                "scallions",
+                "green onion",
+                "green onions",
+                "leek",
+                "leeks",
+                "garlic",
+                "ginger",
+                "potato",
+                "potatoes",
+                "sweet potato",
+                "carrot",
+                "carrots",
+                "celery",
+                "cucumber",
+                "zucchini",
+                "squash",
+                "pumpkin",
+                "bell pepper",
+                "peppers",
+                "jalapeno",
+                "jalapeño",
+                "chile",
+                "chiles",
+                "broccoli",
+                "cauliflower",
+                "mushroom",
+                "mushrooms",
+                "corn",
+                "peas",
+                "green beans",
+                "asparagus",
+                "eggplant",
+                "beet",
+                "beets",
+                "radish",
+                "radishes",
+                "basil",
+                "cilantro",
+                "parsley",
+                "mint",
+                "dill",
+                "rosemary",
+                "sage",
+                "chives",
+                "herbs",
+                "peach",
+                "peaches",
+                "pear",
+                "pears",
+                "mango",
+                "pineapple",
+                "melon",
+                "watermelon",
+                "cherries",
+                "kiwi",
+                "fruit",
+                "vegetable",
+                "vegetables",
+            ],
+            FoodCategory.Produce
+        ),
+    ];
+
+    public static FoodCategory Classify(string? foodName)
+    {
+        if (string.IsNullOrWhiteSpace(foodName))
+        {
+            return FoodCategory.Other;
+        }
+
+        var normalized =
+            " " + NonWordRegex().Replace(foodName.ToLowerInvariant(), " ").Trim() + " ";
+
+        foreach (var (terms, category) in Rules)
+        {
+            foreach (var term in terms)
+            {
+                var normalizedTerm = " " + NonWordRegex().Replace(term, " ").Trim() + " ";
+                if (normalized.Contains(normalizedTerm, StringComparison.Ordinal))
+                {
+                    return category;
+                }
+            }
+        }
+
+        return FoodCategory.Other;
+    }
+
+    [GeneratedRegex(@"[^\p{L}\p{N}']+")]
+    private static partial Regex NonWordRegex();
+}

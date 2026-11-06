@@ -115,6 +115,7 @@ describe('IngestionReviewComponent', () => {
           isNewFoodItem: true,
           proposedFoodItemName: 'Toasted Sesame Oil',
           suggestedIsPantryStaple: true,
+          suggestedCategory: 'CondimentsAndSauces',
         },
       ],
       steps: [
@@ -263,6 +264,10 @@ describe('IngestionReviewComponent', () => {
     expect(ing1.get('matchedFoodItemId')?.value).toBeNull();
     expect(ing1.get('isNewFoodItem')?.value).toBe(true);
     expect(ing1.get('proposedFoodItemName')?.value).toBe('Toasted Sesame Oil');
+    expect(ing1.get('suggestedCategory')?.value).toBe('CondimentsAndSauces');
+
+    ing1.get('suggestedCategory')?.setValue('Refrigerated');
+    expect(component.buildDraftPayload().ingredients?.[1].suggestedCategory).toBe('Refrigerated');
   });
 
   it('toggles mobile panes cleanly', () => {

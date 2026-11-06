@@ -196,73 +196,101 @@
             >
           </div>
         } @else {
-          <ul class="items-list" role="list">
-            @for (item of activeList()!.activeItems; track item.id) {
-              <li class="shopping-item-row">
-                <mat-checkbox
-                  [checked]="false"
-                  (change)="toggleItemChecked(item, true)"
-                  [aria-label]="'Check off ' + item.displayName"
-                  class="item-checkbox"
-                ></mat-checkbox>
+          <div class="items-toolbar">
+            <button
+              type="button"
+              mat-button
+              class="group-toggle-btn"
+              data-testid="group-by-category-toggle"
+              [attr.aria-pressed]="groupByCategory()"
+              (click)="toggleGroupByCategory()"
+            >
+              <mat-icon>{{ groupByCategory() ? 'category' : 'list' }}</mat-icon>
+              <span>{{ groupByCategory() ? 'Grouped by category' : 'Flat list' }}</span>
+            </button>
+          </div>
+          @for (group of activeItemGroups(); track group.category ?? 'all') {
+            <section
+              class="category-group"
+              [attr.data-category]="group.category"
+              [attr.aria-label]="group.label ?? 'Items'"
+            >
+              @if (group.label) {
+                <h3 class="category-heading">
+                  <span>{{ group.label }}</span>
+                  <span class="category-count">{{ group.items.length }}</span>
+                </h3>
+              }
+              <ul class="items-list" role="list">
+                @for (item of group.items; track item.id) {
+                  <li class="shopping-item-row">
+                    <mat-checkbox
+                      [checked]="false"
+                      (change)="toggleItemChecked(item, true)"
+                      [aria-label]="'Check off ' + item.displayName"
+                      class="item-checkbox"
+                    ></mat-checkbox>
 
-                <div class="item-body">
-                  <div class="item-main-line">
-                    @if (item.formattedAmount) {
-                      <span class="item-qty-badge">
-                        {{ item.formattedAmount }}{{ item.unitLabel ? ' ' + item.unitLabel : '' }}
-                      </span>
-                    }
-                    <span class="item-display-name">{{ item.displayName }}</span>
-                  </div>
-
-                  @if (item.notes) {
-                    <div class="item-notes">{{ item.notes }}</div>
-                  }
-
-                  @if (item.sources.length > 0) {
-                    <div class="item-provenance-chips">
-                      @for (source of item.sources; track source.id) {
-                        @if (source.recipeId) {
-                          <a
-                            class="provenance-chip linked"
-                            [routerLink]="['/recipes', source.recipeId]"
-                          >
-                            <mat-icon class="chip-icon">menu_book</mat-icon>
-                            <span>{{ source.sourceLabel }}</span>
-                          </a>
-                        } @else {
-                          <span class="provenance-chip">
-                            <mat-icon class="chip-icon">schedule</mat-icon>
-                            <span>{{ source.sourceLabel }}</span>
+                    <div class="item-body">
+                      <div class="item-main-line">
+                        @if (item.formattedAmount) {
+                          <span class="item-qty-badge">
+                            {{ item.formattedAmount
+                            }}{{ item.unitLabel ? ' ' + item.unitLabel : '' }}
                           </span>
                         }
+                        <span class="item-display-name">{{ item.displayName }}</span>
+                      </div>
+
+                      @if (item.notes) {
+                        <div class="item-notes">{{ item.notes }}</div>
+                      }
+
+                      @if (item.sources.length > 0) {
+                        <div class="item-provenance-chips">
+                          @for (source of item.sources; track source.id) {
+                            @if (source.recipeId) {
+                              <a
+                                class="provenance-chip linked"
+                                [routerLink]="['/recipes', source.recipeId]"
+                              >
+                                <mat-icon class="chip-icon">menu_book</mat-icon>
+                                <span>{{ source.sourceLabel }}</span>
+                              </a>
+                            } @else {
+                              <span class="provenance-chip">
+                                <mat-icon class="chip-icon">schedule</mat-icon>
+                                <span>{{ source.sourceLabel }}</span>
+                              </span>
+                            }
+                          }
+                        </div>
                       }
                     </div>
-                  }
-                </div>
 
-                <div class="item-actions">
-                  <button
-                    type="button"
-                    mat-icon-button
-                    (click)="openItemDialog(item)"
-                    [aria-label]="'Edit ' + item.displayName"
-                  >
-                    <mat-icon>edit</mat-icon>
-                  </button>
-                  <button
-                    type="button"
-                    mat-icon-button
-                    (click)="deleteItem(item)"
-                    [aria-label]="'Delete ' + item.displayName"
-                  >
-                    <mat-icon>delete</mat-icon>
-                  </button>
-                </div>
-              </li>
-            }
-          </ul>
+                    <div class="item-actions">
+                      <button
+                        type="button"
+                        mat-icon-button
+                        (click)="openItemDialog(item)"
+                        [aria-label]="'Edit ' + item.displayName"
+                      >
+                        <mat-icon>edit</mat-icon>
+                      </button>
+                      <button
+                        type="button"
+                        mat-icon-button
+                        (click)="deleteItem(item)"
+                        [aria-label]="'Delete ' + item.displayName"
+                      >
+                        <mat-icon>delete</mat-icon>
+                      </button>
+                    </div>
+                  </li>
+                }
+              </ul>
+            </section>
+          }
         }
       </div>
 

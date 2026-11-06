@@ -39,6 +39,7 @@ public static class IngestionCatalogMaterializer
         AppDbContext dbContext,
         string proposedFoodItemName,
         bool suggestedIsPantryStaple,
+        FoodCategory? suggestedCategory,
         CancellationToken cancellationToken
     )
     {
@@ -92,6 +93,8 @@ public static class IngestionCatalogMaterializer
             NormalizedName = normName,
 
             IsPantryStaple = suggestedIsPantryStaple,
+
+            Category = suggestedCategory ?? FoodCategoryClassifier.Classify(cleanName),
         };
 
         dbContext.FoodItems.Add(newFoodItem);

@@ -281,6 +281,32 @@
   }
 }
 
+.items-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0.25rem 0.5rem 0;
+}
+
+.category-group + .category-group {
+  border-top: 1px solid var(--mat-sys-outline-variant, #e0e0e0);
+}
+
+.category-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0.6rem 0.85rem 0.3rem;
+  font: var(--mat-sys-title-small);
+  color: var(--mat-sys-primary);
+
+  .category-count {
+    font: var(--mat-sys-label-medium);
+    color: var(--mat-sys-on-surface-variant);
+  }
+}
+
 .items-list,
 .pantry-items-list,
 .checked-items-list {

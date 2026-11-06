@@ -29,6 +29,20 @@
       }
     </mat-form-field>
 
+    <!-- Shopping Category -->
+    <mat-form-field appearance="outline" class="full-width">
+      <mat-label>Shopping category</mat-label>
+      <mat-select formControlName="category" data-testid="food-item-category-select">
+        @if (!isEdit()) {
+          <mat-option [value]="null">Auto-detect from name</mat-option>
+        }
+        @for (option of categoryOptions; track option.value) {
+          <mat-option [value]="option.value">{{ option.label }}</mat-option>
+        }
+      </mat-select>
+      <mat-hint>Used to group shopping lists by store section</mat-hint>
+    </mat-form-field>
+
     <!-- Pantry Staple Toggle -->
     <div class="checkbox-row">
       <mat-checkbox formControlName="isPantryStaple"> Always stocked pantry staple </mat-checkbox>
