@@ -42,6 +42,7 @@ import type {
 import {
   MEASUREMENT_UNITS,
   RecipeDifficulty,
+  RecipeMeasurement,
   RecipePreviewData,
   RecipeStepTimerInput,
 } from '../../../core/models/recipe.models';
@@ -50,6 +51,15 @@ import { FoodCatalogService } from '../../../core/services/food-catalog/food-cat
 import { IngestionService } from '../../../core/services/ingestion/ingestion.service';
 import { TaxonomyService } from '../../../core/services/taxonomy/taxonomy.service';
 import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialog/confirm-dialog.component';
+import { MeasurementEditorComponent } from '../../../shared/components/measurement-editor/measurement-editor.component';
+import {
+  buildStepAmounts,
+  createStepAmounts,
+  getStepAmounts,
+  ingredientMeasurementValidator,
+  remapStepIngredients,
+  syncStepAmounts,
+} from '../../../core/utils/recipe-measurement-forms';
 import { RecipeDetailPreviewComponent } from '../recipe-detail-preview/recipe-detail-preview.component';
 import {
   RecipeDetailPreviewDialogComponent,
@@ -76,6 +86,7 @@ import {
     MatTooltipModule,
     SourceViewerComponent,
     RecipeDetailPreviewComponent,
+    MeasurementEditorComponent,
   ],
   templateUrl: './ingestion-review.component.html',
   styleUrl: './ingestion-review.component.scss',
@@ -109,6 +120,7 @@ export class IngestionReviewComponent implements OnInit {
   readonly collections = signal<CollectionDto[]>([]);
   readonly tags = signal<TagDto[]>([]);
   readonly proposedTagNames = signal<string[]>([]);
+  readonly measurementWarnings = signal<string[]>([]);
   readonly selectedCollectionIds = signal<Set<string>>(new Set());
   readonly selectedTagIds = signal<Set<string>>(new Set());
   readonly selectedProposedTagNames = signal<Set<string>>(new Set());
@@ -237,6 +249,7 @@ export class IngestionReviewComponent implements OnInit {
     } else {
       this.selectedTagIds.set(new Set());
     }
+    this.measurementWarnings.set(draft.measurementWarnings ?? []);
     if (draft.proposedTagNames && draft.proposedTagNames.length > 0) {
       this.proposedTagNames.set([...draft.proposedTagNames]);
       this.selectedProposedTagNames.set(new Set(draft.proposedTagNames));
@@ -267,26 +280,33 @@ export class IngestionReviewComponent implements OnInit {
   }
 
   addIngredient(item?: Partial<IngestionDraftIngredientDto>): void {
-    const fg = this.fb.group({
-      sortOrder: [item?.sortOrder ?? this.ingredientsArray.length],
-      sectionName: [item?.sectionName ?? null],
-      originalRawText: [item?.originalRawText ?? null],
-      quantity: [item?.quantity ?? null],
-      maxQuantity: [item?.maxQuantity ?? null],
-      unit: [item?.unit ?? null],
-      customUnitName: [item?.customUnitName ?? null],
-      displayName: [item?.displayName ?? '', [Validators.required]],
-      preparationNote: [item?.preparationNote ?? null],
-      isOptional: [item?.isOptional ?? false],
-      matchedFoodItemId: [item?.matchedFoodItemId ?? null],
-      matchedFoodItemName: [item?.matchedFoodItemName ?? null],
-      isNewFoodItem: [item?.isNewFoodItem ?? !item?.matchedFoodItemId],
-      proposedFoodItemName: [
-        item?.proposedFoodItemName ?? item?.displayName ?? '',
-        [Validators.required],
-      ],
-      suggestedIsPantryStaple: [item?.suggestedIsPantryStaple ?? false],
-    });
+    const fg = this.fb.group(
+      {
+        sortOrder: [item?.sortOrder ?? this.ingredientsArray.length],
+        sectionName: [item?.sectionName ?? null],
+        originalRawText: [item?.originalRawText ?? null],
+        quantity: [item?.quantity ?? null],
+        maxQuantity: [item?.maxQuantity ?? null],
+        unit: [item?.unit ?? null],
+        customUnitName: [item?.customUnitName ?? null],
+        displayName: [item?.displayName ?? '', [Validators.required]],
+        preparationNote: [item?.preparationNote ?? null],
+        isOptional: [item?.isOptional ?? false],
+        matchedFoodItemId: [item?.matchedFoodItemId ?? null],
+        matchedFoodItemName: [item?.matchedFoodItemName ?? null],
+        isNewFoodItem: [item?.isNewFoodItem ?? !item?.matchedFoodItemId],
+        proposedFoodItemName: [
+          item?.proposedFoodItemName ?? item?.displayName ?? '',
+          [Validators.required],
+        ],
+        suggestedIsPantryStaple: [item?.suggestedIsPantryStaple ?? false],
+        alternativeMeasurement: this.fb.control<RecipeMeasurement | null>(
+          item?.alternativeMeasurement ?? null,
+        ),
+        preferAlternativeMeasurement: [item?.preferAlternativeMeasurement ?? false],
+      },
+      { validators: ingredientMeasurementValidator },
+    );
 
     // When matchedFoodItemId is changed, update isNewFoodItem accordingly
     fg.get('matchedFoodItemId')
@@ -309,6 +329,7 @@ export class IngestionReviewComponent implements OnInit {
 
   removeIngredient(index: number): void {
     this.ingredientsArray.removeAt(index);
+    remapStepIngredients(this.stepsArray, (i) => (i === index ? null : i > index ? i - 1 : i));
   }
 
   addStep(step?: Partial<IngestionDraftStepDto>): void {
@@ -326,6 +347,10 @@ export class IngestionReviewComponent implements OnInit {
       sectionName: [step?.sectionName ?? null],
       instruction: [step?.instruction ?? '', [Validators.required]],
       ingredientIndices: [step?.ingredientIndices ?? []],
+      ingredientAmounts: createStepAmounts(
+        step?.ingredientIndices ?? [],
+        step?.ingredientAmounts ?? [],
+      ),
       timers: timersArray,
       imagePath: [step?.imagePath ?? null],
     });
@@ -335,6 +360,13 @@ export class IngestionReviewComponent implements OnInit {
 
   removeStep(index: number): void {
     this.stepsArray.removeAt(index);
+  }
+
+  getStepAmountsArray(stepIndex: number) {
+    return getStepAmounts(this.stepsArray.at(stepIndex));
+  }
+  syncStepAmounts(stepIndex: number): void {
+    syncStepAmounts(this.stepsArray.at(stepIndex));
   }
 
   getStepTimersArray(stepIndex: number): FormArray<FormGroup> {
@@ -470,6 +502,8 @@ export class IngestionReviewComponent implements OnInit {
         isOptional: ing.isOptional,
         isPantryStaple: ing.suggestedIsPantryStaple,
         matchedFoodItemName: ing.matchedFoodItemName || ing.proposedFoodItemName,
+        alternativeMeasurement: ing.alternativeMeasurement,
+        preferAlternativeMeasurement: ing.preferAlternativeMeasurement,
       })),
       steps: (draft.steps || []).map((st, i) => ({
         id: `step-${i}`,
@@ -478,6 +512,7 @@ export class IngestionReviewComponent implements OnInit {
         instruction: st.instruction,
         imagePath: st.imagePath,
         ingredientIndices: st.ingredientIndices,
+        ingredientAmounts: st.ingredientAmounts,
         timers: st.timers,
       })),
     };
@@ -533,6 +568,9 @@ export class IngestionReviewComponent implements OnInit {
           isNewFoodItem: !val.matchedFoodItemId,
           proposedFoodItemName: val.proposedFoodItemName?.trim() || val.displayName.trim(),
           suggestedIsPantryStaple: Boolean(val.suggestedIsPantryStaple),
+          alternativeMeasurement: val.alternativeMeasurement ?? null,
+          preferAlternativeMeasurement:
+            !!val.alternativeMeasurement && Boolean(val.preferAlternativeMeasurement),
         };
       },
     );
@@ -555,6 +593,7 @@ export class IngestionReviewComponent implements OnInit {
         sectionName: val.sectionName?.trim() || null,
         instruction: val.instruction.trim(),
         ingredientIndices: val.ingredientIndices || [],
+        ingredientAmounts: buildStepAmounts(ctrl),
         timers,
         imagePath: val.imagePath || null,
       };
@@ -592,6 +631,7 @@ export class IngestionReviewComponent implements OnInit {
       suggestedCollectionIds: Array.from(this.selectedCollectionIds()),
       suggestedTagIds: Array.from(this.selectedTagIds()),
       proposedTagNames: Array.from(this.selectedProposedTagNames()),
+      measurementWarnings: this.measurementWarnings(),
       ingredients,
       steps,
       confidenceScore: this.job()?.confidenceScore ?? 0.8,

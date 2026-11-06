@@ -21,6 +21,10 @@ public sealed class RecipeIngredientConfiguration : IEntityTypeConfiguration<Rec
 
         builder.Property(ri => ri.Unit).HasConversion<string>().HasMaxLength(32);
         builder.Property(ri => ri.CustomUnitName).HasMaxLength(50);
+        builder.Property(ri => ri.AlternativeQuantity).HasPrecision(10, 4);
+        builder.Property(ri => ri.AlternativeMaxQuantity).HasPrecision(10, 4);
+        builder.Property(ri => ri.AlternativeUnit).HasConversion<string>().HasMaxLength(32);
+        builder.Property(ri => ri.AlternativeCustomUnitName).HasMaxLength(50);
 
         builder.Property(ri => ri.DisplayName).IsRequired().HasMaxLength(200);
         builder.Property(ri => ri.PreparationNote).HasMaxLength(200);

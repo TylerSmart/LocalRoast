@@ -79,6 +79,23 @@ describe('RecipeEditorComponent', () => {
     expect(component.ingredientsArray.length).toBe(1);
   });
 
+  it('keeps assigned portions attached to ingredients when removing and reordering', () => {
+    component.addIngredient();
+    component.addIngredient();
+    component.toggleStepIngredientCallout(0, 2);
+    component
+      .getStepAmountsArray(0)
+      .at(0)
+      .controls.measurement.setValue({ quantity: 1, unit: 'Cup' });
+    component.moveIngredientUp(2);
+    expect(component.stepsArray.at(0).get('ingredientIndices')?.value).toEqual([1]);
+    expect(component.getStepAmountsArray(0).at(0).controls.ingredientIndex.value).toBe(1);
+    component.removeIngredient(0);
+    expect(component.getStepAmountsArray(0).at(0).controls.ingredientIndex.value).toBe(0);
+    component.removeIngredient(0);
+    expect(component.getStepAmountsArray(0).length).toBe(0);
+  });
+
   it('submits valid recipe creation', () => {
     const savedDetail: RecipeDetailDto = {
       id: 'new-1',
@@ -121,16 +138,37 @@ describe('RecipeEditorComponent', () => {
     component.ingredientsArray.at(0).patchValue({
       displayName: 'Spaghetti',
       quantity: 1,
+      alternativeMeasurement: { quantity: 100, unit: 'G' },
+      preferAlternativeMeasurement: true,
+      unit: 'Cup',
     });
     component.stepsArray.at(0).patchValue({
       instruction: 'Boil water and cook pasta.',
     });
+    component.toggleStepIngredientCallout(0, 0);
+    component
+      .getStepAmountsArray(0)
+      .at(0)
+      .controls.measurement.setValue({ quantity: 0.5, unit: 'Cup' });
 
     component.onSave();
 
     expect(mockRecipeService.createRecipe).toHaveBeenCalledWith(
       expect.objectContaining({
         title: 'Quick Tomato Pasta',
+        ingredients: [
+          expect.objectContaining({
+            alternativeMeasurement: { quantity: 100, unit: 'G' },
+            preferAlternativeMeasurement: true,
+          }),
+        ],
+        steps: [
+          expect.objectContaining({
+            ingredientAmounts: [
+              { ingredientIndex: 0, measurement: { quantity: 0.5, unit: 'Cup' } },
+            ],
+          }),
+        ],
       }),
     );
   });

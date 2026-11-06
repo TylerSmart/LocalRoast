@@ -7,9 +7,78 @@ import {
   formatNumber,
   getUnitLabel,
   scaleAndConvert,
+  scaleIngredient,
+  scaleStepIngredient,
+  formatStepIngredient,
+  IngredientMeasurements,
 } from './culinary-math';
 
 describe('culinary-math', () => {
+  describe('recipe-specific equivalents and step portions', () => {
+    const flour: IngredientMeasurements & { displayName: string } = {
+      displayName: 'Bread flour',
+      quantity: 5,
+      unit: 'Cup',
+      alternativeMeasurement: { quantity: 25, unit: 'Oz' },
+      preferAlternativeMeasurement: true,
+    };
+    it.each([
+      [0.5, '71'],
+      [1, '142'],
+      [2, '283'],
+    ])('scales a one-cup step by %s using the authored weight ratio', (factor, grams) => {
+      expect(
+        formatStepIngredient(flour, { quantity: 1, unit: 'Cup' }, Number(factor), 'Metric'),
+      ).toBe(`${grams} g Bread flour`);
+    });
+    it('keeps whole-recipe totals separate from step portions', () => {
+      expect(scaleIngredient(flour, 1, 'Original').quantity).toBe(25);
+      expect(scaleStepIngredient(flour, { quantity: 1, unit: 'Cup' }, 1, 'Original').quantity).toBe(
+        5,
+      );
+      expect(formatStepIngredient(flour, null, 2, 'Metric')).toBe('Bread flour');
+    });
+    it('converts same-dimension units and the reverse source ratio', () => {
+      expect(
+        scaleStepIngredient(flour, { quantity: 16, unit: 'Tbsp' }, 1, 'Original').quantity,
+      ).toBeCloseTo(5, 4);
+      expect(
+        scaleStepIngredient(
+          { ...flour, preferAlternativeMeasurement: false },
+          { quantity: 5, unit: 'Oz' },
+          1,
+          'Original',
+        ).quantity,
+      ).toBe(1);
+    });
+    it('does not invent density conversions or reinterpret incompatible amounts', () => {
+      expect(
+        scaleStepIngredient(
+          { ...flour, alternativeMeasurement: null },
+          { quantity: 1, unit: 'Cup' },
+          1,
+          'Metric',
+        ).unit,
+      ).toBe('Ml');
+      expect(scaleStepIngredient(flour, { quantity: 1, unit: 'Pinch' }, 2, 'Metric').unit).toBe(
+        'Pinch',
+      );
+    });
+    it('honors authored cup equivalents without changing an amount already on the metric side', () => {
+      const ingredient: IngredientMeasurements = {
+        quantity: 1,
+        unit: 'Cup',
+        alternativeMeasurement: { quantity: 250, unit: 'Ml' },
+        preferAlternativeMeasurement: true,
+      };
+      expect(
+        scaleStepIngredient(ingredient, { quantity: 1, unit: 'Cup' }, 1, 'Metric').quantity,
+      ).toBe(250);
+      expect(
+        scaleStepIngredient(ingredient, { quantity: 1, unit: 'L' }, 1, 'Original').quantity,
+      ).toBe(1);
+    });
+  });
   describe('formatNumber & fractions', () => {
     it('should format whole numbers without fractional decimals', () => {
       expect(formatNumber(2, false)).toBe('2');

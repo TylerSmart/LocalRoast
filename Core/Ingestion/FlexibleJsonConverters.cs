@@ -168,59 +168,45 @@ public sealed partial class FlexibleNullableDecimalJsonConverter : JsonConverter
 
         if (reader.TokenType == JsonTokenType.String)
         {
-            var raw = reader.GetString();
-            if (string.IsNullOrWhiteSpace(raw))
-            {
-                return null;
-            }
-
-            var trimmed = raw.Trim();
-            if (
-                string.Equals(trimmed, "null", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(trimmed, "n/a", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(trimmed, "none", StringComparison.OrdinalIgnoreCase)
-            )
-            {
-                return null;
-            }
-
-            trimmed = ReplaceUnicodeFractions(trimmed);
-
-            if (
-                decimal.TryParse(
-                    trimmed,
-                    NumberStyles.Number,
-                    CultureInfo.InvariantCulture,
-                    out var directDec
-                )
-            )
-            {
-                return directDec;
-            }
-
-            if (TryParseFraction(trimmed, out var fracDec))
-            {
-                return fracDec;
-            }
-
-            var match = LeadingNumberRegex().Match(trimmed);
-            if (
-                match.Success
-                && decimal.TryParse(
-                    match.Groups[1].Value,
-                    NumberStyles.Number,
-                    CultureInfo.InvariantCulture,
-                    out var firstNum
-                )
-            )
-            {
-                return firstNum;
-            }
-
-            return null;
+            return ParseNumber(reader.GetString());
         }
 
         return null;
+    }
+
+    public static decimal? ParseNumber(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return null;
+        }
+        var trimmed = ReplaceUnicodeFractions(raw.Trim());
+        if (
+            decimal.TryParse(
+                trimmed,
+                NumberStyles.Number,
+                CultureInfo.InvariantCulture,
+                out var direct
+            )
+        )
+        {
+            return direct;
+        }
+        if (TryParseFraction(trimmed, out var fraction))
+        {
+            return fraction;
+        }
+        var match = LeadingNumberRegex().Match(trimmed);
+        return
+            match.Success
+            && decimal.TryParse(
+                match.Groups[1].Value,
+                NumberStyles.Number,
+                CultureInfo.InvariantCulture,
+                out var leading
+            )
+            ? leading
+            : null;
     }
 
     private static string ReplaceUnicodeFractions(string input)

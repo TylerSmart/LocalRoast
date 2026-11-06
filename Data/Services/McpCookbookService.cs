@@ -228,13 +228,22 @@ public sealed class McpCookbookService(
                     .Select(id =>
                     {
                         var ing = ingredientMap[id];
+                        var amount = s
+                            .IngredientAmounts?.FirstOrDefault(a => a.IngredientId == id)
+                            ?.Measurement;
+                        var scaled = CulinaryMath.ScaleStepIngredient(
+                            ing,
+                            amount,
+                            1,
+                            UnitSystem.Original
+                        );
                         return new McpStepIngredientCalloutDto(
                             IngredientId: ing.Id,
                             DisplayName: ing.DisplayName,
-                            Quantity: ing.Quantity,
-                            MaxQuantity: ing.MaxQuantity,
-                            Unit: ing.Unit,
-                            CustomUnitName: ing.CustomUnitName,
+                            Quantity: scaled.Quantity,
+                            MaxQuantity: scaled.MaxQuantity,
+                            Unit: scaled.Unit,
+                            CustomUnitName: amount?.CustomUnitName,
                             PreparationNote: ing.PreparationNote
                         );
                     })
@@ -533,7 +542,9 @@ public sealed class McpCookbookService(
                         IsOptional: ing.IsOptional,
                         OriginalRawText: string.IsNullOrWhiteSpace(ing.OriginalRawText)
                             ? null
-                            : ing.OriginalRawText.Trim()
+                            : ing.OriginalRawText.Trim(),
+                        AlternativeMeasurement: ing.AlternativeMeasurement,
+                        PreferAlternativeMeasurement: ing.PreferAlternativeMeasurement
                     )
                 );
             }
@@ -583,7 +594,8 @@ public sealed class McpCookbookService(
                         Instruction: instruction,
                         IngredientIndices: validIndices,
                         Timers: timers,
-                        ImagePath: null
+                        ImagePath: null,
+                        IngredientAmounts: s.IngredientAmounts
                     )
                 );
             }

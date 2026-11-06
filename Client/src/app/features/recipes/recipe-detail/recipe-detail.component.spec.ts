@@ -200,6 +200,56 @@ describe('RecipeDetailComponent', () => {
     expect(noodles?.displayQuantityAndUnit).toBe('4 cups');
   });
 
+  it('uses explicit step portions and switches an ingredient equivalent without changing others', () => {
+    const ingredient = {
+      ...sampleRecipe.ingredients[0],
+      quantity: 5,
+      unit: 'Cup' as const,
+      alternativeMeasurement: { quantity: 25, unit: 'Oz' as const },
+      preferAlternativeMeasurement: true,
+    };
+    const step = {
+      ...sampleRecipe.steps[0],
+      ingredientIds: [ingredient.id],
+      ingredientAmounts: [
+        { ingredientId: ingredient.id, measurement: { quantity: 1, unit: 'Cup' as const } },
+      ],
+    };
+    component['recipe'].set({
+      ...sampleRecipe,
+      ingredients: [ingredient, sampleRecipe.ingredients[1]],
+      steps: [step],
+    });
+    component['targetSystem'].set('Metric');
+    expect(component['groupedSteps']()[0].items[0].ingredientCallouts[0].label).toBe(
+      `142 g ${ingredient.displayName}`,
+    );
+    component.setMultiplier(0.5);
+    expect(component['groupedSteps']()[0].items[0].ingredientCallouts[0].label).toBe(
+      `71 g ${ingredient.displayName}`,
+    );
+    component.toggleIngredientMeasurement(ingredient);
+    expect(component['groupedSteps']()[0].items[0].ingredientCallouts[0].label).toBe(
+      `118 ml ${ingredient.displayName}`,
+    );
+    component.toggleIngredientMeasurement(ingredient);
+    expect(component['groupedSteps']()[0].items[0].ingredientCallouts[0].label).toBe(
+      `71 g ${ingredient.displayName}`,
+    );
+    expect(
+      component['scaledIngredientsMap']().get(sampleRecipe.ingredients[1].id)?.ingredient
+        .preferAlternativeMeasurement,
+    ).toBeUndefined();
+    component['recipe'].set({
+      ...sampleRecipe,
+      ingredients: [ingredient],
+      steps: [{ ...step, ingredientAmounts: [] }],
+    });
+    expect(component['groupedSteps']()[0].items[0].ingredientCallouts[0].label).toBe(
+      ingredient.displayName,
+    );
+  });
+
   it('scales quantities when 1.5x multiplier is selected', () => {
     component.setMultiplier(1.5);
     fixture.detectChanges();

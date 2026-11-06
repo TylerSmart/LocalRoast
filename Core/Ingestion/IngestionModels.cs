@@ -46,14 +46,29 @@ public record LlmExtractedIngredientItem(
     string? PreparationNote = null,
     bool IsOptional = false,
     string? OriginalRawText = null,
-    bool SuggestedIsPantryStaple = false
+    bool SuggestedIsPantryStaple = false,
+    LlmExtractedMeasurementItem? AlternativeMeasurement = null
+);
+
+public record LlmExtractedMeasurementItem(
+    [property: JsonConverter(typeof(FlexibleNullableDecimalJsonConverter))] decimal? Quantity,
+    string? Unit,
+    [property: JsonConverter(typeof(FlexibleNullableDecimalJsonConverter))]
+        decimal? MaxQuantity = null
+);
+
+public record LlmExtractedStepIngredientAmountItem(
+    [property: JsonConverter(typeof(FlexibleNullableIntJsonConverter))] int? IngredientIndex,
+    LlmExtractedMeasurementItem Measurement
 );
 
 public record LlmExtractedStepItem(
     string? SectionName,
     string? Instruction = null,
     IReadOnlyList<int>? IngredientIndices = null,
-    IReadOnlyList<LlmExtractedTimerItem>? Timers = null
+    IReadOnlyList<LlmExtractedTimerItem>? Timers = null,
+    IReadOnlyList<LlmExtractedStepIngredientAmountItem>? IngredientAmounts = null,
+    string? OriginalRawText = null
 );
 
 public record LlmExtractedRecipePayload(
@@ -95,7 +110,9 @@ public record IngestionDraftIngredientDto(
     [Required, MaxLength(200)] string DisplayName = "",
     [MaxLength(200)] string? PreparationNote = null,
     bool IsOptional = false,
-    [MaxLength(500)] string? OriginalRawText = null
+    [MaxLength(500)] string? OriginalRawText = null,
+    RecipeMeasurement? AlternativeMeasurement = null,
+    bool PreferAlternativeMeasurement = false
 );
 
 public record IngestionDraftStepDto(
@@ -103,7 +120,8 @@ public record IngestionDraftStepDto(
     [Required, MaxLength(4000)] string Instruction = "",
     IReadOnlyList<int>? IngredientIndices = null,
     IReadOnlyList<RecipeStepTimerInput>? Timers = null,
-    [MaxLength(500)] string? ImagePath = null
+    [MaxLength(500)] string? ImagePath = null,
+    IReadOnlyList<RecipeStepIngredientAmountInput>? IngredientAmounts = null
 );
 
 public record IngestionExtractedDraftDto(
@@ -129,7 +147,8 @@ public record IngestionExtractedDraftDto(
     [Range(1, 10000)] int? SourceBookPage = null,
     bool RetainSourceAttachments = true,
     [MaxLength(200)] string? ExtractedModel = null,
-    IReadOnlyList<string>? ProposedTagNames = null
+    IReadOnlyList<string>? ProposedTagNames = null,
+    IReadOnlyList<string>? MeasurementWarnings = null
 );
 
 public record EnqueueWebUrlIngestionRequest([Required] IReadOnlyList<string> Urls);

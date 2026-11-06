@@ -12,6 +12,10 @@ public sealed class RecipeStepIngredientConfiguration
         builder.ToTable("RecipeStepIngredients");
 
         builder.HasKey(rsi => rsi.Id);
+        builder.Property(rsi => rsi.Quantity).HasPrecision(10, 4);
+        builder.Property(rsi => rsi.MaxQuantity).HasPrecision(10, 4);
+        builder.Property(rsi => rsi.Unit).HasConversion<string>().HasMaxLength(32);
+        builder.Property(rsi => rsi.CustomUnitName).HasMaxLength(50);
 
         builder.HasIndex(rsi => new { rsi.RecipeStepId, rsi.RecipeIngredientId }).IsUnique();
 

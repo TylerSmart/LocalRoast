@@ -38,7 +38,9 @@ public record PublicRecipeIngredientDto(
     string? LinkedSubRecipeTitle,
     string DisplayName,
     string? PreparationNote,
-    bool IsOptional
+    bool IsOptional,
+    RecipeMeasurement? AlternativeMeasurement = null,
+    bool PreferAlternativeMeasurement = false
 );
 
 public record PublicSubRecipeDto(

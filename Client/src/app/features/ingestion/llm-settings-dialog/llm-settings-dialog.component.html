@@ -195,6 +195,16 @@
         </div>
 
         <!-- Ingestion Enable/Disable Toggle -->
+        @if (form.controls.provider.value === 'Ollama') {
+          <div class="toggle-section">
+            <mat-checkbox formControlName="ollamaCpuOnly">Run Ollama on CPU only</mat-checkbox>
+            <span class="toggle-hint">
+              Uses num_gpu=0 for text and vision requests. May be slower, but avoids GPU memory
+              allocation failures such as Gemma's Vulkan startup error. The ctx_other memory-fitting
+              warning alone does not require a configuration change.
+            </span>
+          </div>
+        }
         <div class="toggle-section">
           <mat-slide-toggle formControlName="enableIngestion" color="primary">
             Enable LLM background ingestion

@@ -546,6 +546,19 @@
                   Optional
                 </mat-checkbox>
               </div>
+              <app-measurement-editor
+                formControlName="alternativeMeasurement"
+              ></app-measurement-editor>
+              @if (ingGroup.hasError('primaryMeasurement')) {
+                <p role="status">
+                  An alternative requires a positive primary quantity and unit above.
+                </p>
+              }
+              @if (ingGroup.get('alternativeMeasurement')?.value) {
+                <mat-checkbox formControlName="preferAlternativeMeasurement">
+                  Prefer this alternative when displaying this ingredient
+                </mat-checkbox>
+              }
             </div>
           }
         </div>
@@ -690,6 +703,26 @@
               }
 
               <!-- Step Timers Builder -->
+              <div formArrayName="ingredientAmounts">
+                @for (
+                  amountGroup of getStepAmountsArray($index).controls;
+                  track amountGroup;
+                  let amountIndex = $index
+                ) {
+                  <div [formGroupName]="amountIndex">
+                    <strong>{{
+                      ingredientsArray
+                        .at(amountGroup.controls.ingredientIndex.value)
+                        .get('displayName')?.value
+                    }}</strong>
+                    <app-measurement-editor
+                      formControlName="measurement"
+                      label="Assign step amount"
+                      hint="Only the portion used in this step. It scales in the ingredient callouts; avoid fixed amounts in the instruction. Leave unassigned for a name-only callout."
+                    ></app-measurement-editor>
+                  </div>
+                }
+              </div>
               <div class="step-timers-section">
                 <div class="timers-header">
                   <span class="sub-label">Step Timers:</span>

@@ -39,7 +39,8 @@ public sealed class LlmSettingsService(
                 EnableThinking: entity.EnableThinking,
                 MaxIngestionRetries: entity.MaxIngestionRetries,
                 EnableIngestion: entity.EnableIngestion,
-                ModifiedAt: entity.ModifiedAt
+                ModifiedAt: entity.ModifiedAt,
+                OllamaCpuOnly: entity.OllamaCpuOnly
             );
         }
 
@@ -57,7 +58,8 @@ public sealed class LlmSettingsService(
             EnableThinking: opt.EnableThinking,
             MaxIngestionRetries: opt.MaxIngestionRetries,
             EnableIngestion: opt.EnableIngestion,
-            ModifiedAt: null
+            ModifiedAt: null,
+            OllamaCpuOnly: opt.OllamaCpuOnly
         );
     }
 
@@ -85,7 +87,8 @@ public sealed class LlmSettingsService(
                 AutoPublishHighConfidenceText: entity.AutoPublishHighConfidenceText,
                 EnableThinking: entity.EnableThinking,
                 MaxIngestionRetries: entity.MaxIngestionRetries,
-                EnableIngestion: entity.EnableIngestion
+                EnableIngestion: entity.EnableIngestion,
+                OllamaCpuOnly: entity.OllamaCpuOnly
             );
         }
 
@@ -101,7 +104,8 @@ public sealed class LlmSettingsService(
             AutoPublishHighConfidenceText: opt.AutoPublishHighConfidenceText,
             EnableThinking: opt.EnableThinking,
             MaxIngestionRetries: opt.MaxIngestionRetries,
-            EnableIngestion: opt.EnableIngestion
+            EnableIngestion: opt.EnableIngestion,
+            OllamaCpuOnly: opt.OllamaCpuOnly
         );
     }
 
@@ -150,6 +154,7 @@ public sealed class LlmSettingsService(
         entity.RequestTimeoutSeconds = request.RequestTimeoutSeconds;
         entity.AutoPublishHighConfidenceText = request.AutoPublishHighConfidenceText;
         entity.EnableThinking = request.EnableThinking;
+        entity.OllamaCpuOnly = request.OllamaCpuOnly;
         var wasIngestionEnabled = entity.EnableIngestion;
         entity.MaxIngestionRetries = request.MaxIngestionRetries;
         entity.EnableIngestion = request.EnableIngestion;

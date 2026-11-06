@@ -113,14 +113,17 @@ public sealed record McpStructuredIngredientInput(
     [MaxLength(200)] string? PreparationNote = null,
     bool IsOptional = false,
     [MaxLength(500)] string? OriginalRawText = null,
-    bool IsPantryStaple = false
+    bool IsPantryStaple = false,
+    RecipeMeasurement? AlternativeMeasurement = null,
+    bool PreferAlternativeMeasurement = false
 );
 
 public sealed record McpStructuredStepInput(
     [Required, MaxLength(4000)] string Instruction,
     [MaxLength(150)] string? SectionName = null,
     IReadOnlyList<int>? IngredientIndices = null,
-    IReadOnlyList<RecipeStepTimerInput>? Timers = null
+    IReadOnlyList<RecipeStepTimerInput>? Timers = null,
+    IReadOnlyList<RecipeStepIngredientAmountInput>? IngredientAmounts = null
 );
 
 public sealed record McpSaveStructuredRecipeRequest(

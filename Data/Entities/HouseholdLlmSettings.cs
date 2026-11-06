@@ -28,6 +28,8 @@ public sealed class HouseholdLlmSettings : IAuditable
 
     public bool EnableThinking { get; set; }
 
+    public bool OllamaCpuOnly { get; set; }
+
     public int MaxIngestionRetries { get; set; } = 3;
 
     public bool EnableIngestion { get; set; } = true;

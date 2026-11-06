@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
+using App.Core.Exceptions;
 using App.Core.FoodCatalog;
 using App.Core.Recipes;
 
@@ -17,6 +18,38 @@ public record CatalogTagLookupItem(Guid Id, string Name, string NormalizedName, 
 
 public static class RecipeDraftNormalizer
 {
+    private static readonly Regex SubStepPrefix = new(
+        @"^\s*(?:step\s+)?\d+[A-Za-z][.):]\s+",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled
+    );
+
+    private static RecipeMeasurement? NormalizeMeasurement(
+        LlmExtractedMeasurementItem? raw,
+        ICollection<string> warnings,
+        string label
+    )
+    {
+        if (raw is null)
+        {
+            warnings.Add($"{label}: missing measurement was omitted.");
+            return null;
+        }
+        var (unit, custom) = NormalizeUnit(raw.Unit);
+        var measurement = new RecipeMeasurement(raw.Quantity, unit, raw.MaxQuantity, custom);
+        try
+        {
+            RecipeMeasurementValidation.Validate(measurement);
+            return measurement;
+        }
+        catch (DomainValidationException)
+        {
+            warnings.Add(
+                $"{label}: invalid measurement was omitted; verify the amount in the source."
+            );
+            return null;
+        }
+    }
+
     private static readonly HashSet<string> DisallowedUnitPlaceholders = new(
         StringComparer.OrdinalIgnoreCase
     )
@@ -99,8 +132,11 @@ public static class RecipeDraftNormalizer
             "pt" or "pint" or "pints" => (MeasurementUnit.Pt, null),
             "qt" or "quart" or "quarts" => (MeasurementUnit.Qt, null),
             "gal" or "gallon" or "gallons" => (MeasurementUnit.Gal, null),
-            "ml" or "milliliter" or "milliliters" => (MeasurementUnit.Ml, null),
-            "l" or "liter" or "liters" => (MeasurementUnit.L, null),
+            "ml" or "milliliter" or "milliliters" or "millilitre" or "millilitres" => (
+                MeasurementUnit.Ml,
+                null
+            ),
+            "l" or "liter" or "liters" or "litre" or "litres" => (MeasurementUnit.L, null),
             "oz" or "ounce" or "ounces" => (MeasurementUnit.Oz, null),
             "lb" or "lbs" or "pound" or "pounds" => (MeasurementUnit.Lb, null),
             "g" or "gram" or "grams" => (MeasurementUnit.G, null),
@@ -266,6 +302,7 @@ public static class RecipeDraftNormalizer
             : fallbackSourceBookPage;
 
         var normalizedIngredients = new List<IngestionDraftIngredientDto>();
+        var measurementWarnings = new List<string>();
         var rawIngredients = raw.Ingredients ?? [];
 
         foreach (var rawIng in rawIngredients)
@@ -432,6 +469,54 @@ public static class RecipeDraftNormalizer
                     )
                 );
             }
+            var ingredient = normalizedIngredients[^1];
+            var sourcePair = SourceMeasurementParser.FindAlternative(rawIng.OriginalRawText);
+            if (sourcePair is { } pair)
+            {
+                if (
+                    !string.IsNullOrWhiteSpace(rawSourceText)
+                    && !IsSourceExcerpt(rawIng.OriginalRawText, rawSourceText)
+                )
+                    measurementWarnings.Add(
+                        $"{displayName}: verify the extracted measurement pair; its source excerpt could not be confirmed."
+                    );
+                normalizedIngredients[^1] = ingredient with
+                {
+                    Quantity = pair.Primary.Quantity,
+                    MaxQuantity = pair.Primary.MaxQuantity,
+                    Unit = pair.Primary.Unit,
+                    CustomUnitName = pair.Primary.CustomUnitName,
+                    AlternativeMeasurement = pair.Alternative,
+                };
+            }
+            else if (rawIng.AlternativeMeasurement is not null)
+            {
+                var alternative = NormalizeMeasurement(
+                    rawIng.AlternativeMeasurement,
+                    measurementWarnings,
+                    displayName
+                );
+                if (
+                    alternative is not null
+                    && ingredient.Quantity is > 0
+                    && ingredient.Unit.HasValue
+                )
+                {
+                    normalizedIngredients[^1] = ingredient with
+                    {
+                        AlternativeMeasurement = alternative,
+                    };
+                    measurementWarnings.Add(
+                        $"{displayName}: verify the model-proposed alternative measurement against the source."
+                    );
+                }
+                else if (alternative is not null)
+                {
+                    measurementWarnings.Add(
+                        $"{displayName}: alternative measurement needs a measured primary amount and was omitted."
+                    );
+                }
+            }
         }
 
         var normalizedSteps = new List<IngestionDraftStepDto>();
@@ -444,6 +529,7 @@ public static class RecipeDraftNormalizer
             var instruction = string.IsNullOrWhiteSpace(rawStep.Instruction)
                 ? ""
                 : rawStep.Instruction.Trim();
+            instruction = SubStepPrefix.Replace(instruction, "");
             if (string.IsNullOrWhiteSpace(instruction))
             {
                 continue;
@@ -455,6 +541,67 @@ public static class RecipeDraftNormalizer
                 .Distinct()
                 .OrderBy(idx => idx)
                 .ToList();
+
+            var amounts = new List<RecipeStepIngredientAmountInput>();
+            var sourceAmounts = SourceMeasurementParser.Parse(
+                rawStep.OriginalRawText ?? rawStep.Instruction
+            );
+            foreach (var rawAmount in rawStep.IngredientAmounts ?? [])
+            {
+                var label = $"Step {i + 1}";
+                if (
+                    rawAmount is null
+                    || rawAmount.IngredientIndex is null or < 0
+                    || rawAmount.IngredientIndex >= ingredientCount
+                    || amounts.Any(a => a.IngredientIndex == rawAmount.IngredientIndex)
+                )
+                {
+                    measurementWarnings.Add(
+                        $"{label}: invalid or duplicate ingredient reference was omitted."
+                    );
+                    continue;
+                }
+                var amount = NormalizeMeasurement(
+                    rawAmount.Measurement,
+                    measurementWarnings,
+                    label
+                );
+                if (amount is null)
+                    continue;
+                if (
+                    sourceAmounts.Count == 0
+                    || (
+                        !string.IsNullOrWhiteSpace(rawSourceText)
+                        && !IsSourceExcerpt(
+                            rawStep.OriginalRawText ?? rawStep.Instruction,
+                            rawSourceText
+                        )
+                    )
+                )
+                {
+                    measurementWarnings.Add(
+                        $"{label}: verify the model-proposed amount against the source."
+                    );
+                }
+                else if (
+                    !sourceAmounts.Any(source =>
+                        source.Unit == amount.Unit
+                        && Math.Abs(source.Quantity!.Value - amount.Quantity!.Value) < 0.0001m
+                        && source.MaxQuantity == amount.MaxQuantity
+                    )
+                )
+                {
+                    measurementWarnings.Add(
+                        $"{label}: amount did not match the source instruction and was omitted."
+                    );
+                    continue;
+                }
+                amounts.Add(
+                    new RecipeStepIngredientAmountInput(rawAmount.IngredientIndex.Value, amount)
+                );
+                if (!validIndices.Contains(rawAmount.IngredientIndex.Value))
+                    validIndices.Add(rawAmount.IngredientIndex.Value);
+            }
 
             // Timers: LLM provided vs StepTimerExtractor detection
             var timers = new List<RecipeStepTimerInput>();
@@ -514,7 +661,8 @@ public static class RecipeDraftNormalizer
                     Instruction: instruction,
                     IngredientIndices: validIndices,
                     Timers: timers,
-                    ImagePath: null
+                    ImagePath: null,
+                    IngredientAmounts: amounts
                 )
             );
         }
@@ -581,6 +729,10 @@ public static class RecipeDraftNormalizer
         {
             confidence = Math.Min(confidence, 0.25m);
         } //
+        if (measurementWarnings.Count > 0)
+        {
+            confidence = Math.Min(confidence, 0.70m);
+        }
 
         var normalizedDescription = NormalizeDescription(raw.Description);
         var atkHeadnote = TryExtractAtkHeadnote(rawSourceText);
@@ -620,9 +772,19 @@ public static class RecipeDraftNormalizer
             SourceBookPage: sourceBookPage,
             RetainSourceAttachments: retainSourceAttachments,
             ExtractedModel: extractedModel ?? raw.ExtractedModel,
-            ProposedTagNames: proposedTagNames
+            ProposedTagNames: proposedTagNames,
+            MeasurementWarnings: measurementWarnings
         );
     }
+
+    private static bool IsSourceExcerpt(string? excerpt, string source) =>
+        !string.IsNullOrWhiteSpace(excerpt)
+        && Regex
+            .Replace(source, @"\s+", " ")
+            .Contains(
+                Regex.Replace(excerpt, @"\s+", " ").Trim(),
+                StringComparison.OrdinalIgnoreCase
+            );
 
     private static CatalogFoodLookupItem? FindMatchingFoodItem(
         string rawName,

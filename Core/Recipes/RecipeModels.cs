@@ -64,7 +64,9 @@ public record RecipeIngredientDto(
     string DisplayName,
     string? PreparationNote,
     bool IsOptional,
-    string? OriginalRawText
+    string? OriginalRawText,
+    RecipeMeasurement? AlternativeMeasurement = null,
+    bool PreferAlternativeMeasurement = false
 );
 
 public record RecipeStepTimerDto(Guid Id, int SortOrder, int DurationSeconds, string Label);
@@ -76,7 +78,8 @@ public record RecipeStepDto(
     string Instruction,
     string? ImagePath,
     IReadOnlyList<Guid> IngredientIds,
-    IReadOnlyList<RecipeStepTimerDto> Timers
+    IReadOnlyList<RecipeStepTimerDto> Timers,
+    IReadOnlyList<RecipeStepIngredientAmountDto>? IngredientAmounts = null
 );
 
 public record RecipeAttachmentDto(
@@ -160,7 +163,9 @@ public record RecipeIngredientInput(
     [Required, MaxLength(200)] string DisplayName = "",
     [MaxLength(200)] string? PreparationNote = null,
     bool IsOptional = false,
-    [MaxLength(500)] string? OriginalRawText = null
+    [MaxLength(500)] string? OriginalRawText = null,
+    RecipeMeasurement? AlternativeMeasurement = null,
+    bool PreferAlternativeMeasurement = false
 );
 
 public record RecipeStepTimerInput(
@@ -173,7 +178,8 @@ public record RecipeStepInput(
     [Required, MaxLength(4000)] string Instruction = "",
     IReadOnlyList<int>? IngredientIndices = null,
     IReadOnlyList<RecipeStepTimerInput>? Timers = null,
-    [MaxLength(500)] string? ImagePath = null
+    [MaxLength(500)] string? ImagePath = null,
+    IReadOnlyList<RecipeStepIngredientAmountInput>? IngredientAmounts = null
 );
 
 public record UpsertRecipeRequest(

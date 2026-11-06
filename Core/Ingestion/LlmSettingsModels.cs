@@ -24,6 +24,8 @@ public sealed class LlmDefaultsOptions
 
     public bool EnableThinking { get; set; } = false;
 
+    public bool OllamaCpuOnly { get; set; }
+
     public int MaxIngestionRetries { get; set; } = 3;
 
     public bool EnableIngestion { get; set; } = true;
@@ -48,7 +50,8 @@ public record LlmSettingsDto(
     bool EnableThinking,
     int MaxIngestionRetries,
     bool EnableIngestion,
-    DateTimeOffset? ModifiedAt
+    DateTimeOffset? ModifiedAt,
+    bool OllamaCpuOnly = false
 );
 
 public record EffectiveLlmConnectionConfig(
@@ -62,7 +65,8 @@ public record EffectiveLlmConnectionConfig(
     bool AutoPublishHighConfidenceText,
     bool EnableThinking = false,
     int MaxIngestionRetries = 3,
-    bool EnableIngestion = true
+    bool EnableIngestion = true,
+    bool OllamaCpuOnly = false
 );
 
 public record UpdateLlmSettingsRequest(
@@ -77,7 +81,8 @@ public record UpdateLlmSettingsRequest(
     bool AutoPublishHighConfidenceText = false,
     bool EnableThinking = false,
     [Range(0, 10)] int MaxIngestionRetries = 3,
-    bool EnableIngestion = true
+    bool EnableIngestion = true,
+    bool OllamaCpuOnly = false
 );
 
 public record TestLlmConnectionRequest(

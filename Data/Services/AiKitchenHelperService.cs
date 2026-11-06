@@ -107,11 +107,12 @@ public sealed class AiKitchenHelperService(
                 : recipe.BaseServings;
 
         var scaleFactor = recipe.BaseServings > 0 ? effectiveServings / recipe.BaseServings : 1m;
+        var measurement = ingredient.GetPreferredMeasurement();
         var formattedQty = CulinaryMath.ScaleAndConvert(
-            ingredient.Quantity,
-            ingredient.MaxQuantity,
-            ingredient.Unit,
-            ingredient.CustomUnitName,
+            measurement.Quantity,
+            measurement.MaxQuantity,
+            measurement.Unit,
+            measurement.CustomUnitName,
             scaleFactor,
             request.TargetSystem
         );

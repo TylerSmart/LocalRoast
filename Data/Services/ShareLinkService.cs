@@ -379,7 +379,16 @@ public sealed class ShareLinkService(AppDbContext dbContext, TimeProvider? timeP
             isPublishedSubRecipe ? i.LinkedRecipe?.Title : null,
             i.DisplayName,
             i.PreparationNote,
-            i.IsOptional
+            i.IsOptional,
+            i.AlternativeQuantity.HasValue && i.AlternativeUnit.HasValue
+                ? new RecipeMeasurement(
+                    i.AlternativeQuantity,
+                    i.AlternativeUnit,
+                    i.AlternativeMaxQuantity,
+                    i.AlternativeCustomUnitName
+                )
+                : null,
+            i.PreferAlternativeMeasurement
         );
     }
 
@@ -394,6 +403,12 @@ public sealed class ShareLinkService(AppDbContext dbContext, TimeProvider? timeP
             s.IngredientReferences.Select(ir => ir.RecipeIngredientId).ToList(),
             s.Timers.OrderBy(t => t.SortOrder)
                 .Select(t => new RecipeStepTimerDto(t.Id, t.SortOrder, t.DurationSeconds, t.Label))
+                .ToList(),
+            s.IngredientReferences.Where(ir => ir.Quantity.HasValue && ir.Unit.HasValue)
+                .Select(ir => new RecipeStepIngredientAmountDto(
+                    ir.RecipeIngredientId,
+                    new RecipeMeasurement(ir.Quantity, ir.Unit, ir.MaxQuantity, ir.CustomUnitName)
+                ))
                 .ToList()
         );
     }

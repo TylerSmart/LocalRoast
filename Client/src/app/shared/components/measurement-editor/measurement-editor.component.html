@@ -1,0 +1,35 @@
+<div [formGroup]="form" class="measurement-editor" (focusout)="markTouched()">
+  <mat-checkbox formControlName="enabled">{{ label() }}</mat-checkbox>
+  @if (form.controls.enabled.value) {
+    <p class="measurement-hint">{{ hint() }}</p>
+    <div class="measurement-fields">
+      <mat-form-field appearance="outline" subscriptSizing="dynamic">
+        <mat-label>Amount</mat-label>
+        <input matInput type="number" step="any" min="0.0001" formControlName="quantity" />
+      </mat-form-field>
+      <mat-form-field appearance="outline" subscriptSizing="dynamic">
+        <mat-label>Max (optional)</mat-label>
+        <input matInput type="number" step="any" min="0.0001" formControlName="maxQuantity" />
+      </mat-form-field>
+      <mat-form-field appearance="outline" subscriptSizing="dynamic">
+        <mat-label>Measurement unit</mat-label>
+        <mat-select formControlName="unit">
+          @for (unit of units; track unit.value) {
+            <mat-option [value]="unit.value">{{ unit.label }}</mat-option>
+          }
+        </mat-select>
+      </mat-form-field>
+      @if (form.controls.unit.value === 'Custom') {
+        <mat-form-field appearance="outline" subscriptSizing="dynamic">
+          <mat-label>Custom unit</mat-label>
+          <input matInput formControlName="customUnitName" />
+        </mat-form-field>
+      }
+    </div>
+    @if (validate()) {
+      <p class="measurement-error" role="status">
+        Enter a positive amount and unit. The maximum must not be smaller than the amount.
+      </p>
+    }
+  }
+</div>

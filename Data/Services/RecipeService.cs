@@ -379,7 +379,16 @@ public sealed partial class RecipeService(
             i.DisplayName,
             i.PreparationNote,
             i.IsOptional,
-            i.OriginalRawText
+            i.OriginalRawText,
+            i.AlternativeQuantity.HasValue && i.AlternativeUnit.HasValue
+                ? new RecipeMeasurement(
+                    i.AlternativeQuantity,
+                    i.AlternativeUnit,
+                    i.AlternativeMaxQuantity,
+                    i.AlternativeCustomUnitName
+                )
+                : null,
+            i.PreferAlternativeMeasurement
         );
     }
 
@@ -394,6 +403,12 @@ public sealed partial class RecipeService(
             s.IngredientReferences.Select(ir => ir.RecipeIngredientId).ToList(),
             s.Timers.OrderBy(t => t.SortOrder)
                 .Select(t => new RecipeStepTimerDto(t.Id, t.SortOrder, t.DurationSeconds, t.Label))
+                .ToList(),
+            s.IngredientReferences.Where(ir => ir.Quantity.HasValue && ir.Unit.HasValue)
+                .Select(ir => new RecipeStepIngredientAmountDto(
+                    ir.RecipeIngredientId,
+                    new RecipeMeasurement(ir.Quantity, ir.Unit, ir.MaxQuantity, ir.CustomUnitName)
+                ))
                 .ToList()
         );
     }
@@ -945,6 +960,30 @@ public sealed partial class RecipeService(
                         "An ingredient cannot be both a FoodItem and a Sub-Recipe."
                     );
                 }
+                if (ing.AlternativeMeasurement is { } alternative)
+                {
+                    RecipeMeasurementValidation.Validate(alternative);
+                    if (ing.Quantity is null or <= 0 || ing.Unit is null)
+                    {
+                        throw new DomainValidationException(
+                            "An alternative measurement requires a measured primary quantity and unit."
+                        );
+                    }
+                    RecipeMeasurementValidation.Validate(
+                        new RecipeMeasurement(
+                            ing.Quantity,
+                            ing.Unit,
+                            ing.MaxQuantity,
+                            ing.CustomUnitName
+                        )
+                    );
+                }
+                else if (ing.PreferAlternativeMeasurement)
+                {
+                    throw new DomainValidationException(
+                        "Provide an alternative measurement before selecting it as the default."
+                    );
+                }
             }
         }
 
@@ -984,6 +1023,23 @@ public sealed partial class RecipeService(
                             throw new DomainValidationException("Timer label is required.");
                         }
                     }
+                }
+                var amountIndices = new HashSet<int>();
+                foreach (var amount in step.IngredientAmounts ?? [])
+                {
+                    if (
+                        amount is null
+                        || amount.IngredientIndex < 0
+                        || amount.IngredientIndex >= ingCount
+                        || !amountIndices.Add(amount.IngredientIndex)
+                        || amount.Measurement is null
+                    )
+                    {
+                        throw new DomainValidationException(
+                            "Each step measurement must reference a different valid ingredient index."
+                        );
+                    }
+                    RecipeMeasurementValidation.Validate(amount.Measurement);
                 }
             }
         }
@@ -1099,6 +1155,11 @@ public sealed partial class RecipeService(
                 MaxQuantity = input.MaxQuantity,
                 Unit = unit,
                 CustomUnitName = customUnitName,
+                AlternativeQuantity = input.AlternativeMeasurement?.Quantity,
+                AlternativeMaxQuantity = input.AlternativeMeasurement?.MaxQuantity,
+                AlternativeUnit = input.AlternativeMeasurement?.Unit,
+                AlternativeCustomUnitName = input.AlternativeMeasurement?.CustomUnitName?.Trim(),
+                PreferAlternativeMeasurement = input.PreferAlternativeMeasurement,
                 FoodItemId = input.FoodItemId,
                 LinkedRecipeId = input.LinkedRecipeId,
                 DisplayName = input.DisplayName.Trim(),
@@ -1122,21 +1183,27 @@ public sealed partial class RecipeService(
                 ImagePath = ValidateAndNormalizeMediaPath(sInput.ImagePath),
             };
 
-            if (sInput.IngredientIndices is not null)
+            var amounts = (sInput.IngredientAmounts ?? []).ToDictionary(
+                a => a.IngredientIndex,
+                a => a.Measurement
+            );
+            var indices = (sInput.IngredientIndices ?? []).Concat(amounts.Keys).Distinct();
+            foreach (var idx in indices)
             {
-                var distinctIndices = sInput.IngredientIndices.Distinct().ToList();
-                foreach (var idx in distinctIndices)
+                if (idx >= 0 && idx < createdIngredients.Count)
                 {
-                    if (idx >= 0 && idx < createdIngredients.Count)
-                    {
-                        stepEntity.IngredientReferences.Add(
-                            new RecipeStepIngredient
-                            {
-                                RecipeStep = stepEntity,
-                                RecipeIngredient = createdIngredients[idx],
-                            }
-                        );
-                    }
+                    var amount = amounts.GetValueOrDefault(idx);
+                    stepEntity.IngredientReferences.Add(
+                        new RecipeStepIngredient
+                        {
+                            RecipeStep = stepEntity,
+                            RecipeIngredient = createdIngredients[idx],
+                            Quantity = amount?.Quantity,
+                            MaxQuantity = amount?.MaxQuantity,
+                            Unit = amount?.Unit,
+                            CustomUnitName = amount?.CustomUnitName?.Trim(),
+                        }
+                    );
                 }
             }
 

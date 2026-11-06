@@ -66,6 +66,7 @@ public sealed class LlmSettingsIntegrationTests
         Assert.AreEqual(LlmProvider.Ollama, settings.Provider);
         Assert.IsFalse(settings.HasApiKey);
         Assert.IsNull(settings.ApiKeyMasked);
+        Assert.IsFalse(settings.OllamaCpuOnly);
     }
 
     [TestMethod]
@@ -135,6 +136,28 @@ public sealed class LlmSettingsIntegrationTests
         Assert.IsNotNull(cleared);
         Assert.IsFalse(cleared.HasApiKey);
         Assert.IsNull(cleared.ApiKeyMasked);
+    }
+
+    [TestMethod]
+    public async Task OllamaCpuOnly_PersistsAndReachesEffectiveConfiguration()
+    {
+        await AuthenticateAsync(_client);
+        foreach (var enabled in new[] { true, false })
+        {
+            var response = await _client.PutAsJsonAsync(
+                "/api/llm-settings",
+                new UpdateLlmSettingsRequest(TextModel: "gemma4:26b-a4b", OllamaCpuOnly: enabled)
+            );
+            Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+            var settings = await _client.GetFromJsonAsync<LlmSettingsDto>("/api/llm-settings");
+            Assert.IsNotNull(settings);
+            Assert.AreEqual(enabled, settings.OllamaCpuOnly);
+            using var scope = _factory.Services.CreateScope();
+            var effective = await scope
+                .ServiceProvider.GetRequiredService<ILlmSettingsService>()
+                .GetEffectiveConfigAsync();
+            Assert.AreEqual(enabled, effective.OllamaCpuOnly);
+        }
     }
 
     [TestMethod]
