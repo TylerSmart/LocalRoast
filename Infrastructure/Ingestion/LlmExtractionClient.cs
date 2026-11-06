@@ -402,13 +402,7 @@ public sealed class LlmExtractionClient(HttpClient httpClient, ILlmRequestGate? 
                     keep_alive = string.IsNullOrWhiteSpace(config.OllamaKeepAlive)
                         ? "5m"
                         : config.OllamaKeepAlive.Trim(),
-                    options = new
-                    {
-                        temperature,
-                        num_ctx = config.ContextWindowTokens,
-                        num_predict = maxTokens,
-                        repeat_penalty = 1.1,
-                    },
+                    options = BuildOllamaOptions(config, temperature, maxTokens),
                     format = jsonSchema,
                     messages = new object[]
                     {
@@ -559,13 +553,7 @@ public sealed class LlmExtractionClient(HttpClient httpClient, ILlmRequestGate? 
                     keep_alive = string.IsNullOrWhiteSpace(config.OllamaKeepAlive)
                         ? "5m"
                         : config.OllamaKeepAlive.Trim(),
-                    options = new
-                    {
-                        temperature = 0.1,
-                        num_ctx = config.ContextWindowTokens,
-                        num_predict = 16384,
-                        repeat_penalty = 1.1,
-                    },
+                    options = BuildOllamaOptions(config, 0.1),
                     format = GetRecipeExtractionJsonSchema(),
                     messages = new object[]
                     {
@@ -698,15 +686,45 @@ public sealed class LlmExtractionClient(HttpClient httpClient, ILlmRequestGate? 
         }
     }
 
+    private static Dictionary<string, object> BuildOllamaOptions(
+        EffectiveLlmConnectionConfig config,
+        double temperature,
+        int maxTokens = 16384
+    )
+    {
+        var options = new Dictionary<string, object>
+        {
+            ["temperature"] = temperature,
+            ["num_ctx"] = config.ContextWindowTokens,
+            ["num_predict"] = maxTokens,
+            ["repeat_penalty"] = 1.1,
+        };
+        if (config.OllamaCpuOnly)
+        {
+            options["num_gpu"] = 0;
+        }
+        return options;
+    }
+
     private static async Task EnsureSuccessfulLlmResponseAsync(
         HttpResponseMessage response,
         CancellationToken cancellationToken
     )
     {
-        CheckTransientStatus(response);
         if (!response.IsSuccessStatusCode)
         {
             var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (
+                errorBody.Contains("unable to allocate", StringComparison.OrdinalIgnoreCase)
+                || errorBody.Contains("failed to allocate", StringComparison.OrdinalIgnoreCase)
+                || errorBody.Contains("out of memory", StringComparison.OrdinalIgnoreCase)
+            )
+            {
+                throw new DomainValidationException(
+                    $"The model runner could not allocate enough memory. For Ollama, try CPU-only inference or a smaller model. A Gemma4Assistant ctx_other warning during memory fitting is not a missing application setting. Server detail: {errorBody}"
+                );
+            }
+            CheckTransientStatus(response);
             var detail = !string.IsNullOrWhiteSpace(errorBody) ? $": {errorBody}" : "";
             throw new HttpRequestException(
                 $"Response status code does not indicate success: {(int)response.StatusCode} ({response.ReasonPhrase}){detail}"
@@ -962,14 +980,18 @@ Rules:
    - "unit": normalized unit code (tsp, tbsp, fl_oz, cup, pt, qt, gal, ml, l, oz, lb, g, kg, pinch, dash, clove, can, bunch, slice, whole, or custom unit name). If unmeasured or no unit exists (e.g. unmeasured salt and pepper), set unit to null. NEVER output "null", "none", or placeholder strings as the unit.
    - "canonicalFoodName": the singular canonical ingredient name without preparation, brand, or quantities (e.g. "yellow onion", "garlic", "chicken thigh", "all-purpose flour", "unsalted butter"). When an ingredient matches an item in Existing Food Catalog, reuse that exact canonical name. NEVER output "null", "none", or placeholder words (leave empty or null if unclassified).
    - "displayName": ingredient name as written without leading quantity/unit or preparation instructions (e.g. "extra-virgin olive oil").
-   - "preparationNote": preparation instructions or parenthetical weights only (e.g. "finely diced", "room temperature", "7 1/2 ounces"). Do not repeat any part of the ingredient name here. For example, "1 lime, zested" has displayName "lime" and preparationNote "zested", not "lime zested".
+   - "preparationNote": preparation instructions only (e.g. "finely diced", "room temperature"); keep equivalent measurements out of this field. Do not repeat any part of the ingredient name here. For example, "1 lime, zested" has displayName "lime" and preparationNote "zested", not "lime zested".
+   - "alternativeMeasurement": optional { "quantity": number, "maxQuantity": number or null, "unit": unit code } for a SOURCE-PROVIDED equivalent, such as "5 cups (25 ounces) flour". Keep the first amount as quantity/unit and the parenthetical equivalent here. NEVER assume a density or treat "plus extra" as an equivalent.
    - "isOptional": boolean flag.
    - "originalRawText": verbatim line as originally written.
    - "suggestedIsPantryStaple": boolean flag; true ONLY for basic everyday household staples typically kept on hand (water, salt, black pepper, cooking oils, basic vinegars, all-purpose flour, sugar, baking powder/soda, dried spices/herbs, soy sauce), false for fresh produce, meats, dairy, canned goods, and specialty items.
 5. Steps:
    - "sectionName": optional section header (e.g. "Prepare the Marinade").
-   - "instruction": full clear step instruction text.
+   - "instruction": full clear step instruction text. For ingredient quantities assigned in ingredientAmounts, refer to the listed ingredient amounts instead of repeating fixed numeric amounts; those callouts scale with servings. Preserve all other details, temperatures, and durations.
+   - "originalRawText": verbatim source instruction, including its ingredient quantities.
+   - Split logical sub-steps (such as 4A and 4B) into separate flat ordered steps; omit redundant numbering prefixes. Do not create nested sub-steps.
    - "ingredientIndices": 0-based array of indices of the ingredients used in this step.
+   - "ingredientAmounts": optional list of { "ingredientIndex": 0-based index, "measurement": { "quantity": number, "maxQuantity": number or null, "unit": unit code } }. Assign ONLY amounts explicitly used in this source instruction, not the whole-recipe total. Omit unknown amounts. One amount per ingredient per step; repeated use in separate steps is allowed.
    - "timers": list of timers for any duration in this step:
      - "durationSeconds": integer seconds (e.g. 15 minutes = 900, 1 hour = 3600).
      - "label": short descriptive label (e.g. "Simmer", "Bake", "Rest"). If a step has multiple timers, assign distinct descriptive labels (e.g. "Initial Simmer", "Covered Simmer", "Rest") rather than duplicate names.
@@ -1008,14 +1030,18 @@ Rules:
    - "unit": normalized unit code (tsp, tbsp, fl_oz, cup, pt, qt, gal, ml, l, oz, lb, g, kg, pinch, dash, clove, can, bunch, slice, whole, or custom unit name). If unmeasured or no unit exists (e.g. unmeasured salt and pepper), set unit to null. NEVER output "null", "none", or placeholder strings as the unit.
    - "canonicalFoodName": the singular canonical ingredient name without preparation, brand, or quantities (e.g. "yellow onion", "garlic", "chicken thigh", "all-purpose flour", "unsalted butter"). When an ingredient matches an item in Existing Food Catalog, reuse that exact canonical name. NEVER output "null", "none", or placeholder words (leave empty or null if unclassified).
    - "displayName": ingredient name as written without leading quantity/unit or preparation instructions (e.g. "extra-virgin olive oil").
-   - "preparationNote": preparation instructions or parenthetical weights only (e.g. "finely diced", "room temperature", "7 1/2 ounces"). Do not repeat any part of the ingredient name here. For example, "1 lime, zested" has displayName "lime" and preparationNote "zested", not "lime zested".
+   - "preparationNote": preparation instructions only (e.g. "finely diced", "room temperature"); keep equivalent measurements out of this field. Do not repeat any part of the ingredient name here. For example, "1 lime, zested" has displayName "lime" and preparationNote "zested", not "lime zested".
+   - "alternativeMeasurement": optional { "quantity": number, "maxQuantity": number or null, "unit": unit code } for a SOURCE-PROVIDED equivalent, such as "5 cups (25 ounces) flour". Keep the first amount as quantity/unit and the parenthetical equivalent here. NEVER assume a density or treat "plus extra" as an equivalent.
    - "isOptional": boolean flag.
    - "originalRawText": verbatim line as originally printed.
    - "suggestedIsPantryStaple": boolean flag; true ONLY for basic everyday household staples typically kept on hand (water, salt, black pepper, cooking oils, basic vinegars, all-purpose flour, sugar, baking powder/soda, dried spices/herbs, soy sauce), false for fresh produce, meats, dairy, canned goods, and specialty items.
 6. Steps:
    - "sectionName": optional section header (e.g. "Prepare the Marinade").
-   - "instruction": full clear step instruction text.
+   - "instruction": full clear step instruction text. For ingredient quantities assigned in ingredientAmounts, refer to the listed ingredient amounts instead of repeating fixed numeric amounts; those callouts scale with servings. Preserve all other details, temperatures, and durations.
+   - "originalRawText": verbatim source instruction, including its ingredient quantities.
+   - Split logical sub-steps (such as 4A and 4B) into separate flat ordered steps; omit redundant numbering prefixes. Do not create nested sub-steps.
    - "ingredientIndices": 0-based array of indices of the ingredients used in this step.
+   - "ingredientAmounts": optional list of { "ingredientIndex": 0-based index, "measurement": { "quantity": number, "maxQuantity": number or null, "unit": unit code } }. Assign ONLY amounts explicitly used in this source instruction, not the whole-recipe total. Omit unknown amounts. One amount per ingredient per step; repeated use in separate steps is allowed.
    - "timers": list of timers for any duration in this step:
      - "durationSeconds": integer seconds (e.g. 15 minutes = 900, 1 hour = 3600).
      - "label": short descriptive label (e.g. "Simmer", "Bake", "Rest"). If a step has multiple timers, assign distinct descriptive labels (e.g. "Initial Simmer", "Covered Simmer", "Rest") rather than duplicate names.
@@ -1133,6 +1159,19 @@ Household Cookbook Catalog:
 """;
     }
 
+    private static object BuildMeasurementSchema() =>
+        new
+        {
+            type = "object",
+            properties = new
+            {
+                quantity = new { type = "number" },
+                maxQuantity = new { type = "number" },
+                unit = new { type = "string" },
+            },
+            required = new[] { "quantity", "unit" },
+        };
+
     private static object GetRecipeExtractionJsonSchema()
     {
         return new
@@ -1177,6 +1216,7 @@ Household Cookbook Catalog:
                             isOptional = new { type = "boolean" },
                             originalRawText = new { type = "string" },
                             suggestedIsPantryStaple = new { type = "boolean" },
+                            alternativeMeasurement = BuildMeasurementSchema(),
                         },
                         required = new[] { "displayName" },
                     },
@@ -1191,6 +1231,21 @@ Household Cookbook Catalog:
                         {
                             sectionName = new { type = "string" },
                             instruction = new { type = "string" },
+                            originalRawText = new { type = "string" },
+                            ingredientAmounts = new
+                            {
+                                type = "array",
+                                items = new
+                                {
+                                    type = "object",
+                                    properties = new
+                                    {
+                                        ingredientIndex = new { type = "integer" },
+                                        measurement = BuildMeasurementSchema(),
+                                    },
+                                    required = new[] { "ingredientIndex", "measurement" },
+                                },
+                            },
                             ingredientIndices = new
                             {
                                 type = "array",

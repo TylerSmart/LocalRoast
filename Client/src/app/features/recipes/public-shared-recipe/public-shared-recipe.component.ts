@@ -24,7 +24,9 @@ import {
   FormattedQuantityResult,
   formatDuration,
   formatMinutes,
-  scaleAndConvert,
+  scaleIngredient,
+  formatStepIngredient,
+  stepIngredientCallouts,
 } from '../../../core/utils/culinary-math';
 
 export interface PublicScaledIngredientItem {
@@ -104,15 +106,13 @@ export class PublicSharedRecipeComponent implements OnInit {
       return map;
     }
 
-    for (const ing of r.ingredients) {
-      const scaled = scaleAndConvert(
-        ing.quantity,
-        ing.maxQuantity,
-        ing.unit,
-        ing.customUnitName,
-        factor,
-        sys,
-      );
+    for (const original of r.ingredients) {
+      const ing = {
+        ...original,
+        preferAlternativeMeasurement:
+          this.measurementPreferences()[original.id] ?? original.preferAlternativeMeasurement,
+      };
+      const scaled = scaleIngredient(ing, factor, sys);
 
       const qtyAndUnit = [scaled.formattedAmount, scaled.unitLabel]
         .filter((s) => s.length > 0)
@@ -174,9 +174,12 @@ export class PublicSharedRecipeComponent implements OnInit {
           if (!item) {
             return null;
           }
-          const label = item.displayQuantityAndUnit
-            ? `${item.displayQuantityAndUnit} ${item.ingredient.displayName}`
-            : item.ingredient.displayName;
+          const label = formatStepIngredient(
+            item.ingredient,
+            step.ingredientAmounts?.find((a) => a.ingredientId === id)?.measurement,
+            this.scaleFactor(),
+            this.targetSystem(),
+          );
           return { id, label };
         })
         .filter((c): c is { id: string; label: string } => c !== null);
@@ -203,6 +206,15 @@ export class PublicSharedRecipeComponent implements OnInit {
         this.isUnavailable.set(true);
       }
     });
+  }
+
+  protected readonly measurementPreferences = signal<Record<string, boolean>>({});
+
+  toggleIngredientMeasurement(ingredient: PublicRecipeIngredientDto): void {
+    this.measurementPreferences.update((current) => ({
+      ...current,
+      [ingredient.id]: !(current[ingredient.id] ?? ingredient.preferAlternativeMeasurement),
+    }));
   }
 
   loadSharedRecipe(token: string): void {
@@ -254,21 +266,23 @@ export class PublicSharedRecipeComponent implements OnInit {
     return this.recipe()?.linkedSubRecipes.find((s) => s.id === subRecipeId);
   }
 
-  scaleSubRecipeIngredient(ing: PublicRecipeIngredientDto): string {
-    const factor = this.scaleFactor();
+  scaleSubRecipeIngredient(ing: PublicRecipeIngredientDto, quantity: number | null = null): string {
+    const factor = this.scaleFactor() * (quantity ?? 1);
     const sys = this.targetSystem();
-    const scaled = scaleAndConvert(
-      ing.quantity,
-      ing.maxQuantity,
-      ing.unit,
-      ing.customUnitName,
-      factor,
-      sys,
-    );
+    const scaled = scaleIngredient(ing, factor, sys);
     const qtyAndUnit = [scaled.formattedAmount, scaled.unitLabel]
       .filter((s) => s.length > 0)
       .join(' ');
     return qtyAndUnit ? `${qtyAndUnit} ${ing.displayName}` : ing.displayName;
+  }
+
+  subRecipeStepCallouts(step: RecipeStepDto, sub: PublicSubRecipeDto, quantity: number | null) {
+    return stepIngredientCallouts(
+      step,
+      sub.ingredients,
+      this.scaleFactor() * (quantity ?? 1),
+      this.targetSystem(),
+    );
   }
 
   toggleTheme(): void {

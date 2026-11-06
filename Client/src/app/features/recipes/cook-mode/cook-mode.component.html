@@ -370,6 +370,20 @@
                         <mat-icon>help_outline</mat-icon>
                       </button>
                     }
+                    @if (item.ingredient.alternativeMeasurement) {
+                      <button
+                        mat-icon-button
+                        type="button"
+                        [attr.aria-label]="'Switch measurement for ' + item.ingredient.displayName"
+                        matTooltip="Switch between equivalent measurements"
+                        (click)="
+                          $event.stopPropagation(); toggleIngredientMeasurement(item.ingredient)
+                        "
+                        (keydown)="$event.stopPropagation()"
+                      >
+                        <mat-icon>swap_horiz</mat-icon>
+                      </button>
+                    }
                   </li>
                 }
               </ul>
@@ -390,12 +404,9 @@
                       @for (subIng of sub.ingredients; track subIng.id) {
                         <li class="ingredient-item">
                           <span class="ingredient-text">
-                            @if (subIng.quantity || subIng.customUnitName) {
-                              <strong class="item-qty"
-                                >{{ subIng.quantity }} {{ subIng.customUnitName || '' }}</strong
-                              >
-                            }
-                            <span class="item-name">{{ subIng.displayName }}</span>
+                            <span class="item-name">{{
+                              scaleSubRecipeIngredient(subIng, sub)
+                            }}</span>
                           </span>
                         </li>
                       }
@@ -793,6 +804,20 @@
                         "
                       >
                         <mat-icon>help_outline</mat-icon>
+                      </button>
+                    }
+                    @if (item.ingredient.alternativeMeasurement) {
+                      <button
+                        mat-icon-button
+                        type="button"
+                        [attr.aria-label]="'Switch measurement for ' + item.ingredient.displayName"
+                        matTooltip="Switch between equivalent measurements"
+                        (click)="
+                          $event.stopPropagation(); toggleIngredientMeasurement(item.ingredient)
+                        "
+                        (keydown)="$event.stopPropagation()"
+                      >
+                        <mat-icon>swap_horiz</mat-icon>
                       </button>
                     }
                   </li>

@@ -22,6 +22,7 @@ import {
   RecipeDetailDto,
   RecipeDifficulty,
   RecipeIngredientInput,
+  RecipeMeasurement,
   RecipeStatus,
   RecipeStepInput,
   RecipeSummaryDto,
@@ -33,6 +34,15 @@ import { MediaService } from '../../../core/services/media/media.service';
 import { RecipeService } from '../../../core/services/recipe/recipe.service';
 import { TaxonomyService } from '../../../core/services/taxonomy/taxonomy.service';
 import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialog/confirm-dialog.component';
+import { MeasurementEditorComponent } from '../../../shared/components/measurement-editor/measurement-editor.component';
+import {
+  buildStepAmounts,
+  createStepAmounts,
+  getStepAmounts,
+  ingredientMeasurementValidator,
+  remapStepIngredients,
+  toggleStepIngredient,
+} from '../../../core/utils/recipe-measurement-forms';
 import {
   SearchableSelectComponent,
   SearchableSelectOption,
@@ -59,6 +69,9 @@ interface IngredientFormValue {
   displayName: string;
   preparationNote?: string | null;
   isOptional?: boolean;
+  originalRawText?: string | null;
+  alternativeMeasurement?: RecipeMeasurement | null;
+  preferAlternativeMeasurement?: boolean;
 }
 
 interface TimerFormValue {
@@ -118,6 +131,7 @@ export const MEASUREMENT_UNITS: { value: MeasurementUnit; label: string }[] = [
     MatTooltipModule,
     MatProgressSpinnerModule,
     SearchableSelectComponent,
+    MeasurementEditorComponent,
   ],
   selector: 'app-recipe-editor',
   templateUrl: './recipe-editor.component.html',
@@ -314,20 +328,28 @@ export class RecipeEditorComponent implements OnInit {
     detail.ingredients.forEach((ing, index) => {
       ingredientIdToIndex.set(ing.id, index);
       const isSubRecipe = !!ing.linkedRecipeId;
-      const group = this.fb.group({
-        id: [ing.id],
-        isSubRecipe: [isSubRecipe],
-        sectionName: [ing.sectionName ?? '', Validators.maxLength(150)],
-        quantity: [ing.quantity],
-        maxQuantity: [ing.maxQuantity],
-        unit: [ing.unit ?? null],
-        customUnitName: [ing.customUnitName ?? '', Validators.maxLength(50)],
-        foodItemId: [ing.foodItemId],
-        linkedRecipeId: [ing.linkedRecipeId],
-        displayName: [ing.displayName, [Validators.required, Validators.maxLength(200)]],
-        preparationNote: [ing.preparationNote ?? '', Validators.maxLength(200)],
-        isOptional: [ing.isOptional],
-      });
+      const group = this.fb.group(
+        {
+          id: [ing.id],
+          isSubRecipe: [isSubRecipe],
+          sectionName: [ing.sectionName ?? '', Validators.maxLength(150)],
+          quantity: [ing.quantity],
+          maxQuantity: [ing.maxQuantity],
+          unit: [ing.unit ?? null],
+          customUnitName: [ing.customUnitName ?? '', Validators.maxLength(50)],
+          foodItemId: [ing.foodItemId],
+          linkedRecipeId: [ing.linkedRecipeId],
+          displayName: [ing.displayName, [Validators.required, Validators.maxLength(200)]],
+          preparationNote: [ing.preparationNote ?? '', Validators.maxLength(200)],
+          isOptional: [ing.isOptional],
+          originalRawText: [ing.originalRawText],
+          alternativeMeasurement: this.fb.control<RecipeMeasurement | null>(
+            ing.alternativeMeasurement ?? null,
+          ),
+          preferAlternativeMeasurement: [ing.preferAlternativeMeasurement ?? false],
+        },
+        { validators: ingredientMeasurementValidator },
+      );
       this.ingredientsArray.push(group);
     });
 
@@ -355,6 +377,15 @@ export class RecipeEditorComponent implements OnInit {
         instruction: [step.instruction, [Validators.required, Validators.maxLength(4000)]],
         imagePath: [step.imagePath ?? null],
         ingredientIndices: [selectedIndices],
+        ingredientAmounts: createStepAmounts(
+          selectedIndices,
+          (step.ingredientAmounts ?? []).flatMap((a) => {
+            const index = ingredientIdToIndex.get(a.ingredientId);
+            return index === undefined
+              ? []
+              : [{ ingredientIndex: index, measurement: a.measurement }];
+          }),
+        ),
         timers: timersArray,
       });
 
@@ -579,25 +610,32 @@ export class RecipeEditorComponent implements OnInit {
 
   // --- Ingredient Methods ---
   addIngredient(): void {
-    const group = this.fb.group({
-      id: [null],
-      isSubRecipe: [false],
-      sectionName: ['', Validators.maxLength(150)],
-      quantity: [null],
-      maxQuantity: [null],
-      unit: [null],
-      customUnitName: ['', Validators.maxLength(50)],
-      foodItemId: [null],
-      linkedRecipeId: [null],
-      displayName: ['', [Validators.required, Validators.maxLength(200)]],
-      preparationNote: ['', Validators.maxLength(200)],
-      isOptional: [false],
-    });
+    const group = this.fb.group(
+      {
+        id: [null],
+        isSubRecipe: [false],
+        sectionName: ['', Validators.maxLength(150)],
+        quantity: [null],
+        maxQuantity: [null],
+        unit: [null],
+        customUnitName: ['', Validators.maxLength(50)],
+        foodItemId: [null],
+        linkedRecipeId: [null],
+        displayName: ['', [Validators.required, Validators.maxLength(200)]],
+        preparationNote: ['', Validators.maxLength(200)],
+        isOptional: [false],
+        originalRawText: [null],
+        alternativeMeasurement: this.fb.control<RecipeMeasurement | null>(null),
+        preferAlternativeMeasurement: [false],
+      },
+      { validators: ingredientMeasurementValidator },
+    );
     this.ingredientsArray.push(group);
   }
 
   removeIngredient(index: number): void {
     this.ingredientsArray.removeAt(index);
+    remapStepIngredients(this.stepsArray, (i) => (i === index ? null : i > index ? i - 1 : i));
   }
 
   moveIngredientUp(index: number): void {
@@ -605,6 +643,9 @@ export class RecipeEditorComponent implements OnInit {
       const item = this.ingredientsArray.at(index);
       this.ingredientsArray.removeAt(index);
       this.ingredientsArray.insert(index - 1, item);
+      remapStepIngredients(this.stepsArray, (i) =>
+        i === index ? index - 1 : i === index - 1 ? index : i,
+      );
     }
   }
 
@@ -613,6 +654,9 @@ export class RecipeEditorComponent implements OnInit {
       const item = this.ingredientsArray.at(index);
       this.ingredientsArray.removeAt(index);
       this.ingredientsArray.insert(index + 1, item);
+      remapStepIngredients(this.stepsArray, (i) =>
+        i === index ? index + 1 : i === index + 1 ? index : i,
+      );
     }
   }
 
@@ -663,6 +707,7 @@ export class RecipeEditorComponent implements OnInit {
       instruction: ['', [Validators.required, Validators.maxLength(4000)]],
       imagePath: [null as string | null],
       ingredientIndices: [[] as number[]],
+      ingredientAmounts: createStepAmounts([]),
       timers: this.fb.array<FormGroup>([]),
     });
     this.stepsArray.push(stepGroup);
@@ -709,12 +754,11 @@ export class RecipeEditorComponent implements OnInit {
   }
 
   toggleStepIngredientCallout(stepIndex: number, ingredientIndex: number): void {
-    const step = this.stepsArray.at(stepIndex);
-    const curr: number[] = step.get('ingredientIndices')?.value ?? [];
-    const next = curr.includes(ingredientIndex)
-      ? curr.filter((i) => i !== ingredientIndex)
-      : [...curr, ingredientIndex];
-    step.patchValue({ ingredientIndices: next });
+    toggleStepIngredient(this.stepsArray.at(stepIndex), ingredientIndex);
+  }
+
+  getStepAmountsArray(stepIndex: number) {
+    return getStepAmounts(this.stepsArray.at(stepIndex));
   }
 
   // --- Save / Submit ---
@@ -746,11 +790,15 @@ export class RecipeEditorComponent implements OnInit {
       displayName: ing.displayName.trim(),
       preparationNote: ing.preparationNote?.trim() || null,
       isOptional: !!ing.isOptional,
+      originalRawText: ing.originalRawText ?? null,
+      alternativeMeasurement: ing.alternativeMeasurement ?? null,
+      preferAlternativeMeasurement:
+        !!ing.alternativeMeasurement && !!ing.preferAlternativeMeasurement,
     }));
 
     // Map steps
     const rawSteps = (val.steps || []) as unknown as StepFormValue[];
-    const mappedSteps: RecipeStepInput[] = rawSteps.map((s) => {
+    const mappedSteps: RecipeStepInput[] = rawSteps.map((s, index) => {
       const timers = (s.timers || []).map((t) => {
         const mins = Number(t.minutes) || 0;
         const secs = Number(t.seconds) || 0;
@@ -766,6 +814,7 @@ export class RecipeEditorComponent implements OnInit {
         instruction: s.instruction.trim(),
         imagePath: s.imagePath?.trim() || null,
         ingredientIndices: s.ingredientIndices || [],
+        ingredientAmounts: buildStepAmounts(this.stepsArray.at(index)),
         timers,
       };
     });

@@ -296,6 +296,18 @@
                         }
                       </span>
                     </mat-checkbox>
+                    @if (item.ingredient.alternativeMeasurement) {
+                      <button
+                        mat-icon-button
+                        type="button"
+                        class="no-print"
+                        [attr.aria-label]="'Switch measurement for ' + item.ingredient.displayName"
+                        matTooltip="Switch between equivalent measurements"
+                        (click)="toggleIngredientMeasurement(item.ingredient)"
+                      >
+                        <mat-icon>swap_horiz</mat-icon>
+                      </button>
+                    }
 
                     <!-- Linked Sub-Recipe read-only expansion -->
                     @if (item.ingredient.linkedSubRecipeId) {
@@ -314,7 +326,7 @@
                               <ul>
                                 @for (subIng of subRecipe.ingredients; track subIng.id) {
                                   <li>
-                                    {{ scaleSubRecipeIngredient(subIng) }}
+                                    {{ scaleSubRecipeIngredient(subIng, item.ingredient.quantity) }}
                                     @if (subIng.preparationNote) {
                                       ({{ subIng.preparationNote }})
                                     }
@@ -328,7 +340,19 @@
                                 <strong>Instructions:</strong>
                                 <ol>
                                   @for (subStep of subRecipe.steps; track subStep.id) {
-                                    <li>{{ subStep.instruction }}</li>
+                                    <li>
+                                      {{ subStep.instruction }}
+                                      @for (
+                                        callout of subRecipeStepCallouts(
+                                          subStep,
+                                          subRecipe,
+                                          item.ingredient.quantity
+                                        );
+                                        track callout.id
+                                      ) {
+                                        <div>{{ callout.label }}</div>
+                                      }
+                                    </li>
                                   }
                                 </ol>
                               </div>

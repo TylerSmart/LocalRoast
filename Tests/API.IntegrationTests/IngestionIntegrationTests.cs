@@ -784,6 +784,92 @@ public sealed class IngestionIntegrationTests
         return job;
     }
 
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task StarterIngestion_PreservesMeasurementsAndRequiresReviewForUnverifiedAmounts(
+        bool invalidAmount
+    )
+    {
+        var fakeLlm = new FakeSequentialLlmExtractionClient(_ => new LlmExtractedRecipePayload(
+            Title: "Synthetic Starter",
+            ConfidenceScore: 0.99m,
+            Ingredients:
+            [
+                new(
+                    null,
+                    25,
+                    null,
+                    "oz",
+                    "bread flour",
+                    OriginalRawText: "5 cups (25 ounces) bread flour"
+                ),
+            ],
+            Steps:
+            [
+                new(
+                    null,
+                    "4A. Mix the listed flour.",
+                    [0],
+                    IngredientAmounts: [new(0, new(invalidAmount ? 5 : 1, "cup"))],
+                    OriginalRawText: "4A. Mix 1 cup bread flour."
+                ),
+            ]
+        ));
+        await using var customFactory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Llm:TextModel", "test-text");
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ILlmExtractionClient>();
+                services.AddSingleton<ILlmExtractionClient>(fakeLlm);
+            });
+        });
+        using var client = customFactory.CreateClient();
+        await AuthenticateAsync(client);
+        var queuedResponse = await client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest(
+                "Synthetic Starter\nIngredients:\n5 cups (25 ounces) bread flour\nInstructions:\n4A. Mix 1 cup bread flour.",
+                AutoPublish: true
+            )
+        );
+        queuedResponse.EnsureSuccessStatusCode();
+        var queued = await queuedResponse.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
+        Assert.IsNotNull(queued);
+        using (var scope = customFactory.Services.CreateScope())
+            Assert.IsTrue(
+                await scope
+                    .ServiceProvider.GetRequiredService<IIngestionProcessor>()
+                    .ProcessNextQueuedJobAsync()
+            );
+        var job = await client.GetFromJsonAsync<IngestionJobDetailDto>(
+            $"/api/ingestion/jobs/{queued.Id}"
+        );
+        Assert.IsNotNull(job);
+        Assert.AreEqual(
+            invalidAmount ? IngestionJobStatus.ReadyForReview : IngestionJobStatus.Published,
+            job.Status
+        );
+        Assert.AreEqual(5m, job.ExtractedDraft!.Ingredients![0].Quantity);
+        Assert.AreEqual(25m, job.ExtractedDraft.Ingredients[0].AlternativeMeasurement!.Quantity);
+        if (invalidAmount)
+        {
+            Assert.HasCount(1, job.ExtractedDraft.MeasurementWarnings!);
+            Assert.IsEmpty(job.ExtractedDraft.Steps![0].IngredientAmounts!);
+        }
+        else
+        {
+            var recipe = await client.GetFromJsonAsync<RecipeDetailDto>(
+                $"/api/recipes/{job.ResultingRecipeId}"
+            );
+            Assert.IsNotNull(recipe);
+            Assert.AreEqual(25m, recipe.Ingredients[0].AlternativeMeasurement!.Quantity);
+            Assert.AreEqual(1m, recipe.Steps[0].IngredientAmounts![0].Measurement.Quantity);
+            Assert.AreEqual("Mix the listed flour.", recipe.Steps[0].Instruction);
+        }
+    }
+
     private sealed class FakeSequentialLlmExtractionClient(
         Func<LlmExtractionContext, LlmExtractedRecipePayload> handler
     ) : ILlmExtractionClient

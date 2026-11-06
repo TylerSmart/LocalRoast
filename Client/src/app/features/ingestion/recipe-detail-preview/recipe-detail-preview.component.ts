@@ -26,7 +26,8 @@ import {
 import {
   FormattedQuantityResult,
   formatMinutes,
-  scaleAndConvert,
+  scaleIngredient,
+  formatStepIngredient,
 } from '../../../core/utils/culinary-math';
 
 export interface ScaledPreviewIngredientItem {
@@ -93,14 +94,7 @@ export class RecipeDetailPreviewComponent {
     const map = new Map<number, ScaledPreviewIngredientItem>();
 
     for (const ing of r.ingredients) {
-      const scaled = scaleAndConvert(
-        ing.quantity ?? null,
-        ing.maxQuantity ?? null,
-        ing.unit ?? null,
-        ing.customUnitName ?? null,
-        factor,
-        sys,
-      );
+      const scaled = scaleIngredient(ing, factor, sys);
 
       const qtyAndUnit = [scaled.formattedAmount, scaled.unitLabel]
         .filter((s) => s.length > 0)
@@ -153,9 +147,12 @@ export class RecipeDetailPreviewComponent {
         .map((idx) => {
           const item = map.get(idx);
           if (!item) return null;
-          const label = item.displayQuantityAndUnit
-            ? `${item.displayQuantityAndUnit} ${item.ingredient.displayName}`
-            : item.ingredient.displayName;
+          const label = formatStepIngredient(
+            item.ingredient,
+            step.ingredientAmounts?.find((a) => a.ingredientIndex === idx)?.measurement,
+            this.scaleFactor(),
+            this.targetSystem(),
+          );
           return { id: item.ingredient.id, label };
         })
         .filter((c): c is { id: string; label: string } => c !== null);
@@ -179,7 +176,7 @@ export class RecipeDetailPreviewComponent {
 
   setMultiplier(mult: number): void {
     const base = this.recipe().baseServings || 4;
-    this.targetServings.set(Math.max(1, Math.round(base * mult)));
+    this.targetServings.set(Math.max(0.5, Math.round(base * mult * 2) / 2));
   }
 
   formatMinutes(minutes: number | null | undefined): string {

@@ -12,6 +12,148 @@ public record FormattedQuantityResult(
 
 public static class CulinaryMath
 {
+    public static RecipeMeasurement PreferredMeasurement(
+        RecipeMeasurement primary,
+        RecipeMeasurement? alternative,
+        bool preferAlternative
+    ) => preferAlternative && alternative is not null ? alternative : primary;
+
+    public static FormattedQuantityResult ScaleIngredient(
+        RecipeIngredientDto ingredient,
+        decimal scaleFactor,
+        UnitSystem targetSystem
+    )
+    {
+        var measurement = PreferredMeasurement(
+            new RecipeMeasurement(
+                ingredient.Quantity,
+                ingredient.Unit,
+                ingredient.MaxQuantity,
+                ingredient.CustomUnitName
+            ),
+            ingredient.AlternativeMeasurement,
+            ingredient.PreferAlternativeMeasurement
+        );
+        return ScaleAndConvert(
+            measurement.Quantity,
+            measurement.MaxQuantity,
+            measurement.Unit,
+            measurement.CustomUnitName,
+            scaleFactor,
+            targetSystem
+        );
+    }
+
+    public static FormattedQuantityResult ScaleStepIngredient(
+        RecipeIngredientDto ingredient,
+        RecipeMeasurement? amount,
+        decimal scaleFactor,
+        UnitSystem targetSystem
+    )
+    {
+        if (amount is null)
+            return ScaleAndConvert(null, null, null, null, scaleFactor, targetSystem);
+        var primary = new RecipeMeasurement(
+            ingredient.Quantity,
+            ingredient.Unit,
+            ingredient.MaxQuantity,
+            ingredient.CustomUnitName
+        );
+        var target = PreferredMeasurement(
+            primary,
+            ingredient.AlternativeMeasurement,
+            ingredient.PreferAlternativeMeasurement
+        );
+        var other = ingredient.PreferAlternativeMeasurement
+            ? primary
+            : ingredient.AlternativeMeasurement;
+        if (
+            other is not null
+            && other.Quantity is > 0
+            && target.Quantity is > 0
+            && (
+                amount.Unit != target.Unit
+                || (
+                    amount.Unit == MeasurementUnit.Custom
+                    && !string.Equals(
+                        amount.CustomUnitName,
+                        target.CustomUnitName,
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                )
+            )
+            && (
+                amount.Unit == other.Unit
+                || !TryMeasurementUnitFactor(amount, target, out _)
+                || (
+                    IsMetricUnit(amount.Unit) == IsMetricUnit(other.Unit)
+                    && IsMetricUnit(other.Unit) != IsMetricUnit(target.Unit)
+                )
+            )
+            && TryMeasurementUnitFactor(amount, other, out var unitFactor)
+        )
+        {
+            var ratio = unitFactor * target.Quantity.Value / other.Quantity.Value;
+            amount = new RecipeMeasurement(
+                amount.Quantity * ratio,
+                target.Unit,
+                amount.MaxQuantity * ratio,
+                target.CustomUnitName
+            );
+        }
+        return ScaleAndConvert(
+            amount.Quantity,
+            amount.MaxQuantity,
+            amount.Unit,
+            amount.CustomUnitName,
+            scaleFactor,
+            targetSystem
+        );
+    }
+
+    private static bool TryMeasurementUnitFactor(
+        RecipeMeasurement from,
+        RecipeMeasurement to,
+        out decimal factor
+    )
+    {
+        factor = 0;
+        if (!from.Unit.HasValue || !to.Unit.HasValue)
+            return false;
+        if (
+            from.Unit == to.Unit
+            && (
+                from.Unit != MeasurementUnit.Custom
+                || string.Equals(
+                    from.CustomUnitName,
+                    to.CustomUnitName,
+                    StringComparison.OrdinalIgnoreCase
+                )
+            )
+        )
+        {
+            factor = 1;
+            return true;
+        }
+        if (
+            TryGetVolumeMlFactor(from.Unit.Value, out var fromVolume)
+            && TryGetVolumeMlFactor(to.Unit.Value, out var toVolume)
+        )
+        {
+            factor = fromVolume / toVolume;
+            return true;
+        }
+        if (
+            TryGetWeightGFactor(from.Unit.Value, out var fromWeight)
+            && TryGetWeightGFactor(to.Unit.Value, out var toWeight)
+        )
+        {
+            factor = fromWeight / toWeight;
+            return true;
+        }
+        return false;
+    }
+
     private static readonly (decimal Target, string Fraction)[] KnownFractions =
     [
         (0.125m, "1/8"),

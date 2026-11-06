@@ -1,4 +1,9 @@
-import { MeasurementUnit, RecipeDifficulty, RecipeStepDto } from './recipe.models';
+import {
+  MeasurementUnit,
+  RecipeDifficulty,
+  RecipeMeasurement,
+  RecipeStepDto,
+} from './recipe.models';
 import { TagCategory } from './taxonomy.models';
 
 export interface ShareLinkDto {
@@ -41,6 +46,8 @@ export interface PublicRecipeIngredientDto {
   displayName: string;
   preparationNote: string | null;
   isOptional: boolean;
+  alternativeMeasurement?: RecipeMeasurement | null;
+  preferAlternativeMeasurement?: boolean;
 }
 
 export interface PublicSubRecipeDto {

@@ -19,6 +19,35 @@ describe('IngestionReviewComponent', () => {
   let fixture: ComponentFixture<IngestionReviewComponent>;
   let router: Router;
 
+  it('preserves alternatives, explicit portions, and warnings in review and preview round trips', () => {
+    component.ingredientsArray.at(0).patchValue({
+      alternativeMeasurement: { quantity: 100, unit: 'G' },
+      preferAlternativeMeasurement: true,
+    });
+    component.stepsArray.at(0).patchValue({ ingredientIndices: [0] });
+    component.syncStepAmounts(0);
+    component
+      .getStepAmountsArray(0)
+      .at(0)
+      .controls.measurement.setValue({ quantity: 0.5, unit: 'Custom', customUnitName: 'block' });
+    component.measurementWarnings.set(['Verify the source amount.']);
+    const payload = component.buildDraftPayload();
+    expect(payload.ingredients[0].alternativeMeasurement).toEqual({ quantity: 100, unit: 'G' });
+    expect(payload.steps[0].ingredientAmounts).toEqual([
+      {
+        ingredientIndex: 0,
+        measurement: { quantity: 0.5, unit: 'Custom', customUnitName: 'block' },
+      },
+    ]);
+    expect(payload.measurementWarnings).toEqual(['Verify the source amount.']);
+    component['refreshPreviewData']();
+    expect(component.previewData()?.ingredients[0].alternativeMeasurement?.quantity).toBe(100);
+    expect(component.previewData()?.steps[0].ingredientAmounts?.[0].measurement.quantity).toBe(0.5);
+    component.removeIngredient(0);
+    expect(component.stepsArray.at(0).get('ingredientIndices')?.value).toEqual([]);
+    expect(component.getStepAmountsArray(0).length).toBe(0);
+  });
+
   let mockIngestionService: {
     getJobById: ReturnType<typeof vi.fn>;
     saveDraft: ReturnType<typeof vi.fn>;

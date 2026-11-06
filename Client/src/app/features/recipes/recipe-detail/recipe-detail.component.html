@@ -432,6 +432,18 @@
                     </span>
                   </mat-checkbox>
 
+                  @if (item.ingredient.alternativeMeasurement) {
+                    <button
+                      mat-icon-button
+                      type="button"
+                      class="no-print"
+                      [attr.aria-label]="'Switch measurement for ' + item.ingredient.displayName"
+                      matTooltip="Switch between equivalent measurements"
+                      (click)="toggleIngredientMeasurement(item.ingredient)"
+                    >
+                      <mat-icon>swap_horiz</mat-icon>
+                    </button>
+                  }
                   @if (aiHelper.isAvailable() && !item.ingredient.linkedRecipeId) {
                     <button
                       type="button"
@@ -485,7 +497,7 @@
                             <ul>
                               @for (subIng of subRecipe.ingredients; track subIng.id) {
                                 <li>
-                                  {{ subIng.displayName }}
+                                  {{ scaleSubRecipeIngredient(subIng, item.ingredient.quantity) }}
                                   @if (subIng.preparationNote) {
                                     ({{ subIng.preparationNote }})
                                   }

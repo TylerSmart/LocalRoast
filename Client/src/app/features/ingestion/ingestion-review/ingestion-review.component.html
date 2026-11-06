@@ -307,6 +307,18 @@
 
         @if (rightPaneMode() === 'edit') {
           <form [formGroup]="form" class="draft-form">
+            @if (measurementWarnings().length > 0) {
+              <mat-card class="editor-card" role="status">
+                <mat-card-content>
+                  <h2>Verify ingredient measurements</h2>
+                  <ul>
+                    @for (warning of measurementWarnings(); track $index) {
+                      <li>{{ warning }}</li>
+                    }
+                  </ul>
+                </mat-card-content>
+              </mat-card>
+            }
             <!-- Overview Card -->
             <mat-card class="editor-card">
               <mat-card-content class="editor-card-content">
@@ -580,6 +592,19 @@
                         <mat-icon>delete_outline</mat-icon>
                       </button>
                     </div>
+                    <app-measurement-editor
+                      formControlName="alternativeMeasurement"
+                    ></app-measurement-editor>
+                    @if (ingGroup.hasError('primaryMeasurement')) {
+                      <p role="status">
+                        An alternative requires a positive primary quantity and unit above.
+                      </p>
+                    }
+                    @if (ingGroup.get('alternativeMeasurement')?.value) {
+                      <mat-checkbox formControlName="preferAlternativeMeasurement">
+                        Prefer this alternative when displaying this ingredient
+                      </mat-checkbox>
+                    }
                   </div>
                 }
               </mat-card-content>
@@ -628,7 +653,11 @@
                     <!-- Step Ingredient Callouts Selection -->
                     <mat-form-field appearance="outline" class="form-field full-width">
                       <mat-label>Ingredients used in this step</mat-label>
-                      <mat-select formControlName="ingredientIndices" multiple>
+                      <mat-select
+                        formControlName="ingredientIndices"
+                        multiple
+                        (selectionChange)="syncStepAmounts($index)"
+                      >
                         @for (item of availableIngredientLabels(); track item.index) {
                           <mat-option [value]="item.index">{{ item.label }}</mat-option>
                         }
@@ -636,6 +665,26 @@
                     </mat-form-field>
 
                     <!-- Nested Timers -->
+                    <div formArrayName="ingredientAmounts">
+                      @for (
+                        amountGroup of getStepAmountsArray($index).controls;
+                        track amountGroup;
+                        let amountIndex = $index
+                      ) {
+                        <div [formGroupName]="amountIndex">
+                          <strong>{{
+                            ingredientsArray
+                              .at(amountGroup.controls.ingredientIndex.value)
+                              .get('displayName')?.value
+                          }}</strong>
+                          <app-measurement-editor
+                            formControlName="measurement"
+                            label="Assign step amount"
+                            hint="Only the portion used in this step. It scales in the ingredient callouts; avoid fixed amounts in the instruction. Leave unassigned for a name-only callout."
+                          ></app-measurement-editor>
+                        </div>
+                      }
+                    </div>
                     <div class="timers-subgroup" formArrayName="timers">
                       <div class="timers-header">
                         <span class="timers-title">Step Countdown Timers:</span>

@@ -1206,9 +1206,12 @@ public sealed class ShoppingListService(
                 }
             }
 
-            var qty = ing.Quantity.HasValue ? ing.Quantity.Value * scaleFactor : (decimal?)null;
-            var maxQty = ing.MaxQuantity.HasValue
-                ? ing.MaxQuantity.Value * scaleFactor
+            var measurement = ing.GetPreferredMeasurement();
+            var qty = measurement.Quantity.HasValue
+                ? measurement.Quantity.Value * scaleFactor
+                : (decimal?)null;
+            var maxQty = measurement.MaxQuantity.HasValue
+                ? measurement.MaxQuantity.Value * scaleFactor
                 : (decimal?)null;
 
             targetInputs.Add(
@@ -1218,8 +1221,8 @@ public sealed class ShoppingListService(
                     isPantryStaple,
                     qty,
                     maxQty,
-                    ing.Unit,
-                    ing.CustomUnitName,
+                    measurement.Unit,
+                    measurement.CustomUnitName,
                     ing.PreparationNote,
                     sourceKind,
                     mealPlanEntryId,

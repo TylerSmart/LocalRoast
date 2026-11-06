@@ -33,7 +33,8 @@ import {
   FormattedQuantityResult,
   formatDuration,
   formatMinutes,
-  scaleAndConvert,
+  scaleIngredient,
+  formatStepIngredient,
 } from '../../../core/utils/culinary-math';
 import { getTodayIsoLocal } from '../../../core/utils/meal-plan-date';
 import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialog/confirm-dialog.component';
@@ -136,6 +137,14 @@ export class RecipeDetailComponent implements OnInit {
     }
     return this.targetServings() / r.baseServings;
   });
+  protected readonly measurementPreferences = signal<Record<string, boolean>>({});
+
+  toggleIngredientMeasurement(ingredient: RecipeIngredientDto): void {
+    this.measurementPreferences.update((current) => ({
+      ...current,
+      [ingredient.id]: !(current[ingredient.id] ?? ingredient.preferAlternativeMeasurement),
+    }));
+  }
 
   // Map of ingredientId -> Scaled item for fast step callout resolution
   protected readonly scaledIngredientsMap = computed(() => {
@@ -148,15 +157,13 @@ export class RecipeDetailComponent implements OnInit {
       return map;
     }
 
-    for (const ing of r.ingredients) {
-      const scaled = scaleAndConvert(
-        ing.quantity,
-        ing.maxQuantity,
-        ing.unit,
-        ing.customUnitName,
-        factor,
-        sys,
-      );
+    for (const original of r.ingredients) {
+      const ing = {
+        ...original,
+        preferAlternativeMeasurement:
+          this.measurementPreferences()[original.id] ?? original.preferAlternativeMeasurement,
+      };
+      const scaled = scaleIngredient(ing, factor, sys);
 
       const qtyAndUnit = [scaled.formattedAmount, scaled.unitLabel]
         .filter((s) => s.length > 0)
@@ -220,9 +227,12 @@ export class RecipeDetailComponent implements OnInit {
           if (!item) {
             return null;
           }
-          const label = item.displayQuantityAndUnit
-            ? `${item.displayQuantityAndUnit} ${item.ingredient.displayName}`
-            : item.ingredient.displayName;
+          const label = formatStepIngredient(
+            item.ingredient,
+            step.ingredientAmounts?.find((a) => a.ingredientId === id)?.measurement,
+            this.scaleFactor(),
+            this.targetSystem(),
+          );
           return { id, label };
         })
         .filter((c): c is { id: string; label: string } => c !== null);
@@ -460,6 +470,17 @@ export class RecipeDetailComponent implements OnInit {
       return undefined;
     }
     return this.recipe()?.linkedSubRecipes.find((s) => s.id === subRecipeId);
+  }
+
+  scaleSubRecipeIngredient(ingredient: RecipeIngredientDto, quantity: number | null): string {
+    const scaled = scaleIngredient(
+      ingredient,
+      this.scaleFactor() * (quantity ?? 1),
+      this.targetSystem(),
+    );
+    return [scaled.formattedAmount, scaled.unitLabel, ingredient.displayName]
+      .filter(Boolean)
+      .join(' ');
   }
 
   isTextAttachment(att: RecipeAttachmentDto): boolean {

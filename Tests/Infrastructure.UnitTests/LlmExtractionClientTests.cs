@@ -24,6 +24,107 @@ public sealed class LlmExtractionClientTests
         using var second = await pendingSecond.WaitAsync(TimeSpan.FromSeconds(1));
     }
 
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task OllamaCpuOnly_TextAndVision_UseGpuZeroOnlyWhenEnabled(bool cpuOnly)
+    {
+        var calls = 0;
+        var handler = new MockHttpMessageHandler(request =>
+        {
+            using var body = JsonDocument.Parse(
+                request.Content!.ReadAsStringAsync().GetAwaiter().GetResult()
+            );
+            var options = body.RootElement.GetProperty("options");
+            Assert.AreEqual(cpuOnly, options.TryGetProperty("num_gpu", out var gpu));
+            if (cpuOnly)
+                Assert.AreEqual(0, gpu.GetInt32());
+            Assert.AreEqual(16384, options.GetProperty("num_predict").GetInt32());
+            var schema = body.RootElement.GetProperty("format").GetProperty("properties");
+            Assert.IsTrue(
+                schema
+                    .GetProperty("ingredients")
+                    .GetProperty("items")
+                    .GetProperty("properties")
+                    .TryGetProperty("alternativeMeasurement", out _)
+            );
+            Assert.IsTrue(
+                schema
+                    .GetProperty("steps")
+                    .GetProperty("items")
+                    .GetProperty("properties")
+                    .TryGetProperty("ingredientAmounts", out _)
+            );
+            calls++;
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """{"message":{"content":"{\"title\":\"Synthetic Starter\",\"ingredients\":[],\"steps\":[]}"}}""",
+                    Encoding.UTF8,
+                    "application/json"
+                ),
+            };
+        });
+        var client = new LlmExtractionClient(new HttpClient(handler));
+        var config = new EffectiveLlmConnectionConfig(
+            LlmProvider.Ollama,
+            "http://localhost:11434",
+            null,
+            "test-text",
+            "test-vision",
+            "0",
+            30,
+            false,
+            OllamaCpuOnly: cpuOnly
+        );
+        await client.ExtractRecipeFromTextAsync(
+            config,
+            new LlmExtractionContext("Synthetic source", [])
+        );
+        await client.ExtractRecipeFromImagesAsync(
+            config,
+            new LlmVisionExtractionContext(
+                [new LlmVisionImageInput(1, "image/jpeg", "dGVzdA==")],
+                null,
+                []
+            )
+        );
+        Assert.AreEqual(2, calls);
+    }
+
+    [TestMethod]
+    [DataRow(HttpStatusCode.InternalServerError)]
+    [DataRow(HttpStatusCode.ServiceUnavailable)]
+    public async Task GemmaMemoryFailure_IsActionableInsteadOfAnOfflineHost(HttpStatusCode status)
+    {
+        var handler = new MockHttpMessageHandler(_ => new HttpResponseMessage(status)
+        {
+            Content = new StringContent(
+                """{"error":"Gemma4Assistant requires ctx_other to be set (normal during memory fitting); failed to allocate Vulkan0 buffer"}"""
+            ),
+        });
+        var client = new LlmExtractionClient(new HttpClient(handler));
+        var config = new EffectiveLlmConnectionConfig(
+            LlmProvider.Ollama,
+            "http://localhost:11434",
+            null,
+            "gemma4:26b-a4b",
+            null,
+            "0",
+            30,
+            false
+        );
+        var error = await Assert.ThrowsAsync<DomainValidationException>(() =>
+            client.ExtractRecipeFromTextAsync(
+                config,
+                new LlmExtractionContext("Synthetic source", [])
+            )
+        );
+        StringAssert.Contains(error.Message, "CPU-only");
+        StringAssert.Contains(error.Message, "not a missing application setting");
+        StringAssert.Contains(error.Message, "Vulkan0");
+    }
+
     private sealed class MockHttpMessageHandler(
         Func<HttpRequestMessage, HttpResponseMessage> handlerFunc
     ) : HttpMessageHandler
@@ -409,6 +510,7 @@ public sealed class LlmExtractionClientTests
             var body = req.Content!.ReadAsStringAsync().Result;
             StringAssert.Contains(body, "\"json_schema\"");
             StringAssert.Contains(body, "\"recipe_extraction\"");
+            Assert.IsFalse(body.Contains("\"num_gpu\"", StringComparison.Ordinal));
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(openAiResponse, Encoding.UTF8, "application/json"),
@@ -424,7 +526,8 @@ public sealed class LlmExtractionClientTests
             VisionModel: null,
             OllamaKeepAlive: "5m",
             RequestTimeoutSeconds: 30,
-            AutoPublishHighConfidenceText: false
+            AutoPublishHighConfidenceText: false,
+            OllamaCpuOnly: true
         );
 
         var context = new LlmExtractionContext(

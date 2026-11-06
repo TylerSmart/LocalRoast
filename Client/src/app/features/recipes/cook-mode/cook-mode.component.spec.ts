@@ -184,6 +184,51 @@ describe('CookModeComponent', () => {
     modifiedBy: 'system',
   };
 
+  it('uses scaled step portions in cook callouts and spoken narration', () => {
+    const ingredient = {
+      ...mockRecipe.ingredients[0],
+      quantity: 5,
+      unit: 'Cup' as const,
+      alternativeMeasurement: { quantity: 25, unit: 'Oz' as const },
+      preferAlternativeMeasurement: true,
+    };
+    const step = {
+      ...mockRecipe.steps[0],
+      ingredientIds: [ingredient.id],
+      ingredientAmounts: [
+        { ingredientId: ingredient.id, measurement: { quantity: 1, unit: 'Cup' as const } },
+      ],
+    };
+    component['recipe'].set({ ...mockRecipe, ingredients: [ingredient], steps: [step] });
+    component['targetServings'].set(mockRecipe.baseServings);
+    component['targetSystem'].set('Metric');
+    expect(component['flattenedSteps']()[0].ingredientCallouts[0].label).toBe(
+      `142 g ${ingredient.displayName}`,
+    );
+    component['narrateCurrentStep']();
+    expect(mockSpeechNarrationService.speakStep).toHaveBeenCalledWith(
+      step.stepNumber,
+      `Ingredients for this step: 142 g ${ingredient.displayName}. ${step.instruction}`,
+      step.sectionName,
+    );
+    component.toggleIngredientMeasurement(ingredient);
+    expect(component['flattenedSteps']()[0].ingredientCallouts[0].label).toBe(
+      `237 ml ${ingredient.displayName}`,
+    );
+    component.toggleIngredientMeasurement(ingredient);
+    expect(component['flattenedSteps']()[0].ingredientCallouts[0].label).toBe(
+      `142 g ${ingredient.displayName}`,
+    );
+    component['recipe'].set({
+      ...mockRecipe,
+      ingredients: [ingredient],
+      steps: [{ ...step, ingredientAmounts: [] }],
+    });
+    expect(component['flattenedSteps']()[0].ingredientCallouts[0].label).toBe(
+      ingredient.displayName,
+    );
+  });
+
   beforeEach(async () => {
     mockRecipeService = {
       getRecipeById: vi.fn().mockReturnValue(of(mockRecipe)),

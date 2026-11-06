@@ -79,6 +79,7 @@ export class LlmSettingsDialogComponent implements OnInit {
       Validators.min(2048),
       Validators.max(65536),
     ]),
+    ollamaCpuOnly: this.fb.nonNullable.control<boolean>(false),
     requestTimeoutSeconds: this.fb.nonNullable.control<number>(120, [
       Validators.required,
       Validators.min(5),
@@ -133,6 +134,7 @@ export class LlmSettingsDialogComponent implements OnInit {
             visionModel: settings.visionModel ?? '',
             ollamaKeepAlive: settings.ollamaKeepAlive,
             contextWindowTokens: settings.contextWindowTokens ?? 8192,
+            ollamaCpuOnly: settings.ollamaCpuOnly ?? false,
             requestTimeoutSeconds: settings.requestTimeoutSeconds,
             autoPublishHighConfidenceText: settings.autoPublishHighConfidenceText,
             enableThinking: settings.enableThinking ?? false,
@@ -215,6 +217,7 @@ export class LlmSettingsDialogComponent implements OnInit {
         visionModel: values.visionModel.trim() || null,
         ollamaKeepAlive: values.ollamaKeepAlive.trim() || '5m',
         contextWindowTokens: values.contextWindowTokens,
+        ollamaCpuOnly: values.ollamaCpuOnly,
         requestTimeoutSeconds: values.requestTimeoutSeconds,
         autoPublishHighConfidenceText: values.autoPublishHighConfidenceText,
         enableThinking: values.enableThinking,

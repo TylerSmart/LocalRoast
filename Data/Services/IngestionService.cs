@@ -1264,7 +1264,9 @@ public sealed class IngestionService(
                         DisplayName: ing.DisplayName,
                         PreparationNote: ing.PreparationNote,
                         IsOptional: ing.IsOptional,
-                        OriginalRawText: ing.OriginalRawText
+                        OriginalRawText: ing.OriginalRawText,
+                        AlternativeMeasurement: ing.AlternativeMeasurement,
+                        PreferAlternativeMeasurement: ing.PreferAlternativeMeasurement
                     )
                 );
             }
@@ -1284,7 +1286,8 @@ public sealed class IngestionService(
                         Instruction: s.Instruction,
                         IngredientIndices: s.IngredientIndices,
                         Timers: s.Timers,
-                        ImagePath: s.ImagePath
+                        ImagePath: s.ImagePath,
+                        IngredientAmounts: s.IngredientAmounts
                     )
                 );
             }

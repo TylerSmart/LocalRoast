@@ -42,7 +42,8 @@ import {
   FormattedQuantityResult,
   formatCountdown,
   formatDuration,
-  scaleAndConvert,
+  scaleIngredient,
+  formatStepIngredient,
 } from '../../../core/utils/culinary-math';
 import {
   CookLogDialogComponent,
@@ -136,15 +137,13 @@ export class CookModeComponent implements OnInit, OnDestroy {
 
     if (!r) return map;
 
-    for (const ing of r.ingredients) {
-      const scaled = scaleAndConvert(
-        ing.quantity,
-        ing.maxQuantity,
-        ing.unit,
-        ing.customUnitName,
-        factor,
-        sys,
-      );
+    for (const original of r.ingredients) {
+      const ing = {
+        ...original,
+        preferAlternativeMeasurement:
+          this.measurementPreferences()[original.id] ?? original.preferAlternativeMeasurement,
+      };
+      const scaled = scaleIngredient(ing, factor, sys);
 
       const qtyAndUnit = [scaled.formattedAmount, scaled.unitLabel]
         .filter((s) => s.length > 0)
@@ -197,9 +196,12 @@ export class CookModeComponent implements OnInit, OnDestroy {
         .map((id) => {
           const item = map.get(id);
           if (!item) return null;
-          const label = item.displayQuantityAndUnit
-            ? `${item.displayQuantityAndUnit} ${item.ingredient.displayName}`
-            : item.ingredient.displayName;
+          const label = formatStepIngredient(
+            item.ingredient,
+            step.ingredientAmounts?.find((a) => a.ingredientId === id)?.measurement,
+            this.scaleFactor(),
+            this.targetSystem(),
+          );
           return { id, label };
         })
         .filter((c): c is { id: string; label: string } => c !== null);
@@ -216,6 +218,22 @@ export class CookModeComponent implements OnInit, OnDestroy {
     }
     return null;
   });
+  protected readonly measurementPreferences = signal<Record<string, boolean>>({});
+
+  toggleIngredientMeasurement(ingredient: RecipeIngredientDto): void {
+    this.measurementPreferences.update((current) => ({
+      ...current,
+      [ingredient.id]: !(current[ingredient.id] ?? ingredient.preferAlternativeMeasurement),
+    }));
+  }
+  scaleSubRecipeIngredient(ingredient: RecipeIngredientDto, sub: SubRecipePreviewDto): string {
+    const quantity =
+      this.recipe()?.ingredients.find((i) => i.linkedRecipeId === sub.id)?.quantity ?? 1;
+    const scaled = scaleIngredient(ingredient, this.scaleFactor() * quantity, this.targetSystem());
+    return [scaled.formattedAmount, scaled.unitLabel, ingredient.displayName]
+      .filter(Boolean)
+      .join(' ');
+  }
 
   protected readonly totalStepsCount = computed<number>(() => this.flattenedSteps().length);
 
@@ -506,9 +524,15 @@ export class CookModeComponent implements OnInit, OnDestroy {
   protected narrateCurrentStep(): void {
     const step = this.currentStep();
     if (step) {
+      const amounts = step.ingredientCallouts.filter((c) =>
+        step.step.ingredientAmounts?.some((a) => a.ingredientId === c.id),
+      );
+      const instruction = amounts.length
+        ? `Ingredients for this step: ${amounts.map((a) => a.label).join(', ')}. ${step.step.instruction}`
+        : step.step.instruction;
       this.speechNarrationService.speakStep(
         step.step.stepNumber,
-        step.step.instruction,
+        instruction,
         step.step.sectionName,
       );
     }

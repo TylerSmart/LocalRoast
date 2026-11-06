@@ -20,6 +20,30 @@ public sealed class RecipeIngredient : IAuditable
 
     public string? CustomUnitName { get; set; }
 
+    public decimal? AlternativeQuantity { get; set; }
+
+    public decimal? AlternativeMaxQuantity { get; set; }
+
+    public MeasurementUnit? AlternativeUnit { get; set; }
+
+    public string? AlternativeCustomUnitName { get; set; }
+
+    public bool PreferAlternativeMeasurement { get; set; }
+
+    public RecipeMeasurement GetPreferredMeasurement() =>
+        CulinaryMath.PreferredMeasurement(
+            new RecipeMeasurement(Quantity, Unit, MaxQuantity, CustomUnitName),
+            AlternativeQuantity.HasValue && AlternativeUnit.HasValue
+                ? new RecipeMeasurement(
+                    AlternativeQuantity,
+                    AlternativeUnit,
+                    AlternativeMaxQuantity,
+                    AlternativeCustomUnitName
+                )
+                : null,
+            PreferAlternativeMeasurement
+        );
+
     public Guid? FoodItemId { get; set; }
 
     public Guid? LinkedRecipeId { get; set; }

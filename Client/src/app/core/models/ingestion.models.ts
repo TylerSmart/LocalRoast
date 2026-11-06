@@ -23,7 +23,13 @@ export interface PromotePageToCoverRequest {
   pageNumber: number;
 }
 
-import { MeasurementUnit, RecipeDifficulty, RecipeStepTimerInput } from './recipe.models';
+import {
+  MeasurementUnit,
+  RecipeDifficulty,
+  RecipeMeasurement,
+  RecipeStepIngredientAmountInput,
+  RecipeStepTimerInput,
+} from './recipe.models';
 
 export type LlmProvider = 'Ollama' | 'OpenAiCompatible';
 
@@ -54,6 +60,7 @@ export interface LlmSettingsDto {
   enableIngestion: boolean;
   maxIngestionRetries: number;
   modifiedAt: string | null;
+  ollamaCpuOnly?: boolean;
 }
 
 export interface UpdateLlmSettingsRequest {
@@ -70,6 +77,7 @@ export interface UpdateLlmSettingsRequest {
   enableThinking?: boolean;
   enableIngestion?: boolean;
   maxIngestionRetries?: number;
+  ollamaCpuOnly?: boolean;
 }
 
 export interface TestLlmConnectionRequest {
@@ -121,6 +129,8 @@ export interface IngestionDraftIngredientDto {
   isNewFoodItem: boolean;
   proposedFoodItemName: string | null;
   suggestedIsPantryStaple: boolean;
+  alternativeMeasurement?: RecipeMeasurement | null;
+  preferAlternativeMeasurement?: boolean;
 }
 
 export interface IngestionDraftStepDto {
@@ -130,6 +140,7 @@ export interface IngestionDraftStepDto {
   ingredientIndices: number[];
   timers: RecipeStepTimerInput[];
   imagePath: string | null;
+  ingredientAmounts?: RecipeStepIngredientAmountInput[] | null;
 }
 
 export interface IngestionExtractedDraftDto {
@@ -156,6 +167,7 @@ export interface IngestionExtractedDraftDto {
   retainSourceAttachments?: boolean;
   extractedModel?: string | null;
   proposedTagNames?: string[] | null;
+  measurementWarnings?: string[] | null;
 }
 
 export interface EnqueueWebUrlIngestionRequest {

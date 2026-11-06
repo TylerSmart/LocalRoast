@@ -158,6 +158,44 @@ describe('PublicSharedRecipeComponent', () => {
     expect(scaledLabel).toContain('Roma Tomatoes');
   });
 
+  it('uses assigned portions and per-ingredient equivalents in public recipes', () => {
+    const ingredient = {
+      ...mockPublicRecipe.ingredients[0],
+      quantity: 5,
+      unit: 'Cup' as const,
+      alternativeMeasurement: { quantity: 25, unit: 'Oz' as const },
+      preferAlternativeMeasurement: true,
+    };
+    const step = {
+      ...mockPublicRecipe.steps[0],
+      ingredientIds: [ingredient.id],
+      ingredientAmounts: [
+        { ingredientId: ingredient.id, measurement: { quantity: 1, unit: 'Cup' as const } },
+      ],
+    };
+    component['recipe'].set({ ...mockPublicRecipe, ingredients: [ingredient], steps: [step] });
+    component['targetSystem'].set('Metric');
+    expect(component['groupedSteps']()[0].items[0].ingredientCallouts[0].label).toBe(
+      `142 g ${ingredient.displayName}`,
+    );
+    component.toggleIngredientMeasurement(ingredient);
+    expect(component['groupedSteps']()[0].items[0].ingredientCallouts[0].label).toBe(
+      `237 ml ${ingredient.displayName}`,
+    );
+    component.toggleIngredientMeasurement(ingredient);
+    expect(component['groupedSteps']()[0].items[0].ingredientCallouts[0].label).toBe(
+      `142 g ${ingredient.displayName}`,
+    );
+    component['recipe'].set({
+      ...mockPublicRecipe,
+      ingredients: [ingredient],
+      steps: [{ ...step, ingredientAmounts: [] }],
+    });
+    expect(component['groupedSteps']()[0].items[0].ingredientCallouts[0].label).toBe(
+      ingredient.displayName,
+    );
+  });
+
   it('sets isUnavailable true when API returns error', () => {
     shareLinkServiceSpy.getPublicSharedRecipe.mockReturnValue(
       throwError(() => new Error('Not found')),

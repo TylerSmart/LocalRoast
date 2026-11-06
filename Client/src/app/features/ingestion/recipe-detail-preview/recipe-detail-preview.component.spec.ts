@@ -162,6 +162,35 @@ describe('RecipeDetailPreviewComponent', () => {
     expect(map.get(0)?.scaled.formattedAmount).toBe('4'); // 2 tbsp * 2 = 4 tbsp
   });
 
+  it('scales a one-serving starter to half with the assigned step amount and authored weight equivalent', () => {
+    const ingredient = {
+      ...mockRecipeData.ingredients[0],
+      quantity: 5,
+      unit: 'Cup' as const,
+      alternativeMeasurement: { quantity: 25, unit: 'Oz' as const },
+      preferAlternativeMeasurement: true,
+    };
+    const step = {
+      ...mockRecipeData.steps[0],
+      ingredientIndices: [ingredient.index],
+      ingredientAmounts: [
+        { ingredientIndex: ingredient.index, measurement: { quantity: 1, unit: 'Cup' as const } },
+      ],
+    };
+    fixture.componentRef.setInput('recipe', {
+      ...mockRecipeData,
+      baseServings: 1,
+      ingredients: [ingredient],
+      steps: [step],
+    });
+    component.targetSystem.set('Metric');
+    component.setMultiplier(0.5);
+    expect(component.scaleFactor()).toBe(0.5);
+    expect(component.groupedSteps()[0].items[0].ingredientCallouts[0].label).toBe(
+      `71 g ${ingredient.displayName}`,
+    );
+  });
+
   it('emits publishRequested when publish button is clicked', () => {
     let emitted = false;
     component.publishRequested.subscribe(() => {

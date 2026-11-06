@@ -53,6 +53,23 @@ export const MEASUREMENT_UNITS: { value: MeasurementUnit; label: string }[] = [
 
 export type UnitSystem = 'Original' | 'UsCustomary' | 'Metric';
 
+export interface RecipeMeasurement {
+  quantity: number | null;
+  unit: MeasurementUnit | null;
+  maxQuantity?: number | null;
+  customUnitName?: string | null;
+}
+
+export interface RecipeStepIngredientAmountInput {
+  ingredientIndex: number;
+  measurement: RecipeMeasurement;
+}
+
+export interface RecipeStepIngredientAmountDto {
+  ingredientId: string;
+  measurement: RecipeMeasurement;
+}
+
 export interface RecipeSummaryDto {
   id: string;
   title: string;
@@ -98,6 +115,8 @@ export interface RecipeIngredientDto {
   preparationNote: string | null;
   isOptional: boolean;
   originalRawText: string | null;
+  alternativeMeasurement?: RecipeMeasurement | null;
+  preferAlternativeMeasurement?: boolean;
 }
 
 export interface RecipeStepTimerDto {
@@ -115,6 +134,7 @@ export interface RecipeStepDto {
   imagePath: string | null;
   ingredientIds: string[];
   timers: RecipeStepTimerDto[];
+  ingredientAmounts?: RecipeStepIngredientAmountDto[] | null;
 }
 
 export interface SubRecipePreviewDto {
@@ -217,6 +237,8 @@ export interface RecipeIngredientInput {
   preparationNote?: string | null;
   isOptional?: boolean;
   originalRawText?: string | null;
+  alternativeMeasurement?: RecipeMeasurement | null;
+  preferAlternativeMeasurement?: boolean;
 }
 
 export interface RecipeStepTimerInput {
@@ -230,6 +252,7 @@ export interface RecipeStepInput {
   ingredientIndices?: number[] | null;
   timers?: RecipeStepTimerInput[] | null;
   imagePath?: string | null;
+  ingredientAmounts?: RecipeStepIngredientAmountInput[] | null;
 }
 
 export interface UpsertRecipeRequest {
@@ -326,6 +349,8 @@ export interface RecipePreviewIngredient {
   isOptional?: boolean;
   isPantryStaple?: boolean;
   matchedFoodItemName?: string | null;
+  alternativeMeasurement?: RecipeMeasurement | null;
+  preferAlternativeMeasurement?: boolean;
 }
 
 export interface RecipePreviewStep {
@@ -336,6 +361,7 @@ export interface RecipePreviewStep {
   imagePath?: string | null;
   ingredientIndices?: number[];
   timers?: { durationSeconds: number; label?: string }[];
+  ingredientAmounts?: RecipeStepIngredientAmountInput[] | null;
 }
 
 export interface RecipePreviewData {

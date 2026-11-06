@@ -1,0 +1,28 @@
+:host {
+  display: block;
+  min-width: 0;
+}
+.measurement-editor {
+  margin-block: 8px;
+}
+.measurement-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(140px, 100%), 1fr));
+  gap: 12px;
+  mat-form-field {
+    min-width: 0;
+    width: 100%;
+  }
+}
+.measurement-hint,
+.measurement-error {
+  font-size: 0.8rem;
+  margin: 8px 0;
+  overflow-wrap: anywhere;
+}
+.measurement-hint {
+  color: var(--mat-sys-on-surface-variant);
+}
+.measurement-error {
+  color: var(--mat-sys-error);
+}

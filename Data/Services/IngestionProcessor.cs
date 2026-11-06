@@ -643,7 +643,8 @@ public sealed class IngestionProcessor(
                 && !string.IsNullOrWhiteSpace(draft.Title)
                 && (draft.Ingredients?.Count ?? 0) >= (job.AutoPublish ? 1 : 2)
                 && (draft.Steps?.Count ?? 0) >= 1
-                && draft.ConfidenceScore >= (job.AutoPublish ? 0.60m : 0.85m);
+                && draft.ConfidenceScore >= (job.AutoPublish ? 0.60m : 0.85m)
+                && (draft.MeasurementWarnings?.Count ?? 0) == 0;
 
             if (canAutoPublish)
             {
@@ -972,7 +973,9 @@ public sealed class IngestionProcessor(
                         DisplayName: ing.DisplayName,
                         PreparationNote: ing.PreparationNote,
                         IsOptional: ing.IsOptional,
-                        OriginalRawText: ing.OriginalRawText
+                        OriginalRawText: ing.OriginalRawText,
+                        AlternativeMeasurement: ing.AlternativeMeasurement,
+                        PreferAlternativeMeasurement: ing.PreferAlternativeMeasurement
                     )
                 );
             }
@@ -992,7 +995,8 @@ public sealed class IngestionProcessor(
                         Instruction: s.Instruction,
                         IngredientIndices: s.IngredientIndices,
                         Timers: s.Timers,
-                        ImagePath: s.ImagePath
+                        ImagePath: s.ImagePath,
+                        IngredientAmounts: s.IngredientAmounts
                     )
                 );
             }

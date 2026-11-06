@@ -268,6 +268,39 @@ public sealed class McpCookbookServiceTests
     }
 
     [TestMethod]
+    public async Task StructuredRecipe_PreservesAlternativesAndExplicitStepAmounts()
+    {
+        var recipe = await _service.SaveStructuredRecipeAsync(
+            new McpSaveStructuredRecipeRequest(
+                Title: "Synthetic Starter",
+                Ingredients:
+                [
+                    new McpStructuredIngredientInput(
+                        "Bread flour",
+                        Quantity: 5,
+                        Unit: "cup",
+                        AlternativeMeasurement: new(25, MeasurementUnit.Oz),
+                        PreferAlternativeMeasurement: true
+                    ),
+                ],
+                Steps:
+                [
+                    new McpStructuredStepInput(
+                        "Mix the listed flour.",
+                        IngredientAmounts: [new(0, new(1, MeasurementUnit.Cup))]
+                    ),
+                ]
+            )
+        );
+        Assert.AreEqual(25m, recipe.Ingredients[0].AlternativeMeasurement!.Quantity);
+        Assert.AreEqual(1m, recipe.Steps[0].IngredientAmounts![0].Measurement.Quantity);
+        var detail = await _service.GetRecipeAsync(recipe.Id);
+        Assert.IsNotNull(detail);
+        Assert.AreEqual(5m, detail.Steps[0].StepIngredients[0].Quantity);
+        Assert.AreEqual(MeasurementUnit.Oz, detail.Steps[0].StepIngredients[0].Unit);
+    }
+
+    [TestMethod]
     public async Task SaveStructuredRecipeAsync_ValidRequest_CreatesRecipeWithStepsAndTimers()
     {
         var request = new McpSaveStructuredRecipeRequest(

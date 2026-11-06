@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -14,6 +15,8 @@ public sealed class MockLanLlmAndBlogServer : IAsyncDisposable
     private readonly WebApplication _app;
     public string BaseUrl { get; }
     public bool SimulateOffline { get; set; }
+    public string? ResponsePayload { get; set; }
+    public int? LastNumGpu { get; private set; }
 
     private MockLanLlmAndBlogServer(WebApplication app, string baseUrl)
     {
@@ -57,61 +60,69 @@ public sealed class MockLanLlmAndBlogServer : IAsyncDisposable
 
         app.MapPost(
             "/api/chat",
-            () =>
+            async (HttpRequest request) =>
             {
+                using var body = await JsonDocument.ParseAsync(request.Body);
+                server.LastNumGpu =
+                    body.RootElement.TryGetProperty("options", out var options)
+                    && options.TryGetProperty("num_gpu", out var numGpu)
+                        ? numGpu.GetInt32()
+                        : null;
                 if (server.SimulateOffline)
                 {
                     return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
                 }
 
-                var payloadJson = """
-                    {
-                      "title": "Crispy Sesame Tofu",
-                      "description": "Golden crisp tofu tossed in fragrant sesame sauce.",
-                      "baseServings": 4,
-                      "yieldDisplay": "4 bowls",
-                      "prepTimeMinutes": 15,
-                      "cookTimeMinutes": 10,
-                      "totalTimeMinutes": 25,
-                      "difficulty": "Easy",
-                      "sourceName": "Food Blog",
-                      "sourceAuthor": "Chef Alex",
-                      "ingredients": [
+                var payloadJson =
+                    server.ResponsePayload
+                    ?? """
                         {
-                          "sortOrder": 0,
-                          "displayName": "Garlic",
-                          "quantity": 2,
-                          "unit": "Clove",
-                          "matchedFoodName": "Garlic",
-                          "isPantryStaple": true,
-                          "originalRawText": "2 cloves garlic, minced"
-                        },
-                        {
-                          "sortOrder": 1,
-                          "displayName": "Toasted Sesame Oil",
-                          "quantity": 2,
-                          "unit": "Tbsp",
-                          "isPantryStaple": false,
-                          "originalRawText": "2 tbsp toasted sesame oil"
-                        }
-                      ],
-                      "steps": [
-                        {
-                          "stepNumber": 1,
-                          "instruction": "Heat oil and sauté minced garlic for 2 minutes.",
-                          "ingredientIndices": [0, 1],
-                          "timers": [
+                          "title": "Crispy Sesame Tofu",
+                          "description": "Golden crisp tofu tossed in fragrant sesame sauce.",
+                          "baseServings": 4,
+                          "yieldDisplay": "4 bowls",
+                          "prepTimeMinutes": 15,
+                          "cookTimeMinutes": 10,
+                          "totalTimeMinutes": 25,
+                          "difficulty": "Easy",
+                          "sourceName": "Food Blog",
+                          "sourceAuthor": "Chef Alex",
+                          "ingredients": [
                             {
-                              "durationSeconds": 120,
-                              "label": "Sauté"
+                              "sortOrder": 0,
+                              "displayName": "Garlic",
+                              "quantity": 2,
+                              "unit": "Clove",
+                              "matchedFoodName": "Garlic",
+                              "isPantryStaple": true,
+                              "originalRawText": "2 cloves garlic, minced"
+                            },
+                            {
+                              "sortOrder": 1,
+                              "displayName": "Toasted Sesame Oil",
+                              "quantity": 2,
+                              "unit": "Tbsp",
+                              "isPantryStaple": false,
+                              "originalRawText": "2 tbsp toasted sesame oil"
                             }
-                          ]
+                          ],
+                          "steps": [
+                            {
+                              "stepNumber": 1,
+                              "instruction": "Heat oil and sauté minced garlic for 2 minutes.",
+                              "ingredientIndices": [0, 1],
+                              "timers": [
+                                {
+                                  "durationSeconds": 120,
+                                  "label": "Sauté"
+                                }
+                              ]
+                            }
+                          ],
+                          "suggestedTagNames": ["Quick & Easy"],
+                          "confidenceScore": 0.92
                         }
-                      ],
-                      "suggestedTagNames": ["Quick & Easy"],
-                      "confidenceScore": 0.92
-                    }
-                    """;
+                        """;
 
                 return Results.Ok(
                     new
@@ -203,6 +214,146 @@ public sealed class MockLanLlmAndBlogServer : IAsyncDisposable
 [TestClass]
 public sealed class LlmIngestionE2ETests : E2ETestBase
 {
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task StarterMeasurements_SaveReviewPublishScaleAndSwitchOnMobile_PreservesExplicitPortions()
+    {
+        await using var mockServer = await MockLanLlmAndBlogServer.StartAsync();
+        mockServer.ResponsePayload = """
+            {
+              "title": "Measurement Starter", "baseServings": 4, "confidenceScore": 0.90,
+              "ingredients": [{
+                "displayName": "Starter Flour", "quantity": 5, "unit": "Cup",
+                "originalRawText": "5 cups (25 ounces) Starter Flour"
+              }],
+              "steps": [
+                { "instruction": "4A. Combine the listed flour with water.", "ingredientIndices": [0],
+                  "originalRawText": "4A. Combine 1 cup Starter Flour with water.",
+                  "ingredientAmounts": [{ "ingredientIndex": 0, "measurement": { "quantity": 1, "unit": "Cup" } }] },
+                { "instruction": "4B. Feed with the listed flour.", "ingredientIndices": [0],
+                  "originalRawText": "4B. Feed with 4 cups Starter Flour.",
+                  "ingredientAmounts": [{ "ingredientIndex": 0, "measurement": { "quantity": 4, "unit": "Cup" } }] }
+              ]
+            }
+            """;
+        await RegisterAndLoginAsync();
+        await Page.GotoAsync($"{ServerUrl}/ingest");
+        await Page.Locator(".llm-settings-btn").ClickAsync();
+        var dialog = Page.Locator("app-llm-settings-dialog");
+        await dialog.Locator("input[formcontrolname='baseUrl']").FillAsync(mockServer.BaseUrl);
+        await dialog
+            .Locator("button[aria-label='Test LLM connection and refresh models']")
+            .ClickAsync();
+        await Expect(dialog.Locator(".connection-status-banner.status-success")).ToBeVisibleAsync();
+        await dialog.Locator("input[formcontrolname='textModel']").FillAsync("qwen2.5:14b");
+        await dialog.Locator("mat-checkbox[formcontrolname='ollamaCpuOnly'] label").ClickAsync();
+        await dialog.Locator("button", new() { HasText = "Save Settings" }).ClickAsync();
+        await Expect(dialog).Not.ToBeVisibleAsync();
+        await Page.Locator(".llm-settings-btn").ClickAsync();
+        await Expect(dialog.Locator("mat-checkbox[formcontrolname='ollamaCpuOnly'] input"))
+            .ToBeCheckedAsync();
+        await dialog.Locator("button", new() { HasText = "Save Settings" }).ClickAsync();
+        await Expect(dialog).Not.ToBeVisibleAsync();
+
+        await Page.Locator("button.tab-pill", new() { HasText = "Paste Raw Text" }).ClickAsync();
+        await Page.Locator("input[formcontrolname='titleHint']").FillAsync("Measurement Starter");
+        await Page.Locator("textarea[formcontrolname='rawText']")
+            .FillAsync(
+                "5 cups (25 ounces) Starter Flour\n4A. Combine 1 cup Starter Flour with water.\n4B. Feed with 4 cups Starter Flour."
+            );
+        await Page.Locator("button[aria-label='Queue raw text recipe']").ClickAsync();
+        var job = Page.Locator(".job-card", new() { HasText = "Measurement Starter" });
+        await WaitForLocatorWithRefreshAsync(job.Locator("a.review-action-btn"));
+        Assert.AreEqual(0, mockServer.LastNumGpu);
+        await job.Locator("a.review-action-btn").ClickAsync();
+        await Page.SetViewportSizeAsync(360, 800);
+        var alternative = Page.Locator(
+            "app-measurement-editor[formcontrolname='alternativeMeasurement']"
+        );
+        await Expect(alternative.Locator("input[formcontrolname='quantity']"))
+            .ToHaveValueAsync("25");
+        await Page.Locator("mat-checkbox[formcontrolname='preferAlternativeMeasurement'] input")
+            .CheckAsync();
+        var stepAmount = Page.Locator(
+            "app-measurement-editor[formcontrolname='measurement']"
+        ).First;
+        await stepAmount.Locator("input[formcontrolname='quantity']").FillAsync("0.5");
+        await Page.Locator("button[aria-label='Save review draft']").ClickAsync();
+        await Expect(Page.Locator("mat-snack-bar-container"))
+            .ToContainTextAsync("Review draft saved.");
+        await Page.ReloadAsync();
+        await Expect(stepAmount.Locator("input[formcontrolname='quantity']"))
+            .ToHaveValueAsync("0.5");
+        await Expect(
+                Page.Locator("mat-checkbox[formcontrolname='preferAlternativeMeasurement'] input")
+            )
+            .ToBeCheckedAsync();
+        Assert.IsTrue(
+            await Page.EvaluateAsync<bool>(
+                "document.documentElement.scrollWidth <= window.innerWidth"
+            ),
+            "Review must fit a 360px viewport."
+        );
+        await Page.Locator("button[aria-label='Approve and publish recipe']").ClickAsync();
+        await Expect(Page.Locator(".recipe-title")).ToHaveTextAsync("Measurement Starter");
+        await Page.Locator("mat-button-toggle[value='Metric']").ClickAsync();
+        var callouts = Page.Locator(".ingredient-callout-pill");
+        await Expect(callouts.First).ToContainTextAsync("71 g Starter Flour");
+        await Expect(callouts.Nth(1)).ToContainTextAsync("567 g Starter Flour");
+        await Page.GetByRole(AriaRole.Button, new() { Name = "0.5x", Exact = true }).ClickAsync();
+        await Expect(callouts.First).ToContainTextAsync("35 g Starter Flour");
+        await Page.GetByRole(AriaRole.Button, new() { Name = "2x", Exact = true }).ClickAsync();
+        await Expect(callouts.First).ToContainTextAsync("142 g Starter Flour");
+        var switchButton = Page.Locator(
+            "button[aria-label='Switch measurement for Starter Flour']"
+        );
+        await switchButton.ClickAsync();
+        await Expect(callouts.First).ToContainTextAsync("237 ml Starter Flour");
+        await switchButton.ClickAsync();
+        await Expect(callouts.First).ToContainTextAsync("142 g Starter Flour");
+        Assert.IsTrue(
+            await Page.EvaluateAsync<bool>(
+                "document.documentElement.scrollWidth <= window.innerWidth"
+            ),
+            "Detail must fit a 360px viewport."
+        );
+
+        await Page.Locator("button[aria-label='Start cooking in kitchen mode']").ClickAsync();
+        var cookCallout = Page.Locator(".cook-step-ingredient-chip").First;
+        await Page.Locator("mat-button-toggle[value='Metric']").ClickAsync();
+        await Expect(cookCallout).ToContainTextAsync("142 g Starter Flour");
+        await Page.GetByRole(AriaRole.Button, new() { Name = "0.5x", Exact = true }).ClickAsync();
+        await Expect(cookCallout).ToContainTextAsync("35 g Starter Flour");
+        await Page.GetByRole(AriaRole.Button, new() { Name = "2x", Exact = true }).ClickAsync();
+        await Expect(cookCallout).ToContainTextAsync("142 g Starter Flour");
+        await Page.Locator("button[aria-label='Open ingredients drawer']").ClickAsync();
+        await Page.Locator(
+                ".mobile-ingredients-drawer button[aria-label='Switch measurement for Starter Flour']"
+            )
+            .ClickAsync();
+        await Page.Locator("button[aria-label='Close ingredients drawer']").ClickAsync();
+        await Expect(cookCallout).ToContainTextAsync("237 ml Starter Flour");
+        Assert.IsTrue(
+            await Page.EvaluateAsync<bool>(
+                "document.documentElement.scrollWidth <= window.innerWidth"
+            ),
+            "Cook mode must fit a 360px viewport."
+        );
+        await Page.Locator("button.exit-cook-btn").ClickAsync();
+        await Page.Locator("button[aria-label='More recipe actions']").ClickAsync();
+        await Page.Locator("[aria-label='Edit recipe']").ClickAsync();
+        await Expect(alternative.Locator("input[formcontrolname='quantity']"))
+            .ToHaveValueAsync("25");
+        await Expect(stepAmount.Locator("input[formcontrolname='quantity']"))
+            .ToHaveValueAsync("0.5");
+        Assert.IsTrue(
+            await Page.EvaluateAsync<bool>(
+                "document.documentElement.scrollWidth <= window.innerWidth"
+            ),
+            "Editor must fit a 360px viewport."
+        );
+    }
+
     [TestMethod]
     [Timeout(DefaultTestTimeoutMs)]
     public async Task LlmSettingsAndUrlIngestion_ConfigureOllamaScrapeUrlReviewSideBySideAndPublish_CreatesRecipeAndNewFoodItem()

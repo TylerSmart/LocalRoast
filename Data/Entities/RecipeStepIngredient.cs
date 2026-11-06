@@ -1,3 +1,5 @@
+using App.Core.Recipes;
+
 namespace App.Data.Entities;
 
 public sealed class RecipeStepIngredient : IAuditable
@@ -7,6 +9,14 @@ public sealed class RecipeStepIngredient : IAuditable
     public Guid RecipeStepId { get; set; }
 
     public Guid RecipeIngredientId { get; set; }
+
+    public decimal? Quantity { get; set; }
+
+    public decimal? MaxQuantity { get; set; }
+
+    public MeasurementUnit? Unit { get; set; }
+
+    public string? CustomUnitName { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; }
 

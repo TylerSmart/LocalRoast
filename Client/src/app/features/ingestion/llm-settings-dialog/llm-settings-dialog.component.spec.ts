@@ -87,6 +87,7 @@ describe('LlmSettingsDialogComponent', () => {
     expect(component.form.controls.enableThinking.value).toBe(true);
     expect(component.form.controls.enableIngestion.value).toBe(true);
     expect(component.form.controls.maxIngestionRetries.value).toBe(5);
+    expect(component.form.controls.ollamaCpuOnly.value).toBe(false);
   });
 
   it('automatically attempts to pull models on dialog init when baseUrl is configured', () => {
@@ -138,6 +139,7 @@ describe('LlmSettingsDialogComponent', () => {
     component.form.controls.contextWindowTokens.setValue(16384);
     component.form.controls.enableThinking.setValue(false);
     component.form.controls.maxIngestionRetries.setValue(2);
+    component.form.controls.ollamaCpuOnly.setValue(true);
     component.onSave();
 
     expect(mockLlmSettingsService.updateSettings).toHaveBeenCalledWith(
@@ -146,6 +148,7 @@ describe('LlmSettingsDialogComponent', () => {
         contextWindowTokens: 16384,
         enableThinking: false,
         maxIngestionRetries: 2,
+        ollamaCpuOnly: true,
       }),
     );
     expect(mockIngestionService.refreshSummary).toHaveBeenCalled();

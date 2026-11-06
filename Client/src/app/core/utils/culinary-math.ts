@@ -1,4 +1,144 @@
-import { MeasurementUnit, UnitSystem } from '../models/recipe.models';
+import {
+  MeasurementUnit,
+  RecipeMeasurement,
+  RecipeStepDto,
+  UnitSystem,
+} from '../models/recipe.models';
+
+export interface IngredientMeasurements extends Partial<RecipeMeasurement> {
+  alternativeMeasurement?: RecipeMeasurement | null;
+  preferAlternativeMeasurement?: boolean;
+}
+
+export function preferredIngredientMeasurement(
+  ingredient: IngredientMeasurements,
+): RecipeMeasurement {
+  return ingredient.preferAlternativeMeasurement && ingredient.alternativeMeasurement
+    ? ingredient.alternativeMeasurement
+    : {
+        quantity: ingredient.quantity ?? null,
+        maxQuantity: ingredient.maxQuantity,
+        unit: ingredient.unit ?? null,
+        customUnitName: ingredient.customUnitName,
+      };
+}
+
+export function scaleIngredient(
+  ingredient: IngredientMeasurements,
+  factor: number,
+  system: UnitSystem,
+): FormattedQuantityResult {
+  const measurement = preferredIngredientMeasurement(ingredient);
+  return scaleAndConvert(
+    measurement.quantity,
+    measurement.maxQuantity,
+    measurement.unit,
+    measurement.customUnitName,
+    factor,
+    system,
+  );
+}
+
+function measurementUnitFactor(from: RecipeMeasurement, to: RecipeMeasurement): number | null {
+  if (!from.unit || !to.unit) return null;
+  if (
+    from.unit === to.unit &&
+    (from.unit !== 'Custom' ||
+      from.customUnitName?.toLowerCase() === to.customUnitName?.toLowerCase())
+  )
+    return 1;
+  const fromVolume = getVolumeMlFactor(from.unit);
+  const toVolume = getVolumeMlFactor(to.unit);
+  if (fromVolume !== null && toVolume !== null) return fromVolume / toVolume;
+  const fromWeight = getWeightGFactor(from.unit);
+  const toWeight = getWeightGFactor(to.unit);
+  return fromWeight !== null && toWeight !== null ? fromWeight / toWeight : null;
+}
+
+export function scaleStepIngredient(
+  ingredient: IngredientMeasurements,
+  amount: RecipeMeasurement | null | undefined,
+  factor: number,
+  system: UnitSystem,
+): FormattedQuantityResult {
+  if (!amount) return scaleAndConvert(null, null, null, null, factor, system);
+  const primary: RecipeMeasurement = {
+    quantity: ingredient.quantity ?? null,
+    maxQuantity: ingredient.maxQuantity,
+    unit: ingredient.unit ?? null,
+    customUnitName: ingredient.customUnitName,
+  };
+  const target = preferredIngredientMeasurement(ingredient);
+  const other = ingredient.preferAlternativeMeasurement
+    ? primary
+    : ingredient.alternativeMeasurement;
+  if (
+    other?.quantity &&
+    target.quantity &&
+    (amount.unit !== target.unit ||
+      (amount.unit === 'Custom' &&
+        amount.customUnitName?.toLowerCase() !== target.customUnitName?.toLowerCase())) &&
+    (amount.unit === other.unit ||
+      measurementUnitFactor(amount, target) === null ||
+      (isMetricUnit(amount.unit) === isMetricUnit(other.unit) &&
+        isMetricUnit(other.unit) !== isMetricUnit(target.unit)))
+  ) {
+    const unitFactor = measurementUnitFactor(amount, other);
+    if (unitFactor !== null) {
+      const ratio = (unitFactor * target.quantity) / other.quantity;
+      amount = {
+        quantity: amount.quantity === null ? null : amount.quantity * ratio,
+        maxQuantity: amount.maxQuantity == null ? null : amount.maxQuantity * ratio,
+        unit: target.unit,
+        customUnitName: target.customUnitName,
+      };
+    }
+  }
+  return scaleAndConvert(
+    amount.quantity,
+    amount.maxQuantity,
+    amount.unit,
+    amount.customUnitName,
+    factor,
+    system,
+  );
+}
+
+export function formatStepIngredient(
+  ingredient: IngredientMeasurements & { displayName: string },
+  amount: RecipeMeasurement | null | undefined,
+  factor: number,
+  system: UnitSystem,
+): string {
+  const scaled = scaleStepIngredient(ingredient, amount, factor, system);
+  return [scaled.formattedAmount, scaled.unitLabel, ingredient.displayName]
+    .filter(Boolean)
+    .join(' ');
+}
+
+export function stepIngredientCallouts(
+  step: RecipeStepDto,
+  ingredients: readonly (IngredientMeasurements & { id: string; displayName: string })[],
+  factor: number,
+  system: UnitSystem,
+): { id: string; label: string }[] {
+  return step.ingredientIds.flatMap((id) => {
+    const ingredient = ingredients.find((i) => i.id === id);
+    return ingredient
+      ? [
+          {
+            id,
+            label: formatStepIngredient(
+              ingredient,
+              step.ingredientAmounts?.find((a) => a.ingredientId === id)?.measurement,
+              factor,
+              system,
+            ),
+          },
+        ]
+      : [];
+  });
+}
 
 export interface FormattedQuantityResult {
   quantity: number | null;
@@ -121,7 +261,9 @@ export function getUnitLabel(
         return '';
       }
       const lower = customUnitName.trim().toLowerCase();
-      if (['null', 'none', 'n/a', 'na', 'undefined', 'nil', '-', '--', '???', '?'].includes(lower)) {
+      if (
+        ['null', 'none', 'n/a', 'na', 'undefined', 'nil', '-', '--', '???', '?'].includes(lower)
+      ) {
         return '';
       }
       return customUnitName;
