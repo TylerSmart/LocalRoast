@@ -66,6 +66,7 @@ public sealed class LlmSettingsIntegrationTests
         Assert.AreEqual(LlmProvider.Ollama, settings.Provider);
         Assert.IsFalse(settings.HasApiKey);
         Assert.IsNull(settings.ApiKeyMasked);
+        Assert.AreEqual(8192, settings.ContextWindowTokens);
     }
 
     [TestMethod]
@@ -84,7 +85,8 @@ public sealed class LlmSettingsIntegrationTests
             RequestTimeoutSeconds: 60,
             AutoPublishHighConfidenceText: true,
             EnableThinking: true,
-            MaxIngestionRetries: 5
+            MaxIngestionRetries: 5,
+            ContextWindowTokens: 16384
         );
 
         var putResponse = await _client.PutAsJsonAsync("/api/llm-settings", request);
@@ -101,6 +103,7 @@ public sealed class LlmSettingsIntegrationTests
         Assert.IsTrue(updated.AutoPublishHighConfidenceText);
         Assert.IsTrue(updated.EnableThinking);
         Assert.AreEqual(5, updated.MaxIngestionRetries);
+        Assert.AreEqual(16384, updated.ContextWindowTokens);
 
         // Update without providing ApiKey again -> preserves existing key
         var secondRequest = new UpdateLlmSettingsRequest(

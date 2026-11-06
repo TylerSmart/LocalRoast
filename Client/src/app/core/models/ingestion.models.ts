@@ -47,6 +47,7 @@ export interface LlmSettingsDto {
   textModel: string | null;
   visionModel: string | null;
   ollamaKeepAlive: string;
+  contextWindowTokens: number;
   requestTimeoutSeconds: number;
   autoPublishHighConfidenceText: boolean;
   enableThinking: boolean;
@@ -63,6 +64,7 @@ export interface UpdateLlmSettingsRequest {
   textModel?: string | null;
   visionModel?: string | null;
   ollamaKeepAlive?: string;
+  contextWindowTokens?: number;
   requestTimeoutSeconds?: number;
   autoPublishHighConfidenceText?: boolean;
   enableThinking?: boolean;

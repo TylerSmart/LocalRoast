@@ -32,6 +32,7 @@ describe('LlmSettingsDialogComponent', () => {
     textModel: 'qwen2.5:14b',
     visionModel: 'qwen2.5vl:7b',
     ollamaKeepAlive: '5m',
+    contextWindowTokens: 8192,
     requestTimeoutSeconds: 120,
     autoPublishHighConfidenceText: false,
     enableThinking: true,
@@ -82,6 +83,7 @@ describe('LlmSettingsDialogComponent', () => {
     expect(component.form.controls.baseUrl.value).toBe('http://localhost:11434');
     expect(component.form.controls.textModel.value).toBe('qwen2.5:14b');
     expect(component.form.controls.visionModel.value).toBe('qwen2.5vl:7b');
+    expect(component.form.controls.contextWindowTokens.value).toBe(8192);
     expect(component.form.controls.enableThinking.value).toBe(true);
     expect(component.form.controls.enableIngestion.value).toBe(true);
     expect(component.form.controls.maxIngestionRetries.value).toBe(5);
@@ -133,6 +135,7 @@ describe('LlmSettingsDialogComponent', () => {
 
   it('saves settings and closes dialog', () => {
     component.form.controls.textModel.setValue('mistral:7b');
+    component.form.controls.contextWindowTokens.setValue(16384);
     component.form.controls.enableThinking.setValue(false);
     component.form.controls.maxIngestionRetries.setValue(2);
     component.onSave();
@@ -140,6 +143,7 @@ describe('LlmSettingsDialogComponent', () => {
     expect(mockLlmSettingsService.updateSettings).toHaveBeenCalledWith(
       expect.objectContaining({
         textModel: 'mistral:7b',
+        contextWindowTokens: 16384,
         enableThinking: false,
         maxIngestionRetries: 2,
       }),

@@ -8,7 +8,8 @@ using App.Core.Ingestion;
 
 namespace App.Infrastructure.Ingestion;
 
-public sealed class LlmExtractionClient(HttpClient httpClient) : ILlmExtractionClient
+public sealed class LlmExtractionClient(HttpClient httpClient, ILlmRequestGate? requestGate = null)
+    : ILlmExtractionClient
 {
     private readonly bool _ = ConfigureHttpClient(httpClient);
 
@@ -337,6 +338,7 @@ public sealed class LlmExtractionClient(HttpClient httpClient) : ILlmExtractionC
                     options = new
                     {
                         temperature,
+                        num_ctx = config.ContextWindowTokens,
                         num_predict = 16384,
                         repeat_penalty = 1.1,
                     },
@@ -357,6 +359,9 @@ public sealed class LlmExtractionClient(HttpClient httpClient) : ILlmExtractionC
                     Content = new StringContent(requestJson, Encoding.UTF8, "application/json"),
                 };
 
+                using var requestLease = requestGate is null
+                    ? null
+                    : await requestGate.AcquireAsync(linkedCts.Token);
                 using var response = await httpClient.SendAsync(request, linkedCts.Token);
                 await EnsureSuccessfulLlmResponseAsync(response, linkedCts.Token);
 
@@ -409,6 +414,9 @@ public sealed class LlmExtractionClient(HttpClient httpClient) : ILlmExtractionC
                     );
                 }
 
+                using var requestLease = requestGate is null
+                    ? null
+                    : await requestGate.AcquireAsync(linkedCts.Token);
                 using var response = await httpClient.SendAsync(request, linkedCts.Token);
                 await EnsureSuccessfulLlmResponseAsync(response, linkedCts.Token);
 
@@ -420,7 +428,7 @@ public sealed class LlmExtractionClient(HttpClient httpClient) : ILlmExtractionC
         {
             throw new LlmHostUnavailableException($"LLM host connection failed: {ex.Message}", ex);
         }
-        catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
             sw.Stop();
             var elapsed = Math.Max(1, (int)sw.Elapsed.TotalSeconds);
@@ -487,6 +495,7 @@ public sealed class LlmExtractionClient(HttpClient httpClient) : ILlmExtractionC
                     options = new
                     {
                         temperature = 0.1,
+                        num_ctx = config.ContextWindowTokens,
                         num_predict = 16384,
                         repeat_penalty = 1.1,
                     },
@@ -512,6 +521,9 @@ public sealed class LlmExtractionClient(HttpClient httpClient) : ILlmExtractionC
                     Content = new StringContent(requestJson, Encoding.UTF8, "application/json"),
                 };
 
+                using var requestLease = requestGate is null
+                    ? null
+                    : await requestGate.AcquireAsync(linkedCts.Token);
                 using var response = await httpClient.SendAsync(request, linkedCts.Token);
                 await EnsureSuccessfulLlmResponseAsync(response, linkedCts.Token);
 
@@ -581,6 +593,9 @@ public sealed class LlmExtractionClient(HttpClient httpClient) : ILlmExtractionC
                     );
                 }
 
+                using var requestLease = requestGate is null
+                    ? null
+                    : await requestGate.AcquireAsync(linkedCts.Token);
                 using var response = await httpClient.SendAsync(request, linkedCts.Token);
                 await EnsureSuccessfulLlmResponseAsync(response, linkedCts.Token);
 
@@ -592,7 +607,7 @@ public sealed class LlmExtractionClient(HttpClient httpClient) : ILlmExtractionC
         {
             throw new LlmHostUnavailableException($"LLM host connection failed: {ex.Message}", ex);
         }
-        catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
             sw.Stop();
             var elapsed = Math.Max(1, (int)sw.Elapsed.TotalSeconds);
@@ -854,13 +869,15 @@ Rules:
 2. Description: Extract the recipe's intro/headnote description VERBATIM as written in the source text. Do NOT summarize, rewrite, condense, or invent your own description. Preserve the author's original headnote text and explanation verbatim. Strip out boilerplate section headers like "WHY THIS RECIPE WORKS", "Why This Recipe Works", or "Why It Works" at the start of the description so it begins directly with the headnote narrative. If no headnote or intro description exists in the source text, set description to null.
 3. SourceName & SourceAuthor: extract publication/blog name and author if present. SourceBookTitle & SourceBookPage: extract cookbook title and page number if visible.
 4. Ingredients:
+   - Emit one ingredient per distinct ingredient line in the source. Never combine repeated ingredients, even when they name the same food; keep optional/additional amounts (such as "more ... as needed") as their own optional ingredient.
+   - Preserve every explicit quantity and unit from the source, including ranges and parenthetical weights. Do not omit, combine, or invent amounts. Use null only when the source gives no measurable amount or says to taste/as needed.
    - "sectionName": optional group name (e.g. "For the Marinade", "For the Sauce").
    - "quantity": numeric decimal greater than 0, or null if unmeasured / to taste (e.g. 1.5). When an ingredient specifies an unnumbered count like "Pinch cayenne pepper", "A pinch of salt", "Dash hot sauce", or "Clove garlic", quantity MUST be 1 (e.g. quantity: 1, unit: "pinch"). NEVER output fractional decimals like 0.01 or 0 for a pinch or dash. NEVER output 0 or negative numbers.
    - "maxQuantity": upper bound if a range was specified (e.g. 2.0 for "1.5 to 2 tbsp"), else null.
    - "unit": normalized unit code (tsp, tbsp, fl_oz, cup, pt, qt, gal, ml, l, oz, lb, g, kg, pinch, dash, clove, can, bunch, slice, whole, or custom unit name). If unmeasured or no unit exists (e.g. unmeasured salt and pepper), set unit to null. NEVER output "null", "none", or placeholder strings as the unit.
    - "canonicalFoodName": the singular canonical ingredient name without preparation, brand, or quantities (e.g. "yellow onion", "garlic", "chicken thigh", "all-purpose flour", "unsalted butter"). When an ingredient matches an item in Existing Food Catalog, reuse that exact canonical name. NEVER output "null", "none", or placeholder words (leave empty or null if unclassified).
-   - "displayName": recipe display name as written without leading quantity/unit (e.g. "extra-virgin olive oil").
-   - "preparationNote": preparation instructions or parenthetical weights (e.g. "finely diced", "room temperature", "7 1/2 ounces").
+   - "displayName": ingredient name as written without leading quantity/unit or preparation instructions (e.g. "extra-virgin olive oil").
+   - "preparationNote": preparation instructions or parenthetical weights only (e.g. "finely diced", "room temperature", "7 1/2 ounces"). Do not repeat any part of the ingredient name here. For example, "1 lime, zested" has displayName "lime" and preparationNote "zested", not "lime zested".
    - "isOptional": boolean flag.
    - "originalRawText": verbatim line as originally written.
    - "suggestedIsPantryStaple": boolean flag; true ONLY for basic everyday household staples typically kept on hand (water, salt, black pepper, cooking oils, basic vinegars, all-purpose flour, sugar, baking powder/soda, dried spices/herbs, soy sauce), false for fresh produce, meats, dairy, canned goods, and specialty items.
@@ -898,13 +915,15 @@ Rules:
 3. Description: Transcribe the recipe's intro/headnote description VERBATIM from the page text as printed. Do NOT summarize, rewrite, condense, or invent your own description. Transcribe the author's original headnote text and explanation verbatim across all paragraphs. Strip out boilerplate section headers like "WHY THIS RECIPE WORKS", "Why This Recipe Works", or "Why It Works" at the start of the description so it begins directly with the headnote narrative. If no headnote or intro description is printed on the page(s), set description to null.
 4. SourceBookTitle & SourceBookPage: if visible in headers, footers, or margins, extract the cookbook title and page number. SourceAuthor / SourceName: extract author or chef attribution if printed.
 5. Ingredients:
+   - Emit one ingredient per distinct ingredient line in the source. Never combine repeated ingredients, even when they name the same food; keep optional/additional amounts (such as "more ... as needed") as their own optional ingredient.
+   - Preserve every explicit quantity and unit from the source, including ranges and parenthetical weights. Do not omit, combine, or invent amounts. Use null only when the source gives no measurable amount or says to taste/as needed.
    - "sectionName": optional group name (e.g. "For the Marinade", "For the Sauce").
    - "quantity": numeric decimal greater than 0, or null if unmeasured / to taste (e.g. 1.5). When an ingredient specifies an unnumbered count like "Pinch cayenne pepper", "A pinch of salt", "Dash hot sauce", or "Clove garlic", quantity MUST be 1 (e.g. quantity: 1, unit: "pinch"). NEVER output fractional decimals like 0.01 or 0 for a pinch or dash. NEVER output 0 or negative numbers.
    - "maxQuantity": upper bound if a range was specified (e.g. 2.0 for "1.5 to 2 tbsp"), else null.
    - "unit": normalized unit code (tsp, tbsp, fl_oz, cup, pt, qt, gal, ml, l, oz, lb, g, kg, pinch, dash, clove, can, bunch, slice, whole, or custom unit name). If unmeasured or no unit exists (e.g. unmeasured salt and pepper), set unit to null. NEVER output "null", "none", or placeholder strings as the unit.
    - "canonicalFoodName": the singular canonical ingredient name without preparation, brand, or quantities (e.g. "yellow onion", "garlic", "chicken thigh", "all-purpose flour", "unsalted butter"). When an ingredient matches an item in Existing Food Catalog, reuse that exact canonical name. NEVER output "null", "none", or placeholder words (leave empty or null if unclassified).
-   - "displayName": recipe display name as written without leading quantity/unit (e.g. "extra-virgin olive oil").
-   - "preparationNote": preparation instructions or parenthetical weights (e.g. "finely diced", "room temperature", "7 1/2 ounces").
+   - "displayName": ingredient name as written without leading quantity/unit or preparation instructions (e.g. "extra-virgin olive oil").
+   - "preparationNote": preparation instructions or parenthetical weights only (e.g. "finely diced", "room temperature", "7 1/2 ounces"). Do not repeat any part of the ingredient name here. For example, "1 lime, zested" has displayName "lime" and preparationNote "zested", not "lime zested".
    - "isOptional": boolean flag.
    - "originalRawText": verbatim line as originally printed.
    - "suggestedIsPantryStaple": boolean flag; true ONLY for basic everyday household staples typically kept on hand (water, salt, black pepper, cooking oils, basic vinegars, all-purpose flour, sugar, baking powder/soda, dried spices/herbs, soy sauce), false for fresh produce, meats, dairy, canned goods, and specialty items.

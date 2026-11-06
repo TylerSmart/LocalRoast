@@ -51,6 +51,16 @@ public static class RecipeDraftNormalizer
         RegexOptions.IgnoreCase | RegexOptions.Compiled
     );
 
+    private static readonly Regex LeadingCloveRegex = new(
+        @"^[\s\-*•]*(?:a\s+)?clove\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled
+    );
+
+    private static readonly Regex LeadingSourceAmountRegex = new(
+        @"^[\s\-*•]*(?<quantity>\d+(?:\s+\d+/\d+)?|\d+/\d+|\d+(?:\.\d+)?)(?:\s*(?:to|through|or|[-–—])\s*(?<maxQuantity>\d+(?:\s+\d+/\d+)?|\d+/\d+|\d+(?:\.\d+)?))?(?=\s|$)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled
+    );
+
     public static bool IsDisallowedUnitPlaceholder(string? unit)
     {
         if (string.IsNullOrWhiteSpace(unit))
@@ -142,6 +152,90 @@ public static class RecipeDraftNormalizer
         }
 
         return (quantity, maxQuantity);
+    }
+
+    private static (decimal Quantity, decimal? MaxQuantity)? TryGetSourceAmount(string? rawText)
+    {
+        if (string.IsNullOrWhiteSpace(rawText))
+        {
+            return null;
+        }
+
+        var match = LeadingSourceAmountRegex.Match(rawText);
+        if (!match.Success || !TryParseAmount(match.Groups["quantity"].Value, out var quantity))
+        {
+            return null;
+        }
+
+        decimal? maxQuantity = null;
+        if (
+            match.Groups["maxQuantity"].Success
+            && TryParseAmount(match.Groups["maxQuantity"].Value, out var parsedMax)
+        )
+        {
+            maxQuantity = parsedMax;
+        }
+
+        return quantity > 0m ? (quantity, maxQuantity) : null;
+    }
+
+    private static bool TryParseAmount(string token, out decimal amount)
+    {
+        var parts = token.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 2 && TryParseFraction(parts[1], out var fractionalPart))
+        {
+            if (
+                decimal.TryParse(
+                    parts[0],
+                    NumberStyles.Number,
+                    CultureInfo.InvariantCulture,
+                    out var wholePart
+                )
+            )
+            {
+                amount = wholePart + fractionalPart;
+                return true;
+            }
+        }
+        else if (parts.Length == 1 && TryParseFraction(parts[0], out amount))
+        {
+            return true;
+        }
+
+        amount = 0m;
+        return false;
+    }
+
+    private static bool TryParseFraction(string token, out decimal amount)
+    {
+        var fractionParts = token.Split('/');
+        if (
+            fractionParts.Length == 2
+            && decimal.TryParse(
+                fractionParts[0],
+                NumberStyles.Number,
+                CultureInfo.InvariantCulture,
+                out var numerator
+            )
+            && decimal.TryParse(
+                fractionParts[1],
+                NumberStyles.Number,
+                CultureInfo.InvariantCulture,
+                out var denominator
+            )
+            && denominator != 0m
+        )
+        {
+            amount = numerator / denominator;
+            return true;
+        }
+
+        return decimal.TryParse(
+            token,
+            NumberStyles.Number,
+            CultureInfo.InvariantCulture,
+            out amount
+        );
     }
 
     private static readonly Regex WhyThisRecipeWorksPrefixRegex = new(
@@ -275,6 +369,25 @@ public static class RecipeDraftNormalizer
                 rawIng.Quantity,
                 rawIng.MaxQuantity
             );
+            var sourceAmount = TryGetSourceAmount(rawIng.OriginalRawText);
+            if (sourceAmount is { } parsedAmount)
+            {
+                cleanQuantity = parsedAmount.Quantity;
+                cleanMaxQuantity = parsedAmount.MaxQuantity;
+            }
+            else if (!string.IsNullOrWhiteSpace(rawIng.OriginalRawText))
+            {
+                cleanQuantity =
+                    unit is MeasurementUnit.Pinch or MeasurementUnit.Dash
+                    || (
+                        unit is MeasurementUnit.Clove
+                        && LeadingCloveRegex.IsMatch(rawIng.OriginalRawText)
+                    )
+                        ? 1m
+                        : null;
+                cleanMaxQuantity = null;
+            }
+
             var cleanCanonical = FoodNameSanitizer.SanitizeFoodName(rawIng.CanonicalFoodName);
             var cleanDisplayName = FoodNameSanitizer.SanitizeFoodName(rawIng.DisplayName);
             var displayName = !string.IsNullOrWhiteSpace(rawIng.DisplayName)
