@@ -449,6 +449,16 @@ docker compose logs -f api
 docker compose logs -f sqlserver
 ```
 
+### Log File Retention
+
+Inside the API container, Serilog also writes rolling log files to `./logs/local-roast-<date>.log`. Files roll daily **and** whenever a file reaches 20 MB, and only the newest 14 files are kept (roughly 280 MB at most), so disk usage stays bounded. To keep chatty output out of the files, EF Core SQL commands are logged only at `Warning` and above, and successful `GET` requests (mostly client polling) are logged at `Debug`. You can tune this with environment variables, for example:
+
+| Variable | Example | Effect |
+| :--- | :--- | :--- |
+| `Serilog__MinimumLevel__Default` | `Warning` | Only write warnings and errors. |
+| `Serilog__WriteTo__1__Args__retainedFileCountLimit` | `7` | Keep fewer log files. |
+| `Serilog__WriteTo__1__Args__fileSizeLimitBytes` | `10485760` | Roll files at 10 MB. |
+
 ### Common Issues
 
 1. **SQL Server container exiting with code 1**:

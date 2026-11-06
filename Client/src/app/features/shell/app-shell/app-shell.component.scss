@@ -293,6 +293,10 @@
   margin: 0 auto;
   padding: 1.5rem;
   box-sizing: border-box;
+
+  &.full-width {
+    max-width: none;
+  }
 }
 
 .mobile-bottom-nav {
@@ -492,7 +496,8 @@
   }
 
   .main-content {
-    padding: 1rem 0.75rem 5rem 0.75rem; /* extra bottom padding for bottom nav */
+    /* extra bottom padding for bottom nav + iOS/iPadOS home indicator */
+    padding: 1rem 0.75rem calc(5rem + env(safe-area-inset-bottom, 0px)) 0.75rem;
   }
 
   .mobile-bottom-nav {
@@ -504,8 +509,10 @@
     right: 0;
     width: 100%;
     max-width: 100vw;
-    height: 3.75rem;
-    padding: 0 0.15rem;
+    /* Lift tabs above the iPadOS/iOS home indicator gesture zone */
+    height: calc(3.75rem + env(safe-area-inset-bottom, 0px));
+    padding: 0 max(0.15rem, env(safe-area-inset-right, 0px)) env(safe-area-inset-bottom, 0px)
+      max(0.15rem, env(safe-area-inset-left, 0px));
     background-color: var(--mat-sys-surface-container, #f3ede4);
     border-top: 1px solid var(--mat-sys-outline-variant, #cac4d0);
     z-index: 100;

@@ -238,7 +238,7 @@
             <mat-label>Difficulty</mat-label>
             <mat-select
               [ngModel]="selectedDifficulty()"
-              (ngModelChange)="selectedDifficulty.set($event)"
+              (ngModelChange)="onDifficultyChange($event)"
             >
               <mat-option value="All">All Difficulties</mat-option>
               <mat-option value="Easy">Easy</mat-option>
@@ -252,7 +252,7 @@
         <div class="filter-line">
           <mat-form-field appearance="outline" class="filter-field" subscriptSizing="dynamic">
             <mat-label>Max Time</mat-label>
-            <mat-select [ngModel]="maxTimeMinutes()" (ngModelChange)="maxTimeMinutes.set($event)">
+            <mat-select [ngModel]="maxTimeMinutes()" (ngModelChange)="onMaxTimeChange($event)">
               <mat-option [value]="null">Any Duration</mat-option>
               <mat-option [value]="30">Under 30 min</mat-option>
               <mat-option [value]="45">Under 45 min</mat-option>

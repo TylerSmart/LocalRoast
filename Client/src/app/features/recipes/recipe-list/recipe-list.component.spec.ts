@@ -3,7 +3,7 @@ import { MatDialog } from '@angular/material/dialog';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { provideRouter } from '@angular/router';
 import { of } from 'rxjs';
-import { RecipeSummaryDto } from '../../../core/models/recipe.models';
+import { RecipeQueryParameters, RecipeSummaryDto } from '../../../core/models/recipe.models';
 import { CollectionDto, TagDto } from '../../../core/models/taxonomy.models';
 import { RecipeService } from '../../../core/services/recipe/recipe.service';
 import { TaxonomyService } from '../../../core/services/taxonomy/taxonomy.service';
@@ -150,6 +150,25 @@ describe('RecipeListComponent', () => {
     expect(component['minRating']()).toBe(4);
     expect(mockRecipeService.getRecipesPaged).toHaveBeenCalledWith(
       expect.objectContaining({ minRating: 4 }),
+    );
+  });
+
+  it('reloads recipes when difficulty or max time filters change', () => {
+    mockRecipeService.getRecipesPaged.mockClear();
+
+    component.onDifficultyChange('Project');
+    expect(mockRecipeService.getRecipesPaged).toHaveBeenLastCalledWith(
+      expect.objectContaining({ difficulty: 'Project', page: 1 }),
+    );
+
+    component.onMaxTimeChange(30);
+    expect(mockRecipeService.getRecipesPaged).toHaveBeenLastCalledWith(
+      expect.objectContaining({ difficulty: 'Project', maxTotalTimeMinutes: 30 }),
+    );
+
+    component.onDifficultyChange('All');
+    expect(mockRecipeService.getRecipesPaged).toHaveBeenLastCalledWith(
+      expect.not.objectContaining({ difficulty: expect.anything() }),
     );
   });
 });

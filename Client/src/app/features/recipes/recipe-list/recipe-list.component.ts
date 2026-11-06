@@ -452,6 +452,16 @@ export class RecipeListComponent implements OnInit {
     this.loadRecipes();
   }
 
+  onDifficultyChange(difficulty: RecipeDifficulty | 'All'): void {
+    this.selectedDifficulty.set(difficulty);
+    this.loadRecipes();
+  }
+
+  onMaxTimeChange(minutes: number | null): void {
+    this.maxTimeMinutes.set(minutes);
+    this.loadRecipes();
+  }
+
   deleteRecipe(recipe: RecipeSummaryDto, event: Event): void {
     event.stopPropagation();
     event.preventDefault();

@@ -4,6 +4,8 @@ using System.Net.Http.Json;
 using App.Core.Authentication;
 using App.Core.Ingestion;
 using App.Core.Recipes;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
@@ -272,6 +274,195 @@ public sealed class VisionAndPdfIngestionIntegrationTests
         Assert.IsNotNull(updatedJob.DownloadedCoverImagePath);
 
         StringAssert.StartsWith(updatedJob.DownloadedCoverImagePath, "/api/uploads/recipes/");
+    }
+
+    [TestMethod]
+    public async Task ScannedPdfIngestion_ProcessedViaVision_DoesNotUseRenderedPageAsCoverImage()
+    {
+        var fakeInspector = new FakeScannedPdfInspector();
+        var fakeLlm = new FakeVisionLlmExtractionClient();
+
+        await using var customFactory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Llm:TextModel", "qwen2.5:14b");
+            builder.UseSetting("Llm:VisionModel", "qwen2.5vl:7b");
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<IPdfIngestionInspector>();
+                services.AddSingleton<IPdfIngestionInspector>(fakeInspector);
+                services.RemoveAll<ILlmExtractionClient>();
+                services.AddSingleton<ILlmExtractionClient>(fakeLlm);
+            });
+        });
+
+        using var client = customFactory.CreateClient();
+        await AuthenticateAsync(client);
+
+        // Store a real image so the vision pipeline can encode it as the rendered PDF page
+        using var imageForm = new MultipartFormDataContent();
+        imageForm.Add(
+            new ByteArrayContent(CreateSampleImageBytes())
+            {
+                Headers = { ContentType = new MediaTypeHeaderValue("image/png") },
+            },
+            "files",
+            "page1.png"
+        );
+        var imageJobResp = await client.PostAsync("/api/ingestion/jobs/images", imageForm);
+        var imageJob = await imageJobResp.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
+        Assert.IsNotNull(imageJob);
+        var imageJobDetail = await client.GetFromJsonAsync<IngestionJobDetailDto>(
+            $"/api/ingestion/jobs/{imageJob.Id}"
+        );
+        Assert.IsNotNull(imageJobDetail);
+        fakeInspector.RenderedPage = imageJobDetail.SourceFiles[0];
+
+        using var pdfForm = new MultipartFormDataContent();
+        pdfForm.Add(
+            new ByteArrayContent(CreateSamplePdfBytes())
+            {
+                Headers = { ContentType = new MediaTypeHeaderValue("application/pdf") },
+            },
+            "file",
+            "scanned-card.pdf"
+        );
+        var pdfResp = await client.PostAsync("/api/ingestion/jobs/pdf", pdfForm);
+        Assert.AreEqual(HttpStatusCode.Accepted, pdfResp.StatusCode);
+        var pdfJob = await pdfResp.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
+        Assert.IsNotNull(pdfJob);
+
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            var processor = scope.ServiceProvider.GetRequiredService<IIngestionProcessor>();
+            Assert.IsTrue(await processor.ProcessJobByIdAsync(pdfJob.Id));
+        }
+
+        Assert.IsTrue(fakeLlm.VisionCalled, "Scanned PDF should be extracted via vision.");
+
+        var processed = await client.GetFromJsonAsync<IngestionJobDetailDto>(
+            $"/api/ingestion/jobs/{pdfJob.Id}"
+        );
+        Assert.IsNotNull(processed);
+        Assert.AreEqual(IngestionJobStatus.ReadyForReview, processed.Status);
+        Assert.IsNull(processed.DownloadedCoverImagePath);
+        Assert.IsNull(processed.ExtractedDraft?.CoverImagePath);
+        Assert.IsNull(processed.ExtractedDraft?.ThumbnailImagePath);
+    }
+
+    private sealed class FakeScannedPdfInspector : IPdfIngestionInspector
+    {
+        public IngestionSourceFileDto? RenderedPage { get; set; }
+
+        public Task<PdfInspectionResult> InspectAndPrepareAsync(
+            string pdfMediaUrlPath,
+            string jobToken,
+            CancellationToken cancellationToken = default
+        )
+        {
+            var page = RenderedPage ?? throw new InvalidOperationException("No page configured.");
+            return Task.FromResult(
+                new PdfInspectionResult(
+                    Summary: new PdfInspectionSummaryDto(
+                        TotalPageCount: 1,
+                        ProcessedPageCount: 1,
+                        TotalExtractedCharacters: 0,
+                        AverageCharactersPerPage: 0,
+                        ExtractionMode: PdfExtractionMode.VisionRaster,
+                        RenderedPageImages: [page with { PageNumber = 1 }]
+                    ),
+                    NormalizedDigitalText: null,
+                    GeneratedThumbnailImagePath: page.UrlPath
+                )
+            );
+        }
+    }
+
+    private sealed class FakeVisionLlmExtractionClient : ILlmExtractionClient
+    {
+        public bool VisionCalled { get; private set; }
+
+        public Task<LlmConnectionTestResultDto> ProbeAndListModelsAsync(
+            EffectiveLlmConnectionConfig config,
+            int timeoutSeconds = 15,
+            CancellationToken cancellationToken = default
+        ) =>
+            Task.FromResult(
+                new LlmConnectionTestResultDto(
+                    true,
+                    config.Provider,
+                    config.BaseUrl,
+                    5,
+                    ["qwen2.5:14b", "qwen2.5vl:7b"],
+                    null
+                )
+            );
+
+        public Task<LlmExtractedRecipePayload> ExtractRecipeFromTextAsync(
+            EffectiveLlmConnectionConfig config,
+            LlmExtractionContext context,
+            CancellationToken cancellationToken = default
+        ) => throw new NotImplementedException();
+
+        public Task<LlmExtractedRecipePayload> ExtractRecipeFromImagesAsync(
+            EffectiveLlmConnectionConfig config,
+            LlmVisionExtractionContext context,
+            CancellationToken cancellationToken = default
+        )
+        {
+            VisionCalled = true;
+            return Task.FromResult(
+                new LlmExtractedRecipePayload(
+                    Title: "Grandma's Shortbread",
+                    Description: "Buttery shortbread from a scanned recipe card.",
+                    BaseServings: 12m,
+                    YieldDisplay: "12 cookies",
+                    PrepTimeMinutes: 15,
+                    CookTimeMinutes: 20,
+                    TotalTimeMinutes: 35,
+                    Difficulty: "Easy",
+                    SourceName: null,
+                    SourceAuthor: null,
+                    ConfidenceScore: 0.6m,
+                    SuggestedTagNames: ["Dessert"],
+                    Ingredients:
+                    [
+                        new LlmExtractedIngredientItem(
+                            SectionName: null,
+                            Quantity: 1m,
+                            MaxQuantity: null,
+                            Unit: "cup",
+                            CanonicalFoodName: "butter",
+                            DisplayName: "butter",
+                            PreparationNote: "softened",
+                            IsOptional: false,
+                            OriginalRawText: "1 cup butter, softened",
+                            SuggestedIsPantryStaple: false
+                        ),
+                    ],
+                    Steps:
+                    [
+                        new LlmExtractedStepItem(
+                            SectionName: null,
+                            Instruction: "Bake for 20 minutes.",
+                            IngredientIndices: [0],
+                            Timers: []
+                        ),
+                    ]
+                )
+            );
+        }
+
+        public Task<LlmSubstitutionPayload> SuggestIngredientSubstitutionsAsync(
+            EffectiveLlmConnectionConfig config,
+            LlmSubstitutionContext context,
+            CancellationToken cancellationToken = default
+        ) => throw new NotImplementedException();
+
+        public Task<LlmDraftMealPlanPayload> DraftWeeklyMealPlanAsync(
+            EffectiveLlmConnectionConfig config,
+            LlmDraftMealPlanContext context,
+            CancellationToken cancellationToken = default
+        ) => throw new NotImplementedException();
     }
 
     [TestMethod]
