@@ -11,26 +11,30 @@ public record FoodItemDto(
     int ReferencedRecipeCount,
     DateTimeOffset CreatedAt,
     DateTimeOffset ModifiedAt,
-    int ReferencedShoppingListItemCount = 0
+    int ReferencedShoppingListItemCount = 0,
+    FoodCategory Category = FoodCategory.Other
 );
 
 public record FoodItemQueryParameters(
     string? Search = null,
     bool? IsPantryStaple = null,
     int? Page = null,
-    int? PageSize = null
+    int? PageSize = null,
+    FoodCategory? Category = null
 );
 
 public record CreateFoodItemRequest(
     [Required, MaxLength(150)] string Name,
     bool IsPantryStaple = false,
-    IReadOnlyList<string>? Aliases = null
+    IReadOnlyList<string>? Aliases = null,
+    FoodCategory? Category = null
 );
 
 public record UpdateFoodItemRequest(
     [Required, MaxLength(150)] string Name,
     bool IsPantryStaple = false,
-    IReadOnlyList<string>? Aliases = null
+    IReadOnlyList<string>? Aliases = null,
+    FoodCategory? Category = null
 );
 
 public record MergeFoodItemsRequest(

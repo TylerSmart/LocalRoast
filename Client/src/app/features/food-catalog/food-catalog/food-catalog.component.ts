@@ -8,13 +8,17 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatSelectModule } from '@angular/material/select';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatPaginatorModule, PageEvent } from '@angular/material/paginator';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import {
+  FOOD_CATEGORY_OPTIONS,
+  FoodCategory,
   FoodItemDto,
   FoodItemQueryParameters,
+  foodCategoryLabel,
   MergeFoodItemsResultDto,
 } from '../../../core/models/food-catalog.models';
 import { FoodCatalogService } from '../../../core/services/food-catalog/food-catalog.service';
@@ -34,6 +38,7 @@ import { MergeFoodItemsDialogComponent } from '../merge-food-items-dialog/merge-
     MatIconModule,
     MatFormFieldModule,
     MatInputModule,
+    MatSelectModule,
     MatSlideToggleModule,
     MatChipsModule,
     MatTooltipModule,
@@ -52,6 +57,9 @@ export class FoodCatalogComponent implements OnInit {
   protected readonly items = signal<FoodItemDto[]>([]);
   protected readonly searchQuery = signal<string>('');
   protected readonly onlyPantryStaples = signal<boolean>(false);
+  protected readonly categoryFilter = signal<FoodCategory | null>(null);
+  protected readonly categoryOptions = FOOD_CATEGORY_OPTIONS;
+  protected readonly categoryLabel = foodCategoryLabel;
   protected readonly pageIndex = signal<number>(0);
   protected readonly pageSize = signal<number>(30);
   protected readonly totalCount = signal<number>(0);
@@ -74,6 +82,7 @@ export class FoodCatalogComponent implements OnInit {
       pageSize: this.pageSize(),
       search: this.searchQuery().trim() || null,
       isPantryStaple: this.onlyPantryStaples() ? true : null,
+      category: this.categoryFilter(),
     };
 
     this.catalogService.getFoodItemsPaged(query).subscribe({
@@ -108,6 +117,12 @@ export class FoodCatalogComponent implements OnInit {
 
   onStaplesToggleChange(checked: boolean): void {
     this.onlyPantryStaples.set(checked);
+    this.pageIndex.set(0);
+    this.loadItems();
+  }
+
+  onCategoryFilterChange(category: FoodCategory | null): void {
+    this.categoryFilter.set(category);
     this.pageIndex.set(0);
     this.loadItems();
   }
@@ -175,6 +190,7 @@ export class FoodCatalogComponent implements OnInit {
         name: item.name,
         isPantryStaple: nextStaple,
         aliases: item.aliases,
+        category: item.category ?? null,
       })
       .subscribe({
         next: (updated) => {

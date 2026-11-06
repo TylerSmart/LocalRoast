@@ -50,6 +50,21 @@
         }
       </mat-form-field>
 
+      <!-- Category Filter -->
+      <mat-form-field appearance="outline" class="category-filter-field" subscriptSizing="dynamic">
+        <mat-label>Category</mat-label>
+        <mat-select
+          [value]="categoryFilter()"
+          (selectionChange)="onCategoryFilterChange($event.value)"
+          data-testid="food-catalog-category-filter"
+        >
+          <mat-option [value]="null">All categories</mat-option>
+          @for (option of categoryOptions; track option.value) {
+            <mat-option [value]="option.value">{{ option.label }}</mat-option>
+          }
+        </mat-select>
+      </mat-form-field>
+
       <!-- Pantry Staples Only Toggle -->
       <div class="staple-toggle-container">
         <mat-slide-toggle
@@ -85,7 +100,7 @@
         <mat-icon class="empty-icon">kitchen</mat-icon>
         <h3>No food items found</h3>
         <p>
-          @if (searchQuery() || onlyPantryStaples()) {
+          @if (searchQuery() || onlyPantryStaples() || categoryFilter()) {
             Try adjusting your search query or filters.
           } @else {
             Get started by adding your first staple ingredient to the catalog!
@@ -107,6 +122,9 @@
               <div class="item-header">
                 <div class="name-block">
                   <h3 class="item-name">{{ item.name }}</h3>
+                  <span class="item-category" data-testid="food-item-category">
+                    {{ categoryLabel(item.category) }}
+                  </span>
                 </div>
 
                 <!-- Pantry Staple Button -->

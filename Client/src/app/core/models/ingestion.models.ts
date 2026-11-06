@@ -1,3 +1,5 @@
+import { FoodCategory } from './food-catalog.models';
+
 export type PdfExtractionMode = 'DigitalText' | 'VisionRaster';
 
 export interface IngestionSourceFileDto {
@@ -131,6 +133,7 @@ export interface IngestionDraftIngredientDto {
   suggestedIsPantryStaple: boolean;
   alternativeMeasurement?: RecipeMeasurement | null;
   preferAlternativeMeasurement?: boolean;
+  suggestedCategory?: FoodCategory | null;
 }
 
 export interface IngestionDraftStepDto {

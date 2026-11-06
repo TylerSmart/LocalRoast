@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using App.Core.FoodCatalog;
 using App.Core.Recipes;
 
 namespace App.Core.Shopping;
@@ -47,7 +48,8 @@ public record ShoppingListItemDto(
     int SortOrder,
     IReadOnlyList<ShoppingListItemSourceDto> Sources,
     DateTimeOffset CreatedAt,
-    DateTimeOffset ModifiedAt
+    DateTimeOffset ModifiedAt,
+    FoodCategory Category = FoodCategory.Other
 );
 
 public record ShoppingListDetailDto(

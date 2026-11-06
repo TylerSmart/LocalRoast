@@ -19,6 +19,9 @@ public sealed class FoodItemConfiguration : IEntityTypeConfiguration<FoodItem>
 
         builder.HasIndex(f => f.IsPantryStaple);
 
+        builder.Property(f => f.Category).HasConversion<string>().HasMaxLength(32);
+        builder.HasIndex(f => f.Category);
+
         builder.Property(f => f.CreatedBy).IsRequired().HasMaxLength(256);
         builder.Property(f => f.ModifiedBy).IsRequired().HasMaxLength(256);
     }

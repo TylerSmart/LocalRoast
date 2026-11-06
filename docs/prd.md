@@ -12,14 +12,14 @@
 **LocalRoast** solves four everyday household kitchen frustrations:
 
 1. **Recipe Sprawl & Link Rot:** Great recipes get buried across ad-heavy food blogs, phone screenshots, PDF printouts, family text messages, and physical cookbooks—and bookmarked URLs eventually disappear or change.
-2. **Manual Data-Entry Fatigue:** Typing 18 ingredients and 9 steps by hand stops people from centralizing their recipes. LocalRoast delegates extraction, normalization, timer detection, and aisle classification to a local LLM on your LAN while preserving a Side-by-Side Review Inbox for accuracy.
-3. **Rigid Meal Calendars:** Most meal planners assume every single meal is a newly cooked recipe on a fixed night. Real households cook multi-dish dinners, eat leftovers on Wednesday, order takeout on Friday, and often buy groceries for four dinners on Saturday without deciding _which_ night to cook each one until 5:00 PM.
+2. **Manual Data-Entry Fatigue:** Typing 18 ingredients and 9 steps by hand stops people from centralizing their recipes. LocalRoast delegates extraction, normalization, timer detection, and shopping-category classification to a local LLM on your LAN while preserving a Side-by-Side Review Inbox for accuracy.
+3. **Rigid Meal Calendars:** Most meal planners assume every single meal is a newly cooked recipe on a fixed night. Real households cook multi-dish dinners, eat leftovers on Wednesday, order takeout on Friday, and often buy groceries for four dinners on Saturday without deciding *which* night to cook each one until 5:00 PM.
 4. **Cluttered Grocery Runs & Messy-Hand Cooking:** Shopping lists shouldn't list `"water"` and `"kosher salt"` every week or get out of sync when two people split up in the grocery store—and phones shouldn't dim or force endless up-and-down scrolling while your hands are covered in dough.
 
 ### Core Product Pillars
 
 1. **Local-First Multimodal Ingestion & MCP Native:** Turn Web URLs, raw text, multi-page cookbook photos, and PDFs into structured recipes via `Ollama` (or any OpenAI-compatible `/v1` host) with offline-queue resilience—and expose your cookbook, meal calendar, and shopping lists to external AI clients through an embedded `/api/mcp` server.
-2. **Canonical Food Catalog & Culinary Math:** Structured quantities, ranges, units, and section headers backed by a shared `FoodItem` dictionary (with default grocery aisles, aliases, and pantry-staple flags) enable accurate scaling, US/Metric conversion, and consolidated shopping lists.
+2. **Canonical Food Catalog & Culinary Math:** Structured quantities, ranges, units, and section headers backed by a shared `FoodItem` dictionary (with shopping categories, aliases, and pantry-staple flags) enable accurate scaling, US/Metric conversion, and consolidated shopping lists.
 3. **Flexible Real-World Meal Planning:** Combine `Breakfast`, `Lunch`, `Dinner`, and `Snack / Prep` calendar slots with multi-dish support, `Leftovers` entries, freeform notes, an **"On-Deck" flexible weekly tray**, and reusable **Week Templates**.
 4. **Hands-Free Kitchen & Live Co-Shopping:** Screen wake-lock **Cook Mode** with inline step ingredient callouts and floating multi-timers, historical **Cook Logs**, and **SignalR** real-time co-shopping across household phones.
 
@@ -27,12 +27,12 @@
 
 ## 2. Target Users, Tenancy & Operating Context
 
-| Persona / Actor                          | Primary Surfaces                                          | Key Workflows                                                                                                                                                |
-| :--------------------------------------- | :-------------------------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Household Cooks & Planners**           | **Desktop Browser**, **Tablet**, & **Mobile Phone**       | Ingesting & reviewing recipes, curating collections, planning weekly meals, generating shopping lists, cooking in Cook Mode, and logging cook notes/ratings. |
-| **Household Co-Shoppers**                | **Mobile Phone (In-Store)**                               | Checking off grocery items in real time across multiple phones and adding ad-hoc household items on a clean flat checklist.                                  |
-| **External Friends & Family**            | **Public Browser (No Login)**                             | Viewing, scaling, and printing a single shared recipe via a revocable `/share/<token>` link.                                                                 |
-| **External AI Assistants (MCP Clients)** | **Claude Desktop, Antigravity, Open WebUI, Voice Agents** | Searching the household cookbook, pushing or enqueueing new recipes, drafting weekly meal plans, and updating shopping lists over `/api/mcp`.                |
+| Persona / Actor | Primary Surfaces | Key Workflows |
+| :--- | :--- | :--- |
+| **Household Cooks & Planners** | **Desktop Browser**, **Tablet**, & **Mobile Phone** | Ingesting & reviewing recipes, curating collections, planning weekly meals, generating shopping lists, cooking in Cook Mode, and logging cook notes/ratings. |
+| **Household Co-Shoppers** | **Mobile Phone (In-Store)** | Checking off grocery items in real time across multiple phones and adding ad-hoc household items on a checklist grouped by shopping category. |
+| **External Friends & Family** | **Public Browser (No Login)** | Viewing, scaling, and printing a single shared recipe via a revocable `/share/<token>` link. |
+| **External AI Assistants (MCP Clients)** | **Claude Desktop, Antigravity, Open WebUI, Voice Agents** | Searching the household cookbook, pushing or enqueueing new recipes, drafting weekly meal plans, and updating shopping lists over `/api/mcp`. |
 
 ### Tenancy & Operating Assumptions
 
@@ -61,7 +61,6 @@ erDiagram
     RECIPE }o--o{ TAG : "classified by"
     FOOD_ITEM ||--o{ FOOD_ITEM_ALIAS : "matches synonyms"
     FOOD_ITEM ||--o{ RECIPE_INGREDIENT : "normalizes"
-    STORE_AISLE ||--o{ FOOD_ITEM : "default category"
     INGESTION_JOB ||--o| RECIPE : "produces draft / recipe"
     MEAL_PLAN_ENTRY }o--|| RECIPE : "schedules (optional)"
     MEAL_PLAN_TEMPLATE ||--o{ MEAL_PLAN_TEMPLATE_ITEM : "stamps"
@@ -103,9 +102,9 @@ erDiagram
 - Every structured ingredient links to (or creates on the fly) a canonical **`FoodItem`** record:
   - `name` (singular canonical display name, e.g., `"Yellow Onion"`, `"Kosher Salt"`, `"Garlic"`).
   - `aliases` (normalized synonym list, e.g., `"scallion"` $\leftrightarrow$ `"green onion"`, `"cilantro"` $\leftrightarrow$ `"fresh coriander"`).
-  - `defaultStoreAisleId` (e.g., `Produce`, `Meat & Seafood`, `Dairy & Eggs`, `Spices & Baking`, `Canned & Jarred`).
-  - `isPantryStaple` (`bool`, seeded with common staples like _Water_, _Kosher Salt_, _Black Pepper_, _Olive Oil_, _Vegetable Oil_, _All-Purpose Flour_, _Granulated Sugar_, and editable anytime by household users).
-- **Catalog Hygiene:** Household users can edit any `FoodItem` (changing its aisle or toggling `isPantryStaple`) or **Merge Duplicate FoodItems** (re-pointing all `RecipeIngredient` and `ShoppingListItem` rows in a single transaction).
+  - `category` (fixed `FoodCategory` set in store-walk order: `Produce`, `Meat & Seafood`, `Dairy & Eggs`, `Refrigerated`, `Bakery & Bread`, `Pantry & Dry Goods`, `Canned & Jarred`, `Condiments & Sauces`, `Spices & Seasonings`, `Baking`, `Snacks`, `Beverages`, `Frozen`, `Other`). Suggested by the LLM during ingestion, falling back to a deterministic keyword classifier; existing items without a category are backfilled at startup.
+  - `isPantryStaple` (`bool`, seeded with common staples like *Water*, *Kosher Salt*, *Black Pepper*, *Olive Oil*, *Vegetable Oil*, *All-Purpose Flour*, *Granulated Sugar*, and editable anytime by household users).
+- **Catalog Hygiene:** Household users can edit any `FoodItem` (changing its shopping category or toggling `isPantryStaple`) or **Merge Duplicate FoodItems** (re-pointing all `RecipeIngredient` and `ShoppingListItem` rows in a single transaction).
 
 #### 4.1.4 Ordered Steps, Inline Ingredient References & Timers
 
@@ -176,7 +175,7 @@ flowchart LR
 
 - Extracted jobs land in an **Ingestion Review Inbox** badged in the main navigation:
   - **Left Pane (Original Source):** Interactive image zoom/pan carousel for cookbook photos, embedded PDF viewer, raw pasted text, or source URL metadata + extracted raw lines.
-  - **Right Pane (Structured Draft):** Full editable recipe form pre-populated with parsed sections, ingredients, canonical `FoodItem` bindings (highlighting _New FoodItems_ and their AI-suggested grocery aisles), steps, timers, and suggested tags.
+  - **Right Pane (Structured Draft):** Full editable recipe form pre-populated with parsed sections, ingredients, canonical `FoodItem` bindings (highlighting *New FoodItems* with their AI-suggested shopping category, editable before publish), steps, timers, and suggested tags.
   - **Optional Auto-Publish Toggle:** Household settings include an opt-in toggle to auto-publish high-confidence Web URL / Text extractions directly to the cookbook while still keeping vision/scan jobs in the Review Inbox.
   - **Measurement Review:** Source quantities take precedence over model guesses. Invalid portions, unmatched source excerpts, and unconfirmed equivalent measurements produce visible review warnings and prevent automatic publishing, including when the individual job requests auto-publish.
 
@@ -206,12 +205,13 @@ flowchart LR
 - **Authentication (Personal Access Tokens):**
   - Household users can generate named, revocable **Personal Access Tokens** (`lr_pat_<random>`) in their Account Settings dialog.
   - Only the SHA-256 token hash and prefix are stored in SQL Server, alongside `createdAt`, `expiresAt` (optional), and `lastUsedAt`. Any write action performed over MCP attributes `CreatedBy`/`ModifiedBy` to the token's owning user.
+  - **OAuth sign-in (not yet supported):** The MCP authorization spec requires the server to publish OAuth 2.0 Protected Resource Metadata (RFC 9728) pointing at an OAuth 2.1 authorization server that uses PKCE, and to accept only tokens issued for `/api/mcp` (RFC 8707 resource indicators; no token passthrough). Client registration can use pre-registration, Client ID Metadata Documents (recommended), or Dynamic Client Registration (optional). Google cannot fill the authorization-server role directly because its tokens are not issued for LocalRoast's resource, and accepting them would mean trusting tokens minted for another audience. "Sign in with Google" for MCP therefore requires LocalRoast to act as its own authorization server that delegates the login step to the configured OIDC provider. PATs remain the supported MCP credential until then.
 - **MCP Tool Surface:**
   1. **Cookbook & Discovery Tools:**
      - `search_recipes`: Keyword, tag, collection, max total time, rating, and forgotten-favorite filtering.
      - `get_recipe`: Full structured recipe with ingredients, sections, steps, timers, and cook history notes.
      - `match_recipes_by_ingredients`: Rank saved recipes using a list of on-hand ingredient names.
-     - `list_collections_and_tags`: Inspect existing household collections, cuisines, equipment tags, and aisles.
+     - `list_collections_and_tags`: Inspect existing household collections, cuisines, and equipment tags.
   2. **Ingestion & Authoring Tools:**
      - `enqueue_recipe_ingestion`: Submit a Web URL or raw text block into the async Ollama ingestion queue.
      - `save_structured_recipe`: Directly create or update a complete structured recipe from an external AI conversation (with a `publishImmediately` flag defaulting to `DraftReview` or `Published` per caller choice).
@@ -253,10 +253,10 @@ flowchart LR
 
 ### 4.5 Smart Shopping Lists, Pantry Staples & Real-Time Co-Shopping
 
-#### 4.5.1 Multiple Named Flat Lists
-
-- Create unlimited named **Shopping Lists** (e.g., _Weekly Groceries_, _Costco_, _Trader Joe's_, _Thanksgiving Prep_).
-- Shopping lists intentionally render as a **clean, flat checklist** without store-aisle grouping or custom store layout configuration—keeping grocery runs fast and zero-maintenance while preserving Food Catalog categories strictly for catalog browsing.
+#### 4.5.1 Multiple Named Lists Grouped by Category
+- Create unlimited named **Shopping Lists** (e.g., *Weekly Groceries*, *Costco*, *Trader Joe's*, *Thanksgiving Prep*).
+- Active items are grouped under **shopping category headings** (from each linked `FoodItem`'s category, or a keyword guess for free-text items) in a fixed store-walk order, so a grocery run moves through the store section by section. There is intentionally no per-store layout configuration—categories are zero-maintenance.
+- A **Grouped / Flat list** toggle switches to a plain checklist; the choice is remembered per device.
 
 #### 4.5.2 Smart Consolidation, Unit Math & Provenance Badges
 
@@ -353,7 +353,7 @@ flowchart LR
 - **Milestone 1 — Core Cookbook, Canonical Food Catalog & Discovery:**
   - Replace template `Todo` slice; implement Canonical `FoodItem` catalog (aisles, aliases, `isPantryStaple` seed data), structured `Recipe` CRUD (ingredient/step sections, ranges, inline step timers, Sub-Recipe DAG linking), local `/data/uploads` WebP image pipeline, dynamic scaling + fraction/unit conversion, Collections & Tags, Smart Search + **"Use Up Ingredients"** matcher, Print View, and revocable `/share/<token>` public recipe links.
 - **Milestone 2 — Local LLM Ingestion Pipeline, Vision/PDF & Embedded MCP Server:**
-  - In-App LLM Provider Settings UI (`Ollama` + `OpenAI-compatible /v1` with model discovery & health checks), persistent `IngestionJob` SQL queue & background worker with offline-host retry resilience, Side-by-Side **Review Inbox**, Web URL + Raw Text + Multi-Page Camera Image + PDF ingestion with auto-enrichment (timers, tags, aisles), Personal Access Tokens (`lr_pat_...`), and `/api/mcp` Streamable HTTP server exposing cookbook & ingestion tools.
+  - In-App LLM Provider Settings UI (`Ollama` + `OpenAI-compatible /v1` with model discovery & health checks), persistent `IngestionJob` SQL queue & background worker with offline-host retry resilience, Side-by-Side **Review Inbox**, Web URL + Raw Text + Multi-Page Camera Image + PDF ingestion with auto-enrichment (timers, tags, shopping categories), Personal Access Tokens (`lr_pat_...`), and `/api/mcp` Streamable HTTP server exposing cookbook & ingestion tools.
 - **Milestone 3 — Meal Planning Calendar, Smart Shopping Lists & Real-Time Co-Shopping:**
   - Multi-slot Weekly/Monthly Meal Plan Calendar (multi-dish slots, custom serving overrides, `Leftovers` shopping exclusion, freeform notes, **"On-Deck"** flexible weekly tray, reusable Week Templates), Multiple Named Flat Shopping Lists with unit-consolidated generation + recipe provenance badges + Pantry Staples separation, `SignalR` real-time co-shopping sync, and expanding `/api/mcp` with meal-plan and shopping-list tools.
 - **Milestone 4 — Hands-Free Cook Mode, Cook Logs & 1-Click AI Kitchen Helpers:**

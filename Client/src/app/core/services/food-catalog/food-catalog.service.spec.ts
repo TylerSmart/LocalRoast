@@ -34,6 +34,13 @@ describe('FoodCatalogService', () => {
     expect(result).toEqual([]);
   });
 
+  it('passes the category filter as a query parameter', async () => {
+    const promise = firstValueFrom(service.getFoodItems({ category: 'Produce' }));
+    const req = httpMock.expectOne('/api/food-items?category=Produce');
+    req.flush([]);
+    await promise;
+  });
+
   it('creates food item via POST /api/food-items', async () => {
     const item: FoodItemDto = {
       id: 'f-1',

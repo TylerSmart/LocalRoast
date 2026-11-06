@@ -292,7 +292,8 @@ public sealed class IngestionProcessor(
                     f.Name,
                     f.NormalizedName,
                     f.IsPantryStaple,
-                    f.Aliases.Select(a => a.NormalizedAlias).ToList()
+                    f.Aliases.Select(a => a.NormalizedAlias).ToList(),
+                    f.Category
                 ))
                 .ToListAsync(jobCt);
 
@@ -933,6 +934,7 @@ public sealed class IngestionProcessor(
                         dbContext,
                         ing.ProposedFoodItemName,
                         ing.SuggestedIsPantryStaple,
+                        ing.SuggestedCategory,
                         cancellationToken
                     );
                 }

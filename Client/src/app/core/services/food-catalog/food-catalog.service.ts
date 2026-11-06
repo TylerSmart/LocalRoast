@@ -32,6 +32,9 @@ export class FoodCatalogService {
     if (query?.isPantryStaple !== undefined && query?.isPantryStaple !== null) {
       params = params.set('isPantryStaple', query.isPantryStaple.toString());
     }
+    if (query?.category) {
+      params = params.set('category', query.category);
+    }
 
     return this.http.get<PagedResultDto<FoodItemDto>>(apiUrl('/food-items'), { params });
   }
@@ -43,6 +46,9 @@ export class FoodCatalogService {
     }
     if (query?.isPantryStaple !== undefined && query?.isPantryStaple !== null) {
       params = params.set('isPantryStaple', query.isPantryStaple.toString());
+    }
+    if (query?.category) {
+      params = params.set('category', query.category);
     }
 
     return this.http.get<FoodItemDto[]>(apiUrl('/food-items'), { params });

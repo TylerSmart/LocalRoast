@@ -1,3 +1,4 @@
+import { FoodCategory } from './food-catalog.models';
 import { MeasurementUnit } from './recipe.models';
 
 export type MeasurementDimension = 'Volume' | 'Weight' | 'Discrete' | 'Unspecified';
@@ -51,6 +52,7 @@ export interface ShoppingListItemDto {
   sources: ShoppingListItemSourceDto[];
   createdAt: string;
   modifiedAt: string;
+  category?: FoodCategory;
 }
 
 export interface ShoppingListDetailDto {

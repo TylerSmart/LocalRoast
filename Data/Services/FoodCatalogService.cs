@@ -43,6 +43,11 @@ public sealed class FoodCatalogService(
             q = q.Where(f => f.IsPantryStaple == query.IsPantryStaple.Value);
         }
 
+        if (query.Category.HasValue)
+        {
+            q = q.Where(f => f.Category == query.Category.Value);
+        }
+
         if (!string.IsNullOrWhiteSpace(query.Search))
         {
             var norm = query.Search.Trim().ToLowerInvariant();
@@ -67,7 +72,8 @@ public sealed class FoodCatalogService(
                 f.RecipeIngredients.Select(ri => ri.RecipeId).Distinct().Count(),
                 f.CreatedAt,
                 f.ModifiedAt,
-                f.ShoppingListItems.Count()
+                f.ShoppingListItems.Count(),
+                f.Category ?? FoodCategory.Other
             ))
             .ToListAsync(cancellationToken);
 
@@ -84,6 +90,11 @@ public sealed class FoodCatalogService(
         if (query.IsPantryStaple.HasValue)
         {
             q = q.Where(f => f.IsPantryStaple == query.IsPantryStaple.Value);
+        }
+
+        if (query.Category.HasValue)
+        {
+            q = q.Where(f => f.Category == query.Category.Value);
         }
 
         if (!string.IsNullOrWhiteSpace(query.Search))
@@ -104,7 +115,8 @@ public sealed class FoodCatalogService(
                 f.RecipeIngredients.Select(ri => ri.RecipeId).Distinct().Count(),
                 f.CreatedAt,
                 f.ModifiedAt,
-                f.ShoppingListItems.Count()
+                f.ShoppingListItems.Count(),
+                f.Category ?? FoodCategory.Other
             ))
             .ToListAsync(cancellationToken);
     }
@@ -125,7 +137,8 @@ public sealed class FoodCatalogService(
                 f.RecipeIngredients.Select(ri => ri.RecipeId).Distinct().Count(),
                 f.CreatedAt,
                 f.ModifiedAt,
-                f.ShoppingListItems.Count()
+                f.ShoppingListItems.Count(),
+                f.Category ?? FoodCategory.Other
             ))
             .FirstOrDefaultAsync(cancellationToken);
     }
@@ -201,6 +214,7 @@ public sealed class FoodCatalogService(
             Name = request.Name.Trim(),
             NormalizedName = normName,
             IsPantryStaple = request.IsPantryStaple,
+            Category = request.Category ?? FoodCategoryClassifier.Classify(request.Name),
         };
 
         foreach (var alias in cleanAliases)
@@ -301,6 +315,10 @@ public sealed class FoodCatalogService(
         foodItem.Name = request.Name.Trim();
         foodItem.NormalizedName = normName;
         foodItem.IsPantryStaple = request.IsPantryStaple;
+        if (request.Category.HasValue)
+        {
+            foodItem.Category = request.Category.Value;
+        }
 
         var existingAliases = foodItem.Aliases.ToList();
         foreach (var existing in existingAliases)

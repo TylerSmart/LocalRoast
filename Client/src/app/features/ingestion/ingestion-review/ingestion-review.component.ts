@@ -32,7 +32,11 @@ import { MatSelectModule } from '@angular/material/select';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
-import { FoodItemDto } from '../../../core/models/food-catalog.models';
+import {
+  FOOD_CATEGORY_OPTIONS,
+  FoodCategory,
+  FoodItemDto,
+} from '../../../core/models/food-catalog.models';
 import type {
   IngestionDraftIngredientDto,
   IngestionDraftStepDto,
@@ -153,6 +157,8 @@ export class IngestionReviewComponent implements OnInit {
   get stepsArray(): FormArray<FormGroup> {
     return this.form.get('steps') as FormArray<FormGroup>;
   }
+
+  protected readonly foodCategoryOptions = FOOD_CATEGORY_OPTIONS;
 
   protected readonly availableIngredientLabels = computed(() => {
     return this.ingredientsArray.controls.map((ctrl, index) => {
@@ -300,6 +306,7 @@ export class IngestionReviewComponent implements OnInit {
           [Validators.required],
         ],
         suggestedIsPantryStaple: [item?.suggestedIsPantryStaple ?? false],
+        suggestedCategory: this.fb.control<FoodCategory | null>(item?.suggestedCategory ?? null),
         alternativeMeasurement: this.fb.control<RecipeMeasurement | null>(
           item?.alternativeMeasurement ?? null,
         ),
@@ -571,6 +578,7 @@ export class IngestionReviewComponent implements OnInit {
           alternativeMeasurement: val.alternativeMeasurement ?? null,
           preferAlternativeMeasurement:
             !!val.alternativeMeasurement && Boolean(val.preferAlternativeMeasurement),
+          suggestedCategory: val.suggestedCategory || null,
         };
       },
     );

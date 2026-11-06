@@ -1,3 +1,5 @@
+using App.Core.FoodCatalog;
+
 namespace App.Data.Entities;
 
 public sealed class FoodItem : IAuditable
@@ -9,6 +11,8 @@ public sealed class FoodItem : IAuditable
     public string NormalizedName { get; set; } = string.Empty;
 
     public bool IsPantryStaple { get; set; }
+
+    public FoodCategory? Category { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; }
 

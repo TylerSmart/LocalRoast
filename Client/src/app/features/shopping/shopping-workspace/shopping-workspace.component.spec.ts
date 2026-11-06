@@ -15,7 +15,11 @@ import {
 } from '../../../core/models/shopping.models';
 import { ShoppingRealtimeService } from '../../../core/services/shopping/shopping-realtime.service';
 import { ShoppingService } from '../../../core/services/shopping/shopping.service';
-import { ShoppingWorkspaceComponent } from './shopping-workspace.component';
+import {
+  SHOPPING_GROUP_BY_CATEGORY_STORAGE_KEY,
+  ShoppingItemGroup,
+  ShoppingWorkspaceComponent,
+} from './shopping-workspace.component';
 
 describe('ShoppingWorkspaceComponent', () => {
   let component: ShoppingWorkspaceComponent;
@@ -366,5 +370,62 @@ describe('ShoppingWorkspaceComponent', () => {
   it('disconnects on component destroy', () => {
     fixture.destroy();
     expect(mockRealtimeService.disconnect).toHaveBeenCalled();
+  });
+
+  describe('category grouping', () => {
+    const categorizedDetail = (): ShoppingListDetailDto => ({
+      ...mockDetail,
+      activeItems: [
+        {
+          ...mockActiveItem,
+          id: 'c-1',
+          displayName: 'Curry Powder',
+          category: 'SpicesAndSeasonings',
+        },
+        { ...mockActiveItem, id: 'c-2', displayName: 'Apples', category: 'Produce' },
+        { ...mockActiveItem, id: 'c-3', displayName: 'Paper Towels' },
+        { ...mockActiveItem, id: 'c-4', displayName: 'Lettuce', category: 'Produce' },
+      ],
+    });
+
+    afterEach(() => localStorage.removeItem(SHOPPING_GROUP_BY_CATEGORY_STORAGE_KEY));
+
+    it('groups active items by category in store-walk order', () => {
+      component['activeList'].set(categorizedDetail());
+      fixture.detectChanges();
+
+      const groups = component['activeItemGroups']();
+      expect(groups.map((g: ShoppingItemGroup) => g.category)).toEqual([
+        'Produce',
+        'SpicesAndSeasonings',
+        'Other',
+      ]);
+      expect(groups[0].items.map((i) => i.displayName)).toEqual(['Apples', 'Lettuce']);
+
+      const headings = Array.from(
+        (fixture.nativeElement as HTMLElement).querySelectorAll('.category-heading'),
+      ).map((h) => h.textContent ?? '');
+      expect(headings[0]).toContain('Produce');
+      expect(headings[1]).toContain('Spices & Seasonings');
+    });
+
+    it('toggles to a flat list and persists the preference', () => {
+      component['activeList'].set(categorizedDetail());
+      component['toggleGroupByCategory']();
+      fixture.detectChanges();
+
+      const groups = component['activeItemGroups']();
+      expect(groups.length).toBe(1);
+      expect(groups[0].label).toBeNull();
+      expect(groups[0].items.length).toBe(4);
+      expect(localStorage.getItem(SHOPPING_GROUP_BY_CATEGORY_STORAGE_KEY)).toBe('false');
+      expect((fixture.nativeElement as HTMLElement).querySelector('.category-heading')).toBeNull();
+    });
+
+    it('restores the flat-list preference from storage', () => {
+      localStorage.setItem(SHOPPING_GROUP_BY_CATEGORY_STORAGE_KEY, 'false');
+      const restored = TestBed.createComponent(ShoppingWorkspaceComponent).componentInstance;
+      expect(restored['groupByCategory']()).toBe(false);
+    });
   });
 });

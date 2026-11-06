@@ -66,4 +66,19 @@ describe('FoodItemDialogComponent', () => {
     );
     expect(mockDialogRef.close).toHaveBeenCalledWith(saved);
   });
+
+  it('sends null category for auto-detect and the chosen category when selected', () => {
+    mockCatalogService.createFoodItem.mockReset().mockReturnValue(of({} as FoodItemDto));
+
+    component.onSave();
+    expect(mockCatalogService.createFoodItem).toHaveBeenLastCalledWith(
+      expect.objectContaining({ category: null }),
+    );
+
+    component['form'].controls.category.setValue('Baking');
+    component.onSave();
+    expect(mockCatalogService.createFoodItem).toHaveBeenLastCalledWith(
+      expect.objectContaining({ category: 'Baking' }),
+    );
+  });
 });

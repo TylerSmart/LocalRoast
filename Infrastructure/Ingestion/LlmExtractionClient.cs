@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using App.Core.Exceptions;
+using App.Core.FoodCatalog;
 using App.Core.Ingestion;
 
 namespace App.Infrastructure.Ingestion;
@@ -985,6 +986,7 @@ Rules:
    - "isOptional": boolean flag.
    - "originalRawText": verbatim line as originally written.
    - "suggestedIsPantryStaple": boolean flag; true ONLY for basic everyday household staples typically kept on hand (water, salt, black pepper, cooking oils, basic vinegars, all-purpose flour, sugar, baking powder/soda, dried spices/herbs, soy sauce), false for fresh produce, meats, dairy, canned goods, and specialty items.
+   - "suggestedCategory": grocery-store section for shopping, exactly one of: Produce, MeatAndSeafood, DairyAndEggs, Refrigerated (other chilled items like tofu, hummus, fresh pasta, orange juice), Bakery, PantryDryGoods (rice, pasta, grains, nuts, peanut butter, dried fruit), CannedAndJarred (canned beans, tomatoes, broth, olives), CondimentsAndSauces (oils, vinegars, soy sauce, ketchup, honey), SpicesAndSeasonings (salt, pepper, dried spices and herbs), Baking (flour, sugar, baking powder, yeast, chocolate chips), Snacks, Beverages, Frozen, Other.
 5. Steps:
    - "sectionName": optional section header (e.g. "Prepare the Marinade").
    - "instruction": full clear step instruction text. For ingredient quantities assigned in ingredientAmounts, refer to the listed ingredient amounts instead of repeating fixed numeric amounts; those callouts scale with servings. Preserve all other details, temperatures, and durations.
@@ -1035,6 +1037,7 @@ Rules:
    - "isOptional": boolean flag.
    - "originalRawText": verbatim line as originally printed.
    - "suggestedIsPantryStaple": boolean flag; true ONLY for basic everyday household staples typically kept on hand (water, salt, black pepper, cooking oils, basic vinegars, all-purpose flour, sugar, baking powder/soda, dried spices/herbs, soy sauce), false for fresh produce, meats, dairy, canned goods, and specialty items.
+   - "suggestedCategory": grocery-store section for shopping, exactly one of: Produce, MeatAndSeafood, DairyAndEggs, Refrigerated (other chilled items like tofu, hummus, fresh pasta, orange juice), Bakery, PantryDryGoods (rice, pasta, grains, nuts, peanut butter, dried fruit), CannedAndJarred (canned beans, tomatoes, broth, olives), CondimentsAndSauces (oils, vinegars, soy sauce, ketchup, honey), SpicesAndSeasonings (salt, pepper, dried spices and herbs), Baking (flour, sugar, baking powder, yeast, chocolate chips), Snacks, Beverages, Frozen, Other.
 6. Steps:
    - "sectionName": optional section header (e.g. "Prepare the Marinade").
    - "instruction": full clear step instruction text. For ingredient quantities assigned in ingredientAmounts, refer to the listed ingredient amounts instead of repeating fixed numeric amounts; those callouts scale with servings. Preserve all other details, temperatures, and durations.
@@ -1217,6 +1220,11 @@ Household Cookbook Catalog:
                             originalRawText = new { type = "string" },
                             suggestedIsPantryStaple = new { type = "boolean" },
                             alternativeMeasurement = BuildMeasurementSchema(),
+                            suggestedCategory = new
+                            {
+                                type = "string",
+                                @enum = Enum.GetNames<FoodCategory>(),
+                            },
                         },
                         required = new[] { "displayName" },
                     },

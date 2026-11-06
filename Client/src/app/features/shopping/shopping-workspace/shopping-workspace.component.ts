@@ -1,4 +1,4 @@
-import { Component, OnDestroy, OnInit, inject, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
 import { ReactiveFormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCheckboxModule } from '@angular/material/checkbox';
@@ -13,6 +13,8 @@ import { MatSelectModule } from '@angular/material/select';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { Subscription } from 'rxjs';
+import { APP_STORAGE_PREFIX } from '../../../app.branding';
+import { FOOD_CATEGORY_OPTIONS, FoodCategory } from '../../../core/models/food-catalog.models';
 import {
   ClearCheckedItemsResultDto,
   CreateShoppingListItemRequest,
@@ -29,6 +31,14 @@ import {
   ShoppingListDialogComponent,
   ShoppingListDialogResult,
 } from '../shopping-list-dialog/shopping-list-dialog.component';
+
+export const SHOPPING_GROUP_BY_CATEGORY_STORAGE_KEY = `${APP_STORAGE_PREFIX}:shopping-group-by-category`;
+
+export interface ShoppingItemGroup {
+  category: FoodCategory | null;
+  label: string | null;
+  items: ShoppingListItemDto[];
+}
 
 @Component({
   imports: [
@@ -72,6 +82,39 @@ export class ShoppingWorkspaceComponent implements OnInit, OnDestroy {
   protected readonly syncState = this.shoppingRealtime.syncState;
 
   protected readonly quickAddName = signal<string>('');
+
+  protected readonly groupByCategory = signal<boolean>(this.readGroupByCategoryPreference());
+
+  protected readonly activeItemGroups = computed<ShoppingItemGroup[]>(() => {
+    const items = this.activeList()?.activeItems ?? [];
+    if (!this.groupByCategory()) {
+      return items.length > 0 ? [{ category: null, label: null, items }] : [];
+    }
+
+    return FOOD_CATEGORY_OPTIONS.map((option) => ({
+      category: option.value,
+      label: option.label,
+      items: items.filter((item) => (item.category ?? 'Other') === option.value),
+    })).filter((group) => group.items.length > 0);
+  });
+
+  protected toggleGroupByCategory(): void {
+    const next = !this.groupByCategory();
+    this.groupByCategory.set(next);
+    try {
+      localStorage.setItem(SHOPPING_GROUP_BY_CATEGORY_STORAGE_KEY, next ? 'true' : 'false');
+    } catch {
+      // Storage can be unavailable (private mode); the in-memory preference still applies.
+    }
+  }
+
+  private readGroupByCategoryPreference(): boolean {
+    try {
+      return localStorage.getItem(SHOPPING_GROUP_BY_CATEGORY_STORAGE_KEY) !== 'false';
+    } catch {
+      return true;
+    }
+  }
 
   ngOnInit(): void {
     void this.shoppingRealtime.connect();

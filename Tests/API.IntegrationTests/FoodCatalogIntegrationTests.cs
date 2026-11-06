@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using App.Core.Authentication;
 using App.Core.FoodCatalog;
 using App.Core.Recipes;
+using App.Core.Shopping;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace App.API.IntegrationTests;
@@ -122,6 +123,73 @@ public sealed class FoodCatalogIntegrationTests
         Assert.IsNotNull(updated);
         Assert.IsTrue(updated.IsPantryStaple);
         Assert.AreEqual(1, updated.Aliases.Count);
+    }
+
+    [TestMethod]
+    public async Task FoodItemCategories_AutoDetectOverrideFilter_AndFlowIntoShoppingItems()
+    {
+        await RegisterAndAuthenticateAsync(_client, "category_user@example.com", "categoryuser");
+
+        var autoRes = await _client.PostAsJsonAsync(
+            "/api/food-items",
+            new CreateFoodItemRequest("Whole Milk")
+        );
+        Assert.AreEqual(HttpStatusCode.Created, autoRes.StatusCode);
+        var milk = await autoRes.Content.ReadFromJsonAsync<FoodItemDto>();
+        Assert.IsNotNull(milk);
+        Assert.AreEqual(FoodCategory.DairyAndEggs, milk.Category);
+
+        var explicitRes = await _client.PostAsJsonAsync(
+            "/api/food-items",
+            new CreateFoodItemRequest("Mystery Crunch", Category: FoodCategory.Snacks)
+        );
+        var crunch = await explicitRes.Content.ReadFromJsonAsync<FoodItemDto>();
+        Assert.IsNotNull(crunch);
+        Assert.AreEqual(FoodCategory.Snacks, crunch.Category);
+
+        // Moving milk to "Refrigerated" persists; omitting the category on update keeps it.
+        var movedRes = await _client.PutAsJsonAsync(
+            $"/api/food-items/{milk.Id}",
+            new UpdateFoodItemRequest("Whole Milk", Category: FoodCategory.Refrigerated)
+        );
+        Assert.AreEqual(HttpStatusCode.OK, movedRes.StatusCode);
+        var keptRes = await _client.PutAsJsonAsync(
+            $"/api/food-items/{milk.Id}",
+            new UpdateFoodItemRequest("Whole Milk", IsPantryStaple: true)
+        );
+        var kept = await keptRes.Content.ReadFromJsonAsync<FoodItemDto>();
+        Assert.IsNotNull(kept);
+        Assert.AreEqual(FoodCategory.Refrigerated, kept.Category);
+
+        var filtered = await _client.GetFromJsonAsync<List<FoodItemDto>>(
+            "/api/food-items?category=Refrigerated"
+        );
+        Assert.IsNotNull(filtered);
+        Assert.AreEqual(1, filtered.Count);
+        Assert.AreEqual("Whole Milk", filtered[0].Name);
+
+        var listRes = await _client.PostAsJsonAsync(
+            "/api/shopping-lists",
+            new CreateShoppingListRequest("Category Trip")
+        );
+        var list = await listRes.Content.ReadFromJsonAsync<ShoppingListDetailDto>();
+        Assert.IsNotNull(list);
+
+        var linkedRes = await _client.PostAsJsonAsync(
+            $"/api/shopping-lists/{list.Id}/items",
+            new CreateShoppingListItemRequest("Milk", FoodItemId: milk.Id)
+        );
+        var linked = await linkedRes.Content.ReadFromJsonAsync<ShoppingListItemDto>();
+        Assert.IsNotNull(linked);
+        Assert.AreEqual(FoodCategory.Refrigerated, linked.Category);
+
+        var freeTextRes = await _client.PostAsJsonAsync(
+            $"/api/shopping-lists/{list.Id}/items",
+            new CreateShoppingListItemRequest("Bananas")
+        );
+        var freeText = await freeTextRes.Content.ReadFromJsonAsync<ShoppingListItemDto>();
+        Assert.IsNotNull(freeText);
+        Assert.AreEqual(FoodCategory.Produce, freeText.Category);
     }
 
     [TestMethod]

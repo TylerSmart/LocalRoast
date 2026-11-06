@@ -11,7 +11,8 @@ public record CatalogFoodLookupItem(
     string Name,
     string NormalizedName,
     bool IsPantryStaple,
-    IReadOnlyList<string> NormalizedAliases
+    IReadOnlyList<string> NormalizedAliases,
+    FoodCategory? Category = null
 );
 
 public record CatalogTagLookupItem(Guid Id, string Name, string NormalizedName, string Slug);
@@ -524,7 +525,9 @@ public static class RecipeDraftNormalizer
                         IsOptional: rawIng.IsOptional,
                         OriginalRawText: string.IsNullOrWhiteSpace(rawIng.OriginalRawText)
                             ? null
-                            : rawIng.OriginalRawText.Trim()
+                            : rawIng.OriginalRawText.Trim(),
+                        SuggestedCategory: match.Category
+                            ?? FoodCategoryClassifier.Classify(match.Name)
                     )
                 );
             }
@@ -552,7 +555,9 @@ public static class RecipeDraftNormalizer
                         IsOptional: rawIng.IsOptional,
                         OriginalRawText: string.IsNullOrWhiteSpace(rawIng.OriginalRawText)
                             ? null
-                            : rawIng.OriginalRawText.Trim()
+                            : rawIng.OriginalRawText.Trim(),
+                        SuggestedCategory: FoodCategories.Parse(rawIng.SuggestedCategory)
+                            ?? FoodCategoryClassifier.Classify(proposedName)
                     )
                 );
             }

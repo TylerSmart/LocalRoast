@@ -173,7 +173,8 @@ public sealed class IngestionIntegrationTests
                     DisplayName: uniqueFoodName,
                     PreparationNote: null,
                     IsOptional: false,
-                    OriginalRawText: $"1/2 cup {uniqueFoodName}"
+                    OriginalRawText: $"1/2 cup {uniqueFoodName}",
+                    SuggestedCategory: FoodCategory.CondimentsAndSauces
                 ),
             ],
             Steps:
@@ -214,6 +215,11 @@ public sealed class IngestionIntegrationTests
         Assert.AreEqual(1, recipe.Ingredients.Count);
         Assert.IsNotNull(recipe.Ingredients[0].FoodItemId);
         Assert.AreEqual(uniqueFoodName, recipe.Ingredients[0].FoodItemName);
+
+        var createdFood = await _client.GetFromJsonAsync<FoodItemDto>(
+            $"/api/food-items/{recipe.Ingredients[0].FoodItemId}"
+        );
+        Assert.AreEqual(FoodCategory.CondimentsAndSauces, createdFood?.Category);
 
         // Verify job detail is now Published
         var jobDetailResp = await _client.GetAsync($"/api/ingestion/jobs/{job.Id}");

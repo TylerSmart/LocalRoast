@@ -1,4 +1,5 @@
 using App.Core.Exceptions;
+using App.Core.FoodCatalog;
 using App.Core.Interfaces;
 using App.Core.MealPlans;
 using App.Core.Recipes;
@@ -1433,7 +1434,9 @@ public sealed class ShoppingListService(
             i.SortOrder,
             sources,
             i.CreatedAt,
-            i.ModifiedAt
+            i.ModifiedAt,
+            i.FoodItem?.Category
+                ?? FoodCategoryClassifier.Classify(i.FoodItem?.Name ?? i.DisplayName)
         );
     }
 

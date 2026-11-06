@@ -225,6 +225,7 @@ using (var scope = app.Services.CreateScope())
 
     await IngestionCatalogMaterializer.BackfillMissingSourceAttachmentsAsync(db, mediaStorage);
     await IngestionCatalogMaterializer.CleanLegacyCorruptedIngredientUnitsAsync(db);
+    await FoodCategoryBackfill.AssignMissingCategoriesAsync(db);
 }
 
 app.UseSerilogRequestLogging(options =>
