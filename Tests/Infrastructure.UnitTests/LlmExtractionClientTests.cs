@@ -168,7 +168,18 @@ public sealed class LlmExtractionClientTests
             var body = req.Content!.ReadAsStringAsync().Result;
             StringAssert.Contains(body, "\"think\":false");
             StringAssert.Contains(body, "\"num_predict\":16384");
-            StringAssert.Contains(body, "\"repeat_penalty\":1.1");
+            using var request = JsonDocument.Parse(body);
+            Assert.AreEqual(
+                1,
+                request.RootElement.GetProperty("options").GetProperty("repeat_penalty").GetDouble()
+            );
+            Assert.AreEqual(
+                0,
+                request.RootElement.GetProperty("options").GetProperty("temperature").GetDouble()
+            );
+            Assert.IsFalse(
+                request.RootElement.GetProperty("options").TryGetProperty("num_ctx", out _)
+            );
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(ollamaResponse, Encoding.UTF8, "application/json"),

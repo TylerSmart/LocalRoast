@@ -8,6 +8,92 @@ namespace App.Core.UnitTests;
 [TestClass]
 public sealed class RecipeDraftNormalizerTests
 {
+    [TestMethod]
+    public void Normalize_ExplicitCustomUnitUsesItsNameAndKeepsLegacyUnitsWorking()
+    {
+        var raw = new LlmExtractedRecipePayload(
+            Title: "Herbs",
+            Ingredients: [new(null, 2, null, "custom", "thyme", "thyme", CustomUnitName: "sprig")]
+        );
+        var draft = RecipeDraftNormalizer.Normalize(raw, [], [], null, null, null, null, null);
+        Assert.AreEqual(MeasurementUnit.Custom, draft.Ingredients![0].Unit);
+        Assert.AreEqual("sprig", draft.Ingredients[0].CustomUnitName);
+        Assert.AreEqual(
+            RecipeDraftNormalizer.NormalizeUnit("sprig"),
+            RecipeDraftNormalizer.NormalizeUnit("custom", "sprig")
+        );
+    }
+
+    [TestMethod]
+    public void Normalize_RetainsSourceEquivalentWeightsWithoutReplacingPreparation()
+    {
+        var raw = new LlmExtractedRecipePayload(
+            Title: "Cake",
+            Ingredients:
+            [
+                new(
+                    null,
+                    1.25m,
+                    null,
+                    "cup",
+                    "cake flour",
+                    "cake flour",
+                    PreparationNote: "sifted",
+                    OriginalRawText: "1 1/4 cups (5 ounces) cake flour, sifted"
+                ),
+            ]
+        );
+        var draft = RecipeDraftNormalizer.Normalize(raw, [], [], null, null, null, null, null);
+        Assert.AreEqual("sifted; 5 ounces", draft.Ingredients![0].PreparationNote);
+        Assert.AreEqual(1.25m, draft.Ingredients[0].Quantity);
+    }
+
+    [TestMethod]
+    [DataRow("tsp", 0.03125, "1/32 tsp cayenne", MeasurementUnit.Tsp, 0.03125)]
+    [DataRow("g", 0.01, "0.01 g saffron", MeasurementUnit.G, 0.01)]
+    [DataRow("tsp", 0.01, "Pinch cayenne", MeasurementUnit.Pinch, 1)]
+    public void Normalize_PreservesExplicitSmallAmountsAndOnlyInfersPinchFromSource(
+        string unit,
+        double amount,
+        string source,
+        MeasurementUnit expectedUnit,
+        double expectedAmount
+    )
+    {
+        var raw = new LlmExtractedRecipePayload(
+            Title: "Seasoning",
+            Ingredients:
+            [
+                new(null, (decimal)amount, null, unit, "spice", "spice", OriginalRawText: source),
+            ]
+        );
+        var draft = RecipeDraftNormalizer.Normalize(raw, [], [], null, null, null, null, null);
+        Assert.AreEqual(expectedUnit, draft.Ingredients![0].Unit);
+        Assert.AreEqual((decimal)expectedAmount, draft.Ingredients[0].Quantity);
+    }
+
+    [TestMethod]
+    public void Normalize_CorrectsRangeUpperBoundsAndKeepsSameDurationLabelsUnique()
+    {
+        var raw = new LlmExtractedRecipePayload(
+            Title: "Seared cutlets",
+            Steps:
+            [
+                new(
+                    null,
+                    "Cook first side for 2 to 3 minutes. Cook second side for 2 to 3 minutes.",
+                    [],
+                    [new(120, "Cook cutlets"), new(180, "Cook cutlets")]
+                ),
+            ]
+        );
+        var draft = RecipeDraftNormalizer.Normalize(raw, [], [], null, null, null, null, null);
+        var timers = draft.Steps![0].Timers!;
+        Assert.HasCount(2, timers);
+        Assert.IsTrue(timers.All(t => t.DurationSeconds == 120));
+        Assert.AreNotEqual(timers[0].Label, timers[1].Label);
+    }
+
     private readonly List<CatalogFoodLookupItem> _catalogFoods =
     [
         new(Guid.NewGuid(), "Garlic", "garlic", false, ["garlic clove", "garlic cloves"]),

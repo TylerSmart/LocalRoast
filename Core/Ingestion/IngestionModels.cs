@@ -46,7 +46,8 @@ public record LlmExtractedIngredientItem(
     string? PreparationNote = null,
     bool IsOptional = false,
     string? OriginalRawText = null,
-    bool SuggestedIsPantryStaple = false
+    bool SuggestedIsPantryStaple = false,
+    string? CustomUnitName = null
 );
 
 public record LlmExtractedStepItem(

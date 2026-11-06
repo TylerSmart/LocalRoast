@@ -603,6 +603,10 @@ public sealed class IngestionProcessor(
                 }
             }
 
+            var extractionIssues = RecipeExtractionDiagnostics.GetReviewIssues(
+                rawExtracted,
+                job.NormalizedSourceText ?? job.RawText
+            );
             var draft = RecipeDraftNormalizer.Normalize(
                 raw: rawExtracted,
                 catalogFoods: catalogFoods,
@@ -622,6 +626,16 @@ public sealed class IngestionProcessor(
                 rawSourceText: job.NormalizedSourceText ?? job.RawText
             );
 
+            if (extractionIssues.Count > 0)
+            {
+                draft = draft with { ConfidenceScore = Math.Min(draft.ConfidenceScore, 0.59m) };
+                logger.LogWarning(
+                    "Recipe extraction for job {JobId} requires review: {Issues}",
+                    job.Id,
+                    string.Join(" ", extractionIssues)
+                );
+            }
+
             job.ExtractedModel = modelUsed;
 
             if (
@@ -640,7 +654,8 @@ public sealed class IngestionProcessor(
             // Auto-Publish check
 
             var canAutoPublish =
-                (config.AutoPublishHighConfidenceText || job.AutoPublish)
+                extractionIssues.Count == 0
+                && (config.AutoPublishHighConfidenceText || job.AutoPublish)
                 && (
                     job.Channel == IngestionChannel.WebUrl
                     || job.Channel == IngestionChannel.RawText
@@ -681,6 +696,12 @@ public sealed class IngestionProcessor(
                 job.ProcessedAt = DateTimeOffset.UtcNow;
 
                 job.StatusDetail = $"Ready for side-by-side review ({modelUsed}).";
+                if (extractionIssues.Count > 0)
+                {
+                    var detail =
+                        $"{job.StatusDetail} Validation: {string.Join(" ", extractionIssues)}";
+                    job.StatusDetail = detail[..Math.Min(detail.Length, 2000)];
+                }
             }
 
             await dbContext.SaveChangesAsync(jobCt);

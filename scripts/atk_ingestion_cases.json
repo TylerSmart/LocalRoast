@@ -1,0 +1,136 @@
+[
+  {
+    "id": "c001-s1",
+    "split": "tuning",
+    "ingredients": [
+      { "name": "onion", "quantity": 2, "unit": "Tbsp", "prep": "chop" },
+      { "name": "serrano", "quantity": 1, "unit": "Whole", "prep": "minc" },
+      { "name": "salt", "quantity": 1, "unit": "Tsp" },
+      { "name": "lime zest", "quantity": 0.25, "unit": "Tsp", "prep": "grat" },
+      { "name": "lime juice", "range": [1.5, 2], "parts": [1.5, 0.5], "unit": "Tbsp" },
+      { "name": "avocado", "quantity": 3, "unit": "Whole" },
+      { "name": "tomato", "quantity": 1, "unit": "Whole" },
+      { "name": "cilantro", "quantity": 2, "unit": "Tbsp", "prep": "chop" }
+    ]
+  },
+  {
+    "id": "c006-s368", "split": "tuning",
+    "ingredients": [
+      { "name": "lemon(?! juice| zest)", "quantity": 2, "unit": "Whole" },
+      { "name": "chicken breast", "quantity": 4, "unit": "Whole", "parts": [2, 2], "prep": "trim|tenderloin" },
+      { "name": "^table salt$|^salt$", "quantity": 0, "unit": null },
+      { "name": "black pepper", "quantity": 0, "unit": null },
+      { "name": "flour", "quantity": 0.5, "unit": "Cup" },
+      { "name": "vegetable oil", "quantity": 4, "unit": "Tbsp", "parts": [2, 2] },
+      { "name": "shallot", "quantity": 1, "unit": "Whole", "prep": "garlic" },
+      { "name": "chicken broth", "quantity": 1, "unit": "Cup" },
+      { "name": "caper", "quantity": 2, "unit": "Tbsp", "prep": "drain" },
+      { "name": "butter", "quantity": 3, "unit": "Tbsp", "prep": "soften" },
+      { "name": "parsley", "quantity": 2, "unit": "Tbsp", "prep": "minc" }
+    ],
+    "excluded": ["^garlic"],
+    "timers": [
+      { "seconds": 120, "label": "first" },
+      { "seconds": 120, "label": "second" },
+      { "seconds": 30, "label": "shallot" },
+      { "seconds": 240, "label": "reduc|simmer" },
+      { "seconds": 60, "label": "reduc|simmer" }
+    ]
+  },
+  {
+    "id": "c013-s1113", "split": "tuning",
+    "ingredients": [
+      { "name": "flour", "quantity": 1.25, "unit": "Cup", "prep": "5 ounces" },
+      { "name": "baking powder", "quantity": 0.75, "unit": "Tsp" },
+      { "name": "salt", "quantity": 0.5, "unit": "Tsp" },
+      { "name": "chocolate", "quantity": 6, "unit": "Oz", "prep": "chop" },
+      { "name": "butter", "quantity": 12, "unit": "Tbsp", "prep": "cut" },
+      { "name": "sugar", "quantity": 2.25, "unit": "Cup" },
+      { "name": "egg", "quantity": 4, "unit": "Whole" },
+      { "name": "vanilla", "quantity": 1, "unit": "Tbsp" },
+      { "name": "pecan", "quantity": 1, "unit": "Cup", "prep": "walnut" }
+    ],
+    "excluded": ["^walnut"],
+    "timers": [
+      { "seconds": 1800, "label": "bake" },
+      { "seconds": 7200, "label": "cool" }
+    ]
+  },
+  {
+    "id": "c011-s934", "split": "tuning",
+    "ingredients": [
+      { "name": "potato", "quantity": 4, "unit": "Lb", "prep": "peel" },
+      { "name": "cream", "quantity": 1.5, "unit": "Cup" },
+      { "name": "butter", "quantity": 12, "unit": "Tbsp", "prep": "cut" },
+      { "name": "salt", "quantity": 2, "unit": "Tsp" }
+    ],
+    "timers": [
+      { "seconds": 30, "label": "rinse" },
+      { "seconds": 1200, "label": "boil|cook" },
+      { "seconds": 300, "label": "cream|butter" },
+      { "seconds": 60, "label": "dry" }
+    ]
+  },
+  {
+    "id": "c002-s84", "split": "holdout",
+    "ingredients": [
+      { "name": "flour", "quantity": 0.666667, "unit": "Cup" },
+      { "name": "egg whites?", "quantity": 4, "unit": "Whole" },
+      { "name": "egg yolks?", "quantity": 2, "unit": "Whole" },
+      { "name": "lemon zest", "quantity": 1, "unit": "Tsp" },
+      { "name": "lemon juice", "quantity": 4, "unit": "Tsp" },
+      { "name": "butter", "quantity": 2, "unit": "Tbsp", "prep": "melt" },
+      { "name": "vegetable oil", "range": [1, 2], "unit": "Tsp" }
+    ],
+    "timers": [
+      { "seconds": 60, "label": "whip|beat" },
+      { "seconds": 120, "label": "first" },
+      { "seconds": 120, "label": "second" }
+    ]
+  },
+  {
+    "id": "c008-s707", "split": "holdout",
+    "ingredients": [
+      { "name": "shrimp(?! shells?)", "quantity": 1, "unit": "Lb", "prep": "shell|peel" },
+      { "name": "table salt|^salt$", "quantity": 1.75, "unit": "Tsp", "parts": [0.5, 1, 0.25] },
+      { "name": "water", "quantity": 7, "unit": "Cup" },
+      { "name": "butter", "quantity": 4, "unit": "Tbsp", "parts": [2, 2] },
+      { "name": "baking soda", "quantity": 0.125, "unit": "Tsp" },
+      { "name": "Arborio rice", "quantity": 1.5, "unit": "Cup" },
+      { "name": "lemon zest", "quantity": 0.5, "unit": "Tsp" },
+      { "name": "lemon juice", "quantity": 1, "unit": "Tbsp" }
+    ],
+    "timers": [
+      { "seconds": 120, "label": "shell" },
+      { "seconds": 300, "label": "stock|broth|simmer" },
+      { "seconds": 480, "label": "vegetable|onion|fennel" },
+      { "seconds": 30, "label": "garlic" },
+      { "seconds": 960, "label": "rice|risotto|simmer" }
+    ]
+  },
+  {
+    "id": "c014-s1134", "split": "holdout",
+    "ingredients": [
+      { "name": "butter(?!milk)", "quantity": 19, "unit": "Tbsp", "parts": [18, 1] },
+      { "name": "flour", "quantity": 49, "unit": "Tbsp", "parts": [48, 1] },
+      { "name": "lemon zest", "quantity": 3, "unit": "Tbsp" },
+      { "name": "lemon juice", "range": [5, 6], "unit": "Tbsp" },
+      { "name": "buttermilk", "quantity": 13, "unit": "Tbsp", "parts": [12, 1] }
+    ],
+    "timers": [
+      { "seconds": 2700, "label": "bake" },
+      { "seconds": 600, "label": "cool" },
+      { "seconds": 3600, "label": "cool" },
+      { "seconds": 7200, "label": "cool" }
+    ]
+  },
+  {
+    "id": "c007-s540", "split": "stress",
+    "ingredients": [
+      { "name": "bread flour", "quantity": 3.25, "unit": "Cup" },
+      { "name": "butter", "quantity": 30, "unit": "Tbsp" },
+      { "name": "ice water", "quantity": 9, "unit": "Tbsp" },
+      { "name": "prosciutto", "quantity": 12, "unit": "Slice" }
+    ]
+  }
+]

@@ -579,7 +579,7 @@ public sealed class IngestionIntegrationTests
                         MaxQuantity: null,
                         Unit: "whole",
                         CanonicalFoodName: "lemon",
-                        DisplayName: "lemon, sliced",
+                        DisplayName: "lemon",
                         PreparationNote: "sliced",
                         IsOptional: false,
                         OriginalRawText: "1 lemon, sliced",
@@ -624,7 +624,7 @@ public sealed class IngestionIntegrationTests
         var job1Resp = await client.PostAsJsonAsync(
             "/api/ingestion/jobs/text",
             new EnqueueRawTextIngestionRequest(
-                RawText: "Title: Classic Roast Chicken\nIngredients:\n- 1 whole chicken\n- 1 tbsp kosher salt",
+                RawText: "Title: Classic Roast Chicken\nIngredients:\n- 1 (4-pound) whole chicken\n- 1 tablespoon kosher salt",
                 TitleHint: "Classic Roast Chicken",
                 SourceName: "America's Test Kitchen",
                 SourceAuthor: "America's Test Kitchen",
@@ -643,7 +643,7 @@ public sealed class IngestionIntegrationTests
         var job2Resp = await client.PostAsJsonAsync(
             "/api/ingestion/jobs/text",
             new EnqueueRawTextIngestionRequest(
-                RawText: "Title: Skillet Lemon Chicken\nIngredients:\n- 1 tsp kosher salt\n- 1 lemon",
+                RawText: "Title: Skillet Lemon Chicken\nIngredients:\n- 1 teaspoon kosher salt\n- 1 lemon, sliced",
                 TitleHint: "Skillet Lemon Chicken",
                 SourceName: "America's Test Kitchen",
                 SourceAuthor: "America's Test Kitchen",
@@ -722,6 +722,76 @@ public sealed class IngestionIntegrationTests
         Assert.AreEqual(1, recipe1.Collections.Count);
         Assert.AreEqual("Poultry", recipe1.Collections[0].Name);
         Assert.AreEqual(3, recipe1.Tags.Count);
+    }
+
+    [TestMethod]
+    [DataRow(true, false, false)]
+    [DataRow(false, true, false)]
+    [DataRow(true, false, true)]
+    [DataRow(false, true, true)]
+    public async Task InvalidHighConfidenceExtraction_RequiresReviewEvenWhenAutoPublishRequested(
+        bool jobAutoPublish,
+        bool globalAutoPublish,
+        bool invalidFoodName
+    )
+    {
+        var fakeLlm = new FakeSequentialLlmExtractionClient(_ => new LlmExtractedRecipePayload(
+            Title: "Oil sauce",
+            ConfidenceScore: 0.99m,
+            Ingredients:
+            [
+                new(
+                    null,
+                    invalidFoodName ? 4 : 2,
+                    null,
+                    "tbsp",
+                    invalidFoodName ? "olive oil or butter" : "olive oil",
+                    "olive oil",
+                    OriginalRawText: "4 tablespoons olive oil"
+                ),
+                new(null, null, null, null, "salt", "salt", OriginalRawText: "Salt"),
+            ],
+            Steps: [new(null, "Heat the oil and season with salt.", [0, 1])]
+        ));
+        await using var factory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Llm:TextModel", "gemma4:e4b");
+            builder.UseSetting("Llm:AutoPublishHighConfidenceText", globalAutoPublish.ToString());
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ILlmExtractionClient>();
+                services.AddSingleton<ILlmExtractionClient>(fakeLlm);
+            });
+        });
+        using var client = factory.CreateClient();
+        await AuthenticateAsync(client);
+        var response = await client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest(
+                "Ingredients:\n- 4 tablespoons olive oil\n- Salt\nInstructions:\nHeat oil and season.",
+                AutoPublish: jobAutoPublish
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Accepted, response.StatusCode);
+        var job = await response.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
+        Assert.IsNotNull(job);
+        using var scope = factory.Services.CreateScope();
+        Assert.IsTrue(
+            await scope
+                .ServiceProvider.GetRequiredService<IIngestionProcessor>()
+                .ProcessNextQueuedJobAsync()
+        );
+        var detail = await client.GetFromJsonAsync<IngestionJobDetailDto>(
+            $"/api/ingestion/jobs/{job.Id}"
+        );
+        Assert.IsNotNull(detail);
+        Assert.AreEqual(IngestionJobStatus.ReadyForReview, detail.Status);
+        Assert.AreEqual(0.59m, detail.ConfidenceScore);
+        StringAssert.Contains(
+            detail.StatusDetail,
+            invalidFoodName ? "out of food names" : "source total"
+        );
+        Assert.IsNull(detail.ResultingRecipeId);
     }
 
     private sealed class FakeSequentialLlmExtractionClient(
