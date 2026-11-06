@@ -243,6 +243,14 @@ public sealed class VisionAndPdfIngestionE2ETests : E2ETestBase
 
         await Page.Keyboard.PressAsync("Escape");
 
+        var ingestionToggle = dialog.Locator(
+            "mat-slide-toggle[formcontrolname='enableIngestion'] button"
+        );
+        if (await ingestionToggle.GetAttributeAsync("aria-checked") != "true")
+        {
+            await ingestionToggle.ClickAsync();
+        }
+
         await dialog
             .Locator("button", new() { HasText = "Save Settings" })
             .ClickAsync(new() { Force = true });

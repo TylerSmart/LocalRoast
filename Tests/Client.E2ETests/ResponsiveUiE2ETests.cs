@@ -247,6 +247,7 @@ public sealed class ResponsiveUiE2ETests : E2ETestBase
         await Expect(Page.Locator(".week-view-wrapper")).ToContainTextAsync(RecipeTitle);
         await AssertLayoutAsync(Page.Locator("app-shell"), "populated-meal-plan");
 
+        await Page.Locator("mat-button-toggle[value='week'] button").ClickAsync();
         await Page.GetByRole(AriaRole.Button, new() { Name = "Manage reusable week templates" })
             .ClickAsync();
         await AssertDialogAsync("templates");
@@ -264,7 +265,7 @@ public sealed class ResponsiveUiE2ETests : E2ETestBase
         await Page.Keyboard.PressAsync("Escape");
         await Page.GetByRole(
                 AriaRole.Button,
-                new() { Name = "Generate shopping list for this week" }
+                new() { Name = "Generate shopping list for the displayed seven-day period" }
             )
             .ClickAsync();
         await AssertDialogAsync("generate-shopping");

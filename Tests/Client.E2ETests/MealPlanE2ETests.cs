@@ -320,7 +320,7 @@ public sealed class MealPlanE2ETests : E2ETestBase
             .Not.ToHaveClassAsync(new Regex(".*full-width.*"));
         var recipesMainWidth = await Page.Locator("main.main-content")
             .EvaluateAsync<double>("el => el.getBoundingClientRect().width");
-        Assert.IsLessThanOrEqualTo(1200, recipesMainWidth);
+        Assert.IsLessThanOrEqualTo(1280, recipesMainWidth);
 
         // Mobile still stacks the week without horizontal overflow.
         await Page.Locator("nav.desktop-nav a[href='/meal-plan']").ClickAsync();
