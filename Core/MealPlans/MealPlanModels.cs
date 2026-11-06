@@ -64,7 +64,8 @@ public sealed record CreateMealPlanEntryRequest(
     [Range(typeof(decimal), "0.25", "999")] decimal? TargetServings = null,
     Guid? SourceMealPlanEntryId = null,
     [MaxLength(200)] string? CustomTitle = null,
-    [MaxLength(500)] string? Notes = null
+    [MaxLength(500)] string? Notes = null,
+    [Range(0, 27)] int? SourceDraftEntryIndex = null
 );
 
 public sealed record UpdateMealPlanEntryRequest(

@@ -4,7 +4,7 @@ import { CdkDrag } from '@angular/cdk/drag-drop';
 import { signal } from '@angular/core';
 import { MatDialog } from '@angular/material/dialog';
 import { provideRouter } from '@angular/router';
-import { of } from 'rxjs';
+import { Subject, of, throwError } from 'rxjs';
 import { MealPlanEntryDto, MealPlanWeekDto } from '../../../core/models/meal-plan.models';
 import { MealPlanService } from '../../../core/services/meal-plan/meal-plan.service';
 import { AiKitchenHelperService } from '../../../core/services/ai-helpers/ai-kitchen-helper.service';
@@ -107,6 +107,15 @@ describe('MealPlanCalendarComponent', () => {
   };
 
   beforeEach(async () => {
+    vi.clearAllMocks();
+    mockMealPlanService.getRange.mockImplementation((start: string, end: string) =>
+      of({
+        startDate: start,
+        endDate: end,
+        scheduledEntries: [{ ...mockWeek.days[0].entries[0], scheduledDate: start }],
+        onDeckEntries: mockWeek.onDeckEntries,
+      }),
+    );
     await TestBed.configureTestingModule({
       imports: [MealPlanCalendarComponent],
       providers: [
@@ -122,10 +131,15 @@ describe('MealPlanCalendarComponent', () => {
     fixture.detectChanges();
   });
 
-  it('renders calendar toolbar and loads week data', () => {
+  it('defaults to a rolling seven-day board starting today', () => {
     expect(component).toBeTruthy();
-    expect(mockMealPlanService.getWeek).toHaveBeenCalled();
-    expect(component['weekData']()).toEqual(mockWeek);
+    const today = getTodayIsoLocal();
+    expect(component['viewMode']()).toBe('next7');
+    expect(mockMealPlanService.getRange).toHaveBeenCalledWith(today, addDaysIso(today, 6), true);
+    expect(mockMealPlanService.getWeek).not.toHaveBeenCalled();
+    expect(component['weekData']()!.days).toHaveLength(7);
+    expect(component['weekData']()!.days[0].date).toBe(today);
+    expect(component['weekData']()!.days[6].date).toBe(addDaysIso(today, 6));
 
     const el = fixture.nativeElement as HTMLElement;
     expect(el.textContent).toContain('Meal Plan');
@@ -133,7 +147,8 @@ describe('MealPlanCalendarComponent', () => {
     expect(el.textContent).toContain('Cornbread');
   });
 
-  it('navigates next and previous week', () => {
+  it('preserves canonical Sunday-based week navigation', () => {
+    component['setViewMode']('week');
     const currentSunday = normalizeToSundayIso(getTodayIsoLocal());
     const nextSunday = addDaysIso(currentSunday, 7);
 
@@ -145,8 +160,45 @@ describe('MealPlanCalendarComponent', () => {
     expect(component['activeWeekStart']()).toBe(currentSunday);
   });
 
+  it('navigates rolling periods and resets to today without normalizing to Sunday', () => {
+    const today = getTodayIsoLocal();
+    component['navigatePeriod'](1);
+    expect(component['activeRollingStart']()).toBe(addDaysIso(today, 7));
+    component['navigatePeriod'](-1);
+    expect(component['activeRollingStart']()).toBe(today);
+    component['navigatePeriod'](-1);
+    component['goToToday']();
+    expect(component['activeRollingStart']()).toBe(today);
+    expect(component['weekData']()!.weekStartDate).toBe(today);
+  });
+
+  it('cancels stale rolling loads when switching back to a canonical week', () => {
+    const pending = new Subject<{
+      startDate: string;
+      endDate: string;
+      scheduledEntries: MealPlanEntryDto[];
+      onDeckEntries: MealPlanEntryDto[];
+    }>();
+    mockMealPlanService.getRange.mockReturnValue(pending);
+    component.loadCurrentView();
+    component['setViewMode']('week');
+    pending.next({ startDate: '', endDate: '', scheduledEntries: [], onDeckEntries: [] });
+    expect(component['weekData']()).toEqual(mockWeek);
+  });
+
+  it('clears stale rolling data and reports loading errors', () => {
+    const snack = vi.spyOn(component['snackBar'], 'open');
+    mockMealPlanService.getRange.mockReturnValue(
+      throwError(() => ({ error: { detail: 'Unavailable' } })),
+    );
+    component.loadCurrentView();
+    expect(component['weekData']()).toBeNull();
+    expect(component['isLoading']()).toBe(false);
+    expect(snack).toHaveBeenCalledWith('Unavailable', 'Close', { duration: 4000 });
+  });
+
   it('opens generate shopping list dialog on openGenerateShoppingListDialog', () => {
-    const currentSunday = normalizeToSundayIso(getTodayIsoLocal());
+    const currentSunday = getTodayIsoLocal();
     const currentSaturday = addDaysIso(currentSunday, 6);
 
     mockDialog.open.mockReturnValue({
@@ -228,7 +280,7 @@ describe('MealPlanCalendarComponent', () => {
       DraftMealPlanDialogComponent,
       expect.objectContaining({
         data: {
-          weekStartDate: component['activeWeekStart'](),
+          weekStartDate: component['activePeriodStart'](),
         },
       }),
     );

@@ -754,6 +754,19 @@ public sealed class LlmExtractionClientTests
         var handler = new MockHttpMessageHandler(req =>
         {
             Assert.AreEqual("/v1/chat/completions", req.RequestUri!.AbsolutePath);
+            using var body = System.Text.Json.JsonDocument.Parse(
+                req.Content!.ReadAsStringAsync().GetAwaiter().GetResult()
+            );
+            var messages = body.RootElement.GetProperty("messages");
+            var systemPrompt = messages[0].GetProperty("content").GetString()!;
+            var userPrompt = messages[1].GetProperty("content").GetString()!;
+            StringAssert.Contains(systemPrompt, "0 is the start date");
+            StringAssert.Contains(systemPrompt, "do not add extra proposals for leftovers");
+            StringAssert.Contains(userPrompt, "Seven-Day Period Starts: 2026-11-02");
+            StringAssert.Contains(
+                userPrompt,
+                "Requested Number of Cooking Occasions (not counting leftovers): 1"
+            );
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(openAiResponse, Encoding.UTF8, "application/json"),

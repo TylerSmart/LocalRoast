@@ -308,7 +308,18 @@ public sealed class AiKitchenHelperService(
             throw new DomainValidationException("Prompt cannot exceed 600 characters.");
         }
 
-        var requestedMealCount = Math.Clamp(request.MealCount, 1, 14);
+        if (
+            request.MealCount is < 1 or > 14
+            || request.ServingsPerMeal is < 0.25m or > 999m
+            || !Enum.IsDefined(request.DefaultSlot)
+            || request.ExcludedRecipeIds?.Count > 150
+        )
+        {
+            throw new DomainValidationException(
+                "Invalid meal count, servings, slot, or recipe exclusions."
+            );
+        }
+        var requestedMealCount = request.MealCount;
 
         var config = await llmSettingsService.GetEffectiveConfigAsync(cancellationToken);
         if (string.IsNullOrWhiteSpace(config.TextModel))
@@ -318,10 +329,15 @@ public sealed class AiKitchenHelperService(
             );
         }
 
-        var weekSunday = MealPlanDateHelper.NormalizeToSunday(
-            request.WeekStartDate ?? DateOnly.FromDateTime(_timeProvider.GetUtcNow().UtcDateTime)
-        );
-        var weekSaturday = weekSunday.AddDays(6);
+        var utcToday = DateOnly.FromDateTime(_timeProvider.GetUtcNow().UtcDateTime);
+        var today = request.TodayDate ?? utcToday;
+        if (Math.Abs(today.DayNumber - utcToday.DayNumber) > 1)
+        {
+            throw new DomainValidationException("TodayDate must match the current local date.");
+        }
+        var rangeStart = request.WeekStartDate is { } start && start > today ? start : today;
+        var rangeEnd = rangeStart.AddDays(6);
+        var excludedIds = request.ExcludedRecipeIds?.ToHashSet() ?? [];
 
         var publishedRecipes = await dbContext
             .Recipes.AsNoTracking()
@@ -329,15 +345,16 @@ public sealed class AiKitchenHelperService(
                 .ThenInclude(rt => rt.Tag)
             .Include(r => r.Ingredients)
                 .ThenInclude(i => i.FoodItem)
-            .Where(r => r.Status == RecipeStatus.Published)
+            .Where(r => r.Status == RecipeStatus.Published && !excludedIds.Contains(r.Id))
             .OrderByDescending(r => r.AverageRating ?? 0m)
             .ThenByDescending(r => r.TimesCooked)
+            .ThenBy(r => r.Id)
             .ToListAsync(cancellationToken);
 
         if (publishedRecipes.Count == 0)
         {
             throw new DomainValidationException(
-                "Your household cookbook has no published recipes yet. Add or publish recipes before drafting a meal plan."
+                "No eligible published recipes remain in your household cookbook. Add recipes or remove exclusions before drafting."
             );
         }
 
@@ -385,8 +402,11 @@ public sealed class AiKitchenHelperService(
             .MealPlanEntries.AsNoTracking()
             .Include(e => e.Recipe)
             .Where(e =>
-                (e.IsOnDeck && e.WeekStartDate >= weekSunday && e.WeekStartDate <= weekSaturday)
-                || (!e.IsOnDeck && e.ScheduledDate >= weekSunday && e.ScheduledDate <= weekSaturday)
+                (
+                    e.IsOnDeck
+                    && e.WeekStartDate >= MealPlanDateHelper.NormalizeToSunday(rangeStart)
+                    && e.WeekStartDate <= rangeEnd
+                ) || (!e.IsOnDeck && e.ScheduledDate >= rangeStart && e.ScheduledDate <= rangeEnd)
             )
             .ToListAsync(cancellationToken);
 
@@ -398,8 +418,24 @@ public sealed class AiKitchenHelperService(
             )
             .ToList();
 
+        var occupiedDates = existingWeekEntries
+            .Where(e => !e.IsOnDeck && e.Slot == request.DefaultSlot && e.ScheduledDate.HasValue)
+            .Select(e => e.ScheduledDate!.Value)
+            .ToHashSet();
+        var openDates = Enumerable
+            .Range(0, 7)
+            .Select(offset => rangeStart.AddDays(offset))
+            .Where(date => !occupiedDates.Contains(date))
+            .ToList();
+        if (!request.PlaceOnDeck && requestedMealCount > openDates.Count)
+        {
+            throw new DomainValidationException(
+                $"Only {openDates.Count} unplanned {request.DefaultSlot} dates remain in this seven-day period. Reduce the cooking count."
+            );
+        }
+
         var llmContext = new LlmDraftMealPlanContext(
-            WeekStartDate: weekSunday,
+            WeekStartDate: rangeStart,
             UserPrompt: prompt,
             RequestedMealCount: requestedMealCount,
             DefaultSlotName: request.DefaultSlot.ToString(),
@@ -416,21 +452,14 @@ public sealed class AiKitchenHelperService(
 
         var candidateMapByIndex = catalogList.ToDictionary(c => c.CatalogIndex);
         var recipeByIdMap = publishedRecipes.ToDictionary(r => r.Id);
-        var recipeByTitleMap = publishedRecipes.ToDictionary(
-            r => r.Title,
-            StringComparer.OrdinalIgnoreCase
-        );
+        var recipeByTitleMap = catalogList
+            .Select(candidate => recipeByIdMap[candidate.RecipeId])
+            .GroupBy(r => r.Title, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
 
         var proposals = payload.Proposals ?? [];
         var resultCandidates = new List<DraftMealPlanCandidateDto>();
         var seenRecipeIds = new HashSet<Guid>();
-
-        // Track open days for default assignment
-        var usedDays = existingWeekEntries
-            .Where(e => !e.IsOnDeck && e.ScheduledDate.HasValue && e.Slot == request.DefaultSlot)
-            .Select(e => e.ScheduledDate!.Value.DayNumber - weekSunday.DayNumber)
-            .Where(d => d is >= 0 and <= 6)
-            .ToHashSet();
 
         var nextOpenDay = 0;
 
@@ -456,10 +485,7 @@ public sealed class AiKitchenHelperService(
                 continue;
             }
 
-            if (
-                seenRecipeIds.Contains(matchedRecipe.Id)
-                && publishedRecipes.Count >= requestedMealCount
-            )
+            if (seenRecipeIds.Contains(matchedRecipe.Id) && catalogList.Count >= requestedMealCount)
             {
                 // Skip duplicate recipe in draft if we have enough distinct recipes
                 continue;
@@ -467,47 +493,34 @@ public sealed class AiKitchenHelperService(
 
             seenRecipeIds.Add(matchedRecipe.Id);
 
-            var isOnDeck = request.PlaceOnDeck || (p.IsOnDeck ?? false);
+            var isOnDeck = request.PlaceOnDeck;
             int? dayOffset = null;
             DateOnly? scheduledDate = null;
             MealSlot? slot = null;
 
+            var leftoverDates = new List<DateOnly>();
             if (!isOnDeck)
             {
-                if (p.DayOffset.HasValue && p.DayOffset.Value is >= 0 and <= 6)
+                // Meal count is cooking occasions; each batch covers its share of open dates.
+                var coverage =
+                    openDates.Count / requestedMealCount
+                    + (resultCandidates.Count < openDates.Count % requestedMealCount ? 1 : 0);
+                scheduledDate = openDates[nextOpenDay++];
+                dayOffset = scheduledDate.Value.DayNumber - rangeStart.DayNumber;
+                slot = request.DefaultSlot;
+                for (var i = 1; i < coverage; i++)
                 {
-                    dayOffset = p.DayOffset.Value;
-                }
-                else
-                {
-                    while (nextOpenDay < 7 && usedDays.Contains(nextOpenDay))
-                    {
-                        nextOpenDay++;
-                    }
-                    dayOffset = nextOpenDay < 7 ? nextOpenDay : (nextOpenDay % 7);
-                    nextOpenDay++;
-                }
-
-                usedDays.Add(dayOffset.Value);
-                scheduledDate = weekSunday.AddDays(dayOffset.Value);
-
-                if (
-                    !string.IsNullOrWhiteSpace(p.Slot)
-                    && Enum.TryParse<MealSlot>(p.Slot.Trim(), true, out var parsedSlot)
-                )
-                {
-                    slot = parsedSlot;
-                }
-                else
-                {
-                    slot = request.DefaultSlot;
+                    leftoverDates.Add(openDates[nextOpenDay++]);
                 }
             }
 
-            var targetServings =
-                p.TargetServings.HasValue && p.TargetServings.Value > 0
-                    ? p.TargetServings.Value
-                    : matchedRecipe.BaseServings;
+            var targetServings = request.ServingsPerMeal * (1 + leftoverDates.Count);
+            if (targetServings > 999m)
+            {
+                throw new DomainValidationException(
+                    "Cooking servings including leftovers cannot exceed 999. Reduce servings per meal."
+                );
+            }
 
             var rationale = !string.IsNullOrWhiteSpace(p.Rationale)
                 ? p.Rationale.Trim()
@@ -532,7 +545,8 @@ public sealed class AiKitchenHelperService(
                     ScheduledDate: scheduledDate,
                     Slot: slot,
                     TargetServings: targetServings,
-                    Rationale: rationale
+                    Rationale: rationale,
+                    LeftoverDates: leftoverDates
                 )
             );
 
@@ -542,16 +556,16 @@ public sealed class AiKitchenHelperService(
             }
         }
 
-        if (resultCandidates.Count == 0)
+        if (resultCandidates.Count != requestedMealCount)
         {
             throw new DomainValidationException(
-                "The AI model did not return any valid recipes from your household cookbook. Try refining your prompt."
+                $"The AI model returned {resultCandidates.Count} valid cookbook suggestions instead of {requestedMealCount}. Try again or reduce the cooking count."
             );
         }
 
         return new DraftMealPlanResponseDto(
-            WeekStartDate: weekSunday,
-            WeekEndDate: weekSaturday,
+            WeekStartDate: rangeStart,
+            WeekEndDate: rangeEnd,
             ModelUsed: config.TextModel,
             ConsideredCookbookRecipeCount: catalogList.Count,
             Candidates: resultCandidates

@@ -51,6 +51,9 @@ export interface DraftWeeklyMealPlanRequest {
   mealCount?: number;
   defaultSlot?: MealSlot;
   placeOnDeck?: boolean;
+  servingsPerMeal?: number;
+  todayDate?: string;
+  excludedRecipeIds?: string[];
 }
 
 export interface DraftMealPlanCandidateDto {
@@ -62,6 +65,7 @@ export interface DraftMealPlanCandidateDto {
   slot?: MealSlot | null;
   targetServings: number;
   rationale: string;
+  leftoverDates?: string[];
 }
 
 export interface DraftMealPlanResponseDto {

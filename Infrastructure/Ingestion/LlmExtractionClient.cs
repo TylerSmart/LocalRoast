@@ -1100,11 +1100,12 @@ Strict Rules:
 4. For each proposal:
    - "catalogIndex": The integer index of the recipe from the catalog (1-based).
    - "recipeTitle": Title of the recipe matching the catalog.
-   - "dayOffset": Day of the week offset: 0 for Sunday, 1 for Monday, ..., 6 for Saturday (or null if placed on-deck).
+   - "dayOffset": Offset from the supplied start date: 0 is the start date, through 6 (or null if placed on-deck). Never propose a past date.
    - "slot": Meal slot ("Breakfast", "Lunch", "Dinner", or "SnackPrep").
    - "isOnDeck": True if placed in the flexible weekly On-Deck tray, otherwise false.
    - "targetServings": Servings to cook (defaults to the recipe's base servings).
    - "rationale": Short explanation of why this recipe fits the plan and prompt.
+5. Return exactly the requested number of cooking suggestions, preferably distinct recipes. The application schedules cooking and leftover days and scales servings; do not add extra proposals for leftovers.
 """;
     }
 
@@ -1115,9 +1116,9 @@ Strict Rules:
         );
 
         return $$"""
-Target Week: Sunday {{context.WeekStartDate:yyyy-MM-dd}}
+Seven-Day Period Starts: {{context.WeekStartDate:yyyy-MM-dd}}
 User Request / Constraints: {{context.UserPrompt}}
-Requested Number of Meals: {{context.RequestedMealCount}}
+Requested Number of Cooking Occasions (not counting leftovers): {{context.RequestedMealCount}}
 Default Meal Slot: {{context.DefaultSlotName}}
 Place in On-Deck Tray by Default: {{context.PlaceOnDeck}}
 Existing Scheduled Meals This Week:

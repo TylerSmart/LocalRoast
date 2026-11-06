@@ -7,8 +7,10 @@ import {
   DragDropConfig,
   DragStartDelay,
 } from '@angular/cdk/drag-drop';
-import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { DatePipe } from '@angular/common';
+import { Component, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { Subscription } from 'rxjs';
 import { MatButtonModule } from '@angular/material/button';
 import { MatButtonToggleModule } from '@angular/material/button-toggle';
 import { MatCardModule } from '@angular/material/card';
@@ -107,6 +109,8 @@ export class MealPlanCalendarComponent implements OnInit {
   private readonly dialog = inject(MatDialog);
   private readonly snackBar = inject(MatSnackBar);
   private readonly router = inject(Router);
+  private readonly destroyRef = inject(DestroyRef);
+  private viewLoadSubscription?: Subscription;
   protected readonly aiHelper = inject(AiKitchenHelperService);
 
   protected readonly dragStartDelay: DragStartDelay = { touch: 250, mouse: 0 };
@@ -114,8 +118,12 @@ export class MealPlanCalendarComponent implements OnInit {
   protected readonly dayNamesShort = DAY_NAMES_SHORT;
   protected readonly todayIso = getTodayIsoLocal();
 
-  protected readonly viewMode = signal<'week' | 'month'>('week');
+  protected readonly viewMode = signal<'next7' | 'week' | 'month'>('next7');
+  protected readonly activeRollingStart = signal<string>(getTodayIsoLocal());
   protected readonly activeWeekStart = signal<string>(normalizeToSundayIso(getTodayIsoLocal()));
+  protected readonly activePeriodStart = computed(() =>
+    this.viewMode() === 'next7' ? this.activeRollingStart() : this.activeWeekStart(),
+  );
   protected readonly activeMonth = signal<{ year: number; monthIndex0: number }>({
     year: new Date().getFullYear(),
     monthIndex0: new Date().getMonth(),
@@ -127,8 +135,8 @@ export class MealPlanCalendarComponent implements OnInit {
   protected readonly mobileOnDeckOpen = signal<boolean>(false);
 
   protected readonly periodTitle = computed(() => {
-    if (this.viewMode() === 'week') {
-      return formatWeekRangeLabel(this.activeWeekStart());
+    if (this.viewMode() !== 'month') {
+      return formatWeekRangeLabel(this.activePeriodStart());
     }
     const { year, monthIndex0 } = this.activeMonth();
     return formatMonthYearLabel(year, monthIndex0);
@@ -167,27 +175,81 @@ export class MealPlanCalendarComponent implements OnInit {
   }
 
   loadCurrentView(): void {
-    if (this.viewMode() === 'week') {
+    if (this.viewMode() === 'next7') {
+      this.loadRolling();
+    } else if (this.viewMode() === 'week') {
       this.loadWeek(this.activeWeekStart());
     } else {
       this.loadMonth();
     }
   }
 
-  private loadWeek(weekMondayIso: string): void {
+  private loadRolling(): void {
+    this.viewLoadSubscription?.unsubscribe();
+    const start = this.activeRollingStart();
+    const end = addDaysIso(start, 6);
     this.isLoading.set(true);
-    this.mealPlanService.getWeek(weekMondayIso).subscribe({
-      next: (data) => {
-        this.weekData.set(data);
-        this.isLoading.set(false);
-      },
-      error: () => {
-        this.isLoading.set(false);
-      },
-    });
+    this.viewLoadSubscription = this.mealPlanService
+      .getRange(start, end, true)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (data) => {
+          this.weekData.set({
+            weekStartDate: start,
+            weekEndDate: end,
+            days: Array.from({ length: 7 }, (_, offset) => {
+              const date = addDaysIso(start, offset);
+              return {
+                date,
+                dayOffset: offset,
+                entries: data.scheduledEntries.filter((entry) => entry.scheduledDate === date),
+              };
+            }),
+            onDeckEntries: data.onDeckEntries,
+          });
+          this.isLoading.set(false);
+        },
+        error: (err) => {
+          this.weekData.set(null);
+          this.isLoading.set(false);
+          this.snackBar.open(
+            err?.error?.detail || 'Failed to load the seven-day meal plan.',
+            'Close',
+            {
+              duration: 4000,
+            },
+          );
+        },
+      });
+  }
+
+  private loadWeek(weekMondayIso: string): void {
+    this.viewLoadSubscription?.unsubscribe();
+    this.isLoading.set(true);
+    this.viewLoadSubscription = this.mealPlanService
+      .getWeek(weekMondayIso)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (data) => {
+          this.weekData.set(data);
+          this.isLoading.set(false);
+        },
+        error: (err) => {
+          this.weekData.set(null);
+          this.isLoading.set(false);
+          this.snackBar.open(
+            err?.error?.detail || 'Failed to load the weekly meal plan.',
+            'Close',
+            {
+              duration: 4000,
+            },
+          );
+        },
+      });
   }
 
   private loadMonth(): void {
+    this.viewLoadSubscription?.unsubscribe();
     const grid = this.monthGridDays();
     if (grid.length === 0) return;
 
@@ -195,24 +257,38 @@ export class MealPlanCalendarComponent implements OnInit {
     const start = grid[0].iso;
     const end = grid[grid.length - 1].iso;
 
-    this.mealPlanService.getRange(start, end, true).subscribe({
-      next: (data) => {
-        this.monthRangeData.set(data);
-        this.isLoading.set(false);
-      },
-      error: () => {
-        this.isLoading.set(false);
-      },
-    });
+    this.viewLoadSubscription = this.mealPlanService
+      .getRange(start, end, true)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (data) => {
+          this.monthRangeData.set(data);
+          this.isLoading.set(false);
+        },
+        error: (err) => {
+          this.monthRangeData.set(null);
+          this.isLoading.set(false);
+          this.snackBar.open(
+            err?.error?.detail || 'Failed to load the monthly meal plan.',
+            'Close',
+            {
+              duration: 4000,
+            },
+          );
+        },
+      });
   }
 
-  protected setViewMode(mode: 'week' | 'month'): void {
+  protected setViewMode(mode: 'next7' | 'week' | 'month'): void {
     this.viewMode.set(mode);
     this.loadCurrentView();
   }
 
   protected navigatePeriod(delta: number): void {
-    if (this.viewMode() === 'week') {
+    if (this.viewMode() === 'next7') {
+      this.activeRollingStart.update((start) => addDaysIso(start, delta * 7));
+      this.loadRolling();
+    } else if (this.viewMode() === 'week') {
       const nextMonday = addDaysIso(this.activeWeekStart(), delta * 7);
       this.activeWeekStart.set(nextMonday);
       this.loadWeek(nextMonday);
@@ -233,6 +309,7 @@ export class MealPlanCalendarComponent implements OnInit {
 
   protected goToToday(): void {
     const today = getTodayIsoLocal();
+    this.activeRollingStart.set(today);
     this.activeWeekStart.set(normalizeToSundayIso(today));
     const now = new Date();
     this.activeMonth.set({ year: now.getFullYear(), monthIndex0: now.getMonth() });
@@ -242,7 +319,7 @@ export class MealPlanCalendarComponent implements OnInit {
   protected selectMonthDay(isoDate: string): void {
     this.activeWeekStart.set(normalizeToSundayIso(isoDate));
     this.viewMode.set('week');
-    this.loadWeek(this.activeWeekStart());
+    this.loadCurrentView();
   }
 
   protected openAddEntryDialog(prefill?: {
@@ -254,7 +331,7 @@ export class MealPlanCalendarComponent implements OnInit {
     const week = this.weekData();
     const allWeekScheduled: MealPlanEntryDto[] = week ? week.days.flatMap((d) => d.entries) : [];
 
-    const weekStart = this.activeWeekStart();
+    const weekStart = this.activePeriodStart();
     const defaultDate =
       this.todayIso >= weekStart && this.todayIso <= addDaysIso(weekStart, 6)
         ? this.todayIso
@@ -331,7 +408,7 @@ export class MealPlanCalendarComponent implements OnInit {
           this.snackBar.open(`Moved "${cooked.displayTitle}" to Tonight's Dinner!`, 'Close', {
             duration: 3000,
           });
-          this.loadWeek(this.activeWeekStart());
+          this.loadCurrentView();
         },
         error: (err) => {
           this.snackBar.open(err?.error?.detail || 'Failed to cook tonight.', 'Close', {
@@ -345,14 +422,14 @@ export class MealPlanCalendarComponent implements OnInit {
     this.mealPlanService
       .moveEntry(entry.id, {
         isOnDeck: true,
-        weekStartDate: this.activeWeekStart(),
+        weekStartDate: this.activePeriodStart(),
       })
       .subscribe({
         next: () => {
           this.snackBar.open(`Moved "${entry.displayTitle}" to On-Deck!`, 'Close', {
             duration: 3000,
           });
-          this.loadWeek(this.activeWeekStart());
+          this.loadCurrentView();
         },
         error: (err) => {
           this.snackBar.open(err?.error?.detail || 'Failed to move to On-Deck.', 'Close', {
@@ -413,7 +490,7 @@ export class MealPlanCalendarComponent implements OnInit {
   }
 
   protected openGenerateShoppingListDialog(): void {
-    const start = this.activeWeekStart();
+    const start = this.activePeriodStart();
     const end = addDaysIso(start, 6);
 
     const ref = this.dialog.open(GenerateShoppingListDialogComponent, {
@@ -453,7 +530,7 @@ export class MealPlanCalendarComponent implements OnInit {
       width: '680px',
       maxWidth: '96vw',
       data: {
-        weekStartDate: this.activeWeekStart(),
+        weekStartDate: this.activePeriodStart(),
       },
     });
 
@@ -527,18 +604,18 @@ export class MealPlanCalendarComponent implements OnInit {
         isOnDeck: dest.isOnDeck,
         scheduledDate: dest.date ?? null,
         slot: dest.slot ?? null,
-        weekStartDate: dest.weekStartDate ?? this.activeWeekStart(),
+        weekStartDate: dest.weekStartDate ?? this.activePeriodStart(),
         targetSortOrder: event.currentIndex,
       })
       .subscribe({
         next: () => {
-          this.loadWeek(this.activeWeekStart());
+          this.loadCurrentView();
         },
         error: (err) => {
           this.snackBar.open(err?.error?.detail || 'Failed to move meal.', 'Close', {
             duration: 4000,
           });
-          this.loadWeek(this.activeWeekStart());
+          this.loadCurrentView();
         },
       });
   }

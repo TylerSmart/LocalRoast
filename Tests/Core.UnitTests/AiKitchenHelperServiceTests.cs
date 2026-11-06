@@ -14,6 +14,11 @@ namespace App.Core.UnitTests;
 [TestClass]
 public sealed class AiKitchenHelperServiceTests
 {
+    private sealed class FixedTimeProvider : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => new(2026, 11, 5, 12, 0, 0, TimeSpan.Zero);
+    }
+
     private sealed class MockLlmSettingsService(EffectiveLlmConnectionConfig config)
         : ILlmSettingsService
     {
@@ -144,7 +149,12 @@ public sealed class AiKitchenHelperServiceTests
 
         _settingsService = new MockLlmSettingsService(defaultConfig);
         _llmClient = new MockLlmExtractionClient();
-        _service = new AiKitchenHelperService(_dbContext, _settingsService, _llmClient);
+        _service = new AiKitchenHelperService(
+            _dbContext,
+            _settingsService,
+            _llmClient,
+            new FixedTimeProvider()
+        );
     }
 
     [TestCleanup]
@@ -521,7 +531,7 @@ public sealed class AiKitchenHelperServiceTests
 
         _llmClient.DraftResult = new LlmDraftMealPlanPayload([
             new LlmDraftMealProposalItem(
-                CatalogIndex: 1,
+                CatalogIndex: 0,
                 RecipeTitle: "Lemon Herb Chicken",
                 DayOffset: 0,
                 Slot: "Dinner",
@@ -541,7 +551,7 @@ public sealed class AiKitchenHelperServiceTests
         ]);
 
         var response = await _service.DraftWeeklyMealPlanAsync(
-            new DraftWeeklyMealPlanRequest(Prompt: "2 quick dinners", MealCount: 2)
+            new DraftWeeklyMealPlanRequest(Prompt: "Quick dinners", MealCount: 1)
         );
 
         Assert.AreEqual(1, response.Candidates.Count);
@@ -549,4 +559,149 @@ public sealed class AiKitchenHelperServiceTests
         Assert.AreEqual("Lemon Herb Chicken", response.Candidates[0].Recipe.Title);
         Assert.AreEqual(0, response.Candidates[0].DayOffset);
     }
+
+    [TestMethod]
+    public async Task DraftMealPlan_RollingDates_CookingCountAndServingsIncludeLeftovers()
+    {
+        var recipes = await SeedDraftRecipesAsync();
+        _llmClient.DraftResult = new([
+            Proposal(recipes[0].Title, -5),
+            Proposal(recipes[1].Title, 999),
+        ]);
+
+        var response = await _service.DraftWeeklyMealPlanAsync(
+            new(
+                WeekStartDate: new DateOnly(2026, 11, 1),
+                Prompt: "Two cooking sessions",
+                MealCount: 2,
+                ServingsPerMeal: 2
+            )
+        );
+
+        Assert.AreEqual(new DateOnly(2026, 11, 5), response.WeekStartDate);
+        Assert.AreEqual(new DateOnly(2026, 11, 11), response.WeekEndDate);
+        Assert.AreEqual(response.WeekStartDate, _llmClient.LastDraftContext!.WeekStartDate);
+        Assert.AreEqual(2, response.Candidates.Count);
+        Assert.AreEqual(8m, response.Candidates[0].TargetServings);
+        Assert.AreEqual(6m, response.Candidates[1].TargetServings);
+        Assert.AreEqual(3, response.Candidates[0].LeftoverDates!.Count);
+        Assert.AreEqual(2, response.Candidates[1].LeftoverDates!.Count);
+        var coveredDates = response
+            .Candidates.SelectMany(c => new[] { c.ScheduledDate!.Value }.Concat(c.LeftoverDates!))
+            .OrderBy(d => d)
+            .ToArray();
+        CollectionAssert.AreEqual(
+            Enumerable.Range(0, 7).Select(i => response.WeekStartDate.AddDays(i)).ToArray(),
+            coveredDates
+        );
+        Assert.IsTrue(response.Candidates.All(c => c.Slot == MealSlot.Dinner && !c.IsOnDeck));
+    }
+
+    [TestMethod]
+    public async Task DraftMealPlan_ExistingMealsAreNotCoveredAgain_AndFutureStartIsPreserved()
+    {
+        var recipes = await SeedDraftRecipesAsync();
+        var start = new DateOnly(2026, 11, 12);
+        _dbContext.MealPlanEntries.Add(
+            new MealPlanEntry
+            {
+                WeekStartDate = MealPlanDateHelper.NormalizeToSunday(start),
+                ScheduledDate = start.AddDays(1),
+                Slot = MealSlot.Dinner,
+                EntryType = MealPlanEntryType.Leftovers,
+                IsLeftovers = true,
+                CustomTitle = "Already planned",
+            }
+        );
+        await _dbContext.SaveChangesAsync();
+        _llmClient.DraftResult = new([Proposal(recipes[0].Title)]);
+        var response = await _service.DraftWeeklyMealPlanAsync(
+            new(WeekStartDate: start, Prompt: "One batch", MealCount: 1, ServingsPerMeal: 1)
+        );
+        Assert.AreEqual(start, response.WeekStartDate);
+        Assert.AreEqual(6m, response.Candidates[0].TargetServings);
+        Assert.IsFalse(response.Candidates[0].LeftoverDates!.Contains(start.AddDays(1)));
+    }
+
+    [TestMethod]
+    public async Task DraftMealPlan_OnDeckRetry_ExcludesOriginalChoices_AndHasNoLeftovers()
+    {
+        var recipes = await SeedDraftRecipesAsync();
+        _llmClient.DraftResult = new([Proposal(recipes[2].Title)]);
+        var response = await _service.DraftWeeklyMealPlanAsync(
+            new(
+                Prompt: "Try another quick dinner",
+                MealCount: 1,
+                PlaceOnDeck: true,
+                ExcludedRecipeIds: [recipes[0].Id, recipes[1].Id],
+                ServingsPerMeal: 2
+            )
+        );
+        Assert.AreEqual(recipes[2].Id, response.Candidates[0].RecipeId);
+        Assert.AreEqual(1, _llmClient.LastDraftContext!.CookbookCatalog.Count);
+        Assert.IsTrue(response.Candidates[0].IsOnDeck);
+        Assert.IsNull(response.Candidates[0].ScheduledDate);
+        Assert.AreEqual(0, response.Candidates[0].LeftoverDates!.Count);
+        Assert.AreEqual(2m, response.Candidates[0].TargetServings);
+
+        _llmClient.DraftResult = new([Proposal(recipes[0].Title)]);
+        await Assert.ThrowsAsync<DomainValidationException>(() =>
+            _service.DraftWeeklyMealPlanAsync(
+                new(
+                    Prompt: "No excluded recipes",
+                    MealCount: 1,
+                    PlaceOnDeck: true,
+                    ExcludedRecipeIds: [recipes[0].Id, recipes[1].Id]
+                )
+            )
+        );
+    }
+
+    [TestMethod]
+    public async Task DraftMealPlan_InvalidCountsDatesAndIncompleteSuggestionsFailExplicitly()
+    {
+        var recipes = await SeedDraftRecipesAsync();
+        _llmClient.DraftResult = new([Proposal(recipes[0].Title)]);
+        await Assert.ThrowsAsync<DomainValidationException>(() =>
+            _service.DraftWeeklyMealPlanAsync(new(Prompt: "Dinner", MealCount: 2))
+        );
+        await Assert.ThrowsAsync<DomainValidationException>(() =>
+            _service.DraftWeeklyMealPlanAsync(new(Prompt: "Dinner", MealCount: 8))
+        );
+        await Assert.ThrowsAsync<DomainValidationException>(() =>
+            _service.DraftWeeklyMealPlanAsync(
+                new(Prompt: "Dinner", MealCount: 1, ServingsPerMeal: 999)
+            )
+        );
+        await Assert.ThrowsAsync<DomainValidationException>(() =>
+            _service.DraftWeeklyMealPlanAsync(
+                new(Prompt: "Dinner", TodayDate: new DateOnly(2026, 11, 1))
+            )
+        );
+        var response = await _service.DraftWeeklyMealPlanAsync(
+            new(Prompt: "Dinner", MealCount: 1, TodayDate: new DateOnly(2026, 11, 4))
+        );
+        Assert.AreEqual(new DateOnly(2026, 11, 4), response.WeekStartDate);
+    }
+
+    private async Task<Recipe[]> SeedDraftRecipesAsync()
+    {
+        var recipes = Enumerable
+            .Range(1, 3)
+            .Select(i => new Recipe
+            {
+                Id = Guid.NewGuid(),
+                Title = $"Dinner {i}",
+                Slug = $"dinner-{i}",
+                BaseServings = 4,
+                Status = RecipeStatus.Published,
+            })
+            .ToArray();
+        _dbContext.Recipes.AddRange(recipes);
+        await _dbContext.SaveChangesAsync();
+        return recipes;
+    }
+
+    private static LlmDraftMealProposalItem Proposal(string title, int dayOffset = 0) =>
+        new(0, title, dayOffset, "Lunch", true, 999, "Fits your preferences.");
 }

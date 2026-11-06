@@ -52,7 +52,10 @@ public record DraftWeeklyMealPlanRequest(
     [Required, MaxLength(600)] string Prompt = "",
     [Range(1, 14)] int MealCount = 4,
     MealSlot DefaultSlot = MealSlot.Dinner,
-    bool PlaceOnDeck = false
+    bool PlaceOnDeck = false,
+    [Range(typeof(decimal), "0.25", "999")] decimal ServingsPerMeal = 4,
+    DateOnly? TodayDate = null,
+    [MaxLength(150)] IReadOnlyList<Guid>? ExcludedRecipeIds = null
 );
 
 public record DraftMealPlanCandidateDto(
@@ -63,7 +66,8 @@ public record DraftMealPlanCandidateDto(
     DateOnly? ScheduledDate,
     MealSlot? Slot,
     decimal TargetServings,
-    string Rationale
+    string Rationale,
+    IReadOnlyList<DateOnly>? LeftoverDates = null
 );
 
 public record DraftMealPlanResponseDto(

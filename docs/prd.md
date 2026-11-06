@@ -175,6 +175,9 @@ flowchart LR
   - When the LLM host is online, LocalRoast enables three focused actions that gracefully hide/disable when the LLM host is offline:
     1. **Suggest Ingredient Substitution:** Tap an ingredient in a recipe or Cook Mode (e.g., *"Out of buttermilk"*) to get 2–3 culinary substitution ratios tailored to that specific dish.
     2. **Draft Weekly Meal Plan:** Provide quick constraints on the calendar (e.g., *"4 weeknight dinners under 35 minutes, prioritize chicken thighs and recipes we haven't made recently"*) to propose candidate meals strictly from your saved household cookbook.
+       - The calendar defaults to **Next 7 Days** (today through six days ahead), with canonical Sunday-based Week and Month views still available.
+       - AI drafts start no earlier than the user's local today, even when viewing an earlier week. Scheduled **Times to cook** counts cooking occasions, not leftover meals; the selected slot's remaining unplanned dates are covered by leftovers. **Servings per meal** scales cooking batches to include those portions; leftovers do not add ingredients to shopping lists. On-Deck drafts remain unscheduled recipe suggestions.
+       - Each suggestion can be retried independently, excluding recipes already suggested while preserving the other choices and the replaced group's dates, portions, and leftovers. Applying a selected group saves its cooking entry and linked leftovers together.
     3. **Ask Kitchen AI:** Ask a cooking question from recipe detail or Cook Mode, or request an explanation of a specific ingredient, preparation note, or step. Each ephemeral question uses the configured text model and only the relevant recipe context; failures can be retried.
 
 ---
