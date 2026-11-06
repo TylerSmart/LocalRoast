@@ -161,6 +161,21 @@ export class IngestionHubComponent implements OnInit {
     });
   }
 
+  readonly expandedDetailJobIds = signal<Set<string>>(new Set());
+  readonly detailExpandThreshold = 80;
+
+  toggleJobDetail(jobId: string): void {
+    this.expandedDetailJobIds.update((prev) => {
+      const next = new Set(prev);
+      if (next.has(jobId)) {
+        next.delete(jobId);
+      } else {
+        next.add(jobId);
+      }
+      return next;
+    });
+  }
+
   readonly allCount = computed(() => this.ingestionService.summary().allCount ?? 0);
   readonly reviewCount = computed(() => this.ingestionService.summary().readyForReviewCount);
   readonly waitingCount = computed(() => this.ingestionService.summary().waitingForLlmHostCount);

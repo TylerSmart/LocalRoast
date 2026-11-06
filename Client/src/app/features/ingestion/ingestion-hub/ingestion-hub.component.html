@@ -758,7 +758,25 @@
               }
 
               @if (job.statusDetail) {
-                <p class="job-detail-text">{{ job.statusDetail }}</p>
+                @let detailExpanded = expandedDetailJobIds().has(job.id);
+                <p class="job-detail-text" [class.expanded]="detailExpanded">
+                  {{ job.statusDetail }}
+                </p>
+                @if (job.statusDetail.length > detailExpandThreshold) {
+                  <button
+                    type="button"
+                    class="detail-toggle-btn"
+                    (click)="toggleJobDetail(job.id)"
+                    [attr.aria-expanded]="detailExpanded"
+                    [attr.aria-label]="
+                      (detailExpanded ? 'Hide full details for ' : 'Show full details for ') +
+                      job.displayTitle
+                    "
+                  >
+                    <mat-icon>{{ detailExpanded ? 'expand_less' : 'expand_more' }}</mat-icon>
+                    <span>{{ detailExpanded ? 'Show less' : 'Show full details' }}</span>
+                  </button>
+                }
               }
             </div>
 
