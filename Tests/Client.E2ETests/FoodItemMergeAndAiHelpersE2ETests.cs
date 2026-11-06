@@ -86,7 +86,6 @@ public sealed class MockKitchenAiOllamaServer : IAsyncDisposable
                     || bodyText.Contains("meal planning")
                 )
                 {
-                    using var body = JsonDocument.Parse(bodyText);
                     var prompt = body
                         .RootElement.GetProperty("messages")
                         .EnumerateArray()

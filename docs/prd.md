@@ -13,7 +13,7 @@
 
 1. **Recipe Sprawl & Link Rot:** Great recipes get buried across ad-heavy food blogs, phone screenshots, PDF printouts, family text messages, and physical cookbooks—and bookmarked URLs eventually disappear or change.
 2. **Manual Data-Entry Fatigue:** Typing 18 ingredients and 9 steps by hand stops people from centralizing their recipes. LocalRoast delegates extraction, normalization, timer detection, and shopping-category classification to a local LLM on your LAN while preserving a Side-by-Side Review Inbox for accuracy.
-3. **Rigid Meal Calendars:** Most meal planners assume every single meal is a newly cooked recipe on a fixed night. Real households cook multi-dish dinners, eat leftovers on Wednesday, order takeout on Friday, and often buy groceries for four dinners on Saturday without deciding *which* night to cook each one until 5:00 PM.
+3. **Rigid Meal Calendars:** Most meal planners assume every single meal is a newly cooked recipe on a fixed night. Real households cook multi-dish dinners, eat leftovers on Wednesday, order takeout on Friday, and often buy groceries for four dinners on Saturday without deciding _which_ night to cook each one until 5:00 PM.
 4. **Cluttered Grocery Runs & Messy-Hand Cooking:** Shopping lists shouldn't list `"water"` and `"kosher salt"` every week or get out of sync when two people split up in the grocery store—and phones shouldn't dim or force endless up-and-down scrolling while your hands are covered in dough.
 
 ### Core Product Pillars
@@ -27,12 +27,12 @@
 
 ## 2. Target Users, Tenancy & Operating Context
 
-| Persona / Actor | Primary Surfaces | Key Workflows |
-| :--- | :--- | :--- |
-| **Household Cooks & Planners** | **Desktop Browser**, **Tablet**, & **Mobile Phone** | Ingesting & reviewing recipes, curating collections, planning weekly meals, generating shopping lists, cooking in Cook Mode, and logging cook notes/ratings. |
-| **Household Co-Shoppers** | **Mobile Phone (In-Store)** | Checking off grocery items in real time across multiple phones and adding ad-hoc household items on a checklist grouped by shopping category. |
-| **External Friends & Family** | **Public Browser (No Login)** | Viewing, scaling, and printing a single shared recipe via a revocable `/share/<token>` link. |
-| **External AI Assistants (MCP Clients)** | **Claude Desktop, Antigravity, Open WebUI, Voice Agents** | Searching the household cookbook, pushing or enqueueing new recipes, drafting weekly meal plans, and updating shopping lists over `/api/mcp`. |
+| Persona / Actor                          | Primary Surfaces                                          | Key Workflows                                                                                                                                                |
+| :--------------------------------------- | :-------------------------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Household Cooks & Planners**           | **Desktop Browser**, **Tablet**, & **Mobile Phone**       | Ingesting & reviewing recipes, curating collections, planning weekly meals, generating shopping lists, cooking in Cook Mode, and logging cook notes/ratings. |
+| **Household Co-Shoppers**                | **Mobile Phone (In-Store)**                               | Checking off grocery items in real time across multiple phones and adding ad-hoc household items on a checklist grouped by shopping category.                |
+| **External Friends & Family**            | **Public Browser (No Login)**                             | Viewing, scaling, and printing a single shared recipe via a revocable `/share/<token>` link.                                                                 |
+| **External AI Assistants (MCP Clients)** | **Claude Desktop, Antigravity, Open WebUI, Voice Agents** | Searching the household cookbook, pushing or enqueueing new recipes, drafting weekly meal plans, and updating shopping lists over `/api/mcp`.                |
 
 ### Tenancy & Operating Assumptions
 
@@ -104,7 +104,7 @@ erDiagram
   - `name` (singular canonical display name, e.g., `"Yellow Onion"`, `"Kosher Salt"`, `"Garlic"`).
   - `aliases` (normalized synonym list, e.g., `"scallion"` $\leftrightarrow$ `"green onion"`, `"cilantro"` $\leftrightarrow$ `"fresh coriander"`).
   - `category` (fixed `FoodCategory` set in store-walk order: `Produce`, `Meat & Seafood`, `Dairy & Eggs`, `Refrigerated`, `Bakery & Bread`, `Pantry & Dry Goods`, `Canned & Jarred`, `Condiments & Sauces`, `Spices & Seasonings`, `Baking`, `Snacks`, `Beverages`, `Frozen`, `Other`). Suggested by the LLM during ingestion, falling back to a deterministic keyword classifier; existing items without a category are backfilled at startup.
-  - `isPantryStaple` (`bool`, seeded with common staples like *Water*, *Kosher Salt*, *Black Pepper*, *Olive Oil*, *Vegetable Oil*, *All-Purpose Flour*, *Granulated Sugar*, and editable anytime by household users).
+  - `isPantryStaple` (`bool`, seeded with common staples like _Water_, _Kosher Salt_, _Black Pepper_, _Olive Oil_, _Vegetable Oil_, _All-Purpose Flour_, _Granulated Sugar_, and editable anytime by household users).
 - **Catalog Hygiene:** Household users can edit any `FoodItem` (changing its shopping category or toggling `isPantryStaple`) or **Merge Duplicate FoodItems** (re-pointing all `RecipeIngredient` and `ShoppingListItem` rows in a single transaction).
 
 #### 4.1.4 Ordered Steps, Inline Ingredient References & Timers
@@ -176,13 +176,16 @@ flowchart LR
 
 - Extracted jobs land in an **Ingestion Review Inbox** badged in the main navigation:
   - **Left Pane (Original Source):** Interactive image zoom/pan carousel for cookbook photos, embedded PDF viewer, raw pasted text, or source URL metadata + extracted raw lines.
-  - **Right Pane (Structured Draft):** Full editable recipe form pre-populated with parsed sections, ingredients, canonical `FoodItem` bindings (highlighting *New FoodItems* with their AI-suggested shopping category, editable before publish), steps, timers, and suggested tags.
+  - **Right Pane (Structured Draft):** Full editable recipe form pre-populated with parsed sections, ingredients, canonical `FoodItem` bindings (highlighting _New FoodItems_ with their AI-suggested shopping category, editable before publish), steps, timers, and suggested tags.
   - **Optional Auto-Publish Toggle:** Household settings include an opt-in toggle to auto-publish high-confidence Web URL / Text extractions directly to the cookbook while still keeping vision/scan jobs in the Review Inbox.
   - **Measurement Review:** Source quantities take precedence over model guesses. Invalid portions, unmatched source excerpts, and unconfirmed equivalent measurements produce visible review warnings and prevent automatic publishing, including when the individual job requests auto-publish.
+  - **Extraction Quality Gate:** A model's confidence is not sufficient to publish. Detectable source-total/provenance errors, preparation or alternatives embedded in food names, missing timed phases, invalid or missing ingredient links, unrepresented divided additions, and measured intermediate mixtures absent from the ingredient list route to review (including explicitly requested auto-publish jobs), cap confidence below auto-publish thresholds, and explain the issues in the job status. Structural mixture warnings are review-only, not another LLM correction loop. These checks are conservative heuristics, not proof of semantic correctness; manual review remains necessary for complex recipes.
 
 #### 4.2.4 Provider-Agnostic Local LLM Configuration & 1-Click Helpers
 
 - **Supported Backends:** Native **Ollama API** (`/api/chat`, `/api/tags`, structured JSON `format` schema, configurable `keep_alive`) and **OpenAI-Compatible `/v1` API** (`LM Studio`, `llama.cpp`, `vLLM`, `LiteLLM`, `OpenRouter`, etc.).
+- **Small Gemma Text Extraction:** Model tags beginning `gemma4:e2b` or `gemma4:e4b` use serial ingredient and instruction passes, followed by at most one validation-guided correction. The instruction schema bounds indices against the finalized ingredient array. Extraction uses temperature 0 and repetition penalty 1 while respecting the configured context window, CPU-only option, thinking toggle, keep-alive and per-request timeout. A 16,384-token context is recommended for these tags and is the evaluator default. Other models retain single-pass extraction. Vision shares the nullable, constrained-unit schema and extraction rules but remains single-pass.
+- **Structured Amounts:** Unknown quantities/units are actual JSON nulls; known units use canonical codes, with a separate custom-unit name for other units. Explicit per-step portions use `ingredientAmounts`; separate portion rows remain supported but must conserve source totals. Instruction prose retains process measurements, not duplicated ingredient amounts. If a prepared-mixture portion has no corresponding ingredient row, retain its source amount for manual review rather than silently lose it; such drafts are not multiplier-safe. Source-provided equivalents use `alternativeMeasurement`, never a whole-line weight copied to every split portion. Other parenthetical package weights remain notes. Explicit small measurements are not discarded as hallucinations.
 - **In-App LLM Settings UI:** Seeded from optional Docker environment variables (`Llm__Provider`, `Llm__BaseUrl`, `Llm__ApiKey`, `Llm__TextModel`, `Llm__VisionModel`) and editable in-app:
   - Live **"Test Connection & Refresh Models"** button querying available models on the host.
   - Independent **Text Model** and **Vision Model** dropdown selectors (allowing a fast 7B–14B text model for URLs/text and a dedicated vision model like `qwen2.5vl` or `gemma3` for cookbook photos).
@@ -191,8 +194,8 @@ flowchart LR
 - **Targeted 1-Click AI Kitchen Helpers (No Chat Bloat):**
   - LocalRoast uses focused helpers rather than a persistent chatbot drawer or saved chat history.
   - When the LLM host is online, LocalRoast enables three focused actions that gracefully hide/disable when the LLM host is offline:
-    1. **Suggest Ingredient Substitution:** Tap an ingredient in a recipe or Cook Mode (e.g., *"Out of buttermilk"*) to get 2–3 culinary substitution ratios tailored to that specific dish.
-    2. **Draft Weekly Meal Plan:** Provide quick constraints on the calendar (e.g., *"4 weeknight dinners under 35 minutes, prioritize chicken thighs and recipes we haven't made recently"*) to propose candidate meals strictly from your saved household cookbook.
+    1. **Suggest Ingredient Substitution:** Tap an ingredient in a recipe or Cook Mode (e.g., _"Out of buttermilk"_) to get 2–3 culinary substitution ratios tailored to that specific dish.
+    2. **Draft Weekly Meal Plan:** Provide quick constraints on the calendar (e.g., _"4 weeknight dinners under 35 minutes, prioritize chicken thighs and recipes we haven't made recently"_) to propose candidate meals strictly from your saved household cookbook.
        - The calendar defaults to **Next 7 Days** (today through six days ahead), with canonical Sunday-based Week and Month views still available.
        - AI drafts start no earlier than the user's local today, even when viewing an earlier week. Scheduled **Times to cook** counts cooking occasions, not leftover meals; the selected slot's remaining unplanned dates are covered by leftovers. **Servings per meal** scales cooking batches to include those portions; leftovers do not add ingredients to shopping lists. On-Deck drafts remain unscheduled recipe suggestions.
        - Each suggestion can be retried independently, excluding recipes already suggested while preserving the other choices and the replaced group's dates, portions, and leftovers. Applying a selected group saves its cooking entry and linked leftovers together.
@@ -255,7 +258,8 @@ flowchart LR
 ### 4.5 Smart Shopping Lists, Pantry Staples & Real-Time Co-Shopping
 
 #### 4.5.1 Multiple Named Lists Grouped by Category
-- Create unlimited named **Shopping Lists** (e.g., *Weekly Groceries*, *Costco*, *Trader Joe's*, *Thanksgiving Prep*).
+
+- Create unlimited named **Shopping Lists** (e.g., _Weekly Groceries_, _Costco_, _Trader Joe's_, _Thanksgiving Prep_).
 - Active items are grouped under **shopping category headings** (from each linked `FoodItem`'s category, or a keyword guess for free-text items) in a fixed store-walk order, so a grocery run moves through the store section by section. There is intentionally no per-store layout configuration—categories are zero-maintenance.
 - A **Grouped / Flat list** toggle switches to a plain checklist; the choice is remembered per device.
 
@@ -358,4 +362,4 @@ flowchart LR
 - **Milestone 3 — Meal Planning Calendar, Smart Shopping Lists & Real-Time Co-Shopping:**
   - Multi-slot Weekly/Monthly Meal Plan Calendar (multi-dish slots, custom serving overrides, `Leftovers` shopping exclusion, freeform notes, **"On-Deck"** flexible weekly tray, reusable Week Templates), Multiple Named Flat Shopping Lists with unit-consolidated generation + recipe provenance badges + Pantry Staples separation, `SignalR` real-time co-shopping sync, and expanding `/api/mcp` with meal-plan and shopping-list tools.
 - **Milestone 4 — Hands-Free Cook Mode, Cook Logs & 1-Click AI Kitchen Helpers:**
-  - Wake-locked **Cook Mode** (`navigator.wakeLock`, inline step ingredient callouts, floating multi-timer bar with alerts), **Cook Log** (*"I Made This!"* history, star ratings, tweak notes, dish photos, and *"Forgotten Favorites"* discovery filter), `FoodItem` duplicate-merge management tools, and focused LLM helpers (*Ingredient Substitutions*, *Draft Week Meal Plan*, and *Ask Kitchen AI*).
+  - Wake-locked **Cook Mode** (`navigator.wakeLock`, inline step ingredient callouts, floating multi-timer bar with alerts), **Cook Log** (_"I Made This!"_ history, star ratings, tweak notes, dish photos, and _"Forgotten Favorites"_ discovery filter), `FoodItem` duplicate-merge management tools, and focused LLM helpers (_Ingredient Substitutions_, _Draft Week Meal Plan_, and _Ask Kitchen AI_).

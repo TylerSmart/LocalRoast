@@ -379,6 +379,12 @@ public sealed class VisionAndPdfIngestionIntegrationTests
 
     private sealed class FakeVisionLlmExtractionClient : ILlmExtractionClient
     {
+        public Task<string> AnswerKitchenQuestionAsync(
+            EffectiveLlmConnectionConfig config,
+            LlmKitchenQuestionContext context,
+            CancellationToken cancellationToken = default
+        ) => throw new NotImplementedException();
+
         public bool VisionCalled { get; private set; }
 
         public Task<LlmConnectionTestResultDto> ProbeAndListModelsAsync(

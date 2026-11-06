@@ -7,6 +7,17 @@ namespace App.Core.UnitTests;
 public sealed class StepTimerExtractorTests
 {
     [TestMethod]
+    public void DetectTimers_EqualDurationsInDifferentPhasesAreBothPreserved()
+    {
+        var timers = StepTimerExtractor.DetectTimers(
+            "Cook first side for 2 to 3 minutes. Cook second side for 2 to 3 minutes."
+        );
+        Assert.HasCount(2, timers);
+        Assert.IsTrue(timers.All(timer => timer.DurationSeconds == 120));
+        Assert.AreNotEqual(timers[0].Label, timers[1].Label);
+    }
+
+    [TestMethod]
     public void DetectTimers_EmptyOrWhitespace_ReturnsEmpty()
     {
         var result1 = StepTimerExtractor.DetectTimers(null);
@@ -36,6 +47,30 @@ public sealed class StepTimerExtractorTests
         Assert.AreEqual(1, result.Count);
         Assert.AreEqual(1500, result[0].DurationSeconds); // 25 * 60
         Assert.AreEqual("Bake", result[0].Label);
+    }
+
+    [TestMethod]
+    [DataRow("Simmer for 2-3 minutes.", 180, 120)]
+    [DataRow("Simmer for 2\u20133 minutes.", 180, 120)]
+    [DataRow("Simmer for 2\u20143 minutes.", 180, 120)]
+    [DataRow("Simmer for 2 to 3 minutes.", 120, 120)]
+    [DataRow("Simmer for 2 to 3 minutes, then rest for 3 to 4 minutes.", 180, 180)]
+    [DataRow("Simmer for 3 minutes.", 180, 180)]
+    public void UseRangeLowerBound_CorrectsOnlyUnambiguousUpperBounds(
+        string instruction,
+        int supplied,
+        int expected
+    )
+    {
+        Assert.AreEqual(expected, StepTimerExtractor.UseRangeLowerBound(supplied, instruction));
+    }
+
+    [TestMethod]
+    public void DetectTimers_EnDashRange_UsesLowerBound()
+    {
+        var timers = StepTimerExtractor.DetectTimers("Bake for 25\u201330 minutes.");
+        Assert.HasCount(1, timers);
+        Assert.AreEqual(1500, timers[0].DurationSeconds);
     }
 
     [TestMethod]

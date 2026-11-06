@@ -51,7 +51,8 @@ public record LlmExtractedIngredientItem(
     LlmExtractedMeasurementItem? AlternativeMeasurement = null,
     string? SuggestedCategory = null,
     bool IsRecipeReference = false,
-    string? ReferencedRecipeTitle = null
+    string? ReferencedRecipeTitle = null,
+    string? CustomUnitName = null
 );
 
 public record LlmExtractedMeasurementItem(

@@ -858,7 +858,10 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
             "mat-slide-toggle[formcontrolname='enableThinking'] button"
         );
         await Expect(thinkingToggle).ToBeVisibleAsync();
-        await thinkingToggle.ClickAsync();
+        if (await thinkingToggle.GetAttributeAsync("aria-checked") != "true")
+        {
+            await thinkingToggle.ClickAsync();
+        }
 
         // Check retries input
         var retriesInput = dialog.Locator("input[formcontrolname='maxIngestionRetries']");
@@ -871,12 +874,8 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         );
         await Expect(ingestionToggle).ToBeVisibleAsync();
 
-        await Page.Keyboard.PressAsync("Escape");
-
         // Save
-        await dialog
-            .Locator("button", new() { HasText = "Save Settings" })
-            .ClickAsync(new() { Force = true });
+        await dialog.Locator("button", new() { HasText = "Save Settings" }).ClickAsync();
         await Expect(dialog).Not.ToBeVisibleAsync();
 
         // Re-open to verify persisted values
@@ -885,6 +884,8 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
 
         var savedRetries = dialog.Locator("input[formcontrolname='maxIngestionRetries']");
         await Expect(savedRetries).ToHaveValueAsync("4");
+        await Expect(dialog.Locator("mat-slide-toggle[formcontrolname='enableThinking'] button"))
+            .ToHaveAttributeAsync("aria-checked", "true");
         await dialog.Locator("button", new() { HasText = "Cancel" }).ClickAsync();
         await Expect(dialog).Not.ToBeVisibleAsync();
     }

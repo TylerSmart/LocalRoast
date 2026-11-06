@@ -15,7 +15,7 @@ public static class StepTimerExtractor
     );
 
     private static readonly Regex RangeDurationRegex = new(
-        @"(?:\b(bake|simmer|cook|boil|roast|fry|chill|rest|marinate|steep|refrigerate|cool)\b[^\.\n;]{0,30}?)?(?:for\s+)?(\d+(?:\.\d+)?)\s*(?:-|to)\s*(\d+(?:\.\d+)?)\s*(hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)\b",
+        @"(?:\b(bake|simmer|cook|boil|roast|fry|chill|rest|marinate|steep|refrigerate|cool)\b[^\.\n;]{0,30}?)?(?:for\s+)?(\d+(?:\.\d+)?)\s*(?:[-\u2013\u2014]|to)\s*(\d+(?:\.\d+)?)\s*(hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled,
         RegexTimeout
     );
@@ -37,18 +37,24 @@ public static class StepTimerExtractor
         }
 
         var results = new List<RecipeStepTimerInput>();
-        var seenSeconds = new HashSet<int>();
         var matchedSpans = new List<(int Start, int End)>();
 
         void TryAddTimer(int seconds, string? verb)
         {
-            if (seconds < 1 || seconds > 864000 || seenSeconds.Contains(seconds))
+            if (seconds < 1 || seconds > 864000)
             {
                 return;
             }
 
-            seenSeconds.Add(seconds);
             var label = CleanVerbLabel(verb, stepNumber);
+            var baseLabel = label;
+            var suffix = 1;
+            while (
+                results.Any(timer => timer.Label.Equals(label, StringComparison.OrdinalIgnoreCase))
+            )
+            {
+                label = $"{baseLabel} {++suffix}";
+            }
             results.Add(new RecipeStepTimerInput(seconds, label));
         }
 
@@ -151,6 +157,38 @@ public static class StepTimerExtractor
             return (int)Math.Round(value);
         }
         return null;
+    }
+
+    public static int UseRangeLowerBound(int durationSeconds, string instruction)
+    {
+        var ranges = RangeDurationRegex
+            .Matches(instruction)
+            .Select(match =>
+                (
+                    Lower: ConvertToSeconds(
+                        double.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture),
+                        match.Groups[4].Value
+                    ),
+                    Upper: ConvertToSeconds(
+                        double.Parse(match.Groups[3].Value, CultureInfo.InvariantCulture),
+                        match.Groups[4].Value
+                    )
+                )
+            )
+            .ToList();
+        // A duration that is also another phase's lower bound is ambiguous; leave it unchanged.
+        if (ranges.Any(range => range.Lower == durationSeconds))
+        {
+            return durationSeconds;
+        }
+        var lowerBounds = ranges
+            .Where(range =>
+                range.Upper == durationSeconds && range.Lower is > 0 && range.Lower < range.Upper
+            )
+            .Select(range => range.Lower!.Value)
+            .Distinct()
+            .ToList();
+        return lowerBounds.Count == 1 ? lowerBounds[0] : durationSeconds;
     }
 
     private static string CleanVerbLabel(string? verb, int stepNumber)

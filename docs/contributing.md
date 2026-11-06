@@ -18,6 +18,7 @@ Thank you for your interest in contributing! Whether you are fixing bugs, propos
 5. [Code Quality & Standards](#code-quality--standards)
    - [Formatting & Linting](#formatting--linting)
    - [Running Tests](#running-tests)
+   - [Evaluating ATK Ingestion](#evaluating-atk-ingestion-on-a-local-model-server)
 6. [Commit & Branch Guidelines](#commit--branch-guidelines)
 
 ---
@@ -96,22 +97,26 @@ dotnet tool restore
 All commands below run from the repository root:
 
 - **Add a new migration**:
+
   ```powershell
   dotnet ef migrations add <MigrationName> --project Data/App.Data.csproj
   dotnet csharpier format Data/Migrations
   ```
 
 - **Apply pending migrations**:
+
   ```powershell
   dotnet ef database update --project Data/App.Data.csproj
   ```
 
 - **List applied migrations**:
+
   ```powershell
   dotnet ef migrations list --project Data/App.Data.csproj
   ```
 
 - **Revert the last migration**:
+
   ```powershell
   dotnet ef database update <PreviousMigrationName> --project Data/App.Data.csproj
   dotnet ef migrations remove --project Data/App.Data.csproj
@@ -147,6 +152,7 @@ Always commit generated files in `Data/Migrations/` in the same commit as the en
 `.NET 10` uses `Microsoft.Testing.Platform`, which requires `--project` when running a specific test `.csproj`:
 
 - **Backend Build & Tests** (from repo root):
+
   ```powershell
   dotnet build App.slnx
   dotnet test --project Tests/Core.UnitTests/App.Core.UnitTests.csproj
@@ -180,6 +186,41 @@ dotnet test --project Tests\Client.E2ETests\App.Client.E2ETests.csproj --filter 
 ```
 
 To inspect successful states as well as automatic failure artifacts, set `LOCALROAST_RESPONSIVE_SCREENSHOTS` to a local output directory before running the responsive suite. Screenshots supplement the geometry checks; review long labels, scrolling, touch controls, and light/dark contrast visually. Run the complete E2E suite before finishing broad UI changes.
+
+### Evaluating ATK Ingestion on a Local Model Server
+
+Use your own ATK EPUB with the existing importer. The evaluator reuses its parser and raw-text formatter, calls the **production** .NET extraction client and draft normalizer, and does not enqueue jobs, publish recipes, change LLM settings, or touch a database.
+
+```powershell
+# Parser-only smoke test (no network).
+python scripts\import_atk_epub.py --dry-run --limit 1
+
+# Serial live evaluation: one request at a time, all cases for one model before switching.
+python scripts\evaluate_atk_ingestion.py --epub "C:\Books\ATK.epub" `
+  --base-url http://localhost:11434 --thinking --timeout 600 `
+  --output "C:\PrivateBenchmarks\atk-run-001"
+
+# A smaller iteration, using case IDs from scripts\atk_ingestion_cases.json.
+python scripts\evaluate_atk_ingestion.py --epub "C:\Books\ATK.epub" `
+  --base-url http://localhost:11434 --models gemma4:e4b --thinking `
+  --ids c001-s1 c006-s368 --output "C:\PrivateBenchmarks\atk-run-002"
+
+# Re-score saved outputs without any inference; use the same case/model selection as the run.
+python scripts\evaluate_atk_ingestion.py --epub "C:\Books\ATK.epub" `
+  --score-only --output "C:\PrivateBenchmarks\atk-run-001"
+
+python -m unittest discover -s scripts -p "test_evaluate_atk_ingestion.py"
+```
+
+- The manifest contains four tuning recipes, three held-out recipes and one multi-day stress recipe, with independently specified quantity, portion, preparation and timer assertions. Add new cookbook IDs and assertions there to extend coverage.
+- Output directories contain copyrighted source text, exact requests/responses, normalized drafts, validation diagnostics, timings and source-code/manifest hashes. **Keep them private and out of git.** A fresh output directory is required for every live run.
+- `summary.json` separates evaluator findings from production validation diagnostics. Exit code 1 means extraction/scoring failures were found, not that the evaluator passed. Zero findings is not a guarantee that every culinary detail is correct: manually compare ingredients, intermediate mixtures, batches, serving counts, sections, doneness cues and timers against the source.
+- `--ollama-options '{"temperature":0.7,"seed":42}'` is an explicitly recorded experiment, not a change to application/server defaults. `--no-build` is only appropriate when the evaluator and referenced projects are already current.
+- For a 16 GB GPU, start with `gemma4:e4b`, thinking enabled, a 600-second **per-request** timeout, a 5-minute keep-alive and auto-publish disabled. E2B is faster but needs more correction/review. The two-pass path may make a third request; keep the server limited to one concurrent request and one loaded model. The application never enables thinking or rewrites household settings on your behalf.
+- The evaluator explicitly uses a 16,384-token context. Application requests honor the household's configured context window and CPU-only setting for all models. Use 16,384 tokens as a starting point for small Gemma models, not a hidden override.
+- The schema, zero-temperature extraction and repetition penalty 1 address reproducibility/contract errors, not model capability limits. Neither model is guaranteed to handle every recipe perfectly; in particular audit separated eggs, partially used prepared mixtures, alternatives and repeated cooking batches. Source equivalents use `alternativeMeasurement`; explicit per-step portions use `ingredientAmounts`, while separate portion rows remain supported and must conserve source totals.
+- A prepared-mixture portion that cannot be represented by a linked ingredient must retain its source amount and remain reviewable, rather than silently losing that amount to satisfy a prose check. Such drafts are not ready for reliable serving-multiplier use.
+- Source methods that measure intermediate stock, broth, batter, dough, filling or sauce not listed as an ingredient receive a separate manual-review warning, even if the model erased that amount. These structural limitations are not sent through another LLM correction loop.
 
 ## Commit & Branch Guidelines
 

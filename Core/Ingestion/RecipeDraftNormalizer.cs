@@ -100,6 +100,12 @@ public static class RecipeDraftNormalizer
         RegexOptions.IgnoreCase | RegexOptions.Compiled
     );
 
+    private static readonly Regex ParentheticalMeasurementRegex = new(
+        @"\((?<measurement>[^()]*\b(?:ounces?|pounds?|grams?|kilograms?|sticks?)\b[^()]*)\)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled,
+        TimeSpan.FromSeconds(1)
+    );
+
     public static bool IsDisallowedUnitPlaceholder(string? unit)
     {
         if (string.IsNullOrWhiteSpace(unit))
@@ -140,8 +146,18 @@ public static class RecipeDraftNormalizer
         return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
     }
 
-    public static (MeasurementUnit? Unit, string? CustomUnitName) NormalizeUnit(string? rawUnit)
+    public static (MeasurementUnit? Unit, string? CustomUnitName) NormalizeUnit(
+        string? rawUnit,
+        string? customUnitName = null
+    )
     {
+        if (
+            string.Equals(rawUnit, "custom", StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(customUnitName)
+        )
+        {
+            rawUnit = customUnitName;
+        }
         if (string.IsNullOrWhiteSpace(rawUnit))
         {
             return (null, null);
@@ -345,6 +361,41 @@ public static class RecipeDraftNormalizer
         return string.IsNullOrWhiteSpace(cleaned) ? null : cleaned;
     }
 
+    public static string? NormalizePreparationNote(
+        LlmExtractedIngredientItem ingredient,
+        IReadOnlyList<LlmExtractedIngredientItem> ingredients
+    )
+    {
+        var result = string.IsNullOrWhiteSpace(ingredient.PreparationNote)
+            ? null
+            : ingredient.PreparationNote.Trim();
+        // A full source-line weight is not necessarily the weight of a split portion or food.
+        if (
+            SourceMeasurementParser.FindAlternative(ingredient.OriginalRawText) is not null
+            || ingredients.Count(other =>
+                string.Equals(
+                    other.OriginalRawText?.Trim(),
+                    ingredient.OriginalRawText?.Trim(),
+                    StringComparison.OrdinalIgnoreCase
+                )
+            ) != 1
+        )
+        {
+            return result;
+        }
+        foreach (
+            Match match in ParentheticalMeasurementRegex.Matches(ingredient.OriginalRawText ?? "")
+        )
+        {
+            var measurement = match.Groups["measurement"].Value.Trim();
+            if (result?.Contains(measurement, StringComparison.OrdinalIgnoreCase) != true)
+            {
+                result = result is null ? measurement : $"{result}; {measurement}";
+            }
+        }
+        return result;
+    }
+
     public static string? TryExtractAtkHeadnote(string? rawText)
     {
         if (string.IsNullOrWhiteSpace(rawText))
@@ -430,18 +481,27 @@ public static class RecipeDraftNormalizer
 
         foreach (var rawIng in rawIngredients)
         {
-            var (unit, customUnit) = NormalizeUnit(rawIng.Unit);
+            var isSplitSourceLine =
+                !string.IsNullOrWhiteSpace(rawIng.OriginalRawText)
+                && rawIngredients.Count(other =>
+                    string.Equals(
+                        other.OriginalRawText?.Trim(),
+                        rawIng.OriginalRawText.Trim(),
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                ) > 1;
+            var (unit, customUnit) = NormalizeUnit(rawIng.Unit, rawIng.CustomUnitName);
             var (cleanQuantity, cleanMaxQuantity) = NormalizeQuantities(
                 rawIng.Quantity,
                 rawIng.MaxQuantity
             );
             var sourceAmount = TryGetSourceAmount(rawIng.OriginalRawText);
-            if (sourceAmount is { } parsedAmount)
+            if (!isSplitSourceLine && sourceAmount is { } parsedAmount)
             {
                 cleanQuantity = parsedAmount.Quantity;
                 cleanMaxQuantity = parsedAmount.MaxQuantity;
             }
-            else if (!string.IsNullOrWhiteSpace(rawIng.OriginalRawText))
+            else if (!isSplitSourceLine && !string.IsNullOrWhiteSpace(rawIng.OriginalRawText))
             {
                 cleanQuantity =
                     unit is MeasurementUnit.Pinch or MeasurementUnit.Dash
@@ -482,9 +542,7 @@ public static class RecipeDraftNormalizer
                 )
                 ?? (rawIng.IsRecipeReference ? NormalizeRecipeReferenceTitle(displayName) : null);
 
-            var prepNote = string.IsNullOrWhiteSpace(rawIng.PreparationNote)
-                ? null
-                : rawIng.PreparationNote.Trim();
+            var prepNote = NormalizePreparationNote(rawIng, rawIngredients);
 
             if (prepNote is null && !string.IsNullOrWhiteSpace(rawIng.Unit))
             {
@@ -503,21 +561,8 @@ public static class RecipeDraftNormalizer
             {
                 cleanQuantity = 1m;
             }
-            // If unit is Tsp and quantity is tiny (<= 0.05, e.g. LLM 0.01 tsp artifact for a pinch), convert to 1 pinch.
-            else if (unit is MeasurementUnit.Tsp && cleanQuantity is <= 0.05m)
-            {
-                unit = MeasurementUnit.Pinch;
-                customUnit = null;
-                cleanQuantity = 1m;
-            }
-            // For other units or unmeasured ingredients, quantities <= 0.05 are LLM float hallucinations for "unmeasured" or "a pinch"
-            else if (cleanQuantity is <= 0.05m)
-            {
-                cleanQuantity = null;
-            }
-
-            // If unit was not detected, but the original text or display name starts with "pinch" or "dash", infer the unit and count
-            if (unit is null)
+            // Only infer pinch/dash from source wording; small explicit measurements are valid.
+            if (unit is null || cleanQuantity is null or <= 0.05m)
             {
                 var textToCheck = !string.IsNullOrWhiteSpace(rawIng.OriginalRawText)
                     ? rawIng.OriginalRawText
@@ -667,7 +712,13 @@ public static class RecipeDraftNormalizer
             }
             var ingredient = normalizedIngredients[^1];
             var sourcePair = SourceMeasurementParser.FindAlternative(rawIng.OriginalRawText);
-            if (sourcePair is { } pair)
+            if (sourcePair is not null && isSplitSourceLine)
+            {
+                measurementWarnings.Add(
+                    $"{displayName}: the source equivalent applies to a whole ingredient line, not each split portion; verify portion measurements."
+                );
+            }
+            else if (sourcePair is { } pair)
             {
                 if (
                     !string.IsNullOrWhiteSpace(rawSourceText)
@@ -807,7 +858,15 @@ public static class RecipeDraftNormalizer
                 {
                     if (t.DurationSeconds >= 1 && !string.IsNullOrWhiteSpace(t.Label))
                     {
-                        timers.Add(new RecipeStepTimerInput(t.DurationSeconds, t.Label.Trim()));
+                        timers.Add(
+                            new RecipeStepTimerInput(
+                                StepTimerExtractor.UseRangeLowerBound(
+                                    t.DurationSeconds,
+                                    instruction
+                                ),
+                                t.Label.Trim()
+                            )
+                        );
                     }
                 }
             }
@@ -828,22 +887,22 @@ public static class RecipeDraftNormalizer
                 if (labelGroups.Count > 0)
                 {
                     var disambiguated = new List<RecipeStepTimerInput>(timers.Count);
+                    var usedLabels = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                     foreach (var timer in timers)
                     {
-                        if (labelGroups.Contains(timer.Label))
+                        var label = timer.Label;
+                        if (labelGroups.Contains(label))
                         {
                             var formatted = FormatTimerDuration(timer.DurationSeconds);
-                            disambiguated.Add(
-                                timer with
-                                {
-                                    Label = $"{timer.Label} ({formatted})",
-                                }
-                            );
+                            label = $"{label} ({formatted})";
                         }
-                        else
+                        var baseLabel = label;
+                        var suffix = 1;
+                        while (!usedLabels.Add(label))
                         {
-                            disambiguated.Add(timer);
+                            label = $"{baseLabel} {++suffix}";
                         }
+                        disambiguated.Add(timer with { Label = label });
                     }
                     timers = disambiguated;
                 }

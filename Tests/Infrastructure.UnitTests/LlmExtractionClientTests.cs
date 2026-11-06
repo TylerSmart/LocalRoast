@@ -283,9 +283,21 @@ public sealed class LlmExtractionClientTests
             StringAssert.Contains(body, "\"think\":false");
             StringAssert.Contains(body, "\"num_ctx\":16384");
             StringAssert.Contains(body, "\"num_predict\":16384");
-            StringAssert.Contains(body, "\"repeat_penalty\":1.1");
             StringAssert.Contains(body, "Never combine repeated ingredients");
             StringAssert.Contains(body, "Do not repeat any part of the ingredient name");
+            using var request = JsonDocument.Parse(body);
+            Assert.AreEqual(
+                1,
+                request.RootElement.GetProperty("options").GetProperty("repeat_penalty").GetDouble()
+            );
+            Assert.AreEqual(
+                0,
+                request.RootElement.GetProperty("options").GetProperty("temperature").GetDouble()
+            );
+            Assert.AreEqual(
+                expected: 16384,
+                actual: request.RootElement.GetProperty("options").GetProperty("num_ctx").GetInt32()
+            );
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(ollamaResponse, Encoding.UTF8, "application/json"),
