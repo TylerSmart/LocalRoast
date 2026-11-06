@@ -40,7 +40,8 @@ public record PublicRecipeIngredientDto(
     string? PreparationNote,
     bool IsOptional,
     RecipeMeasurement? AlternativeMeasurement = null,
-    bool PreferAlternativeMeasurement = false
+    bool PreferAlternativeMeasurement = false,
+    string? UnresolvedRecipeTitle = null
 );
 
 public record PublicSubRecipeDto(

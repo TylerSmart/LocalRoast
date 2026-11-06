@@ -595,3 +595,9 @@ button[mat-stroked-button] {
   gap: 0.35rem;
   color: var(--mat-sys-primary, #6b5e43);
 }
+.unresolved-recipe-hint {
+  grid-column: 1 / -1;
+  margin: -0.25rem 0 0;
+  color: var(--mat-sys-on-surface-variant);
+  font-size: 0.85rem;
+}

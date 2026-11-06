@@ -197,6 +197,52 @@ public sealed class ShoppingListsIntegrationTests
     }
 
     [TestMethod]
+    public async Task AddRecipeIngredients_UnresolvedRecipeReference_RemainsFreeText()
+    {
+        await RegisterAndAuthenticateAsync(_client, "recipe-reference@example.com", "Recipe Ref");
+
+        const string referencedRecipeTitle = "Foolproof All-Butter Dough";
+        var recipeResponse = await _client.PostAsJsonAsync(
+            "/api/recipes",
+            new UpsertRecipeRequest(
+                Title: "Blueberry Pie with Unresolved Component",
+                Ingredients:
+                [
+                    new RecipeIngredientInput(
+                        Quantity: 1m,
+                        Unit: MeasurementUnit.Custom,
+                        CustomUnitName: "recipe",
+                        DisplayName: referencedRecipeTitle,
+                        UnresolvedRecipeTitle: referencedRecipeTitle
+                    ),
+                ]
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Created, recipeResponse.StatusCode);
+        var recipe = await recipeResponse.Content.ReadFromJsonAsync<RecipeDetailDto>();
+        Assert.IsNotNull(recipe);
+
+        var listResponse = await _client.PostAsJsonAsync(
+            "/api/shopping-lists",
+            new CreateShoppingListRequest("Pie Shopping")
+        );
+        Assert.AreEqual(HttpStatusCode.Created, listResponse.StatusCode);
+        var list = await listResponse.Content.ReadFromJsonAsync<ShoppingListDetailDto>();
+        Assert.IsNotNull(list);
+
+        var addResponse = await _client.PostAsJsonAsync(
+            $"/api/shopping-lists/{list.Id}/generate/recipe",
+            new AddRecipeToShoppingListRequest(recipe.Id)
+        );
+        Assert.AreEqual(HttpStatusCode.OK, addResponse.StatusCode);
+        var result = await addResponse.Content.ReadFromJsonAsync<ShoppingListGenerationResultDto>();
+        Assert.IsNotNull(result);
+        var item = result.ShoppingList.ActiveItems.Single();
+        Assert.AreEqual(referencedRecipeTitle, item.DisplayName);
+        Assert.IsNull(item.FoodItemId);
+    }
+
+    [TestMethod]
     public async Task MealPlan_GenerateShoppingList_Consolidates_ExcludesPantry_AndPromotesStaple()
     {
         await RegisterAndAuthenticateAsync(_client, "planner@example.com", "Chef Planner");

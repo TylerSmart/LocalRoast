@@ -458,6 +458,18 @@
       padding: 0;
     }
   }
+
+  .unresolved-recipe-reference {
+    margin: 0.5rem 0 0;
+    color: var(--mat-sys-error);
+    font-size: 0.85rem;
+  }
+
+  .unresolved-recipe-label {
+    color: var(--mat-sys-error);
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
 }
 
 .steps-list {

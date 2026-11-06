@@ -405,6 +405,11 @@ public sealed class ShareLinkIntegrationTests
                     Quantity: 1m,
                     LinkedRecipeId: draftSub.Id
                 ),
+                new RecipeIngredientInput(
+                    DisplayName: "Future Pie Crust",
+                    Quantity: 1m,
+                    UnresolvedRecipeTitle: "Future Pie Crust"
+                ),
             ]
         );
 
@@ -436,5 +441,8 @@ public sealed class ShareLinkIntegrationTests
         var draftIng = shared.Ingredients.First(i => i.DisplayName == "Secret Crema");
         Assert.IsNull(draftIng.LinkedSubRecipeId);
         Assert.IsNull(draftIng.LinkedSubRecipeTitle);
+
+        var unresolvedIng = shared.Ingredients.First(i => i.DisplayName == "Future Pie Crust");
+        Assert.AreEqual("Future Pie Crust", unresolvedIng.UnresolvedRecipeTitle);
     }
 }

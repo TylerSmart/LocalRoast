@@ -66,7 +66,8 @@ public record RecipeIngredientDto(
     bool IsOptional,
     string? OriginalRawText,
     RecipeMeasurement? AlternativeMeasurement = null,
-    bool PreferAlternativeMeasurement = false
+    bool PreferAlternativeMeasurement = false,
+    string? UnresolvedRecipeTitle = null
 );
 
 public record RecipeStepTimerDto(Guid Id, int SortOrder, int DurationSeconds, string Label);
@@ -186,7 +187,8 @@ public record RecipeIngredientInput(
     bool IsOptional = false,
     [MaxLength(500)] string? OriginalRawText = null,
     RecipeMeasurement? AlternativeMeasurement = null,
-    bool PreferAlternativeMeasurement = false
+    bool PreferAlternativeMeasurement = false,
+    [MaxLength(200)] string? UnresolvedRecipeTitle = null
 );
 
 public record RecipeStepTimerInput(

@@ -506,6 +506,11 @@
     }
   }
 
+  .recipe-reference-pill {
+    background-color: var(--mat-sys-tertiary-container, #ffd8e4);
+    color: var(--mat-sys-on-tertiary-container, #31111d);
+  }
+
   .new-food-item-banner {
     display: inline-flex;
     align-items: center;

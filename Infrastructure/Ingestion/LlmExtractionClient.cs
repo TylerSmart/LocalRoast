@@ -985,6 +985,9 @@ Rules:
    - "alternativeMeasurement": optional { "quantity": number, "maxQuantity": number or null, "unit": unit code } for a SOURCE-PROVIDED equivalent, such as "5 cups (25 ounces) flour". Keep the first amount as quantity/unit and the parenthetical equivalent here. NEVER assume a density or treat "plus extra" as an equivalent.
    - "isOptional": boolean flag.
    - "originalRawText": verbatim line as originally written.
+   - "isRecipeReference": true only when the ingredient is another prepared recipe or component (e.g. "1 recipe Foolproof All-Butter Dough"); otherwise false.
+   - "referencedRecipeTitle": component recipe's title without quantity or editorial notes, or null when "isRecipeReference" is false.
+   - For recipe references, do not classify the component as a food item; keep its title in "displayName" and leave "canonicalFoodName" empty.
    - "suggestedIsPantryStaple": boolean flag; true ONLY for basic everyday household staples typically kept on hand (water, salt, black pepper, cooking oils, basic vinegars, all-purpose flour, sugar, baking powder/soda, dried spices/herbs, soy sauce), false for fresh produce, meats, dairy, canned goods, and specialty items.
    - "suggestedCategory": grocery-store section for shopping, exactly one of: Produce, MeatAndSeafood, DairyAndEggs, Refrigerated (other chilled items like tofu, hummus, fresh pasta, orange juice), Bakery, PantryDryGoods (rice, pasta, grains, nuts, peanut butter, dried fruit), CannedAndJarred (canned beans, tomatoes, broth, olives), CondimentsAndSauces (oils, vinegars, soy sauce, ketchup, honey), SpicesAndSeasonings (salt, pepper, dried spices and herbs), Baking (flour, sugar, baking powder, yeast, chocolate chips), Snacks, Beverages, Frozen, Other.
 5. Steps:
@@ -1036,6 +1039,9 @@ Rules:
    - "alternativeMeasurement": optional { "quantity": number, "maxQuantity": number or null, "unit": unit code } for a SOURCE-PROVIDED equivalent, such as "5 cups (25 ounces) flour". Keep the first amount as quantity/unit and the parenthetical equivalent here. NEVER assume a density or treat "plus extra" as an equivalent.
    - "isOptional": boolean flag.
    - "originalRawText": verbatim line as originally printed.
+   - "isRecipeReference": true only when the ingredient is another prepared recipe or component (e.g. "1 recipe Foolproof All-Butter Dough"); otherwise false.
+   - "referencedRecipeTitle": component recipe's title without quantity or editorial notes, or null when "isRecipeReference" is false.
+   - For recipe references, do not classify the component as a food item; keep its title in "displayName" and leave "canonicalFoodName" empty.
    - "suggestedIsPantryStaple": boolean flag; true ONLY for basic everyday household staples typically kept on hand (water, salt, black pepper, cooking oils, basic vinegars, all-purpose flour, sugar, baking powder/soda, dried spices/herbs, soy sauce), false for fresh produce, meats, dairy, canned goods, and specialty items.
    - "suggestedCategory": grocery-store section for shopping, exactly one of: Produce, MeatAndSeafood, DairyAndEggs, Refrigerated (other chilled items like tofu, hummus, fresh pasta, orange juice), Bakery, PantryDryGoods (rice, pasta, grains, nuts, peanut butter, dried fruit), CannedAndJarred (canned beans, tomatoes, broth, olives), CondimentsAndSauces (oils, vinegars, soy sauce, ketchup, honey), SpicesAndSeasonings (salt, pepper, dried spices and herbs), Baking (flour, sugar, baking powder, yeast, chocolate chips), Snacks, Beverages, Frozen, Other.
 6. Steps:
@@ -1225,6 +1231,8 @@ Household Cookbook Catalog:
                                 type = "string",
                                 @enum = Enum.GetNames<FoodCategory>(),
                             },
+                            isRecipeReference = new { type = "boolean" },
+                            referencedRecipeTitle = new { type = "string" },
                         },
                         required = new[] { "displayName" },
                     },

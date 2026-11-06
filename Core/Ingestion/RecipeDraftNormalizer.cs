@@ -95,6 +95,11 @@ public static class RecipeDraftNormalizer
         RegexOptions.IgnoreCase | RegexOptions.Compiled
     );
 
+    private static readonly Regex RecipeReferenceRegex = new(
+        @"^\s*(?:\d+(?:\s+\d+/\d+|/\d+)?\s+)?(?:recipe|batch\s+of)\s+(?<title>.+?)(?:\s*\(this page\))?\s*$",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled
+    );
+
     public static bool IsDisallowedUnitPlaceholder(string? unit)
     {
         if (string.IsNullOrWhiteSpace(unit))
@@ -110,6 +115,29 @@ public static class RecipeDraftNormalizer
     {
         var cleaned = regex.Replace(displayName, "").Trim();
         return string.IsNullOrWhiteSpace(cleaned) ? displayName : cleaned;
+    }
+
+    private static string? NormalizeRecipeReferenceTitle(string? title)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            return null;
+        }
+
+        var normalized = title.Trim();
+        normalized = Regex.Replace(
+            normalized,
+            @"\s*\(this page\)\s*$",
+            "",
+            RegexOptions.IgnoreCase
+        );
+        normalized = Regex.Replace(
+            normalized,
+            @"^(?:recipe|batch\s+of)\s+",
+            "",
+            RegexOptions.IgnoreCase
+        );
+        return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
     }
 
     public static (MeasurementUnit? Unit, string? CustomUnitName) NormalizeUnit(string? rawUnit)
@@ -434,6 +462,25 @@ public static class RecipeDraftNormalizer
             var candidateFoodName = !string.IsNullOrWhiteSpace(rawIng.CanonicalFoodName)
                 ? cleanCanonical
                 : cleanDisplayName;
+            var rawRecipeReferenceTitle = NormalizeRecipeReferenceTitle(
+                rawIng.ReferencedRecipeTitle
+            );
+            var sourceIngredientText = !string.IsNullOrWhiteSpace(rawIng.OriginalRawText)
+                ? rawIng.OriginalRawText
+                : displayName;
+            var recipeReferenceMatch = RecipeReferenceRegex.Match(sourceIngredientText);
+            var isRecipeReference =
+                rawIng.IsRecipeReference
+                || recipeReferenceMatch.Success
+                || rawRecipeReferenceTitle is not null;
+            var recipeReferenceTitle =
+                rawRecipeReferenceTitle
+                ?? (
+                    recipeReferenceMatch.Success
+                        ? NormalizeRecipeReferenceTitle(recipeReferenceMatch.Groups["title"].Value)
+                        : null
+                )
+                ?? (rawIng.IsRecipeReference ? NormalizeRecipeReferenceTitle(displayName) : null);
 
             var prepNote = string.IsNullOrWhiteSpace(rawIng.PreparationNote)
                 ? null
@@ -495,6 +542,37 @@ public static class RecipeDraftNormalizer
                         displayName = StripLeadingUnitPrefix(displayName, LeadingDashRegex);
                     }
                 }
+            }
+
+            if (isRecipeReference)
+            {
+                displayName = recipeReferenceTitle ?? displayName;
+                normalizedIngredients.Add(
+                    new IngestionDraftIngredientDto(
+                        SectionName: string.IsNullOrWhiteSpace(rawIng.SectionName)
+                            ? null
+                            : rawIng.SectionName.Trim(),
+                        Quantity: cleanQuantity,
+                        MaxQuantity: cleanMaxQuantity,
+                        Unit: unit,
+                        CustomUnitName: customUnit,
+                        MatchedFoodItemId: null,
+                        MatchedFoodItemName: null,
+                        IsNewFoodItem: false,
+                        ProposedFoodItemName: null,
+                        SuggestedIsPantryStaple: false,
+                        CreateNewFoodItem: false,
+                        DisplayName: displayName,
+                        PreparationNote: prepNote,
+                        IsOptional: rawIng.IsOptional,
+                        OriginalRawText: string.IsNullOrWhiteSpace(rawIng.OriginalRawText)
+                            ? null
+                            : rawIng.OriginalRawText.Trim(),
+                        IsRecipeReference: true,
+                        ReferencedRecipeTitle: recipeReferenceTitle
+                    )
+                );
+                continue;
             }
 
             CatalogFoodLookupItem? match = null;

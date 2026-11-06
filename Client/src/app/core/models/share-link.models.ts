@@ -48,6 +48,7 @@ export interface PublicRecipeIngredientDto {
   isOptional: boolean;
   alternativeMeasurement?: RecipeMeasurement | null;
   preferAlternativeMeasurement?: boolean;
+  unresolvedRecipeTitle?: string | null;
 }
 
 export interface PublicSubRecipeDto {

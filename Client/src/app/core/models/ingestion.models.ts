@@ -134,6 +134,8 @@ export interface IngestionDraftIngredientDto {
   alternativeMeasurement?: RecipeMeasurement | null;
   preferAlternativeMeasurement?: boolean;
   suggestedCategory?: FoodCategory | null;
+  isRecipeReference?: boolean;
+  referencedRecipeTitle?: string | null;
 }
 
 export interface IngestionDraftStepDto {

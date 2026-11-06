@@ -29,6 +29,7 @@ public sealed class RecipeIngredientConfiguration : IEntityTypeConfiguration<Rec
         builder.Property(ri => ri.DisplayName).IsRequired().HasMaxLength(200);
         builder.Property(ri => ri.PreparationNote).HasMaxLength(200);
         builder.Property(ri => ri.OriginalRawText).HasMaxLength(500);
+        builder.Property(ri => ri.UnresolvedRecipeTitle).HasMaxLength(200);
 
         builder
             .HasOne(ri => ri.Recipe)

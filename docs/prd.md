@@ -96,6 +96,7 @@ erDiagram
   - A `RecipeIngredient` row can optionally link to another saved `Recipe` (`linkedRecipeId`, e.g., _Fish Tacos_ linking to `1x` batch of saved _Pickled Red Onions_ and `0.5x` batch of _Chipotle Crema_).
   - **Cycle Prevention:** Saving a sub-recipe link validates the dependency graph (DAG) and rejects circular references.
   - Viewing the parent recipe lets the cook expand sub-recipe ingredients/steps inline, and adding the parent recipe to a Meal Plan or Shopping List includes component ingredients automatically (unless unchecked).
+  - Ingestion recognizes recipe components, links an existing recipe when its title matches, and stores unmatched references separately from the food catalog. Unresolved components remain visible in recipe and cook views and as named shopping-list entries; users can link them later from the recipe editor.
 
 #### 4.1.3 Canonical `FoodItem` Catalog & Pantry Staples
 

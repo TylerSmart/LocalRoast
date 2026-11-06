@@ -117,6 +117,7 @@ export interface RecipeIngredientDto {
   originalRawText: string | null;
   alternativeMeasurement?: RecipeMeasurement | null;
   preferAlternativeMeasurement?: boolean;
+  unresolvedRecipeTitle?: string | null;
 }
 
 export interface RecipeStepTimerDto {
@@ -239,6 +240,7 @@ export interface RecipeIngredientInput {
   originalRawText?: string | null;
   alternativeMeasurement?: RecipeMeasurement | null;
   preferAlternativeMeasurement?: boolean;
+  unresolvedRecipeTitle?: string | null;
 }
 
 export interface RecipeStepTimerInput {
@@ -351,6 +353,7 @@ export interface RecipePreviewIngredient {
   matchedFoodItemName?: string | null;
   alternativeMeasurement?: RecipeMeasurement | null;
   preferAlternativeMeasurement?: boolean;
+  unresolvedRecipeTitle?: string | null;
 }
 
 export interface RecipePreviewStep {

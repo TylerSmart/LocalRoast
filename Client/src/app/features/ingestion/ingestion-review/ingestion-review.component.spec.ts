@@ -313,6 +313,26 @@ describe('IngestionReviewComponent', () => {
     expect(component.ingredientsArray.length).toBe(2);
   });
 
+  it('preserves recipe references in the draft without food-item materialization', () => {
+    component.addIngredient({
+      displayName: '1 recipe Foolproof All-Butter Dough (this page)',
+      isRecipeReference: true,
+      referencedRecipeTitle: 'Foolproof All-Butter Dough',
+    });
+
+    const ingredient = component.buildDraftPayload().ingredients?.[2];
+    expect(ingredient).toMatchObject({
+      isRecipeReference: true,
+      referencedRecipeTitle: 'Foolproof All-Butter Dough',
+      displayName: 'Foolproof All-Butter Dough',
+      matchedFoodItemId: null,
+      matchedFoodItemName: null,
+      isNewFoodItem: false,
+      proposedFoodItemName: null,
+      suggestedIsPantryStaple: false,
+    });
+  });
+
   it('adds and removes steps and timers', () => {
     component.addStep({ instruction: 'Serve warm over rice.' });
     expect(component.stepsArray.length).toBe(2);

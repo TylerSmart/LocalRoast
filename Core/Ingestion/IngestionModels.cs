@@ -49,7 +49,9 @@ public record LlmExtractedIngredientItem(
     string? OriginalRawText = null,
     bool SuggestedIsPantryStaple = false,
     LlmExtractedMeasurementItem? AlternativeMeasurement = null,
-    string? SuggestedCategory = null
+    string? SuggestedCategory = null,
+    bool IsRecipeReference = false,
+    string? ReferencedRecipeTitle = null
 );
 
 public record LlmExtractedMeasurementItem(
@@ -115,7 +117,9 @@ public record IngestionDraftIngredientDto(
     [MaxLength(500)] string? OriginalRawText = null,
     RecipeMeasurement? AlternativeMeasurement = null,
     bool PreferAlternativeMeasurement = false,
-    FoodCategory? SuggestedCategory = null
+    FoodCategory? SuggestedCategory = null,
+    bool IsRecipeReference = false,
+    [MaxLength(200)] string? ReferencedRecipeTitle = null
 );
 
 public record IngestionDraftStepDto(

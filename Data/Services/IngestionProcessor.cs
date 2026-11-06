@@ -922,10 +922,30 @@ public sealed class IngestionProcessor(
         {
             foreach (var ing in draft.Ingredients)
             {
-                var foodItemId = ing.MatchedFoodItemId;
+                var recipeTitle = ing.IsRecipeReference ? ing.ReferencedRecipeTitle?.Trim() : null;
+                if (ing.IsRecipeReference && string.IsNullOrWhiteSpace(recipeTitle))
+                {
+                    throw new DomainValidationException(
+                        "A title is required for a recipe component reference."
+                    );
+                }
+
+                var foodItemId = ing.IsRecipeReference ? null : ing.MatchedFoodItemId;
+                Guid? linkedRecipeId = null;
+
+                if (!string.IsNullOrWhiteSpace(recipeTitle))
+                {
+                    linkedRecipeId = await IngestionCatalogMaterializer.ResolveRecipeReferenceAsync(
+                        dbContext,
+                        recipeTitle,
+                        job.ResultingRecipeId,
+                        cancellationToken
+                    );
+                }
 
                 if (
                     foodItemId == null
+                    && !ing.IsRecipeReference
                     && ing.CreateNewFoodItem
                     && !string.IsNullOrWhiteSpace(ing.ProposedFoodItemName)
                 )
@@ -971,13 +991,16 @@ public sealed class IngestionProcessor(
                             ? ing.CustomUnitName
                             : null,
                         FoodItemId: foodItemId,
-                        LinkedRecipeId: null,
-                        DisplayName: ing.DisplayName,
+                        LinkedRecipeId: linkedRecipeId,
+                        DisplayName: string.IsNullOrWhiteSpace(recipeTitle)
+                            ? ing.DisplayName
+                            : recipeTitle,
                         PreparationNote: ing.PreparationNote,
                         IsOptional: ing.IsOptional,
                         OriginalRawText: ing.OriginalRawText,
                         AlternativeMeasurement: ing.AlternativeMeasurement,
-                        PreferAlternativeMeasurement: ing.PreferAlternativeMeasurement
+                        PreferAlternativeMeasurement: ing.PreferAlternativeMeasurement,
+                        UnresolvedRecipeTitle: linkedRecipeId.HasValue ? null : recipeTitle
                     )
                 );
             }

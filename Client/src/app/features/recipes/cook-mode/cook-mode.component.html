@@ -333,6 +333,9 @@
                         <strong class="item-qty">{{ item.displayQuantityAndUnit }}</strong>
                       }
                       <span class="item-name">{{ item.ingredient.displayName }}</span>
+                      @if (item.ingredient.unresolvedRecipeTitle) {
+                        <span class="unresolved-recipe-label">Recipe component not linked</span>
+                      }
                       @if (item.ingredient.preparationNote) {
                         <span class="item-prep">({{ item.ingredient.preparationNote }})</span>
                       }
@@ -769,6 +772,9 @@
                         <strong class="item-qty">{{ item.displayQuantityAndUnit }}</strong>
                       }
                       <span class="item-name">{{ item.ingredient.displayName }}</span>
+                      @if (item.ingredient.unresolvedRecipeTitle) {
+                        <span class="unresolved-recipe-label">Recipe component not linked</span>
+                      }
                       @if (item.ingredient.preparationNote) {
                         <span class="item-prep">({{ item.ingredient.preparationNote }})</span>
                       }

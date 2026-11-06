@@ -48,6 +48,8 @@ public sealed class RecipeIngredient : IAuditable
 
     public Guid? LinkedRecipeId { get; set; }
 
+    public string? UnresolvedRecipeTitle { get; set; }
+
     public string DisplayName { get; set; } = string.Empty;
 
     public string? PreparationNote { get; set; }

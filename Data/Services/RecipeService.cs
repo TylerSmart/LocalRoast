@@ -632,7 +632,8 @@ public sealed partial class RecipeService(
                     i.AlternativeCustomUnitName
                 )
                 : null,
-            i.PreferAlternativeMeasurement
+            i.PreferAlternativeMeasurement,
+            i.UnresolvedRecipeTitle
         );
     }
 
@@ -1228,6 +1229,16 @@ public sealed partial class RecipeService(
                         "Provide an alternative measurement before selecting it as the default."
                     );
                 }
+
+                if (
+                    !string.IsNullOrWhiteSpace(ing.UnresolvedRecipeTitle)
+                    && (ing.FoodItemId.HasValue || ing.LinkedRecipeId.HasValue)
+                )
+                {
+                    throw new DomainValidationException(
+                        "An unresolved recipe reference cannot also be linked to a FoodItem or recipe."
+                    );
+                }
             }
         }
 
@@ -1406,6 +1417,9 @@ public sealed partial class RecipeService(
                 PreferAlternativeMeasurement = input.PreferAlternativeMeasurement,
                 FoodItemId = input.FoodItemId,
                 LinkedRecipeId = input.LinkedRecipeId,
+                UnresolvedRecipeTitle = string.IsNullOrWhiteSpace(input.UnresolvedRecipeTitle)
+                    ? null
+                    : input.UnresolvedRecipeTitle.Trim(),
                 DisplayName = input.DisplayName.Trim(),
                 PreparationNote = input.PreparationNote?.Trim(),
                 IsOptional = input.IsOptional,

@@ -388,7 +388,8 @@ public sealed class ShareLinkService(AppDbContext dbContext, TimeProvider? timeP
                     i.AlternativeCustomUnitName
                 )
                 : null,
-            i.PreferAlternativeMeasurement
+            i.PreferAlternativeMeasurement,
+            i.UnresolvedRecipeTitle
         );
     }
 

@@ -605,6 +605,13 @@
       font-weight: 500;
     }
 
+    .unresolved-recipe-label {
+      display: block;
+      color: var(--mat-sys-error);
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+
     .item-prep {
       color: var(--mat-sys-on-surface-variant);
       font-size: 0.875rem;

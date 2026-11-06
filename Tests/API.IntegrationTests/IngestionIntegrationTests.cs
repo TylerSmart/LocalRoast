@@ -49,6 +49,28 @@ public sealed class IngestionIntegrationTests
         return auth;
     }
 
+    private static IngestionExtractedDraftDto CreateRecipeReferenceDraft(
+        string title,
+        string referencedRecipeTitle
+    ) =>
+        new(
+            Title: title,
+            Ingredients:
+            [
+                new IngestionDraftIngredientDto(
+                    Quantity: 1m,
+                    Unit: MeasurementUnit.Custom,
+                    CustomUnitName: "recipe",
+                    CreateNewFoodItem: false,
+                    DisplayName: referencedRecipeTitle,
+                    OriginalRawText: $"1 recipe {referencedRecipeTitle} (this page)",
+                    IsRecipeReference: true,
+                    ReferencedRecipeTitle: referencedRecipeTitle
+                ),
+            ],
+            Steps: []
+        );
+
     [TestMethod]
     public async Task IngestionEndpoints_Unauthenticated_ReturnUnauthorized()
     {
@@ -248,6 +270,97 @@ public sealed class IngestionIntegrationTests
 
         var recipeResp = await _client.GetAsync($"/api/recipes/{recipe.Id}");
         Assert.AreEqual(HttpStatusCode.OK, recipeResp.StatusCode);
+    }
+
+    [TestMethod]
+    public async Task DraftPublish_RecipeReferenceExactTitleLinksSavedRecipe()
+    {
+        await AuthenticateAsync(_client);
+
+        const string referencedRecipeTitle = "Foolproof All-Butter Dough";
+        var targetResponse = await _client.PostAsJsonAsync(
+            "/api/recipes",
+            new UpsertRecipeRequest(Title: referencedRecipeTitle)
+        );
+        Assert.AreEqual(HttpStatusCode.Created, targetResponse.StatusCode);
+        var targetRecipe = await targetResponse.Content.ReadFromJsonAsync<RecipeDetailDto>();
+        Assert.IsNotNull(targetRecipe);
+
+        var jobResponse = await _client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest("Blueberry Pie", TitleHint: "Blueberry Pie")
+        );
+        var job = await jobResponse.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
+        Assert.IsNotNull(job);
+
+        var draft = CreateRecipeReferenceDraft("Blueberry Pie", referencedRecipeTitle);
+        var saveResponse = await _client.PutAsJsonAsync(
+            $"/api/ingestion/jobs/{job.Id}/draft",
+            draft
+        );
+        Assert.AreEqual(HttpStatusCode.OK, saveResponse.StatusCode);
+        var savedJob = await saveResponse.Content.ReadFromJsonAsync<IngestionJobDetailDto>();
+        Assert.IsNotNull(savedJob?.ExtractedDraft?.Ingredients);
+        Assert.IsTrue(savedJob.ExtractedDraft.Ingredients[0].IsRecipeReference);
+        Assert.AreEqual(
+            referencedRecipeTitle,
+            savedJob.ExtractedDraft.Ingredients[0].ReferencedRecipeTitle
+        );
+
+        var publishResponse = await _client.PostAsJsonAsync(
+            $"/api/ingestion/jobs/{job.Id}/approve",
+            draft
+        );
+        Assert.AreEqual(HttpStatusCode.Created, publishResponse.StatusCode);
+        var publishedRecipe = await publishResponse.Content.ReadFromJsonAsync<RecipeDetailDto>();
+        Assert.IsNotNull(publishedRecipe);
+        Assert.AreEqual(targetRecipe.Id, publishedRecipe.Ingredients[0].LinkedRecipeId);
+        Assert.IsNull(publishedRecipe.Ingredients[0].FoodItemId);
+        Assert.IsNull(publishedRecipe.Ingredients[0].UnresolvedRecipeTitle);
+    }
+
+    [TestMethod]
+    public async Task DraftPublish_UnknownRecipeReferenceRemainsUnlinkedAndIsNotCreatedAsFood()
+    {
+        await AuthenticateAsync(_client);
+
+        const string referencedRecipeTitle = "Foolproof All-Butter Dough";
+        var jobResponse = await _client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest("Blueberry Pie", TitleHint: "Blueberry Pie")
+        );
+        var job = await jobResponse.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
+        Assert.IsNotNull(job);
+
+        var draft = CreateRecipeReferenceDraft("Blueberry Pie", referencedRecipeTitle);
+        var saveResponse = await _client.PutAsJsonAsync(
+            $"/api/ingestion/jobs/{job.Id}/draft",
+            draft
+        );
+        Assert.AreEqual(HttpStatusCode.OK, saveResponse.StatusCode);
+
+        var publishResponse = await _client.PostAsJsonAsync(
+            $"/api/ingestion/jobs/{job.Id}/approve",
+            draft
+        );
+        Assert.AreEqual(HttpStatusCode.Created, publishResponse.StatusCode);
+        var publishedRecipe = await publishResponse.Content.ReadFromJsonAsync<RecipeDetailDto>();
+        Assert.IsNotNull(publishedRecipe);
+        Assert.AreEqual(referencedRecipeTitle, publishedRecipe.Ingredients[0].DisplayName);
+        Assert.IsNull(publishedRecipe.Ingredients[0].LinkedRecipeId);
+        Assert.IsNull(publishedRecipe.Ingredients[0].FoodItemId);
+        Assert.AreEqual(
+            referencedRecipeTitle,
+            publishedRecipe.Ingredients[0].UnresolvedRecipeTitle
+        );
+
+        var foodItemsResponse = await _client.GetAsync("/api/food-items");
+        Assert.AreEqual(HttpStatusCode.OK, foodItemsResponse.StatusCode);
+        var foodItems = await foodItemsResponse.Content.ReadFromJsonAsync<
+            IReadOnlyList<FoodItemDto>
+        >();
+        Assert.IsNotNull(foodItems);
+        Assert.IsFalse(foodItems.Any(item => item.Name == referencedRecipeTitle));
     }
 
     [TestMethod]

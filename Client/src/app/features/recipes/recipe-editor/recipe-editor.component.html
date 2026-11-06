@@ -484,6 +484,16 @@
                     placeholder="Search sub-recipes..."
                     (selectionChange)="onSubRecipeSelected($index, $event)"
                   />
+                  @if (
+                    ingGroup.get('unresolvedRecipeTitle')?.value &&
+                    !ingGroup.get('linkedRecipeId')?.value
+                  ) {
+                    <p class="unresolved-recipe-hint">
+                      Not in the cookbook yet:
+                      {{ ingGroup.get('unresolvedRecipeTitle')?.value }}. Search for it here after
+                      adding the recipe.
+                    </p>
+                  }
                 } @else {
                   <!-- Food Item Autocomplete / Display Name -->
                   <mat-form-field
