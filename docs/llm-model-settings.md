@@ -19,13 +19,14 @@ Results come from the [ATK ingestion evaluator](contributing.md#evaluating-atk-i
 
 ## Quick Recommendations
 
-| Text Model | Recommendation | Thinking | Timeout (s) | Server context | Auto-publish |
+| Text Model | Recommendation | Thinking | Timeout (s) | Context window | Auto-publish |
 | --- | --- | --- | --- | --- | --- |
-| `gemma4:e4b` | **Default choice** | On | 600 | Set by LocalRoast (16,384) | Off |
-| `gemma4:e2b` | Fast drafts; review every recipe | On | 300 | Set by LocalRoast (16,384) | Off |
-| `gemma4:12b` | About 2x faster than E4B, slightly more findings | **Off** | 300 | **16,384 on the server** | Off |
-| `gemma4:26b-a4b` | Not recommended on 16 GB | Off | 300 | 16,384 and `num_gpu 24` on the server | Off |
+| `gemma4:e4b` | **Default choice** | On | 600 | 16,384 | Off |
+| `gemma4:e2b` | Fast drafts; review every recipe | On | 300 | 16,384 | Off |
+| `gemma4:12b` | About 2x faster than E4B, slightly more findings | **Off** | 300 | 16,384 | Off |
+| `gemma4:26b-a4b` | Not recommended on 16 GB | Off | 300 | 16,384, plus partial GPU offload on the server | Off |
 
+- **Context window:** LocalRoast sends the **Context window** from LLM Settings (default 8,192) with every Ollama request, for every model. Raise it to 16,384 for these models: E4B with thinking used up to 16,381 tokens, and E2B up to 13,096. Larger values are untested and use more GPU memory.
 - **Keep-alive:** the default `5m` keeps the model loaded for the back-to-back requests of a single job and for consecutive queued jobs. Raise it (for example `30m`) only if the queue has long gaps. Models loaded in about 9–16 seconds on the test server.
 - **Auto-publish:** keep it off for all of these models. The quality gate already blocks drafts with detectable problems, but zero detected issues does not prove the recipe is correct.
 - **Thinking applies to the Vision Model too.** The toggle is household-wide, and vision extraction also uses temperature 0. Do not enable thinking while either the Text or Vision Model is `gemma4:12b` (see [gemma4:12b](#gemma412b)).
@@ -41,12 +42,13 @@ Results come from the [ATK ingestion evaluator](contributing.md#evaluating-atk-i
   - `c002-s84`: separated eggs and a fractional flour amount.
   - `c014-s1134`: butter and flour with extra portions for the pan, plus bake and cool timers.
 - **Score:** *findings* are evaluator assertion failures (lower is better). Examples are wrong totals or splits, amounts left in step text, invalid ingredient links, missing timers and failed extractions. Each larger-model configuration ran once, so expect run-to-run variation, especially with sampling.
+- **Code version:** measured at commit `8eb9ac3`, before per-step `ingredientAmounts`, `alternativeMeasurement`, the configurable context window and the CPU-only option were merged. Those changes altered the extraction prompts and schema, so re-run the evaluator to refresh these numbers.
 
 ---
 
 ## Measured Results
 
-### All eight cases (LocalRoast's current behavior)
+### All eight cases (measured at `8eb9ac3`)
 
 | Model | Findings | Zero-finding cases | Mean time per recipe |
 | --- | --- | --- | --- |
@@ -62,9 +64,9 @@ E4B's stress case failed cleanly at the output-token limit after 219 seconds ins
 | `gemma4:e2b`, thinking, staged | Yes | 16 | ~51 s |
 | `gemma4:e4b`, thinking, staged | Yes | 11 | ~131 s |
 | `gemma4:12b`, thinking, temperature 0 | Yes, but fails | Failed 2 of 2 | ~5.4 min, then failed |
-| `gemma4:12b`, no thinking | Yes, with server context set | 14 | ~50–70 s |
+| `gemma4:12b`, no thinking | Yes | 14 | ~50–70 s |
 | `gemma4:12b`, thinking + Gemma sampling | **No** (benchmark only) | **8** | ~4.5 min |
-| `gemma4:26b-a4b`, no thinking | Only with server `num_gpu` | 17 | ~47 s |
+| `gemma4:26b-a4b`, no thinking | Only with server-side partial GPU offload | 17 | ~47 s |
 | `gemma4:26b-a4b`, thinking + Gemma sampling | **No** (benchmark only) | 10 | ~4.3 min |
 
 *Staged* means LocalRoast's separate ingredient and instruction requests followed by at most one correction request. *Gemma sampling* is temperature 1.0, `top_p` 0.95 and `top_k` 64.
@@ -75,15 +77,15 @@ E4B's stress case failed cleanly at the output-token limit after 219 seconds ins
 
 ### `gemma4:e4b`
 
-- **Set:** Text Model `gemma4:e4b`, thinking on, timeout 600 seconds, keep-alive `5m`, auto-publish off.
-- **LocalRoast sets automatically:** staged extraction (up to three requests per recipe), temperature 0, repetition penalty 1 and a 16,384-token context. The timeout applies to each request, not the whole job. The longest single request measured was 108 seconds; 600 leaves headroom for long recipes and busy servers.
+- **Set:** Text Model `gemma4:e4b`, thinking on, timeout 600 seconds, context window 16,384, keep-alive `5m`, auto-publish off.
+- **LocalRoast sets automatically:** staged extraction (up to three requests per recipe), temperature 0 and repetition penalty 1. The timeout applies to each request, not the whole job. The longest single request measured was 108 seconds; 600 leaves headroom for long recipes and busy servers.
 - **Weaknesses:**
   - amounts left in step text
   - divided ingredients that are not split
   - invalid ingredient links
   - wrong split totals (separated eggs, butter reserved for the pan)
   - missing bake and cool timers
-- **Long recipes:** very long recipes can use the whole 16,384-token context while thinking and fail. Those jobs fail cleanly and can be retried or entered manually.
+- **Long recipes:** very long recipes can use the whole 16,384-token context while thinking and fail. Those jobs fail cleanly and can be retried or entered manually. A larger context window may let them finish, but it was not tested and needs more GPU memory.
 
 ### `gemma4:e2b`
 
@@ -101,14 +103,14 @@ E4B's stress case failed cleanly at the output-token limit after 219 seconds ins
 - Fits entirely in 16 GB of VRAM at a 16,384-token context and generated about 36–43 tokens per second.
 - **Do not enable thinking in LocalRoast yet.** LocalRoast sends temperature 0 for extraction. With thinking enabled, the model repeated the same reasoning until it hit the output limit and failed (2 of 2 cases, about 5.4 minutes each).
 - **With thinking off:** single-pass extraction, 14 findings on the three hard cases (versus 11 for E4B) in about a minute per recipe. Its most common problem was invalid ingredient links, which the quality gate flags for review.
-- **Set the server context.** LocalRoast only sizes the context for E2B/E4B tags, and Ollama's documented default (4,096 tokens) is too small: these requests used up to 5,900 tokens without thinking and 14,000 with it. See [Ollama Server Configuration](#ollama-server-configuration).
+- **Set the context window to 16,384.** These requests used up to 5,900 tokens without thinking and 14,000 with it, so the default 8,192 leaves little headroom.
 - **Best measured configuration:** thinking with Gemma sampling had 8 findings and produced a perfect bundt cake (E4B's worst case), using one request in about 4.5 minutes. LocalRoast cannot use it yet:
   - LocalRoast always sends temperature 0, which overrides any `PARAMETER temperature` in a Modelfile.
   - It needs per-model sampling settings in LocalRoast.
 
 ### `gemma4:26b-a4b`
 
-- **Memory:** the 17.4 GB mixture-of-experts model does not fit in 16 GB of VRAM. On the test server it failed to load with a GPU out-of-memory error. Requesting `num_gpu` 24 kept 24 layers on the GPU, ran the rest from system RAM, and loaded in 16 seconds. LocalRoast cannot send `num_gpu`, so it must be set in a derived model (see below).
+- **Memory:** the 17.4 GB mixture-of-experts model does not fit in 16 GB of VRAM. On the test server it failed to load with a GPU out-of-memory error. Requesting `num_gpu` 24 kept 24 layers on the GPU, ran the rest from system RAM, and loaded in 16 seconds; all measurements above used this setting. LocalRoast only sends `num_gpu` for **Run Ollama on CPU only** (`num_gpu` 0), so partial offload must be set in a derived model (see below). CPU-only mode also loads the model, but runs entirely from system RAM and was not benchmarked for extraction.
 - **Not recommended:**
   - Without thinking it had the most findings (17).
   - With thinking and sampling it had 10 findings, but it kept one recipe's four long method paragraphs as steps of up to 1,100 characters. The other models split the same method into 16–20 focused steps, which the serving multiplier and timers depend on. It was also no faster than 12b.
@@ -119,20 +121,21 @@ E4B's stress case failed cleanly at the output-token limit after 219 seconds ins
 ## Ollama Server Configuration
 
 - **One request and one model at a time:** set `OLLAMA_NUM_PARALLEL=1` and `OLLAMA_MAX_LOADED_MODELS=1` on smaller GPUs so ingestion requests never compete for VRAM.
-- **Context for models LocalRoast does not size:** either raise the server default with `OLLAMA_CONTEXT_LENGTH=16384`, or create a derived model and select it as the Text Model:
+- **Context:** set it in LocalRoast's LLM Settings. The `num_ctx` LocalRoast sends with each request overrides `OLLAMA_CONTEXT_LENGTH` and any Modelfile `num_ctx`.
+- **Partial GPU offload for `gemma4:26b-a4b`:** create a derived model and select it as the Text Model, leaving **Run Ollama on CPU only** off (when on, LocalRoast's `num_gpu` 0 overrides the Modelfile):
 
   ```text
   # Modelfile
-  FROM gemma4:12b
-  PARAMETER num_ctx 16384
+  FROM gemma4:26b-a4b
+  PARAMETER num_gpu 24
   ```
 
   ```powershell
-  ollama create gemma4-12b-recipes -f Modelfile
+  ollama create gemma4-26b-recipes -f Modelfile
   ```
 
-- **Partial GPU offload for `gemma4:26b-a4b`:** add `PARAMETER num_gpu 24` to its Modelfile. This was verified only through the API's `options`, not through a derived model inside LocalRoast.
-- **Keep E2B/E4B tag names.** LocalRoast's staged extraction and 16,384-token context only apply to Text Model tags that begin with `gemma4:e2b` or `gemma4:e4b`. A copy of either model under a different name falls back to single-pass extraction and the server's default context.
+  This was verified only through the API's `options`, not through a derived model inside LocalRoast.
+- **Keep E2B/E4B tag names.** LocalRoast's staged extraction only applies to Text Model tags that begin with `gemma4:e2b` or `gemma4:e4b`. A copy of either model under a different name falls back to single-pass extraction.
 - **Check GPU placement:** run `ollama ps`. `100% GPU` means the model is fully on the GPU; a CPU/GPU split means part of it runs from system RAM and is slower.
 
 ---
@@ -150,4 +153,4 @@ E4B's stress case failed cleanly at the output-token limit after 219 seconds ins
     --timeout 600 --output "C:\PrivateBenchmarks\atk-12b-sampled"
   ```
 
-- Planned improvements: per-model profiles (staged mode, thinking, sampling preset, context and GPU options) instead of tag-name checks, and an iterative, issue-targeted repair loop. Together these would make the best measured `gemma4:12b` configuration available in LocalRoast.
+- Planned improvements: per-model profiles (staged mode, thinking, sampling preset and GPU layers) instead of tag-name checks and household-wide settings, and an iterative, issue-targeted repair loop. Together these would make the best measured `gemma4:12b` configuration available in LocalRoast.
