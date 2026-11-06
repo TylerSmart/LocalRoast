@@ -441,6 +441,17 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
 
         await Expect(Page).ToHaveURLAsync(new Regex(".*/ingest/review/.*"));
 
+        // Review header actions render as a tidy grid without text wrapping
+        var headerButtons = Page.Locator(".review-header .header-actions > button");
+        await Expect(headerButtons.First).ToBeVisibleAsync();
+        var headerButtonHeights = await headerButtons.EvaluateAllAsync<double[]>(
+            "els => els.map(el => el.getBoundingClientRect().height)"
+        );
+        foreach (var height in headerButtonHeights)
+        {
+            Assert.IsLessThanOrEqualTo(48.0, height, "Review action buttons must not wrap text.");
+        }
+
         // 4. Verify mobile pane switcher
         var switcher = Page.Locator(".mobile-pane-switcher");
         await Expect(switcher).ToBeVisibleAsync();
@@ -567,6 +578,104 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         // Banner disappears and header button switches back to Pause Ingestion
         await Expect(pausedBanner).Not.ToBeVisibleAsync();
         await Expect(pauseBtn).ToContainTextAsync("Pause Ingestion");
+    }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task IngestionHub_MobileViewport_360px_ActionsFitAndJobCardsDoNotOverflow()
+    {
+        const string longTitle =
+            "Sweet and Saucy Grilled Salmon with Lime-Jalapeño Glaze and Extra Long Supercalifragilisticexpialidocious Garnish";
+        var longDetail =
+            "Attempt 3/3 failed: The LLM host returned an invalid response while extracting the structured recipe. "
+            + string.Join(" ", Enumerable.Repeat("Additional diagnostic context.", 8))
+            + " END-OF-DETAIL";
+
+        await Page.RouteAsync(
+            new Regex(@"/api/ingestion/jobs\?"),
+            async route =>
+            {
+                var response = await route.FetchAsync();
+                var body = System.Text.Json.Nodes.JsonNode.Parse(await response.TextAsync())!;
+                if (body["items"] is System.Text.Json.Nodes.JsonArray items)
+                {
+                    foreach (var item in items)
+                    {
+                        item!["statusDetail"] = longDetail;
+                    }
+                }
+                await route.FulfillAsync(new() { Response = response, Body = body.ToJsonString() });
+            }
+        );
+
+        await RegisterAndLoginAsync();
+        await Page.SetViewportSizeAsync(360, 640);
+        await Page.GotoAsync($"{ServerUrl}/ingest");
+
+        // 1. Pause ingestion so the queued job stays put
+        var toggleBtn = Page.Locator(".toggle-ingestion-btn");
+        await toggleBtn.ClickAsync();
+        await Expect(toggleBtn).ToContainTextAsync("Resume Ingestion");
+
+        // 2. Header action buttons share the same full width
+        var toggleBox = (await toggleBtn.BoundingBoxAsync())!;
+        var settingsBox = (await Page.Locator(".llm-settings-btn").BoundingBoxAsync())!;
+        Assert.AreEqual(settingsBox.Width, toggleBox.Width, 1.0);
+
+        // 3. Banner Resume button keeps its horizontal padding around the icon
+        var resumeBtn = Page.Locator(".paused-ingestion-banner .banner-resume-btn");
+        await Expect(resumeBtn).ToBeVisibleAsync();
+        var resumeBox = (await resumeBtn.BoundingBoxAsync())!;
+        var resumeIconBox = (await resumeBtn.Locator("mat-icon").BoundingBoxAsync())!;
+        Assert.IsGreaterThanOrEqualTo(8.0, resumeIconBox.X - resumeBox.X);
+        var resumeOverflows = await resumeBtn.EvaluateAsync<bool>(
+            "el => el.scrollWidth > el.clientWidth"
+        );
+        Assert.IsFalse(resumeOverflows, "Resume button content must not overflow.");
+
+        // 4. Queue a job with a very long title
+        await Page.Locator("button.tab-pill", new() { HasText = "Paste Raw Text" }).ClickAsync();
+        await Page.Locator("input[formcontrolname='titleHint']").FillAsync(longTitle);
+        await Page.Locator("textarea[formcontrolname='rawText']").FillAsync("1 salmon fillet");
+        await Page.Locator("button[aria-label='Queue raw text recipe']").ClickAsync();
+
+        var jobCard = Page.Locator(".job-card", new() { HasText = "Sweet and Saucy" });
+        await WaitForLocatorWithRefreshAsync(jobCard);
+
+        // 5. Card content stays within the card and the page does not scroll horizontally
+        var cardOverflow = await jobCard.EvaluateAsync<double>(
+            @"card => {
+                const right = card.getBoundingClientRect().right;
+                return Math.max(...[...card.querySelectorAll('.job-title, .job-detail-text, .job-badges, .job-actions')]
+                    .map(el => el.getBoundingClientRect().right - right));
+            }"
+        );
+        Assert.IsLessThanOrEqualTo(
+            0.5,
+            cardOverflow,
+            "Job card content must not overflow the card."
+        );
+        var pageOverflows = await Page.EvaluateAsync<bool>(
+            "() => document.documentElement.scrollWidth > document.documentElement.clientWidth"
+        );
+        Assert.IsFalse(pageOverflows, "Ingestion page must not scroll horizontally at 360px.");
+
+        // 6. Long status detail can be expanded to reveal the full text
+        var detail = jobCard.Locator(".job-detail-text");
+        var toggleDetail = jobCard.Locator(".detail-toggle-btn");
+        await Expect(toggleDetail).ToContainTextAsync("Show full details");
+        var collapsedHeight = (await detail.BoundingBoxAsync())!.Height;
+
+        await toggleDetail.ClickAsync();
+        await Expect(toggleDetail).ToContainTextAsync("Show less");
+        await Expect(detail).ToHaveClassAsync(new Regex("expanded"));
+        var expandedHeight = (await detail.BoundingBoxAsync())!.Height;
+        Assert.IsGreaterThan(collapsedHeight, expandedHeight);
+
+        await toggleDetail.ClickAsync();
+        await Expect(toggleDetail).ToContainTextAsync("Show full details");
+
+        await Page.UnrouteAllAsync();
     }
 
     [TestMethod]

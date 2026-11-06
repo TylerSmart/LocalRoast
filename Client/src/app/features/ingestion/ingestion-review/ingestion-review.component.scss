@@ -648,7 +648,30 @@
       justify-content: flex-end;
     }
   }
+}
 
+@media (max-width: 600px) {
+  .review-header {
+    align-items: stretch;
+
+    .header-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.5rem;
+
+      > button {
+        width: 100%;
+        white-space: nowrap;
+      }
+
+      > button:last-child {
+        grid-column: 1 / -1;
+      }
+    }
+  }
+}
+
+@media (max-width: 960px) {
   .mobile-pane-switcher {
     display: flex;
   }
