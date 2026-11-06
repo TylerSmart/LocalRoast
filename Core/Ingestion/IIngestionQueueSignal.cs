@@ -11,6 +11,8 @@ public interface IIngestionQueueSignal
 
     IDisposable RegisterActiveJobExecution(Guid jobId, CancellationTokenSource cts);
 
+    Task<IDisposable> AcquireJobExecutionAsync(CancellationToken cancellationToken = default);
+
     void CancelActiveExecution();
 
     Guid? ActiveJobId { get; }

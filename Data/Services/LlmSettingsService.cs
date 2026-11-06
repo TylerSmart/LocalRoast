@@ -39,6 +39,7 @@ public sealed class LlmSettingsService(
                 EnableThinking: entity.EnableThinking,
                 MaxIngestionRetries: entity.MaxIngestionRetries,
                 EnableIngestion: entity.EnableIngestion,
+                ContextWindowTokens: entity.ContextWindowTokens,
                 ModifiedAt: entity.ModifiedAt
             );
         }
@@ -57,6 +58,7 @@ public sealed class LlmSettingsService(
             EnableThinking: opt.EnableThinking,
             MaxIngestionRetries: opt.MaxIngestionRetries,
             EnableIngestion: opt.EnableIngestion,
+            ContextWindowTokens: opt.ContextWindowTokens,
             ModifiedAt: null
         );
     }
@@ -85,7 +87,8 @@ public sealed class LlmSettingsService(
                 AutoPublishHighConfidenceText: entity.AutoPublishHighConfidenceText,
                 EnableThinking: entity.EnableThinking,
                 MaxIngestionRetries: entity.MaxIngestionRetries,
-                EnableIngestion: entity.EnableIngestion
+                EnableIngestion: entity.EnableIngestion,
+                ContextWindowTokens: entity.ContextWindowTokens
             );
         }
 
@@ -101,7 +104,8 @@ public sealed class LlmSettingsService(
             AutoPublishHighConfidenceText: opt.AutoPublishHighConfidenceText,
             EnableThinking: opt.EnableThinking,
             MaxIngestionRetries: opt.MaxIngestionRetries,
-            EnableIngestion: opt.EnableIngestion
+            EnableIngestion: opt.EnableIngestion,
+            ContextWindowTokens: opt.ContextWindowTokens
         );
     }
 
@@ -153,6 +157,7 @@ public sealed class LlmSettingsService(
         var wasIngestionEnabled = entity.EnableIngestion;
         entity.MaxIngestionRetries = request.MaxIngestionRetries;
         entity.EnableIngestion = request.EnableIngestion;
+        entity.ContextWindowTokens = request.ContextWindowTokens;
 
         await dbContext.SaveChangesAsync(cancellationToken);
 

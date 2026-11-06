@@ -160,6 +160,10 @@ public sealed class McpCookbookServiceTests
         public IDisposable RegisterActiveJobExecution(Guid jobId, CancellationTokenSource cts) =>
             new DummyDisposable();
 
+        public Task<IDisposable> AcquireJobExecutionAsync(
+            CancellationToken cancellationToken = default
+        ) => Task.FromResult<IDisposable>(new DummyDisposable());
+
         public void CancelActiveExecution() { }
 
         public Guid? ActiveJobId => null;

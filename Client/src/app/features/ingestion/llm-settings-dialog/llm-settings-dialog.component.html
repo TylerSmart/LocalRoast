@@ -194,6 +194,42 @@
           </mat-form-field>
         </div>
 
+        @if (form.controls.provider.value === 'Ollama') {
+          <div class="context-window-section">
+            <div class="context-window-heading">
+              <label for="contextWindowSlider">Context window</label>
+              <span>{{ form.controls.contextWindowTokens.value }} tokens</span>
+            </div>
+            <input
+              id="contextWindowSlider"
+              class="context-window-slider"
+              type="range"
+              min="2048"
+              max="65536"
+              step="2048"
+              [value]="form.controls.contextWindowTokens.value"
+              (input)="onContextWindowSliderInput($event)"
+              aria-describedby="contextWindowHint"
+            />
+            <mat-form-field appearance="outline" class="form-field context-window-number">
+              <mat-label>Context window (tokens)</mat-label>
+              <input
+                matInput
+                type="number"
+                formControlName="contextWindowTokens"
+                min="2048"
+                max="65536"
+                step="1"
+                aria-describedby="contextWindowHint"
+              />
+            </mat-form-field>
+            <p id="contextWindowHint" class="context-window-hint">
+              Larger windows can include more source text but use more memory. Applied to Ollama
+              requests.
+            </p>
+          </div>
+        }
+
         <!-- Ingestion Enable/Disable Toggle -->
         <div class="toggle-section">
           <mat-slide-toggle formControlName="enableIngestion" color="primary">

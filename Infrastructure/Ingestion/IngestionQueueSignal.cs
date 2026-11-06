@@ -15,6 +15,7 @@ public sealed class IngestionQueueSignal : IIngestionQueueSignal
     );
 
     private readonly object _lock = new();
+    private readonly SemaphoreSlim _jobExecutionLock = new(1, 1);
     private Guid? _activeJobId;
     private CancellationTokenSource? _activeCts;
 
@@ -73,6 +74,14 @@ public sealed class IngestionQueueSignal : IIngestionQueueSignal
         return new ActiveJobScope(this, jobId, cts);
     }
 
+    public async Task<IDisposable> AcquireJobExecutionAsync(
+        CancellationToken cancellationToken = default
+    )
+    {
+        await _jobExecutionLock.WaitAsync(cancellationToken);
+        return new JobExecutionScope(_jobExecutionLock);
+    }
+
     public void CancelActiveExecution()
     {
         CancellationTokenSource? ctsToCancel;
@@ -116,6 +125,19 @@ public sealed class IngestionQueueSignal : IIngestionQueueSignal
             if (Interlocked.Exchange(ref _disposed, 1) == 0)
             {
                 signal.Unregister(jobId, cts);
+            }
+        }
+    }
+
+    private sealed class JobExecutionScope(SemaphoreSlim semaphore) : IDisposable
+    {
+        private int _disposed;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+            {
+                semaphore.Release();
             }
         }
     }

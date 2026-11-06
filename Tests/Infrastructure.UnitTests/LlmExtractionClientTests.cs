@@ -11,6 +11,19 @@ namespace App.Infrastructure.UnitTests;
 [TestClass]
 public sealed class LlmExtractionClientTests
 {
+    [TestMethod]
+    public async Task LlmRequestGate_SerializesConcurrentRequests()
+    {
+        var gate = new LlmRequestGate();
+        var first = await gate.AcquireAsync();
+        var pendingSecond = gate.AcquireAsync();
+
+        Assert.IsFalse(pendingSecond.IsCompleted);
+
+        first.Dispose();
+        using var second = await pendingSecond.WaitAsync(TimeSpan.FromSeconds(1));
+    }
+
     private sealed class MockHttpMessageHandler(
         Func<HttpRequestMessage, HttpResponseMessage> handlerFunc
     ) : HttpMessageHandler
@@ -167,8 +180,11 @@ public sealed class LlmExtractionClientTests
             Assert.AreEqual("/api/chat", req.RequestUri!.AbsolutePath);
             var body = req.Content!.ReadAsStringAsync().Result;
             StringAssert.Contains(body, "\"think\":false");
+            StringAssert.Contains(body, "\"num_ctx\":16384");
             StringAssert.Contains(body, "\"num_predict\":16384");
             StringAssert.Contains(body, "\"repeat_penalty\":1.1");
+            StringAssert.Contains(body, "Never combine repeated ingredients");
+            StringAssert.Contains(body, "Do not repeat any part of the ingredient name");
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(ollamaResponse, Encoding.UTF8, "application/json"),
@@ -184,7 +200,8 @@ public sealed class LlmExtractionClientTests
             VisionModel: null,
             OllamaKeepAlive: "5m",
             RequestTimeoutSeconds: 30,
-            AutoPublishHighConfidenceText: false
+            AutoPublishHighConfidenceText: false,
+            ContextWindowTokens: 16384
         );
 
         var context = new LlmExtractionContext(

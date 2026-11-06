@@ -95,6 +95,8 @@ public sealed class IngestionProcessor(
         CancellationToken cancellationToken = default
     )
     {
+        using var executionLock = await queueSignal.AcquireJobExecutionAsync(cancellationToken);
+
         var initialConfig = await llmSettingsService.GetEffectiveConfigAsync(cancellationToken);
 
         if (!initialConfig.EnableIngestion)
@@ -107,7 +109,7 @@ public sealed class IngestionProcessor(
             cancellationToken
         );
 
-        if (job is null || job.Status is IngestionJobStatus.Discarded)
+        if (job is null || job.Status is not IngestionJobStatus.Queued)
         {
             return false;
         }
@@ -608,7 +610,8 @@ public sealed class IngestionProcessor(
                 fallbackSourceBookPage: job.SourceBookPage,
                 retainSourceAttachments: job.Channel
                     is IngestionChannel.Images
-                        or IngestionChannel.Pdf,
+                        or IngestionChannel.Pdf
+                        or IngestionChannel.RawText,
                 extractedModel: modelUsed,
                 fallbackCollectionIds: fallbackCollectionIds,
                 rawSourceText: job.NormalizedSourceText ?? job.RawText

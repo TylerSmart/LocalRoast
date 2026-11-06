@@ -74,6 +74,11 @@ export class LlmSettingsDialogComponent implements OnInit {
     textModel: this.fb.nonNullable.control<string>(''),
     visionModel: this.fb.nonNullable.control<string>(''),
     ollamaKeepAlive: this.fb.nonNullable.control<string>('5m'),
+    contextWindowTokens: this.fb.nonNullable.control<number>(8192, [
+      Validators.required,
+      Validators.min(2048),
+      Validators.max(65536),
+    ]),
     requestTimeoutSeconds: this.fb.nonNullable.control<number>(120, [
       Validators.required,
       Validators.min(5),
@@ -127,6 +132,7 @@ export class LlmSettingsDialogComponent implements OnInit {
             textModel: settings.textModel ?? '',
             visionModel: settings.visionModel ?? '',
             ollamaKeepAlive: settings.ollamaKeepAlive,
+            contextWindowTokens: settings.contextWindowTokens ?? 8192,
             requestTimeoutSeconds: settings.requestTimeoutSeconds,
             autoPublishHighConfidenceText: settings.autoPublishHighConfidenceText,
             enableThinking: settings.enableThinking ?? false,
@@ -208,6 +214,7 @@ export class LlmSettingsDialogComponent implements OnInit {
         textModel: values.textModel.trim() || null,
         visionModel: values.visionModel.trim() || null,
         ollamaKeepAlive: values.ollamaKeepAlive.trim() || '5m',
+        contextWindowTokens: values.contextWindowTokens,
         requestTimeoutSeconds: values.requestTimeoutSeconds,
         autoPublishHighConfidenceText: values.autoPublishHighConfidenceText,
         enableThinking: values.enableThinking,
@@ -226,6 +233,11 @@ export class LlmSettingsDialogComponent implements OnInit {
           this.isSaving.set(false);
         },
       });
+  }
+
+  onContextWindowSliderInput(event: Event): void {
+    const slider = event.target as HTMLInputElement;
+    this.form.controls.contextWindowTokens.setValue(slider.valueAsNumber);
   }
 
   onCancel(): void {

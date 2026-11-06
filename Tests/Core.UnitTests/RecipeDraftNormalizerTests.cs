@@ -118,6 +118,68 @@ public sealed class RecipeDraftNormalizerTests
     }
 
     [TestMethod]
+    public void Normalize_UsesSourceAmountsAndClearsInventedAmounts()
+    {
+        var raw = new LlmExtractedRecipePayload(
+            Title: "Simple Avocado Dip",
+            Ingredients:
+            [
+                new(
+                    SectionName: null,
+                    Quantity: null,
+                    MaxQuantity: null,
+                    Unit: "tsp",
+                    CanonicalFoodName: "kosher salt",
+                    DisplayName: "kosher salt",
+                    OriginalRawText: "1/2 to 1 teaspoon kosher salt"
+                ),
+                new(
+                    SectionName: null,
+                    Quantity: 1m,
+                    MaxQuantity: 999m,
+                    Unit: "null",
+                    CanonicalFoodName: "lime juice",
+                    DisplayName: "lime juice",
+                    PreparationNote: "as needed",
+                    IsOptional: true,
+                    OriginalRawText: "Additional lime juice, as needed"
+                ),
+                new(
+                    SectionName: null,
+                    Quantity: 0.01m,
+                    MaxQuantity: null,
+                    Unit: "pinch",
+                    CanonicalFoodName: "cayenne pepper",
+                    DisplayName: "cayenne pepper",
+                    OriginalRawText: "Pinch cayenne pepper"
+                ),
+            ],
+            Steps: [new(null, "Mash and season.", [0, 1, 2], [])]
+        );
+
+        var draft = RecipeDraftNormalizer.Normalize(
+            raw,
+            _catalogFoods,
+            _tags,
+            null,
+            null,
+            null,
+            null,
+            null
+        );
+
+        Assert.IsNotNull(draft.Ingredients);
+        Assert.AreEqual(0.5m, draft.Ingredients[0].Quantity);
+        Assert.AreEqual(1m, draft.Ingredients[0].MaxQuantity);
+        Assert.IsNull(draft.Ingredients[1].Quantity);
+        Assert.IsNull(draft.Ingredients[1].MaxQuantity);
+        Assert.IsNull(draft.Ingredients[1].Unit);
+        Assert.IsTrue(draft.Ingredients[1].IsOptional);
+        Assert.AreEqual(1m, draft.Ingredients[2].Quantity);
+        Assert.AreEqual(MeasurementUnit.Pinch, draft.Ingredients[2].Unit);
+    }
+
+    [TestMethod]
     public void Normalize_DisallowedUnitPlaceholderOnUnmeasuredSaltAndPepper_NormalizesUnitToNull()
     {
         var raw = new LlmExtractedRecipePayload(

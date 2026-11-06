@@ -740,6 +740,32 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
 
     [TestMethod]
     [Timeout(DefaultTestTimeoutMs)]
+    public async Task LlmSettingsDialog_ContextWindowCanBeAdjustedAndPersists()
+    {
+        await RegisterAndLoginAsync();
+        await Page.GotoAsync($"{ServerUrl}/ingest");
+        await Page.Locator(".llm-settings-btn").ClickAsync();
+
+        var dialog = Page.Locator("app-llm-settings-dialog");
+        await Expect(dialog).ToBeVisibleAsync();
+
+        var contextInput = dialog.Locator("input[formcontrolname='contextWindowTokens']");
+        await contextInput.FillAsync("16384");
+        await dialog
+            .Locator("button", new() { HasText = "Save Settings" })
+            .ClickAsync(new() { Force = true });
+        await Expect(dialog).Not.ToBeVisibleAsync();
+
+        await Page.Locator(".llm-settings-btn").ClickAsync();
+        await Expect(dialog).ToBeVisibleAsync();
+        await Expect(contextInput).ToHaveValueAsync("16384");
+        await Expect(dialog.Locator("#contextWindowSlider")).ToHaveValueAsync("16384");
+        await dialog.Locator("button", new() { HasText = "Cancel" }).ClickAsync();
+        await Expect(dialog).Not.ToBeVisibleAsync();
+    }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
     public async Task IngestionReview_RecipeDetailPreview_InlineToggleAndDialogPreview_WorksAsExpected()
     {
         await using var mockServer = await MockLanLlmAndBlogServer.StartAsync();

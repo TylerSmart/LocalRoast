@@ -722,6 +722,66 @@ public sealed class IngestionIntegrationTests
         Assert.AreEqual(1, recipe1.Collections.Count);
         Assert.AreEqual("Poultry", recipe1.Collections[0].Name);
         Assert.AreEqual(3, recipe1.Tags.Count);
+        Assert.AreEqual(1, recipe1.Attachments.Count);
+    }
+
+    [TestMethod]
+    public async Task ConcurrentJobProcessing_UsesSingleLlmRequestAtATime()
+    {
+        var fakeLlm = new BlockingLlmExtractionClient();
+        await using var customFactory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Llm:TextModel", "test-model");
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ILlmExtractionClient>();
+                services.AddSingleton<ILlmExtractionClient>(fakeLlm);
+            });
+        });
+
+        using var client = customFactory.CreateClient();
+        await AuthenticateAsync(client);
+
+        var firstJob = await EnqueueRawTextJobAsync(client, "Serialized Job One");
+        var secondJob = await EnqueueRawTextJobAsync(client, "Serialized Job Two");
+
+        using var firstScope = customFactory.Services.CreateScope();
+        using var secondScope = customFactory.Services.CreateScope();
+        var firstProcessor = firstScope.ServiceProvider.GetRequiredService<IIngestionProcessor>();
+        var secondProcessor = secondScope.ServiceProvider.GetRequiredService<IIngestionProcessor>();
+
+        var firstProcessing = firstProcessor.ProcessJobByIdAsync(firstJob.Id);
+        await fakeLlm.FirstCallStarted.WaitAsync(TimeSpan.FromSeconds(10));
+        var secondProcessing = secondProcessor.ProcessJobByIdAsync(secondJob.Id);
+
+        await Task.Delay(100);
+        Assert.AreEqual(1, fakeLlm.ExtractionCallCount);
+        Assert.AreEqual(1, fakeLlm.MaxConcurrentRequests);
+
+        fakeLlm.ReleaseFirstCall();
+        Assert.IsTrue(await firstProcessing.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.IsTrue(await secondProcessing.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.AreEqual(2, fakeLlm.ExtractionCallCount);
+        Assert.AreEqual(1, fakeLlm.MaxConcurrentRequests);
+    }
+
+    private static async Task<IngestionJobSummaryDto> EnqueueRawTextJobAsync(
+        HttpClient client,
+        string title
+    )
+    {
+        var response = await client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest(
+                RawText: $"Title: {title}\nIngredients:\n- 1 cup flour\nInstructions:\n1. Mix the flour thoroughly and bake until cooked.",
+                TitleHint: title
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Accepted, response.StatusCode);
+
+        var job = await response.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
+        Assert.IsNotNull(job);
+        return job;
     }
 
     private sealed class FakeSequentialLlmExtractionClient(
@@ -773,5 +833,120 @@ public sealed class IngestionIntegrationTests
             LlmDraftMealPlanContext context,
             CancellationToken cancellationToken = default
         ) => throw new NotImplementedException();
+    }
+
+    private sealed class BlockingLlmExtractionClient : ILlmExtractionClient
+    {
+        private readonly TaskCompletionSource<bool> _firstCallStarted = new(
+            TaskCreationOptions.RunContinuationsAsynchronously
+        );
+        private readonly TaskCompletionSource<bool> _releaseFirstCall = new(
+            TaskCreationOptions.RunContinuationsAsynchronously
+        );
+        private int _activeRequests;
+        private int _maxConcurrentRequests;
+        private int _extractionCallCount;
+
+        public Task FirstCallStarted => _firstCallStarted.Task;
+        public int ExtractionCallCount => Volatile.Read(ref _extractionCallCount);
+        public int MaxConcurrentRequests => Volatile.Read(ref _maxConcurrentRequests);
+
+        public void ReleaseFirstCall() => _releaseFirstCall.TrySetResult(true);
+
+        public Task<LlmConnectionTestResultDto> ProbeAndListModelsAsync(
+            EffectiveLlmConnectionConfig config,
+            int timeoutSeconds = 15,
+            CancellationToken cancellationToken = default
+        ) =>
+            Task.FromResult(
+                new LlmConnectionTestResultDto(
+                    true,
+                    config.Provider,
+                    config.BaseUrl,
+                    5,
+                    ["test-model"],
+                    null
+                )
+            );
+
+        public async Task<LlmExtractedRecipePayload> ExtractRecipeFromTextAsync(
+            EffectiveLlmConnectionConfig config,
+            LlmExtractionContext context,
+            CancellationToken cancellationToken = default
+        )
+        {
+            var call = Interlocked.Increment(ref _extractionCallCount);
+            var active = Interlocked.Increment(ref _activeRequests);
+            UpdateMaximum(active);
+            try
+            {
+                if (call == 1)
+                {
+                    _firstCallStarted.TrySetResult(true);
+                    await _releaseFirstCall.Task.WaitAsync(cancellationToken);
+                }
+
+                return new LlmExtractedRecipePayload(
+                    Title: context.SourceContent.Contains(
+                        "Serialized Job One",
+                        StringComparison.Ordinal
+                    )
+                        ? "Serialized Job One"
+                        : "Serialized Job Two",
+                    ConfidenceScore: 0.8m,
+                    Ingredients:
+                    [
+                        new LlmExtractedIngredientItem(
+                            SectionName: null,
+                            Quantity: 1m,
+                            MaxQuantity: null,
+                            Unit: "cup",
+                            CanonicalFoodName: "flour",
+                            DisplayName: "flour",
+                            OriginalRawText: "1 cup flour"
+                        ),
+                    ],
+                    Steps: [new LlmExtractedStepItem(null, "Mix and bake.", [0])]
+                );
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _activeRequests);
+            }
+        }
+
+        public Task<LlmExtractedRecipePayload> ExtractRecipeFromImagesAsync(
+            EffectiveLlmConnectionConfig config,
+            LlmVisionExtractionContext context,
+            CancellationToken cancellationToken = default
+        ) => throw new NotImplementedException();
+
+        public Task<LlmSubstitutionPayload> SuggestIngredientSubstitutionsAsync(
+            EffectiveLlmConnectionConfig config,
+            LlmSubstitutionContext context,
+            CancellationToken cancellationToken = default
+        ) => throw new NotImplementedException();
+
+        public Task<LlmDraftMealPlanPayload> DraftWeeklyMealPlanAsync(
+            EffectiveLlmConnectionConfig config,
+            LlmDraftMealPlanContext context,
+            CancellationToken cancellationToken = default
+        ) => throw new NotImplementedException();
+
+        private void UpdateMaximum(int active)
+        {
+            int currentMaximum;
+            do
+            {
+                currentMaximum = Volatile.Read(ref _maxConcurrentRequests);
+                if (active <= currentMaximum)
+                {
+                    return;
+                }
+            } while (
+                Interlocked.CompareExchange(ref _maxConcurrentRequests, active, currentMaximum)
+                != currentMaximum
+            );
+        }
     }
 }

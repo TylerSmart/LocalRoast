@@ -22,6 +22,8 @@ public sealed class HouseholdLlmSettings : IAuditable
 
     public string OllamaKeepAlive { get; set; } = "5m";
 
+    public int ContextWindowTokens { get; set; } = 8192;
+
     public int RequestTimeoutSeconds { get; set; } = 120;
 
     public bool AutoPublishHighConfidenceText { get; set; }
