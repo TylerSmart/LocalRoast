@@ -103,6 +103,7 @@ Open `http://localhost:62781` (or your reverse-proxied HTTPS domain) in your bro
 - 🐳 **[Production Docker Deployment Guide (`docs/deployment/docker-deployment.md`)](docs/deployment/docker-deployment.md)**
 - 🚀 **[TrueNAS Scale Deployment Guide (`docs/deployment/truenas-scale.md`)](docs/deployment/truenas-scale.md)**
 - 🔐 **[OIDC & SSO Authentication Guide (`docs/deployment/oidc-authentication.md`)](docs/deployment/oidc-authentication.md)**
+- 🤖 **[Recommended Local LLM Model Settings (`docs/llm-model-settings.md`)](docs/llm-model-settings.md)**
 - 🛠️ **[Contributing & Development Guide (`docs/contributing.md`)](docs/contributing.md)**
 
 ---
