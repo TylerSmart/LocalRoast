@@ -13,6 +13,15 @@
     @if (isSearching()) {
       <mat-spinner diameter="20" class="search-spinner"></mat-spinner>
     }
+    <button
+      mat-icon-button
+      type="button"
+      aria-label="Close search"
+      (click)="dialogRef.close()"
+      (keydown.enter)="$event.stopPropagation()"
+    >
+      <mat-icon>close</mat-icon>
+    </button>
   </div>
 
   <div class="results-list" role="listbox" aria-label="Search results">

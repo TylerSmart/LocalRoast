@@ -44,6 +44,7 @@ describe('CookModeComponent', () => {
   };
   let mockDialog: {
     open: ReturnType<typeof vi.fn>;
+    openDialogs: object[];
   };
   let mockRouter: {
     navigate: ReturnType<typeof vi.fn>;
@@ -205,6 +206,7 @@ describe('CookModeComponent', () => {
     };
     mockDialog = {
       open: vi.fn().mockReturnValue({ afterClosed: () => of(null) }),
+      openDialogs: [],
     };
     mockRouter = {
       navigate: vi.fn().mockResolvedValue(true),
@@ -347,6 +349,19 @@ describe('CookModeComponent', () => {
 
     component['onWindowKeydown'](new KeyboardEvent('keydown', { key: 'ArrowLeft' }));
     expect(component['activeStepIndex']()).toBe(0);
+  });
+
+  it('keeps step shortcuts behind dialogs and dismisses the ingredients drawer with Escape', () => {
+    mockDialog.openDialogs = [{}];
+    component['onWindowKeydown'](new KeyboardEvent('keydown', { key: 'ArrowRight' }));
+    expect(component['activeStepIndex']()).toBe(0);
+    mockDialog.openDialogs = [];
+
+    component['isMobileDrawerOpen'].set(true);
+    component['onWindowKeydown'](new KeyboardEvent('keydown', { key: 'ArrowRight' }));
+    expect(component['activeStepIndex']()).toBe(0);
+    component['onWindowKeydown'](new KeyboardEvent('keydown', { key: 'Escape' }));
+    expect(component['isMobileDrawerOpen']()).toBe(false);
   });
 
   it('launches a step timer via KitchenTimerService', () => {

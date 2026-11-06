@@ -96,19 +96,6 @@
   font-weight: 600;
   padding: 0.2rem 0.6rem;
   border-radius: 9999px;
-
-  &[data-diff='Easy'] {
-    background-color: #e8f5e9;
-    color: #2e7d32;
-  }
-  &[data-diff='Medium'] {
-    background-color: #fff8e1;
-    color: #f57f17;
-  }
-  &[data-diff='Project'] {
-    background-color: #ede7f6;
-    color: #512da8;
-  }
 }
 
 .status-badge {
@@ -295,6 +282,7 @@
     display: flex;
     align-items: center;
     gap: 0.5rem;
+    flex-wrap: wrap;
   }
 }
 
@@ -422,8 +410,8 @@
     font-size: 0.7rem;
     padding: 0.1rem 0.35rem;
     border-radius: 0.25rem;
-    background-color: #fff8e1;
-    color: #f57f17;
+    background-color: var(--app-warning-container);
+    color: var(--app-on-warning-container);
   }
 }
 
@@ -1050,6 +1038,7 @@
         align-items: center;
         gap: 0.5rem;
         font-size: 0.9rem;
+        flex-wrap: wrap;
 
         .log-author {
           font-weight: 700;

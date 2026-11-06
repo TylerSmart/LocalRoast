@@ -79,7 +79,7 @@
 
       <!-- Mobile List Selector -->
       <div class="mobile-list-select-wrapper">
-        <mat-form-field appearance="outline" class="mobile-list-select">
+        <mat-form-field appearance="outline" class="mobile-list-select" subscriptSizing="dynamic">
           <mat-label>Select List</mat-label>
           <mat-select
             [value]="activeList()?.id"
@@ -153,7 +153,11 @@
     <div class="workspace-content">
       <!-- Quick Item Adder Bar -->
       <form class="quick-add-bar" (submit)="onQuickAddSubmit(); $event.preventDefault()">
-        <mat-form-field appearance="outline" class="quick-add-input-field">
+        <mat-form-field
+          appearance="outline"
+          class="quick-add-input-field"
+          subscriptSizing="dynamic"
+        >
           <mat-label>Quick Add Item</mat-label>
           <input
             matInput

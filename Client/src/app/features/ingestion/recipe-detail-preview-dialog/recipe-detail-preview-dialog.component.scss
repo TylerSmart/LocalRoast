@@ -4,11 +4,14 @@
   align-items: center;
   padding: 1rem 1.5rem 0.5rem;
   border-bottom: 1px solid var(--mat-sys-outline-variant, #cac4d0);
+  gap: 0.5rem;
 
   .header-title-group {
     display: flex;
     align-items: center;
     gap: 0.65rem;
+    min-width: 0;
+    flex: 1;
 
     .header-icon {
       color: var(--mat-sys-primary, #6750a4);
@@ -19,6 +22,7 @@
 
     .dialog-title {
       margin: 0;
+      padding: 0;
       font-size: 1.25rem;
       font-weight: 700;
       color: var(--mat-sys-on-surface, #1c1b1f);
@@ -31,11 +35,30 @@
       border-radius: 9999px;
       background-color: var(--mat-sys-primary-container, #eaddff);
       color: var(--mat-sys-on-primary-container, #21005d);
+      flex-shrink: 0;
     }
   }
 
   .close-dialog-btn {
     margin-right: -0.5rem;
+  }
+}
+
+@media (max-width: 600px) {
+  .dialog-header {
+    padding-inline: 1rem;
+
+    .header-title-group {
+      gap: 0.5rem;
+
+      .dialog-title {
+        font-size: 1.1rem;
+      }
+
+      .preview-tag {
+        display: none;
+      }
+    }
   }
 }
 

@@ -556,6 +556,7 @@
                 <span class="month-date-number" [class.today-badge]="cell.isToday">
                   {{ cell.dateNum }}
                 </span>
+                <span class="month-agenda-date">{{ cell.iso | date: 'EEE, MMM d' }}</span>
                 <button
                   type="button"
                   mat-icon-button
@@ -568,6 +569,9 @@
               </div>
 
               <div class="month-cell-entries">
+                @if (cellEntries.length === 0) {
+                  <span class="month-empty-label">No meals planned</span>
+                }
                 @for (entry of cellEntries.slice(0, 3); track entry.id) {
                   <span
                     class="month-meal-pill"

@@ -76,6 +76,12 @@
   justify-content: space-between;
   align-items: center;
   margin-bottom: 1rem;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+
+  .card-section-title {
+    margin-bottom: 0;
+  }
 }
 
 .card-section-title {
@@ -93,7 +99,7 @@
 
 .form-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
   gap: 1rem;
   align-items: start;
 }
@@ -138,6 +144,7 @@
   justify-content: space-between;
   align-items: center;
   gap: 0.5rem;
+  flex-wrap: wrap;
 
   .item-order-pill,
   .step-number-badge {
@@ -280,8 +287,8 @@
     }
 
     .timer-field-label {
-      flex: 1;
-      min-width: 160px;
+      flex: 1 1 160px;
+      min-width: 0;
     }
   }
 }
@@ -336,17 +343,63 @@ button[mat-stroked-button] {
   }
 
   .ingredient-fields-grid {
-    flex-direction: column;
-    align-items: stretch;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
 
-    .field-section,
-    .field-qty,
-    .field-unit,
-    .field-food-link,
-    .field-display-name,
-    .field-prep {
-      max-width: 100%;
+    > * {
+      grid-column: 1 / -1;
+      min-width: 0;
       width: 100%;
+      max-width: none;
+    }
+
+    .field-qty {
+      grid-column: span 1;
+      max-width: none;
+    }
+
+    .create-catalog-btn {
+      width: 44px;
+      justify-self: end;
+    }
+
+    .field-opt,
+    .field-optional {
+      height: auto;
+    }
+  }
+
+  .builder-item-top {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+
+    .mode-checkbox {
+      order: 1;
+      grid-column: 1 / -1;
+    }
+
+    .item-order-pill {
+      justify-self: start;
+    }
+  }
+
+  .step-timers-section .timer-row .timer-field-label {
+    flex-basis: 100%;
+    order: -1;
+  }
+
+  .taxonomy-group-header {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .form-bottom-actions {
+    flex-wrap: wrap;
+    padding-bottom: 0;
+
+    > * {
+      flex: 1;
     }
   }
 }
@@ -444,6 +497,7 @@ button[mat-stroked-button] {
   border: 1px solid var(--mat-sys-outline-variant, #cac4d0);
   overflow: hidden;
   box-sizing: border-box;
+  max-width: 100%;
   transition:
     background-color 0.15s ease,
     border-color 0.15s ease;

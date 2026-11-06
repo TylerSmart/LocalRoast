@@ -168,6 +168,19 @@ Always commit generated files in `Data/Migrations/` in the same commit as the en
 
 ---
 
+## Responsive UI Verification
+
+UI changes should preserve both light and dark themes and work without page-level horizontal scrolling. Navigation uses a single desktop row from 1440px, a two-row header at 769-1439px, and bottom navigation at 768px and below. Month planning uses an agenda at 600px and below.
+
+The `ResponsiveUiE2ETests` suite exercises pages, populated forms, nested dialogs, AI results, media viewers, public shares, and cooking controls at phone, tablet, and desktop sizes. It checks rendered bounds, dialog footer visibility, form sizing, and drawer keyboard focus, including short-screen settings dialogs.
+
+```powershell
+npm run build:production --prefix Client
+dotnet test --project Tests\Client.E2ETests\App.Client.E2ETests.csproj --filter "FullyQualifiedName~ResponsiveUiE2ETests|FullyQualifiedName~NavigationAndThemeE2ETests"
+```
+
+To inspect successful states as well as automatic failure artifacts, set `LOCALROAST_RESPONSIVE_SCREENSHOTS` to a local output directory before running the responsive suite. Screenshots supplement the geometry checks; review long labels, scrolling, touch controls, and light/dark contrast visually. Run the complete E2E suite before finishing broad UI changes.
+
 ## Commit & Branch Guidelines
 
 - **Branch Naming**: `feature/<short-description>`, `fix/<short-description>`, `docs/<short-description>`, `chore/<short-description>`

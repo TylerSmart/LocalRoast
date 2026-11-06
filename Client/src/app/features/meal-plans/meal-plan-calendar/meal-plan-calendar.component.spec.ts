@@ -174,6 +174,17 @@ describe('MealPlanCalendarComponent', () => {
     expect(component['viewMode']()).toBe('week');
   });
 
+  it('provides full date labels and empty states for the mobile month agenda', () => {
+    component['setViewMode']('month');
+    fixture.detectChanges();
+
+    const el = fixture.nativeElement as HTMLElement;
+    const dates = el.querySelectorAll('.month-agenda-date');
+    expect(dates.length).toBeGreaterThanOrEqual(28);
+    expect(dates[0].textContent).toMatch(/[A-Za-z]{3}, [A-Za-z]{3} \d{1,2}/);
+    expect(el.querySelector('.month-empty-label')?.textContent).toContain('No meals planned');
+  });
+
   it('calls cookTonight on entry', () => {
     const entry = mockWeek.onDeckEntries[0];
     component['cookTonight'](entry);

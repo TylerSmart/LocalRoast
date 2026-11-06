@@ -131,12 +131,14 @@
 
   .create-form {
     display: grid;
-    grid-template-columns: 1fr 180px auto;
+    grid-template-columns: minmax(0, 1fr) minmax(130px, 0.6fr);
     gap: 12px;
     align-items: start;
 
     .form-actions {
       padding-top: 4px;
+      grid-column: 1 / -1;
+      justify-self: end;
     }
 
     .generate-btn {
@@ -194,7 +196,7 @@
     align-items: center;
     gap: 8px;
     font-size: 0.85rem;
-    overflow-x: auto;
+    flex-wrap: wrap;
     max-width: 100%;
 
     .endpoint-label {
@@ -208,7 +210,10 @@
       padding: 2px 6px;
       background-color: var(--mat-sys-surface-container-highest);
       border-radius: 4px;
-      white-space: nowrap;
+      white-space: normal;
+      min-width: 0;
+      overflow-wrap: anywhere;
+      flex: 1;
     }
   }
 
@@ -436,13 +441,14 @@
   }
 }
 
-@media (max-width: 580px) {
+@media (max-width: 600px) {
   .create-token-section .create-form {
     grid-template-columns: 1fr;
     gap: 8px;
 
     .form-actions {
       padding-top: 0;
+      justify-self: stretch;
     }
 
     .generate-btn {

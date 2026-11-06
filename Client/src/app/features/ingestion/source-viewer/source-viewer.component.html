@@ -43,6 +43,7 @@
           (click)="zoomOut()"
           [disabled]="zoomLevel() <= 0.5"
           matTooltip="Zoom Out"
+          aria-label="Zoom out"
         >
           <mat-icon>zoom_out</mat-icon>
         </button>
@@ -53,6 +54,7 @@
           class="zoom-badge"
           (click)="resetZoom()"
           matTooltip="Reset Zoom"
+          aria-label="Reset zoom"
         >
           {{ (zoomLevel() * 100).toFixed(0) }}%
         </button>
@@ -63,6 +65,7 @@
           (click)="zoomIn()"
           [disabled]="zoomLevel() >= 3.0"
           matTooltip="Zoom In"
+          aria-label="Zoom in"
         >
           <mat-icon>zoom_in</mat-icon>
         </button>
@@ -72,6 +75,7 @@
           type="button"
           (click)="rotateClockwise()"
           matTooltip="Rotate 90° Clockwise"
+          aria-label="Rotate clockwise"
         >
           <mat-icon>rotate_right</mat-icon>
         </button>
@@ -86,6 +90,7 @@
             (click)="prevPage()"
             [disabled]="activePageIndex() === 0"
             matTooltip="Previous Page"
+            aria-label="Previous source page"
           >
             <mat-icon>chevron_left</mat-icon>
           </button>
@@ -98,6 +103,7 @@
             (click)="nextPage()"
             [disabled]="activePageIndex() >= totalPages() - 1"
             matTooltip="Next Page"
+            aria-label="Next source page"
           >
             <mat-icon>chevron_right</mat-icon>
           </button>

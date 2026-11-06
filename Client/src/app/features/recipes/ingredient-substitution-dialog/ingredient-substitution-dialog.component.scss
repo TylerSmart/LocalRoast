@@ -227,4 +227,9 @@
       width: 100%;
     }
   }
+
+  .ingredient-target-banner {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }

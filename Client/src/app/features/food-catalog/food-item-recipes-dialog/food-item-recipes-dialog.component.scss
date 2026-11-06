@@ -27,8 +27,27 @@
   }
 }
 
+@media (max-width: 600px) {
+  .recipe-usage-row {
+    flex-wrap: wrap;
+    gap: 0.75rem;
+
+    .recipe-info {
+      flex-basis: calc(100% - 66px);
+    }
+
+    .recipe-actions {
+      margin-left: auto;
+    }
+  }
+
+  .dialog-title .title-with-badge {
+    flex-wrap: wrap;
+  }
+}
+
 .dialog-content {
-  min-width: 320px;
+  min-width: 0;
   max-width: 600px;
   max-height: 70vh;
   padding: 8px 24px 16px;
@@ -60,12 +79,12 @@
   gap: 12px;
   padding: 12px 16px;
   border-radius: 8px;
-  background-color: #e8f5e9;
-  color: #1b5e20;
+  background-color: var(--app-success-container);
+  color: var(--app-on-success-container);
   font-size: 0.875rem;
 
   mat-icon {
-    color: #2e7d32;
+    color: var(--app-success);
     margin-top: 2px;
   }
 

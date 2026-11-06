@@ -11,12 +11,14 @@
   gap: 1rem;
   padding-bottom: 0.5rem;
   border-bottom: 1px solid var(--mat-sys-outline-variant, #cac4d0);
+  flex-wrap: wrap;
 
   .header-left {
     display: flex;
     align-items: center;
     gap: 0.75rem;
     min-width: 0;
+    max-width: 100%;
 
     .back-link {
       color: var(--mat-sys-on-surface-variant, #49454f);
@@ -75,7 +77,7 @@
         font-weight: 700;
         overflow: hidden;
         text-overflow: ellipsis;
-        white-space: nowrap;
+        white-space: normal;
       }
     }
   }
@@ -84,7 +86,7 @@
     display: flex;
     align-items: center;
     gap: 0.75rem;
-    flex-shrink: 0;
+    flex-wrap: wrap;
 
     .discard-btn {
       color: var(--mat-sys-error, #ba1a1a);
@@ -128,15 +130,16 @@
 
 .review-split-grid {
   display: grid;
-  grid-template-columns: 42% 58%;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
   gap: 1.5rem;
   align-items: start;
 }
 
 .source-inspector-pane {
   position: sticky;
-  top: 1rem;
-  max-height: calc(100vh - 6rem);
+  top: var(--app-sticky-offset);
+  max-height: calc(100dvh - var(--app-sticky-offset) - 1rem);
+  min-width: 0;
   overflow-y: auto;
 
   .source-card {
@@ -151,6 +154,8 @@
     align-items: center;
     justify-content: space-between;
     padding: 1rem 1rem 0.5rem;
+    flex-wrap: wrap;
+    gap: 0.5rem;
 
     .source-card-title {
       display: flex;
@@ -265,6 +270,9 @@
 }
 
 .draft-editor-pane {
+  min-width: 0;
+  container-type: inline-size;
+
   .draft-pane-toolbar {
     display: flex;
     align-items: center;
@@ -349,6 +357,8 @@
     align-items: center;
     justify-content: space-between;
     padding: 1.25rem 1.25rem 0.25rem;
+    flex-wrap: wrap;
+    gap: 0.75rem;
 
     .card-title {
       display: flex;
@@ -375,12 +385,12 @@
 
   &.two-cols {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   &.three-cols {
     display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
@@ -517,7 +527,7 @@
 
 .new-item-row {
   display: grid;
-  grid-template-columns: 1fr 1fr auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 0.75rem;
   align-items: center;
   padding: 0.5rem 0.75rem;
@@ -535,9 +545,19 @@
 
 .ingredient-inputs-grid {
   display: grid;
-  grid-template-columns: 80px 140px 1fr 1fr auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
   gap: 0.5rem;
   align-items: center;
+
+  .name-field,
+  .note-field {
+    grid-column: 1 / -1;
+  }
+
+  .delete-btn {
+    grid-column: 3;
+    grid-row: 1;
+  }
 }
 
 .step-row-card {
@@ -591,7 +611,7 @@
 
   .timer-input-row {
     display: grid;
-    grid-template-columns: 1fr 70px 70px auto;
+    grid-template-columns: minmax(0, 1fr) 70px 70px auto;
     gap: 0.5rem;
     align-items: center;
   }
@@ -645,12 +665,17 @@
 
     .header-actions {
       width: 100%;
-      justify-content: flex-end;
+      justify-content: flex-start;
     }
   }
 
   .mobile-pane-switcher {
     display: flex;
+
+    .switcher-pill {
+      min-width: 0;
+      flex-direction: column;
+    }
   }
 
   .review-split-grid {
@@ -683,22 +708,23 @@
     gap: 0.25rem;
   }
 
-  .ingredient-inputs-grid {
-    grid-template-columns: 1fr 1fr;
-    gap: 0.25rem;
+  .draft-pane-toolbar .pane-view-toggle {
+    flex-wrap: wrap;
+  }
+}
 
-    .name-field,
-    .note-field {
-      grid-column: span 2;
-    }
-
-    .delete-btn {
-      grid-column: span 2;
-      justify-self: flex-end;
-    }
+@container (max-width: 540px) {
+  .form-row.three-cols,
+  .form-row.two-cols,
+  .new-item-row {
+    grid-template-columns: minmax(0, 1fr);
   }
 
-  .timer-input-row {
-    grid-template-columns: 1fr 60px 60px auto;
+  .timers-subgroup .timer-input-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+
+    > :first-child {
+      grid-column: 1 / -1;
+    }
   }
 }

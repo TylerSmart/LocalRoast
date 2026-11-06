@@ -711,13 +711,21 @@
         (click)="closeMobileDrawer()"
         aria-label="Close ingredients drawer backdrop"
       ></button>
-      <div class="mobile-ingredients-drawer">
+      <div
+        class="mobile-ingredients-drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="cook-ingredients-title"
+        cdkTrapFocus
+        [cdkTrapFocusAutoCapture]="true"
+      >
         <div class="drawer-header">
-          <h3>Ingredients</h3>
+          <h3 id="cook-ingredients-title">Ingredients</h3>
           <button
             mat-icon-button
             (click)="closeMobileDrawer()"
             aria-label="Close ingredients drawer"
+            cdkFocusInitial
           >
             <mat-icon>close</mat-icon>
           </button>

@@ -8,6 +8,7 @@ import {
   DragStartDelay,
 } from '@angular/cdk/drag-drop';
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
+import { DatePipe } from '@angular/common';
 import { MatButtonModule } from '@angular/material/button';
 import { MatButtonToggleModule } from '@angular/material/button-toggle';
 import { MatCardModule } from '@angular/material/card';
@@ -75,6 +76,7 @@ export const MEAL_PLAN_DRAG_CONFIG: DragDropConfig = {
 
 @Component({
   imports: [
+    DatePipe,
     RouterLink,
     CdkDropListGroup,
     CdkDropList,

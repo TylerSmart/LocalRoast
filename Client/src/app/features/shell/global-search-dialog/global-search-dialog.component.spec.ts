@@ -87,6 +87,18 @@ describe('GlobalSearchDialogComponent', () => {
     expect(results.some((r) => r.id === 'col-c1')).toBe(true);
   });
 
+  it('closes from the visible close control without selecting a result', () => {
+    const closeButton: HTMLButtonElement = fixture.nativeElement.querySelector(
+      'button[aria-label="Close search"]',
+    );
+    closeButton.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    closeButton.click();
+
+    expect(mockDialogRef.close).toHaveBeenCalledTimes(1);
+    expect(mockRouter.navigateByUrl).not.toHaveBeenCalled();
+    expect(mockRouter.navigate).not.toHaveBeenCalled();
+  });
+
   it('navigates to selected action and closes dialog', () => {
     const results = component['searchResults']();
     const matcherAction = results.find((r) => r.id === 'action-matcher')!;

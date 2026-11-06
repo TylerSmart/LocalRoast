@@ -15,17 +15,8 @@
   gap: 0.5rem;
   padding-top: 0.25rem !important;
   padding-bottom: 0.5rem !important;
-  min-width: 300px;
+  min-width: 0;
   max-width: 500px;
-  overflow: visible !important;
-  max-height: none !important;
-}
-
-@media (max-height: 640px) {
-  .dialog-content {
-    overflow-y: auto !important;
-    max-height: calc(90vh - 120px) !important;
-  }
 }
 
 .recipe-subtitle {
@@ -76,6 +67,7 @@
   display: flex;
   align-items: center;
   gap: 0.25rem;
+  flex-wrap: wrap;
 }
 
 .star-btn {
@@ -90,6 +82,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
 
   &:hover {
     transform: scale(1.15);

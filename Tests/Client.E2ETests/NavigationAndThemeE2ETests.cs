@@ -35,7 +35,23 @@ public sealed class NavigationAndThemeE2ETests : E2ETestBase
     {
         await RegisterAndLoginAsync();
 
-        int[] widths = [769, 820, 900, 901, 960, 961, 1024, 1133, 1200, 1280, 1281, 1366];
+        int[] widths =
+        [
+            769,
+            820,
+            900,
+            901,
+            960,
+            961,
+            1024,
+            1133,
+            1200,
+            1280,
+            1281,
+            1366,
+            1440,
+            1920,
+        ];
 
         foreach (var width in widths)
         {
@@ -59,6 +75,9 @@ public sealed class NavigationAndThemeE2ETests : E2ETestBase
                     return {
                         navClientWidth: nav.clientWidth,
                         navScrollWidth: nav.scrollWidth,
+                        navTop: navRect.top,
+                        brandBottom: brand.bottom,
+                        actionsBottom: actions.bottom,
                         brandRight: brand.right,
                         navLeft: navRect.left,
                         navRight: navRect.right,
@@ -76,20 +95,31 @@ public sealed class NavigationAndThemeE2ETests : E2ETestBase
                 metrics.NavScrollWidth,
                 $"At {width}px, desktop-nav overflowed (scrollWidth={metrics.NavScrollWidth}, clientWidth={metrics.NavClientWidth})."
             );
-            Assert.IsGreaterThanOrEqualTo(
-                metrics.BrandRight - 0.5,
-                metrics.FirstLinkLeft,
-                $"At {width}px, Cookbook button is behind brand title (brandRight={metrics.BrandRight}, firstLinkLeft={metrics.FirstLinkLeft})."
-            );
+            if (width < 1440)
+            {
+                Assert.IsGreaterThanOrEqualTo(
+                    Math.Max(metrics.BrandBottom, metrics.ActionsBottom) - 0.5,
+                    metrics.NavTop,
+                    $"At {width}px, tablet navigation must sit below the brand and account controls."
+                );
+            }
+            else
+            {
+                Assert.IsGreaterThanOrEqualTo(
+                    metrics.BrandRight - 0.5,
+                    metrics.FirstLinkLeft,
+                    $"At {width}px, navigation overlaps the brand."
+                );
+                Assert.IsLessThanOrEqualTo(
+                    metrics.ActionsLeft + 0.5,
+                    metrics.LastLinkRight,
+                    $"At {width}px, navigation overlaps account controls."
+                );
+            }
             Assert.IsGreaterThanOrEqualTo(
                 metrics.NavLeft - 0.5,
                 metrics.FirstIconLeft,
                 $"At {width}px, Cookbook icon is clipped on the left (navLeft={metrics.NavLeft}, firstIconLeft={metrics.FirstIconLeft})."
-            );
-            Assert.IsLessThanOrEqualTo(
-                metrics.ActionsLeft + 0.5,
-                metrics.LastLinkRight,
-                $"At {width}px, Food Catalog button is behind top-actions (lastLinkRight={metrics.LastLinkRight}, actionsLeft={metrics.ActionsLeft})."
             );
             Assert.IsLessThanOrEqualTo(
                 metrics.NavRight + 0.5,
@@ -217,6 +247,9 @@ public sealed class NavigationAndThemeE2ETests : E2ETestBase
     {
         public double NavClientWidth { get; set; }
         public double NavScrollWidth { get; set; }
+        public double NavTop { get; set; }
+        public double BrandBottom { get; set; }
+        public double ActionsBottom { get; set; }
         public double BrandRight { get; set; }
         public double NavLeft { get; set; }
         public double NavRight { get; set; }

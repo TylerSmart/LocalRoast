@@ -148,6 +148,23 @@ describe('DraftMealPlanDialogComponent', () => {
     expect(component.errorMessage()).toBe('LLM host unavailable');
   });
 
+  it('shows the proposed meal slot and keeps selection edits in sync', async () => {
+    component.prompt.set('Quick dinners');
+    component.submitDraft();
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    const select = (fixture.nativeElement as HTMLElement).querySelector<HTMLSelectElement>(
+      '.candidate-slot-select',
+    )!;
+    expect(select.value).toBe('Dinner');
+
+    select.value = 'Lunch';
+    select.dispatchEvent(new Event('change'));
+    await fixture.whenStable();
+    expect(component.candidateItems()[0].slot).toBe('Lunch');
+  });
+
   it('toggles candidate selection and updates selectedCount', () => {
     component.prompt.set('Quick weeknight dinners');
     component.submitDraft();

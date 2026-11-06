@@ -21,6 +21,7 @@ Ingest recipes from web URLs, cookbook camera photos, PDFs, or pasted text via a
 - **Flexible Household Meal Planning:** Multi-dish `Breakfast`, `Lunch`, `Dinner`, and `Snack / Prep` calendar slots, custom serving overrides, `Leftovers` tracking (excluded from shopping math), freeform notes, an **"On-Deck"** weekly tray, and reusable Week Templates.
 - **Real-Time Smart Shopping Lists:** Multiple named lists (*Weekly*, *Costco*, *Trader Joe's*) with unit consolidation, recipe provenance badges, auto-separated Pantry Staples, custom Store Aisle walking layouts, and live **SignalR** multi-phone sync.
 - **Hands-Free Cook Mode & Cook Logs:** Screen wake-lock (`navigator.wakeLock`), large step-by-step cards with inline scaled ingredient callouts, floating multi-timers, *"I Made This!"* Cook Logs (ratings, tweak notes, photos), **"Use Up Ingredients"** fridge matching, and revocable `/share/<token>` links.
+- **Responsive Workspace:** Wide-screen navigation, a two-row tablet header, and safe-area-aware phone navigation. Forms and dialogs reflow on small screens, month planning becomes a phone-friendly agenda, and light/dark themes share accessible status colors.
 
 ---
 

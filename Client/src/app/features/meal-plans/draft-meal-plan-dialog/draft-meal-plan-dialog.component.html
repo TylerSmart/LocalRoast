@@ -190,8 +190,8 @@
                       <select
                         [id]="'slot-' + item.id"
                         class="candidate-slot-select"
-                        [value]="item.slot"
-                        (change)="updateSlot(item.id, $any($event.target).value)"
+                        [ngModel]="item.slot"
+                        (ngModelChange)="updateSlot(item.id, $event)"
                       >
                         @for (slot of slots; track slot.value) {
                           <option [value]="slot.value">{{ slot.label }}</option>

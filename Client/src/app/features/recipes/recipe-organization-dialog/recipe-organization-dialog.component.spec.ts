@@ -78,6 +78,9 @@ describe('RecipeOrganizationDialogComponent', () => {
     expect(component).toBeTruthy();
     expect(component['selectedCollectionIds']().has('c1')).toBe(true);
     expect(component['selectedTagIds']().size).toBe(0);
+    const el = fixture.nativeElement as HTMLElement;
+    expect(el.querySelector('h2')?.textContent).toBe('Organize Recipe');
+    expect(el.querySelector('.org-subtitle')?.textContent).toBe('Tomato Soup');
   });
 
   it('toggles tag and saves updated recipe organization', () => {

@@ -87,7 +87,7 @@
 // Mode Selector
 .mode-button-group {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
 
   .mode-btn {
@@ -176,7 +176,6 @@
     transition:
       transform 0.15s cubic-bezier(0.4, 0, 0.2, 1),
       box-shadow 0.15s ease;
-    outline: none;
 
     &:hover {
       transform: scale(1.16);
@@ -227,7 +226,6 @@
     cursor: pointer;
     text-align: left;
     transition: all 0.15s ease;
-    outline: none;
 
     &:hover {
       background-color: var(--mat-sys-surface-container-high);
@@ -255,6 +253,7 @@
         display: flex;
         align-items: center;
         gap: 8px;
+        flex-wrap: wrap;
 
         .font-name {
           font-size: 0.9375rem;
@@ -351,6 +350,7 @@
     align-items: center;
     gap: 8px;
     margin-top: 4px;
+    flex-wrap: wrap;
 
     .preview-btn {
       display: inline-flex;
@@ -379,6 +379,23 @@
         color: var(--mat-sys-on-secondary-container);
       }
     }
+  }
+}
+
+@media (max-width: 600px) {
+  .mode-button-group .mode-btn {
+    flex-direction: column;
+    gap: 0.35rem;
+    padding: 0.75rem 0.25rem;
+  }
+
+  .theme-dialog-header {
+    padding-inline: 1rem;
+    gap: 0.5rem;
+  }
+
+  .color-roles-tabs .palette-tab-content {
+    padding-inline: 0.75rem;
   }
 }
 

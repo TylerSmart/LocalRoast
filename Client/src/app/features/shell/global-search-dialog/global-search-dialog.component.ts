@@ -2,6 +2,7 @@ import { A11yModule } from '@angular/cdk/a11y';
 import { Component, ElementRef, OnInit, ViewChild, computed, inject, signal } from '@angular/core';
 import { FormControl, ReactiveFormsModule } from '@angular/forms';
 import { MatDialogRef } from '@angular/material/dialog';
+import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { Router } from '@angular/router';
@@ -22,7 +23,13 @@ export interface SearchResultItem {
 }
 
 @Component({
-  imports: [A11yModule, ReactiveFormsModule, MatIconModule, MatProgressSpinnerModule],
+  imports: [
+    A11yModule,
+    ReactiveFormsModule,
+    MatIconModule,
+    MatProgressSpinnerModule,
+    MatButtonModule,
+  ],
   selector: 'app-global-search-dialog',
   templateUrl: './global-search-dialog.component.html',
   styleUrl: './global-search-dialog.component.scss',

@@ -1,8 +1,8 @@
 .attachment-dialog-container {
   display: flex;
   flex-direction: column;
-  height: 85vh;
-  width: 90vw;
+  height: min(85dvh, calc(100dvh - 2rem));
+  width: 100%;
   max-width: 1200px;
   background: #141418;
   color: #fff;
@@ -15,9 +15,13 @@
   align-items: center;
   justify-content: space-between;
   padding: 12px 16px;
-  background: #202026;
-  border-bottom: 1px solid #33333e;
+  background: var(--mat-sys-surface-container);
+  color: var(--mat-sys-on-surface);
+  border-bottom: 1px solid var(--mat-sys-outline-variant);
   z-index: 10;
+  gap: 0.75rem;
+  flex-shrink: 0;
+  flex-wrap: wrap;
 }
 
 .header-left {
@@ -35,12 +39,13 @@
   .header-titles {
     display: flex;
     flex-direction: column;
+    min-width: 0;
 
     .dialog-title {
       margin: 0;
       font-size: 16px;
       font-weight: 600;
-      color: #fff;
+      color: var(--mat-sys-on-surface);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -49,7 +54,7 @@
 
     .page-indicator {
       font-size: 12px;
-      color: #aaa;
+      color: var(--mat-sys-on-surface-variant);
     }
   }
 }
@@ -58,10 +63,11 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-wrap: wrap;
 
   button,
   a {
-    color: #eee;
+    color: var(--mat-sys-on-surface);
   }
 
   .zoom-badge {
@@ -73,6 +79,7 @@
 
 .stage-container {
   flex: 1;
+  min-height: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -191,12 +198,30 @@
 
 @media (max-width: 600px) {
   .attachment-dialog-container {
-    width: 100vw;
-    height: 100vh;
-    border-radius: 0;
+    height: calc(100dvh - 2rem);
+  }
+
+  .dialog-header {
+    padding: 0.75rem 1rem;
+  }
+
+  .header-left {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .header-actions {
+    width: 100%;
+    gap: 0;
+    justify-content: flex-end;
   }
 
   .header-left .header-titles .dialog-title {
-    max-width: 200px;
+    max-width: 100%;
+  }
+
+  .text-viewer-pane,
+  .text-viewer-pane .text-content {
+    padding: 1rem;
   }
 }

@@ -13,7 +13,7 @@
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  min-width: 340px;
+  min-width: 0;
   max-width: 580px;
   padding-top: 0.5rem;
   box-sizing: border-box;
@@ -111,6 +111,7 @@
   display: flex;
   gap: 0.5rem;
   justify-content: space-around;
+  flex-wrap: wrap;
 
   .metric-pill {
     display: flex;
@@ -135,6 +136,20 @@
       background-color: var(--mat-sys-secondary-container, #e8def8);
       color: var(--mat-sys-on-secondary-container, #1d192b);
     }
+  }
+}
+
+@media (max-width: 600px) {
+  .dates-row {
+    flex-direction: column;
+
+    mat-form-field {
+      flex: 0 1 auto;
+    }
+  }
+
+  .duplicate-meals-banner .dup-radio-group {
+    margin-left: 0;
   }
 }
 

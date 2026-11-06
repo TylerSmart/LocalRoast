@@ -1,3 +1,38 @@
+@media (max-width: 600px) {
+  .templates-dialog-container ::ng-deep .mat-mdc-tab {
+    flex: 1;
+    min-width: 0;
+    padding-inline: 0.5rem;
+
+    .mdc-tab__text-label {
+      white-space: normal;
+      text-align: center;
+    }
+  }
+
+  .mode-selector-row .compact-toggle {
+    width: 100%;
+    flex-direction: column;
+  }
+
+  .apply-target-strip {
+    flex-wrap: wrap;
+  }
+
+  .template-header {
+    align-items: stretch;
+    flex-direction: column;
+
+    .template-actions {
+      justify-content: flex-end;
+    }
+  }
+
+  .template-preview-tray .preview-item-row .preview-day-slot {
+    flex-basis: 100%;
+  }
+}
+
 .templates-dialog-container {
   display: flex;
   flex-direction: column;
@@ -139,7 +174,7 @@ h2[mat-dialog-title] {
     flex-direction: column;
     gap: 0.25rem;
     flex: 1;
-    min-width: 200px;
+    min-width: 0;
 
     .template-name {
       font-weight: 600;
@@ -211,6 +246,7 @@ h2[mat-dialog-title] {
     align-items: center;
     gap: 0.5rem;
     font-size: 0.8rem;
+    flex-wrap: wrap;
 
     .preview-day-slot {
       min-width: 120px;

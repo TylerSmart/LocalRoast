@@ -3,7 +3,7 @@ import { MatDialog } from '@angular/material/dialog';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { provideRouter } from '@angular/router';
 import { of } from 'rxjs';
-import { RecipeSummaryDto } from '../../../core/models/recipe.models';
+import { RecipeQueryParameters, RecipeSummaryDto } from '../../../core/models/recipe.models';
 import { CollectionDto, TagDto } from '../../../core/models/taxonomy.models';
 import { RecipeService } from '../../../core/services/recipe/recipe.service';
 import { TaxonomyService } from '../../../core/services/taxonomy/taxonomy.service';

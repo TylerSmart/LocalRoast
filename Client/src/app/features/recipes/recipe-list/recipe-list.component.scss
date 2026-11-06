@@ -80,6 +80,9 @@
     border: none;
     background: transparent;
     padding-right: 0.45rem;
+    min-width: 0;
+    white-space: normal;
+    text-align: left;
 
     &.active {
       border: none;
@@ -92,8 +95,9 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 36px;
+  height: 44px;
+  flex-shrink: 0;
   padding: 0;
   border: none;
   border-radius: 50%;
@@ -136,6 +140,7 @@
   white-space: nowrap;
   flex-shrink: 0;
   cursor: pointer;
+  min-height: 44px;
   transition: all 0.15s ease-in-out;
 
   &:hover {
@@ -344,17 +349,20 @@
   background-color: var(--mat-sys-surface, #ffffff);
   font-size: 0.825rem;
   font-weight: 500;
+  max-width: 100%;
 
   .tag-pill-name {
     padding-right: 0.25rem;
+    min-width: 0;
   }
 
   .tag-pill-action {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 24px;
-    height: 24px;
+    width: 36px;
+    height: 44px;
+    flex-shrink: 0;
     padding: 0;
     border: none;
     border-radius: 50%;
@@ -474,6 +482,7 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  flex-wrap: wrap;
 }
 
 .diff-badge {
@@ -481,19 +490,6 @@
   font-weight: 600;
   padding: 0.15rem 0.5rem;
   border-radius: 9999px;
-
-  &[data-diff='Easy'] {
-    background-color: #e8f5e9;
-    color: #2e7d32;
-  }
-  &[data-diff='Medium'] {
-    background-color: #fff8e1;
-    color: #f57f17;
-  }
-  &[data-diff='Project'] {
-    background-color: #ede7f6;
-    color: #512da8;
-  }
 }
 
 .status-badge {
@@ -683,6 +679,24 @@
 }
 
 @media (max-width: 600px) {
+  .page-header .header-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+
+    > * {
+      width: 100%;
+    }
+
+    > :last-child {
+      grid-column: 1 / -1;
+    }
+  }
+
+  .collection-pill-group {
+    max-width: 100%;
+  }
+
   .recipes-grid {
     grid-template-columns: minmax(0, 1fr);
   }

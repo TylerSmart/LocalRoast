@@ -20,6 +20,7 @@
   background-color: var(--mat-sys-primary-container, #eaddff);
   color: var(--mat-sys-on-primary-container, #21005d);
   border: 1px solid var(--mat-sys-outline-variant, #cac4d0);
+  flex-wrap: wrap;
 
   .banner-content {
     display: flex;
@@ -117,19 +118,6 @@
   font-weight: 600;
   padding: 0.2rem 0.6rem;
   border-radius: 9999px;
-
-  &[data-diff='Easy'] {
-    background-color: #e8f5e9;
-    color: #2e7d32;
-  }
-  &[data-diff='Medium'] {
-    background-color: #fff8e1;
-    color: #f57f17;
-  }
-  &[data-diff='Project'] {
-    background-color: #ede7f6;
-    color: #512da8;
-  }
 }
 
 .status-badge {
@@ -307,13 +295,30 @@
     display: flex;
     align-items: center;
     gap: 0.5rem;
+    flex-wrap: wrap;
   }
 }
 
 /* Two-Column Body Grid */
+@media (max-width: 600px) {
+  .scaling-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+
+    .toolbar-divider {
+      display: none;
+    }
+
+    .servings-stepper,
+    .unit-system-toggle {
+      justify-content: space-between;
+    }
+  }
+}
+
 .recipe-body-grid {
   display: grid;
-  grid-template-columns: 1fr 1.35fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
   gap: 2rem;
   align-items: start;
 
@@ -412,8 +417,8 @@
       }
 
       .pantry-tag {
-        background-color: #e8f5e9;
-        color: #2e7d32;
+        background-color: var(--app-success-container);
+        color: var(--app-on-success-container);
       }
 
       .catalog-badge {

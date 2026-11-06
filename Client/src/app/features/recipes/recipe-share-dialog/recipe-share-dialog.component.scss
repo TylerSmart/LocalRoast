@@ -24,6 +24,7 @@
     .header-titles {
       display: flex;
       flex-direction: column;
+      min-width: 0;
 
       .dialog-title {
         margin: 0;
@@ -49,6 +50,27 @@
   flex-direction: column;
   gap: 1.25rem;
   padding: 1rem 1.5rem;
+}
+
+@media (max-width: 600px) {
+  .share-dialog-header {
+    padding-inline: 1rem;
+    gap: 0.5rem;
+  }
+
+  .share-form .form-row {
+    flex-direction: column;
+
+    .flex-field,
+    .preset-field {
+      min-width: 0;
+      width: 100%;
+    }
+  }
+
+  .link-card .link-title-row {
+    flex-wrap: wrap;
+  }
 }
 
 .status-warning-banner {

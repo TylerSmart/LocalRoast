@@ -19,6 +19,7 @@
         <mat-button-toggle-group
           formControlName="entryType"
           aria-label="Select meal type"
+          [hideSingleSelectionIndicator]="true"
           class="full-width-toggle"
         >
           <mat-button-toggle value="Recipe">
@@ -42,6 +43,7 @@
         <mat-button-toggle-group
           formControlName="placement"
           aria-label="Select placement"
+          [hideSingleSelectionIndicator]="true"
           class="full-width-toggle placement-toggle"
         >
           <mat-button-toggle value="scheduled">

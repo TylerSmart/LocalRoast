@@ -56,7 +56,8 @@ h2[mat-dialog-title] {
   display: flex;
 
   ::ng-deep .mat-button-toggle {
-    flex: 1;
+    flex: 1 1 0;
+    min-width: 0;
 
     .mat-button-toggle-label-content {
       display: inline-flex;
@@ -128,6 +129,8 @@ h2[mat-dialog-title] {
 
 .servings-stepper-row {
   display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
   align-items: center;
   justify-content: space-between;
 
@@ -192,4 +195,15 @@ h2[mat-dialog-title] {
 .inline-spinner {
   display: inline-block;
   margin-right: 0.5rem;
+}
+
+@media (max-width: 600px) {
+  .full-width-toggle ::ng-deep .mat-button-toggle .mat-button-toggle-label-content {
+    display: flex;
+    flex-direction: column;
+    min-height: 64px;
+    padding: 0.5rem 0.25rem;
+    line-height: 1.35;
+    white-space: normal;
+  }
 }

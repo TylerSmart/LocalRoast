@@ -164,23 +164,23 @@
 
     .thumbnail-label {
       font-size: 11px;
-      color: #aaa;
+      color: var(--mat-sys-on-surface-variant);
       white-space: nowrap;
     }
 
     &:hover {
-      border-color: rgba(255, 255, 255, 0.4);
+      border-color: var(--mat-sys-outline);
       .thumbnail-label {
-        color: #fff;
+        color: var(--mat-sys-on-surface);
       }
     }
 
     &.active {
       border-color: var(--mat-sys-primary, #6750a4);
-      background: rgba(103, 80, 164, 0.15);
+      background: var(--mat-sys-primary-container);
 
       .thumbnail-label {
-        color: #fff;
+        color: var(--mat-sys-on-primary-container);
         font-weight: 600;
       }
     }

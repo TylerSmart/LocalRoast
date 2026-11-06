@@ -1,6 +1,6 @@
 :host {
   display: block;
-  min-height: 100vh;
+  min-height: 100dvh;
   background-color: var(--mat-sys-surface);
   color: var(--mat-sys-on-surface);
 }
@@ -8,9 +8,8 @@
 .cook-mode-container {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
-  max-width: 100vw;
-  overflow-x: hidden;
+  min-height: 100dvh;
+  min-width: 0;
   box-sizing: border-box;
 }
 
@@ -38,13 +37,14 @@
   position: sticky;
   top: 0;
   z-index: 100;
+  flex-wrap: wrap;
 
   .top-bar-left {
     display: flex;
     align-items: center;
     gap: 0.75rem;
     min-width: 0;
-    flex: 1;
+    flex: 1 1 18rem;
 
     .exit-btn {
       flex-shrink: 0;
@@ -65,8 +65,10 @@
     display: flex;
     align-items: center;
     gap: 0.65rem;
-    flex-shrink: 0;
+    flex: 1 1 50rem;
     flex-wrap: wrap;
+    justify-content: flex-end;
+    min-width: 0;
   }
 
   .log-cook-btn {
@@ -126,6 +128,8 @@
   user-select: none;
   flex-shrink: 0;
   cursor: pointer;
+  min-height: 44px;
+  min-width: 44px;
   transition: all 0.2s ease;
 
   .narration-icon {
@@ -181,6 +185,8 @@
   user-select: none;
   flex-shrink: 0;
   cursor: pointer;
+  min-height: 44px;
+  min-width: 44px;
   transition: all 0.2s ease;
 
   .voice-icon {
@@ -367,8 +373,8 @@
   flex-shrink: 0;
 
   .mult-chip {
-    min-width: 36px;
-    height: 32px;
+    min-width: 44px;
+    height: 44px;
     padding: 0 0.4rem;
     font-size: 0.8rem;
     border-radius: 9999px;
@@ -388,7 +394,7 @@
 
 /* Unit Toggle */
 .unit-toggle {
-  height: 36px;
+  min-height: 44px;
   flex-shrink: 0;
 }
 
@@ -475,7 +481,7 @@
 /* 3. Main Workspace */
 .cook-workspace {
   display: grid;
-  grid-template-columns: 360px 1fr;
+  grid-template-columns: minmax(260px, 0.75fr) minmax(0, 1.5fr);
   gap: 1.5rem;
   padding: 1.5rem;
   flex: 1;
@@ -492,9 +498,10 @@
   border: 1px solid var(--mat-sys-outline-variant);
   display: flex;
   flex-direction: column;
-  max-height: calc(100vh - 160px);
+  max-height: calc(100dvh - 10rem);
+  min-width: 0;
   position: sticky;
-  top: 80px;
+  top: 9rem;
 
   .pane-header {
     display: flex;
@@ -671,8 +678,8 @@
     flex-wrap: wrap;
 
     .step-dot-btn {
-      width: 32px;
-      height: 32px;
+      width: 44px;
+      height: 44px;
       border-radius: 50%;
       border: 1px solid var(--mat-sys-outline-variant);
       background-color: var(--mat-sys-surface-container-high);
@@ -686,8 +693,8 @@
       transition: all 0.15s ease;
 
       &.is-completed {
-        background-color: var(--app-success, #10b981);
-        color: white;
+        background-color: var(--app-success-container);
+        color: var(--app-on-success-container);
         border-color: transparent;
       }
 
@@ -914,6 +921,8 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.5rem;
 
     .tray-title {
       display: flex;
@@ -933,10 +942,12 @@
     align-items: center;
     gap: 0.5rem;
     margin-top: 0.5rem;
+    flex-wrap: wrap;
 
     .custom-timer-input {
-      flex: 1;
-      height: 36px;
+      flex: 1 1 160px;
+      min-width: 0;
+      height: 44px;
       padding: 0 0.5rem;
       border-radius: 8px;
       border: 1px solid var(--mat-sys-outline-variant);
@@ -946,7 +957,7 @@
 
     .custom-timer-mins {
       width: 60px;
-      height: 36px;
+      height: 44px;
       padding: 0 0.5rem;
       border-radius: 8px;
       border: 1px solid var(--mat-sys-outline-variant);
@@ -976,6 +987,8 @@
       align-items: center;
       gap: 0.75rem;
       flex-shrink: 0;
+      flex-wrap: wrap;
+      max-width: 100%;
 
       &.is-completed {
         background-color: var(--mat-sys-error-container);
@@ -991,6 +1004,7 @@
       .timer-info {
         display: flex;
         flex-direction: column;
+        min-width: 0;
 
         .timer-countdown {
           font-family: monospace;
@@ -1084,7 +1098,8 @@
   left: 0;
   right: 0;
   bottom: 0;
-  max-height: 80vh;
+  max-height: 80dvh;
+  padding-bottom: env(safe-area-inset-bottom);
   background-color: var(--mat-sys-surface);
   border-top-left-radius: 20px;
   border-top-right-radius: 20px;
@@ -1109,6 +1124,8 @@
 
   .drawer-body {
     overflow-y: auto;
+    min-height: 0;
+    overscroll-behavior: contain;
     padding: 1rem 1.25rem;
     display: flex;
     flex-direction: column;
@@ -1119,6 +1136,7 @@
 /* Mobile Responsiveness (Verified down to 360px) */
 @media (max-width: 900px) {
   .cook-top-bar {
+    position: static;
     padding: 0.65rem 1rem;
     flex-wrap: wrap;
     gap: 0.5rem;
@@ -1159,11 +1177,32 @@
   }
 
   .floating-timer-tray {
-    padding: 0.5rem 1rem;
+    padding: 0.5rem 1rem calc(0.5rem + env(safe-area-inset-bottom));
+    position: static;
   }
 }
 
 @media (max-width: 480px) {
+  .cook-step-card .step-instruction-box {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.75rem;
+
+    .instruction-text {
+      grid-column: 1 / -1;
+      grid-row: 2;
+    }
+
+    .step-checkbox {
+      justify-self: start;
+    }
+
+    .step-speak-btn {
+      grid-column: 2;
+      grid-row: 1;
+    }
+  }
+
   .top-bar-left .exit-label {
     display: none;
   }

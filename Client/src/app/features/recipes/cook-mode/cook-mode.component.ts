@@ -1,4 +1,5 @@
 import { Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
+import { CdkTrapFocus } from '@angular/cdk/a11y';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatButtonToggleModule } from '@angular/material/button-toggle';
@@ -66,6 +67,7 @@ export interface CookIngredientSection {
 
 @Component({
   imports: [
+    CdkTrapFocus,
     FormsModule,
     MatButtonModule,
     MatButtonToggleModule,
@@ -300,7 +302,15 @@ export class CookModeComponent implements OnInit, OnDestroy {
   }
 
   protected onWindowKeydown(event: KeyboardEvent): void {
-    if (event.repeat || this.kitchenQuestionOpen) {
+    if (event.repeat || this.kitchenQuestionOpen || this.dialog.openDialogs.length > 0) {
+      return;
+    }
+
+    if (this.isMobileDrawerOpen()) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        this.closeMobileDrawer();
+      }
       return;
     }
 
