@@ -9,12 +9,16 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import textwrap
 
 from import_atk_epub import (
+    BOOK_AUTHOR,
     DEFAULT_EPUB_PATH,
     format_recipe_as_llm_raw_text,
     parse_atk_epub,
 )
+
+SOURCE_STYLES = ("canonical", "plain", "web")
 
 ROOT = Path(__file__).resolve().parents[1]
 PROJECT = ROOT / "scripts" / "IngestionEvaluator" / "IngestionEvaluator.csproj"
@@ -58,6 +62,61 @@ def ingredient_amounts_in_prose(instruction):
             instruction[:m.start()], re.IGNORECASE,
         )
     ]
+
+
+def _step_texts(recipe):
+    return [re.sub(r"^(\[[^\]]+\]\s*)?\d+\.\s*", r"\1", s) for s in recipe["steps"]]
+
+
+def render_source(recipe, style):
+    """Renders the same recipe as differently shaped text so non-canonical sources
+    (copied pages, PDFs, notes) are evaluated, not just the importer's labeled layout."""
+    if style == "canonical":
+        return format_recipe_as_llm_raw_text(recipe)
+    serves = recipe.get("yield") or f"Serves {recipe['base_servings']}"
+    if style == "plain":
+        # Pasted notes: no section headings, bullets, or step numbers.
+        lines = [recipe["title"], serves, ""]
+        if recipe.get("description"):
+            lines += [recipe["description"], ""]
+        last_section = None
+        for ing in recipe["ingredients"]:
+            if ing.get("section") and ing["section"] != last_section:
+                lines.append(ing["section"])
+                last_section = ing["section"]
+            lines.append(ing["text"])
+        for step in _step_texts(recipe):
+            lines += ["", step]
+        return "\n".join(lines)
+    if style == "web":
+        # Page copy or PDF text: site chrome, shouted headings, glyph bullets, hard wraps.
+        def wrap(text, indent=""):
+            return textwrap.wrap(
+                text, 72, subsequent_indent=indent, break_on_hyphens=False, break_long_words=False
+            ) or [""]
+
+        lines = [
+            "Skip to content", "Home \u00bb Recipes \u00bb Dinner", recipe["title"],
+            f"By {BOOK_AUTHOR} | Updated March 3, 2025", "Jump to Recipe   Print Recipe", "",
+        ]
+        if recipe.get("description"):
+            lines += [*wrap(recipe["description"]), ""]
+        lines += [f"Yield: {serves}", "", "INGREDIENTS"]
+        last_section = None
+        for ing in recipe["ingredients"]:
+            if ing.get("section") and ing["section"] != last_section:
+                lines.append(f"{ing['section']}:")
+                last_section = ing["section"]
+            lines += wrap(f"\u2022 {ing['text']}", "  ")
+        lines += ["", "DIRECTIONS"]
+        for number, step in enumerate(_step_texts(recipe), 1):
+            lines += wrap(f"{number}) {step}")
+        lines += [
+            "", "Did you make this recipe? Leave a comment below!",
+            "Rate this recipe \u2605\u2605\u2605\u2605\u2605", "Share: Facebook Pinterest Email",
+        ]
+        return "\n".join(lines)
+    raise ValueError(f"Unknown source style: {style}")
 
 
 def score_result(case, source, result):
@@ -188,6 +247,9 @@ def main():
     parser.add_argument("--top-k", type=int, help="LLM Settings Top K (blank in the app = model default)")
     parser.add_argument("--context-window", type=int, default=16384, help="LLM Settings Context window (num_ctx and num_predict)")
     parser.add_argument("--ollama-options", default="{}", help="Experimental overrides; recorded in every result")
+    parser.add_argument("--repair-rounds", type=int, default=1, help="LLM Settings Repair Rounds (0-5)")
+    parser.add_argument("--source-style", choices=SOURCE_STYLES, default="canonical",
+                        help="canonical = importer layout; plain/web exercise LLM source sectioning")
     parser.add_argument("--output", type=Path, required=True, help="Private results directory; contains source text")
     parser.add_argument("--score-only", action="store_true")
     parser.add_argument("--no-build", action="store_true")
@@ -202,6 +264,8 @@ def main():
         parser.error("--top-k must be between 1 and 1000")
     if not 2048 <= args.context_window <= 65536:
         parser.error("--context-window must be between 2048 and 65536")
+    if not 0 <= args.repair_rounds <= 5:
+        parser.error("--repair-rounds must be between 0 and 5")
     if not isinstance(json.loads(args.ollama_options), dict):
         parser.error("--ollama-options must be a JSON object")
     cases = json.loads(args.cases.read_text(encoding="utf-8"))
@@ -224,7 +288,7 @@ def main():
                 {
                     "id": c["id"],
                     "title": recipes[c["id"]]["title"],
-                    "sourceContent": format_recipe_as_llm_raw_text(recipes[c["id"]]),
+                    "sourceContent": render_source(recipes[c["id"]], args.source_style),
                     "foodNames": c.get("foodNames", []),
                 } for c in cases
             ], ensure_ascii=False, indent=2), encoding="utf-8"
@@ -233,6 +297,7 @@ def main():
             ROOT / "Infrastructure" / "Ingestion" / "LlmExtractionClient.cs",
             ROOT / "Core" / "Ingestion" / "RecipeDraftNormalizer.cs",
             ROOT / "Core" / "Ingestion" / "RecipeExtractionDiagnostics.cs",
+            ROOT / "Core" / "Ingestion" / "RecipeSourceSectioner.cs",
             ROOT / "Core" / "Ingestion" / "StepTimerExtractor.cs",
             args.cases,
         ]
@@ -246,6 +311,8 @@ def main():
             "models": args.models, "thinking": args.thinking,
             "sampling": {"temperature": args.temperature, "topP": args.top_p, "topK": args.top_k},
             "contextWindowTokens": args.context_window,
+            "repairRounds": args.repair_rounds,
+            "sourceStyle": args.source_style,
             "ollamaOptions": json.loads(args.ollama_options),
             "caseIds": [c["id"] for c in cases],
         }
@@ -261,6 +328,7 @@ def main():
                 args.ollama_options,
                 *("" if value is None else str(value) for value in (args.temperature, args.top_p, args.top_k)),
                 str(args.context_window),
+                str(args.repair_rounds),
             ])
             if completed.returncode not in (0, 1):
                 raise RuntimeError(f"Evaluator exited with code {completed.returncode}")
@@ -272,6 +340,7 @@ def main():
                 "seconds": round(result["elapsedSeconds"], 1), "issues": issues,
                 "validationIssues": result.get("validationIssues"),
                 "requests": len(result.get("exchanges", [])),
+                "sectioned": result.get("structuredSource") is not None,
             }
             summary.append(row)
             print(f"{model} {case['id']}: {len(issues)} issues ({row['seconds']}s)", flush=True)

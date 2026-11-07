@@ -37,6 +37,9 @@ public sealed class LlmDefaultsOptions
     /// <summary>Null omits top_k so the model's own default applies.</summary>
     public int? TopK { get; set; }
 
+    /// <summary>Maximum validation-driven correction requests after each text extraction.</summary>
+    public int ExtractionRepairRounds { get; set; } = 1;
+
     public int MaxIngestionRetries { get; set; } = 3;
 
     public bool EnableIngestion { get; set; } = true;
@@ -66,7 +69,8 @@ public record LlmSettingsDto(
     bool OllamaCpuOnly = false,
     double? Temperature = null,
     double? TopP = null,
-    int? TopK = null
+    int? TopK = null,
+    int ExtractionRepairRounds = 1
 );
 
 public record EffectiveLlmConnectionConfig(
@@ -85,7 +89,8 @@ public record EffectiveLlmConnectionConfig(
     bool OllamaCpuOnly = false,
     double? Temperature = null,
     double? TopP = null,
-    int? TopK = null
+    int? TopK = null,
+    int ExtractionRepairRounds = 1
 );
 
 public record UpdateLlmSettingsRequest(
@@ -96,7 +101,7 @@ public record UpdateLlmSettingsRequest(
     [MaxLength(200)] string? TextModel = null,
     [MaxLength(200)] string? VisionModel = null,
     [MaxLength(32)] string OllamaKeepAlive = "5m",
-    [Range(5, 600)] int RequestTimeoutSeconds = 120,
+    [Range(5, 1800)] int RequestTimeoutSeconds = 120,
     bool AutoPublishHighConfidenceText = false,
     bool EnableThinking = false,
     [Range(0, 10)] int MaxIngestionRetries = 3,
@@ -105,7 +110,8 @@ public record UpdateLlmSettingsRequest(
     bool OllamaCpuOnly = false,
     [Range(0.0, 2.0)] double? Temperature = null,
     [Range(0.0, 1.0)] double? TopP = null,
-    [Range(1, 1000)] int? TopK = null
+    [Range(1, 1000)] int? TopK = null,
+    [Range(0, 5)] int ExtractionRepairRounds = 1
 );
 
 public record TestLlmConnectionRequest(

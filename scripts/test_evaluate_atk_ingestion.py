@@ -1,6 +1,7 @@
+import re
 import unittest
 
-from evaluate_atk_ingestion import converted_amount, ingredient_amounts_in_prose, score_result
+from evaluate_atk_ingestion import converted_amount, ingredient_amounts_in_prose, render_source, score_result
 
 
 class EvaluationTests(unittest.TestCase):
@@ -77,6 +78,34 @@ class EvaluationTests(unittest.TestCase):
         self.assertTrue(any("incorrect alternative" in i for i in score_result(case, source, result)))
         step["ingredientAmounts"][0]["measurement"]["quantity"] = 5
         self.assertTrue(any("Wrong portions" in i for i in score_result(case, source, result)))
+
+    def test_source_styles_keep_every_line_but_drop_canonical_layout(self):
+        recipe = {
+            "title": "Chicken Stew", "yield": "Serves 4", "base_servings": 4,
+            "description": "A hearty stew. " * 12,
+            "ingredients": [
+                {"section": None, "text": "2 pounds boneless, skinless chicken thighs, trimmed and cut into 1-inch pieces"},
+                {"section": "Garnish", "text": "1/4 cup minced fresh parsley"},
+            ],
+            "steps": ["1. " + "Season chicken. " * 8, "2. Sprinkle with parsley and serve."],
+        }
+        self.assertIn("\nIngredients:\n- 2 pounds", render_source(recipe, "canonical"))
+        for style in ("plain", "web"):
+            text = render_source(recipe, style)
+            lines = [line.strip() for line in text.splitlines()]
+            self.assertNotIn("Ingredients:", lines)
+            self.assertFalse(any(line.startswith("- ") or line.startswith("1. ") for line in lines))
+            collapsed = re.sub(r"\s+", " ", text)
+            for expected in [i["text"] for i in recipe["ingredients"]] + [s[3:].strip() for s in recipe["steps"]]:
+                self.assertIn(re.sub(r"\s+", " ", expected).strip(), collapsed, style)
+        web = render_source(recipe, "web").splitlines()
+        self.assertTrue(all(len(line) <= 72 for line in web))
+        self.assertIn("Jump to Recipe   Print Recipe", web)
+        self.assertIn("  1-inch pieces", web)
+        self.assertIn("Garnish:", web)
+        self.assertIn("Garnish", render_source(recipe, "plain").splitlines())
+        with self.assertRaises(ValueError):
+            render_source(recipe, "markdown")
 
 
 if __name__ == "__main__":

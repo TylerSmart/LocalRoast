@@ -38,6 +38,8 @@ public sealed class HouseholdLlmSettings : IAuditable
 
     public int? TopK { get; set; }
 
+    public int ExtractionRepairRounds { get; set; } = 1;
+
     public int MaxIngestionRetries { get; set; } = 3;
 
     public bool EnableIngestion { get; set; } = true;

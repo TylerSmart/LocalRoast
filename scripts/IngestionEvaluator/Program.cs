@@ -8,10 +8,10 @@ using App.Core.Exceptions;
 using App.Core.Ingestion;
 using App.Infrastructure.Ingestion;
 
-if (args.Length != 11)
+if (args.Length != 12)
 {
     Console.Error.WriteLine(
-        "Usage: IngestionEvaluator <input.json> <output-dir> <base-url> <model> <timeout-seconds> <thinking> <ollama-options-json> <temperature|\"\"> <top-p|\"\"> <top-k|\"\"> <context-window-tokens>"
+        "Usage: IngestionEvaluator <input.json> <output-dir> <base-url> <model> <timeout-seconds> <thinking> <ollama-options-json> <temperature|\"\"> <top-p|\"\"> <top-k|\"\"> <context-window-tokens> <repair-rounds>"
     );
     return 2;
 }
@@ -43,7 +43,8 @@ var config = new EffectiveLlmConnectionConfig(
     TopP: string.IsNullOrEmpty(args[8])
         ? null
         : double.Parse(args[8], CultureInfo.InvariantCulture),
-    TopK: string.IsNullOrEmpty(args[9]) ? null : int.Parse(args[9], CultureInfo.InvariantCulture)
+    TopK: string.IsNullOrEmpty(args[9]) ? null : int.Parse(args[9], CultureInfo.InvariantCulture),
+    ExtractionRepairRounds: int.Parse(args[11], CultureInfo.InvariantCulture)
 );
 var overrides =
     JsonNode.Parse(args[6]) as JsonObject
@@ -65,12 +66,31 @@ foreach (var item in cases)
     var stopwatch = Stopwatch.StartNew();
     LlmExtractedRecipePayload? raw = null;
     IngestionExtractedDraftDto? draft = null;
+    string? structuredSource = null;
     string? error = null;
+    double? sectioningSeconds = null;
     try
     {
+        if (!RecipeSourceSectioner.HasCanonicalSections(item.SourceContent))
+        {
+            try
+            {
+                structuredSource = await client.StructureRecipeSourceAsync(
+                    config,
+                    item.SourceContent
+                );
+            }
+            catch (Exception ex)
+                when (ex is DomainValidationException or LlmHostUnavailableException)
+            {
+                Console.Error.WriteLine($"  sectioning failed: {ex.Message}");
+            }
+            sectioningSeconds = stopwatch.Elapsed.TotalSeconds;
+        }
+
         raw = await client.ExtractRecipeFromTextAsync(
             config,
-            new LlmExtractionContext(item.SourceContent, [], item.FoodNames)
+            new LlmExtractionContext(structuredSource ?? item.SourceContent, [], item.FoodNames)
         );
         draft = RecipeDraftNormalizer.Normalize(
             raw,
@@ -107,14 +127,20 @@ foreach (var item in cases)
                 config.TopP,
                 config.TopK,
                 config.ContextWindowTokens,
+                config.ExtractionRepairRounds,
                 Overrides = overrides,
                 ElapsedSeconds = stopwatch.Elapsed.TotalSeconds,
+                SectioningSeconds = sectioningSeconds,
                 Error = error,
+                StructuredSource = structuredSource,
                 Raw = raw,
                 Draft = draft,
                 ValidationIssues = raw is null
                     ? null
-                    : RecipeExtractionDiagnostics.GetReviewIssues(raw, item.SourceContent),
+                    : RecipeExtractionDiagnostics.GetReviewIssues(
+                        raw,
+                        structuredSource ?? item.SourceContent
+                    ),
                 handler.Exchanges,
             },
             jsonOptions

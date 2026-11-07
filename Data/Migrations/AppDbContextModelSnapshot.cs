@@ -276,6 +276,9 @@ namespace App.Data.Migrations
                     b.Property<bool>("EnableThinking")
                         .HasColumnType("bit");
 
+                    b.Property<int>("ExtractionRepairRounds")
+                        .HasColumnType("int");
+
                     b.Property<int>("MaxIngestionRetries")
                         .HasColumnType("int");
 
@@ -451,6 +454,10 @@ namespace App.Data.Migrations
                     b.Property<string>("StatusDetail")
                         .HasMaxLength(2000)
                         .HasColumnType("nvarchar(2000)");
+
+                    b.Property<string>("StructuredSourceText")
+                        .HasMaxLength(100000)
+                        .HasColumnType("nvarchar(max)");
 
                     b.HasKey("Id");
 

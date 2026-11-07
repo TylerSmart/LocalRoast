@@ -97,6 +97,17 @@ public interface ILlmExtractionClient
         CancellationToken cancellationToken = default
     );
 
+    /// <summary>
+    /// Asks the text model to locate the recipe sections in an unstructured source and returns
+    /// a canonical Ingredients/Instructions copy built only from verbatim source lines, or null
+    /// when the sections could not be identified.
+    /// </summary>
+    Task<string?> StructureRecipeSourceAsync(
+        EffectiveLlmConnectionConfig config,
+        string sourceText,
+        CancellationToken cancellationToken = default
+    );
+
     Task<LlmExtractedRecipePayload> ExtractRecipeFromImagesAsync(
         EffectiveLlmConnectionConfig config,
         LlmVisionExtractionContext context,

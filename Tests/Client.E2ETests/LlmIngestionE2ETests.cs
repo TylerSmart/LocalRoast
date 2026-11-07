@@ -944,6 +944,58 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
 
     [TestMethod]
     [Timeout(DefaultTestTimeoutMs)]
+    public async Task LlmSettingsDialog_RepairRoundsAndLongTimeoutPersistAndFitMobile()
+    {
+        await RegisterAndLoginAsync();
+        await Page.SetViewportSizeAsync(360, 740);
+        await Page.GotoAsync($"{ServerUrl}/ingest");
+        await Page.Locator(".llm-settings-btn").ClickAsync();
+
+        var dialog = Page.Locator("app-llm-settings-dialog");
+        var repairRounds = dialog.Locator("input[formcontrolname='extractionRepairRounds']");
+        var timeout = dialog.Locator("input[formcontrolname='requestTimeoutSeconds']");
+        var save = dialog.Locator("button", new() { HasText = "Save Settings" });
+        await Expect(repairRounds).ToHaveValueAsync("1");
+
+        await repairRounds.FillAsync("6");
+        await Expect(save).ToBeDisabledAsync();
+        await repairRounds.FillAsync("2");
+        await timeout.FillAsync("1801");
+        await Expect(save).ToBeDisabledAsync();
+        await timeout.FillAsync("1800");
+        await Expect(save).ToBeEnabledAsync();
+
+        await repairRounds.ScrollIntoViewIfNeededAsync();
+        Assert.IsTrue(
+            await repairRounds.EvaluateAsync<bool>(
+                """
+                input => {
+                  const field = input.closest('mat-form-field').getBoundingClientRect();
+                  const content = input.closest('mat-dialog-content').getBoundingClientRect();
+                  return field.left >= content.left && field.right <= content.right;
+                }
+                """
+            ),
+            "Repair Rounds must fit inside the dialog at 360px."
+        );
+        Assert.IsTrue(
+            await Page.EvaluateAsync<bool>(
+                "document.documentElement.scrollWidth <= window.innerWidth"
+            ),
+            "LLM settings must fit a 360px viewport."
+        );
+
+        await save.ClickAsync();
+        await Expect(dialog).Not.ToBeVisibleAsync();
+        await Page.Locator(".llm-settings-btn").ClickAsync();
+        await Expect(repairRounds).ToHaveValueAsync("2");
+        await Expect(timeout).ToHaveValueAsync("1800");
+        await dialog.Locator("button", new() { HasText = "Cancel" }).ClickAsync();
+        await Expect(dialog).Not.ToBeVisibleAsync();
+    }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
     public async Task LlmSettingsDialog_SamplingOverridesPersistReachOllamaAndFitMobile()
     {
         await using var mockServer = await MockLanLlmAndBlogServer.StartAsync();

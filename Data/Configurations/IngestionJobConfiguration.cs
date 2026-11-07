@@ -19,6 +19,7 @@ public sealed class IngestionJobConfiguration : IEntityTypeConfiguration<Ingesti
         builder.Property(j => j.RawText).HasMaxLength(100000);
         builder.Property(j => j.ScrapedPageJson).HasMaxLength(200000);
         builder.Property(j => j.NormalizedSourceText).HasMaxLength(100000);
+        builder.Property(j => j.StructuredSourceText).HasMaxLength(100000);
         builder.Property(j => j.DownloadedCoverImagePath).HasMaxLength(500);
         builder.Property(j => j.DownloadedThumbnailImagePath).HasMaxLength(500);
         builder.Property(j => j.SourceFilesJson).HasMaxLength(200000);

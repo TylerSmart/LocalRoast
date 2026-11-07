@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -7,12 +8,20 @@ using System.Text.Json.Serialization;
 using App.Core.Exceptions;
 using App.Core.FoodCatalog;
 using App.Core.Ingestion;
+using Microsoft.Extensions.Logging;
 
 namespace App.Infrastructure.Ingestion;
 
-public sealed class LlmExtractionClient(HttpClient httpClient, ILlmRequestGate? requestGate = null)
-    : ILlmExtractionClient
+public sealed class LlmExtractionClient(
+    HttpClient httpClient,
+    ILlmRequestGate? requestGate = null,
+    ILogger<LlmExtractionClient>? logger = null
+) : ILlmExtractionClient
 {
+    // OpenAI-compatible servers may reject max_tokens larger than the remaining context, so
+    // they keep this fixed cap; Ollama stops at num_ctx and can use the whole window.
+    private const int DefaultOutputTokenLimit = 16384;
+
     private readonly bool _ = ConfigureHttpClient(httpClient);
 
     private static bool ConfigureHttpClient(HttpClient client)
@@ -193,7 +202,8 @@ public sealed class LlmExtractionClient(HttpClient httpClient, ILlmRequestGate? 
 
         if (UsesStagedExtraction(config.TextModel))
         {
-            return await ExtractRecipeInStagesAsync(config, context, cancellationToken);
+            var staged = await ExtractRecipeInStagesAsync(config, context, cancellationToken);
+            return await RepairRecipeAsync(config, context, staged, cancellationToken);
         }
 
         var systemPrompt = BuildExtractionSystemPrompt(context);
@@ -209,9 +219,10 @@ public sealed class LlmExtractionClient(HttpClient httpClient, ILlmRequestGate? 
 
         var cleanedJson = CleanMarkdownJsonFences(responseContent);
 
+        LlmExtractedRecipePayload recipe;
         try
         {
-            return DeserializeRecipeWithRepair(cleanedJson);
+            recipe = DeserializeRecipeWithRepair(cleanedJson);
         }
         catch (JsonException ex)
         {
@@ -219,6 +230,124 @@ public sealed class LlmExtractionClient(HttpClient httpClient, ILlmRequestGate? 
                 $"Failed to parse recipe extraction JSON output from LLM: {ex.Message}"
             );
         }
+        return await RepairRecipeAsync(config, context, recipe, cancellationToken);
+    }
+
+    public async Task<string?> StructureRecipeSourceAsync(
+        EffectiveLlmConnectionConfig config,
+        string sourceText,
+        CancellationToken cancellationToken = default
+    )
+    {
+        if (string.IsNullOrWhiteSpace(config.TextModel))
+        {
+            throw new LlmHostUnavailableException(
+                "No Text LLM model is configured in LLM Settings. Please select a Text Model and retry."
+            );
+        }
+
+        var lines = RecipeSourceSectioner.GetContentLines(sourceText);
+        if (lines.Count < 3 || lines.Count > RecipeSourceSectioner.MaxLines)
+        {
+            return null;
+        }
+
+        // About ten tokens per labeled line, plus room to reason when Thinking is on.
+        var maxTokens = Math.Max(1024, lines.Count * 16) + (config.EnableThinking ? 8192 : 0);
+        var content = await SendStructuredTextChatAsync(
+            config,
+            SourceSectionsSchemaName,
+            GetSourceLabelsJsonSchema(lines.Count),
+            SourceSectionsSystemPrompt,
+            RecipeSourceSectioner.NumberLines(lines),
+            0,
+            cancellationToken,
+            maxTokens: maxTokens
+        );
+
+        try
+        {
+            using var document = JsonDocument.Parse(CleanMarkdownJsonFences(content));
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+            var labels = new RecipeSourceLineLabel[lines.Count];
+            for (var i = 0; i < lines.Count; i++)
+            {
+                labels[i] =
+                    document.RootElement.TryGetProperty(
+                        (i + 1).ToString(CultureInfo.InvariantCulture),
+                        out var label
+                    )
+                    && label.ValueKind == JsonValueKind.String
+                        ? RecipeSourceSectioner.ParseLabel(label.GetString())
+                        : RecipeSourceLineLabel.Skip;
+            }
+            return RecipeSourceSectioner.BuildStructuredText(lines, labels);
+        }
+        catch (JsonException ex)
+        {
+            logger?.LogWarning(ex, "Could not parse the recipe source line labels JSON.");
+            return null;
+        }
+    }
+
+    private const string SourceSectionsSchemaName = "recipe_source_lines";
+
+    private const string SourceSectionsSystemPrompt = """
+Label every line of a document that contains ONE recipe. Each input line starts with its line number and "|". Return a JSON object that maps EVERY line number to exactly one label. Never copy or rewrite text.
+Labels:
+- title: the recipe's name.
+- detail: servings or yield, prep/cook/total time, author, source, book or page.
+- description: introduction or headnote paragraphs about this recipe.
+- note: tips, variations, substitutions, make-ahead, storage or equipment notes for this recipe.
+- ingredient_group: a heading that names a group of ingredients, such as "For the sauce".
+- ingredient: a line that starts a new ingredient.
+- ingredient_wrap: the rest of the previous ingredient line, broken onto this line. It continues mid-phrase instead of naming a new food.
+- instruction: method text, including a step that continues onto following lines.
+- skip: headings such as "Ingredients" or "Directions", navigation, ads, ratings, reviews, comments, nutrition, links, and anything that is not part of this recipe.
+Example input:
+1| Home > Breads
+2| Skillet Cornbread
+3| Serves 8 | Prep 10 min
+4| This bread is crisp at the edges and tender
+5| in the middle.
+6| Ingredients
+7| 1 cup cornmeal
+8| 1 cup whole milk, warmed to room
+9| temperature
+10| For the pan:
+11| 2 tablespoons butter
+12| Directions
+13| 1. Heat the oven to 425 degrees.
+14| 2. Melt the butter in the skillet, add the batter
+15| and bake for 20 minutes.
+16| Tip: Leftovers keep for 2 days.
+17| 132 comments
+Example output:
+{"1":"skip","2":"title","3":"detail","4":"description","5":"description","6":"skip","7":"ingredient","8":"ingredient","9":"ingredient_wrap","10":"ingredient_group","11":"ingredient","12":"skip","13":"instruction","14":"instruction","15":"instruction","16":"note","17":"skip"}
+""";
+
+    // One required property per line ("1".."N"), so constrained decoding labels every line in order.
+    private static object GetSourceLabelsJsonSchema(int lineCount)
+    {
+        var properties = new Dictionary<string, object>(lineCount);
+        for (var number = 1; number <= lineCount; number++)
+        {
+            properties[number.ToString(CultureInfo.InvariantCulture)] = new
+            {
+                type = "string",
+                @enum = RecipeSourceSectioner.LabelNames,
+            };
+        }
+        return new
+        {
+            type = "object",
+            additionalProperties = false,
+            properties,
+            required = properties.Keys.ToArray(),
+        };
     }
 
     private static bool UsesStagedExtraction(string model) =>
@@ -365,17 +494,10 @@ Example with index 0 = frying oil and index 1 = sliced mushrooms:
             );
         }
 
-        var issues = RecipeExtractionDiagnostics.GetIssues(recipe, context.SourceContent);
-        if (issues.Count == 0)
-        {
-            return recipe;
-        }
+        return recipe;
+    }
 
-        var repairedContent = await SendStructuredTextChatAsync(
-            config,
-            "recipe_extraction",
-            GetRecipeExtractionJsonSchema(),
-            """
+    private const string RepairSystemPrompt = """
 Correct the supplied recipe draft against the original source. Return the COMPLETE corrected recipe, not a patch.
 Fix the listed validation issues without dropping any ingredients, instructions, temperatures, doneness cues or timers.
 Use ingredientAmounts for explicit per-step portions of a total ingredient row. If separate portion rows are needed, keep their total equal to the source. A partial amount is not the whole recipe amount.
@@ -386,37 +508,88 @@ For measured portions of prepared mixtures that have no corresponding ingredient
 Keep process measurements (temperatures, sizes, reduction targets, durations) in prose.
 Use the lower end of each time range for timers and descriptive action/food labels.
 Do not invent ingredients or quantities. Preserve all other correct fields.
-"""
-                + "\n"
-                + MeasurementAndReferenceRules,
-            $"ORIGINAL SOURCE:\n{context.SourceContent}\n\nDRAFT:\n{JsonSerializer.Serialize(recipe, new JsonSerializerOptions(JsonSerializerDefaults.Web))}\n\nVALIDATION ISSUES:\n{string.Join("\n", issues)}",
-            0,
-            cancellationToken
-        );
-        try
+""";
+
+    /// <summary>
+    /// Runs up to <see cref="EffectiveLlmConnectionConfig.ExtractionRepairRounds"/> correction
+    /// requests while validation issues remain, keeping the draft with the fewest issues and
+    /// stopping as soon as a round does not improve. A failed round keeps the best draft.
+    /// </summary>
+    private async Task<LlmExtractedRecipePayload> RepairRecipeAsync(
+        EffectiveLlmConnectionConfig config,
+        LlmExtractionContext context,
+        LlmExtractedRecipePayload recipe,
+        CancellationToken cancellationToken
+    )
+    {
+        var best = recipe;
+        var bestIssues = RecipeExtractionDiagnostics.GetIssues(best, context.SourceContent);
+        for (var round = 1; round <= config.ExtractionRepairRounds && bestIssues.Count > 0; round++)
         {
-            var corrected = DeserializeRecipeWithRepair(CleanMarkdownJsonFences(repairedContent));
+            LlmExtractedRecipePayload corrected;
+            try
+            {
+                var content = await SendStructuredTextChatAsync(
+                    config,
+                    "recipe_extraction",
+                    GetRecipeExtractionJsonSchema(),
+                    RepairSystemPrompt + "\n" + MeasurementAndReferenceRules,
+                    $"ORIGINAL SOURCE:\n{context.SourceContent}\n\nDRAFT:\n{JsonSerializer.Serialize(best, new JsonSerializerOptions(JsonSerializerDefaults.Web))}\n\nVALIDATION ISSUES:\n{string.Join("\n", bestIssues)}",
+                    0,
+                    cancellationToken
+                );
+                corrected = DeserializeRecipeWithRepair(CleanMarkdownJsonFences(content));
+            }
+            catch (Exception ex)
+                when ((
+                        ex
+                        is JsonException
+                            or DomainValidationException
+                            or LlmHostUnavailableException
+                    ) && !cancellationToken.IsCancellationRequested
+                )
+            {
+                logger?.LogWarning(
+                    ex,
+                    "Recipe repair round {Round} failed; keeping the draft with {IssueCount} validation issues.",
+                    round,
+                    bestIssues.Count
+                );
+                break;
+            }
+
             if (
                 corrected.Ingredients is not { Count: > 0 }
                 || corrected.Steps is not { Count: > 0 }
             )
             {
-                throw new DomainValidationException(
-                    "The corrected recipe is missing ingredients or steps."
+                logger?.LogWarning(
+                    "Recipe repair round {Round} dropped all ingredients or steps; keeping the previous draft.",
+                    round
                 );
+                break;
             }
-            return
-                RecipeExtractionDiagnostics.GetIssues(corrected, context.SourceContent).Count
-                <= issues.Count
-                ? corrected
-                : recipe;
-        }
-        catch (JsonException ex)
-        {
-            throw new DomainValidationException(
-                $"Failed to parse corrected recipe JSON output from LLM: {ex.Message}"
+
+            var issues = RecipeExtractionDiagnostics.GetIssues(corrected, context.SourceContent);
+            logger?.LogInformation(
+                "Recipe repair round {Round}: {Before} -> {After} validation issues.",
+                round,
+                bestIssues.Count,
+                issues.Count
             );
+            if (issues.Count > bestIssues.Count)
+            {
+                break;
+            }
+            var improved = issues.Count < bestIssues.Count;
+            best = corrected;
+            bestIssues = issues;
+            if (!improved)
+            {
+                break;
+            }
         }
+        return best;
     }
 
     public async Task<LlmSubstitutionPayload> SuggestIngredientSubstitutionsAsync(
@@ -587,12 +760,17 @@ Do not invent ingredients or quantities. Preserve all other correct fields.
         string userPrompt,
         double temperature,
         CancellationToken cancellationToken,
-        int maxTokens = 16384
+        int? maxTokens = null,
+        bool? enableThinking = null
     )
     {
         var normalizedBase = NormalizeBaseUrl(config.Provider, config.BaseUrl);
         var timeout = TimeSpan.FromSeconds(Math.Max(15, config.RequestTimeoutSeconds));
         var sw = Stopwatch.StartNew();
+        var isRecipeSchema = schemaName is "recipe_extraction" or SourceSectionsSchemaName;
+        // The line-label schema has one property per source line; the prompt explains it more
+        // compactly than the schema text would.
+        var promptIncludesSchema = schemaName != SourceSectionsSchemaName;
 
         using var cts = new CancellationTokenSource(timeout);
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
@@ -610,15 +788,15 @@ Do not invent ingredients or quantities. Preserve all other correct fields.
                 {
                     model = config.TextModel!.Trim(),
                     stream = false,
-                    think = config.EnableThinking,
+                    think = enableThinking ?? config.EnableThinking,
                     keep_alive = string.IsNullOrWhiteSpace(config.OllamaKeepAlive)
                         ? "5m"
                         : config.OllamaKeepAlive.Trim(),
                     options = BuildOllamaOptions(
                         config,
                         temperature,
-                        maxTokens,
-                        recipeExtraction: schemaName == "recipe_extraction"
+                        maxTokens ?? GetOllamaOutputTokenLimit(config),
+                        recipeExtraction: isRecipeSchema
                     ),
                     format = jsonSchema,
                     messages = new object[]
@@ -626,7 +804,7 @@ Do not invent ingredients or quantities. Preserve all other correct fields.
                         new
                         {
                             role = "system",
-                            content = schemaName == "recipe_extraction"
+                            content = isRecipeSchema && promptIncludesSchema
                                 ? $"{systemPrompt}\n\nJSON schema:\n{JsonSerializer.Serialize(jsonSchema)}"
                                 : systemPrompt,
                         },
@@ -654,9 +832,9 @@ Do not invent ingredients or quantities. Preserve all other correct fields.
             }
             else // OpenAiCompatible
             {
-                var schemaString = JsonSerializer.Serialize(jsonSchema);
-                var systemWithSchema =
-                    $"{systemPrompt}\n\nStrict Output Rule: You MUST respond strictly in valid JSON matching this schema:\n{schemaString}";
+                var systemWithSchema = promptIncludesSchema
+                    ? $"{systemPrompt}\n\nStrict Output Rule: You MUST respond strictly in valid JSON matching this schema:\n{JsonSerializer.Serialize(jsonSchema)}"
+                    : systemPrompt;
 
                 var payload = new
                 {
@@ -665,7 +843,7 @@ Do not invent ingredients or quantities. Preserve all other correct fields.
                     temperature = config.Temperature ?? temperature,
                     top_p = config.TopP,
                     top_k = config.TopK,
-                    max_tokens = maxTokens,
+                    max_tokens = maxTokens ?? DefaultOutputTokenLimit,
                     response_format = new
                     {
                         type = "json_schema",
@@ -778,7 +956,12 @@ Do not invent ingredients or quantities. Preserve all other correct fields.
                     keep_alive = string.IsNullOrWhiteSpace(config.OllamaKeepAlive)
                         ? "5m"
                         : config.OllamaKeepAlive.Trim(),
-                    options = BuildOllamaOptions(config, 0, 16384, recipeExtraction: true),
+                    options = BuildOllamaOptions(
+                        config,
+                        0,
+                        GetOllamaOutputTokenLimit(config),
+                        recipeExtraction: true
+                    ),
                     format = GetRecipeExtractionJsonSchema(),
                     messages = new object[]
                     {
@@ -844,7 +1027,7 @@ Do not invent ingredients or quantities. Preserve all other correct fields.
                     temperature = config.Temperature ?? 0,
                     top_p = config.TopP,
                     top_k = config.TopK,
-                    max_tokens = 16384,
+                    max_tokens = DefaultOutputTokenLimit,
                     response_format = new
                     {
                         type = "json_schema",
@@ -917,10 +1100,13 @@ Do not invent ingredients or quantities. Preserve all other correct fields.
         }
     }
 
+    private static int GetOllamaOutputTokenLimit(EffectiveLlmConnectionConfig config) =>
+        Math.Max(DefaultOutputTokenLimit, config.ContextWindowTokens);
+
     private static Dictionary<string, object> BuildOllamaOptions(
         EffectiveLlmConnectionConfig config,
         double temperature,
-        int maxTokens = 16384,
+        int maxTokens,
         bool recipeExtraction = false
     )
     {

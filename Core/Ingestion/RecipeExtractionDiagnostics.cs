@@ -9,6 +9,11 @@ public static class RecipeExtractionDiagnostics
 {
     private static readonly TimeSpan RegexTimeout = TimeSpan.FromSeconds(1);
     private static readonly Regex Whitespace = new(@"\s+", RegexOptions.None, RegexTimeout);
+    private static readonly Regex SentenceBreak = new(
+        @"(?<=[.!?][)\]""'\u201D]?)\s+|\n",
+        RegexOptions.None,
+        RegexTimeout
+    );
     private static readonly Regex LeadingMeasurement = new(
         @"^(?<quantity>\d+\s+\d+/\d+|\d+/\d+|\d+(?:\.\d+)?)(?:\s*(?:to|[-\u2013\u2014])\s*(?<max>\d+\s+\d+/\d+|\d+/\d+|\d+(?:\.\d+)?))?\s+(?<unit>[A-Za-z]+)\b",
         RegexOptions.IgnoreCase,
@@ -125,12 +130,13 @@ public static class RecipeExtractionDiagnostics
         for (var i = 0; i < ingredients.Count; i++)
         {
             var ingredient = ingredients[i];
+            var name = DescribeIngredient(i, ingredient);
             if (
                 RecipeDraftNormalizer.NormalizePreparationNote(ingredient, ingredients)?.Length
                 > 200
             )
             {
-                issues.Add($"Ingredient {i}: preparation note exceeds the 200-character limit.");
+                issues.Add($"{name}: preparation note exceeds the 200-character limit.");
             }
             if (
                 !FoodNameSanitizer.IsValidFoodName(ingredient.DisplayName)
@@ -144,7 +150,7 @@ public static class RecipeExtractionDiagnostics
                 )
             )
             {
-                issues.Add($"Ingredient {i}: missing a meaningful food name.");
+                issues.Add($"{name}: missing a meaningful food name.");
             }
             if (
                 new[] { ingredient.DisplayName, ingredient.CanonicalFoodName }.Any(name =>
@@ -154,7 +160,7 @@ public static class RecipeExtractionDiagnostics
             )
             {
                 issues.Add(
-                    $"Ingredient {i}: move preparation actions and alternative foods out of food names into preparationNote; name only the chosen food."
+                    $"{name}: move preparation actions and alternative foods out of food names into preparationNote; name only the chosen food."
                 );
             }
             if (
@@ -166,18 +172,23 @@ public static class RecipeExtractionDiagnostics
                 )
             )
             {
-                issues.Add($"Ingredient {i}: measured ingredient is not linked to any step.");
+                var mentions = FindStepsMentioning(ingredient, steps);
+                issues.Add(
+                    mentions.Count == 0
+                        ? $"{name}: measured ingredient is not linked to any step."
+                        : $"{name}: measured ingredient is not linked to any step; {DescribeSteps(mentions)} {(mentions.Count == 1 ? "mentions" : "mention")} it, so add {i} to the ingredientIndices of each step that uses it."
+                );
             }
             if (ingredient.Quantity is <= 0 || ingredient.MaxQuantity is <= 0)
             {
-                issues.Add($"Ingredient {i}: non-positive measurement.");
+                issues.Add($"{name}: non-positive measurement.");
             }
             if (
                 string.Equals(ingredient.Unit, "custom", StringComparison.OrdinalIgnoreCase)
                 && RecipeDraftNormalizer.IsDisallowedUnitPlaceholder(ingredient.CustomUnitName)
             )
             {
-                issues.Add($"Ingredient {i}: custom unit is missing its actual unit name.");
+                issues.Add($"{name}: custom unit is missing its actual unit name.");
             }
         }
 
@@ -194,14 +205,16 @@ public static class RecipeExtractionDiagnostics
                 issues.Add($"Step {i + 1}: ingredient index is out of range.");
             }
             var instruction = step.Instruction ?? "";
-            if (
-                AmountInInstruction
-                    .Matches(instruction)
-                    .Any(m => !ProcessMeasurementPrefix.IsMatch(instruction[..m.Index]))
-            )
+            var fixedAmounts = AmountInInstruction
+                .Matches(instruction)
+                .Where(m => !ProcessMeasurementPrefix.IsMatch(instruction[..m.Index]))
+                .Select(m => Quote(m.Value))
+                .Distinct()
+                .ToList();
+            if (fixedAmounts.Count > 0)
             {
                 issues.Add(
-                    $"Step {i + 1}: contains fixed ingredient amounts; split measured portions and link them before removing those amounts from prose."
+                    $"Step {i + 1}: contains fixed ingredient amounts ({string.Join(", ", fixedAmounts)}); split measured portions and link them before removing those amounts from prose."
                 );
             }
             if (
@@ -226,6 +239,10 @@ public static class RecipeExtractionDiagnostics
         }
 
         var sourceLines = GetSourceIngredientLines(source);
+        var normalizedSourceLines = sourceLines.Select(NormalizeLine).ToHashSet();
+        var allRowsVerbatim = ingredients.All(ingredient =>
+            normalizedSourceLines.Contains(NormalizeLine(ingredient.OriginalRawText))
+        );
         var seenSourceLines = new HashSet<string>();
         for (var lineIndex = 0; lineIndex < sourceLines.Count; lineIndex++)
         {
@@ -243,8 +260,12 @@ public static class RecipeExtractionDiagnostics
                 .ToList();
             if (matches.Count == 0)
             {
+                // The model has to copy this text, so it is quoted in full.
+                var exact = Quote(line, maxLength: 400);
                 issues.Add(
-                    $"Source ingredient line {lineIndex + 1}: missing or originalRawText is not verbatim."
+                    allRowsVerbatim
+                        ? $"Source ingredient line {lineIndex + 1}: {exact} is missing; add an ingredient row with this exact originalRawText."
+                        : $"Source ingredient line {lineIndex + 1}: {exact} is missing or its originalRawText is not verbatim; copy this exact text into originalRawText."
                 );
                 continue;
             }
@@ -257,7 +278,7 @@ public static class RecipeExtractionDiagnostics
             )
             {
                 issues.Add(
-                    $"Source ingredient line {lineIndex + 1}: alternatives must be one food choice, not multiple shopping items."
+                    $"Source ingredient line {lineIndex + 1}: {Quote(line)} alternatives must be one food choice, not multiple shopping items."
                 );
             }
             var measurement = LeadingMeasurement.Match(line);
@@ -338,7 +359,7 @@ public static class RecipeExtractionDiagnostics
             )
             {
                 issues.Add(
-                    $"Source ingredient line {lineIndex + 1}: portion quantities/units do not conserve the source total ({expected}-{expectedMax} {measurement.Groups["unit"].Value})."
+                    $"Source ingredient line {lineIndex + 1}: {Quote(line)} portion quantities/units do not conserve the source total ({expected}-{expectedMax} {measurement.Groups["unit"].Value})."
                 );
             }
         }
@@ -349,7 +370,8 @@ public static class RecipeExtractionDiagnostics
         );
         if (instructionHeader >= 0 && steps.Count > 0)
         {
-            var sourceTimers = StepTimerExtractor.DetectTimers(source![(instructionHeader + 14)..]);
+            var sourceMethod = source![(instructionHeader + 14)..];
+            var sourceTimers = StepTimerExtractor.DetectTimers(sourceMethod);
             var extractedDurations = steps
                 .SelectMany(step =>
                 {
@@ -373,16 +395,110 @@ public static class RecipeExtractionDiagnostics
                 .ToList();
             foreach (var group in sourceTimers.GroupBy(timer => timer.DurationSeconds))
             {
-                if (extractedDurations.Count(duration => duration == group.Key) < group.Count())
+                var extractedCount = extractedDurations.Count(duration => duration == group.Key);
+                if (extractedCount < group.Count())
                 {
+                    var sentences = FindTimedSentences(sourceMethod, group.Key);
+                    var context =
+                        sentences.Count == 0
+                            ? ""
+                            : $" (source has {group.Count()}, extracted {extractedCount}: {string.Join("; ", sentences.Select(sentence => Quote(sentence)))})";
                     issues.Add(
-                        $"Source timed phases: missing a {group.Key}-second timer; preserve all cooking/waiting durations and use range lower bounds."
+                        $"Source timed phases: missing a {group.Key}-second timer{context}; preserve all cooking/waiting durations and use range lower bounds."
                     );
                 }
             }
         }
         return issues;
     }
+
+    private const int QuoteLength = 120;
+
+    private static string DescribeIngredient(int index, LlmExtractedIngredientItem ingredient)
+    {
+        var text = FoodNameSanitizer.IsValidFoodName(ingredient.DisplayName)
+            ? ingredient.DisplayName
+            : ingredient.OriginalRawText;
+        return string.IsNullOrWhiteSpace(text)
+            ? $"Ingredient {index}"
+            : $"Ingredient {index} {Quote(text)}";
+    }
+
+    // Issues quote the text they refer to, so a correction request (or a reviewer) can find it
+    // without counting lines.
+    private static string Quote(string? text, int maxLength = QuoteLength)
+    {
+        var value = Whitespace.Replace(text ?? "", " ").Trim();
+        return value.Length <= maxLength
+            ? $"\"{value}\""
+            : $"\"{value[..(maxLength - 3)].TrimEnd()}...\"";
+    }
+
+    private static List<string> FindTimedSentences(string method, int durationSeconds) =>
+        SentenceBreak
+            .Split(method)
+            .Where(sentence =>
+                StepTimerExtractor
+                    .DetectTimers(sentence)
+                    .Any(timer => timer.DurationSeconds == durationSeconds)
+            )
+            .Distinct()
+            .Take(3)
+            .ToList();
+
+    // Steps (1-based) whose text names an unlinked ingredient: the full name first, then its last
+    // word (usually the food, as in "unsalted butter"), then its first word (as in "fennel bulb").
+    private static List<int> FindStepsMentioning(
+        LlmExtractedIngredientItem ingredient,
+        IReadOnlyList<LlmExtractedStepItem> steps
+    )
+    {
+        var names = new[] { ingredient.DisplayName, ingredient.CanonicalFoodName }
+            .Select(name => Whitespace.Replace(name ?? "", " ").Trim())
+            .Where(name => name.Length >= 3)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var words = names.Select(name => name.Split(' ')).ToList();
+        foreach (
+            var terms in new[]
+            {
+                names,
+                words.Select(parts => parts[^1]).ToList(),
+                words.Select(parts => parts[0]).ToList(),
+            }
+        )
+        {
+            var patterns = terms
+                .Where(term => term.Length >= 3)
+                .Select(term => new Regex(
+                    $@"\b{Regex.Escape(term)}(?:e?s)?\b",
+                    RegexOptions.IgnoreCase,
+                    RegexTimeout
+                ))
+                .ToList();
+            var matches = Enumerable
+                .Range(0, steps.Count)
+                .Where(index =>
+                    patterns.Any(pattern => pattern.IsMatch(steps[index].Instruction ?? ""))
+                )
+                .Select(index => index + 1)
+                .ToList();
+            if (matches.Count > 0)
+            {
+                return matches;
+            }
+        }
+        return [];
+    }
+
+    private static string DescribeSteps(IReadOnlyList<int> stepNumbers) =>
+        stepNumbers.Count switch
+        {
+            1 => $"step {stepNumbers[0]}",
+            <= 3 =>
+                $"steps {string.Join(", ", stepNumbers.Take(stepNumbers.Count - 1))} and {stepNumbers[^1]}",
+            _ => $"steps {string.Join(", ", stepNumbers.Take(3))} and {stepNumbers.Count - 3} more",
+        };
 
     private static string NormalizeLine(string? line) =>
         Whitespace.Replace((line ?? "").Trim().TrimStart('-', ' '), " ");

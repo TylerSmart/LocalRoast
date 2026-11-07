@@ -91,6 +91,19 @@ describe('LlmSettingsDialogComponent', () => {
     expect(component.form.controls.temperature.value).toBeNull();
     expect(component.form.controls.topP.value).toBeNull();
     expect(component.form.controls.topK.value).toBeNull();
+    expect(component.form.controls.extractionRepairRounds.value).toBe(1);
+  });
+
+  it('loads saved repair rounds and long timeouts into the form', () => {
+    mockLlmSettingsService.getSettings.mockReturnValue(
+      of({ ...initialSettings, requestTimeoutSeconds: 1800, extractionRepairRounds: 0 }),
+    );
+
+    component.loadSettings();
+
+    expect(component.form.controls.requestTimeoutSeconds.value).toBe(1800);
+    expect(component.form.controls.extractionRepairRounds.value).toBe(0);
+    expect(component.form.valid).toBe(true);
   });
 
   it('loads saved sampling overrides into the form', () => {
@@ -132,6 +145,10 @@ describe('LlmSettingsDialogComponent', () => {
     ['topK', 0],
     ['topK', 12.5],
     ['topK', 1001],
+    ['extractionRepairRounds', -1],
+    ['extractionRepairRounds', 1.5],
+    ['extractionRepairRounds', 6],
+    ['requestTimeoutSeconds', 1801],
   ] as const)('blocks saving when %s is %s', (control, value) => {
     component.form.controls[control].setValue(value);
 
@@ -190,6 +207,8 @@ describe('LlmSettingsDialogComponent', () => {
     component.form.controls.contextWindowTokens.setValue(16384);
     component.form.controls.enableThinking.setValue(false);
     component.form.controls.maxIngestionRetries.setValue(2);
+    component.form.controls.extractionRepairRounds.setValue(3);
+    component.form.controls.requestTimeoutSeconds.setValue(1800);
     component.form.controls.ollamaCpuOnly.setValue(true);
     component.onSave();
 
@@ -199,6 +218,8 @@ describe('LlmSettingsDialogComponent', () => {
         contextWindowTokens: 16384,
         enableThinking: false,
         maxIngestionRetries: 2,
+        extractionRepairRounds: 3,
+        requestTimeoutSeconds: 1800,
         ollamaCpuOnly: true,
       }),
     );

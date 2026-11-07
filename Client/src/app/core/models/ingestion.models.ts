@@ -66,6 +66,7 @@ export interface LlmSettingsDto {
   temperature?: number | null;
   topP?: number | null;
   topK?: number | null;
+  extractionRepairRounds?: number;
 }
 
 export interface UpdateLlmSettingsRequest {
@@ -86,6 +87,7 @@ export interface UpdateLlmSettingsRequest {
   temperature?: number | null;
   topP?: number | null;
   topK?: number | null;
+  extractionRepairRounds?: number;
 }
 
 export interface TestLlmConnectionRequest {

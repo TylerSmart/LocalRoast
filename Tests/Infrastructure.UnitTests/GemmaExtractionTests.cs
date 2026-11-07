@@ -328,7 +328,7 @@ Add 2 tablespoons remaining oil and the dough.
     }
 
     [TestMethod]
-    public async Task Extract_EmptyCorrectionCannotReplaceACompleteDraft()
+    public async Task Extract_EmptyCorrectionKeepsTheCompleteDraft()
     {
         var calls = 0;
         using var http = new HttpClient(
@@ -347,13 +347,383 @@ Add 2 tablespoons remaining oil and the dough.
                 );
             })
         );
-        await Assert.ThrowsAsync<DomainValidationException>(() =>
-            new LlmExtractionClient(http).ExtractRecipeFromTextAsync(
-                Config(LlmProvider.Ollama, "gemma4:e4b"),
-                new LlmExtractionContext(Source, [])
-            )
+        var result = await new LlmExtractionClient(http).ExtractRecipeFromTextAsync(
+            Config(LlmProvider.Ollama, "gemma4:e4b") with
+            {
+                ExtractionRepairRounds = 3,
+            },
+            new LlmExtractionContext(Source, [])
         );
         Assert.AreEqual(3, calls);
+        Assert.AreEqual("Melt 2 tbsp butter.", result.Steps![0].Instruction);
+        Assert.HasCount(1, result.Ingredients!);
+    }
+
+    private const string TwoIssueSteps =
+        """{"steps":[{"instruction":"Melt butter.","ingredientIndices":[8]}]}""";
+    private const string OneIssueRecipe = """
+        {"title":"Butter sauce","ingredients":[{"quantity":2,"unit":"tbsp","canonicalFoodName":"butter","displayName":"butter","originalRawText":"2 tbsp butter"}],"steps":[{"instruction":"Melt 2 tbsp butter.","ingredientIndices":[0]}]}
+        """;
+    private const string CleanRecipe = """
+        {"title":"Butter sauce","ingredients":[{"quantity":2,"unit":"tbsp","canonicalFoodName":"butter","displayName":"butter","originalRawText":"2 tbsp butter"}],"steps":[{"instruction":"Melt the butter.","ingredientIndices":[0]}]}
+        """;
+
+    [TestMethod]
+    public async Task Extract_RepairsIterativelyWhileEachRoundImproves()
+    {
+        var calls = 0;
+        using var http = new HttpClient(
+            new Handler(request =>
+            {
+                calls++;
+                var body = request.Content!.ReadAsStringAsync().Result;
+                if (calls == 3)
+                {
+                    StringAssert.Contains(body, "out of range");
+                }
+                if (calls == 4)
+                {
+                    StringAssert.Contains(body, "Melt 2 tbsp butter.");
+                    Assert.DoesNotContain("out of range", body);
+                }
+                return Response(
+                    LlmProvider.Ollama,
+                    calls switch
+                    {
+                        1 => IngredientsJson,
+                        2 => TwoIssueSteps,
+                        3 => OneIssueRecipe,
+                        _ => CleanRecipe,
+                    }
+                );
+            })
+        );
+        var result = await new LlmExtractionClient(http).ExtractRecipeFromTextAsync(
+            Config(LlmProvider.Ollama, "gemma4:e4b") with
+            {
+                ExtractionRepairRounds = 3,
+            },
+            new LlmExtractionContext(Source, [])
+        );
+        Assert.AreEqual(4, calls);
+        Assert.IsEmpty(RecipeExtractionDiagnostics.GetIssues(result, Source));
+    }
+
+    [TestMethod]
+    public async Task Extract_RepairStopsWhenARoundDoesNotImprove()
+    {
+        var calls = 0;
+        using var http = new HttpClient(
+            new Handler(_ =>
+            {
+                calls++;
+                return Response(
+                    LlmProvider.Ollama,
+                    calls switch
+                    {
+                        1 => IngredientsJson,
+                        2 => TwoIssueSteps,
+                        _ => IngredientsJson[..^1] + ",\"steps\":" + TwoIssueSteps[9..],
+                    }
+                );
+            })
+        );
+        await new LlmExtractionClient(http).ExtractRecipeFromTextAsync(
+            Config(LlmProvider.Ollama, "gemma4:e4b") with
+            {
+                ExtractionRepairRounds = 5,
+            },
+            new LlmExtractionContext(Source, [])
+        );
+        Assert.AreEqual(3, calls);
+    }
+
+    [TestMethod]
+    public async Task Extract_RepairKeepsTheBetterDraftWhenARoundGetsWorse()
+    {
+        var calls = 0;
+        using var http = new HttpClient(
+            new Handler(_ =>
+            {
+                calls++;
+                return Response(
+                    LlmProvider.Ollama,
+                    calls switch
+                    {
+                        1 => IngredientsJson,
+                        2 =>
+                            """{"steps":[{"instruction":"Melt 2 tbsp butter.","ingredientIndices":[0]}]}""",
+                        _ => IngredientsJson[..^1] + ",\"steps\":" + TwoIssueSteps[9..],
+                    }
+                );
+            })
+        );
+        var result = await new LlmExtractionClient(http).ExtractRecipeFromTextAsync(
+            Config(LlmProvider.Ollama, "gemma4:e4b") with
+            {
+                ExtractionRepairRounds = 3,
+            },
+            new LlmExtractionContext(Source, [])
+        );
+        Assert.AreEqual(3, calls);
+        Assert.AreEqual("Melt 2 tbsp butter.", result.Steps![0].Instruction);
+        CollectionAssert.AreEqual(new[] { 0 }, result.Steps[0].IngredientIndices!.ToArray());
+    }
+
+    [TestMethod]
+    [DataRow(HttpStatusCode.OK)]
+    [DataRow(HttpStatusCode.InternalServerError)]
+    public async Task Extract_FailedRepairRoundKeepsTheDraft(HttpStatusCode repairStatus)
+    {
+        var calls = 0;
+        using var http = new HttpClient(
+            new Handler(_ =>
+            {
+                calls++;
+                if (calls < 3)
+                {
+                    return Response(
+                        LlmProvider.Ollama,
+                        calls == 1 ? IngredientsJson : TwoIssueSteps
+                    );
+                }
+                return new HttpResponseMessage(repairStatus)
+                {
+                    Content = new StringContent(
+                        repairStatus == HttpStatusCode.OK
+                            ? JsonSerializer.Serialize(
+                                new { message = new { content = "not json" } }
+                            )
+                            : "boom",
+                        Encoding.UTF8,
+                        "application/json"
+                    ),
+                };
+            })
+        );
+        var result = await new LlmExtractionClient(http).ExtractRecipeFromTextAsync(
+            Config(LlmProvider.Ollama, "gemma4:e4b") with
+            {
+                ExtractionRepairRounds = 2,
+            },
+            new LlmExtractionContext(Source, [])
+        );
+        Assert.AreEqual(3, calls);
+        CollectionAssert.AreEqual(new[] { 8 }, result.Steps![0].IngredientIndices!.ToArray());
+    }
+
+    [TestMethod]
+    [DataRow(0, 2)]
+    [DataRow(1, 3)]
+    public async Task Extract_RepairRoundsSettingControlsCorrectionRequests(
+        int repairRounds,
+        int expectedCalls
+    )
+    {
+        var calls = 0;
+        using var http = new HttpClient(
+            new Handler(_ =>
+            {
+                calls++;
+                return Response(
+                    LlmProvider.Ollama,
+                    calls switch
+                    {
+                        1 => IngredientsJson,
+                        2 => TwoIssueSteps,
+                        _ => CleanRecipe,
+                    }
+                );
+            })
+        );
+        await new LlmExtractionClient(http).ExtractRecipeFromTextAsync(
+            Config(LlmProvider.Ollama, "gemma4:e4b") with
+            {
+                ExtractionRepairRounds = repairRounds,
+            },
+            new LlmExtractionContext(Source, [])
+        );
+        Assert.AreEqual(expectedCalls, calls);
+    }
+
+    [TestMethod]
+    [DataRow(LlmProvider.Ollama)]
+    [DataRow(LlmProvider.OpenAiCompatible)]
+    public async Task Extract_SinglePassModelsAreRepairedToo(LlmProvider provider)
+    {
+        var calls = 0;
+        using var http = new HttpClient(
+            new Handler(request =>
+            {
+                calls++;
+                if (calls == 2)
+                {
+                    StringAssert.Contains(
+                        request.Content!.ReadAsStringAsync().Result,
+                        "VALIDATION ISSUES"
+                    );
+                }
+                return Response(provider, calls == 1 ? OneIssueRecipe : CleanRecipe);
+            })
+        );
+        var result = await new LlmExtractionClient(http).ExtractRecipeFromTextAsync(
+            Config(provider, "gemma4:12b"),
+            new LlmExtractionContext(Source, [])
+        );
+        Assert.AreEqual(2, calls);
+        Assert.AreEqual("Melt the butter.", result.Steps![0].Instruction);
+    }
+
+    [TestMethod]
+    [DataRow(LlmProvider.Ollama, 8192, 16384)]
+    [DataRow(LlmProvider.Ollama, 32768, 32768)]
+    [DataRow(LlmProvider.OpenAiCompatible, 32768, 16384)]
+    public async Task Extract_OutputCapFollowsTheContextWindow(
+        LlmProvider provider,
+        int contextWindow,
+        int expectedCap
+    )
+    {
+        using var http = new HttpClient(
+            new Handler(request =>
+            {
+                using var document = JsonDocument.Parse(
+                    request.Content!.ReadAsStringAsync().Result
+                );
+                var body = document.RootElement;
+                Assert.AreEqual(
+                    expectedCap,
+                    provider == LlmProvider.Ollama
+                        ? body.GetProperty("options").GetProperty("num_predict").GetInt32()
+                        : body.GetProperty("max_tokens").GetInt32()
+                );
+                return Response(provider, CleanRecipe);
+            })
+        );
+        await new LlmExtractionClient(http).ExtractRecipeFromTextAsync(
+            Config(provider, "gemma4:12b") with
+            {
+                ContextWindowTokens = contextWindow,
+            },
+            new LlmExtractionContext(Source, [])
+        );
+    }
+
+    [TestMethod]
+    [DataRow(LlmProvider.Ollama, false)]
+    [DataRow(LlmProvider.Ollama, true)]
+    [DataRow(LlmProvider.OpenAiCompatible, false)]
+    public async Task StructureSource_LabelsEveryLineAndBuildsCanonicalText(
+        LlmProvider provider,
+        bool thinking
+    )
+    {
+        const string plain = """
+            Skillet Cornbread
+            Serves 8
+            Jump to recipe
+            1 cup cornmeal
+            1 cup buttermilk, at room
+            temperature
+            Whisk the cornmeal and buttermilk.
+            Bake for 20 minutes.
+            """;
+        using var http = new HttpClient(
+            new Handler(request =>
+            {
+                using var document = JsonDocument.Parse(
+                    request.Content!.ReadAsStringAsync().Result
+                );
+                var body = document.RootElement;
+                var schema = GetSchema(body, provider);
+                AssertStrictSchema(schema);
+                var properties = schema.GetProperty("properties").EnumerateObject().ToList();
+                CollectionAssert.AreEqual(
+                    new[] { "1", "2", "3", "4", "5", "6", "7", "8" },
+                    properties.Select(p => p.Name).ToArray()
+                );
+                CollectionAssert.AreEqual(
+                    RecipeSourceSectioner.LabelNames.ToArray(),
+                    properties[0]
+                        .Value.GetProperty("enum")
+                        .EnumerateArray()
+                        .Select(x => x.GetString())
+                        .ToArray()
+                );
+                var expectedTokens = 1024 + (thinking ? 8192 : 0);
+                if (provider == LlmProvider.Ollama)
+                {
+                    Assert.AreEqual(thinking, body.GetProperty("think").GetBoolean());
+                    Assert.AreEqual(
+                        expectedTokens,
+                        body.GetProperty("options").GetProperty("num_predict").GetInt32()
+                    );
+                }
+                else
+                {
+                    Assert.AreEqual(expectedTokens, body.GetProperty("max_tokens").GetInt32());
+                }
+                var system = body.GetProperty("messages")[0].GetProperty("content").GetString()!;
+                Assert.DoesNotContain("JSON schema:", system);
+                Assert.DoesNotContain("Strict Output Rule", system);
+                var prompt = body.GetProperty("messages")[1].GetProperty("content").GetString()!;
+                StringAssert.Contains(prompt, "1| Skillet Cornbread");
+                StringAssert.Contains(prompt, "6| temperature");
+                return Response(
+                    provider,
+                    """
+                    {"1":"title","2":"detail","3":"skip","4":"ingredient","5":"ingredient","6":"ingredient_wrap","7":"instruction","8":"instruction"}
+                    """
+                );
+            })
+        );
+        var structured = await new LlmExtractionClient(http).StructureRecipeSourceAsync(
+            Config(provider, "gemma4:e4b") with
+            {
+                EnableThinking = thinking,
+            },
+            plain
+        );
+        Assert.AreEqual(
+            "Title: Skillet Cornbread\nServes 8\n\nIngredients:\n- 1 cup cornmeal\n- 1 cup buttermilk, at room temperature\n\nInstructions:\nWhisk the cornmeal and buttermilk.\nBake for 20 minutes.",
+            structured
+        );
+    }
+
+    [TestMethod]
+    public async Task StructureSource_UnparseableLabelsFallBackToNull()
+    {
+        using var http = new HttpClient(new Handler(_ => Response(LlmProvider.Ollama, "not json")));
+        Assert.IsNull(
+            await new LlmExtractionClient(http).StructureRecipeSourceAsync(
+                Config(LlmProvider.Ollama, "gemma4:e4b"),
+                "Cornbread\n1 cup cornmeal\nBake it."
+            )
+        );
+    }
+
+    [TestMethod]
+    public async Task StructureSource_SkipsSourcesOverTheLineCap()
+    {
+        var requests = 0;
+        using var http = new HttpClient(
+            new Handler(_ =>
+            {
+                requests++;
+                return Response(LlmProvider.Ollama, "{}");
+            })
+        );
+        var source = string.Join(
+            '\n',
+            Enumerable.Range(1, RecipeSourceSectioner.MaxLines + 1).Select(i => $"Line {i}")
+        );
+        Assert.IsNull(
+            await new LlmExtractionClient(http).StructureRecipeSourceAsync(
+                Config(LlmProvider.Ollama, "gemma4:e4b"),
+                source
+            )
+        );
+        Assert.AreEqual(0, requests);
     }
 
     private static EffectiveLlmConnectionConfig Config(LlmProvider provider, string model) =>

@@ -44,7 +44,8 @@ public sealed class LlmSettingsService(
                 OllamaCpuOnly: entity.OllamaCpuOnly,
                 Temperature: entity.Temperature,
                 TopP: entity.TopP,
-                TopK: entity.TopK
+                TopK: entity.TopK,
+                ExtractionRepairRounds: entity.ExtractionRepairRounds
             );
         }
 
@@ -67,7 +68,8 @@ public sealed class LlmSettingsService(
             OllamaCpuOnly: opt.OllamaCpuOnly,
             Temperature: opt.Temperature,
             TopP: opt.TopP,
-            TopK: opt.TopK
+            TopK: opt.TopK,
+            ExtractionRepairRounds: opt.ExtractionRepairRounds
         );
     }
 
@@ -100,7 +102,8 @@ public sealed class LlmSettingsService(
                 OllamaCpuOnly: entity.OllamaCpuOnly,
                 Temperature: entity.Temperature,
                 TopP: entity.TopP,
-                TopK: entity.TopK
+                TopK: entity.TopK,
+                ExtractionRepairRounds: entity.ExtractionRepairRounds
             );
         }
 
@@ -121,7 +124,8 @@ public sealed class LlmSettingsService(
             OllamaCpuOnly: opt.OllamaCpuOnly,
             Temperature: opt.Temperature,
             TopP: opt.TopP,
-            TopK: opt.TopK
+            TopK: opt.TopK,
+            ExtractionRepairRounds: opt.ExtractionRepairRounds
         );
     }
 
@@ -178,6 +182,7 @@ public sealed class LlmSettingsService(
         entity.Temperature = request.Temperature;
         entity.TopP = request.TopP;
         entity.TopK = request.TopK;
+        entity.ExtractionRepairRounds = request.ExtractionRepairRounds;
 
         await dbContext.SaveChangesAsync(cancellationToken);
 

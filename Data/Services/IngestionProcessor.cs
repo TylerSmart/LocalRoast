@@ -388,6 +388,8 @@ public sealed class IngestionProcessor(
 
             string modelUsed;
 
+            var diagnosticsSource = job.NormalizedSourceText ?? job.RawText;
+
             if (requiresVision)
             {
                 if (string.IsNullOrWhiteSpace(config.VisionModel))
@@ -497,8 +499,40 @@ public sealed class IngestionProcessor(
 
                 modelUsed = config.TextModel;
 
+                var sourceText = job.NormalizedSourceText ?? job.RawText ?? "";
+                job.StructuredSourceText = null;
+                if (!RecipeSourceSectioner.HasCanonicalSections(sourceText))
+                {
+                    job.StatusDetail = "Organizing source text via local LLM...";
+                    await dbContext.SaveChangesAsync(jobCt);
+                    try
+                    {
+                        job.StructuredSourceText = await llmClient.StructureRecipeSourceAsync(
+                            config,
+                            sourceText,
+                            jobCt
+                        );
+                    }
+                    catch (Exception ex)
+                        when ((ex is DomainValidationException or LlmHostUnavailableException)
+                            && !jobCt.IsCancellationRequested
+                        )
+                    {
+                        // Sectioning is optional; if the host is really down, extraction below fails the same way.
+                        logger.LogWarning(
+                            ex,
+                            "Source sectioning failed for job {JobId}; extracting from the unstructured text.",
+                            job.Id
+                        );
+                    }
+                    job.StatusDetail = "Extracting structured recipe via local LLM...";
+                    await dbContext.SaveChangesAsync(jobCt);
+                }
+
+                diagnosticsSource = job.StructuredSourceText ?? sourceText;
+
                 var extractionContext = new LlmExtractionContext(
-                    SourceContent: job.NormalizedSourceText ?? job.RawText ?? "",
+                    SourceContent: diagnosticsSource,
                     AvailableTagNames: tagNames,
                     AvailableFoodNames: availableFoodNames
                 );
@@ -521,11 +555,11 @@ public sealed class IngestionProcessor(
                     (rawExtracted.Ingredients?.Count ?? 0) == 0
                     || (rawExtracted.Steps?.Count ?? 0) == 0
                 )
-                && (job.NormalizedSourceText ?? job.RawText ?? "").Length > 80
+                && (diagnosticsSource ?? "").Length > 80
             )
             {
                 var retryContext = new LlmExtractionContext(
-                    SourceContent: (job.NormalizedSourceText ?? job.RawText ?? "")
+                    SourceContent: diagnosticsSource
                         + "\n\nIMPORTANT: Extract all ingredients into the ingredients array and all numbered steps into the steps array. Do not return empty arrays.",
                     AvailableTagNames: tagNames,
                     AvailableFoodNames: availableFoodNames
@@ -600,7 +634,7 @@ public sealed class IngestionProcessor(
 
             var extractionIssues = RecipeExtractionDiagnostics.GetReviewIssues(
                 rawExtracted,
-                job.NormalizedSourceText ?? job.RawText
+                diagnosticsSource
             );
             var draft = RecipeDraftNormalizer.Normalize(
                 raw: rawExtracted,

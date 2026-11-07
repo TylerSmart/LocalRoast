@@ -403,6 +403,12 @@ public sealed class VisionAndPdfIngestionIntegrationTests
                 )
             );
 
+        public Task<string?> StructureRecipeSourceAsync(
+            EffectiveLlmConnectionConfig config,
+            string sourceText,
+            CancellationToken cancellationToken = default
+        ) => throw new NotImplementedException();
+
         public Task<LlmExtractedRecipePayload> ExtractRecipeFromTextAsync(
             EffectiveLlmConnectionConfig config,
             LlmExtractionContext context,

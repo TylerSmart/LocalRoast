@@ -71,6 +71,71 @@ public sealed class LlmSettingsIntegrationTests
         Assert.IsNull(settings.Temperature);
         Assert.IsNull(settings.TopP);
         Assert.IsNull(settings.TopK);
+        Assert.AreEqual(1, settings.ExtractionRepairRounds);
+    }
+
+    [TestMethod]
+    public async Task RepairRoundsAndLongTimeout_PersistAndReachEffectiveConfiguration()
+    {
+        await AuthenticateAsync(_client);
+
+        var response = await _client.PutAsJsonAsync(
+            "/api/llm-settings",
+            new UpdateLlmSettingsRequest(
+                TextModel: "gemma4:26b-a4b",
+                RequestTimeoutSeconds: 1800,
+                ExtractionRepairRounds: 3
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+        var settings = await _client.GetFromJsonAsync<LlmSettingsDto>("/api/llm-settings");
+        Assert.IsNotNull(settings);
+        Assert.AreEqual(1800, settings.RequestTimeoutSeconds);
+        Assert.AreEqual(3, settings.ExtractionRepairRounds);
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var effective = await scope
+                .ServiceProvider.GetRequiredService<ILlmSettingsService>()
+                .GetEffectiveConfigAsync();
+            Assert.AreEqual(1800, effective.RequestTimeoutSeconds);
+            Assert.AreEqual(3, effective.ExtractionRepairRounds);
+        }
+
+        response = await _client.PutAsJsonAsync(
+            "/api/llm-settings",
+            new UpdateLlmSettingsRequest(TextModel: "gemma4:e4b", ExtractionRepairRounds: 0)
+        );
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+        var disabled = await response.Content.ReadFromJsonAsync<LlmSettingsDto>();
+        Assert.IsNotNull(disabled);
+        Assert.AreEqual(0, disabled.ExtractionRepairRounds);
+    }
+
+    [TestMethod]
+    [DataRow(1801, 1)]
+    [DataRow(4, 1)]
+    [DataRow(120, 6)]
+    [DataRow(120, -1)]
+    public async Task UpdateSettings_OutOfRangeTimeoutOrRepairRounds_ReturnsBadRequest(
+        int timeoutSeconds,
+        int repairRounds
+    )
+    {
+        await AuthenticateAsync(_client);
+
+        var response = await _client.PutAsJsonAsync(
+            "/api/llm-settings",
+            new UpdateLlmSettingsRequest(
+                RequestTimeoutSeconds: timeoutSeconds,
+                ExtractionRepairRounds: repairRounds
+            )
+        );
+
+        Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
+        var settings = await _client.GetFromJsonAsync<LlmSettingsDto>("/api/llm-settings");
+        Assert.IsNotNull(settings);
+        Assert.AreEqual(1, settings.ExtractionRepairRounds);
+        Assert.AreEqual(120, settings.RequestTimeoutSeconds);
     }
 
     [TestMethod]

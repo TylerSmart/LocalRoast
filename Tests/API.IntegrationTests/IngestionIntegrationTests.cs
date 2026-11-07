@@ -1060,10 +1060,195 @@ public sealed class IngestionIntegrationTests
         Assert.IsNull(detail.ResultingRecipeId);
     }
 
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task TextIngestion_SectionsUnstructuredSourceBeforeExtractionAndValidation(
+        bool canonical
+    )
+    {
+        const string structured =
+            "Title: Plain Toast\n\nIngredients:\n- 2 slices bread\n- 1 tbsp butter\n\nInstructions:\nToast the bread and spread the butter.";
+        var source = canonical
+            ? structured
+            : "Plain Toast\n2 slices bread\n1 tbsp butter\nToast the bread and spread the butter.";
+        var extractionSources = new List<string>();
+        var fakeLlm = new FakeSequentialLlmExtractionClient(
+            context =>
+            {
+                extractionSources.Add(context.SourceContent);
+                return new LlmExtractedRecipePayload(
+                    Title: "Plain Toast",
+                    ConfidenceScore: 0.99m,
+                    Ingredients:
+                    [
+                        new(
+                            null,
+                            2,
+                            null,
+                            "slice",
+                            "bread",
+                            "bread",
+                            OriginalRawText: "2 slices bread"
+                        ),
+                    ],
+                    Steps: [new(null, "Toast the bread and spread the butter.", [0])]
+                );
+            },
+            _ => structured
+        );
+        await using var factory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Llm:TextModel", "gemma4:e4b");
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ILlmExtractionClient>();
+                services.AddSingleton<ILlmExtractionClient>(fakeLlm);
+            });
+        });
+        using var client = factory.CreateClient();
+        await AuthenticateAsync(client);
+        var response = await client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest(source, AutoPublish: true)
+        );
+        Assert.AreEqual(HttpStatusCode.Accepted, response.StatusCode);
+        var job = await response.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
+        Assert.IsNotNull(job);
+        using (var scope = factory.Services.CreateScope())
+        {
+            Assert.IsTrue(
+                await scope
+                    .ServiceProvider.GetRequiredService<IIngestionProcessor>()
+                    .ProcessNextQueuedJobAsync()
+            );
+        }
+
+        if (canonical)
+        {
+            Assert.IsEmpty(fakeLlm.StructuredSources);
+        }
+        else
+        {
+            Assert.HasCount(1, fakeLlm.StructuredSources);
+            StringAssert.Contains(fakeLlm.StructuredSources[0], "1 tbsp butter");
+        }
+        Assert.HasCount(1, extractionSources);
+        Assert.AreEqual(structured, extractionSources[0].ReplaceLineEndings("\n"));
+
+        // The structured ingredient list lets validation catch the dropped butter line.
+        var detail = await client.GetFromJsonAsync<IngestionJobDetailDto>(
+            $"/api/ingestion/jobs/{job.Id}"
+        );
+        Assert.IsNotNull(detail);
+        Assert.AreEqual(IngestionJobStatus.ReadyForReview, detail.Status);
+        StringAssert.Contains(detail.StatusDetail, "Source ingredient line 2");
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<App.Data.AppDbContext>();
+            var entity = await db.IngestionJobs.FindAsync(job.Id);
+            Assert.IsNotNull(entity);
+            Assert.AreEqual(canonical ? null : structured, entity.StructuredSourceText);
+            StringAssert.Contains(entity.NormalizedSourceText ?? entity.RawText, "Plain Toast");
+            if (!canonical)
+            {
+                Assert.DoesNotContain("Ingredients:", entity.NormalizedSourceText ?? "");
+            }
+        }
+    }
+
+    [TestMethod]
+    public async Task TextIngestion_FallsBackToUnstructuredSourceWhenSectioningTimesOut()
+    {
+        const string source =
+            "Plain Toast\n2 slices bread\nToast the bread until golden, about 3 minutes.";
+        var extractionSources = new List<string>();
+        var fakeLlm = new FakeSequentialLlmExtractionClient(
+            context =>
+            {
+                extractionSources.Add(context.SourceContent);
+                return new LlmExtractedRecipePayload(
+                    Title: "Plain Toast",
+                    ConfidenceScore: 0.99m,
+                    Ingredients:
+                    [
+                        new(
+                            null,
+                            2,
+                            null,
+                            "slice",
+                            "bread",
+                            "bread",
+                            OriginalRawText: "2 slices bread"
+                        ),
+                    ],
+                    Steps: [new(null, "Toast the bread until golden, about 3 minutes.", [0])]
+                );
+            },
+            _ => throw new LlmHostUnavailableException("The LLM request timed out.")
+        );
+        await using var factory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Llm:TextModel", "gemma4:e4b");
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ILlmExtractionClient>();
+                services.AddSingleton<ILlmExtractionClient>(fakeLlm);
+            });
+        });
+        using var client = factory.CreateClient();
+        await AuthenticateAsync(client);
+        var response = await client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest(source, AutoPublish: false)
+        );
+        Assert.AreEqual(HttpStatusCode.Accepted, response.StatusCode);
+        var job = await response.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
+        Assert.IsNotNull(job);
+        using (var scope = factory.Services.CreateScope())
+        {
+            Assert.IsTrue(
+                await scope
+                    .ServiceProvider.GetRequiredService<IIngestionProcessor>()
+                    .ProcessNextQueuedJobAsync()
+            );
+        }
+
+        Assert.HasCount(1, fakeLlm.StructuredSources);
+        Assert.HasCount(1, extractionSources);
+        StringAssert.Contains(extractionSources[0], "2 slices bread");
+        Assert.DoesNotContain("Ingredients:", extractionSources[0]);
+        var detail = await client.GetFromJsonAsync<IngestionJobDetailDto>(
+            $"/api/ingestion/jobs/{job.Id}"
+        );
+        Assert.IsNotNull(detail);
+        Assert.AreEqual(IngestionJobStatus.ReadyForReview, detail.Status);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<App.Data.AppDbContext>();
+            var entity = await db.IngestionJobs.FindAsync(job.Id);
+            Assert.IsNotNull(entity);
+            Assert.IsNull(entity.StructuredSourceText);
+        }
+    }
+
     private sealed class FakeSequentialLlmExtractionClient(
-        Func<LlmExtractionContext, LlmExtractedRecipePayload> handler
+        Func<LlmExtractionContext, LlmExtractedRecipePayload> handler,
+        Func<string, string?>? structureSource = null
     ) : ILlmExtractionClient
     {
+        public List<string> StructuredSources { get; } = [];
+
+        public Task<string?> StructureRecipeSourceAsync(
+            EffectiveLlmConnectionConfig config,
+            string sourceText,
+            CancellationToken cancellationToken = default
+        )
+        {
+            StructuredSources.Add(sourceText);
+            return Task.FromResult(structureSource?.Invoke(sourceText));
+        }
+
         public Task<LlmConnectionTestResultDto> ProbeAndListModelsAsync(
             EffectiveLlmConnectionConfig config,
             int timeoutSeconds = 15,
@@ -1113,6 +1298,12 @@ public sealed class IngestionIntegrationTests
 
     private sealed class BlockingLlmExtractionClient : ILlmExtractionClient
     {
+        public Task<string?> StructureRecipeSourceAsync(
+            EffectiveLlmConnectionConfig config,
+            string sourceText,
+            CancellationToken cancellationToken = default
+        ) => Task.FromResult<string?>(null);
+
         public Task<string> AnswerKitchenQuestionAsync(
             EffectiveLlmConnectionConfig config,
             LlmKitchenQuestionContext context,

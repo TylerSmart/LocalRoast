@@ -20,6 +20,12 @@ public sealed class IngestionJob : IAuditable
 
     public string? NormalizedSourceText { get; set; }
 
+    /// <summary>
+    /// LLM-sectioned copy of the source in the canonical Ingredients/Instructions layout,
+    /// built only from verbatim source lines. Null when the source was already structured.
+    /// </summary>
+    public string? StructuredSourceText { get; set; }
+
     public string? DownloadedCoverImagePath { get; set; }
 
     public string? DownloadedThumbnailImagePath { get; set; }
