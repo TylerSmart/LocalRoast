@@ -31,16 +31,6 @@ public enum IngestionJobStatus
     Discarded = 7,
 }
 
-/// <summary>How text recipes are extracted: one request, or separate ingredient and instruction requests.</summary>
-[JsonConverter(typeof(JsonStringEnumConverter))]
-public enum LlmExtractionStrategy
-{
-    /// <summary>Use the recommendation of the model profile that matches the Text Model tag.</summary>
-    Auto = 0,
-    SinglePass = 1,
-    Staged = 2,
-}
-
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum IngestionRefinementStatus
 {

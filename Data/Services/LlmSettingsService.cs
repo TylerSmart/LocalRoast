@@ -45,8 +45,6 @@ public sealed class LlmSettingsService(
                 Temperature: entity.Temperature,
                 TopP: entity.TopP,
                 TopK: entity.TopK,
-                ExtractionRepairRounds: entity.ExtractionRepairRounds,
-                ExtractionStrategy: entity.ExtractionStrategy,
                 RefineModel: entity.RefineModel,
                 RefineEnableThinking: entity.RefineEnableThinking,
                 RefineTemperature: entity.RefineTemperature,
@@ -76,8 +74,6 @@ public sealed class LlmSettingsService(
             Temperature: opt.Temperature,
             TopP: opt.TopP,
             TopK: opt.TopK,
-            ExtractionRepairRounds: opt.ExtractionRepairRounds,
-            ExtractionStrategy: opt.ExtractionStrategy,
             RefineModel: opt.RefineModel,
             RefineEnableThinking: opt.RefineEnableThinking,
             RefineTemperature: opt.RefineTemperature,
@@ -117,8 +113,6 @@ public sealed class LlmSettingsService(
                 Temperature: entity.Temperature,
                 TopP: entity.TopP,
                 TopK: entity.TopK,
-                ExtractionRepairRounds: entity.ExtractionRepairRounds,
-                ExtractionStrategy: entity.ExtractionStrategy,
                 RefineModel: entity.RefineModel,
                 RefineEnableThinking: entity.RefineEnableThinking,
                 RefineTemperature: entity.RefineTemperature,
@@ -146,8 +140,6 @@ public sealed class LlmSettingsService(
             Temperature: opt.Temperature,
             TopP: opt.TopP,
             TopK: opt.TopK,
-            ExtractionRepairRounds: opt.ExtractionRepairRounds,
-            ExtractionStrategy: opt.ExtractionStrategy,
             RefineModel: opt.RefineModel,
             RefineEnableThinking: opt.RefineEnableThinking,
             RefineTemperature: opt.RefineTemperature,
@@ -210,8 +202,6 @@ public sealed class LlmSettingsService(
         entity.Temperature = request.Temperature;
         entity.TopP = request.TopP;
         entity.TopK = request.TopK;
-        entity.ExtractionRepairRounds = request.ExtractionRepairRounds;
-        entity.ExtractionStrategy = request.ExtractionStrategy;
         entity.RefineModel = string.IsNullOrWhiteSpace(request.RefineModel)
             ? null
             : request.RefineModel.Trim();
@@ -392,8 +382,6 @@ public sealed class LlmSettingsService(
             Temperature = opt.Temperature,
             TopP = opt.TopP,
             TopK = opt.TopK,
-            ExtractionRepairRounds = opt.ExtractionRepairRounds,
-            ExtractionStrategy = opt.ExtractionStrategy,
             RefineModel = opt.RefineModel,
             RefineEnableThinking = opt.RefineEnableThinking,
             RefineTemperature = opt.RefineTemperature,

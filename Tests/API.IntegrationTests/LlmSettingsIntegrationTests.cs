@@ -71,70 +71,45 @@ public sealed class LlmSettingsIntegrationTests
         Assert.IsNull(settings.Temperature);
         Assert.IsNull(settings.TopP);
         Assert.IsNull(settings.TopK);
-        Assert.AreEqual(1, settings.ExtractionRepairRounds);
     }
 
     [TestMethod]
-    public async Task RepairRoundsAndLongTimeout_PersistAndReachEffectiveConfiguration()
+    public async Task LongTimeout_PersistsAndReachesEffectiveConfiguration()
     {
         await AuthenticateAsync(_client);
 
         var response = await _client.PutAsJsonAsync(
             "/api/llm-settings",
-            new UpdateLlmSettingsRequest(
-                TextModel: "gemma4:26b-a4b",
-                RequestTimeoutSeconds: 1800,
-                ExtractionRepairRounds: 3
-            )
+            new UpdateLlmSettingsRequest(TextModel: "gemma4:26b-a4b", RequestTimeoutSeconds: 1800)
         );
         Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
         var settings = await _client.GetFromJsonAsync<LlmSettingsDto>("/api/llm-settings");
         Assert.IsNotNull(settings);
         Assert.AreEqual(1800, settings.RequestTimeoutSeconds);
-        Assert.AreEqual(3, settings.ExtractionRepairRounds);
         using (var scope = _factory.Services.CreateScope())
         {
             var effective = await scope
                 .ServiceProvider.GetRequiredService<ILlmSettingsService>()
                 .GetEffectiveConfigAsync();
             Assert.AreEqual(1800, effective.RequestTimeoutSeconds);
-            Assert.AreEqual(3, effective.ExtractionRepairRounds);
         }
-
-        response = await _client.PutAsJsonAsync(
-            "/api/llm-settings",
-            new UpdateLlmSettingsRequest(TextModel: "gemma4:e4b", ExtractionRepairRounds: 0)
-        );
-        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
-        var disabled = await response.Content.ReadFromJsonAsync<LlmSettingsDto>();
-        Assert.IsNotNull(disabled);
-        Assert.AreEqual(0, disabled.ExtractionRepairRounds);
     }
 
     [TestMethod]
-    [DataRow(1801, 1)]
-    [DataRow(4, 1)]
-    [DataRow(120, 6)]
-    [DataRow(120, -1)]
-    public async Task UpdateSettings_OutOfRangeTimeoutOrRepairRounds_ReturnsBadRequest(
-        int timeoutSeconds,
-        int repairRounds
-    )
+    [DataRow(1801)]
+    [DataRow(4)]
+    public async Task UpdateSettings_OutOfRangeTimeout_ReturnsBadRequest(int timeoutSeconds)
     {
         await AuthenticateAsync(_client);
 
         var response = await _client.PutAsJsonAsync(
             "/api/llm-settings",
-            new UpdateLlmSettingsRequest(
-                RequestTimeoutSeconds: timeoutSeconds,
-                ExtractionRepairRounds: repairRounds
-            )
+            new UpdateLlmSettingsRequest(RequestTimeoutSeconds: timeoutSeconds)
         );
 
         Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
         var settings = await _client.GetFromJsonAsync<LlmSettingsDto>("/api/llm-settings");
         Assert.IsNotNull(settings);
-        Assert.AreEqual(1, settings.ExtractionRepairRounds);
         Assert.AreEqual(120, settings.RequestTimeoutSeconds);
     }
 
@@ -322,7 +297,6 @@ public sealed class LlmSettingsIntegrationTests
 
         Assert.IsNotNull(profiles);
         var e4b = profiles.Single(profile => profile.Id == "gemma4-e4b");
-        Assert.IsTrue(e4b.UseStagedExtraction);
         Assert.IsTrue(e4b.EnableThinking);
         var thinking = profiles.Single(profile => profile.Id == "gemma4-12b-thinking");
         Assert.IsTrue(thinking.RecommendedAsRefineModel);
@@ -331,7 +305,7 @@ public sealed class LlmSettingsIntegrationTests
     }
 
     [TestMethod]
-    public async Task ExtractionStrategyAndRefineSettings_PersistAndReachRefineConfiguration()
+    public async Task RefineSettings_PersistAndReachRefineConfiguration()
     {
         await AuthenticateAsync(_client);
 
@@ -339,7 +313,6 @@ public sealed class LlmSettingsIntegrationTests
             "/api/llm-settings",
             new UpdateLlmSettingsRequest(
                 TextModel: "my-tuned-e4b",
-                ExtractionStrategy: LlmExtractionStrategy.Staged,
                 RefineModel: "  gemma4:26b-a4b  ",
                 RefineEnableThinking: false,
                 RefineTemperature: 1.0,
@@ -351,7 +324,6 @@ public sealed class LlmSettingsIntegrationTests
         Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
         var settings = await response.Content.ReadFromJsonAsync<LlmSettingsDto>();
         Assert.IsNotNull(settings);
-        Assert.AreEqual(LlmExtractionStrategy.Staged, settings.ExtractionStrategy);
         Assert.AreEqual("gemma4:26b-a4b", settings.RefineModel);
         Assert.IsFalse(settings.RefineEnableThinking);
         Assert.AreEqual(900, settings.RefineRequestTimeoutSeconds);
@@ -361,12 +333,6 @@ public sealed class LlmSettingsIntegrationTests
             var effective = await scope
                 .ServiceProvider.GetRequiredService<ILlmSettingsService>()
                 .GetEffectiveConfigAsync();
-            Assert.IsTrue(
-                LlmModelProfiles.UsesStagedExtraction(
-                    effective.ExtractionStrategy,
-                    effective.TextModel
-                )
-            );
             var refine = effective.ForRefinement();
             Assert.AreEqual("gemma4:26b-a4b", refine.TextModel);
             Assert.AreEqual("gemma4:26b-a4b", refine.VisionModel);
@@ -375,7 +341,6 @@ public sealed class LlmSettingsIntegrationTests
             Assert.AreEqual(0.95, refine.TopP);
             Assert.AreEqual(64, refine.TopK);
             Assert.AreEqual(900, refine.RequestTimeoutSeconds);
-            Assert.AreEqual(LlmExtractionStrategy.SinglePass, refine.ExtractionStrategy);
         }
 
         response = await _client.PutAsJsonAsync(
@@ -385,7 +350,6 @@ public sealed class LlmSettingsIntegrationTests
         Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
         var cleared = await response.Content.ReadFromJsonAsync<LlmSettingsDto>();
         Assert.IsNull(cleared!.RefineModel);
-        Assert.AreEqual(LlmExtractionStrategy.Auto, cleared.ExtractionStrategy);
     }
 
     [TestMethod]

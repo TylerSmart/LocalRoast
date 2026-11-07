@@ -60,6 +60,41 @@ class EvaluationTests(unittest.TestCase):
             }},
         )
 
+    def test_amounts_must_be_tagged_as_scalable_spans(self):
+        source, result = self.fixture()
+        instruction = "Add 1/2 teaspoon salt, then reduce to 1 cup."
+        step = result["draft"]["steps"][0]
+        step["instruction"] = instruction
+        self.assertTrue(any("hard-coded" in i for i in score_result({}, source, result)))
+        step["inlineAmounts"] = [{"start": 4, "length": 12, "kind": "Fixed", "ingredientIndex": None,
+                                  "measurement": {"quantity": 0.5, "unit": "Tsp"}}]
+        self.assertTrue(any("hard-coded" in i for i in score_result({}, source, result)))
+        step["inlineAmounts"][0].update(kind="Ingredient", ingredientIndex=0)
+        self.assertEqual([], score_result({}, source, result))
+
+    def test_tagged_spans_are_separate_portions(self):
+        source, result = self.fixture()
+        line = "4 tablespoons oil"
+        source["ingredients"] = [{"text": line}]
+        result["draft"]["ingredients"][0].update(displayName="oil", quantity=4, unit="Tbsp", originalRawText=line)
+        instruction = "Heat 2 tablespoons oil, add chicken, then add 2 tablespoons oil."
+        step = result["draft"]["steps"][0]
+        step.update(
+            instruction=instruction,
+            ingredientAmounts=[{"ingredientIndex": 0, "measurement": {"quantity": 4, "unit": "Tbsp"}}],
+            inlineAmounts=[
+                {"start": start, "length": 13, "kind": "Ingredient", "ingredientIndex": 0,
+                 "measurement": {"quantity": 2, "unit": "Tbsp"}}
+                for start in (instruction.index("2 tablespoons"), instruction.rindex("2 tablespoons"))
+            ],
+        )
+        case = {"ingredients": [{"name": "oil", "quantity": 4, "unit": "Tbsp", "parts": [2, 2]}]}
+        self.assertEqual([], score_result(case, source, result))
+        step["inlineAmounts"].pop()
+        self.assertTrue(any("hard-coded" in i for i in score_result(case, source, result)))
+        step["ingredientAmounts"][0]["measurement"]["quantity"] = 2
+        self.assertTrue(any("Wrong portions" in i for i in score_result(case, source, result)))
+
     def test_explicit_step_portions_and_alternative_measurements(self):
         source, result = self.fixture()
         line = "4 tablespoons oil (2 ounces)"

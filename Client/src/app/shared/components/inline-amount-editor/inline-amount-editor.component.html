@@ -1,0 +1,90 @@
+<div class="inline-amount-editor" data-testid="inline-amount-editor">
+  <div class="editor-header">
+    <span class="editor-title">Tagged amounts</span>
+    <button
+      mat-stroked-button
+      type="button"
+      class="detect-amounts-button"
+      data-testid="detect-amounts"
+      [disabled]="isDetecting() || !text().trim()"
+      (click)="detect()"
+    >
+      @if (isDetecting()) {
+        <mat-spinner diameter="18"></mat-spinner>
+      } @else {
+        <mat-icon>auto_awesome</mat-icon>
+      }
+      Detect amounts
+    </button>
+  </div>
+
+  @if (rows().length) {
+    <p class="tagged-preview" data-testid="inline-amount-preview">
+      @for (segment of preview(); track $index) {
+        @if (segment.kind) {
+          <mark class="tagged-span" [attr.data-kind]="segment.kind">{{ segment.text }}</mark>
+        } @else {
+          <span>{{ segment.text }}</span>
+        }
+      }
+    </p>
+
+    <ul class="amount-rows">
+      @for (row of rows(); track row.amount.start) {
+        <li class="amount-row" data-testid="inline-amount-row">
+          <div class="span-label">
+            <span class="span-text">"{{ row.text }}"</span>
+            @if (row.measurement) {
+              <span class="span-measurement">{{ row.measurement }}</span>
+            }
+          </div>
+          <div class="row-controls">
+            <mat-form-field appearance="outline" subscriptSizing="dynamic" class="kind-field">
+              <mat-label>Kind</mat-label>
+              <mat-select
+                data-testid="inline-amount-kind"
+                [value]="row.amount.kind"
+                (selectionChange)="setKind(row.amount, $event.value)"
+              >
+                @for (kind of kinds; track kind.value) {
+                  <mat-option
+                    [value]="kind.value"
+                    [disabled]="kind.value === 'Ingredient' && !ingredientOptions().length"
+                    >{{ kind.label }}</mat-option
+                  >
+                }
+              </mat-select>
+            </mat-form-field>
+            @if (row.amount.kind === 'Ingredient') {
+              <mat-form-field
+                appearance="outline"
+                subscriptSizing="dynamic"
+                class="ingredient-field"
+              >
+                <mat-label>Ingredient</mat-label>
+                <mat-select
+                  data-testid="inline-amount-ingredient"
+                  [value]="row.amount.ingredientIndex"
+                  (selectionChange)="setIngredient(row.amount, $event.value)"
+                >
+                  @for (option of ingredientOptions(); track option.index) {
+                    <mat-option [value]="option.index">{{ option.label }}</mat-option>
+                  }
+                </mat-select>
+              </mat-form-field>
+            }
+            <button
+              mat-icon-button
+              type="button"
+              data-testid="inline-amount-remove"
+              aria-label="Remove tagged amount"
+              (click)="remove(row.amount)"
+            >
+              <mat-icon>delete</mat-icon>
+            </button>
+          </div>
+        </li>
+      }
+    </ul>
+  }
+</div>

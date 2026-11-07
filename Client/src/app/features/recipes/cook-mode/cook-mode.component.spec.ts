@@ -184,6 +184,50 @@ describe('CookModeComponent', () => {
     modifiedBy: 'system',
   };
 
+  it('renders scaled inline amount chips, skips spanned callouts and narrates the scaled text', () => {
+    const ingredient = { ...mockRecipe.ingredients[0], quantity: 2, unit: 'Cup' as const };
+    const step = {
+      ...mockRecipe.steps[0],
+      instruction: 'Whisk 1 cup in, then reduce to 1 cup.',
+      ingredientIds: [ingredient.id],
+      ingredientAmounts: [],
+      inlineAmounts: [
+        {
+          start: 6,
+          length: 5,
+          kind: 'Ingredient' as const,
+          ingredientId: ingredient.id,
+          measurement: { quantity: 1, unit: 'Cup' as const },
+          alternativeMeasurement: null,
+        },
+        {
+          start: 31,
+          length: 5,
+          kind: 'Fixed' as const,
+          ingredientId: null,
+          measurement: { quantity: 1, unit: 'Cup' as const },
+          alternativeMeasurement: null,
+        },
+      ],
+    };
+    component['recipe'].set({ ...mockRecipe, ingredients: [ingredient], steps: [step] });
+    component['activeStepIndex'].set(0);
+    component['targetServings'].set(mockRecipe.baseServings * 2);
+    fixture.detectChanges();
+    const el: HTMLElement = fixture.nativeElement;
+    expect(el.querySelector('.instruction-text')?.textContent?.trim()).toBe(
+      'Whisk 2 cups in, then reduce to 1 cup.',
+    );
+    expect(el.querySelector('.inline-amount')?.textContent).toBe('2 cups');
+    expect(component['flattenedSteps']()[0].ingredientCallouts).toEqual([]);
+    component['narrateCurrentStep']();
+    expect(mockSpeechNarrationService.speakStep).toHaveBeenLastCalledWith(
+      step.stepNumber,
+      'Whisk 2 cups in, then reduce to 1 cup.',
+      step.sectionName,
+    );
+  });
+
   it('uses scaled step portions in cook callouts and spoken narration', () => {
     const ingredient = {
       ...mockRecipe.ingredients[0],

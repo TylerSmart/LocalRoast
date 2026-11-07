@@ -200,6 +200,12 @@ public sealed class RecipesController(IRecipeService recipeService) : Controller
         }
     }
 
+    [HttpPost("step-amounts/detect")]
+    [ProducesResponseType(typeof(IReadOnlyList<DetectedStepAmountDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    public IActionResult DetectStepAmounts([FromBody] DetectStepAmountsRequest request) =>
+        Ok(recipeService.DetectStepAmounts(request.Instruction));
+
     [HttpPost("{id:guid}/attachments")]
     [Consumes("multipart/form-data")]
     [RequestSizeLimit(28_311_552)]

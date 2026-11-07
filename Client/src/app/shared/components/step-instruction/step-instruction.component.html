@@ -1,0 +1,15 @@
+@for (segment of segments(); track $index) {
+  @if (segment.amount?.kind === 'Fixed') {
+    <span class="fixed-amount" data-kind="Fixed">{{ segment.text }}</span>
+  } @else if (segment.amount; as amount) {
+    <span
+      class="inline-amount"
+      [class.is-scaled]="amount.scaled"
+      [attr.data-kind]="amount.kind"
+      [attr.title]="amount.ingredientName ?? (amount.kind === 'Mixture' ? 'Mixture' : null)"
+      >{{ segment.text }}</span
+    >
+  } @else {
+    <span>{{ segment.text }}</span>
+  }
+}

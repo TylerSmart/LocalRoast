@@ -1,7 +1,7 @@
 # Phase 12: Tagged Instruction Ingestion & Scalable Inline Amounts
 
 > **Branch:** `feature/phase-12-tagged-instruction-ingestion`
-> **Status:** `[ ]` Not Started
+> **Status:** `[x]` Completed
 > **PRD Reference:** `docs/prd.md` — Sections 4.1.4, 4.1.5, 4.2.1, 4.2.3, 4.2.4
 > **Target Execution:** Run `/execute-phase` to execute this plan step-by-step.
 
@@ -397,7 +397,7 @@ The class extends `E2ETestBase`. Seed via the API with `UpsertRecipeRequest`:
 
 ## 6. Step-by-Step Execution Checklist
 
-- [ ] **Task 1: Core, Data & Infrastructure**
+- [x] **Task 1: Core, Data & Infrastructure**
   1. Move `InlineStepAmountKind`; add the DTOs/records from 2.4; remove `LlmExtractionStrategy` and the settings members (2.1–2.4).
   2. `InstructionAmountTagger.Reconcile`, `TaggedStepDiagnostics`, the `RecipeExtractionDiagnostics` deletions, the normalizer mapping, and the repair mapper (2.5).
   3. Entity, configuration, `AppDbContext`, and `RecipeService` validation/persistence/reads/detect (2.2–2.5).
@@ -423,7 +423,7 @@ The class extends `E2ETestBase`. Seed via the API with `UpsertRecipeRequest`:
      dotnet test --project Tests/Infrastructure.UnitTests/App.Infrastructure.UnitTests.csproj
      ```
 
-- [ ] **Task 2: API & Integration Tests**
+- [x] **Task 2: API & Integration Tests**
   1. `RecipesController` detect endpoint (Section 3).
   2. New `Tests/API.IntegrationTests/RecipeInlineAmountsIntegrationTests.cs`:
      - Create and get round-trip with ingredient ids.
@@ -440,7 +440,7 @@ The class extends `E2ETestBase`. Seed via the API with `UpsertRecipeRequest`:
      dotnet test --project Tests/API.IntegrationTests/App.API.IntegrationTests.csproj
      ```
 
-- [ ] **Task 3: Angular Client & Unit Tests**
+- [x] **Task 3: Angular Client & Unit Tests**
   1. Models, `RecipeService.detectStepAmounts`, `step-instruction.ts` utils + spec, and the callout change (4.1).
   2. `StepInstructionComponent`, the divided breakdown, and `InlineAmountEditorComponent`. Wire them into the 4 views + 2 editors. Settings dialog removals (4.2).
   3. Update the affected specs: recipe-detail, cook-mode, public-shared-recipe, recipe-detail-preview, recipe-editor, ingestion-review, llm-settings-dialog, ingestion-repair-dialog.
@@ -451,7 +451,7 @@ The class extends `E2ETestBase`. Seed via the API with `UpsertRecipeRequest`:
      npm test -- --watch=false
      ```
 
-- [ ] **Task 4: Docs, Evaluator, E2E & Final Verify**
+- [x] **Task 4: Docs, Evaluator, E2E & Final Verify**
   1. Docs:
      - `docs/prd.md` 4.1.4: steps are verbatim source paragraphs with tagged inline amounts that scale as chips. A row's uses aggregate into a divided breakdown. Multiple timers per step. Replace the "Explicit Step Portions" and "Flat Steps" bullets.
      - 4.2.1: vision transcribes, then the text pipeline runs.

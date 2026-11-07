@@ -167,7 +167,14 @@ public sealed class MockLanLlmAndBlogServer : IAsyncDisposable
                     new
                     {
                         model = "qwen2.5:14b",
-                        message = new { role = "assistant", content = payloadJson },
+                        message = new
+                        {
+                            role = "assistant",
+                            content = TaggedPipelineMockResponder.Respond(
+                                body.RootElement,
+                                payloadJson
+                            ),
+                        },
                     }
                 );
             }
@@ -253,6 +260,10 @@ public sealed class MockLanLlmAndBlogServer : IAsyncDisposable
 [TestClass]
 public sealed class LlmIngestionE2ETests : E2ETestBase
 {
+    // Matches the mock host's default tofu payload; the tagged pipeline keeps this method verbatim.
+    private const string TofuSourceText =
+        "Crispy Sesame Tofu\nIngredients:\n- 2 cloves garlic, minced\n- 2 tbsp toasted sesame oil\nInstructions:\nHeat oil and sauté minced garlic for 2 minutes.";
+
     // Tab (not Escape) leaves the model field: with no autocomplete panel open, Escape closes
     // the dialog and cancels the in-flight save.
     private async Task SaveLlmSettingsDialogAsync(ILocator dialog)
@@ -286,7 +297,7 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
               "title": "Repair Journey", "baseServings": 4,
               "ingredients": [
                 {"displayName":"butter","canonicalFoodName":"butter","quantity":1,"unit":"Tbsp","originalRawText":"1 tbsp butter"},
-                {"displayName":"salt","canonicalFoodName":"salt","quantity":1,"unit":"Tsp","originalRawText":"1 tsp salt"}
+                {"displayName":"salt","canonicalFoodName":"salt","quantity":null,"unit":null,"originalRawText":"Salt"}
               ],
               "steps": [
                 {"instruction":"Melt butter and add salt.","ingredientIndices":[0],
@@ -310,7 +321,7 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await Page.Locator("button.tab-pill", new() { HasText = "Paste Raw Text" }).ClickAsync();
         await Page.Locator("textarea[formcontrolname='rawText']")
             .FillAsync(
-                "Repair Journey\nIngredients:\n- 1 tbsp butter\n- 1 tsp salt\nInstructions:\nMelt butter and add salt."
+                "Repair Journey\nIngredients:\n- 1 tbsp butter\n- Salt\nInstructions:\nMelt butter and add salt, about 1 minute."
             );
         var queuedResponse = await Page.RunAndWaitForResponseAsync(
             () => Page.Locator("button[aria-label='Queue raw text recipe']").ClickAsync(),
@@ -342,7 +353,7 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
                   "title":"AI proposal","baseServings":4,
                   "ingredients":[
                     {"displayName":"butter","canonicalFoodName":"butter","quantity":1,"unit":"Tbsp","originalRawText":"1 tbsp butter"},
-                    {"displayName":"salt","canonicalFoodName":"salt","quantity":1,"unit":"Tsp","originalRawText":"1 tsp salt"}
+                    {"displayName":"salt","canonicalFoodName":"salt","quantity":null,"unit":null,"originalRawText":"Salt"}
                   ],
                   "steps":[
                     {"instruction":"Melt butter, then add salt.","ingredientIndices":[0,1],
@@ -351,7 +362,9 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
                 }
                 """;
             await reviewCard.Locator("textarea").FillAsync("Link the salt.");
-            await reviewCard.Locator("button", new() { HasText = "Fix with AI" }).ClickAsync();
+            await reviewCard
+                .Locator("button", new() { HasText = "Re-extract with AI" })
+                .ClickAsync();
             var preview = Page.Locator("app-ingestion-repair-dialog");
             await Expect(preview).ToBeVisibleAsync();
             await Expect(preview).ToContainTextAsync("Unsaved user title");
@@ -376,19 +389,25 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
 
             await title.FillAsync("Unsaved after reload");
             mockServer.SimulateOffline = true;
-            await reviewCard.Locator("button", new() { HasText = "Fix with AI" }).ClickAsync();
+            await reviewCard
+                .Locator("button", new() { HasText = "Re-extract with AI" })
+                .ClickAsync();
             await Expect(reviewCard.Locator("[role='alert']")).ToBeVisibleAsync();
             await Expect(title).ToHaveValueAsync("Unsaved after reload");
             mockServer.SimulateOffline = false;
 
-            await reviewCard.Locator("button", new() { HasText = "Fix with AI" }).ClickAsync();
+            await reviewCard
+                .Locator("button", new() { HasText = "Re-extract with AI" })
+                .ClickAsync();
             await Expect(preview).ToBeVisibleAsync();
             await preview.Locator("button", new() { HasText = "Apply to editor" }).ClickAsync();
             await Expect(title).ToHaveValueAsync("AI proposal");
             await Page.ReloadAsync();
             await Expect(title).ToHaveValueAsync("Repair Journey");
 
-            await reviewCard.Locator("button", new() { HasText = "Fix with AI" }).ClickAsync();
+            await reviewCard
+                .Locator("button", new() { HasText = "Re-extract with AI" })
+                .ClickAsync();
             await Expect(preview).ToBeVisibleAsync();
             await preview.Locator("button", new() { HasText = "Apply to editor" }).ClickAsync();
             await Expect(title).ToHaveValueAsync("AI proposal");
@@ -423,7 +442,7 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
 
     [TestMethod]
     [Timeout(DefaultTestTimeoutMs)]
-    public async Task StarterMeasurements_SaveReviewPublishScaleAndSwitchOnMobile_PreservesExplicitPortions()
+    public async Task StarterMeasurements_SaveReviewPublishScaleAndSwitchOnMobile_ScalesTaggedPortions()
     {
         await using var mockServer = await MockLanLlmAndBlogServer.StartAsync();
         mockServer.ResponsePayload = """
@@ -434,12 +453,8 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
                 "originalRawText": "5 cups (25 ounces) Starter Flour"
               }],
               "steps": [
-                { "instruction": "4A. Combine the listed flour with water.", "ingredientIndices": [0],
-                  "originalRawText": "4A. Combine 1 cup Starter Flour with water.",
-                  "ingredientAmounts": [{ "ingredientIndex": 0, "measurement": { "quantity": 1, "unit": "Cup" } }] },
-                { "instruction": "4B. Feed with the listed flour.", "ingredientIndices": [0],
-                  "originalRawText": "4B. Feed with 4 cups Starter Flour.",
-                  "ingredientAmounts": [{ "ingredientIndex": 0, "measurement": { "quantity": 4, "unit": "Cup" } }] }
+                { "instruction": "Combine 1 cup Starter Flour with water.", "ingredientIndices": [0] },
+                { "instruction": "Feed with 4 cups Starter Flour.", "ingredientIndices": [0] }
               ]
             }
             """;
@@ -481,20 +496,22 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
             .ToHaveValueAsync("25");
         await Page.Locator("mat-checkbox[formcontrolname='preferAlternativeMeasurement'] input")
             .CheckAsync();
-        var stepAmount = Page.Locator(
-            "app-measurement-editor[formcontrolname='measurement']"
-        ).First;
-        await stepAmount.Locator("input[formcontrolname='quantity']").FillAsync("0.5");
+        var instructions = Page.Locator("textarea[formcontrolname='instruction']");
+        await Expect(instructions.First)
+            .ToHaveValueAsync("Combine 1 cup Starter Flour with water.");
+        var taggedRows = Page.Locator("[data-testid=inline-amount-row]");
+        await Expect(taggedRows).ToHaveCountAsync(2);
+        await Expect(taggedRows.First.Locator("[data-testid=inline-amount-ingredient]"))
+            .ToContainTextAsync("Starter Flour");
         await Page.Locator("button[aria-label='Save review draft']").ClickAsync();
         await Expect(Page.Locator("mat-snack-bar-container"))
             .ToContainTextAsync("Review draft saved.");
         await Page.ReloadAsync();
-        await Expect(stepAmount.Locator("input[formcontrolname='quantity']"))
-            .ToHaveValueAsync("0.5");
         await Expect(
                 Page.Locator("mat-checkbox[formcontrolname='preferAlternativeMeasurement'] input")
             )
             .ToBeCheckedAsync();
+        await Expect(taggedRows).ToHaveCountAsync(2);
         Assert.IsTrue(
             await Page.EvaluateAsync<bool>(
                 "document.documentElement.scrollWidth <= window.innerWidth"
@@ -504,20 +521,21 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await Page.Locator("button[aria-label='Approve and publish recipe']").ClickAsync();
         await Expect(Page.Locator(".recipe-title")).ToHaveTextAsync("Measurement Starter");
         await Page.Locator("mat-button-toggle[value='Metric']").ClickAsync();
-        var callouts = Page.Locator(".ingredient-callout-pill");
-        await Expect(callouts.First).ToContainTextAsync("71 g Starter Flour");
-        await Expect(callouts.Nth(1)).ToContainTextAsync("567 g Starter Flour");
+        // Tagged portions scale in place through the preferred 25-ounce weight.
+        var chips = Page.Locator(".step-instruction-text .inline-amount");
+        await Expect(chips.First).ToHaveTextAsync("142 g");
+        await Expect(chips.Nth(1)).ToHaveTextAsync("567 g");
         await Page.GetByRole(AriaRole.Button, new() { Name = "0.5x", Exact = true }).ClickAsync();
-        await Expect(callouts.First).ToContainTextAsync("35 g Starter Flour");
+        await Expect(chips.First).ToHaveTextAsync("71 g");
         await Page.GetByRole(AriaRole.Button, new() { Name = "2x", Exact = true }).ClickAsync();
-        await Expect(callouts.First).ToContainTextAsync("142 g Starter Flour");
+        await Expect(chips.First).ToHaveTextAsync("283 g");
         var switchButton = Page.Locator(
             "button[aria-label='Switch measurement for Starter Flour']"
         );
         await switchButton.ClickAsync();
-        await Expect(callouts.First).ToContainTextAsync("237 ml Starter Flour");
+        await Expect(chips.First).ToHaveTextAsync("473 ml");
         await switchButton.ClickAsync();
-        await Expect(callouts.First).ToContainTextAsync("142 g Starter Flour");
+        await Expect(chips.First).ToHaveTextAsync("283 g");
         Assert.IsTrue(
             await Page.EvaluateAsync<bool>(
                 "document.documentElement.scrollWidth <= window.innerWidth"
@@ -526,20 +544,20 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         );
 
         await Page.Locator("button[aria-label='Start cooking in kitchen mode']").ClickAsync();
-        var cookCallout = Page.Locator(".cook-step-ingredient-chip").First;
+        var cookChip = Page.Locator(".instruction-text .inline-amount").First;
         await Page.Locator("mat-button-toggle[value='Metric']").ClickAsync();
-        await Expect(cookCallout).ToContainTextAsync("142 g Starter Flour");
+        await Expect(cookChip).ToHaveTextAsync("283 g");
         await Page.GetByRole(AriaRole.Button, new() { Name = "0.5x", Exact = true }).ClickAsync();
-        await Expect(cookCallout).ToContainTextAsync("35 g Starter Flour");
+        await Expect(cookChip).ToHaveTextAsync("71 g");
         await Page.GetByRole(AriaRole.Button, new() { Name = "2x", Exact = true }).ClickAsync();
-        await Expect(cookCallout).ToContainTextAsync("142 g Starter Flour");
+        await Expect(cookChip).ToHaveTextAsync("283 g");
         await Page.Locator("button[aria-label='Open ingredients drawer']").ClickAsync();
         await Page.Locator(
                 ".mobile-ingredients-drawer button[aria-label='Switch measurement for Starter Flour']"
             )
             .ClickAsync();
         await Page.Locator("button[aria-label='Close ingredients drawer']").ClickAsync();
-        await Expect(cookCallout).ToContainTextAsync("237 ml Starter Flour");
+        await Expect(cookChip).ToHaveTextAsync("473 ml");
         Assert.IsTrue(
             await Page.EvaluateAsync<bool>(
                 "document.documentElement.scrollWidth <= window.innerWidth"
@@ -551,8 +569,7 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await Page.Locator("[aria-label='Edit recipe']").ClickAsync();
         await Expect(alternative.Locator("input[formcontrolname='quantity']"))
             .ToHaveValueAsync("25");
-        await Expect(stepAmount.Locator("input[formcontrolname='quantity']"))
-            .ToHaveValueAsync("0.5");
+        await Expect(taggedRows).ToHaveCountAsync(2);
         Assert.IsTrue(
             await Page.EvaluateAsync<bool>(
                 "document.documentElement.scrollWidth <= window.innerWidth"
@@ -782,7 +799,7 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
 
         // 3. Submit a raw text recipe
         await Page.Locator("button.tab-pill", new() { HasText = "Paste Raw Text" }).ClickAsync();
-        await Page.Locator("textarea[formcontrolname='rawText']").FillAsync("Quick mobile toast");
+        await Page.Locator("textarea[formcontrolname='rawText']").FillAsync(TofuSourceText);
         await Page.Locator("button[aria-label='Queue raw text recipe']").ClickAsync();
 
         var reviewBtn = Page.Locator("a.review-action-btn").First;
@@ -1202,7 +1219,7 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
 
     [TestMethod]
     [Timeout(DefaultTestTimeoutMs)]
-    public async Task LlmSettingsDialog_RepairRoundsAndLongTimeoutPersistAndFitMobile()
+    public async Task LlmSettingsDialog_LongTimeoutPersistsAndFitsMobile()
     {
         await RegisterAndLoginAsync();
         await Page.SetViewportSizeAsync(360, 740);
@@ -1210,22 +1227,19 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await Page.Locator(".llm-settings-btn").ClickAsync();
 
         var dialog = Page.Locator("app-llm-settings-dialog");
-        var repairRounds = dialog.Locator("input[formcontrolname='extractionRepairRounds']");
         var timeout = dialog.Locator("input[formcontrolname='requestTimeoutSeconds']");
         var save = dialog.Locator("button", new() { HasText = "Save Settings" });
-        await Expect(repairRounds).ToHaveValueAsync("1");
+        await Expect(dialog.Locator("input[formcontrolname='extractionRepairRounds']"))
+            .ToHaveCountAsync(0);
 
-        await repairRounds.FillAsync("6");
-        await Expect(save).ToBeDisabledAsync();
-        await repairRounds.FillAsync("2");
         await timeout.FillAsync("1801");
         await Expect(save).ToBeDisabledAsync();
         await timeout.FillAsync("1800");
         await Expect(save).ToBeEnabledAsync();
 
-        await repairRounds.ScrollIntoViewIfNeededAsync();
+        await timeout.ScrollIntoViewIfNeededAsync();
         Assert.IsTrue(
-            await repairRounds.EvaluateAsync<bool>(
+            await timeout.EvaluateAsync<bool>(
                 """
                 input => {
                   const field = input.closest('mat-form-field').getBoundingClientRect();
@@ -1234,7 +1248,7 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
                 }
                 """
             ),
-            "Repair Rounds must fit inside the dialog at 360px."
+            "Request Timeout must fit inside the dialog at 360px."
         );
         Assert.IsTrue(
             await Page.EvaluateAsync<bool>(
@@ -1246,7 +1260,6 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await save.ClickAsync();
         await Expect(dialog).Not.ToBeVisibleAsync();
         await Page.Locator(".llm-settings-btn").ClickAsync();
-        await Expect(repairRounds).ToHaveValueAsync("2");
         await Expect(timeout).ToHaveValueAsync("1800");
         await dialog.Locator("button", new() { HasText = "Cancel" }).ClickAsync();
         await Expect(dialog).Not.ToBeVisibleAsync();
@@ -1311,8 +1324,7 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await Expect(dialog).Not.ToBeVisibleAsync();
 
         await Page.Locator("button.tab-pill", new() { HasText = "Paste Raw Text" }).ClickAsync();
-        await Page.Locator("textarea[formcontrolname='rawText']")
-            .FillAsync("Crispy Sesame Tofu with garlic and oil");
+        await Page.Locator("textarea[formcontrolname='rawText']").FillAsync(TofuSourceText);
         await Page.Locator("button[aria-label='Queue raw text recipe']").ClickAsync();
         await WaitForLocatorWithRefreshAsync(Page.Locator("a.review-action-btn").First);
         Assert.AreEqual(1.0, mockServer.LastTemperature);
@@ -1357,8 +1369,7 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
 
         // 2. Submit a raw text recipe
         await Page.Locator("button.tab-pill", new() { HasText = "Paste Raw Text" }).ClickAsync();
-        await Page.Locator("textarea[formcontrolname='rawText']")
-            .FillAsync("Crispy Sesame Tofu with garlic and oil");
+        await Page.Locator("textarea[formcontrolname='rawText']").FillAsync(TofuSourceText);
         await Page.Locator("button[aria-label='Queue raw text recipe']").ClickAsync();
 
         var reviewBtn = Page.Locator("a.review-action-btn").First;

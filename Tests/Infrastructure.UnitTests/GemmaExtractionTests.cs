@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using App.Core.Exceptions;
 using App.Core.Ingestion;
+using App.Core.Recipes;
 using App.Infrastructure.Ingestion;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -16,16 +17,30 @@ public sealed class GemmaExtractionTests
     private const string IngredientsJson = """
         {"title":"Butter sauce","confidenceScore":0.95,"ingredients":[{"quantity":2,"unit":"tbsp","canonicalFoodName":"butter","displayName":"butter","originalRawText":"2 tbsp butter"}]}
         """;
-    private const string StepsJson = """
-        {"steps":[{"instruction":"Melt the butter.","ingredientIndices":[0],"timers":[]}]}
+    private const string ButterTags = """{"steps":{"1":["0 butter"]}}""";
+    private const string CleanRecipe = """
+        {"title":"Butter sauce","suggestedTagNames":["Sauce"],"ingredients":[{"quantity":2,"unit":"tbsp","canonicalFoodName":"butter","displayName":"butter","originalRawText":"2 tbsp butter"}],"steps":[{"instruction":"Melt the butter.","ingredientIndices":[0]}]}
         """;
+    private const string MeasuredSource =
+        "Title: Butter sauce\nIngredients:\n- 2 tbsp butter\nInstructions:\n1. Melt 2 tbsp butter.";
+
+    private static bool IsMethodTagRequest(string body) =>
+        body.Contains("You annotate a recipe method", StringComparison.Ordinal);
+
+    private static string UserText(JsonElement body)
+    {
+        var content = body.GetProperty("messages")[1].GetProperty("content");
+        return content.ValueKind == JsonValueKind.Array
+            ? content[0].GetProperty("text").GetString()!
+            : content.GetString()!;
+    }
 
     [TestMethod]
     [DataRow(LlmProvider.Ollama, "gemma4:e2b")]
     [DataRow(LlmProvider.Ollama, "gemma4:e4b")]
     [DataRow(LlmProvider.OpenAiCompatible, "gemma4:e2b")]
     [DataRow(LlmProvider.OpenAiCompatible, "gemma4:e4b")]
-    public async Task Extract_UsesFinalIngredientsInSerialStepPass(
+    public async Task Extract_SendsIngredientsThenMethodTagsWithIngredientLabels(
         LlmProvider provider,
         string model
     )
@@ -70,27 +85,26 @@ public sealed class GemmaExtractionTests
                             .Any(t => t.GetString() == "null")
                     );
                 }
+                return Response(provider, IngredientsJson);
             }
-            else
-            {
-                Assert.AreEqual(2, calls);
-                Assert.AreEqual(
-                    0,
-                    properties
-                        .GetProperty("steps")
-                        .GetProperty("items")
-                        .GetProperty("properties")
-                        .GetProperty("ingredientIndices")
-                        .GetProperty("items")
-                        .GetProperty("maximum")
-                        .GetInt32()
-                );
-                var prompt = body.GetProperty("messages")[1].GetProperty("content").GetString()!;
-                StringAssert.Contains(prompt, "\"index\":0");
-                StringAssert.Contains(prompt, "\"quantity\":2");
-                StringAssert.Contains(prompt, "\"displayName\":\"butter\"");
-            }
-            return Response(provider, calls == 1 ? IngredientsJson : StepsJson);
+            Assert.AreEqual(2, calls);
+            Assert.IsFalse(properties.TryGetProperty("amounts", out _));
+            CollectionAssert.AreEqual(
+                new[] { "0 butter" },
+                properties
+                    .GetProperty("steps")
+                    .GetProperty("properties")
+                    .GetProperty("1")
+                    .GetProperty("items")
+                    .GetProperty("enum")
+                    .EnumerateArray()
+                    .Select(value => value.GetString())
+                    .ToArray()
+            );
+            var prompt = UserText(body);
+            StringAssert.Contains(prompt, "0 butter");
+            StringAssert.Contains(prompt, "Melt the butter.");
+            return Response(provider, ButterTags);
         });
         using var http = new HttpClient(handler);
         var result = await new LlmExtractionClient(http).ExtractRecipeFromTextAsync(
@@ -100,7 +114,9 @@ public sealed class GemmaExtractionTests
         Assert.AreEqual(2, calls);
         Assert.AreEqual("Butter sauce", result.Title);
         Assert.AreEqual(2, result.Ingredients![0].Quantity);
-        CollectionAssert.AreEqual(new[] { 0 }, result.Steps![0].IngredientIndices!.ToArray());
+        Assert.AreEqual("Melt the butter.", result.Steps![0].Instruction);
+        CollectionAssert.AreEqual(new[] { 0 }, result.Steps[0].IngredientIndices!.ToArray());
+        Assert.IsEmpty(result.TaggerIssues ?? []);
     }
 
     [TestMethod]
@@ -127,13 +143,31 @@ public sealed class GemmaExtractionTests
     }
 
     [TestMethod]
-    [DataRow(LlmProvider.Ollama, false)]
-    [DataRow(LlmProvider.Ollama, true)]
-    [DataRow(LlmProvider.OpenAiCompatible, false)]
-    [DataRow(LlmProvider.OpenAiCompatible, true)]
-    public async Task Extract_PreservesMeasurementsReferencesAndConfiguredOptions(
-        LlmProvider provider,
-        bool requireCorrection
+    public async Task Extract_SourceWithoutInstructionsIsRejectedBeforeAnyRequest()
+    {
+        var calls = 0;
+        using var http = new HttpClient(
+            new Handler(_ =>
+            {
+                calls++;
+                return Response(LlmProvider.Ollama, IngredientsJson);
+            })
+        );
+        var error = await Assert.ThrowsAsync<DomainValidationException>(() =>
+            new LlmExtractionClient(http).ExtractRecipeFromTextAsync(
+                Config(LlmProvider.Ollama, "gemma4:e4b"),
+                new LlmExtractionContext("Title: Butter sauce\nIngredients:\n- 2 tbsp butter", [])
+            )
+        );
+        StringAssert.Contains(error.Message, "no Instructions section");
+        Assert.AreEqual(0, calls);
+    }
+
+    [TestMethod]
+    [DataRow(LlmProvider.Ollama)]
+    [DataRow(LlmProvider.OpenAiCompatible)]
+    public async Task Extract_TagsVerbatimAmountsAndPreservesMeasurementsAndReferences(
+        LlmProvider provider
     )
     {
         const string source = """
@@ -170,23 +204,6 @@ Add 2 tablespoons remaining oil and the dough.
                     IsRecipeReference: true,
                     ReferencedRecipeTitle: "Dough"
                 ),
-            ],
-            Steps:
-            [
-                new(
-                    null,
-                    "Heat the oil.",
-                    [0],
-                    IngredientAmounts: [new(0, new(2, "tbsp"))],
-                    OriginalRawText: "Heat 2 tablespoons oil."
-                ),
-                new(
-                    null,
-                    "Add remaining oil and the dough.",
-                    [0, 1],
-                    IngredientAmounts: [new(0, new(2, "tbsp"))],
-                    OriginalRawText: "Add 2 tablespoons remaining oil and the dough."
-                ),
             ]
         );
         var calls = 0;
@@ -198,15 +215,10 @@ Add 2 tablespoons remaining oil and the dough.
                     request.Content!.ReadAsStringAsync().Result
                 );
                 var body = document.RootElement;
-                var schema = GetSchema(body, provider);
-                AssertStrictSchema(schema);
+                AssertStrictSchema(GetSchema(body, provider));
                 var systemPrompt = body.GetProperty("messages")[0]
                     .GetProperty("content")
                     .GetString()!;
-                StringAssert.Contains(systemPrompt, "alternativeMeasurement");
-                StringAssert.Contains(systemPrompt, "ingredientAmounts");
-                StringAssert.Contains(systemPrompt, "referencedRecipeTitle");
-                StringAssert.Contains(systemPrompt, "suggestedCategory");
                 if (provider == LlmProvider.Ollama)
                 {
                     var options = body.GetProperty("options");
@@ -215,36 +227,23 @@ Add 2 tablespoons remaining oil and the dough.
                     Assert.AreEqual(0, options.GetProperty("temperature").GetDouble());
                     Assert.AreEqual(1, options.GetProperty("repeat_penalty").GetDouble());
                 }
-                if (calls == 2)
+                if (calls == 1)
                 {
-                    var stepFields = schema
-                        .GetProperty("properties")
-                        .GetProperty("steps")
-                        .GetProperty("items")
-                        .GetProperty("properties");
-                    Assert.AreEqual(
-                        1,
-                        stepFields
-                            .GetProperty("ingredientAmounts")
-                            .GetProperty("items")
-                            .GetProperty("properties")
-                            .GetProperty("ingredientIndex")
-                            .GetProperty("maximum")
-                            .GetInt32()
+                    StringAssert.Contains(systemPrompt, "alternativeMeasurement");
+                    StringAssert.Contains(systemPrompt, "referencedRecipeTitle");
+                    StringAssert.Contains(systemPrompt, "suggestedCategory");
+                    return Response(
+                        provider,
+                        JsonSerializer.Serialize(
+                            recipe,
+                            new JsonSerializerOptions(JsonSerializerDefaults.Web)
+                        )
                     );
-                    if (requireCorrection)
-                        return Response(
-                            provider,
-                            """{"steps":[{"instruction":"Add oil.","ingredientIndices":[9]}]}"""
-                        );
                 }
-                var result = calls == 1 ? recipe with { Steps = null } : recipe;
+                StringAssert.Contains(UserText(body), "[A1: 2 tablespoons]");
                 return Response(
                     provider,
-                    JsonSerializer.Serialize(
-                        result,
-                        new JsonSerializerOptions(JsonSerializerDefaults.Web)
-                    )
+                    """{"amounts":{"A1":"0 oil","A2":"0 oil"},"steps":{"1":["0 oil"],"2":["0 oil","1 Dough"]}}"""
                 );
             })
         );
@@ -256,8 +255,20 @@ Add 2 tablespoons remaining oil and the dough.
             },
             new LlmExtractionContext(source, [])
         );
-        Assert.AreEqual(requireCorrection ? 3 : 2, calls);
-        Assert.IsEmpty(RecipeExtractionDiagnostics.GetReviewIssues(extracted, source));
+        Assert.AreEqual(2, calls);
+        Assert.IsEmpty(extracted.TaggerIssues ?? []);
+        Assert.AreEqual("Heat 2 tablespoons oil.", extracted.Steps![0].Instruction);
+        var inline = extracted.Steps[0].InlineAmounts!.Single();
+        Assert.AreEqual(5, inline.Start);
+        Assert.AreEqual("2 tablespoons", inline.Text);
+        Assert.AreEqual(InlineStepAmountKind.Ingredient, inline.Kind);
+        Assert.AreEqual(0, inline.IngredientIndex);
+        Assert.AreEqual(2m, inline.Measurement.Quantity);
+        CollectionAssert.AreEqual(
+            new[] { 0, 1 },
+            extracted.Steps[1].IngredientIndices!.Order().ToArray()
+        );
+
         var draft = RecipeDraftNormalizer.Normalize(
             extracted,
             [],
@@ -271,111 +282,38 @@ Add 2 tablespoons remaining oil and the dough.
         );
         Assert.AreEqual(2m, draft.Ingredients![0].AlternativeMeasurement!.Quantity);
         Assert.AreEqual("Dough", draft.Ingredients[1].ReferencedRecipeTitle);
-        Assert.AreEqual(2m, draft.Steps![1].IngredientAmounts![0].Measurement.Quantity);
-        Assert.IsEmpty(draft.MeasurementWarnings ?? []);
+        var draftInline = draft.Steps![1].InlineAmounts!.Single();
+        Assert.AreEqual(InlineStepAmountKind.Ingredient, draftInline.Kind);
+        Assert.AreEqual(0, draftInline.IngredientIndex);
+        Assert.AreEqual(2m, draftInline.Measurement.Quantity);
     }
 
     [TestMethod]
-    public async Task Extract_RepairsDetectedErrorOnceAndRetainsUnresolvedIssuesForReview()
+    public async Task Extract_UnclassifiedAmountIsReturnedAsTaggerIssue()
     {
-        var calls = 0;
-        var badSteps = """{"steps":[{"instruction":"Melt butter.","ingredientIndices":[8]}]}""";
         using var http = new HttpClient(
             new Handler(request =>
-            {
-                calls++;
-                if (calls == 3)
-                {
-                    var body = request.Content!.ReadAsStringAsync().Result;
-                    StringAssert.Contains(body, "out of range");
-                    return Response(
-                        LlmProvider.Ollama,
-                        IngredientsJson[..^1] + ",\"steps\":" + badSteps[9..]
-                    );
-                }
-                return Response(LlmProvider.Ollama, calls == 1 ? IngredientsJson : badSteps);
-            })
+                Response(
+                    LlmProvider.Ollama,
+                    IsMethodTagRequest(request.Content!.ReadAsStringAsync().Result)
+                        ? "{}"
+                        : IngredientsJson
+                )
+            )
         );
         var result = await new LlmExtractionClient(http).ExtractRecipeFromTextAsync(
             Config(LlmProvider.Ollama, "gemma4:e4b"),
-            new LlmExtractionContext(Source, [])
+            new LlmExtractionContext(MeasuredSource, [])
         );
-        Assert.AreEqual(3, calls);
-        Assert.IsNotEmpty(RecipeExtractionDiagnostics.GetIssues(result, Source));
-    }
-
-    [TestMethod]
-    public async Task Extract_StepPhaseFailureIsNotReturnedAsSuccessfulPartialRecipe()
-    {
-        var calls = 0;
-        using var http = new HttpClient(
-            new Handler(_ =>
-            {
-                calls++;
-                return Response(
-                    LlmProvider.Ollama,
-                    calls == 1 ? IngredientsJson : """{"steps":[]}"""
-                );
-            })
-        );
-        await Assert.ThrowsAsync<DomainValidationException>(() =>
-            new LlmExtractionClient(http).ExtractRecipeFromTextAsync(
-                Config(LlmProvider.Ollama, "gemma4:e4b"),
-                new LlmExtractionContext(Source, [])
-            )
-        );
-        Assert.AreEqual(2, calls);
-    }
-
-    [TestMethod]
-    public async Task Extract_EmptyCorrectionKeepsTheCompleteDraft()
-    {
-        var calls = 0;
-        using var http = new HttpClient(
-            new Handler(_ =>
-            {
-                calls++;
-                return Response(
-                    LlmProvider.Ollama,
-                    calls switch
-                    {
-                        1 => IngredientsJson,
-                        2 =>
-                            """{"steps":[{"instruction":"Melt 2 tbsp butter.","ingredientIndices":[0]}]}""",
-                        _ => """{"title":"Butter sauce","ingredients":[],"steps":[]}""",
-                    }
-                );
-            })
-        );
-        var result = await new LlmExtractionClient(http).ExtractRecipeFromTextAsync(
-            Config(LlmProvider.Ollama, "gemma4:e4b") with
-            {
-                ExtractionRepairRounds = 3,
-            },
-            new LlmExtractionContext(Source, [])
-        );
-        Assert.AreEqual(3, calls);
         Assert.AreEqual("Melt 2 tbsp butter.", result.Steps![0].Instruction);
-        Assert.HasCount(1, result.Ingredients!);
+        Assert.IsTrue(result.TaggerIssues!.Any(issue => issue.Contains("not classified")));
     }
 
-    private const string TwoIssueSteps =
-        """{"steps":[{"instruction":"Melt butter.","ingredientIndices":[8]}]}""";
-    private const string OneIssueRecipe = """
-        {"title":"Butter sauce","ingredients":[{"quantity":2,"unit":"tbsp","canonicalFoodName":"butter","displayName":"butter","originalRawText":"2 tbsp butter"}],"steps":[{"instruction":"Melt 2 tbsp butter.","ingredientIndices":[0]}]}
-        """;
-    private const string CleanRecipe = """
-        {"title":"Butter sauce","ingredients":[{"quantity":2,"unit":"tbsp","canonicalFoodName":"butter","displayName":"butter","originalRawText":"2 tbsp butter"}],"steps":[{"instruction":"Melt the butter.","ingredientIndices":[0]}]}
-        """;
-
     [TestMethod]
-    [DataRow(LlmProvider.Ollama, false)]
-    [DataRow(LlmProvider.Ollama, true)]
-    [DataRow(LlmProvider.OpenAiCompatible, false)]
-    [DataRow(LlmProvider.OpenAiCompatible, true)]
-    public async Task ManualRepair_UsesHintAndSourceEvenWhenAutomaticRoundsAreDisabled(
-        LlmProvider provider,
-        bool useImages
+    [DataRow(LlmProvider.Ollama)]
+    [DataRow(LlmProvider.OpenAiCompatible)]
+    public async Task ManualRepair_ReExtractsFromSourceWithHintAndPreviousIngredients(
+        LlmProvider provider
     )
     {
         var calls = 0;
@@ -387,48 +325,37 @@ Add 2 tablespoons remaining oil and the dough.
                     request.Content!.ReadAsStringAsync().Result
                 );
                 var body = document.RootElement;
-                var user = body.GetProperty("messages")[1];
-                var content = user.GetProperty("content");
-                var text =
-                    content.ValueKind == JsonValueKind.Array
-                        ? content[0].GetProperty("text").GetString()!
-                        : content.GetString()!;
-                StringAssert.Contains(text, "Keep the user's unsalted butter.");
-                StringAssert.Contains(text, "Butter sauce");
-                if (useImages && provider == LlmProvider.Ollama)
+                var text = UserText(body);
+                StringAssert.Contains(
+                    text,
+                    "Reviewer feedback (apply it): Keep the user's unsalted butter."
+                );
+                if (calls == 1)
                 {
-                    Assert.AreEqual("abc", user.GetProperty("images")[0].GetString());
-                }
-                if (useImages && provider == LlmProvider.OpenAiCompatible)
-                {
-                    Assert.AreEqual(
-                        "data:image/jpeg;base64,abc",
-                        content[1].GetProperty("image_url").GetProperty("url").GetString()
+                    StringAssert.Contains(text, "Butter sauce");
+                    StringAssert.Contains(text, "Previous ingredient rows");
+                    StringAssert.Contains(text, "2 tbsp butter");
+                    StringAssert.Contains(
+                        body.GetProperty("messages")[0].GetProperty("content").GetString()!,
+                        "Sauce"
                     );
+                    return Response(provider, IngredientsJson);
                 }
-                return Response(provider, CleanRecipe);
+                return Response(provider, ButterTags);
             })
         );
         var original = JsonSerializer.Deserialize<LlmExtractedRecipePayload>(
-            OneIssueRecipe,
+            CleanRecipe,
             new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
         )!;
         var result = await new LlmExtractionClient(http).RepairRecipeDraftAsync(
-            Config(provider, "text-model") with
-            {
-                VisionModel = "vision-model",
-                ExtractionRepairRounds = 0,
-            },
-            new LlmRecipeRepairContext(
-                Source,
-                useImages ? [new LlmVisionImageInput(1, "image/jpeg", "abc")] : [],
-                original,
-                "Keep the user's unsalted butter."
-            )
+            Config(provider, "text-model"),
+            new LlmRecipeRepairContext(Source, original, "Keep the user's unsalted butter.")
         );
 
-        Assert.AreEqual(1, calls);
+        Assert.AreEqual(2, calls);
         Assert.AreEqual("Melt the butter.", result.Draft.Steps![0].Instruction);
+        Assert.IsEmpty(result.Notices);
     }
 
     [TestMethod]
@@ -445,402 +372,36 @@ Add 2 tablespoons remaining oil and the dough.
         await Assert.ThrowsAsync<LlmHostUnavailableException>(() =>
             new LlmExtractionClient(http).RepairRecipeDraftAsync(
                 Config(LlmProvider.Ollama, "text-model"),
-                new LlmRecipeRepairContext(Source, [], original, "Make the timer clearer.")
+                new LlmRecipeRepairContext(Source, original, "Make the timer clearer.")
             )
         );
     }
 
     [TestMethod]
-    [DataRow(false)]
-    [DataRow(true)]
-    public async Task ManualRepair_NoticesNewFindingsEvenWhenTheIssueCountDoesNotIncrease(
-        bool countDecreases
-    )
-    {
-        const string proposal = """
-            {"title":"Butter sauce","ingredients":[{"quantity":2,"unit":"tbsp","canonicalFoodName":"butter","displayName":"butter","originalRawText":"2 tbsp butter"}],"steps":[{"instruction":"Melt the butter.","ingredientIndices":[0],"timers":[{"durationSeconds":120,"label":"Cook"}]}]}
-            """;
-        using var http = new HttpClient(new Handler(_ => Response(LlmProvider.Ollama, proposal)));
-        var original = JsonSerializer.Deserialize<LlmExtractedRecipePayload>(
-            OneIssueRecipe,
-            new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
-        )!;
-        if (countDecreases)
-        {
-            original = original with
-            {
-                Steps =
-                [
-                    original.Steps![0] with
-                    {
-                        Timers = [new LlmExtractedTimerItem(120, "Timer")],
-                    },
-                ],
-            };
-        }
-
-        var result = await new LlmExtractionClient(http).RepairRecipeDraftAsync(
-            Config(LlmProvider.Ollama, "text-model") with
-            {
-                ExtractionRepairRounds = 0,
-            },
-            new LlmRecipeRepairContext(Source, [], original, null)
-        );
-
-        var before =
-            RecipeExtractionDiagnostics.GetReviewIssues(original, Source).Count
-            + RecipeExtractionDiagnostics.GetQualityWarnings(original).Count;
-        var after =
-            RecipeExtractionDiagnostics.GetReviewIssues(result.Draft, Source).Count
-            + RecipeExtractionDiagnostics.GetQualityWarnings(result.Draft).Count;
-        Assert.AreEqual(countDecreases ? after + 1 : after, before);
-        Assert.AreEqual("Melt the butter.", result.Draft.Steps![0].Instruction);
-        Assert.IsTrue(
-            result.Notices.Any(notice => notice.Contains("new or changed review findings"))
-        );
-    }
-
-    [TestMethod]
-    public async Task ManualRepair_DoesNotLabelUnchangedFindingsAsNew()
+    public async Task ManualRepair_ReportsRemainingTaggerIssuesAsNotices()
     {
         using var http = new HttpClient(
-            new Handler(_ => Response(LlmProvider.Ollama, OneIssueRecipe))
-        );
-        var original = JsonSerializer.Deserialize<LlmExtractedRecipePayload>(
-            OneIssueRecipe,
-            new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
-        )!;
-
-        var result = await new LlmExtractionClient(http).RepairRecipeDraftAsync(
-            Config(LlmProvider.Ollama, "text-model") with
-            {
-                ExtractionRepairRounds = 0,
-            },
-            new LlmRecipeRepairContext(Source, [], original, null)
-        );
-
-        Assert.IsFalse(
-            result.Notices.Any(notice => notice.Contains("new or changed review findings"))
-        );
-    }
-
-    [TestMethod]
-    public async Task ManualRepair_RejectsMalformedNestedRowsBeforeComputingDiagnostics()
-    {
-        var calls = 0;
-        using var http = new HttpClient(
-            new Handler(_ =>
-            {
-                calls++;
-                return Response(
+            new Handler(request =>
+                Response(
                     LlmProvider.Ollama,
-                    """{"title":"Butter","ingredients":[null],"steps":[{"instruction":"Melt."}]}"""
-                );
-            })
+                    IsMethodTagRequest(request.Content!.ReadAsStringAsync().Result)
+                        ? "{}"
+                        : IngredientsJson
+                )
+            )
         );
         var original = JsonSerializer.Deserialize<LlmExtractedRecipePayload>(
             CleanRecipe,
             new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
         )!;
 
-        await Assert.ThrowsAsync<DomainValidationException>(() =>
-            new LlmExtractionClient(http).RepairRecipeDraftAsync(
-                Config(LlmProvider.Ollama, "text-model"),
-                new LlmRecipeRepairContext(Source, [], original, null)
-            )
-        );
-        Assert.AreEqual(2, calls);
-    }
-
-    [TestMethod]
-    public async Task ManualRepair_RetriesAnInvalidIndexWithSpecificFeedbackEvenWhenRoundsAreZero()
-    {
-        var calls = 0;
-        using var http = new HttpClient(
-            new Handler(request =>
-            {
-                calls++;
-                if (calls == 1)
-                {
-                    return Response(
-                        LlmProvider.Ollama,
-                        """{"title":"Butter","ingredients":[{"displayName":"butter"}],"steps":[{"instruction":"Melt.","ingredientIndices":[2]}]}"""
-                    );
-                }
-                var body = request.Content!.ReadAsStringAsync().Result;
-                StringAssert.Contains(body, "ingredient index 2");
-                StringAssert.Contains(body, "indexed 0 through 0");
-                StringAssert.Contains(body, "Keep the butter.");
-                return Response(LlmProvider.Ollama, CleanRecipe);
-            })
-        );
-        var original = JsonSerializer.Deserialize<LlmExtractedRecipePayload>(
-            OneIssueRecipe,
-            new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
-        )!;
-
         var result = await new LlmExtractionClient(http).RepairRecipeDraftAsync(
-            Config(LlmProvider.Ollama, "text-model") with
-            {
-                ExtractionRepairRounds = 0,
-            },
-            new LlmRecipeRepairContext(Source, [], original, "Keep the butter.")
+            Config(LlmProvider.Ollama, "text-model"),
+            new LlmRecipeRepairContext(MeasuredSource, original, null)
         );
 
-        Assert.AreEqual(2, calls);
-        Assert.AreEqual("Melt the butter.", result.Draft.Steps![0].Instruction);
-        Assert.IsTrue(result.Notices.Any(notice => notice.Contains("retried once")));
-    }
-
-    [TestMethod]
-    public async Task ManualRepair_KeepsAnEarlierProposalIfAnInvalidLaterRoundCannotBeRetried()
-    {
-        var calls = 0;
-        using var http = new HttpClient(
-            new Handler(_ =>
-            {
-                calls++;
-                return Response(
-                    LlmProvider.Ollama,
-                    calls == 1
-                        ? OneIssueRecipe
-                        : """{"title":"Butter","ingredients":[{"displayName":"butter"}],"steps":[{"instruction":"Melt.","ingredientIndices":[7]}]}"""
-                );
-            })
-        );
-        var original = JsonSerializer.Deserialize<LlmExtractedRecipePayload>(
-            OneIssueRecipe,
-            new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
-        )!;
-        original = original with
-        {
-            Steps =
-            [
-                original.Steps![0] with
-                {
-                    Instruction = "Melt 2 tbsp butter and simmer for 3 minutes.",
-                    IngredientIndices = [7],
-                },
-            ],
-        };
-
-        var result = await new LlmExtractionClient(http).RepairRecipeDraftAsync(
-            Config(LlmProvider.Ollama, "text-model") with
-            {
-                ExtractionRepairRounds = 2,
-            },
-            new LlmRecipeRepairContext(Source, [], original)
-        );
-
-        Assert.AreEqual(3, calls);
-        Assert.AreEqual("Melt 2 tbsp butter.", result.Draft.Steps![0].Instruction);
-        Assert.IsTrue(result.Notices.Any(notice => notice.Contains("earlier proposal was kept")));
-    }
-
-    [TestMethod]
-    public async Task Extract_RepairsIterativelyWhileEachRoundImproves()
-    {
-        var calls = 0;
-        using var http = new HttpClient(
-            new Handler(request =>
-            {
-                calls++;
-                var body = request.Content!.ReadAsStringAsync().Result;
-                if (calls == 3)
-                {
-                    StringAssert.Contains(body, "out of range");
-                }
-                if (calls == 4)
-                {
-                    StringAssert.Contains(body, "Melt 2 tbsp butter.");
-                    Assert.DoesNotContain("out of range", body);
-                }
-                return Response(
-                    LlmProvider.Ollama,
-                    calls switch
-                    {
-                        1 => IngredientsJson,
-                        2 => TwoIssueSteps,
-                        3 => OneIssueRecipe,
-                        _ => CleanRecipe,
-                    }
-                );
-            })
-        );
-        var result = await new LlmExtractionClient(http).ExtractRecipeFromTextAsync(
-            Config(LlmProvider.Ollama, "gemma4:e4b") with
-            {
-                ExtractionRepairRounds = 3,
-            },
-            new LlmExtractionContext(Source, [])
-        );
-        Assert.AreEqual(4, calls);
-        Assert.IsEmpty(RecipeExtractionDiagnostics.GetIssues(result, Source));
-    }
-
-    [TestMethod]
-    public async Task Extract_RepairStopsWhenARoundDoesNotImprove()
-    {
-        var calls = 0;
-        using var http = new HttpClient(
-            new Handler(_ =>
-            {
-                calls++;
-                return Response(
-                    LlmProvider.Ollama,
-                    calls switch
-                    {
-                        1 => IngredientsJson,
-                        2 => TwoIssueSteps,
-                        _ => IngredientsJson[..^1] + ",\"steps\":" + TwoIssueSteps[9..],
-                    }
-                );
-            })
-        );
-        await new LlmExtractionClient(http).ExtractRecipeFromTextAsync(
-            Config(LlmProvider.Ollama, "gemma4:e4b") with
-            {
-                ExtractionRepairRounds = 5,
-            },
-            new LlmExtractionContext(Source, [])
-        );
-        Assert.AreEqual(3, calls);
-    }
-
-    [TestMethod]
-    public async Task Extract_RepairKeepsTheBetterDraftWhenARoundGetsWorse()
-    {
-        var calls = 0;
-        using var http = new HttpClient(
-            new Handler(_ =>
-            {
-                calls++;
-                return Response(
-                    LlmProvider.Ollama,
-                    calls switch
-                    {
-                        1 => IngredientsJson,
-                        2 =>
-                            """{"steps":[{"instruction":"Melt 2 tbsp butter.","ingredientIndices":[0]}]}""",
-                        _ => IngredientsJson[..^1] + ",\"steps\":" + TwoIssueSteps[9..],
-                    }
-                );
-            })
-        );
-        var result = await new LlmExtractionClient(http).ExtractRecipeFromTextAsync(
-            Config(LlmProvider.Ollama, "gemma4:e4b") with
-            {
-                ExtractionRepairRounds = 3,
-            },
-            new LlmExtractionContext(Source, [])
-        );
-        Assert.AreEqual(3, calls);
-        Assert.AreEqual("Melt 2 tbsp butter.", result.Steps![0].Instruction);
-        CollectionAssert.AreEqual(new[] { 0 }, result.Steps[0].IngredientIndices!.ToArray());
-    }
-
-    [TestMethod]
-    [DataRow(HttpStatusCode.OK)]
-    [DataRow(HttpStatusCode.InternalServerError)]
-    public async Task Extract_FailedRepairRoundKeepsTheDraft(HttpStatusCode repairStatus)
-    {
-        var calls = 0;
-        using var http = new HttpClient(
-            new Handler(_ =>
-            {
-                calls++;
-                if (calls < 3)
-                {
-                    return Response(
-                        LlmProvider.Ollama,
-                        calls == 1 ? IngredientsJson : TwoIssueSteps
-                    );
-                }
-                return new HttpResponseMessage(repairStatus)
-                {
-                    Content = new StringContent(
-                        repairStatus == HttpStatusCode.OK
-                            ? JsonSerializer.Serialize(
-                                new { message = new { content = "not json" } }
-                            )
-                            : "boom",
-                        Encoding.UTF8,
-                        "application/json"
-                    ),
-                };
-            })
-        );
-        var result = await new LlmExtractionClient(http).ExtractRecipeFromTextAsync(
-            Config(LlmProvider.Ollama, "gemma4:e4b") with
-            {
-                ExtractionRepairRounds = 2,
-            },
-            new LlmExtractionContext(Source, [])
-        );
-        Assert.AreEqual(3, calls);
-        CollectionAssert.AreEqual(new[] { 8 }, result.Steps![0].IngredientIndices!.ToArray());
-    }
-
-    [TestMethod]
-    [DataRow(0, 2)]
-    [DataRow(1, 3)]
-    public async Task Extract_RepairRoundsSettingControlsCorrectionRequests(
-        int repairRounds,
-        int expectedCalls
-    )
-    {
-        var calls = 0;
-        using var http = new HttpClient(
-            new Handler(_ =>
-            {
-                calls++;
-                return Response(
-                    LlmProvider.Ollama,
-                    calls switch
-                    {
-                        1 => IngredientsJson,
-                        2 => TwoIssueSteps,
-                        _ => CleanRecipe,
-                    }
-                );
-            })
-        );
-        await new LlmExtractionClient(http).ExtractRecipeFromTextAsync(
-            Config(LlmProvider.Ollama, "gemma4:e4b") with
-            {
-                ExtractionRepairRounds = repairRounds,
-            },
-            new LlmExtractionContext(Source, [])
-        );
-        Assert.AreEqual(expectedCalls, calls);
-    }
-
-    [TestMethod]
-    [DataRow(LlmProvider.Ollama)]
-    [DataRow(LlmProvider.OpenAiCompatible)]
-    public async Task Extract_SinglePassModelsAreRepairedToo(LlmProvider provider)
-    {
-        var calls = 0;
-        using var http = new HttpClient(
-            new Handler(request =>
-            {
-                calls++;
-                if (calls == 2)
-                {
-                    StringAssert.Contains(
-                        request.Content!.ReadAsStringAsync().Result,
-                        "VALIDATION ISSUES"
-                    );
-                }
-                return Response(provider, calls == 1 ? OneIssueRecipe : CleanRecipe);
-            })
-        );
-        var result = await new LlmExtractionClient(http).ExtractRecipeFromTextAsync(
-            Config(provider, "gemma4:12b"),
-            new LlmExtractionContext(Source, [])
-        );
-        Assert.AreEqual(2, calls);
-        Assert.AreEqual("Melt the butter.", result.Steps![0].Instruction);
+        Assert.IsNotEmpty(result.Notices);
+        Assert.IsTrue(result.Notices.All(notice => notice.StartsWith("Still needs review: ")));
     }
 
     [TestMethod]

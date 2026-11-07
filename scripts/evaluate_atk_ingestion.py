@@ -64,6 +64,23 @@ def ingredient_amounts_in_prose(instruction):
     ]
 
 
+def untagged_ingredient_amounts(step):
+    """Steps keep amounts verbatim, so each ingredient amount must be a scalable
+    Ingredient or Mixture span rather than plain text."""
+    instruction = step["instruction"]
+    spans = [
+        (a["start"], a["start"] + a["length"])
+        for a in step.get("inlineAmounts") or []
+        if a.get("kind") in ("Ingredient", "Mixture")
+    ]
+    prose_amounts = ingredient_amounts_in_prose(instruction)
+    return [
+        m.group() for m in AMOUNT_IN_INSTRUCTION.finditer(instruction)
+        if m.group() in prose_amounts
+        and not any(start <= m.start() and m.end() <= end for start, end in spans)
+    ]
+
+
 def _step_texts(recipe):
     return [re.sub(r"^(\[[^\]]+\]\s*)?\d+\.\s*", r"\1", s) for s in recipe["steps"]]
 
@@ -132,7 +149,7 @@ def score_result(case, source, result):
     if draft.get("title", "").casefold() != source["title"].casefold():
         issues.append("Title differs from source")
     for index, step in enumerate(steps):
-        if ingredient_amounts_in_prose(step["instruction"]):
+        if untagged_ingredient_amounts(step):
             issues.append(f"Step {index + 1}: hard-coded ingredient amount")
         indices = step.get("ingredientIndices") or []
         if any(i < 0 or i >= len(ingredients) for i in indices):
@@ -185,11 +202,23 @@ def score_result(case, source, result):
             try:
                 portions = []
                 for index, amount in zip(matching_indices, amounts):
-                    step_amounts = [
-                        converted_amount(a["measurement"], "quantity", unit)
-                        for s in steps for a in (s.get("ingredientAmounts") or [])
-                        if a["ingredientIndex"] == index
-                    ]
+                    step_amounts = []
+                    for step_index, s in enumerate(steps):
+                        for a in s.get("ingredientAmounts") or []:
+                            if a["ingredientIndex"] != index:
+                                continue
+                            step_total = converted_amount(a["measurement"], "quantity", unit)
+                            spans = [
+                                converted_amount(span["measurement"], "quantity", unit)
+                                for span in (s.get("inlineAmounts") or [])
+                                if span.get("kind") == "Ingredient"
+                                and span.get("ingredientIndex") == index
+                            ]
+                            # Steps are whole source paragraphs; each inline span is one addition,
+                            # and any untagged remainder assigned by reconciliation is another.
+                            step_amounts.extend(spans)
+                            if step_total - sum(spans) > 0.001:
+                                step_amounts.append(step_total - sum(spans))
                     portions.extend(step_amounts or [amount])
                 actual = sorted(a for a in portions if a > 0)
             except ValueError:
@@ -247,7 +276,6 @@ def main():
     parser.add_argument("--top-k", type=int, help="LLM Settings Top K (blank in the app = model default)")
     parser.add_argument("--context-window", type=int, default=16384, help="LLM Settings Context window (num_ctx and num_predict)")
     parser.add_argument("--ollama-options", default="{}", help="Experimental overrides; recorded in every result")
-    parser.add_argument("--repair-rounds", type=int, default=1, help="LLM Settings Repair Rounds (0-5)")
     parser.add_argument("--source-style", choices=SOURCE_STYLES, default="canonical",
                         help="canonical = importer layout; plain/web exercise LLM source sectioning")
     parser.add_argument("--output", type=Path, required=True, help="Private results directory; contains source text")
@@ -264,8 +292,6 @@ def main():
         parser.error("--top-k must be between 1 and 1000")
     if not 2048 <= args.context_window <= 65536:
         parser.error("--context-window must be between 2048 and 65536")
-    if not 0 <= args.repair_rounds <= 5:
-        parser.error("--repair-rounds must be between 0 and 5")
     if not isinstance(json.loads(args.ollama_options), dict):
         parser.error("--ollama-options must be a JSON object")
     cases = json.loads(args.cases.read_text(encoding="utf-8"))
@@ -299,6 +325,8 @@ def main():
             ROOT / "Core" / "Ingestion" / "RecipeExtractionDiagnostics.cs",
             ROOT / "Core" / "Ingestion" / "RecipeSourceSectioner.cs",
             ROOT / "Core" / "Ingestion" / "StepTimerExtractor.cs",
+            ROOT / "Core" / "Ingestion" / "InstructionAmountTagger.cs",
+            ROOT / "Core" / "Ingestion" / "SourceMeasurementParser.cs",
             args.cases,
         ]
         metadata = {
@@ -311,7 +339,6 @@ def main():
             "models": args.models, "thinking": args.thinking,
             "sampling": {"temperature": args.temperature, "topP": args.top_p, "topK": args.top_k},
             "contextWindowTokens": args.context_window,
-            "repairRounds": args.repair_rounds,
             "sourceStyle": args.source_style,
             "ollamaOptions": json.loads(args.ollama_options),
             "caseIds": [c["id"] for c in cases],
@@ -328,7 +355,6 @@ def main():
                 args.ollama_options,
                 *("" if value is None else str(value) for value in (args.temperature, args.top_p, args.top_k)),
                 str(args.context_window),
-                str(args.repair_rounds),
             ])
             if completed.returncode not in (0, 1):
                 raise RuntimeError(f"Evaluator exited with code {completed.returncode}")

@@ -22,7 +22,6 @@ import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import type {
   LlmConnectionTestResultDto,
-  LlmExtractionStrategy,
   LlmModelProfile,
   LlmProvider,
   LlmSettingsDto,
@@ -154,12 +153,6 @@ export class LlmSettingsDialogComponent implements OnInit {
       Validators.min(0),
       Validators.max(10),
     ]),
-    extractionRepairRounds: this.fb.nonNullable.control<number>(1, [
-      Validators.required,
-      Validators.min(0),
-      Validators.max(5),
-      Validators.pattern(/^\d+$/),
-    ]),
     temperature: this.fb.control<number | null>(null, [Validators.min(0), Validators.max(2)]),
     topP: this.fb.control<number | null>(null, [Validators.min(0), Validators.max(1)]),
     topK: this.fb.control<number | null>(null, [
@@ -167,7 +160,6 @@ export class LlmSettingsDialogComponent implements OnInit {
       Validators.max(1000),
       Validators.pattern(/^\d+$/),
     ]),
-    extractionStrategy: this.fb.nonNullable.control<LlmExtractionStrategy>('Auto'),
     refineModel: this.fb.nonNullable.control<string>('', [Validators.maxLength(200)]),
     refineEnableThinking: this.fb.nonNullable.control<boolean>(true),
     refineTemperature: this.fb.control<number | null>(null, [Validators.min(0), Validators.max(2)]),
@@ -249,11 +241,9 @@ export class LlmSettingsDialogComponent implements OnInit {
             enableThinking: settings.enableThinking ?? false,
             enableIngestion: settings.enableIngestion ?? true,
             maxIngestionRetries: settings.maxIngestionRetries ?? 3,
-            extractionRepairRounds: settings.extractionRepairRounds ?? 1,
             temperature: settings.temperature ?? null,
             topP: settings.topP ?? null,
             topK: settings.topK ?? null,
-            extractionStrategy: settings.extractionStrategy ?? 'Auto',
             refineModel: settings.refineModel ?? '',
             refineEnableThinking: settings.refineEnableThinking ?? true,
             refineTemperature: settings.refineTemperature ?? null,
@@ -344,11 +334,9 @@ export class LlmSettingsDialogComponent implements OnInit {
         enableThinking: values.enableThinking,
         enableIngestion: values.enableIngestion,
         maxIngestionRetries: values.maxIngestionRetries,
-        extractionRepairRounds: values.extractionRepairRounds,
         temperature: values.temperature,
         topP: values.topP,
         topK: values.topK,
-        extractionStrategy: values.extractionStrategy,
         refineModel: values.refineModel.trim() || null,
         refineEnableThinking: values.refineEnableThinking,
         refineTemperature: values.refineTemperature,
@@ -390,8 +378,7 @@ export class LlmSettingsDialogComponent implements OnInit {
 
   /**
    * Fills the model settings with a profile's measured recommendations. The model name is kept
-   * so derived models (for example with a custom num_gpu) can use a profile; when the name does
-   * not match the profile, the extraction strategy is set explicitly instead of Auto.
+   * so derived models (for example with a custom num_gpu) can use a profile.
    */
   applyProfile(): void {
     const profile = this.selectedProfile();
@@ -402,8 +389,6 @@ export class LlmSettingsDialogComponent implements OnInit {
     if (!controls.textModel.value.trim()) {
       controls.textModel.setValue(profile.modelTag);
     }
-    const matchesByName =
-      matchModelProfile(this.profiles(), controls.textModel.value)?.id === profile.id;
     this.form.patchValue({
       enableThinking: profile.enableThinking,
       temperature: profile.temperature,
@@ -411,12 +396,6 @@ export class LlmSettingsDialogComponent implements OnInit {
       topK: profile.topK,
       contextWindowTokens: profile.contextWindowTokens,
       requestTimeoutSeconds: profile.requestTimeoutSeconds,
-      extractionRepairRounds: profile.extractionRepairRounds,
-      extractionStrategy: matchesByName
-        ? 'Auto'
-        : profile.useStagedExtraction
-          ? 'Staged'
-          : 'SinglePass',
     });
     this.form.markAsDirty();
     this.profileMessage.set(

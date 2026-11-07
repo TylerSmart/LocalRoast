@@ -72,6 +72,43 @@ public sealed class RecipeDraftNormalizerTests
     }
 
     [TestMethod]
+    public void Normalize_KeepsTheEquivalentOnTheOnlyMeasuredRowOfAPlusExtraLine()
+    {
+        const string line = "5 cups (25 ounces) all-purpose flour, plus extra for dusting";
+        var raw = new LlmExtractedRecipePayload(
+            Title: "Bread",
+            Ingredients:
+            [
+                new(
+                    null,
+                    5m,
+                    null,
+                    "cup",
+                    "all-purpose flour",
+                    "all-purpose flour",
+                    OriginalRawText: line
+                ),
+                new(
+                    null,
+                    null,
+                    null,
+                    null,
+                    "all-purpose flour",
+                    "all-purpose flour",
+                    PreparationNote: "for dusting",
+                    IsOptional: true,
+                    OriginalRawText: line
+                ),
+            ]
+        );
+        var draft = RecipeDraftNormalizer.Normalize(raw, [], [], null, null, null, null, null);
+        Assert.AreEqual(25m, draft.Ingredients![0].AlternativeMeasurement!.Quantity);
+        Assert.IsNull(draft.Ingredients[1].Quantity);
+        Assert.IsNull(draft.Ingredients[1].AlternativeMeasurement);
+        Assert.IsFalse(draft.MeasurementWarnings?.Any(w => w.Contains("split portion")) ?? false);
+    }
+
+    [TestMethod]
     [DataRow("tsp", 0.03125, "1/32 tsp cayenne", MeasurementUnit.Tsp, 0.03125)]
     [DataRow("g", 0.01, "0.01 g saffron", MeasurementUnit.G, 0.01)]
     [DataRow("tsp", 0.01, "Pinch cayenne", MeasurementUnit.Pinch, 1)]

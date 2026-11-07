@@ -117,13 +117,29 @@ export function formatStepIngredient(
 }
 
 export function stepIngredientCallouts(
-  step: RecipeStepDto,
+  step: Pick<
+    RecipeStepDto,
+    'ingredientIds' | 'ingredientAmounts' | 'instruction' | 'inlineAmounts'
+  >,
   ingredients: readonly (IngredientMeasurements & { id: string; displayName: string })[],
   factor: number,
   system: UnitSystem,
 ): { id: string; label: string }[] {
+  const instruction = step.instruction ?? '';
+  const spanned = new Set(
+    (step.inlineAmounts ?? [])
+      .filter(
+        (a) =>
+          a.kind === 'Ingredient' &&
+          a.ingredientId &&
+          a.start >= 0 &&
+          a.length > 0 &&
+          a.start + a.length <= instruction.length,
+      )
+      .map((a) => a.ingredientId),
+  );
   return step.ingredientIds.flatMap((id) => {
-    const ingredient = ingredients.find((i) => i.id === id);
+    const ingredient = spanned.has(id) ? undefined : ingredients.find((i) => i.id === id);
     return ingredient
       ? [
           {

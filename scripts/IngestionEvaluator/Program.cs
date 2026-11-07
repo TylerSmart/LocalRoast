@@ -8,10 +8,10 @@ using App.Core.Exceptions;
 using App.Core.Ingestion;
 using App.Infrastructure.Ingestion;
 
-if (args.Length != 12)
+if (args.Length != 11)
 {
     Console.Error.WriteLine(
-        "Usage: IngestionEvaluator <input.json> <output-dir> <base-url> <model> <timeout-seconds> <thinking> <ollama-options-json> <temperature|\"\"> <top-p|\"\"> <top-k|\"\"> <context-window-tokens> <repair-rounds>"
+        "Usage: IngestionEvaluator <input.json> <output-dir> <base-url> <model> <timeout-seconds> <thinking> <ollama-options-json> <temperature|\"\"> <top-p|\"\"> <top-k|\"\"> <context-window-tokens>"
     );
     return 2;
 }
@@ -43,8 +43,7 @@ var config = new EffectiveLlmConnectionConfig(
     TopP: string.IsNullOrEmpty(args[8])
         ? null
         : double.Parse(args[8], CultureInfo.InvariantCulture),
-    TopK: string.IsNullOrEmpty(args[9]) ? null : int.Parse(args[9], CultureInfo.InvariantCulture),
-    ExtractionRepairRounds: int.Parse(args[11], CultureInfo.InvariantCulture)
+    TopK: string.IsNullOrEmpty(args[9]) ? null : int.Parse(args[9], CultureInfo.InvariantCulture)
 );
 var overrides =
     JsonNode.Parse(args[6]) as JsonObject
@@ -68,6 +67,7 @@ foreach (var item in cases)
     IngestionExtractedDraftDto? draft = null;
     string? structuredSource = null;
     string? error = null;
+    IReadOnlyList<string>? taggerIssues = null;
     double? sectioningSeconds = null;
     try
     {
@@ -88,10 +88,13 @@ foreach (var item in cases)
             sectioningSeconds = stopwatch.Elapsed.TotalSeconds;
         }
 
-        raw = await client.ExtractRecipeFromTextAsync(
-            config,
-            new LlmExtractionContext(structuredSource ?? item.SourceContent, [], item.FoodNames)
+        var extractionContext = new LlmExtractionContext(
+            structuredSource ?? item.SourceContent,
+            [],
+            item.FoodNames
         );
+        raw = await client.ExtractRecipeFromTextAsync(config, extractionContext);
+        taggerIssues = raw.TaggerIssues ?? [];
         draft = RecipeDraftNormalizer.Normalize(
             raw,
             [],
@@ -127,7 +130,7 @@ foreach (var item in cases)
                 config.TopP,
                 config.TopK,
                 config.ContextWindowTokens,
-                config.ExtractionRepairRounds,
+                TaggerIssues = taggerIssues,
                 Overrides = overrides,
                 ElapsedSeconds = stopwatch.Elapsed.TotalSeconds,
                 SectioningSeconds = sectioningSeconds,

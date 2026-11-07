@@ -73,7 +73,22 @@ public record LlmExtractedStepItem(
     IReadOnlyList<int>? IngredientIndices = null,
     IReadOnlyList<LlmExtractedTimerItem>? Timers = null,
     IReadOnlyList<LlmExtractedStepIngredientAmountItem>? IngredientAmounts = null,
-    string? OriginalRawText = null
+    string? OriginalRawText = null,
+    IReadOnlyList<InlineStepAmount>? InlineAmounts = null
+);
+
+/// <summary>
+/// An amount kept verbatim in step text, located by code. Start/Length index the step's
+/// instruction so the UI can render it as a scalable chip.
+/// </summary>
+public record InlineStepAmount(
+    int Start,
+    int Length,
+    string Text,
+    InlineStepAmountKind Kind,
+    int? IngredientIndex,
+    RecipeMeasurement Measurement,
+    RecipeMeasurement? AlternativeMeasurement = null
 );
 
 public record LlmExtractedRecipePayload(
@@ -97,7 +112,12 @@ public record LlmExtractedRecipePayload(
     string? SourceBookTitle = null,
     [property: JsonConverter(typeof(FlexibleNullableIntJsonConverter))] int? SourceBookPage = null,
     string? ExtractedModel = null
-);
+)
+{
+    /// <summary>Reconciliation issues found by the tagged pipeline; never part of a JSON schema.</summary>
+    [JsonIgnore]
+    public IReadOnlyList<string>? TaggerIssues { get; init; }
+}
 
 // Normalized structured draft stored in IngestionJob.ExtractedDraftJson & edited in Review Inbox
 public record IngestionDraftIngredientDto(
@@ -129,7 +149,8 @@ public record IngestionDraftStepDto(
     IReadOnlyList<int>? IngredientIndices = null,
     IReadOnlyList<RecipeStepTimerInput>? Timers = null,
     [MaxLength(500)] string? ImagePath = null,
-    IReadOnlyList<RecipeStepIngredientAmountInput>? IngredientAmounts = null
+    IReadOnlyList<RecipeStepIngredientAmountInput>? IngredientAmounts = null,
+    IReadOnlyList<RecipeStepInlineAmountInput>? InlineAmounts = null
 );
 
 public record IngestionExtractedDraftDto(

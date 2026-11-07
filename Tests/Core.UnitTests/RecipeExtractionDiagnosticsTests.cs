@@ -7,19 +7,6 @@ namespace App.Core.UnitTests;
 public sealed class RecipeExtractionDiagnosticsTests
 {
     [TestMethod]
-    public void GetReviewIssues_PreparedMixturePortionsRequireReviewEvenAfterAmountsWereErased()
-    {
-        var source = Source + "\nAdd 1 cup prepared stock to the pan.";
-        var recipe = Recipe([Ingredient(4, "tbsp")], [new(null, "Heat oil and add stock.", [0])]);
-        Assert.IsEmpty(RecipeExtractionDiagnostics.GetIssues(recipe, source));
-        Assert.IsTrue(
-            RecipeExtractionDiagnostics
-                .GetReviewIssues(recipe, source)
-                .Any(issue => issue.Contains("prepared stock"))
-        );
-    }
-
-    [TestMethod]
     public void GetReviewIssues_DoesNotConfusePurchasedStockWithAnIntermediateMixture()
     {
         const string line = "4 cups chicken stock";
@@ -42,28 +29,6 @@ public sealed class RecipeExtractionDiagnosticsTests
                 $"Ingredients:\n- {line}\nInstructions:\nAdd 2 cups stock, then the remaining stock."
             )
         );
-    }
-
-    [TestMethod]
-    public void GetIssues_SeparatedEggComponentsAreNotSummedAsWholeEggs()
-    {
-        const string source =
-            "Ingredients:\n- 2 large eggs, separated\nInstructions:\nSeparate the eggs.";
-        var whites = new LlmExtractedIngredientItem(
-            null,
-            2,
-            null,
-            "whole",
-            "egg white",
-            "egg whites",
-            OriginalRawText: "2 large eggs, separated"
-        );
-        var yolks = whites with { CanonicalFoodName = "egg yolk", DisplayName = "egg yolks" };
-        var recipe = Recipe(
-            [whites, yolks],
-            [new(null, "Beat whites.", [0]), new(null, "Mix yolks.", [1])]
-        );
-        Assert.IsEmpty(RecipeExtractionDiagnostics.GetIssues(recipe, source));
     }
 
     [TestMethod]
@@ -118,24 +83,6 @@ public sealed class RecipeExtractionDiagnosticsTests
     }
 
     [TestMethod]
-    public void GetIssues_UnmeasuredOptionalExtraDoesNotChangeKnownSourceTotal()
-    {
-        var recipe = Recipe(
-            [
-                Ingredient(4, "tbsp"),
-                Ingredient(4, "tbsp") with
-                {
-                    Quantity = null,
-                    Unit = null,
-                    IsOptional = true,
-                },
-            ],
-            [new(null, "Heat oil.", [0]), new(null, "Grease the dish if needed.", [1])]
-        );
-        Assert.IsEmpty(RecipeExtractionDiagnostics.GetIssues(recipe, Source));
-    }
-
-    [TestMethod]
     public void GetIssues_FlagsExpandedPreparationNotesBeforeAutoPublication()
     {
         var recipe = Recipe(
@@ -151,69 +98,6 @@ public sealed class RecipeExtractionDiagnosticsTests
         Assert.IsTrue(
             RecipeExtractionDiagnostics.GetIssues(recipe).Any(i => i.Contains("200-character"))
         );
-    }
-
-    [TestMethod]
-    public void GetIssues_DetectsOmittedTimedPhaseButAcceptsNormalizerFallback()
-    {
-        var source =
-            Source
-            + "\nInstructions:\nCook first side for 2 to 3 minutes. Cook second side for 2 to 3 minutes.";
-        var incomplete = Recipe(
-            [Ingredient(4, "tbsp")],
-            [new(null, "Cook the food.", [0], [new(120, "Cook first side")])]
-        );
-        Assert.IsTrue(
-            RecipeExtractionDiagnostics
-                .GetIssues(incomplete, source)
-                .Any(i =>
-                    i.Contains(
-                        "missing a 120-second timer (source has 2, extracted 1: \"Cook first side for 2 to 3 minutes.\"; \"Cook second side for 2 to 3 minutes.\")"
-                    )
-                )
-        );
-        var complete = Recipe(
-            [Ingredient(4, "tbsp")],
-            [
-                new(
-                    null,
-                    "Cook first side for 2 to 3 minutes. Cook second side for 2 to 3 minutes.",
-                    [0]
-                ),
-            ]
-        );
-        Assert.IsEmpty(RecipeExtractionDiagnostics.GetIssues(complete, source));
-    }
-
-    [TestMethod]
-    public void GetIssues_IdenticalLinesInDifferentSectionsAreNotDoubleCounted()
-    {
-        var source =
-            "Ingredients:\n[First]\n- 4 tablespoons oil\n[Second]\n- 4 tablespoons oil\nInstructions:\nCook.";
-        var recipe = Recipe(
-            [Ingredient(4, "tbsp"), Ingredient(4, "tbsp")],
-            [new(null, "Cook first sauce.", [0]), new(null, "Cook second sauce.", [1])]
-        );
-        Assert.IsEmpty(RecipeExtractionDiagnostics.GetIssues(recipe, source));
-    }
-
-    [TestMethod]
-    public void GetIssues_FlagsDividedAdditionReusingWholeAmount()
-    {
-        var recipe = Recipe(
-            [Ingredient(4, "tbsp")],
-            [new(null, "Heat half the oil.", [0]), new(null, "Add remaining oil.", [0])]
-        );
-        Assert.IsTrue(
-            RecipeExtractionDiagnostics
-                .GetIssues(recipe, Source)
-                .Any(i => i.Contains("divided addition"))
-        );
-        var split = Recipe(
-            [Ingredient(2, "tbsp"), Ingredient(2, "tbsp")],
-            [new(null, "Heat the frying oil.", [0]), new(null, "Add remaining oil.", [1])]
-        );
-        Assert.IsEmpty(RecipeExtractionDiagnostics.GetIssues(split, Source));
     }
 
     [TestMethod]
@@ -254,149 +138,12 @@ public sealed class RecipeExtractionDiagnosticsTests
     }
 
     [TestMethod]
-    public void GetIssues_DetectsWrongTotalsWithoutGuessingCorrections()
-    {
-        var recipe = Recipe([Ingredient(2, "tbsp")], [new(null, "Heat the oil.", [0])]);
-        var issues = RecipeExtractionDiagnostics.GetIssues(recipe, Source);
-        Assert.IsTrue(issues.Any(i => i.Contains("source total")));
-        Assert.AreEqual(2, recipe.Ingredients![0].Quantity);
-    }
-
-    [TestMethod]
-    public void GetIssues_AcceptsConservedPortionsAndEquivalentUnits()
-    {
-        var recipe = Recipe(
-            [Ingredient(2, "tbsp"), Ingredient(6, "tsp")],
-            [new(null, "Heat the frying oil.", [0]), new(null, "Add the finishing oil.", [1])]
-        );
-        Assert.IsEmpty(RecipeExtractionDiagnostics.GetIssues(recipe, Source));
-    }
-
-    [TestMethod]
-    public void GetIssues_AcceptsSourceProvidedWeightWithoutGuessingDensity()
-    {
-        var recipe = Recipe(
-            [
-                new(
-                    null,
-                    25,
-                    null,
-                    "oz",
-                    "flour",
-                    "flour",
-                    OriginalRawText: "5 cups (25 ounces) flour"
-                ),
-            ],
-            [new(null, "Mix the flour.", [0])]
-        );
-        Assert.IsEmpty(
-            RecipeExtractionDiagnostics.GetIssues(
-                recipe,
-                "Ingredients:\n- 5 cups (25 ounces) flour\nInstructions:\nMix the flour."
-            )
-        );
-        Assert.IsTrue(
-            RecipeExtractionDiagnostics
-                .GetIssues(
-                    recipe with
-                    {
-                        Ingredients = [recipe.Ingredients![0] with { Quantity = 24 }],
-                    },
-                    "Ingredients:\n- 5 cups (25 ounces) flour\nInstructions:\nMix the flour."
-                )
-                .Any(i => i.Contains("source total"))
-        );
-    }
-
-    [TestMethod]
-    public void GetIssues_DetectsInvalidAndMissingIngredientLinksBeforeNormalization()
+    public void GetIssues_DetectsInvalidIngredientLinksBeforeNormalization()
     {
         var issues = RecipeExtractionDiagnostics.GetIssues(
             Recipe([Ingredient(4, "tbsp")], [new(null, "Heat oil.", [1])])
         );
         Assert.IsTrue(issues.Any(i => i.Contains("out of range")));
-        Assert.Contains(
-            "Ingredient 0 \"oil\": measured ingredient is not linked to any step; step 1 mentions it, so add 0 to the ingredientIndices of each step that uses it.",
-            issues
-        );
-    }
-
-    [TestMethod]
-    public void GetIssues_NamesTheStepsThatMentionAnUnlinkedIngredient()
-    {
-        LlmExtractedIngredientItem Item(string name) =>
-            new(null, 1, null, "whole", name, name, OriginalRawText: $"1 {name}");
-        var issues = RecipeExtractionDiagnostics.GetIssues(
-            Recipe(
-                [Item("unsalted butter"), Item("fennel bulb"), Item("bay leaves"), Item("saffron")],
-                [
-                    new(null, "Melt 2 tablespoons butter in a pot.", []),
-                    new(null, "Add the fennel and bay leaves; cook until soft.", []),
-                    new(null, "Stir in the remaining butters.", []),
-                ]
-            )
-        );
-
-        CollectionAssert.AreEqual(
-            new[]
-            {
-                "Ingredient 0 \"unsalted butter\": measured ingredient is not linked to any step; steps 1 and 3 mention it, so add 0 to the ingredientIndices of each step that uses it.",
-                "Ingredient 1 \"fennel bulb\": measured ingredient is not linked to any step; step 2 mentions it, so add 1 to the ingredientIndices of each step that uses it.",
-                "Ingredient 2 \"bay leaves\": measured ingredient is not linked to any step; step 2 mentions it, so add 2 to the ingredientIndices of each step that uses it.",
-                "Ingredient 3 \"saffron\": measured ingredient is not linked to any step.",
-            },
-            issues.Where(i => i.Contains("not linked")).ToArray()
-        );
-    }
-
-    [TestMethod]
-    public void GetIssues_PreservesProcessMeasurementsButFlagsFixedIngredientAmounts()
-    {
-        var recipe = Recipe(
-            [Ingredient(4, "tbsp")],
-            [
-                new(
-                    null,
-                    "Heat oil in a 12-inch pan at 350 degrees. Simmer for 5 minutes until reduced to 1/3 cup.",
-                    [0]
-                ),
-            ]
-        );
-        Assert.IsEmpty(RecipeExtractionDiagnostics.GetIssues(recipe, Source));
-        var invalid = recipe with
-        {
-            Steps = [new(null, "Add 2 tablespoons oil, then 2 tablespoons more.", [0])],
-        };
-        Assert.Contains(
-            "Step 1: contains fixed ingredient amounts (\"2 tablespoons\"); split measured portions and link them before removing those amounts from prose.",
-            RecipeExtractionDiagnostics.GetIssues(invalid, Source)
-        );
-    }
-
-    [TestMethod]
-    public void GetIssues_MixedFractionRangeAndOptionalExtraConserveTotal()
-    {
-        const string line = "1 1/2-2 tablespoons oil";
-        var recipe = Recipe(
-            [
-                Ingredient(1.5m, "tbsp") with
-                {
-                    OriginalRawText = line,
-                },
-                Ingredient(0.5m, "tbsp") with
-                {
-                    OriginalRawText = line,
-                    IsOptional = true,
-                },
-            ],
-            [new(null, "Heat the oil.", [0]), new(null, "Add finishing oil if needed.", [1])]
-        );
-        Assert.IsEmpty(
-            RecipeExtractionDiagnostics.GetIssues(
-                recipe,
-                $"Ingredients:\n- {line}\nInstructions:\nCook."
-            )
-        );
     }
 
     [TestMethod]
@@ -459,32 +206,6 @@ public sealed class RecipeExtractionDiagnosticsTests
             $"Source ingredient line 1: \"{line}\" is missing; add an ingredient row with this exact originalRawText.",
             RecipeExtractionDiagnostics.GetIssues(dropped, source)
         );
-    }
-
-    [TestMethod]
-    public void GetIssues_TruncatesLongTimedSentenceQuotes()
-    {
-        const string sentence =
-            "Meanwhile, in the preheated oven, bake the cake on the middle rack, rotating the pan halfway through so it browns evenly on every side, for 45 minutes.";
-        var source = $"{Source}\nInstructions:\n{sentence}";
-        var issue = RecipeExtractionDiagnostics
-            .GetIssues(Recipe([Ingredient(4, "tbsp")], [new(null, "Bake.", [0])]), source)
-            .Single(i => i.StartsWith("Source timed phases:"));
-        StringAssert.Contains(
-            issue,
-            $"(source has 1, extracted 0: \"{sentence[..117].TrimEnd()}...\")"
-        );
-    }
-
-    [TestMethod]
-    public void GetIssues_QuotesOnlyTheTimedSentenceAfterAParenthetical()
-    {
-        var source =
-            $"{Source}\nInstructions:\n(Chill the dough if it softens.) Bake for 45 minutes.";
-        var issue = RecipeExtractionDiagnostics
-            .GetIssues(Recipe([Ingredient(4, "tbsp")], [new(null, "Bake.", [0])]), source)
-            .Single(i => i.StartsWith("Source timed phases:"));
-        StringAssert.Contains(issue, "(source has 1, extracted 0: \"Bake for 45 minutes.\")");
     }
 
     [TestMethod]

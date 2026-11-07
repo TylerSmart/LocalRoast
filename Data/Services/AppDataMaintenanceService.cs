@@ -75,6 +75,11 @@ public sealed class AppDataMaintenanceService(
             );
             dbContext.RecipeStepIngredients.RemoveRange(stepIngredients);
 
+            var stepInlineAmounts = await dbContext.RecipeStepInlineAmounts.ToListAsync(
+                cancellationToken
+            );
+            dbContext.RecipeStepInlineAmounts.RemoveRange(stepInlineAmounts);
+
             var steps = await dbContext.RecipeSteps.ToListAsync(cancellationToken);
             dbContext.RecipeSteps.RemoveRange(steps);
 

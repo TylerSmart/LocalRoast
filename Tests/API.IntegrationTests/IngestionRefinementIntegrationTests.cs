@@ -156,10 +156,6 @@ public sealed class IngestionRefinementIntegrationTests
 
         Assert.IsNotNull(fakeLlm.LastRepairConfig);
         Assert.AreEqual(RefineModel, fakeLlm.LastRepairConfig.TextModel);
-        Assert.AreEqual(
-            LlmExtractionStrategy.SinglePass,
-            fakeLlm.LastRepairConfig.ExtractionStrategy
-        );
         Assert.IsNull(fakeLlm.LastRepairContext!.UserHint);
 
         var refined = await GetRefinementAsync(client, id);
@@ -435,7 +431,7 @@ public sealed class IngestionRefinementIntegrationTests
             CancellationToken cancellationToken = default
         ) => Task.FromResult(Extraction);
 
-        public Task<LlmExtractedRecipePayload> ExtractRecipeFromImagesAsync(
+        public Task<string?> TranscribeRecipeImagesAsync(
             EffectiveLlmConnectionConfig config,
             LlmVisionExtractionContext context,
             CancellationToken cancellationToken = default

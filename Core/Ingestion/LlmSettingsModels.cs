@@ -37,12 +37,7 @@ public sealed class LlmDefaultsOptions
     /// <summary>Null omits top_k so the model's own default applies.</summary>
     public int? TopK { get; set; }
 
-    /// <summary>Maximum validation-driven correction requests after each text extraction.</summary>
-    public int ExtractionRepairRounds { get; set; } = 1;
-
-    public LlmExtractionStrategy ExtractionStrategy { get; set; } = LlmExtractionStrategy.Auto;
-
-    /// <summary>Optional larger model that refines drafts still flagged after the Text Model's repair rounds.</summary>
+    /// <summary>Optional larger model that refines drafts still flagged after the Text Model's extraction.</summary>
     public string? RefineModel { get; set; }
 
     public bool RefineEnableThinking { get; set; } = true;
@@ -85,8 +80,6 @@ public record LlmSettingsDto(
     double? Temperature = null,
     double? TopP = null,
     int? TopK = null,
-    int ExtractionRepairRounds = 1,
-    LlmExtractionStrategy ExtractionStrategy = LlmExtractionStrategy.Auto,
     string? RefineModel = null,
     bool RefineEnableThinking = true,
     double? RefineTemperature = null,
@@ -112,8 +105,6 @@ public record EffectiveLlmConnectionConfig(
     double? Temperature = null,
     double? TopP = null,
     int? TopK = null,
-    int ExtractionRepairRounds = 1,
-    LlmExtractionStrategy ExtractionStrategy = LlmExtractionStrategy.Auto,
     string? RefineModel = null,
     bool RefineEnableThinking = true,
     double? RefineTemperature = null,
@@ -133,7 +124,6 @@ public record EffectiveLlmConnectionConfig(
             TopP = RefineTopP,
             TopK = RefineTopK,
             RequestTimeoutSeconds = RefineRequestTimeoutSeconds,
-            ExtractionStrategy = LlmExtractionStrategy.SinglePass,
         };
 }
 
@@ -155,8 +145,6 @@ public record UpdateLlmSettingsRequest(
     [Range(0.0, 2.0)] double? Temperature = null,
     [Range(0.0, 1.0)] double? TopP = null,
     [Range(1, 1000)] int? TopK = null,
-    [Range(0, 5)] int ExtractionRepairRounds = 1,
-    LlmExtractionStrategy ExtractionStrategy = LlmExtractionStrategy.Auto,
     [MaxLength(200)] string? RefineModel = null,
     bool RefineEnableThinking = true,
     [Range(0.0, 2.0)] double? RefineTemperature = null,

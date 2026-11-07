@@ -403,6 +403,12 @@
         font-style: italic;
       }
 
+      .ingredient-uses {
+        flex-basis: 100%;
+        font-size: 0.8rem;
+        color: var(--mat-sys-on-surface-variant);
+      }
+
       .optional-tag,
       .pantry-tag {
         font-size: 0.7rem;

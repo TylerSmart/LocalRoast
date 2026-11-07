@@ -25,7 +25,6 @@ public sealed class IngestionReviewTests
         );
 
         var warnings = RecipeExtractionDiagnostics.GetQualityWarnings(recipe);
-        Assert.IsTrue(warnings.Any(warning => warning.Contains("multiple actions")));
         Assert.IsTrue(warnings.Any(warning => warning.Contains("vague label")));
         Assert.IsTrue(
             warnings.Any(warning =>
@@ -36,20 +35,6 @@ public sealed class IngestionReviewTests
         );
         Assert.IsFalse(warnings.Any(warning => warning.Contains("Rest tomatoes")));
         Assert.IsEmpty(RecipeExtractionDiagnostics.GetReviewIssues(recipe));
-    }
-
-    [TestMethod]
-    public void QualityChecks_UseTheExactLongStepThreshold()
-    {
-        var shortStep = new LlmExtractedRecipePayload(Steps: [new(null, new string('x', 300))]);
-        var longStep = shortStep with { Steps = [new(null, new string('x', 301))] };
-
-        Assert.IsEmpty(RecipeExtractionDiagnostics.GetQualityWarnings(shortStep));
-        Assert.IsTrue(
-            RecipeExtractionDiagnostics
-                .GetQualityWarnings(longStep)
-                .Any(warning => warning.Contains("exceeds 300"))
-        );
     }
 
     [TestMethod]

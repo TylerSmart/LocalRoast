@@ -35,8 +35,6 @@ public sealed class LlmProfilesAndRefinementE2ETests : E2ETestBase
         await Expect(dialog.Locator("input[formcontrolname='topK']")).ToHaveValueAsync("64");
         await Expect(dialog.Locator("input[formcontrolname='requestTimeoutSeconds']"))
             .ToHaveValueAsync("900");
-        await Expect(dialog.Locator("[data-testid='llm-extraction-strategy']"))
-            .ToContainTextAsync("Single request");
 
         var refineSection = dialog.Locator(".refine-section");
         await refineSection.ScrollIntoViewIfNeededAsync();
@@ -74,8 +72,6 @@ public sealed class LlmProfilesAndRefinementE2ETests : E2ETestBase
 
         await Page.Locator(".llm-settings-btn").ClickAsync();
         await Expect(textModel).ToHaveValueAsync("my-custom-e4b");
-        await Expect(dialog.Locator("[data-testid='llm-extraction-strategy']"))
-            .ToContainTextAsync("Single request");
         await Expect(refineModelInput).ToHaveValueAsync("gemma4:26b-a4b");
         await Expect(dialog.Locator("input[formcontrolname='refineTemperature']"))
             .ToHaveValueAsync("1");
@@ -134,7 +130,7 @@ public sealed class LlmProfilesAndRefinementE2ETests : E2ETestBase
               "title": "Refine Journey", "baseServings": 4,
               "ingredients": [
                 {"displayName":"butter","canonicalFoodName":"butter","quantity":1,"unit":"Tbsp","originalRawText":"1 tbsp butter"},
-                {"displayName":"salt","canonicalFoodName":"salt","quantity":1,"unit":"Tsp","originalRawText":"1 tsp salt"}
+                {"displayName":"salt","canonicalFoodName":"salt","quantity":null,"unit":null,"originalRawText":"Salt"}
               ],
               "steps": [
                 {"instruction":"Melt butter and add salt.","ingredientIndices":[0],
@@ -147,7 +143,7 @@ public sealed class LlmProfilesAndRefinementE2ETests : E2ETestBase
               "title":"Refined Journey","baseServings":4,
               "ingredients":[
                 {"displayName":"butter","canonicalFoodName":"butter","quantity":1,"unit":"Tbsp","originalRawText":"1 tbsp butter"},
-                {"displayName":"salt","canonicalFoodName":"salt","quantity":1,"unit":"Tsp","originalRawText":"1 tsp salt"}
+                {"displayName":"salt","canonicalFoodName":"salt","quantity":null,"unit":null,"originalRawText":"Salt"}
               ],
               "steps":[
                 {"instruction":"Melt butter, then add salt.","ingredientIndices":[0,1],
@@ -170,7 +166,7 @@ public sealed class LlmProfilesAndRefinementE2ETests : E2ETestBase
         await Page.Locator("button.tab-pill", new() { HasText = "Paste Raw Text" }).ClickAsync();
         await Page.Locator("textarea[formcontrolname='rawText']")
             .FillAsync(
-                "Refine Journey\nIngredients:\n- 1 tbsp butter\n- 1 tsp salt\nInstructions:\nMelt butter and add salt."
+                "Refine Journey\nIngredients:\n- 1 tbsp butter\n- Salt\nInstructions:\nMelt butter and add salt, about 1 minute."
             );
         var queuedResponse = await Page.RunAndWaitForResponseAsync(
             () => Page.Locator("button[aria-label='Queue raw text recipe']").ClickAsync(),

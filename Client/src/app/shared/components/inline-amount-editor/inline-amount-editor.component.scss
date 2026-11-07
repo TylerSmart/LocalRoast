@@ -1,0 +1,127 @@
+:host {
+  display: block;
+}
+
+.inline-amount-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.editor-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.editor-title {
+  font: var(--mat-sys-label-large);
+  color: var(--mat-sys-on-surface-variant);
+}
+
+.detect-amounts-button mat-spinner {
+  display: inline-block;
+  margin-right: 8px;
+}
+
+.tagged-preview {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--mat-sys-surface-container-low);
+  font: var(--mat-sys-body-medium);
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.tagged-span {
+  background: var(--mat-sys-primary-container);
+  color: var(--mat-sys-on-primary-container);
+  border-radius: 4px;
+  padding: 0 2px;
+
+  &[data-kind='Fixed'] {
+    background: var(--mat-sys-surface-container-highest);
+    color: var(--mat-sys-on-surface);
+  }
+
+  &[data-kind='Mixture'] {
+    background: var(--mat-sys-tertiary-container);
+    color: var(--mat-sys-on-tertiary-container);
+  }
+}
+
+.amount-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.amount-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.span-label {
+  display: flex;
+  flex-direction: column;
+  min-width: 120px;
+  flex: 1 1 140px;
+}
+
+.span-text {
+  font: var(--mat-sys-body-medium);
+  overflow-wrap: anywhere;
+}
+
+.span-measurement {
+  font: var(--mat-sys-body-small);
+  color: var(--mat-sys-on-surface-variant);
+}
+
+.row-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 2 1 320px;
+  min-width: 0;
+}
+
+.kind-field {
+  width: 140px;
+}
+
+.ingredient-field {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+@media (max-width: 600px) {
+  .amount-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .row-controls {
+    flex-wrap: wrap;
+    flex-basis: auto;
+  }
+
+  .kind-field,
+  .ingredient-field {
+    flex: 1 1 100%;
+    width: 100%;
+  }
+
+  .row-controls button {
+    align-self: flex-end;
+  }
+}

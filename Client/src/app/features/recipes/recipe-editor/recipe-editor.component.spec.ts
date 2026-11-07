@@ -192,6 +192,121 @@ describe('RecipeEditorComponent', () => {
     expect(component.ingredientsArray.at(0).get('unresolvedRecipeTitle')?.value).toBeNull();
   });
 
+  it('loads, relocates, remaps and saves tagged inline amounts', () => {
+    const ingredient = (id: string, displayName: string) => ({
+      id,
+      sortOrder: 0,
+      sectionName: null,
+      quantity: 1,
+      maxQuantity: null,
+      unit: 'Cup' as const,
+      customUnitName: null,
+      foodItemId: null,
+      foodItemName: null,
+      isPantryStaple: false,
+      linkedRecipeId: null,
+      linkedRecipeTitle: null,
+      linkedRecipeSlug: null,
+      displayName,
+      preparationNote: null,
+      isOptional: false,
+      originalRawText: null,
+    });
+    const measurement = { quantity: 3, unit: 'Tbsp' as const };
+    const detail: RecipeDetailDto = {
+      id: 'r-1',
+      title: 'Pancakes',
+      slug: 'pancakes',
+      description: null,
+      status: 'Published',
+      baseServings: 4,
+      yieldDisplay: null,
+      prepTimeMinutes: null,
+      cookTimeMinutes: null,
+      totalTimeMinutes: null,
+      difficulty: null,
+      sourceUrl: null,
+      sourceName: null,
+      sourceAuthor: null,
+      sourceBookTitle: null,
+      sourceBookPage: null,
+      coverImagePath: null,
+      thumbnailImagePath: null,
+      timesCooked: 0,
+      lastCookedAt: null,
+      averageRating: null,
+      ingredients: [ingredient('flour', 'flour'), ingredient('milk', 'whole milk')],
+      steps: [
+        {
+          id: 's-1',
+          stepNumber: 1,
+          sectionName: null,
+          instruction: 'Add 3 tbsp milk.',
+          imagePath: null,
+          ingredientIds: ['milk'],
+          ingredientAmounts: [],
+          inlineAmounts: [
+            {
+              start: 4,
+              length: 6,
+              kind: 'Ingredient',
+              ingredientId: 'milk',
+              measurement,
+              alternativeMeasurement: null,
+            },
+          ],
+          timers: [],
+        },
+      ],
+      linkedSubRecipes: [],
+      collections: [],
+      tags: [],
+      createdAt: '2026-01-01T00:00:00Z',
+      createdBy: 'user',
+      modifiedAt: '2026-01-01T00:00:00Z',
+      modifiedBy: 'user',
+    };
+    component.populateForm(detail);
+    fixture.detectChanges();
+    const inline = () => component.stepsArray.at(0).get('inlineAmounts')?.value;
+    expect(inline()).toEqual([
+      {
+        start: 4,
+        length: 6,
+        kind: 'Ingredient',
+        ingredientIndex: 1,
+        measurement,
+        alternativeMeasurement: null,
+      },
+    ]);
+    expect(
+      fixture.nativeElement.querySelector('app-inline-amount-editor .tagged-span')?.textContent,
+    ).toBe('3 tbsp');
+
+    component.stepsArray.at(0).patchValue({ instruction: '  Add 3 tbsp milk.' });
+    fixture.detectChanges();
+    expect(inline()[0].start).toBe(6);
+
+    component.moveIngredientUp(1);
+    expect(inline()[0].ingredientIndex).toBe(0);
+
+    mockRecipeService.createRecipe.mockReturnValue(of(detail));
+    component.onSave();
+    expect(mockRecipeService.createRecipe).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        steps: [
+          expect.objectContaining({
+            instruction: 'Add 3 tbsp milk.',
+            inlineAmounts: [expect.objectContaining({ start: 4, length: 6, ingredientIndex: 0 })],
+          }),
+        ],
+      }),
+    );
+
+    component.removeIngredient(0);
+    expect(inline()[0]).toEqual(expect.objectContaining({ kind: 'Fixed', ingredientIndex: null }));
+  });
+
   it('submits valid recipe creation', () => {
     const savedDetail: RecipeDetailDto = {
       id: 'new-1',

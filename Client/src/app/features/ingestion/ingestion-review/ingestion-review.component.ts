@@ -50,6 +50,7 @@ import {
   MEASUREMENT_UNITS,
   RecipeDifficulty,
   RecipeMeasurement,
+  RecipeStepInlineAmountInput,
   RecipePreviewData,
   RecipeStepTimerInput,
 } from '../../../core/models/recipe.models';
@@ -60,6 +61,8 @@ import { LlmSettingsService } from '../../../core/services/llm-settings/llm-sett
 import { TaxonomyService } from '../../../core/services/taxonomy/taxonomy.service';
 import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialog/confirm-dialog.component';
 import { MeasurementEditorComponent } from '../../../shared/components/measurement-editor/measurement-editor.component';
+import { InlineAmountEditorComponent } from '../../../shared/components/inline-amount-editor/inline-amount-editor.component';
+import { trimInstructionWithAmounts } from '../../../core/utils/step-instruction';
 import {
   buildStepAmounts,
   createStepAmounts,
@@ -99,6 +102,7 @@ import {
     SourceViewerComponent,
     RecipeDetailPreviewComponent,
     MeasurementEditorComponent,
+    InlineAmountEditorComponent,
   ],
   templateUrl: './ingestion-review.component.html',
   styleUrl: './ingestion-review.component.scss',
@@ -606,6 +610,9 @@ export class IngestionReviewComponent implements OnInit {
         step?.ingredientIndices ?? [],
         step?.ingredientAmounts ?? [],
       ),
+      inlineAmounts: new FormControl<RecipeStepInlineAmountInput[]>(step?.inlineAmounts ?? [], {
+        nonNullable: true,
+      }),
       timers: timersArray,
       imagePath: [step?.imagePath ?? null],
     });
@@ -615,6 +622,10 @@ export class IngestionReviewComponent implements OnInit {
 
   removeStep(index: number): void {
     this.stepsArray.removeAt(index);
+  }
+
+  setStepInlineAmounts(stepIndex: number, amounts: RecipeStepInlineAmountInput[]): void {
+    this.stepsArray.at(stepIndex).get('inlineAmounts')?.setValue(amounts);
   }
 
   getStepAmountsArray(stepIndex: number) {
@@ -774,6 +785,7 @@ export class IngestionReviewComponent implements OnInit {
         imagePath: st.imagePath,
         ingredientIndices: st.ingredientIndices,
         ingredientAmounts: st.ingredientAmounts,
+        inlineAmounts: st.inlineAmounts ?? [],
         timers: st.timers,
       })),
     };
@@ -859,12 +871,17 @@ export class IngestionReviewComponent implements OnInit {
         };
       });
 
+      const trimmed = trimInstructionWithAmounts(
+        val.instruction ?? '',
+        (val.inlineAmounts ?? []) as RecipeStepInlineAmountInput[],
+      );
       return {
         stepNumber: i + 1,
         sectionName: val.sectionName?.trim() || null,
-        instruction: val.instruction.trim(),
+        instruction: trimmed.instruction,
         ingredientIndices: val.ingredientIndices || [],
         ingredientAmounts: buildStepAmounts(ctrl),
+        inlineAmounts: trimmed.amounts,
         timers,
         imagePath: val.imagePath || null,
       };
@@ -978,7 +995,7 @@ export class IngestionReviewComponent implements OnInit {
               if (!apply) return;
               if (snapshot !== this.reviewEditSnapshot()) {
                 this.reviewError.set(
-                  'The draft changed while AI repair was running. Your edits were kept; rerun the repair to use the current draft.',
+                  'The draft changed while AI re-extraction was running. Your edits were kept; re-extract again to use the current draft.',
                 );
                 return;
               }
@@ -995,7 +1012,7 @@ export class IngestionReviewComponent implements OnInit {
                       snapshot !== this.reviewEditSnapshot()
                     ) {
                       this.reviewError.set(
-                        'The draft or job changed while AI repair was running. Your edits were kept; reload or rerun the repair before applying it.',
+                        'The draft or job changed while AI re-extraction was running. Your edits were kept; reload or re-extract again before applying it.',
                       );
                       return;
                     }
@@ -1026,7 +1043,7 @@ export class IngestionReviewComponent implements OnInit {
           this.reviewError.set(
             err?.error?.detail ||
               err?.error?.title ||
-              'AI repair failed. Your draft was not changed.',
+              'AI re-extraction failed. Your draft was not changed.',
           );
         },
       });

@@ -405,8 +405,6 @@ public sealed class IngestionProcessor(
                 }
             }
 
-            LlmExtractedRecipePayload rawExtracted;
-
             string modelUsed;
 
             var diagnosticsSource = job.NormalizedSourceText ?? job.RawText;
@@ -420,7 +418,14 @@ public sealed class IngestionProcessor(
                     );
                 }
 
-                modelUsed = config.VisionModel;
+                if (string.IsNullOrWhiteSpace(config.TextModel))
+                {
+                    throw new LlmHostUnavailableException(
+                        "No Text LLM model is configured in LLM Settings. Please select a Text Model and retry."
+                    );
+                }
+
+                modelUsed = $"{config.VisionModel} → {config.TextModel}";
 
                 var imageInputs = new List<LlmVisionImageInput>();
 
@@ -503,11 +508,16 @@ public sealed class IngestionProcessor(
                     AvailableFoodNames: availableFoodNames
                 );
 
-                rawExtracted = await llmClient.ExtractRecipeFromImagesAsync(
-                    config,
-                    visionContext,
-                    jobCt
-                );
+                job.StatusDetail = "Reading recipe text from images via local LLM...";
+                await dbContext.SaveChangesAsync(jobCt);
+                job.StructuredSourceText =
+                    await llmClient.TranscribeRecipeImagesAsync(config, visionContext, jobCt)
+                    ?? throw new DomainValidationException(
+                        "No recipe text could be read from the images."
+                    );
+                diagnosticsSource = job.StructuredSourceText;
+                job.StatusDetail = "Extracting structured recipe via local LLM...";
+                await dbContext.SaveChangesAsync(jobCt);
             }
             else
             {
@@ -539,6 +549,15 @@ public sealed class IngestionProcessor(
                             && !jobCt.IsCancellationRequested
                         )
                     {
+                        // Without sections there is no method to extract, so a host outage must
+                        // surface as one instead of as a missing Instructions section.
+                        if (
+                            ex is LlmHostUnavailableException
+                            && InstructionAmountTagger.ParseMethod(sourceText).Count == 0
+                        )
+                        {
+                            throw;
+                        }
                         // Sectioning is optional; if the host is really down, extraction below fails the same way.
                         logger.LogWarning(
                             ex,
@@ -551,55 +570,23 @@ public sealed class IngestionProcessor(
                 }
 
                 diagnosticsSource = job.StructuredSourceText ?? sourceText;
-
-                var extractionContext = new LlmExtractionContext(
-                    SourceContent: diagnosticsSource,
-                    AvailableTagNames: tagNames,
-                    AvailableFoodNames: availableFoodNames
-                );
-
-                rawExtracted = await llmClient.ExtractRecipeFromTextAsync(
-                    config,
-                    extractionContext,
-                    jobCt
-                );
             }
+
+            var extractionContext = new LlmExtractionContext(
+                SourceContent: diagnosticsSource,
+                AvailableTagNames: tagNames,
+                AvailableFoodNames: availableFoodNames
+            );
+
+            var rawExtracted = await llmClient.ExtractRecipeFromTextAsync(
+                config,
+                extractionContext,
+                jobCt
+            );
 
             if (await IsJobDiscardedInDbAsync(job.Id, jobCt))
             {
                 return false;
-            }
-
-            if (
-                !requiresVision
-                && (
-                    (rawExtracted.Ingredients?.Count ?? 0) == 0
-                    || (rawExtracted.Steps?.Count ?? 0) == 0
-                )
-                && (diagnosticsSource ?? "").Length > 80
-            )
-            {
-                var retryContext = new LlmExtractionContext(
-                    SourceContent: diagnosticsSource
-                        + "\n\nIMPORTANT: Extract all ingredients into the ingredients array and all numbered steps into the steps array. Do not return empty arrays.",
-                    AvailableTagNames: tagNames,
-                    AvailableFoodNames: availableFoodNames
-                );
-
-                var retryExtracted = await llmClient.ExtractRecipeFromTextAsync(
-                    config,
-                    retryContext,
-                    jobCt
-                );
-
-                if (
-                    (retryExtracted.Ingredients?.Count ?? 0)
-                        > (rawExtracted.Ingredients?.Count ?? 0)
-                    || (retryExtracted.Steps?.Count ?? 0) > (rawExtracted.Steps?.Count ?? 0)
-                )
-                {
-                    rawExtracted = retryExtracted;
-                }
             }
 
             string? fallbackSourceName = job.SourceName;
@@ -757,8 +744,7 @@ public sealed class IngestionProcessor(
 
                 var refineModel = config.RefineModel?.Trim();
                 if (
-                    !requiresVision
-                    && !string.IsNullOrWhiteSpace(refineModel)
+                    !string.IsNullOrWhiteSpace(refineModel)
                     && !string.Equals(
                         refineModel,
                         config.TextModel?.Trim(),
@@ -1119,7 +1105,8 @@ public sealed class IngestionProcessor(
                         IngredientIndices: s.IngredientIndices,
                         Timers: s.Timers,
                         ImagePath: s.ImagePath,
-                        IngredientAmounts: s.IngredientAmounts
+                        IngredientAmounts: s.IngredientAmounts,
+                        InlineAmounts: s.InlineAmounts
                     )
                 );
             }

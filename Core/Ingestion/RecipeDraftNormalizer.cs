@@ -24,6 +24,76 @@ public static class RecipeDraftNormalizer
         RegexOptions.IgnoreCase | RegexOptions.Compiled
     );
 
+    /// <summary>
+    /// Maps tagged spans onto the trimmed instruction. Spans that fall outside the text or
+    /// overlap an earlier span are dropped; an ingredient span without a valid row becomes Fixed.
+    /// </summary>
+    public static List<RecipeStepInlineAmountInput> NormalizeInlineAmounts(
+        IReadOnlyList<InlineStepAmount>? raw,
+        int leadingTrim,
+        string instruction,
+        int ingredientCount,
+        ICollection<string> warnings,
+        string label
+    )
+    {
+        var result = new List<RecipeStepInlineAmountInput>();
+        var end = 0;
+        foreach (var amount in (raw ?? []).OrderBy(a => a.Start))
+        {
+            var start = amount.Start - leadingTrim;
+            if (
+                start < end
+                || amount.Length is < 1 or > 200
+                || start + amount.Length > instruction.Length
+                || !IsValidMeasurement(amount.Measurement)
+            )
+            {
+                warnings.Add(
+                    $"{label}: an inline amount did not match the step text and was omitted."
+                );
+                continue;
+            }
+            var validIndex =
+                amount.IngredientIndex is { } index && index >= 0 && index < ingredientCount;
+            var kind =
+                amount.Kind == InlineStepAmountKind.Ingredient && !validIndex
+                    ? InlineStepAmountKind.Fixed
+                    : amount.Kind;
+            result.Add(
+                new RecipeStepInlineAmountInput(
+                    start,
+                    amount.Length,
+                    kind,
+                    kind == InlineStepAmountKind.Ingredient ? amount.IngredientIndex : null,
+                    amount.Measurement,
+                    IsValidMeasurement(amount.AlternativeMeasurement)
+                        ? amount.AlternativeMeasurement
+                        : null
+                )
+            );
+            end = start + amount.Length;
+        }
+        return result;
+    }
+
+    private static bool IsValidMeasurement(RecipeMeasurement? measurement)
+    {
+        if (measurement is null)
+        {
+            return false;
+        }
+        try
+        {
+            RecipeMeasurementValidation.Validate(measurement);
+            return true;
+        }
+        catch (DomainValidationException)
+        {
+            return false;
+        }
+    }
+
     private static RecipeMeasurement? NormalizeMeasurement(
         LlmExtractedMeasurementItem? raw,
         ICollection<string> warnings,
@@ -481,15 +551,24 @@ public static class RecipeDraftNormalizer
 
         foreach (var rawIng in rawIngredients)
         {
-            var isSplitSourceLine =
-                !string.IsNullOrWhiteSpace(rawIng.OriginalRawText)
-                && rawIngredients.Count(other =>
-                    string.Equals(
-                        other.OriginalRawText?.Trim(),
-                        rawIng.OriginalRawText.Trim(),
-                        StringComparison.OrdinalIgnoreCase
+            var sameLine = string.IsNullOrWhiteSpace(rawIng.OriginalRawText)
+                ? []
+                : rawIngredients
+                    .Where(other =>
+                        string.Equals(
+                            other.OriginalRawText?.Trim(),
+                            rawIng.OriginalRawText.Trim(),
+                            StringComparison.OrdinalIgnoreCase
+                        )
                     )
-                ) > 1;
+                    .ToList();
+            // "5 cups (25 ounces) flour, plus extra" keeps its equivalent on the one measured row.
+            var isSplitSourceLine =
+                sameLine.Count > 1
+                && !(
+                    rawIng.Quantity is not null && sameLine.Count(o => o.Quantity is not null) == 1
+                );
+            var isUnmeasuredSplitRow = sameLine.Count > 1 && rawIng.Quantity is null;
             var (unit, customUnit) = NormalizeUnit(rawIng.Unit, rawIng.CustomUnitName);
             var (cleanQuantity, cleanMaxQuantity) = NormalizeQuantities(
                 rawIng.Quantity,
@@ -714,9 +793,10 @@ public static class RecipeDraftNormalizer
             var sourcePair = SourceMeasurementParser.FindAlternative(rawIng.OriginalRawText);
             if (sourcePair is not null && isSplitSourceLine)
             {
-                measurementWarnings.Add(
-                    $"{displayName}: the source equivalent applies to a whole ingredient line, not each split portion; verify portion measurements."
-                );
+                if (!isUnmeasuredSplitRow)
+                    measurementWarnings.Add(
+                        $"{displayName}: the source equivalent applies to a whole ingredient line, not each split portion; verify portion measurements."
+                    );
             }
             else if (sourcePair is { } pair)
             {
@@ -773,14 +853,24 @@ public static class RecipeDraftNormalizer
         for (var i = 0; i < rawSteps.Count; i++)
         {
             var rawStep = rawSteps[i];
-            var instruction = string.IsNullOrWhiteSpace(rawStep.Instruction)
-                ? ""
-                : rawStep.Instruction.Trim();
-            instruction = SubStepPrefix.Replace(instruction, "");
+            var rawInstruction = rawStep.Instruction ?? "";
+            var instruction = rawInstruction.Trim();
+            var tagged = rawStep.InlineAmounts is { Count: > 0 };
+            // Tagged spans index the verbatim text, so only surrounding whitespace may change.
+            if (!tagged)
+                instruction = SubStepPrefix.Replace(instruction, "");
             if (string.IsNullOrWhiteSpace(instruction))
             {
                 continue;
             }
+            var inlineAmounts = NormalizeInlineAmounts(
+                rawStep.InlineAmounts,
+                rawInstruction.Length - rawInstruction.TrimStart().Length,
+                instruction,
+                ingredientCount,
+                measurementWarnings,
+                $"Step {i + 1}"
+            );
 
             // Valid ingredient indices
             if ((rawStep.IngredientIndices ?? []).Any(idx => idx < 0 || idx >= ingredientCount))
@@ -821,13 +911,18 @@ public static class RecipeDraftNormalizer
                 );
                 if (amount is null)
                     continue;
+                // Tagged steps compute their amounts in code from the verbatim spans.
+                var modelProposed = rawStep.InlineAmounts is null;
                 if (
-                    sourceAmounts.Count == 0
-                    || (
-                        !string.IsNullOrWhiteSpace(rawSourceText)
-                        && !IsSourceExcerpt(
-                            rawStep.OriginalRawText ?? rawStep.Instruction,
-                            rawSourceText
+                    modelProposed
+                    && (
+                        sourceAmounts.Count == 0
+                        || (
+                            !string.IsNullOrWhiteSpace(rawSourceText)
+                            && !IsSourceExcerpt(
+                                rawStep.OriginalRawText ?? rawStep.Instruction,
+                                rawSourceText
+                            )
                         )
                     )
                 )
@@ -837,7 +932,8 @@ public static class RecipeDraftNormalizer
                     );
                 }
                 else if (
-                    !sourceAmounts.Any(source =>
+                    modelProposed
+                    && !sourceAmounts.Any(source =>
                         source.Unit == amount.Unit
                         && Math.Abs(source.Quantity!.Value - amount.Quantity!.Value) < 0.0001m
                         && source.MaxQuantity == amount.MaxQuantity
@@ -855,6 +951,17 @@ public static class RecipeDraftNormalizer
                 if (!validIndices.Contains(rawAmount.IngredientIndex.Value))
                     validIndices.Add(rawAmount.IngredientIndex.Value);
             }
+
+            foreach (
+                var index in inlineAmounts
+                    .Where(a => a.IngredientIndex is not null)
+                    .Select(a => a.IngredientIndex!.Value)
+            )
+            {
+                if (!validIndices.Contains(index))
+                    validIndices.Add(index);
+            }
+            validIndices.Sort();
 
             // Timers: LLM provided vs StepTimerExtractor detection
             var timers = new List<RecipeStepTimerInput>();
@@ -923,7 +1030,8 @@ public static class RecipeDraftNormalizer
                     IngredientIndices: validIndices,
                     Timers: timers,
                     ImagePath: null,
-                    IngredientAmounts: amounts
+                    IngredientAmounts: amounts,
+                    InlineAmounts: inlineAmounts
                 )
             );
         }

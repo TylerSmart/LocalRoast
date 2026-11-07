@@ -287,6 +287,87 @@ public sealed class IngestionIntegrationTests
     }
 
     [TestMethod]
+    public async Task DraftApprove_PublishesInlineAmountsWithIngredientIds()
+    {
+        await AuthenticateAsync(_client);
+        var job = await EnqueueRawTextJobAsync(_client, "Inline Roux");
+        const string instruction = "Melt 2 tbsp butter, then whisk in 1/4 cup flour to a paste.";
+        var butterStart = instruction.IndexOf("2 tbsp", StringComparison.Ordinal);
+        var flourStart = instruction.IndexOf("1/4 cup", StringComparison.Ordinal);
+        var draft = new IngestionExtractedDraftDto(
+            Title: "Inline Roux",
+            Ingredients:
+            [
+                new IngestionDraftIngredientDto(
+                    Quantity: 0.25m,
+                    Unit: MeasurementUnit.Cup,
+                    CreateNewFoodItem: false,
+                    DisplayName: "flour",
+                    OriginalRawText: "1/4 cup flour"
+                ),
+                new IngestionDraftIngredientDto(
+                    Quantity: 2,
+                    Unit: MeasurementUnit.Tbsp,
+                    CreateNewFoodItem: false,
+                    DisplayName: "butter",
+                    OriginalRawText: "2 tablespoons butter"
+                ),
+            ],
+            Steps:
+            [
+                new IngestionDraftStepDto(
+                    Instruction: instruction,
+                    InlineAmounts:
+                    [
+                        new(
+                            butterStart,
+                            "2 tbsp".Length,
+                            InlineStepAmountKind.Ingredient,
+                            1,
+                            new(2, MeasurementUnit.Tbsp)
+                        ),
+                        new(
+                            flourStart,
+                            "1/4 cup".Length,
+                            InlineStepAmountKind.Ingredient,
+                            0,
+                            new(0.25m, MeasurementUnit.Cup)
+                        ),
+                    ]
+                ),
+            ]
+        );
+
+        var approveResp = await _client.PostAsJsonAsync(
+            $"/api/ingestion/jobs/{job.Id}/approve",
+            draft
+        );
+        Assert.AreEqual(
+            HttpStatusCode.Created,
+            approveResp.StatusCode,
+            await approveResp.Content.ReadAsStringAsync()
+        );
+        var published = await approveResp.Content.ReadFromJsonAsync<RecipeDetailDto>();
+        Assert.IsNotNull(published);
+
+        var recipe = await _client.GetFromJsonAsync<RecipeDetailDto>(
+            $"/api/recipes/{published.Id}"
+        );
+        Assert.IsNotNull(recipe);
+        var flour = recipe.Ingredients.Single(i => i.DisplayName == "flour");
+        var butter = recipe.Ingredients.Single(i => i.DisplayName == "butter");
+        var step = recipe.Steps.Single();
+        Assert.AreEqual(instruction, step.Instruction);
+        var spans = step.InlineAmounts!;
+        Assert.HasCount(2, spans);
+        Assert.AreEqual(butter.Id, spans[0].IngredientId);
+        Assert.AreEqual(butterStart, spans[0].Start);
+        Assert.AreEqual(flour.Id, spans[1].IngredientId);
+        Assert.AreEqual(0.25m, spans[1].Measurement.Quantity);
+        CollectionAssert.AreEquivalent(new[] { flour.Id, butter.Id }, step.IngredientIds.ToArray());
+    }
+
+    [TestMethod]
     public async Task DraftPublish_RecipeReferenceExactTitleLinksSavedRecipe()
     {
         await AuthenticateAsync(_client);
@@ -1017,6 +1098,9 @@ public sealed class IngestionIntegrationTests
         bool invalidAmount
     )
     {
+        var cups = invalidAmount ? 6 : 1;
+        var mixStep = $"Mix {cups} cup{(cups == 1 ? "" : "s")} bread flour.";
+        var amountLength = mixStep.IndexOf(" bread", StringComparison.Ordinal) - 4;
         var fakeLlm = new FakeSequentialLlmExtractionClient(_ => new LlmExtractedRecipePayload(
             Title: "Synthetic Starter",
             ConfidenceScore: 0.99m,
@@ -1029,18 +1113,30 @@ public sealed class IngestionIntegrationTests
                     "oz",
                     "bread flour",
                     DisplayName: "bread flour",
-                    OriginalRawText: "5 cups (25 ounces) bread flour"
+                    OriginalRawText: "5 cups (25 ounces) bread flour",
+                    AlternativeMeasurement: new(5, "cup")
                 ),
             ],
             Steps:
             [
                 new(
                     null,
-                    "4A. Mix the listed flour.",
+                    mixStep,
                     [0],
-                    IngredientAmounts: [new(0, new(invalidAmount ? 5 : 1, "cup"))],
-                    OriginalRawText: "4A. Mix 1 cup bread flour."
+                    IngredientAmounts: [new(0, new(cups, "cup"))],
+                    InlineAmounts:
+                    [
+                        new(
+                            4,
+                            amountLength,
+                            mixStep.Substring(4, amountLength),
+                            InlineStepAmountKind.Ingredient,
+                            0,
+                            new(cups, MeasurementUnit.Cup)
+                        ),
+                    ]
                 ),
+                new(null, "Knead in the remaining flour.", [0]),
             ]
         ));
         await using var customFactory = _factory.WithWebHostBuilder(builder =>
@@ -1057,7 +1153,7 @@ public sealed class IngestionIntegrationTests
         var queuedResponse = await client.PostAsJsonAsync(
             "/api/ingestion/jobs/text",
             new EnqueueRawTextIngestionRequest(
-                "Synthetic Starter\nIngredients:\n- 5 cups (25 ounces) bread flour\nInstructions:\n4A. Mix 1 cup bread flour.",
+                $"Synthetic Starter\nIngredients:\n- 5 cups (25 ounces) bread flour\nInstructions:\n1. {mixStep}\n2. Knead in the remaining flour.",
                 AutoPublish: true
             )
         );
@@ -1082,8 +1178,8 @@ public sealed class IngestionIntegrationTests
         Assert.AreEqual(25m, job.ExtractedDraft.Ingredients[0].AlternativeMeasurement!.Quantity);
         if (invalidAmount)
         {
-            Assert.HasCount(1, job.ExtractedDraft.MeasurementWarnings!);
-            Assert.IsEmpty(job.ExtractedDraft.Steps![0].IngredientAmounts!);
+            StringAssert.Contains(job.StatusDetail, "exceed the ingredient list");
+            Assert.IsNull(job.ResultingRecipeId);
         }
         else
         {
@@ -1091,9 +1187,15 @@ public sealed class IngestionIntegrationTests
                 $"/api/recipes/{job.ResultingRecipeId}"
             );
             Assert.IsNotNull(recipe);
-            Assert.AreEqual(25m, recipe.Ingredients[0].AlternativeMeasurement!.Quantity);
+            var flour = recipe.Ingredients[0];
+            Assert.AreEqual(25m, flour.AlternativeMeasurement!.Quantity);
             Assert.AreEqual(1m, recipe.Steps[0].IngredientAmounts![0].Measurement.Quantity);
-            Assert.AreEqual("Mix the listed flour.", recipe.Steps[0].Instruction);
+            Assert.AreEqual(mixStep, recipe.Steps[0].Instruction);
+            var inline = recipe.Steps[0].InlineAmounts!.Single();
+            Assert.AreEqual(4, inline.Start);
+            Assert.AreEqual("1 cup", mixStep.Substring(inline.Start, inline.Length));
+            Assert.AreEqual(InlineStepAmountKind.Ingredient, inline.Kind);
+            Assert.AreEqual(flour.Id, inline.IngredientId);
         }
     }
 
@@ -1115,7 +1217,7 @@ public sealed class IngestionIntegrationTests
             [
                 new(
                     null,
-                    invalidFoodName ? 4 : 2,
+                    4,
                     null,
                     "tbsp",
                     invalidFoodName ? "olive oil or butter" : "olive oil",
@@ -1124,7 +1226,17 @@ public sealed class IngestionIntegrationTests
                 ),
                 new(null, null, null, null, "salt", "salt", OriginalRawText: "Salt"),
             ],
-            Steps: [new(null, "Heat the oil and season with salt.", [0, 1])]
+            Steps:
+            [
+                invalidFoodName
+                    ? new(null, "Heat the oil and season with salt.", [0, 1])
+                    : new(
+                        null,
+                        "Heat 6 tablespoons oil and season with salt.",
+                        [0, 1],
+                        IngredientAmounts: [new(0, new(6, "tbsp"))]
+                    ),
+            ]
         ));
         await using var factory = _factory.WithWebHostBuilder(builder =>
         {
@@ -1162,7 +1274,7 @@ public sealed class IngestionIntegrationTests
         Assert.AreEqual(0.59m, detail.ConfidenceScore);
         StringAssert.Contains(
             detail.StatusDetail,
-            invalidFoodName ? "out of food names" : "source total"
+            invalidFoodName ? "out of food names" : "exceed the ingredient list"
         );
         Assert.IsNull(detail.ResultingRecipeId);
     }
@@ -1268,7 +1380,7 @@ public sealed class IngestionIntegrationTests
     public async Task TextIngestion_FallsBackToUnstructuredSourceWhenSectioningTimesOut()
     {
         const string source =
-            "Plain Toast\n2 slices bread\nToast the bread until golden, about 3 minutes.";
+            "Plain Toast\n2 slices bread\nInstructions:\nToast the bread until golden, about 3 minutes.";
         var extractionSources = new List<string>();
         var fakeLlm = new FakeSequentialLlmExtractionClient(
             context =>
@@ -1337,6 +1449,53 @@ public sealed class IngestionIntegrationTests
             Assert.IsNotNull(entity);
             Assert.IsNull(entity.StructuredSourceText);
         }
+    }
+
+    [TestMethod]
+    public async Task TextIngestion_WaitsForHostWhenSectioningFailsAndSourceHasNoMethod()
+    {
+        var extractionCalls = 0;
+        var fakeLlm = new FakeSequentialLlmExtractionClient(
+            _ =>
+            {
+                extractionCalls++;
+                throw new InvalidOperationException("Extraction must not run without a method.");
+            },
+            _ => throw new LlmHostUnavailableException("LLM host connection failed.")
+        );
+        await using var factory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Llm:TextModel", "gemma4:e4b");
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ILlmExtractionClient>();
+                services.AddSingleton<ILlmExtractionClient>(fakeLlm);
+            });
+        });
+        using var client = factory.CreateClient();
+        await AuthenticateAsync(client);
+        var response = await client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest(
+                "Plain Toast\n2 slices bread\nToast the bread until golden.",
+                AutoPublish: false
+            )
+        );
+        var job = await response.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
+        Assert.IsNotNull(job);
+        using (var scope = factory.Services.CreateScope())
+        {
+            await scope
+                .ServiceProvider.GetRequiredService<IIngestionProcessor>()
+                .ProcessNextQueuedJobAsync();
+        }
+
+        Assert.AreEqual(0, extractionCalls);
+        var detail = await client.GetFromJsonAsync<IngestionJobDetailDto>(
+            $"/api/ingestion/jobs/{job.Id}"
+        );
+        Assert.IsNotNull(detail);
+        Assert.AreEqual(IngestionJobStatus.WaitingForLlmHost, detail.Status);
     }
 
     [TestMethod]
@@ -1496,6 +1655,7 @@ public sealed class IngestionIntegrationTests
                     Channel = IngestionChannel.RawText,
                     Status = IngestionJobStatus.Queued,
                     DisplayTitle = draft.Title,
+                    RawText = "Rice\nIngredients:\n- 1 cup rice\nInstructions:\n1. Cook rice.",
                 }
             );
             await db.SaveChangesAsync();
@@ -1611,6 +1771,7 @@ public sealed class IngestionIntegrationTests
                     Channel = IngestionChannel.RawText,
                     Status = IngestionJobStatus.ReadyForReview,
                     DisplayTitle = "Rice",
+                    RawText = "Rice\nIngredients:\n- rice\nInstructions:\n1. Cook rice.",
                 }
             );
             await db.SaveChangesAsync();
@@ -1631,7 +1792,7 @@ public sealed class IngestionIntegrationTests
     [TestMethod]
     [DataRow(IngestionChannel.Images)]
     [DataRow(IngestionChannel.Pdf)]
-    public async Task ReviewRepair_ReportsMissingOriginalImages(IngestionChannel channel)
+    public async Task ReviewRepair_RejectsJobsWithoutSourceText(IngestionChannel channel)
     {
         await AuthenticateAsync(_client);
         var id = Guid.NewGuid();
@@ -1662,7 +1823,7 @@ public sealed class IngestionIntegrationTests
         Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
         StringAssert.Contains(
             await response.Content.ReadAsStringAsync(),
-            "source images are unavailable"
+            "no source text to re-extract from"
         );
     }
 
@@ -1717,7 +1878,7 @@ public sealed class IngestionIntegrationTests
             CancellationToken cancellationToken = default
         ) => Task.FromResult(handler(context));
 
-        public Task<LlmExtractedRecipePayload> ExtractRecipeFromImagesAsync(
+        public Task<string?> TranscribeRecipeImagesAsync(
             EffectiveLlmConnectionConfig config,
             LlmVisionExtractionContext context,
             CancellationToken cancellationToken = default
@@ -1840,7 +2001,7 @@ public sealed class IngestionIntegrationTests
             }
         }
 
-        public Task<LlmExtractedRecipePayload> ExtractRecipeFromImagesAsync(
+        public Task<string?> TranscribeRecipeImagesAsync(
             EffectiveLlmConnectionConfig config,
             LlmVisionExtractionContext context,
             CancellationToken cancellationToken = default

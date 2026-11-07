@@ -644,6 +644,13 @@
                 ></textarea>
               </mat-form-field>
 
+              <app-inline-amount-editor
+                [instruction]="stepGroup.get('instruction')?.value"
+                [amounts]="stepGroup.get('inlineAmounts')?.value"
+                [ingredientOptions]="inlineIngredientOptions()"
+                (amountsChange)="setStepInlineAmounts($index, $event)"
+              ></app-inline-amount-editor>
+
               <!-- Step Photo Controls -->
               <div class="step-photo-section">
                 @if (stepGroup.get('imagePath')?.value) {
@@ -728,7 +735,7 @@
                     <app-measurement-editor
                       formControlName="measurement"
                       label="Assign step amount"
-                      hint="Only the portion used in this step. It scales in the ingredient callouts; avoid fixed amounts in the instruction. Leave unassigned for a name-only callout."
+                      hint="Only the portion used in this step. It scales in the ingredient callouts. Tag the amount in the instruction instead to scale it in place. Leave unassigned for a name-only callout."
                     ></app-measurement-editor>
                   </div>
                 }

@@ -224,6 +224,25 @@ describe('RecipeService', () => {
     expect(result[0].matchedCount).toBe(2);
   });
 
+  it('detects step amounts via POST /api/recipes/step-amounts/detect', async () => {
+    const promise = firstValueFrom(service.detectStepAmounts('Add 1 cup flour.'));
+    const req = httpMock.expectOne('/api/recipes/step-amounts/detect');
+    expect(req.request.method).toBe('POST');
+    expect(req.request.body).toEqual({ instruction: 'Add 1 cup flour.' });
+    req.flush([
+      {
+        start: 4,
+        length: 5,
+        text: '1 cup',
+        measurement: { quantity: 1, unit: 'Cup' },
+        alternativeMeasurement: null,
+      },
+    ]);
+
+    const result = await promise;
+    expect(result[0].text).toBe('1 cup');
+  });
+
   it('deletes recipe via DELETE /api/recipes/:id', async () => {
     const promise = firstValueFrom(service.deleteRecipe('r-1'));
     const req = httpMock.expectOne('/api/recipes/r-1');

@@ -191,6 +191,39 @@ describe('RecipeDetailPreviewComponent', () => {
     );
   });
 
+  it('maps tagged inline amounts by ingredient index into scaled chips and a divided breakdown', () => {
+    const span = (start: number) => ({
+      start,
+      length: 6,
+      kind: 'Ingredient' as const,
+      ingredientIndex: 0,
+      measurement: { quantity: 1, unit: 'Tbsp' as const },
+    });
+    fixture.componentRef.setInput('recipe', {
+      ...mockRecipeData,
+      steps: [
+        {
+          ...mockRecipeData.steps[1],
+          instruction: 'Warm 1 tbsp oil, then add 1 tbsp more.',
+          ingredientIndices: [0, 1],
+          inlineAmounts: [span(5), span(26)],
+        },
+      ],
+    });
+    component.setMultiplier(2);
+    fixture.detectChanges();
+    const el: HTMLElement = fixture.nativeElement;
+    expect(el.querySelector('.step-instruction-text')?.textContent?.trim()).toBe(
+      'Warm 2 tbsp oil, then add 2 tbsp more.',
+    );
+    expect(el.querySelector('.ingredient-uses')?.textContent).toBe(
+      'Divided: 2 tbsp (step 2) · 2 tbsp (step 2)',
+    );
+    expect(component.groupedSteps()[0].items[0].ingredientCallouts.map((c) => c.id)).toEqual([
+      'ing-1',
+    ]);
+  });
+
   it('emits publishRequested when publish button is clicked', () => {
     let emitted = false;
     component.publishRequested.subscribe(() => {

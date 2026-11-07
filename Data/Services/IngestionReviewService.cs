@@ -12,7 +12,6 @@ public sealed class IngestionReviewService(
     AppDbContext dbContext,
     ILlmSettingsService llmSettingsService,
     ILlmExtractionClient llmClient,
-    IMediaStorageService mediaStorageService,
     IIngestionQueueSignal queueSignal,
     ILogger<IngestionReviewService> logger
 ) : IIngestionReviewService
@@ -44,16 +43,14 @@ public sealed class IngestionReviewService(
             throw new ConflictException("Only a recipe awaiting review can be repaired.");
         }
 
-        var source = GetSource(job);
+        var source = RequireSource(job);
         var before = Diagnose(request.Draft, source);
-        var images = await GetSourceImagesAsync(job, cancellationToken);
         var config = await llmSettingsService.GetEffectiveConfigAsync(cancellationToken);
         queueSignal.PreemptBackgroundWork();
         var result = await llmClient.RepairRecipeDraftAsync(
             config,
             new LlmRecipeRepairContext(
                 source,
-                images,
                 IngestionDraftRepairMapper.ToPayload(request.Draft),
                 request.Hint
             ),
@@ -318,12 +315,10 @@ public sealed class IngestionReviewService(
             }
             else
             {
-                var images = await GetSourceImagesAsync(job, refineCts.Token);
                 var result = await llmClient.RepairRecipeDraftAsync(
                     refineConfig,
                     new LlmRecipeRepairContext(
-                        source,
-                        images,
+                        RequireSource(job),
                         IngestionDraftRepairMapper.ToPayload(draft)
                     ),
                     refineCts.Token
@@ -493,83 +488,10 @@ public sealed class IngestionReviewService(
         );
     }
 
-    private async Task<IReadOnlyList<LlmVisionImageInput>> GetSourceImagesAsync(
-        IngestionJob job,
-        CancellationToken cancellationToken
-    )
-    {
-        IReadOnlyList<IngestionSourceFileDto> sourceFiles = [];
-        var requiresImages = job.Channel == IngestionChannel.Images;
-        try
-        {
-            if (job.Channel == IngestionChannel.Images)
-            {
-                sourceFiles = string.IsNullOrWhiteSpace(job.SourceFilesJson)
-                    ? []
-                    : JsonSerializer.Deserialize<List<IngestionSourceFileDto>>(
-                        job.SourceFilesJson,
-                        JsonOptions
-                    ) ?? [];
-            }
-            else if (
-                job.Channel == IngestionChannel.Pdf
-                && !string.IsNullOrWhiteSpace(job.PdfInspectionJson)
-            )
-            {
-                var inspection = JsonSerializer.Deserialize<PdfInspectionSummaryDto>(
-                    job.PdfInspectionJson,
-                    JsonOptions
-                );
-                if (inspection?.ExtractionMode == PdfExtractionMode.VisionRaster)
-                {
-                    requiresImages = true;
-                    sourceFiles = inspection.RenderedPageImages ?? [];
-                }
-            }
-        }
-        catch (JsonException)
-        {
-            throw new DomainValidationException(
-                "The stored source images could not be read. The review draft has not been changed."
+    private static string RequireSource(IngestionJob job) =>
+        GetSource(job) is { } source && !string.IsNullOrWhiteSpace(source)
+            ? source
+            : throw new DomainValidationException(
+                "This job has no source text to re-extract from."
             );
-        }
-
-        if (
-            (requiresImages && sourceFiles.Count == 0)
-            || (
-                job.Channel == IngestionChannel.Pdf
-                && sourceFiles.Count == 0
-                && string.IsNullOrWhiteSpace(GetSource(job))
-            )
-            || sourceFiles.Any(file => file is null || string.IsNullOrWhiteSpace(file.UrlPath))
-        )
-        {
-            throw new DomainValidationException(
-                "The original source images are unavailable. The review draft has not been changed."
-            );
-        }
-        var images = new List<LlmVisionImageInput>();
-        foreach (var file in sourceFiles)
-        {
-            byte[] jpeg;
-            try
-            {
-                jpeg = await mediaStorageService.EncodeMediaImageAsVisionJpegAsync(
-                    file.UrlPath,
-                    1568,
-                    cancellationToken
-                );
-            }
-            catch (NotFoundException)
-            {
-                throw new DomainValidationException(
-                    "An original source image is missing. The review draft has not been changed."
-                );
-            }
-            images.Add(
-                new LlmVisionImageInput(file.PageNumber, "image/jpeg", Convert.ToBase64String(jpeg))
-            );
-        }
-        return images;
-    }
 }

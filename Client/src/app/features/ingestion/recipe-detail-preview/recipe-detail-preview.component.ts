@@ -29,6 +29,14 @@ import {
   scaleIngredient,
   formatStepIngredient,
 } from '../../../core/utils/culinary-math';
+import {
+  NumberedInstructionStep,
+  formatIngredientUses,
+  ingredientUses,
+  inlineAmountInputsToDtos,
+  validInlineSpans,
+} from '../../../core/utils/step-instruction';
+import { StepInstructionComponent } from '../../../shared/components/step-instruction/step-instruction.component';
 
 export interface ScaledPreviewIngredientItem {
   ingredient: RecipePreviewIngredient;
@@ -38,6 +46,7 @@ export interface ScaledPreviewIngredientItem {
 
 export interface ScaledPreviewStepItem {
   step: RecipePreviewStep;
+  instructionStep: NumberedInstructionStep;
   ingredientCallouts: { id: string; label: string }[];
 }
 
@@ -64,6 +73,7 @@ export interface PreviewStepSectionGroup {
     MatIconModule,
     MatProgressSpinnerModule,
     MatTooltipModule,
+    StepInstructionComponent,
   ],
   templateUrl: './recipe-detail-preview.component.html',
   styleUrl: './recipe-detail-preview.component.scss',
@@ -132,12 +142,58 @@ export class RecipeDetailPreviewComponent {
     }));
   });
 
+  readonly displayIngredients = computed(() =>
+    Array.from(this.scaledIngredientsMap().values()).map((item) => item.ingredient),
+  );
+
+  /** Preview steps with inline amounts keyed by preview ingredient ids (`ing-N`). */
+  readonly instructionSteps = computed<NumberedInstructionStep[]>(() => {
+    const map = this.scaledIngredientsMap();
+    return this.recipe().steps.map((step) => ({
+      stepNumber: step.stepNumber,
+      instruction: step.instruction,
+      inlineAmounts: inlineAmountInputsToDtos(
+        step.inlineAmounts ?? [],
+        (index) => map.get(index)?.ingredient.id,
+      ),
+    }));
+  });
+
+  readonly ingredientUsesMap = computed(() => {
+    const result = new Map<string, string>();
+    const steps = this.instructionSteps();
+    const ingredients = this.displayIngredients();
+    for (const item of this.scaledIngredientsMap().values()) {
+      const uses = ingredientUses(
+        steps,
+        item.ingredient.id,
+        ingredients,
+        this.scaleFactor(),
+        this.targetSystem(),
+      );
+      if (
+        uses.length >= 2 ||
+        (uses.length === 1 && uses[0].label !== item.displayQuantityAndUnit)
+      ) {
+        result.set(item.ingredient.id, formatIngredientUses(uses));
+      }
+    }
+    return result;
+  });
+
   readonly groupedSteps = computed<PreviewStepSectionGroup[]>(() => {
     const r = this.recipe();
     const map = this.scaledIngredientsMap();
+    const instructionSteps = this.instructionSteps();
     const sectionsMap = new Map<string, ScaledPreviewStepItem[]>();
 
-    for (const step of r.steps) {
+    for (const [stepIndex, step] of r.steps.entries()) {
+      const instructionStep = instructionSteps[stepIndex];
+      const spanned = new Set(
+        validInlineSpans(instructionStep.instruction ?? '', instructionStep.inlineAmounts ?? [])
+          .filter((a) => a.kind === 'Ingredient')
+          .map((a) => a.ingredientId),
+      );
       const section = step.sectionName?.trim() || '';
       if (!sectionsMap.has(section)) {
         sectionsMap.set(section, []);
@@ -146,7 +202,7 @@ export class RecipeDetailPreviewComponent {
       const callouts = (step.ingredientIndices || [])
         .map((idx) => {
           const item = map.get(idx);
-          if (!item) return null;
+          if (!item || spanned.has(item.ingredient.id)) return null;
           const label = formatStepIngredient(
             item.ingredient,
             step.ingredientAmounts?.find((a) => a.ingredientIndex === idx)?.measurement,
@@ -159,6 +215,7 @@ export class RecipeDetailPreviewComponent {
 
       sectionsMap.get(section)!.push({
         step,
+        instructionStep,
         ingredientCallouts: callouts,
       });
     }

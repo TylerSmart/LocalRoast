@@ -43,8 +43,10 @@ import {
   formatCountdown,
   formatDuration,
   scaleIngredient,
-  formatStepIngredient,
+  stepIngredientCallouts,
 } from '../../../core/utils/culinary-math';
+import { renderScaledInstruction } from '../../../core/utils/step-instruction';
+import { StepInstructionComponent } from '../../../shared/components/step-instruction/step-instruction.component';
 import {
   CookLogDialogComponent,
   CookLogDialogData,
@@ -78,6 +80,7 @@ export interface CookIngredientSection {
     MatTooltipModule,
     MatDividerModule,
     MatProgressSpinnerModule,
+    StepInstructionComponent,
   ],
   selector: 'app-cook-mode',
   templateUrl: './cook-mode.component.html',
@@ -159,6 +162,10 @@ export class CookModeComponent implements OnInit, OnDestroy {
     return map;
   });
 
+  protected readonly displayIngredients = computed(() =>
+    Array.from(this.scaledIngredientsMap().values()).map((item) => item.ingredient),
+  );
+
   protected readonly groupedIngredients = computed<CookIngredientSection[]>(() => {
     const r = this.recipe();
     const map = this.scaledIngredientsMap();
@@ -188,23 +195,16 @@ export class CookModeComponent implements OnInit, OnDestroy {
 
   protected readonly flattenedSteps = computed<ScaledCookStep[]>(() => {
     const r = this.recipe();
-    const map = this.scaledIngredientsMap();
+    const ingredients = this.displayIngredients();
     if (!r) return [];
 
     return r.steps.map((step) => {
-      const callouts = step.ingredientIds
-        .map((id) => {
-          const item = map.get(id);
-          if (!item) return null;
-          const label = formatStepIngredient(
-            item.ingredient,
-            step.ingredientAmounts?.find((a) => a.ingredientId === id)?.measurement,
-            this.scaleFactor(),
-            this.targetSystem(),
-          );
-          return { id, label };
-        })
-        .filter((c): c is { id: string; label: string } => c !== null);
+      const callouts = stepIngredientCallouts(
+        step,
+        ingredients,
+        this.scaleFactor(),
+        this.targetSystem(),
+      );
 
       return { step, ingredientCallouts: callouts };
     });
@@ -524,12 +524,18 @@ export class CookModeComponent implements OnInit, OnDestroy {
   protected narrateCurrentStep(): void {
     const step = this.currentStep();
     if (step) {
+      const text = renderScaledInstruction(
+        step.step,
+        this.displayIngredients(),
+        this.scaleFactor(),
+        this.targetSystem(),
+      );
       const amounts = step.ingredientCallouts.filter((c) =>
         step.step.ingredientAmounts?.some((a) => a.ingredientId === c.id),
       );
       const instruction = amounts.length
-        ? `Ingredients for this step: ${amounts.map((a) => a.label).join(', ')}. ${step.step.instruction}`
-        : step.step.instruction;
+        ? `Ingredients for this step: ${amounts.map((a) => a.label).join(', ')}. ${text}`
+        : text;
       this.speechNarrationService.speakStep(
         step.step.stepNumber,
         instruction,

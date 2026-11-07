@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -68,8 +69,12 @@ public sealed class MockMultimodalServer : IAsyncDisposable
 
                 using var reader = new StreamReader(context.Request.Body);
                 var requestBody = await reader.ReadToEndAsync();
+                using var body = JsonDocument.Parse(requestBody);
 
-                var isVision = requestBody.Contains("\"images\":");
+                // Vision jobs are transcribed first, then extracted as text that names the berries.
+                var isVision =
+                    requestBody.Contains("\"images\":")
+                    || requestBody.Contains("blueberries", StringComparison.OrdinalIgnoreCase);
 
                 var recipeJson = isVision
                     ? """
@@ -153,7 +158,17 @@ public sealed class MockMultimodalServer : IAsyncDisposable
                         """;
 
                 return Results.Ok(
-                    new { message = new { role = "assistant", content = recipeJson } }
+                    new
+                    {
+                        message = new
+                        {
+                            role = "assistant",
+                            content = TaggedPipelineMockResponder.Respond(
+                                body.RootElement,
+                                recipeJson
+                            ),
+                        },
+                    }
                 );
             }
         );

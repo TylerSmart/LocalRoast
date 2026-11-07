@@ -51,6 +51,9 @@ public interface IRecipeService
         CancellationToken cancellationToken = default
     );
 
+    /// <summary>Finds the measured amounts in a step instruction without persisting anything.</summary>
+    IReadOnlyList<DetectedStepAmountDto> DetectStepAmounts(string instruction);
+
     Task<bool> DeleteRecipeAttachmentAsync(
         Guid recipeId,
         Guid attachmentId,

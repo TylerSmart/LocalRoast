@@ -6,7 +6,6 @@ using App.API.Hubs;
 using App.API.Mcp;
 using App.Core;
 using App.Core.Authentication;
-using App.Core.Media;
 using App.Core.Shopping;
 using App.Data;
 using App.Data.Services;
@@ -220,12 +219,6 @@ using (var scope = app.Services.CreateScope())
     {
         db.Database.Migrate();
     }
-
-    var mediaStorage = scope.ServiceProvider.GetRequiredService<IMediaStorageService>();
-
-    await IngestionCatalogMaterializer.BackfillMissingSourceAttachmentsAsync(db, mediaStorage);
-    await IngestionCatalogMaterializer.CleanLegacyCorruptedIngredientUnitsAsync(db);
-    await FoodCategoryBackfill.AssignMissingCategoriesAsync(db);
 }
 
 app.UseSerilogRequestLogging(options =>

@@ -80,8 +80,38 @@ public record RecipeStepDto(
     string? ImagePath,
     IReadOnlyList<Guid> IngredientIds,
     IReadOnlyList<RecipeStepTimerDto> Timers,
-    IReadOnlyList<RecipeStepIngredientAmountDto>? IngredientAmounts = null
+    IReadOnlyList<RecipeStepIngredientAmountDto>? IngredientAmounts = null,
+    IReadOnlyList<RecipeStepInlineAmountDto>? InlineAmounts = null
 );
+
+/// <summary>An amount inside a step's instruction; Start/Length index the trimmed instruction.</summary>
+public record RecipeStepInlineAmountDto(
+    int Start,
+    int Length,
+    InlineStepAmountKind Kind,
+    Guid? IngredientId,
+    RecipeMeasurement Measurement,
+    RecipeMeasurement? AlternativeMeasurement = null
+);
+
+public record RecipeStepInlineAmountInput(
+    [Range(0, 3999)] int Start,
+    [Range(1, 200)] int Length,
+    InlineStepAmountKind Kind,
+    int? IngredientIndex,
+    [Required] RecipeMeasurement Measurement,
+    RecipeMeasurement? AlternativeMeasurement = null
+);
+
+public record DetectedStepAmountDto(
+    int Start,
+    int Length,
+    string Text,
+    RecipeMeasurement Measurement,
+    RecipeMeasurement? AlternativeMeasurement
+);
+
+public record DetectStepAmountsRequest([Required, MaxLength(4000)] string Instruction);
 
 public record RecipeAttachmentDto(
     Guid Id,
@@ -202,7 +232,8 @@ public record RecipeStepInput(
     IReadOnlyList<int>? IngredientIndices = null,
     IReadOnlyList<RecipeStepTimerInput>? Timers = null,
     [MaxLength(500)] string? ImagePath = null,
-    IReadOnlyList<RecipeStepIngredientAmountInput>? IngredientAmounts = null
+    IReadOnlyList<RecipeStepIngredientAmountInput>? IngredientAmounts = null,
+    IReadOnlyList<RecipeStepInlineAmountInput>? InlineAmounts = null
 );
 
 public record UpsertRecipeRequest(

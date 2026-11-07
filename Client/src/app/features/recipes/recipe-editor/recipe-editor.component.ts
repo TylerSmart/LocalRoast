@@ -1,5 +1,12 @@
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
-import { FormArray, FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
+import {
+  FormArray,
+  FormBuilder,
+  FormControl,
+  FormGroup,
+  ReactiveFormsModule,
+  Validators,
+} from '@angular/forms';
 import { MatAutocompleteModule } from '@angular/material/autocomplete';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
@@ -24,6 +31,7 @@ import {
   RecipeIngredientInput,
   RecipeMeasurement,
   RecipeStatus,
+  RecipeStepInlineAmountInput,
   RecipeStepInput,
   RecipeSummaryDto,
   UpsertRecipeRequest,
@@ -35,6 +43,8 @@ import { RecipeService } from '../../../core/services/recipe/recipe.service';
 import { TaxonomyService } from '../../../core/services/taxonomy/taxonomy.service';
 import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialog/confirm-dialog.component';
 import { MeasurementEditorComponent } from '../../../shared/components/measurement-editor/measurement-editor.component';
+import { InlineAmountEditorComponent } from '../../../shared/components/inline-amount-editor/inline-amount-editor.component';
+import { trimInstructionWithAmounts } from '../../../core/utils/step-instruction';
 import {
   buildStepAmounts,
   createStepAmounts,
@@ -47,6 +57,7 @@ import {
   SearchableSelectComponent,
   SearchableSelectOption,
 } from '../../../shared/components/searchable-select/searchable-select.component';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { FoodItemDialogComponent } from '../../food-catalog/food-item-dialog/food-item-dialog.component';
@@ -87,6 +98,7 @@ interface StepFormValue {
   instruction: string;
   imagePath?: string | null;
   ingredientIndices?: number[];
+  inlineAmounts?: RecipeStepInlineAmountInput[];
   timers?: TimerFormValue[];
 }
 
@@ -133,6 +145,7 @@ export const MEASUREMENT_UNITS: { value: MeasurementUnit; label: string }[] = [
     MatProgressSpinnerModule,
     SearchableSelectComponent,
     MeasurementEditorComponent,
+    InlineAmountEditorComponent,
   ],
   selector: 'app-recipe-editor',
   templateUrl: './recipe-editor.component.html',
@@ -230,6 +243,22 @@ export class RecipeEditorComponent implements OnInit {
     ingredients: this.fb.array<FormGroup>([]),
     steps: this.fb.array<FormGroup>([]),
   });
+
+  private readonly formRevision = signal(0);
+
+  protected readonly inlineIngredientOptions = computed(() => {
+    this.formRevision();
+    return this.ingredientsArray.controls.map((ctrl, index) => {
+      const name = ctrl.get('displayName')?.value || `Ingredient #${index + 1}`;
+      return { index, label: `${index + 1}. ${name}` };
+    });
+  });
+
+  constructor() {
+    this.form.valueChanges
+      .pipe(takeUntilDestroyed())
+      .subscribe(() => this.formRevision.update((revision) => revision + 1));
+  }
 
   get ingredientsArray(): FormArray<FormGroup> {
     return this.form.get('ingredients') as FormArray<FormGroup>;
@@ -387,6 +416,23 @@ export class RecipeEditorComponent implements OnInit {
               ? []
               : [{ ingredientIndex: index, measurement: a.measurement }];
           }),
+        ),
+        inlineAmounts: new FormControl<RecipeStepInlineAmountInput[]>(
+          (step.inlineAmounts ?? []).map((a) => {
+            const index =
+              a.kind === 'Ingredient' && a.ingredientId
+                ? ingredientIdToIndex.get(a.ingredientId)
+                : undefined;
+            return {
+              start: a.start,
+              length: a.length,
+              kind: a.kind === 'Ingredient' && index === undefined ? 'Fixed' : a.kind,
+              ingredientIndex: index ?? null,
+              measurement: a.measurement,
+              alternativeMeasurement: a.alternativeMeasurement ?? null,
+            };
+          }),
+          { nonNullable: true },
         ),
         timers: timersArray,
       });
@@ -715,6 +761,7 @@ export class RecipeEditorComponent implements OnInit {
       imagePath: [null as string | null],
       ingredientIndices: [[] as number[]],
       ingredientAmounts: createStepAmounts([]),
+      inlineAmounts: new FormControl<RecipeStepInlineAmountInput[]>([], { nonNullable: true }),
       timers: this.fb.array<FormGroup>([]),
     });
     this.stepsArray.push(stepGroup);
@@ -762,6 +809,10 @@ export class RecipeEditorComponent implements OnInit {
 
   toggleStepIngredientCallout(stepIndex: number, ingredientIndex: number): void {
     toggleStepIngredient(this.stepsArray.at(stepIndex), ingredientIndex);
+  }
+
+  setStepInlineAmounts(stepIndex: number, amounts: RecipeStepInlineAmountInput[]): void {
+    this.stepsArray.at(stepIndex).get('inlineAmounts')?.setValue(amounts);
   }
 
   getStepAmountsArray(stepIndex: number) {
@@ -820,12 +871,14 @@ export class RecipeEditorComponent implements OnInit {
         };
       });
 
+      const trimmed = trimInstructionWithAmounts(s.instruction, s.inlineAmounts ?? []);
       return {
         sectionName: s.sectionName?.trim() || null,
-        instruction: s.instruction.trim(),
+        instruction: trimmed.instruction,
         imagePath: s.imagePath?.trim() || null,
         ingredientIndices: s.ingredientIndices || [],
         ingredientAmounts: buildStepAmounts(this.stepsArray.at(index)),
+        inlineAmounts: trimmed.amounts,
         timers,
       };
     });

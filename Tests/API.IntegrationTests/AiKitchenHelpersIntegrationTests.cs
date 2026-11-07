@@ -124,7 +124,7 @@ public sealed class AiKitchenHelpersIntegrationTests
             CancellationToken cancellationToken = default
         ) => throw new NotImplementedException();
 
-        public Task<LlmExtractedRecipePayload> ExtractRecipeFromImagesAsync(
+        public Task<string?> TranscribeRecipeImagesAsync(
             EffectiveLlmConnectionConfig config,
             LlmVisionExtractionContext context,
             CancellationToken cancellationToken = default

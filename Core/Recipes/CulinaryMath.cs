@@ -111,6 +111,46 @@ public static class CulinaryMath
         );
     }
 
+    /// <summary>Converts between units of the same dimension (volume or weight) or identical units.</summary>
+    public static bool TryConvertQuantity(
+        decimal quantity,
+        MeasurementUnit from,
+        MeasurementUnit to,
+        out decimal result
+    )
+    {
+        result = quantity;
+        if (from == to)
+            return true;
+        // Exact ratios inside one system; the rounded metric factors would turn 1/4 cup into 3.99998 tbsp.
+        if (
+            TryGetExactFactor(from, out var fromExact, out var fromSystem)
+            && TryGetExactFactor(to, out var toExact, out var toSystem)
+            && fromSystem == toSystem
+        )
+        {
+            result = quantity * fromExact / toExact;
+            return true;
+        }
+        if (
+            TryGetVolumeMlFactor(from, out var fromVolume)
+            && TryGetVolumeMlFactor(to, out var toVolume)
+        )
+        {
+            result = quantity * fromVolume / toVolume;
+            return true;
+        }
+        if (
+            TryGetWeightGFactor(from, out var fromWeight)
+            && TryGetWeightGFactor(to, out var toWeight)
+        )
+        {
+            result = quantity * fromWeight / toWeight;
+            return true;
+        }
+        return false;
+    }
+
     private static bool TryMeasurementUnitFactor(
         RecipeMeasurement from,
         RecipeMeasurement to,
@@ -295,6 +335,28 @@ public static class CulinaryMath
         }
 
         return (qty, maxQty, unit);
+    }
+
+    private static bool TryGetExactFactor(MeasurementUnit unit, out decimal factor, out int system)
+    {
+        (factor, system) = unit switch
+        {
+            MeasurementUnit.Tsp => (1m, 1),
+            MeasurementUnit.Tbsp => (3m, 1),
+            MeasurementUnit.FlOz => (6m, 1),
+            MeasurementUnit.Cup => (48m, 1),
+            MeasurementUnit.Pt => (96m, 1),
+            MeasurementUnit.Qt => (192m, 1),
+            MeasurementUnit.Gal => (768m, 1),
+            MeasurementUnit.Ml => (1m, 2),
+            MeasurementUnit.L => (1000m, 2),
+            MeasurementUnit.Oz => (1m, 3),
+            MeasurementUnit.Lb => (16m, 3),
+            MeasurementUnit.G => (1m, 4),
+            MeasurementUnit.Kg => (1000m, 4),
+            _ => (0m, 0),
+        };
+        return system != 0;
     }
 
     private static bool TryGetVolumeMlFactor(MeasurementUnit unit, out decimal factor)

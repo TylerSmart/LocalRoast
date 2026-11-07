@@ -378,7 +378,7 @@
                     [formControl]="repairHint"
                     maxlength="2000"
                     rows="2"
-                    placeholder="For example: split the butter between the two steps"
+                    placeholder="For example: the butter is divided between the dough and the topping"
                   ></textarea>
                 </mat-form-field>
                 <div class="review-actions">
@@ -410,13 +410,13 @@
                     } @else {
                       <mat-icon>auto_fix_high</mat-icon>
                     }
-                    {{ isRepairing() ? 'Preparing preview...' : 'Fix with AI' }}
+                    {{ isRepairing() ? 'Preparing preview...' : 'Re-extract with AI' }}
                   </button>
                 </div>
                 @if (isRepairing()) {
                   <p role="status">
-                    AI repair can take several minutes and may retry an unusable response once. You
-                    can keep editing.
+                    Re-extracting regenerates the steps from the source text and can take several
+                    minutes. You can keep editing.
                   </p>
                 }
 
@@ -904,6 +904,13 @@
                       ></textarea>
                     </mat-form-field>
 
+                    <app-inline-amount-editor
+                      [instruction]="stepGroup.get('instruction')?.value"
+                      [amounts]="stepGroup.get('inlineAmounts')?.value"
+                      [ingredientOptions]="availableIngredientLabels()"
+                      (amountsChange)="setStepInlineAmounts($index, $event)"
+                    ></app-inline-amount-editor>
+
                     <!-- Step Ingredient Callouts Selection -->
                     <mat-form-field appearance="outline" class="form-field full-width">
                       <mat-label>Ingredients used in this step</mat-label>
@@ -934,7 +941,7 @@
                           <app-measurement-editor
                             formControlName="measurement"
                             label="Assign step amount"
-                            hint="Only the portion used in this step. It scales in the ingredient callouts; avoid fixed amounts in the instruction. Leave unassigned for a name-only callout."
+                            hint="Only the portion used in this step. It scales in the ingredient callouts. Tag the amount in the instruction instead to scale it in place. Leave unassigned for a name-only callout."
                           ></app-measurement-editor>
                         </div>
                       }

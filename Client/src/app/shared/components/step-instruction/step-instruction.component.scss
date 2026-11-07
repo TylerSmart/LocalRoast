@@ -1,0 +1,21 @@
+:host {
+  display: inline;
+}
+
+.inline-amount {
+  background: var(--mat-sys-primary-container);
+  color: var(--mat-sys-on-primary-container);
+  border-radius: 6px;
+  padding: 0 4px;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+@media print {
+  .inline-amount {
+    background: none;
+    color: inherit;
+    padding: 0;
+    font-weight: 700;
+  }
+}

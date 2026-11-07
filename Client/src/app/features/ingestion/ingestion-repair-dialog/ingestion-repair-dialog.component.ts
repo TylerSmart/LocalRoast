@@ -160,6 +160,12 @@ export class IngestionRepairDialogComponent {
       );
       add(
         section,
+        'Tagged amounts',
+        this.formatInlineAmounts(oldStep, before),
+        this.formatInlineAmounts(newStep, after),
+      );
+      add(
+        section,
         'Timers',
         this.format(oldStep?.timers?.map((timer) => `${timer.label}: ${timer.durationSeconds}s`)),
         this.format(newStep?.timers?.map((timer) => `${timer.label}: ${timer.durationSeconds}s`)),
@@ -185,6 +191,24 @@ export class IngestionRepairDialogComponent {
     const range = measurement.maxQuantity == null ? '' : `-${measurement.maxQuantity}`;
     const unit = measurement.unit === 'Custom' ? measurement.customUnitName : measurement.unit;
     return `${quantity}${range} ${unit ?? ''}`.trim();
+  }
+
+  private formatInlineAmounts(
+    step: IngestionDraftStepDto | undefined,
+    draft: IngestionExtractedDraftDto,
+  ): string {
+    return this.format(
+      step?.inlineAmounts?.map((amount) => {
+        const text = step.instruction.slice(amount.start, amount.start + amount.length);
+        const target =
+          amount.kind === 'Ingredient' && amount.ingredientIndex !== null
+            ? this.ingredientLabel(amount.ingredientIndex, draft)
+            : amount.kind === 'Mixture'
+              ? 'mixture'
+              : 'other';
+        return `"${text}" → ${target}`;
+      }),
+    );
   }
 
   private ingredientLabel(index: number, draft: IngestionExtractedDraftDto): string {

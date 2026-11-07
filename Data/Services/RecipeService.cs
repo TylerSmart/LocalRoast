@@ -447,6 +447,8 @@ public sealed partial class RecipeService(
             .Include(r => r.Steps)
                 .ThenInclude(s => s.IngredientReferences)
             .Include(r => r.Steps)
+                .ThenInclude(s => s.InlineAmounts)
+            .Include(r => r.Steps)
                 .ThenInclude(s => s.Timers)
             .Include(r => r.RecipeCollections)
                 .ThenInclude(rc => rc.Collection)
@@ -480,6 +482,8 @@ public sealed partial class RecipeService(
                     .ThenInclude(i => i.LinkedRecipe)
                 .Include(r => r.Steps)
                     .ThenInclude(s => s.IngredientReferences)
+                .Include(r => r.Steps)
+                    .ThenInclude(s => s.InlineAmounts)
                 .Include(r => r.Steps)
                     .ThenInclude(s => s.Timers)
                 .ToListAsync(cancellationToken);
@@ -654,9 +658,27 @@ public sealed partial class RecipeService(
                     ir.RecipeIngredientId,
                     new RecipeMeasurement(ir.Quantity, ir.Unit, ir.MaxQuantity, ir.CustomUnitName)
                 ))
-                .ToList()
+                .ToList(),
+            s.InlineAmounts.OrderBy(a => a.SortOrder).Select(MapInlineAmountDto).ToList()
         );
     }
+
+    internal static RecipeStepInlineAmountDto MapInlineAmountDto(RecipeStepInlineAmount a) =>
+        new(
+            a.Start,
+            a.Length,
+            a.Kind,
+            a.RecipeIngredientId,
+            new RecipeMeasurement(a.Quantity, a.Unit, a.MaxQuantity, a.CustomUnitName),
+            a.AlternativeQuantity.HasValue && a.AlternativeUnit.HasValue
+                ? new RecipeMeasurement(
+                    a.AlternativeQuantity,
+                    a.AlternativeUnit,
+                    a.AlternativeMaxQuantity,
+                    a.AlternativeCustomUnitName
+                )
+                : null
+        );
 
     public async Task<RecipeDetailDto> CreateRecipeAsync(
         UpsertRecipeRequest request,
@@ -723,6 +745,8 @@ public sealed partial class RecipeService(
             .Include(r => r.Steps)
                 .ThenInclude(s => s.IngredientReferences)
             .Include(r => r.Steps)
+                .ThenInclude(s => s.InlineAmounts)
+            .Include(r => r.Steps)
                 .ThenInclude(s => s.Timers)
             .Include(r => r.RecipeCollections)
             .Include(r => r.RecipeTags)
@@ -754,6 +778,9 @@ public sealed partial class RecipeService(
 
         var totalTime = ComputeTotalTime(request);
 
+        dbContext.RecipeStepInlineAmounts.RemoveRange(
+            recipe.Steps.SelectMany(s => s.InlineAmounts).ToList()
+        );
         dbContext.RecipeStepIngredients.RemoveRange(
             recipe.Steps.SelectMany(s => s.IngredientReferences).ToList()
         );
@@ -831,6 +858,8 @@ public sealed partial class RecipeService(
         var recipe = await dbContext
             .Recipes.Include(r => r.Steps)
                 .ThenInclude(s => s.IngredientReferences)
+            .Include(r => r.Steps)
+                .ThenInclude(s => s.InlineAmounts)
             .Include(r => r.Attachments)
             .Include(r => r.CookLogs)
             .FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
@@ -863,6 +892,9 @@ public sealed partial class RecipeService(
             .Select(c => new { c.PhotoImagePath, c.PhotoThumbnailPath })
             .ToListAsync(cancellationToken);
 
+        dbContext.RecipeStepInlineAmounts.RemoveRange(
+            recipe.Steps.SelectMany(s => s.InlineAmounts).ToList()
+        );
         dbContext.RecipeStepIngredients.RemoveRange(
             recipe.Steps.SelectMany(s => s.IngredientReferences).ToList()
         );
@@ -1296,6 +1328,43 @@ public sealed partial class RecipeService(
                     }
                     RecipeMeasurementValidation.Validate(amount.Measurement);
                 }
+
+                var lead = step.Instruction.Length - step.Instruction.TrimStart().Length;
+                var trimmedLength = step.Instruction.Trim().Length;
+                var inlineEnd = 0;
+                foreach (var inline in step.InlineAmounts ?? [])
+                {
+                    var start = inline?.Start - lead;
+                    if (
+                        inline is null
+                        || start < inlineEnd
+                        || inline.Length < 1
+                        || start + inline.Length > trimmedLength
+                        || inline.Measurement is null
+                        || !Enum.IsDefined(inline.Kind)
+                        || (inline.Kind == InlineStepAmountKind.Ingredient)
+                            != (
+                                inline.IngredientIndex is { } index
+                                && index >= 0
+                                && index < ingCount
+                            )
+                        || (
+                            inline.Kind != InlineStepAmountKind.Ingredient
+                            && inline.IngredientIndex is not null
+                        )
+                    )
+                    {
+                        throw new DomainValidationException(
+                            "Each inline amount must cover a distinct part of its step and reference a valid ingredient."
+                        );
+                    }
+                    RecipeMeasurementValidation.Validate(inline.Measurement);
+                    if (inline.AlternativeMeasurement is not null)
+                    {
+                        RecipeMeasurementValidation.Validate(inline.AlternativeMeasurement);
+                    }
+                    inlineEnd = start!.Value + inline.Length;
+                }
             }
         }
     }
@@ -1443,8 +1512,18 @@ public sealed partial class RecipeService(
 
             var amounts = (sInput.IngredientAmounts ?? []).ToDictionary(
                 a => a.IngredientIndex,
-                a => a.Measurement
+                a => (RecipeMeasurement?)a.Measurement
             );
+            var inlineInputs = sInput.InlineAmounts ?? [];
+            foreach (
+                var group in inlineInputs
+                    .Where(a => a.Kind == InlineStepAmountKind.Ingredient)
+                    .GroupBy(a => a.IngredientIndex!.Value)
+            )
+            {
+                // Tagged spans are the source of truth for the step's portion of that row.
+                amounts[group.Key] = SumInlineMeasurements(group.Select(a => a.Measurement));
+            }
             var indices = (sInput.IngredientIndices ?? []).Concat(amounts.Keys).Distinct();
             foreach (var idx in indices)
             {
@@ -1463,6 +1542,35 @@ public sealed partial class RecipeService(
                         }
                     );
                 }
+            }
+
+            var leadingTrim = sInput.Instruction.Length - sInput.Instruction.TrimStart().Length;
+            for (var a = 0; a < inlineInputs.Count; a++)
+            {
+                var inline = inlineInputs[a];
+                stepEntity.InlineAmounts.Add(
+                    new RecipeStepInlineAmount
+                    {
+                        RecipeStep = stepEntity,
+                        SortOrder = a,
+                        Start = inline.Start - leadingTrim,
+                        Length = inline.Length,
+                        Kind = inline.Kind,
+                        RecipeIngredient =
+                            inline.Kind == InlineStepAmountKind.Ingredient
+                                ? createdIngredients[inline.IngredientIndex!.Value]
+                                : null,
+                        Quantity = inline.Measurement.Quantity,
+                        MaxQuantity = inline.Measurement.MaxQuantity,
+                        Unit = inline.Measurement.Unit,
+                        CustomUnitName = inline.Measurement.CustomUnitName?.Trim(),
+                        AlternativeQuantity = inline.AlternativeMeasurement?.Quantity,
+                        AlternativeMaxQuantity = inline.AlternativeMeasurement?.MaxQuantity,
+                        AlternativeUnit = inline.AlternativeMeasurement?.Unit,
+                        AlternativeCustomUnitName =
+                            inline.AlternativeMeasurement?.CustomUnitName?.Trim(),
+                    }
+                );
             }
 
             if (sInput.Timers is not null)
@@ -1485,6 +1593,73 @@ public sealed partial class RecipeService(
             dbContext.RecipeSteps.Add(stepEntity);
         }
     }
+
+    /// <summary>
+    /// Sums the tagged spans of one row in the first span's unit; null when any span cannot
+    /// be converted into that unit.
+    /// </summary>
+    private static RecipeMeasurement? SumInlineMeasurements(
+        IEnumerable<RecipeMeasurement> measurements
+    )
+    {
+        RecipeMeasurement? sum = null;
+        decimal low = 0,
+            high = 0;
+        var hasMaximum = false;
+        foreach (var measurement in measurements)
+        {
+            sum ??= measurement;
+            var unit = sum.Unit!.Value;
+            if (
+                (
+                    unit == MeasurementUnit.Custom
+                    && !string.Equals(
+                        sum.CustomUnitName?.Trim(),
+                        measurement.CustomUnitName?.Trim(),
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                )
+                || !CulinaryMath.TryConvertQuantity(
+                    measurement.Quantity!.Value,
+                    measurement.Unit!.Value,
+                    unit,
+                    out var quantity
+                )
+                || !CulinaryMath.TryConvertQuantity(
+                    measurement.MaxQuantity ?? measurement.Quantity.Value,
+                    measurement.Unit.Value,
+                    unit,
+                    out var maximum
+                )
+            )
+            {
+                return null;
+            }
+            low += quantity;
+            high += maximum;
+            hasMaximum |= measurement.MaxQuantity.HasValue;
+        }
+        return sum is null
+            ? null
+            : sum with
+            {
+                Quantity = Math.Round(low, 4),
+                MaxQuantity = hasMaximum ? Math.Round(high, 4) : null,
+            };
+    }
+
+    public IReadOnlyList<DetectedStepAmountDto> DetectStepAmounts(string instruction) =>
+        SourceMeasurementParser
+            .FindSpans(instruction)
+            .Where(span => span.Measurement.Quantity is not null)
+            .Select(span => new DetectedStepAmountDto(
+                span.Index,
+                span.Length,
+                instruction.Substring(span.Index, span.Length),
+                span.Measurement,
+                span.Alternative
+            ))
+            .ToList();
 
     private async Task SyncTaxonomyAsync(
         Recipe recipe,

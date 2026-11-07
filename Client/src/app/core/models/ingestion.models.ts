@@ -30,6 +30,7 @@ import {
   RecipeDifficulty,
   RecipeMeasurement,
   RecipeStepIngredientAmountInput,
+  RecipeStepInlineAmountInput,
   RecipeStepTimerInput,
 } from './recipe.models';
 
@@ -47,8 +48,6 @@ export type IngestionJobStatus =
   | 'Failed'
   | 'Discarded';
 
-export type LlmExtractionStrategy = 'Auto' | 'SinglePass' | 'Staged';
-
 export interface LlmModelProfile {
   id: string;
   displayName: string;
@@ -61,8 +60,6 @@ export interface LlmModelProfile {
   topK: number | null;
   contextWindowTokens: number;
   requestTimeoutSeconds: number;
-  extractionRepairRounds: number;
-  useStagedExtraction: boolean;
   recommendedAsRefineModel: boolean;
   notes: string[];
 }
@@ -86,8 +83,6 @@ export interface LlmSettingsDto {
   temperature?: number | null;
   topP?: number | null;
   topK?: number | null;
-  extractionRepairRounds?: number;
-  extractionStrategy?: LlmExtractionStrategy;
   refineModel?: string | null;
   refineEnableThinking?: boolean;
   refineTemperature?: number | null;
@@ -114,8 +109,6 @@ export interface UpdateLlmSettingsRequest {
   temperature?: number | null;
   topP?: number | null;
   topK?: number | null;
-  extractionRepairRounds?: number;
-  extractionStrategy?: LlmExtractionStrategy;
   refineModel?: string | null;
   refineEnableThinking?: boolean;
   refineTemperature?: number | null;
@@ -189,6 +182,7 @@ export interface IngestionDraftStepDto {
   timers: RecipeStepTimerInput[];
   imagePath: string | null;
   ingredientAmounts?: RecipeStepIngredientAmountInput[] | null;
+  inlineAmounts?: RecipeStepInlineAmountInput[] | null;
 }
 
 export interface IngestionExtractedDraftDto {

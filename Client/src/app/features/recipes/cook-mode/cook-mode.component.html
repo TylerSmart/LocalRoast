@@ -458,7 +458,12 @@
                 aria-label="Mark step completed"
               ></mat-checkbox>
               <p class="instruction-text" [class.is-done]="checkedSteps()[currentStep()!.step.id]">
-                {{ currentStep()!.step.instruction }}
+                <app-step-instruction
+                  [step]="currentStep()!.step"
+                  [ingredients]="displayIngredients()"
+                  [factor]="scaleFactor()"
+                  [unitSystem]="targetSystem()"
+                ></app-step-instruction>
               </p>
               @if (speechNarrationService.isSupported()) {
                 <button

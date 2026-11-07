@@ -38,10 +38,6 @@ public sealed class HouseholdLlmSettings : IAuditable
 
     public int? TopK { get; set; }
 
-    public int ExtractionRepairRounds { get; set; } = 1;
-
-    public LlmExtractionStrategy ExtractionStrategy { get; set; } = LlmExtractionStrategy.Auto;
-
     public string? RefineModel { get; set; }
 
     public bool RefineEnableThinking { get; set; } = true;

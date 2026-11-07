@@ -429,6 +429,9 @@
                       @if (item.ingredient.isPantryStaple) {
                         <span class="pantry-tag" matTooltip="Pantry Staple">pantry</span>
                       }
+                      @if (ingredientUsesMap().get(item.ingredient.id); as uses) {
+                        <span class="ingredient-uses">{{ uses }}</span>
+                      }
                     </span>
                   </mat-checkbox>
 
@@ -542,7 +545,14 @@
                 <li class="step-card">
                   <div class="step-header">
                     <span class="step-number-circle">{{ stepItem.step.stepNumber }}</span>
-                    <p class="step-instruction-text">{{ stepItem.step.instruction }}</p>
+                    <p class="step-instruction-text">
+                      <app-step-instruction
+                        [step]="stepItem.step"
+                        [ingredients]="displayIngredients()"
+                        [factor]="scaleFactor()"
+                        [unitSystem]="targetSystem()"
+                      ></app-step-instruction>
+                    </p>
                     @if (aiHelper.isAvailable()) {
                       <button
                         type="button"

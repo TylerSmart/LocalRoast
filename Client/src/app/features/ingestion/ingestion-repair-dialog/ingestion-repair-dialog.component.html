@@ -1,4 +1,4 @@
-<h2 mat-dialog-title>{{ data.title || 'Review AI repair' }}</h2>
+<h2 mat-dialog-title>{{ data.title || 'Review AI re-extraction' }}</h2>
 <mat-dialog-content class="repair-dialog-content">
   <p>
     Compare the proposal with your current draft. Applying it changes the editor only; save or
@@ -6,7 +6,7 @@
   </p>
 
   @if (data.preview.notices.length) {
-    <section class="notice" aria-label="AI repair notices">
+    <section class="notice" aria-label="AI re-extraction notices">
       <h3>Notices</h3>
       <ul>
         @for (notice of data.preview.notices; track $index) {

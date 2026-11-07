@@ -233,6 +233,8 @@ public sealed class ShareLinkService(AppDbContext dbContext, TimeProvider? timeP
             .Include(r => r.Steps)
                 .ThenInclude(s => s.IngredientReferences)
             .Include(r => r.Steps)
+                .ThenInclude(s => s.InlineAmounts)
+            .Include(r => r.Steps)
                 .ThenInclude(s => s.Timers)
             .Include(r => r.RecipeTags)
                 .ThenInclude(rt => rt.Tag)
@@ -266,6 +268,8 @@ public sealed class ShareLinkService(AppDbContext dbContext, TimeProvider? timeP
                     .ThenInclude(i => i.FoodItem)
                 .Include(r => r.Steps)
                     .ThenInclude(s => s.IngredientReferences)
+                .Include(r => r.Steps)
+                    .ThenInclude(s => s.InlineAmounts)
                 .Include(r => r.Steps)
                     .ThenInclude(s => s.Timers)
                 .ToListAsync(cancellationToken);
@@ -410,6 +414,9 @@ public sealed class ShareLinkService(AppDbContext dbContext, TimeProvider? timeP
                     ir.RecipeIngredientId,
                     new RecipeMeasurement(ir.Quantity, ir.Unit, ir.MaxQuantity, ir.CustomUnitName)
                 ))
+                .ToList(),
+            s.InlineAmounts.OrderBy(a => a.SortOrder)
+                .Select(RecipeService.MapInlineAmountDto)
                 .ToList()
         );
     }

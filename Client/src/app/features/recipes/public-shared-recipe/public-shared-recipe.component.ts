@@ -25,9 +25,10 @@ import {
   formatDuration,
   formatMinutes,
   scaleIngredient,
-  formatStepIngredient,
   stepIngredientCallouts,
 } from '../../../core/utils/culinary-math';
+import { formatIngredientUses, ingredientUses } from '../../../core/utils/step-instruction';
+import { StepInstructionComponent } from '../../../shared/components/step-instruction/step-instruction.component';
 
 export interface PublicScaledIngredientItem {
   ingredient: PublicRecipeIngredientDto;
@@ -64,6 +65,7 @@ export interface PublicStepSectionGroup {
     MatExpansionModule,
     MatTooltipModule,
     MatProgressSpinnerModule,
+    StepInstructionComponent,
   ],
   selector: 'app-public-shared-recipe',
   templateUrl: './public-shared-recipe.component.html',
@@ -128,6 +130,33 @@ export class PublicSharedRecipeComponent implements OnInit {
     return map;
   });
 
+  protected readonly displayIngredients = computed(() =>
+    Array.from(this.scaledIngredientsMap().values()).map((item) => item.ingredient),
+  );
+
+  protected readonly ingredientUsesMap = computed(() => {
+    const r = this.recipe();
+    const result = new Map<string, string>();
+    if (!r) return result;
+    const ingredients = this.displayIngredients();
+    for (const item of this.scaledIngredientsMap().values()) {
+      const uses = ingredientUses(
+        r.steps,
+        item.ingredient.id,
+        ingredients,
+        this.scaleFactor(),
+        this.targetSystem(),
+      );
+      if (
+        uses.length >= 2 ||
+        (uses.length === 1 && uses[0].label !== item.displayQuantityAndUnit)
+      ) {
+        result.set(item.ingredient.id, formatIngredientUses(uses));
+      }
+    }
+    return result;
+  });
+
   protected readonly groupedIngredients = computed<PublicIngredientSectionGroup[]>(() => {
     const r = this.recipe();
     const map = this.scaledIngredientsMap();
@@ -155,7 +184,7 @@ export class PublicSharedRecipeComponent implements OnInit {
 
   protected readonly groupedSteps = computed<PublicStepSectionGroup[]>(() => {
     const r = this.recipe();
-    const map = this.scaledIngredientsMap();
+    const ingredients = this.displayIngredients();
     if (!r) {
       return [];
     }
@@ -168,21 +197,12 @@ export class PublicSharedRecipeComponent implements OnInit {
         sectionsMap.set(section, []);
       }
 
-      const callouts = step.ingredientIds
-        .map((id) => {
-          const item = map.get(id);
-          if (!item) {
-            return null;
-          }
-          const label = formatStepIngredient(
-            item.ingredient,
-            step.ingredientAmounts?.find((a) => a.ingredientId === id)?.measurement,
-            this.scaleFactor(),
-            this.targetSystem(),
-          );
-          return { id, label };
-        })
-        .filter((c): c is { id: string; label: string } => c !== null);
+      const callouts = stepIngredientCallouts(
+        step,
+        ingredients,
+        this.scaleFactor(),
+        this.targetSystem(),
+      );
 
       sectionsMap.get(section)!.push({
         step,

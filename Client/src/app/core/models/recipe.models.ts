@@ -70,6 +70,34 @@ export interface RecipeStepIngredientAmountDto {
   measurement: RecipeMeasurement;
 }
 
+export type InlineStepAmountKind = 'Ingredient' | 'Mixture' | 'Fixed';
+
+export interface RecipeStepInlineAmountDto {
+  start: number;
+  length: number;
+  kind: InlineStepAmountKind;
+  ingredientId: string | null;
+  measurement: RecipeMeasurement;
+  alternativeMeasurement?: RecipeMeasurement | null;
+}
+
+export interface RecipeStepInlineAmountInput {
+  start: number;
+  length: number;
+  kind: InlineStepAmountKind;
+  ingredientIndex: number | null;
+  measurement: RecipeMeasurement;
+  alternativeMeasurement?: RecipeMeasurement | null;
+}
+
+export interface DetectedStepAmountDto {
+  start: number;
+  length: number;
+  text: string;
+  measurement: RecipeMeasurement;
+  alternativeMeasurement: RecipeMeasurement | null;
+}
+
 export interface RecipeSummaryDto {
   id: string;
   title: string;
@@ -136,6 +164,7 @@ export interface RecipeStepDto {
   ingredientIds: string[];
   timers: RecipeStepTimerDto[];
   ingredientAmounts?: RecipeStepIngredientAmountDto[] | null;
+  inlineAmounts?: RecipeStepInlineAmountDto[] | null;
 }
 
 export interface SubRecipePreviewDto {
@@ -255,6 +284,7 @@ export interface RecipeStepInput {
   timers?: RecipeStepTimerInput[] | null;
   imagePath?: string | null;
   ingredientAmounts?: RecipeStepIngredientAmountInput[] | null;
+  inlineAmounts?: RecipeStepInlineAmountInput[] | null;
 }
 
 export interface UpsertRecipeRequest {
@@ -365,6 +395,7 @@ export interface RecipePreviewStep {
   ingredientIndices?: number[];
   timers?: { durationSeconds: number; label?: string }[];
   ingredientAmounts?: RecipeStepIngredientAmountInput[] | null;
+  inlineAmounts?: RecipeStepInlineAmountInput[] | null;
 }
 
 export interface RecipePreviewData {

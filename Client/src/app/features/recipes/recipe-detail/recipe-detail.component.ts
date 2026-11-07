@@ -34,8 +34,10 @@ import {
   formatDuration,
   formatMinutes,
   scaleIngredient,
-  formatStepIngredient,
+  stepIngredientCallouts,
 } from '../../../core/utils/culinary-math';
+import { formatIngredientUses, ingredientUses } from '../../../core/utils/step-instruction';
+import { StepInstructionComponent } from '../../../shared/components/step-instruction/step-instruction.component';
 import { getTodayIsoLocal } from '../../../core/utils/meal-plan-date';
 import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialog/confirm-dialog.component';
 import {
@@ -97,6 +99,7 @@ export interface StepSectionGroup {
     MatMenuModule,
     MatTooltipModule,
     MatProgressSpinnerModule,
+    StepInstructionComponent,
   ],
   selector: 'app-recipe-detail',
   templateUrl: './recipe-detail.component.html',
@@ -179,6 +182,34 @@ export class RecipeDetailComponent implements OnInit {
     return map;
   });
 
+  protected readonly displayIngredients = computed(() =>
+    Array.from(this.scaledIngredientsMap().values()).map((item) => item.ingredient),
+  );
+
+  /** ingredientId -> "Divided: ..." text when the ingredient is split across tagged step amounts. */
+  protected readonly ingredientUsesMap = computed(() => {
+    const r = this.recipe();
+    const result = new Map<string, string>();
+    if (!r) return result;
+    const ingredients = this.displayIngredients();
+    for (const item of this.scaledIngredientsMap().values()) {
+      const uses = ingredientUses(
+        r.steps,
+        item.ingredient.id,
+        ingredients,
+        this.scaleFactor(),
+        this.targetSystem(),
+      );
+      if (
+        uses.length >= 2 ||
+        (uses.length === 1 && uses[0].label !== item.displayQuantityAndUnit)
+      ) {
+        result.set(item.ingredient.id, formatIngredientUses(uses));
+      }
+    }
+    return result;
+  });
+
   // Ingredients grouped by section
   protected readonly groupedIngredients = computed<IngredientSectionGroup[]>(() => {
     const r = this.recipe();
@@ -208,7 +239,6 @@ export class RecipeDetailComponent implements OnInit {
   // Steps grouped by section with resolved ingredient chips
   protected readonly groupedSteps = computed<StepSectionGroup[]>(() => {
     const r = this.recipe();
-    const map = this.scaledIngredientsMap();
     if (!r) {
       return [];
     }
@@ -221,21 +251,12 @@ export class RecipeDetailComponent implements OnInit {
         sectionsMap.set(section, []);
       }
 
-      const callouts = step.ingredientIds
-        .map((id) => {
-          const item = map.get(id);
-          if (!item) {
-            return null;
-          }
-          const label = formatStepIngredient(
-            item.ingredient,
-            step.ingredientAmounts?.find((a) => a.ingredientId === id)?.measurement,
-            this.scaleFactor(),
-            this.targetSystem(),
-          );
-          return { id, label };
-        })
-        .filter((c): c is { id: string; label: string } => c !== null);
+      const callouts = stepIngredientCallouts(
+        step,
+        this.displayIngredients(),
+        this.scaleFactor(),
+        this.targetSystem(),
+      );
 
       sectionsMap.get(section)!.push({
         step,

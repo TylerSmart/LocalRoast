@@ -15,8 +15,6 @@ public sealed record LlmModelProfileDto(
     int? TopK,
     int ContextWindowTokens,
     int RequestTimeoutSeconds,
-    int ExtractionRepairRounds,
-    bool UseStagedExtraction,
     bool RecommendedAsRefineModel,
     IReadOnlyList<string> Notes
 );
@@ -37,14 +35,8 @@ public static class LlmModelProfiles
             TopK: null,
             ContextWindowTokens: 32768,
             RequestTimeoutSeconds: 600,
-            ExtractionRepairRounds: 1,
-            UseStagedExtraction: true,
             RecommendedAsRefineModel: false,
-            Notes:
-            [
-                "Extracts ingredients and instructions in separate requests.",
-                "Review divided ingredients, separated eggs and long steps.",
-            ]
+            Notes: ["Review divided ingredients, separated eggs and long steps."]
         ),
         new(
             Id: "gemma4-e2b",
@@ -58,14 +50,8 @@ public static class LlmModelProfiles
             TopK: null,
             ContextWindowTokens: 32768,
             RequestTimeoutSeconds: 300,
-            ExtractionRepairRounds: 1,
-            UseStagedExtraction: true,
             RecommendedAsRefineModel: false,
-            Notes:
-            [
-                "Extracts ingredients and instructions in separate requests.",
-                "Often leaves amounts in step text and rarely fixes its own drafts.",
-            ]
+            Notes: []
         ),
         new(
             Id: "gemma4-12b",
@@ -79,10 +65,8 @@ public static class LlmModelProfiles
             TopK: null,
             ContextWindowTokens: 32768,
             RequestTimeoutSeconds: 300,
-            ExtractionRepairRounds: 1,
-            UseStagedExtraction: false,
             RecommendedAsRefineModel: false,
-            Notes: ["Extracts each recipe in a single request."]
+            Notes: []
         ),
         new(
             Id: "gemma4-12b-thinking",
@@ -96,8 +80,6 @@ public static class LlmModelProfiles
             TopK: 64,
             ContextWindowTokens: 32768,
             RequestTimeoutSeconds: 900,
-            ExtractionRepairRounds: 1,
-            UseStagedExtraction: false,
             RecommendedAsRefineModel: true,
             Notes:
             [
@@ -117,8 +99,6 @@ public static class LlmModelProfiles
             TopK: 64,
             ContextWindowTokens: 32768,
             RequestTimeoutSeconds: 1200,
-            ExtractionRepairRounds: 1,
-            UseStagedExtraction: false,
             RecommendedAsRefineModel: true,
             Notes:
             [
@@ -143,12 +123,4 @@ public static class LlmModelProfiles
             .Select(match => match.profile)
             .FirstOrDefault();
     }
-
-    public static bool UsesStagedExtraction(LlmExtractionStrategy strategy, string? model) =>
-        strategy switch
-        {
-            LlmExtractionStrategy.Staged => true,
-            LlmExtractionStrategy.SinglePass => false,
-            _ => Match(model)?.UseStagedExtraction ?? false,
-        };
 }

@@ -29,8 +29,6 @@ const testProfiles: LlmModelProfile[] = [
     topK: 64,
     contextWindowTokens: 16384,
     requestTimeoutSeconds: 600,
-    extractionRepairRounds: 2,
-    useStagedExtraction: true,
     recommendedAsRefineModel: false,
     notes: ['Small model.'],
   },
@@ -46,8 +44,6 @@ const testProfiles: LlmModelProfile[] = [
     topK: 64,
     contextWindowTokens: 16384,
     requestTimeoutSeconds: 1200,
-    extractionRepairRounds: 1,
-    useStagedExtraction: false,
     recommendedAsRefineModel: true,
     notes: [],
   },
@@ -135,18 +131,16 @@ describe('LlmSettingsDialogComponent', () => {
     expect(component.form.controls.temperature.value).toBeNull();
     expect(component.form.controls.topP.value).toBeNull();
     expect(component.form.controls.topK.value).toBeNull();
-    expect(component.form.controls.extractionRepairRounds.value).toBe(1);
   });
 
-  it('loads saved repair rounds and long timeouts into the form', () => {
+  it('loads long timeouts into the form', () => {
     mockLlmSettingsService.getSettings.mockReturnValue(
-      of({ ...initialSettings, requestTimeoutSeconds: 1800, extractionRepairRounds: 0 }),
+      of({ ...initialSettings, requestTimeoutSeconds: 1800 }),
     );
 
     component.loadSettings();
 
     expect(component.form.controls.requestTimeoutSeconds.value).toBe(1800);
-    expect(component.form.controls.extractionRepairRounds.value).toBe(0);
     expect(component.form.valid).toBe(true);
   });
 
@@ -190,7 +184,7 @@ describe('LlmSettingsDialogComponent', () => {
     expect(component.filteredRefineModels()).toEqual(['gemma4:12b']);
   });
 
-  it('applies a profile without renaming the model and sets the strategy explicitly', () => {
+  it('applies a profile without renaming the model', () => {
     component.form.controls.textModel.setValue('my-gemma-e4b-gpu');
     component.onProfileSelected('gemma4-e4b');
     component.applyProfile();
@@ -200,13 +194,7 @@ describe('LlmSettingsDialogComponent', () => {
     expect(values.enableThinking).toBe(false);
     expect(values.temperature).toBe(0.2);
     expect(values.contextWindowTokens).toBe(16384);
-    expect(values.extractionRepairRounds).toBe(2);
-    expect(values.extractionStrategy).toBe('Staged');
     expect(component.profileMessage()).toContain('Gemma 4 E4B');
-
-    component.form.controls.textModel.setValue('gemma4:e4b');
-    component.applyProfile();
-    expect(component.form.controls.extractionStrategy.value).toBe('Auto');
   });
 
   it('fills a blank refine model from the refine profile and saves refine settings', () => {
@@ -234,7 +222,8 @@ describe('LlmSettingsDialogComponent', () => {
     fixture.detectChanges();
     const element: HTMLElement = fixture.nativeElement;
     expect(element.querySelector('[data-testid="llm-profile-select"]')).toBeTruthy();
-    expect(element.querySelector('[data-testid="llm-extraction-strategy"]')).toBeTruthy();
+    expect(element.querySelector('[data-testid="llm-extraction-strategy"]')).toBeNull();
+    expect(element.querySelector('[formcontrolname="extractionRepairRounds"]')).toBeNull();
 
     mockLlmSettingsService.getModelProfiles.mockReturnValue(throwError(() => new Error('down')));
     component.loadProfiles();
@@ -269,9 +258,6 @@ describe('LlmSettingsDialogComponent', () => {
     ['topK', 0],
     ['topK', 12.5],
     ['topK', 1001],
-    ['extractionRepairRounds', -1],
-    ['extractionRepairRounds', 1.5],
-    ['extractionRepairRounds', 6],
     ['requestTimeoutSeconds', 1801],
   ] as const)('blocks saving when %s is %s', (control, value) => {
     component.form.controls[control].setValue(value);
@@ -331,7 +317,6 @@ describe('LlmSettingsDialogComponent', () => {
     component.form.controls.contextWindowTokens.setValue(16384);
     component.form.controls.enableThinking.setValue(false);
     component.form.controls.maxIngestionRetries.setValue(2);
-    component.form.controls.extractionRepairRounds.setValue(3);
     component.form.controls.requestTimeoutSeconds.setValue(1800);
     component.form.controls.ollamaCpuOnly.setValue(true);
     component.onSave();
@@ -342,12 +327,14 @@ describe('LlmSettingsDialogComponent', () => {
         contextWindowTokens: 16384,
         enableThinking: false,
         maxIngestionRetries: 2,
-        extractionRepairRounds: 3,
         requestTimeoutSeconds: 1800,
         ollamaCpuOnly: true,
       }),
     );
     expect(mockIngestionService.refreshSummary).toHaveBeenCalled();
+    const payload = mockLlmSettingsService.updateSettings.mock.calls[0][0];
+    expect(payload).not.toHaveProperty('extractionStrategy');
+    expect(payload).not.toHaveProperty('extractionRepairRounds');
     expect(mockDialogRef.close).toHaveBeenCalledWith(true);
   });
 

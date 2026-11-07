@@ -210,23 +210,6 @@
           </div>
         }
 
-        <mat-form-field
-          appearance="outline"
-          class="form-field full-width"
-          subscriptSizing="dynamic"
-        >
-          <mat-label>Extraction strategy</mat-label>
-          <mat-select formControlName="extractionStrategy" data-testid="llm-extraction-strategy">
-            <mat-option value="Auto">Automatic (from the model profile)</mat-option>
-            <mat-option value="Staged">Staged: ingredients, then instructions</mat-option>
-            <mat-option value="SinglePass">Single request per recipe</mat-option>
-          </mat-select>
-          <mat-hint>
-            Staged extraction helps small models such as Gemma 4 E2B/E4B. Choose it explicitly for
-            renamed or derived models.
-          </mat-hint>
-        </mat-form-field>
-
         <!-- Advanced Options Row -->
         <div class="form-row two-cols">
           @if (form.controls.provider.value === 'Ollama') {
@@ -253,22 +236,6 @@
             <mat-label>Auto-Retries on Failure</mat-label>
             <input matInput type="number" formControlName="maxIngestionRetries" min="0" max="10" />
             <mat-hint>Retries before marking failed (0 to disable)</mat-hint>
-          </mat-form-field>
-
-          <mat-form-field appearance="outline" class="form-field">
-            <mat-label>Repair Rounds</mat-label>
-            <input
-              matInput
-              type="number"
-              formControlName="extractionRepairRounds"
-              min="0"
-              max="5"
-              step="1"
-            />
-            <mat-hint>AI fixes for validation issues (0 to disable)</mat-hint>
-            @if (form.controls.extractionRepairRounds.invalid) {
-              <mat-error>Whole number 0 to 5</mat-error>
-            }
           </mat-form-field>
         </div>
 

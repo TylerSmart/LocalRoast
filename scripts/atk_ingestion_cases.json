@@ -132,5 +132,18 @@
       { "name": "ice water", "quantity": 9, "unit": "Tbsp" },
       { "name": "prosciutto", "quantity": 12, "unit": "Slice" }
     ]
+  },
+  {
+    "id": "c012-ss286", "split": "stress",
+    "ingredients": [
+      { "name": "whole-wheat flour", "quantity": 4.5, "unit": "Cup", "parts": [4.5], "alternativeMeasurement": { "quantity": 24.75, "unit": "Oz" } },
+      { "name": "all-purpose flour", "quantity": 5, "unit": "Cup", "parts": [0.5, 1, 5], "alternativeMeasurement": { "quantity": 25, "unit": "Oz" } },
+      { "name": "water", "unit": "Cup", "parts": [0.666667, 0.25, 0.25, 0.5] }
+    ],
+    "timers": [
+      { "seconds": 172800, "label": "sit|rest|ferment|starter|bubbl" },
+      { "seconds": 86400, "label": "sit|rest|ferment|starter|feed" },
+      { "seconds": 18000, "label": "sit|rest|ferment|starter" }
+    ]
   }
 ]

@@ -1311,7 +1311,8 @@ public sealed class IngestionService(
                         IngredientIndices: s.IngredientIndices,
                         Timers: s.Timers,
                         ImagePath: s.ImagePath,
-                        IngredientAmounts: s.IngredientAmounts
+                        IngredientAmounts: s.IngredientAmounts,
+                        InlineAmounts: s.InlineAmounts
                     )
                 );
             }

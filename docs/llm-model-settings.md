@@ -32,12 +32,11 @@ Results come from the [ATK ingestion evaluator](contributing.md#evaluating-atk-i
 
 *Blank* means leave the field empty so LocalRoast uses its defaults (see [Sampling Settings](#sampling-settings)). For every model, keep **Auto-publish** off and keep-alive at `5m`.
 
-**One-click profiles:** LLM Settings has a **Recommended settings** picker with one profile per row of this table. Choose a profile and select **Apply** to fill Thinking, Sampling, Context window, Timeout and Repair Rounds, then **Save Settings**. Applying a profile never renames your Text Model; it only fills the field when it is blank, so a derived model (for example one with `num_gpu 24`) can use a profile. The picker preselects the profile that matches the Text Model tag. The same data is available from `GET /api/llm-settings/model-profiles`.
+**One-click profiles:** LLM Settings has a **Recommended settings** picker with one profile per row of this table. Choose a profile and select **Apply** to fill Thinking, Sampling, Context window and Timeout, then **Save Settings**. Applying a profile never renames your Text Model; it only fills the field when it is blank, so a derived model (for example one with `num_gpu 24`) can use a profile. The picker preselects the profile that matches the Text Model tag. The same data is available from `GET /api/llm-settings/model-profiles`.
 
-**Extraction strategy:** *Automatic* (the default) uses staged extraction — separate ingredient and instruction requests — for models whose profile recommends it (`gemma4:e2b` and `gemma4:e4b` tags) and a single request otherwise. Choose **Staged** or **Single request per recipe** explicitly for renamed or derived models; applying a profile to a model whose name does not match it sets this for you.
+**Extraction pipeline ("tag, don't rewrite"):** every Text Model uses the same two requests per recipe. The first extracts metadata and the shopping ingredient list. LocalRoast then keeps each method paragraph verbatim as a step, finds every amount and duration in it, and the second request only classifies those spans (which ingredient row an amount measures, or *mixture* / *other*, which rows each step uses, and a timer label). LocalRoast assembles the steps and reconciles the tagged amounts with the ingredient rows; remaining issues route the draft to review. There is no extraction strategy setting and no automatic repair loop. See [Tagged pipeline](#tagged-pipeline-current-code) for the measured comparison with the previous pipeline.
 
 - **Context window:** LocalRoast sends the **Context window** from LLM Settings (default 8,192) with every Ollama request. Use 32,768 for these models. At 16,384, E2B, E4B and 12B with thinking all failed the long multi-day stress recipe because the prompt plus the model's output filled the window. At 32,768 they finished it, and generated just as fast as at 16,384 (they still fit entirely on the 16 GB GPU). On Ollama, each request may generate up to the larger of 16,384 tokens and the context window, so a 32,768 window also lifts the output cap that made `gemma4:26b-a4b` with thinking fail the stress recipe (it now finishes, using 31,530 of the 32,768 tokens). OpenAI-compatible servers keep a 16,384-token cap, because some reject `max_tokens` larger than the remaining context.
-- **Repair Rounds:** keep the default of 1. After extraction, LocalRoast checks the draft against the source and sends up to this many correction requests, for every Text Model. It keeps the draft with the fewest issues and stops as soon as a round does not improve. See [Repair rounds](#repair-rounds) for what more rounds changed.
 - **Source sectioning:** pasted text, digital PDFs and web pages without complete recipe data first get one extra request that labels every source line, so extraction and validation see a clean `Ingredients:` / `Instructions:` layout. It follows the **Thinking** toggle and took 7–41 seconds per recipe for E4B with thinking. See [Source sectioning](#source-sectioning).
 - **Timeout:** applies to each request, not the whole job, and accepts up to 1,800 seconds.
 - **Keep-alive:** the default `5m` keeps the model loaded for the back-to-back requests of a single job and for consecutive queued jobs. Raise it (for example `30m`) only if the queue has long gaps. Models loaded in about 9–16 seconds on the test server.
@@ -51,7 +50,7 @@ Results come from the [ATK ingestion evaluator](contributing.md#evaluating-atk-i
 LLM Settings has three optional fields under **Sampling (optional)**: **Temperature**, **Top P** and **Top K**.
 
 - **Blank (recommended unless the table says otherwise):** LocalRoast's defaults.
-  - Recipe extraction (text, staged, sectioning, correction and vision requests) uses temperature 0, which picks the most likely token every time. Runs are still not exactly repeatable on a GPU server (see [Run-to-run variation](#run-to-run-variation)).
+  - Recipe extraction (sectioning, ingredient, tagging and vision transcription requests) uses temperature 0, which picks the most likely token every time. Runs are still not exactly repeatable on a GPU server (see [Run-to-run variation](#run-to-run-variation)).
   - Substitutions, kitchen questions and meal-plan suggestions use temperature 0.2.
   - Top P and Top K are not sent, so the model's own defaults apply. Every Gemma 4 tag in the Ollama library ships with Top P 0.95 and Top K 64; at temperature 0 they have no effect.
 - **Set:** each value is sent with every request, for both Ollama and OpenAI-compatible providers. Clear a field to return to the default. Some hosted OpenAI-compatible APIs reject Top K; leave it blank for those.
@@ -73,12 +72,24 @@ LLM Settings has three optional fields under **Sampling (optional)**: **Temperat
   - `c002-s84`: separated eggs and a fractional flour amount.
   - `c014-s1134`: butter and flour with extra portions for the pan, plus bake and cool timers.
 - **Score:** *findings* are evaluator assertion failures (lower is better). Examples are wrong totals or splits, amounts left in step text, invalid ingredient links, missing timers and failed extractions; a failed recipe counts as one finding. Findings do not measure how well the method is split into steps, so the results also count steps and steps over 300 characters: long steps combine several actions, which makes divided ingredients and timers harder to follow. Each configuration ran once, and results vary between runs even at temperature 0 (see [Run-to-run variation](#run-to-run-variation)), so treat differences of a few findings as noise.
-- **Code version:** the sections up to [Context window on long recipes](#context-window-on-long-recipes) were measured on the branch that added the Sampling settings, which includes per-step `ingredientAmounts`, `alternativeMeasurement`, the configurable context window and the CPU-only option, except where a row says otherwise. [Source sectioning](#source-sectioning), [Repair rounds](#repair-rounds) and [Run-to-run variation](#run-to-run-variation) used the later code that added source sectioning, Repair Rounds, the correction request for every model and the larger Ollama output cap. Earlier numbers from commit `8eb9ac3` are only quoted for comparison.
+- **Code version:** the sections up to [Context window on long recipes](#context-window-on-long-recipes) were measured on the branch that added the Sampling settings, which includes per-step `ingredientAmounts`, `alternativeMeasurement`, the configurable context window and the CPU-only option, except where a row says otherwise. [Source sectioning](#source-sectioning), [Repair rounds](#repair-rounds-removed) and [Run-to-run variation](#run-to-run-variation) used the later code that added source sectioning, Repair Rounds, the correction request for every model and the larger Ollama output cap. Earlier numbers from commit `8eb9ac3` are only quoted for comparison.
 - **Context window:** the sampling comparison ran at 16,384 tokens. Recipes that failed there were re-run at 32,768; `gemma4:12b` without thinking and `gemma4:26b-a4b` ran at 32,768 throughout. Recipes that finished at 16,384 were not re-run: the window only matters once it fills.
 
 ---
 
 ## Measured Results
+
+### Tagged pipeline (current code)
+
+The phase that introduced "tag, don't rewrite" extraction compared it with the previous pipeline (staged ingredient and instruction requests that rewrote step text, plus one automatic repair round) on nine ATK cases from `scripts/atk_ingestion_cases.json` (including the `c012-ss286` sourdough starter added in that phase), with `gemma4:e4b`, thinking, blank Sampling and a 32,768-token context:
+
+| Pipeline | Issues | Total time (9 cases) |
+| --- | --- | --- |
+| Previous (staged + repair) | 10 | ~1,372 s |
+| **Tagged (current)** | **3** | **~550 s** |
+
+- The 3 remaining issues are expectation-only, not extraction errors: the chicken piccata's "half of the chicken" cannot be expressed as a 2 + 2 split of its row, and the pancakes' separated eggs (whites and yolks) are modeled differently from the case's expectations.
+- Step text is now the verbatim source paragraph, so findings about amounts left in step text, rewritten steps and long steps no longer apply. The sections below were measured with the previous pipeline; use them for the relative model, sampling and context-window comparisons, not as current issue counts.
 
 ### All eight cases at the recommended context window (32,768)
 
@@ -146,45 +157,17 @@ All runs used thinking, blank Sampling, a 32,768-token context and Repair Rounds
 - **Rejoining wrapped lines matters.** With the 72-character wraps kept, the bundt cake scored 11, 4 and 6 findings in three E4B runs; with them rejoined, 4, 2 and 4. Wrapped text splits sentences across lines, so a continuation line that starts with a number (such as "1-inch border") looks like an ingredient line, and amounts or durations can be separated from the rest of their sentence. LocalRoast now rejoins wrapped prose and numbered steps before extraction, and keeps short heading lines (such as "For the glaze") on their own line.
 - **Cost:** one extra request per recipe, 9–20 seconds on average and at most 41 seconds.
 
-### Repair rounds
+### Repair rounds (removed)
 
-After extraction, LocalRoast checks the draft against the source. While issues remain, it sends a correction request containing the source, the draft and the list of issues. **Repair Rounds** caps how many correction requests one job may send. The loop stops as soon as a round does not lower the issue count, and a correction that raises it is discarded.
-
-All runs used thinking, blank Sampling and a 32,768-token context. The counts below are LocalRoast's own checks on each correction response, not the evaluator's findings.
-
-| Model | Correction requests | Lowered the issue count | Same count | Raised it (discarded) |
-| --- | --- | --- | --- | --- |
-| `gemma4:e4b` (5 runs, all three source styles) | 28 | 16 | 3 | 9 |
-| `gemma4:e2b` (4 runs, all three source styles) | 27 | 6 | 14 | 7 |
-
-- **A second round never helped.** With Repair Rounds 3 on the canonical layout, E4B sent a second correction for 2 of 8 recipes. Neither lowered the issue count, and they added 47 and 124 seconds. E2B never reached a second round, because none of its first corrections in that run lowered the count.
-- The eight-case totals with Repair Rounds 3 were 10 findings for E4B and 42 for E2B, against 19 and 35 with one round. Because the second rounds changed nothing, these differences come from the first drafts (see [Run-to-run variation](#run-to-run-variation)).
-- **Keep Repair Rounds at 1.** Each extra round is one more request (about 50–125 seconds with E4B) for every recipe that still has issues.
-- **E2B rarely fixes its own drafts.** Half of its corrections came back with the same number of issues. Most of the issues it was asked to fix were missing timers (38), fixed amounts left in step text (29) and dropped or reworded source ingredient lines (26).
-
-The issue list was then rewritten so each issue quotes what it refers to: the full text of a missing source line, the step's fixed amounts, the ingredient's name and the timed sentences. To measure only the wording, the same saved E2B drafts were sent again with the old and the new text.
-
-| Issue text | Requests | Source lines fixed | Timers fixed | Step amounts fixed | Issues kept (from 104) | New issues raised |
-| --- | --- | --- | --- | --- | --- | --- |
-| Old ("Source ingredient line 6: missing") | 18 | 0 of 24 | 10 of 32 | 0 of 30 | 102 | 36 |
-| Quoted (current) | 18 | 20 of 24 | 18 of 32 | 3 of 30 | 98 | 93 |
-
-- **Quoting fixed most dropped and reworded lines,** but the total fell only from 102 to 98. E2B adds the restored rows without linking them to a step, so most new issues were "not linked to any step" and "out of range" indices.
-- **Unlinked ingredients now name the steps that mention them,** for example `Ingredient 0 "unsalted butter": measured ingredient is not linked to any step; steps 1 and 3 mention it, so add 0 to the ingredientIndices of each step that uses it.` On 3 saved E2B drafts sent twice each, unlinked rows fell from 20 to 15 (plain message: 19) and the total from 40 to 33 (plain: 37). Most of the gain came from one recipe, so treat it as a small improvement.
-- **Tried and dropped:** renumbering step links to follow moved rows (rows had rarely moved, so it never helped), asking for restored rows to be appended at the end, and sending a second round when a correction keeps the same issue count (7 → 7 → 7 and 7 → 7 → 6 on two drafts). The loop still stops when a round does not lower the count.
-- **End-to-end check with the quoted and hinted issues** (canonical layout, Repair Rounds 1):
-  - **E4B** scored **9** findings in a mean of 155 seconds per recipe, its best eight-case total so far (earlier canonical runs: 10 and 19). Five of its 7 corrections lowered the issue count, including the bundt cake from 5 issues to 0.
-  - **E2B** scored 44 (earlier: 35). Only 2 of its 7 corrections lowered the count. Most of the difference is the shrimp risotto (17 findings against 11), whose first draft dropped five consecutive ingredient lines. Its correction kept all 12 issues: the model's thinking planned each fix ("Need to link the 4 cups stock"), but the JSON it returned did not include them. A single run is accurate only to about 5–10 findings, so this does not show that the new text hurt E2B; it does show that E2B often cannot carry out fixes it has identified.
+Earlier versions sent up to **Repair Rounds** correction requests after extraction. Measurements showed a second round never lowered the issue count, and E2B often returned its draft nearly unchanged even when its thinking planned the fixes. The tagged pipeline no longer rewrites steps, so the setting and the automatic loop were removed: remaining reconciliation issues go straight to review, and **Re-extract with AI** is the manual way to run extraction again.
 
 ### Repairing a draft during review
 
-The review editor lists validation issues and advisory quality warnings, such as long or multi-action steps, vague timers, and ingredients mentioned in a step but not linked. These checks are format-independent where possible, can produce false positives, and do not prove a recipe is correct. The new advisory warnings do not change automatic publication eligibility. Use **Recheck issues** after editing.
+The review editor lists validation issues (ingredient-row problems and tagged-step reconciliation issues) and advisory quality warnings, such as vague timers and ingredients mentioned in a step but not linked. These checks can produce false positives and do not prove a recipe is correct. Advisory warnings do not change automatic publication eligibility. Use **Recheck issues** after editing.
 
-**Fix with AI** sends the current editor contents, the reported issues, and an optional instruction to the configured model. It uses the stored structured source when available, otherwise the normalized or original text; photo and scanned-PDF jobs send their original images to the Vision Model. A manual repair makes at least one request even when Repair Rounds is 0, and may use additional rounds up to the configured limit. It can make one extra request to correct an unusable response, such as a missing or out-of-range ingredient index. A first proposal that has more findings can still be inspected, with a warning; later worsening rounds are discarded. Requests use the same sampling, thinking, context and per-request timeout settings described above, so a repair can take several minutes.
+**Re-extract with AI** re-runs the tagged extraction with an optional instruction and the current ingredient rows as context, using the configured Text Model. It uses the stored structured source when available (for photo and scanned-PDF jobs, the Vision Model's verbatim transcription), otherwise the normalized or original text. Steps are always regenerated from the source paragraphs, so step-text edits are replaced. Requests use the same sampling, thinking, context and per-request timeout settings described above, so a re-extraction can take several minutes.
 
 Compare the proposed fields, ingredient links, portions, timers and diagnostics with the source. The preview calls out new or changed findings even when the total finding count stays the same or decreases; diagnostics cannot catch every mistake. Applying the preview changes only the editor: **Save Draft** or **Approve & Publish** remains a separate action. Cancel leaves the editor unchanged. If the editor or stored job changes while repair is running or its preview is open, the proposal is not applied; keep your edits and rerun after resolving the conflict. Unsafe mappings of duplicate ingredient metadata or step images are rejected instead of guessed.
-
-A small, synthetic two-step sanity check used a hint to split butter portions and rename a two-minute timer; it is **not a benchmark**. E4B fixed the detected portion issues in 29 seconds but still called the timer "Cooking". E2B twice produced an invalid ingredient index; replaying one of those responses through the new retry produced valid links but left fixed amounts and a vague timer, and invented a 120-minute recipe time. Another E2B attempt returned a valid proposal with the wrong butter total. Even fewer reported issues can hide a new mistake, so inspect the complete diff.
 
 ### Run-to-run variation
 
@@ -208,7 +191,7 @@ Temperature 0 does not make extraction repeatable on the test server. Two identi
 ### `gemma4:e4b`
 
 - **Set:** Text Model `gemma4:e4b`, thinking on, Sampling blank, context window 32,768, timeout 600 seconds, keep-alive `5m`, auto-publish off.
-- **LocalRoast sets automatically:** source sectioning for sources without an `Ingredients:` / `Instructions:` layout, staged extraction (separate ingredient and instruction requests), then up to **Repair Rounds** correction requests. Temperature is 0 while Sampling is blank, and the repetition penalty is 1. The timeout applies to each request, not the whole job.
+- **LocalRoast sets automatically:** source sectioning for sources without an `Ingredients:` / `Instructions:` layout, then the two tagged extraction requests (ingredients, then amount and timer tags). Temperature is 0 while Sampling is blank, and the repetition penalty is 1. The timeout applies to each request, not the whole job.
 - **Weaknesses:**
   - divided ingredients that are not split (chicken and oil cooked in batches)
   - wrong split totals for separated eggs
@@ -226,12 +209,11 @@ Temperature 0 does not make extraction repeatable on the test server. Two identi
   - source ingredient lines rewritten instead of copied verbatim
   - wrong split totals (butter and flour for the pan, separated eggs)
   - missing timers and ingredients not linked to any step
-  - corrections that plan fixes in the thinking but return the draft nearly unchanged (see [Repair rounds](#repair-rounds))
 - **Use it** when speed matters and you will review every recipe.
 
 ### `gemma4:12b`
 
-- **Fits entirely in 16 GB of VRAM** at a 32,768-token context and generated about 35–36 tokens per second. It extracts each recipe in a single request: staged extraction only runs for `gemma4:e2b` and `gemma4:e4b` tags. The measurements below predate running the correction request for every model, so nothing repaired its mistakes then; its most common finding was amounts left in step text, which the correction request targets.
+- **Fits entirely in 16 GB of VRAM** at a 32,768-token context and generated about 35–36 tokens per second. The measurements below predate the tagged pipeline: it extracted each recipe in a single request, and its most common finding was amounts left in step text, which no longer applies now that steps are verbatim.
 - **Recommended: thinking off, Sampling blank,** context window 32,768, timeout 300 seconds. 28 findings, 90 seconds per recipe on average (longest request 177 seconds) and repeatable output. It split methods into focused steps (102 steps, 9 over 300 characters), but did not beat E4B on findings.
 - **Thinking on needs Temperature 1, Top P 0.95 and Top K 64.** At temperature 0 it repeated the same reasoning until it hit the output limit. With those values it worked:
   - 33 findings in about 4.2 minutes per recipe. It did best on the three hardest cases (10 findings versus 15 without thinking), but worse on the rest.
@@ -242,7 +224,7 @@ Temperature 0 does not make extraction repeatable on the test server. Two identi
 
 - **Memory:** the 17.4 GB mixture-of-experts model does not fit in 16 GB of VRAM. On the test server it failed to load with a GPU out-of-memory error. A derived model with `num_gpu` 24 (see [Ollama Server Configuration](#ollama-server-configuration)) keeps 24 layers on the GPU and runs the rest from system RAM; it loaded in 16 seconds. All 26B measurements passed `num_gpu` 24 through the evaluator. CPU-only mode also loads the model, but runs entirely from system RAM and was not benchmarked for extraction.
 - **Speed:** only about 4 billion of its parameters are active for each token, so even partly offloaded it generated 39–49 tokens per second, faster than 12B.
-- **Single request:** like 12B it extracts in one request. Its measurements below (apart from the stress-recipe runs) predate the correction request for every model; amounts left in step text were 10 of its 19 findings with thinking and 9 of 32 without.
+- **Previous pipeline:** like 12B, its measurements below used a single request per recipe; amounts left in step text were 10 of its 19 findings with thinking and 9 of 32 without.
 - **With thinking (Temperature 1, Top P 0.95, Top K 64):** the most accurate configuration after E4B, with 19 findings and 9 on the three hardest cases (E4B: 6). However:
   - It averaged 5.4 minutes per recipe, twice E4B's time, and produced 8,100–16,400 output tokens per recipe, mostly reasoning.
   - The stress recipe (Beef Wellington) used to fail when its output reached LocalRoast's fixed 16,384-token output cap. Now that the cap follows the context window, it finished with 2 findings, but took 20 minutes. Extraction produced 18,630 output tokens in 530 seconds, and the correction request 21,568 in 695 seconds, at 32–37 tokens per second. The correction peaked at 31,530 of the 32,768-token window, so longer recipes may need a larger window, which leaves less VRAM for model layers.
@@ -255,14 +237,14 @@ Temperature 0 does not make extraction repeatable on the test server. Two identi
 
 ## Refine Model (background second pass)
 
-The optional **Refine Model** section in LLM Settings names a second, usually larger and slower model — for example `gemma4:12b` with thinking, or a derived `gemma4:26b-a4b` — that re-checks drafts which still have problems after the Text Model's own repair rounds. The **Refine profile** picker offers the profiles recommended for this role and fills the refine thinking, sampling and timeout fields; the Refine Model name is filled only when blank. Leave the Refine Model blank to turn the feature off.
+The optional **Refine Model** section in LLM Settings names a second, usually larger and slower model — for example `gemma4:12b` with thinking, or a derived `gemma4:26b-a4b` — that re-checks drafts which still have problems after the Text Model's extraction. The **Refine profile** picker offers the profiles recommended for this role and fills the refine thinking, sampling and timeout fields; the Refine Model name is filled only when blank. Leave the Refine Model blank to turn the feature off.
 
 - **When it runs automatically:** after a text job (web, pasted text or digital PDF) reaches review, LocalRoast queues a refinement if a Refine Model is set, it differs from the Text Model, and the normalized draft still has validation issues or quality warnings. Photo and scanned-PDF jobs are not queued automatically.
 - **Manual request:** the review screen offers **Refine with _model_** for any draft ready for review, including photo jobs (their original images are sent to the Refine Model, so it must support images).
-- **Never blocks imports or other AI features:** refinement runs only while no imports are queued. A newly queued import, a "Repair with AI" preview, or a kitchen-helper request (substitutions, questions, meal plans) pauses the running refinement. It goes back to waiting and starts again from the beginning later. Interrupted refinements also resume after a server restart. Changing LLM Settings can pause it the same way.
-- **What it sends:** one repair request using the Refine Model with its own thinking, sampling and timeout (default 1,200 seconds) and the household's context window. It extracts in a single request regardless of the Extraction strategy.
+- **Never blocks imports or other AI features:** refinement runs only while no imports are queued. A newly queued import, a "Re-extract with AI" preview, or a kitchen-helper request (substitutions, questions, meal plans) pauses the running refinement. It goes back to waiting and starts again from the beginning later. Interrupted refinements also resume after a server restart. Changing LLM Settings can pause it the same way.
+- **What it sends:** one repair request using the Refine Model with its own thinking, sampling and timeout (default 1,200 seconds) and the household's context window. It runs the same tagged extraction with the current ingredient rows as context.
 - **What counts as an improvement:** the proposal is kept only when it has fewer validation issues, or the same number and fewer quality warnings. Otherwise the review screen reports that the refine model found nothing to improve.
-- **Reviewing it:** the review screen shows the status and the before → after count of issues plus warnings. **Compare refined draft** opens the same comparison as **Fix with AI**; applying it replaces the editor contents (your food links, collections and tags are kept) and does not save. If the saved draft changed after the refinement started, a warning asks you to compare carefully. **Dismiss** (or **Cancel refinement** while it waits or runs) removes it. Re-running a job's import discards any refinement.
+- **Reviewing it:** the review screen shows the status and the before → after count of issues plus warnings. **Compare refined draft** opens the same comparison as **Re-extract with AI**; applying it replaces the editor contents (your food links, collections and tags are kept) and does not save. If the saved draft changed after the refinement started, a warning asks you to compare carefully. **Dismiss** (or **Cancel refinement** while it waits or runs) removes it. Re-running a job's import discards any refinement.
 - **Memory:** with `OLLAMA_MAX_LOADED_MODELS=1`, switching between the Text Model and the Refine Model reloads each model. Expect the load time (about 10–60 seconds, longer for partly offloaded models) on top of the refinement itself.
 
 ---
@@ -275,7 +257,6 @@ LocalRoast's **OpenAI-Compatible (/v1)** provider works with hosted services suc
 - **Pick models that support structured outputs.** Every request asks for strict JSON-schema output (`response_format: json_schema`). Models or routes without structured-output support may reject the request or return invalid JSON. OpenRouter's model list can be filtered by this feature.
 - **Settings that only apply to Ollama:** Context window, Keep alive, Run Ollama on CPU only and the thinking toggles are not sent. Each request may generate up to 16,384 tokens.
 - **Sampling:** Temperature is always sent. Top P and Top K are sent when set; leave Top K blank if the provider rejects it. The built-in profiles were measured on local Gemma models through Ollama, so treat their values only as a starting point.
-- **Extraction strategy:** with Automatic, model names that do not match a profile use a single request per recipe. Set it to **Staged** to try the two-step extraction instead.
 - **Refine Model:** it uses the same provider, Base URL and API key as the Text Model, so it cannot mix a local Ollama model with a hosted one.
 - **Privacy and cost:** the source text, photos and drafts are sent to the hosted provider, and usage is billed by that provider. LocalRoast still sends one request at a time.
 
@@ -299,7 +280,6 @@ LocalRoast's **OpenAI-Compatible (/v1)** provider works with hosted services suc
   ```
 
   This was verified only through the API's `options`, not through a derived model inside LocalRoast.
-- **Staged extraction for renamed models.** With **Extraction strategy** set to Automatic, staged extraction only applies to Text Model tags that begin with `gemma4:e2b` or `gemma4:e4b`. For a copy of either model under a different name, set Extraction strategy to **Staged** (or apply the E2B/E4B profile, which does it for you).
 - **Check GPU placement:** run `ollama ps`. `100% GPU` means the model is fully on the GPU; a CPU/GPU split means part of it runs from system RAM and is slower. On the Vulkan test server `ollama ps` reported implausibly small sizes, so a drop in tokens per second after changing the context window was the more reliable sign.
 
 ---

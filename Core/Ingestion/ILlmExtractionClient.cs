@@ -3,7 +3,9 @@ namespace App.Core.Ingestion;
 public record LlmExtractionContext(
     string SourceContent,
     IReadOnlyList<string> AvailableTagNames,
-    IReadOnlyList<string>? AvailableFoodNames = null
+    IReadOnlyList<string>? AvailableFoodNames = null,
+    string? ReviewerHint = null,
+    IReadOnlyList<LlmExtractedIngredientItem>? CurrentIngredients = null
 );
 
 public record LlmVisionImageInput(int PageNumber, string MimeType, string Base64Data);
@@ -16,8 +18,7 @@ public record LlmVisionExtractionContext(
 );
 
 public record LlmRecipeRepairContext(
-    string? SourceContent,
-    IReadOnlyList<LlmVisionImageInput> Images,
+    string SourceContent,
     LlmExtractedRecipePayload Draft,
     string? UserHint = null
 );
@@ -117,12 +118,18 @@ public interface ILlmExtractionClient
         CancellationToken cancellationToken = default
     );
 
-    Task<LlmExtractedRecipePayload> ExtractRecipeFromImagesAsync(
+    /// <summary>
+    /// Transcribes recipe images verbatim into canonical text with an "Ingredients:" section of
+    /// "- " bullets and an "Instructions:" section of numbered paragraphs, or null when no
+    /// recipe was found.
+    /// </summary>
+    Task<string?> TranscribeRecipeImagesAsync(
         EffectiveLlmConnectionConfig config,
         LlmVisionExtractionContext context,
         CancellationToken cancellationToken = default
     );
 
+    /// <summary>Re-extracts the source with the reviewer hint and the current rows as context.</summary>
     Task<LlmRecipeRepairResult> RepairRecipeDraftAsync(
         EffectiveLlmConnectionConfig config,
         LlmRecipeRepairContext context,

@@ -398,6 +398,12 @@
     font-size: 0.85rem;
   }
 
+  .ingredient-uses {
+    flex-basis: 100%;
+    font-size: 0.8rem;
+    color: var(--mat-sys-on-surface-variant);
+  }
+
   .optional-tag {
     font-size: 0.7rem;
     padding: 0.1rem 0.35rem;

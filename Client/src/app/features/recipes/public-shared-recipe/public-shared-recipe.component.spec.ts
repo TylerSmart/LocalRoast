@@ -196,6 +196,39 @@ describe('PublicSharedRecipeComponent', () => {
     );
   });
 
+  it('renders tagged inline amounts as scaled chips with a divided breakdown', () => {
+    const ingredient = { ...mockPublicRecipe.ingredients[0], linkedSubRecipeId: null };
+    const span = (start: number) => ({
+      start,
+      length: 4,
+      kind: 'Ingredient' as const,
+      ingredientId: ingredient.id,
+      measurement: { quantity: 1, unit: 'Lb' as const },
+      alternativeMeasurement: null,
+    });
+    component['recipe'].set({
+      ...mockPublicRecipe,
+      ingredients: [ingredient],
+      steps: [
+        {
+          ...mockPublicRecipe.steps[0],
+          instruction: 'Sear 1 lb meat, then 1 lb more.',
+          inlineAmounts: [span(5), span(21)],
+        },
+      ],
+    });
+    component.setMultiplier(2);
+    fixture.detectChanges();
+    const el: HTMLElement = fixture.nativeElement;
+    expect(el.querySelector('.step-instruction-text')?.textContent?.trim()).toBe(
+      'Sear 2 lb meat, then 2 lb more.',
+    );
+    expect(el.querySelector('.ingredient-uses')?.textContent).toBe(
+      'Divided: 2 lb (step 1) · 2 lb (step 1)',
+    );
+    expect(component['groupedSteps']()[0].items[0].ingredientCallouts).toEqual([]);
+  });
+
   it('sets isUnavailable true when API returns error', () => {
     shareLinkServiceSpy.getPublicSharedRecipe.mockReturnValue(
       throwError(() => new Error('Not found')),

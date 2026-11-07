@@ -76,6 +76,15 @@ describe('IngestionRepairDialogComponent', () => {
         instruction: 'Warm the olive oil.',
         ingredientIndices: [0],
         ingredientAmounts: [{ ingredientIndex: 0, measurement: { quantity: 1, unit: 'Tbsp' } }],
+        inlineAmounts: [
+          {
+            start: 9,
+            length: 9,
+            kind: 'Ingredient',
+            ingredientIndex: 0,
+            measurement: { quantity: 1, unit: 'Tbsp' },
+          },
+        ],
         timers: [{ label: 'Warm oil', durationSeconds: 90 }],
       },
     ],
@@ -117,6 +126,9 @@ describe('IngestionRepairDialogComponent', () => {
     expect(text).toContain('1. olive oil: 1 Tbsp');
     expect(text).toContain('Warm oil: 90s');
     expect(text).toContain('Verify the portions.');
+    expect(text).toContain('Review AI re-extraction');
+    expect(text).toContain('Step 1: Tagged amounts');
+    expect(text).toContain('"olive oil" → 1. olive oil');
     expect(text).toContain('Oil is unlinked');
     expect(component.changes.length).toBeGreaterThan(0);
   });

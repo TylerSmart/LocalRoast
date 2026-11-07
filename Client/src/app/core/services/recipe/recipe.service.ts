@@ -5,6 +5,7 @@ import { apiUrl } from '../../api/api-url';
 import {
   CookLogDto,
   CookLogMutationResultDto,
+  DetectedStepAmountDto,
   IngredientMatchRequest,
   IngredientMatchResultDto,
   RecipeAttachmentDto,
@@ -119,6 +120,12 @@ export class RecipeService {
 
   updateRecipe(id: string, request: UpsertRecipeRequest): Observable<RecipeDetailDto> {
     return this.http.put<RecipeDetailDto>(apiUrl(`/recipes/${id}`), request);
+  }
+
+  detectStepAmounts(instruction: string): Observable<DetectedStepAmountDto[]> {
+    return this.http.post<DetectedStepAmountDto[]>(apiUrl('/recipes/step-amounts/detect'), {
+      instruction,
+    });
   }
 
   deleteRecipe(id: string): Observable<void> {

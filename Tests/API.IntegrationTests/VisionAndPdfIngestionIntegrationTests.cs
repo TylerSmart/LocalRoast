@@ -325,6 +325,7 @@ public sealed class VisionAndPdfIngestionIntegrationTests
             $"/api/ingestion/jobs/{imageJob.Id}"
         );
         Assert.IsNotNull(imageReview?.ExtractedDraft);
+        Assert.AreEqual("qwen2.5vl:7b → qwen2.5:14b", imageReview.ExtractedDraft.ExtractedModel);
         var imageRepair = await client.PostAsJsonAsync(
             $"/api/ingestion/jobs/{imageJob.Id}/repair-preview",
             new IngestionRepairPreviewRequest(imageReview.ExtractedDraft, "Check the image.")
@@ -335,8 +336,7 @@ public sealed class VisionAndPdfIngestionIntegrationTests
             await imageRepair.Content.ReadAsStringAsync()
         );
         Assert.IsNotNull(fakeLlm.LastRepairContext);
-        Assert.HasCount(1, fakeLlm.LastRepairContext.Images);
-        Assert.IsFalse(string.IsNullOrEmpty(fakeLlm.LastRepairContext.Images[0].Base64Data));
+        StringAssert.Contains(fakeLlm.LastRepairContext.SourceContent, "Instructions:");
 
         using var pdfForm = new MultipartFormDataContent();
         pdfForm.Add(
@@ -379,7 +379,7 @@ public sealed class VisionAndPdfIngestionIntegrationTests
             await pdfRepair.Content.ReadAsStringAsync()
         );
         Assert.IsNotNull(fakeLlm.LastRepairContext);
-        Assert.HasCount(1, fakeLlm.LastRepairContext.Images);
+        StringAssert.Contains(fakeLlm.LastRepairContext.SourceContent, "Instructions:");
         Assert.AreEqual("Check the scanned page.", fakeLlm.LastRepairContext.UserHint);
     }
 
@@ -455,19 +455,24 @@ public sealed class VisionAndPdfIngestionIntegrationTests
             CancellationToken cancellationToken = default
         ) => throw new NotImplementedException();
 
-        public Task<LlmExtractedRecipePayload> ExtractRecipeFromTextAsync(
-            EffectiveLlmConnectionConfig config,
-            LlmExtractionContext context,
-            CancellationToken cancellationToken = default
-        ) => throw new NotImplementedException();
-
-        public Task<LlmExtractedRecipePayload> ExtractRecipeFromImagesAsync(
+        public Task<string?> TranscribeRecipeImagesAsync(
             EffectiveLlmConnectionConfig config,
             LlmVisionExtractionContext context,
             CancellationToken cancellationToken = default
         )
         {
             VisionCalled = true;
+            return Task.FromResult<string?>(
+                "Grandma's Shortbread\n\nIngredients:\n- 1 cup butter, softened\n\nInstructions:\n1. Bake for 20 minutes."
+            );
+        }
+
+        public Task<LlmExtractedRecipePayload> ExtractRecipeFromTextAsync(
+            EffectiveLlmConnectionConfig config,
+            LlmExtractionContext context,
+            CancellationToken cancellationToken = default
+        )
+        {
             return Task.FromResult(
                 new LlmExtractedRecipePayload(
                     Title: "Grandma's Shortbread",
