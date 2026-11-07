@@ -1,0 +1,40 @@
+.repair-dialog-content {
+  overflow-wrap: anywhere;
+}
+
+.notice {
+  padding: 0.75rem;
+  border: 1px solid var(--mat-sys-outline-variant);
+  border-radius: 0.5rem;
+  background: var(--mat-sys-tertiary-container);
+  color: var(--mat-sys-on-tertiary-container);
+}
+
+.diagnostic-comparison,
+.change-values {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.change {
+  padding: 0.75rem 0;
+  border-top: 1px solid var(--mat-sys-outline-variant);
+
+  h4 {
+    margin: 0 0 0.5rem;
+  }
+
+  p {
+    margin: 0.25rem 0;
+    white-space: pre-wrap;
+  }
+}
+
+@media (max-width: 600px) {
+  .diagnostic-comparison,
+  .change-values {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.5rem;
+  }
+}

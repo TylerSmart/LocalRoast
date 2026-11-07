@@ -1,10 +1,12 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text.Json;
 using App.Core.Authentication;
 using App.Core.FoodCatalog;
 using App.Core.Ingestion;
 using App.Core.Recipes;
+using App.Data.Entities;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -85,6 +87,18 @@ public sealed class IngestionIntegrationTests
             new EnqueueRawTextIngestionRequest("Sample")
         );
         Assert.AreEqual(HttpStatusCode.Unauthorized, textResp.StatusCode);
+
+        var draft = new IngestionExtractedDraftDto("Sample");
+        var diagnostics = await _client.PostAsJsonAsync(
+            $"/api/ingestion/jobs/{Guid.NewGuid()}/review-diagnostics",
+            new IngestionDraftDiagnosticsRequest(draft)
+        );
+        Assert.AreEqual(HttpStatusCode.Unauthorized, diagnostics.StatusCode);
+        var repair = await _client.PostAsJsonAsync(
+            $"/api/ingestion/jobs/{Guid.NewGuid()}/repair-preview",
+            new IngestionRepairPreviewRequest(draft)
+        );
+        Assert.AreEqual(HttpStatusCode.Unauthorized, repair.StatusCode);
     }
 
     [TestMethod]
@@ -1232,12 +1246,351 @@ public sealed class IngestionIntegrationTests
         }
     }
 
+    [TestMethod]
+    public async Task ReviewRepair_UsesUnsavedDraftAndStructuredSourceWithoutPersistingPreview()
+    {
+        const string structured =
+            "Title: Beans\nIngredients:\n- 1 tbsp oil\n- 1 tbsp butter\nInstructions:\nHeat oil and add butter.";
+        var original = new IngestionExtractedDraftDto(
+            Title: "Stored title",
+            Ingredients:
+            [
+                new(
+                    Quantity: 1,
+                    Unit: MeasurementUnit.Tbsp,
+                    DisplayName: "oil",
+                    OriginalRawText: "1 tbsp oil"
+                ),
+                new(
+                    Quantity: 1,
+                    Unit: MeasurementUnit.Tbsp,
+                    DisplayName: "butter",
+                    OriginalRawText: "1 tbsp butter"
+                ),
+            ],
+            Steps: [new(Instruction: "Heat oil and add butter.", IngredientIndices: [0])]
+        );
+        var fakeLlm = new FakeSequentialLlmExtractionClient(
+            _ => throw new InvalidOperationException("Extraction was not expected."),
+            repair: context => new LlmRecipeRepairResult(
+                context.Draft with
+                {
+                    Steps =
+                    [
+                        context.Draft.Steps![0] with
+                        {
+                            Instruction = "Heat oil, then add butter.",
+                            IngredientIndices = [0, 1],
+                        },
+                    ],
+                },
+                []
+            )
+        );
+        await using var factory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Llm:TextModel", "test-text");
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ILlmExtractionClient>();
+                services.AddSingleton<ILlmExtractionClient>(fakeLlm);
+            });
+        });
+        using var client = factory.CreateClient();
+        await AuthenticateAsync(client);
+        var id = Guid.NewGuid();
+        var storedJson = JsonSerializer.Serialize(original);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<App.Data.AppDbContext>();
+            db.IngestionJobs.Add(
+                new IngestionJob
+                {
+                    Id = id,
+                    Channel = IngestionChannel.RawText,
+                    Status = IngestionJobStatus.ReadyForReview,
+                    DisplayTitle = original.Title,
+                    RawText = "unstructured original",
+                    StructuredSourceText = structured,
+                    ExtractedDraftJson = storedJson,
+                }
+            );
+            await db.SaveChangesAsync();
+        }
+
+        var edited = original with { Title = "Unsaved user title" };
+        var diagnosticsResponse = await client.PostAsJsonAsync(
+            $"/api/ingestion/jobs/{id}/review-diagnostics",
+            new IngestionDraftDiagnosticsRequest(edited)
+        );
+        Assert.AreEqual(HttpStatusCode.OK, diagnosticsResponse.StatusCode);
+        var diagnostics =
+            await diagnosticsResponse.Content.ReadFromJsonAsync<IngestionReviewDiagnosticsDto>();
+        Assert.IsNotNull(diagnostics);
+        Assert.IsTrue(diagnostics.ValidationIssues.Any(issue => issue.Contains("butter")));
+
+        var previewResponse = await client.PostAsJsonAsync(
+            $"/api/ingestion/jobs/{id}/repair-preview",
+            new IngestionRepairPreviewRequest(edited, "Link the butter.")
+        );
+        Assert.AreEqual(
+            HttpStatusCode.OK,
+            previewResponse.StatusCode,
+            await previewResponse.Content.ReadAsStringAsync()
+        );
+        var preview = await previewResponse.Content.ReadFromJsonAsync<IngestionRepairPreviewDto>();
+        Assert.IsNotNull(preview);
+        Assert.AreEqual("Unsaved user title", preview.Draft.Title);
+        CollectionAssert.AreEqual(
+            new[] { 0, 1 },
+            preview.Draft.Steps![0].IngredientIndices!.ToArray()
+        );
+        Assert.IsNotNull(fakeLlm.LastRepairContext);
+        Assert.AreEqual(structured, fakeLlm.LastRepairContext.SourceContent);
+        Assert.AreEqual("Link the butter.", fakeLlm.LastRepairContext.UserHint);
+        Assert.AreEqual("Unsaved user title", fakeLlm.LastRepairContext.Draft.Title);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<App.Data.AppDbContext>();
+            var entity = await db.IngestionJobs.FindAsync(id);
+            Assert.IsNotNull(entity);
+            Assert.AreEqual(storedJson, entity.ExtractedDraftJson);
+            Assert.AreEqual(IngestionJobStatus.ReadyForReview, entity.Status);
+        }
+
+        var saved = await client.PutAsJsonAsync($"/api/ingestion/jobs/{id}/draft", preview.Draft);
+        Assert.AreEqual(HttpStatusCode.OK, saved.StatusCode);
+        var updated = await saved.Content.ReadFromJsonAsync<IngestionJobDetailDto>();
+        Assert.AreEqual("Unsaved user title", updated!.ExtractedDraft!.Title);
+    }
+
+    [TestMethod]
+    public async Task ReviewRepair_ReportsMissingJobsConflictsAndUnavailableHosts()
+    {
+        var draft = new IngestionExtractedDraftDto(
+            "Review me",
+            Ingredients: [new(Quantity: 1, Unit: MeasurementUnit.Cup, DisplayName: "rice")],
+            Steps: [new(Instruction: "Cook rice.", IngredientIndices: [0])]
+        );
+        var fakeLlm = new FakeSequentialLlmExtractionClient(
+            _ => throw new InvalidOperationException(),
+            repair: _ => throw new LlmHostUnavailableException("Test host is offline.")
+        );
+        await using var factory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ILlmExtractionClient>();
+                services.AddSingleton<ILlmExtractionClient>(fakeLlm);
+            });
+        });
+        using var client = factory.CreateClient();
+        await AuthenticateAsync(client);
+        var missing = await client.PostAsJsonAsync(
+            $"/api/ingestion/jobs/{Guid.NewGuid()}/repair-preview",
+            new IngestionRepairPreviewRequest(draft)
+        );
+        Assert.AreEqual(HttpStatusCode.NotFound, missing.StatusCode);
+
+        var id = Guid.NewGuid();
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<App.Data.AppDbContext>();
+            db.IngestionJobs.Add(
+                new IngestionJob
+                {
+                    Id = id,
+                    Channel = IngestionChannel.RawText,
+                    Status = IngestionJobStatus.Queued,
+                    DisplayTitle = draft.Title,
+                }
+            );
+            await db.SaveChangesAsync();
+        }
+        var conflict = await client.PostAsJsonAsync(
+            $"/api/ingestion/jobs/{id}/repair-preview",
+            new IngestionRepairPreviewRequest(draft)
+        );
+        Assert.AreEqual(HttpStatusCode.Conflict, conflict.StatusCode);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<App.Data.AppDbContext>();
+            var entity = await db.IngestionJobs.FindAsync(id);
+            entity!.Status = IngestionJobStatus.ReadyForReview;
+            await db.SaveChangesAsync();
+        }
+        var unavailable = await client.PostAsJsonAsync(
+            $"/api/ingestion/jobs/{id}/repair-preview",
+            new IngestionRepairPreviewRequest(draft)
+        );
+        Assert.AreEqual(HttpStatusCode.ServiceUnavailable, unavailable.StatusCode);
+        StringAssert.Contains(
+            await unavailable.Content.ReadAsStringAsync(),
+            "Test host is offline."
+        );
+    }
+
+    [TestMethod]
+    public async Task ReviewEndpoints_RejectMalformedNestedDraftsAndReportUnknownIndices()
+    {
+        await AuthenticateAsync(_client);
+        var id = Guid.NewGuid();
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<App.Data.AppDbContext>();
+            db.IngestionJobs.Add(
+                new IngestionJob
+                {
+                    Id = id,
+                    Channel = IngestionChannel.RawText,
+                    Status = IngestionJobStatus.ReadyForReview,
+                    DisplayTitle = "Rice",
+                }
+            );
+            await db.SaveChangesAsync();
+        }
+        var malformed = new IngestionExtractedDraftDto("Rice", Ingredients: [null!]);
+        var response = await _client.PostAsJsonAsync(
+            $"/api/ingestion/jobs/{id}/review-diagnostics",
+            new IngestionDraftDiagnosticsRequest(malformed)
+        );
+        Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
+
+        var unknown = new IngestionExtractedDraftDto(
+            "Rice",
+            Ingredients: [new(DisplayName: "rice")],
+            Steps: [new(Instruction: "Cook rice.", IngredientIndices: [3])]
+        );
+        response = await _client.PostAsJsonAsync(
+            $"/api/ingestion/jobs/{id}/review-diagnostics",
+            new IngestionDraftDiagnosticsRequest(unknown)
+        );
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+        var diagnostics = await response.Content.ReadFromJsonAsync<IngestionReviewDiagnosticsDto>();
+        Assert.IsNotNull(diagnostics);
+        Assert.IsTrue(diagnostics.ValidationIssues.Any(issue => issue.Contains("out of range")));
+    }
+
+    [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
+    public async Task ReviewRepair_RejectsJobsChangedDuringInference(bool changeStatus)
+    {
+        var id = Guid.NewGuid();
+        IServiceProvider? services = null;
+        var fakeLlm = new FakeSequentialLlmExtractionClient(
+            _ => throw new InvalidOperationException(),
+            repair: context =>
+            {
+                using var scope = services!.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<App.Data.AppDbContext>();
+                var entity = db.IngestionJobs.Find(id)!;
+                if (changeStatus)
+                {
+                    entity.Status = IngestionJobStatus.Discarded;
+                }
+                else
+                {
+                    entity.DisplayTitle = "Saved elsewhere";
+                }
+                db.SaveChanges();
+                return new LlmRecipeRepairResult(context.Draft, []);
+            }
+        );
+        await using var factory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureServices(collection =>
+            {
+                collection.RemoveAll<ILlmExtractionClient>();
+                collection.AddSingleton<ILlmExtractionClient>(fakeLlm);
+            });
+        });
+        services = factory.Services;
+        using var client = factory.CreateClient();
+        await AuthenticateAsync(client);
+        using (var scope = services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<App.Data.AppDbContext>();
+            db.IngestionJobs.Add(
+                new IngestionJob
+                {
+                    Id = id,
+                    Channel = IngestionChannel.RawText,
+                    Status = IngestionJobStatus.ReadyForReview,
+                    DisplayTitle = "Rice",
+                }
+            );
+            await db.SaveChangesAsync();
+        }
+        var draft = new IngestionExtractedDraftDto(
+            "Rice",
+            Ingredients: [new(DisplayName: "rice")],
+            Steps: [new(Instruction: "Cook rice.", IngredientIndices: [0])]
+        );
+        var response = await client.PostAsJsonAsync(
+            $"/api/ingestion/jobs/{id}/repair-preview",
+            new IngestionRepairPreviewRequest(draft)
+        );
+        Assert.AreEqual(HttpStatusCode.Conflict, response.StatusCode);
+        StringAssert.Contains(await response.Content.ReadAsStringAsync(), "changed while");
+    }
+
+    [TestMethod]
+    [DataRow(IngestionChannel.Images)]
+    [DataRow(IngestionChannel.Pdf)]
+    public async Task ReviewRepair_ReportsMissingOriginalImages(IngestionChannel channel)
+    {
+        await AuthenticateAsync(_client);
+        var id = Guid.NewGuid();
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<App.Data.AppDbContext>();
+            db.IngestionJobs.Add(
+                new IngestionJob
+                {
+                    Id = id,
+                    Channel = channel,
+                    Status = IngestionJobStatus.ReadyForReview,
+                    DisplayTitle = "Rice",
+                    SourceFilesJson = "[]",
+                }
+            );
+            await db.SaveChangesAsync();
+        }
+        var draft = new IngestionExtractedDraftDto(
+            "Rice",
+            Ingredients: [new(DisplayName: "rice")],
+            Steps: [new(Instruction: "Cook rice.", IngredientIndices: [0])]
+        );
+        var response = await _client.PostAsJsonAsync(
+            $"/api/ingestion/jobs/{id}/repair-preview",
+            new IngestionRepairPreviewRequest(draft)
+        );
+        Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
+        StringAssert.Contains(
+            await response.Content.ReadAsStringAsync(),
+            "source images are unavailable"
+        );
+    }
+
     private sealed class FakeSequentialLlmExtractionClient(
         Func<LlmExtractionContext, LlmExtractedRecipePayload> handler,
-        Func<string, string?>? structureSource = null
+        Func<string, string?>? structureSource = null,
+        Func<LlmRecipeRepairContext, LlmRecipeRepairResult>? repair = null
     ) : ILlmExtractionClient
     {
         public List<string> StructuredSources { get; } = [];
+        public LlmRecipeRepairContext? LastRepairContext { get; private set; }
+
+        public Task<LlmRecipeRepairResult> RepairRecipeDraftAsync(
+            EffectiveLlmConnectionConfig config,
+            LlmRecipeRepairContext context,
+            CancellationToken cancellationToken = default
+        )
+        {
+            LastRepairContext = context;
+            return Task.FromResult(repair?.Invoke(context) ?? throw new NotImplementedException());
+        }
 
         public Task<string?> StructureRecipeSourceAsync(
             EffectiveLlmConnectionConfig config,
@@ -1298,6 +1651,12 @@ public sealed class IngestionIntegrationTests
 
     private sealed class BlockingLlmExtractionClient : ILlmExtractionClient
     {
+        public Task<LlmRecipeRepairResult> RepairRecipeDraftAsync(
+            EffectiveLlmConnectionConfig config,
+            LlmRecipeRepairContext context,
+            CancellationToken cancellationToken = default
+        ) => throw new NotImplementedException();
+
         public Task<string?> StructureRecipeSourceAsync(
             EffectiveLlmConnectionConfig config,
             string sourceText,

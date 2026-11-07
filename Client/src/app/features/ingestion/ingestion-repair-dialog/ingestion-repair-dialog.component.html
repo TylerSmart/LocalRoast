@@ -1,0 +1,73 @@
+<h2 mat-dialog-title>Review AI repair</h2>
+<mat-dialog-content class="repair-dialog-content">
+  <p>
+    Compare the proposal with your current draft. Applying it changes the editor only; save or
+    publish separately when you are ready.
+  </p>
+
+  @if (data.preview.notices.length) {
+    <section class="notice" aria-label="AI repair notices">
+      <h3>Notices</h3>
+      <ul>
+        @for (notice of data.preview.notices; track $index) {
+          <li>{{ notice }}</li>
+        }
+      </ul>
+    </section>
+  }
+
+  <section class="diagnostic-comparison" aria-label="Diagnostics comparison">
+    <div>
+      <h3>Before</h3>
+      <p>{{ data.preview.before.validationIssues.length }} validation issues</p>
+      <p>{{ data.preview.before.qualityWarnings.length }} quality warnings</p>
+      <ul>
+        @for (issue of data.preview.before.validationIssues; track $index) {
+          <li>{{ issue }}</li>
+        }
+        @for (warning of data.preview.before.qualityWarnings; track $index) {
+          <li>{{ warning }}</li>
+        }
+      </ul>
+    </div>
+    <div>
+      <h3>After</h3>
+      <p>{{ data.preview.after.validationIssues.length }} validation issues</p>
+      <p>{{ data.preview.after.qualityWarnings.length }} quality warnings</p>
+      <ul>
+        @for (issue of data.preview.after.validationIssues; track $index) {
+          <li>{{ issue }}</li>
+        }
+        @for (warning of data.preview.after.qualityWarnings; track $index) {
+          <li>{{ warning }}</li>
+        }
+      </ul>
+    </div>
+  </section>
+
+  <h3>Proposed changes</h3>
+  @if (!changes.length) {
+    <p>No changes were proposed.</p>
+  }
+  @for (change of changes; track $index) {
+    <section class="change">
+      <h4>{{ change.section }}: {{ change.field }}</h4>
+      <div class="change-values">
+        <div>
+          <strong>Before</strong>
+          <p>{{ change.before }}</p>
+        </div>
+        <div>
+          <strong>After</strong>
+          <p>{{ change.after }}</p>
+        </div>
+      </div>
+    </section>
+  }
+</mat-dialog-content>
+<mat-dialog-actions align="end">
+  <button mat-button type="button" (click)="close(false)">Cancel</button>
+  <button mat-flat-button type="button" (click)="close(true)" [disabled]="!changes.length">
+    Apply to editor
+  </button>
+</mat-dialog-actions>

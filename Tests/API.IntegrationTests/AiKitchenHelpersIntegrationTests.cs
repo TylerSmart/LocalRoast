@@ -53,6 +53,12 @@ public sealed class AiKitchenHelpersIntegrationTests
 
     private sealed class MockLlmExtractionClient : ILlmExtractionClient
     {
+        public Task<LlmRecipeRepairResult> RepairRecipeDraftAsync(
+            EffectiveLlmConnectionConfig config,
+            LlmRecipeRepairContext context,
+            CancellationToken cancellationToken = default
+        ) => throw new NotImplementedException();
+
         public bool ProbeReachable { get; set; } = true;
         public bool ThrowUnavailable { get; set; }
         public LlmKitchenQuestionContext? LastKitchenQuestionContext { get; private set; }

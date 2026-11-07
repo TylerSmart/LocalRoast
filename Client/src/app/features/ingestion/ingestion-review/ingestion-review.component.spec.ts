@@ -4,9 +4,13 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { MatDialog } from '@angular/material/dialog';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { ActivatedRoute, Router, provideRouter } from '@angular/router';
-import { of } from 'rxjs';
+import { Subject, of, throwError } from 'rxjs';
 import { FoodItemDto } from '../../../core/models/food-catalog.models';
-import type { IngestionJobDetailDto } from '../../../core/models/ingestion.models';
+import type {
+  IngestionJobDetailDto,
+  IngestionRepairPreviewDto,
+  IngestionReviewDiagnosticsDto,
+} from '../../../core/models/ingestion.models';
 import { RecipeDetailDto } from '../../../core/models/recipe.models';
 import { CollectionDto, TagDto } from '../../../core/models/taxonomy.models';
 import { FoodCatalogService } from '../../../core/services/food-catalog/food-catalog.service';
@@ -54,6 +58,8 @@ describe('IngestionReviewComponent', () => {
     approveAndPublish: ReturnType<typeof vi.fn>;
     discardJob: ReturnType<typeof vi.fn>;
     retryJob: ReturnType<typeof vi.fn>;
+    getReviewDiagnostics: ReturnType<typeof vi.fn>;
+    previewRepair: ReturnType<typeof vi.fn>;
   };
   let mockFoodCatalogService: {
     getFoodItems: ReturnType<typeof vi.fn>;
@@ -226,6 +232,10 @@ describe('IngestionReviewComponent', () => {
       ),
       discardJob: vi.fn().mockReturnValue(of(undefined)),
       retryJob: vi.fn().mockReturnValue(of(sampleJob)),
+      getReviewDiagnostics: vi
+        .fn()
+        .mockReturnValue(of({ validationIssues: [], qualityWarnings: [] })),
+      previewRepair: vi.fn(),
     };
 
     mockFoodCatalogService = {
@@ -299,6 +309,145 @@ describe('IngestionReviewComponent', () => {
     expect(component.buildDraftPayload().ingredients?.[1].suggestedCategory).toBe('Refrigerated');
   });
 
+  it('checks the edited draft and shows validation issues and advisory warnings', () => {
+    mockIngestionService.getReviewDiagnostics.mockReturnValue(
+      of({
+        validationIssues: ['Butter is not linked.'],
+        qualityWarnings: ['Step 1 has a vague timer label.'],
+      }),
+    );
+    component.form.controls.title.setValue('Unsaved title');
+    component.recheckReviewIssues();
+    fixture.detectChanges();
+
+    expect(mockIngestionService.getReviewDiagnostics).toHaveBeenLastCalledWith(
+      'job-123',
+      expect.objectContaining({ title: 'Unsaved title' }),
+    );
+    expect(fixture.nativeElement.textContent).toContain('Butter is not linked.');
+    expect(fixture.nativeElement.textContent).toContain('Step 1 has a vague timer label.');
+    expect(component.diagnosticsStale()).toBe(false);
+    component.form.controls.description.setValue('An edit after checking');
+    expect(component.diagnosticsStale()).toBe(true);
+  });
+
+  it('marks diagnostics stale when the draft changes before a check completes', () => {
+    const response = new Subject<IngestionReviewDiagnosticsDto>();
+    mockIngestionService.getReviewDiagnostics.mockReturnValue(response);
+    component.recheckReviewIssues();
+    component.form.controls.title.setValue('Changed while checking');
+    response.next({ validationIssues: [], qualityWarnings: [] });
+    expect(component.diagnosticsStale()).toBe(true);
+  });
+
+  function makePreview(): IngestionRepairPreviewDto {
+    const draft = component.buildDraftPayload();
+    return {
+      draft: {
+        ...draft,
+        title: 'AI suggestion',
+        suggestedCollectionIds: [],
+        suggestedTagIds: [],
+        proposedTagNames: [],
+        ingredients: draft.ingredients.map((item, index) =>
+          index === 0 ? { ...item, createNewFoodItem: false } : item,
+        ),
+      },
+      before: { validationIssues: ['A problem'], qualityWarnings: [] },
+      after: { validationIssues: [], qualityWarnings: [] },
+      notices: [],
+    };
+  }
+
+  it('passes the current edits and hint to AI and leaves a cancelled preview unsaved', () => {
+    component.form.controls.title.setValue('My unsaved title');
+    component.repairHint.setValue('  Fix the timer  ');
+    const preview = makePreview();
+    mockIngestionService.previewRepair.mockReturnValue(of(preview));
+    mockDialog.open.mockReturnValue({ afterClosed: () => of(false) });
+
+    component.fixWithAi();
+
+    expect(mockIngestionService.previewRepair).toHaveBeenCalledWith(
+      'job-123',
+      expect.objectContaining({ title: 'My unsaved title' }),
+      'Fix the timer',
+    );
+    expect(component.form.controls.title.value).toBe('My unsaved title');
+    expect(mockIngestionService.saveDraft).not.toHaveBeenCalled();
+  });
+
+  it('applies a preview only to the editor and preserves cleared fields and food settings', () => {
+    component.form.controls.sourceUrl.setValue('');
+    component.form.controls.difficulty.setValue(null);
+    component.proposedTagNames.set(['Previously unselected']);
+    const preview = makePreview();
+    mockIngestionService.previewRepair.mockReturnValue(of(preview));
+    const dialogResult = new Subject<boolean>();
+    mockDialog.open.mockReturnValue({ afterClosed: () => dialogResult });
+
+    component.fixWithAi();
+    expect(component.form.controls.title.value).toBe('Crispy Sesame Tofu');
+    dialogResult.next(true);
+
+    expect(component.form.controls.title.value).toBe('AI suggestion');
+    expect(component.form.controls.sourceUrl.value).toBe('');
+    expect(component.form.controls.difficulty.value).toBeNull();
+    expect(component.selectedCollectionIds().size).toBe(0);
+    expect(component.selectedTagIds().size).toBe(0);
+    expect(component.proposedTagNames()).toContain('Previously unselected');
+    expect(component.buildDraftPayload().ingredients[0].createNewFoodItem).toBe(false);
+    expect(component.form.dirty).toBe(true);
+    expect(mockIngestionService.saveDraft).not.toHaveBeenCalled();
+  });
+
+  it('does not overwrite edits made during inference or while the preview is open', () => {
+    const response = new Subject<IngestionRepairPreviewDto>();
+    const preview = makePreview();
+    const dialogResult = new Subject<boolean>();
+    mockIngestionService.previewRepair.mockReturnValue(response);
+    mockDialog.open.mockReturnValue({ afterClosed: () => dialogResult });
+
+    component.fixWithAi();
+    component.form.controls.title.setValue('Edited while waiting');
+    response.next(preview);
+    component.form.controls.description.setValue('Edited while previewing');
+    dialogResult.next(true);
+
+    expect(component.form.controls.title.value).toBe('Edited while waiting');
+    expect(component.form.controls.description.value).toBe('Edited while previewing');
+    expect(component.reviewError()).toContain('Your edits were kept');
+    expect(mockIngestionService.saveDraft).not.toHaveBeenCalled();
+  });
+
+  it('refuses to apply a preview if another session changed the saved job', () => {
+    mockIngestionService.previewRepair.mockReturnValue(of(makePreview()));
+    const dialogResult = new Subject<boolean>();
+    mockDialog.open.mockReturnValue({ afterClosed: () => dialogResult });
+    component.fixWithAi();
+    mockIngestionService.getJobById.mockReturnValue(
+      of({ ...sampleJob, modifiedAt: '2026-10-27T12:00:00Z' }),
+    );
+    dialogResult.next(true);
+    expect(component.form.controls.title.value).toBe('Crispy Sesame Tofu');
+    expect(component.reviewError()).toContain('job changed');
+    expect(mockIngestionService.saveDraft).not.toHaveBeenCalled();
+  });
+
+  it('keeps unsaved edits accessible when AI repair fails', () => {
+    component.form.controls.title.setValue('Still editing');
+    mockIngestionService.previewRepair.mockReturnValue(
+      throwError(() => ({ error: { detail: 'The model is offline.' } })),
+    );
+    component.fixWithAi();
+    fixture.detectChanges();
+
+    expect(component.reviewError()).toBe('The model is offline.');
+    expect(component.errorMessage()).toBeNull();
+    expect(component.form.controls.title.value).toBe('Still editing');
+    expect(fixture.nativeElement.querySelector('.draft-form')).toBeTruthy();
+  });
+
   it('toggles mobile panes cleanly', () => {
     expect(component.mobilePane()).toBe('draft');
     component.setMobilePane('source');
@@ -306,11 +455,27 @@ describe('IngestionReviewComponent', () => {
   });
 
   it('adds and removes ingredients', () => {
+    expect(component['availableIngredientLabels']()).toHaveLength(2);
     component.addIngredient({ displayName: 'Scallions' });
     expect(component.ingredientsArray.length).toBe(3);
+    expect(component['availableIngredientLabels']()[2].label).toBe('3. Scallions');
 
     component.removeIngredient(2);
     expect(component.ingredientsArray.length).toBe(2);
+    expect(component['availableIngredientLabels']()).toHaveLength(2);
+  });
+
+  it('updates food-creation behavior when changing a catalog or recipe reference', () => {
+    const ingredient = component.ingredientsArray.at(0);
+    ingredient.get('matchedFoodItemId')?.setValue(null);
+    expect(component.buildDraftPayload().ingredients[0].createNewFoodItem).toBe(true);
+
+    ingredient.get('isRecipeReference')?.setValue(true);
+    component.onRecipeReferenceToggled(0, true);
+    expect(component.buildDraftPayload().ingredients[0].createNewFoodItem).toBe(false);
+    ingredient.get('isRecipeReference')?.setValue(false);
+    component.onRecipeReferenceToggled(0, false);
+    expect(component.buildDraftPayload().ingredients[0].createNewFoodItem).toBe(true);
   });
 
   it('preserves recipe references in the draft without food-item materialization', () => {
@@ -393,6 +558,16 @@ describe('IngestionReviewComponent', () => {
     const badge = fixture.nativeElement.querySelector('.model-badge');
     expect(badge).toBeTruthy();
     expect(badge.textContent).toContain('gpt-4o');
+  });
+
+  it.each([
+    ['Images', 'Photos'],
+    ['Pdf', 'PDF'],
+  ] as const)('labels %s source jobs accurately', (channel, label) => {
+    mockIngestionService.getJobById.mockReturnValue(of({ ...sampleJob, channel }));
+    component.ngOnInit();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.channel-badge').textContent).toContain(label);
   });
 
   it('displays and toggles proposed new tags even when tag catalog is empty', () => {

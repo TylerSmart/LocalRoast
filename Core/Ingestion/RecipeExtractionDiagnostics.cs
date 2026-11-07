@@ -54,6 +54,16 @@ public static class RecipeExtractionDiagnostics
         RegexOptions.IgnoreCase,
         RegexTimeout
     );
+    private static readonly Regex CookingAction = new(
+        @"\b(?:add|bake|beat|boil|braise|broil|chop|combine|cook|cut|drain|fold|fry|heat|knead|mix|pour|reduce|remove|roast|saute|sauté|season|serve|simmer|slice|stir|transfer|whisk)\b",
+        RegexOptions.IgnoreCase,
+        RegexTimeout
+    );
+    private static readonly Regex VagueTimerLabel = new(
+        @"^(?:step\s+\d+\s+)?(?:timer|cook|cooking|bake|baking|boil|fry|heat|rest|simmer|wait)(?:\s+timer)?$",
+        RegexOptions.IgnoreCase,
+        RegexTimeout
+    );
     private static readonly JsonSerializerOptions NumberOptions = new()
     {
         Converters = { new FlexibleNullableDecimalJsonConverter() },
@@ -117,6 +127,80 @@ public static class RecipeExtractionDiagnostics
             }
         }
         return issues;
+    }
+
+    public static IReadOnlyList<string> GetQualityWarnings(LlmExtractedRecipePayload recipe)
+    {
+        var warnings = new List<string>();
+        var ingredients = recipe.Ingredients ?? [];
+        var steps = recipe.Steps ?? [];
+
+        for (var stepIndex = 0; stepIndex < steps.Count; stepIndex++)
+        {
+            var step = steps[stepIndex];
+            var instruction = step.Instruction ?? "";
+            if (instruction.Length > 300)
+            {
+                warnings.Add(
+                    $"Step {stepIndex + 1}: instruction exceeds 300 characters; consider splitting it into shorter steps."
+                );
+            }
+            if (CookingAction.Matches(instruction).Count >= 3)
+            {
+                warnings.Add(
+                    $"Step {stepIndex + 1}: instruction may contain multiple actions; consider splitting it where appropriate."
+                );
+            }
+            foreach (var timer in step.Timers ?? [])
+            {
+                var label = timer.Label?.Trim() ?? "";
+                if (string.IsNullOrEmpty(label) || VagueTimerLabel.IsMatch(label))
+                {
+                    warnings.Add(
+                        $"Step {stepIndex + 1}: timer {Quote(label)} has a vague label; name the food or action being timed."
+                    );
+                }
+            }
+
+            var reportedFoods = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            for (var ingredientIndex = 0; ingredientIndex < ingredients.Count; ingredientIndex++)
+            {
+                var ingredient = ingredients[ingredientIndex];
+                var foodKey = ingredient.CanonicalFoodName?.Trim();
+                if (string.IsNullOrWhiteSpace(foodKey))
+                {
+                    foodKey = ingredient.DisplayName?.Trim();
+                }
+                if (
+                    string.IsNullOrWhiteSpace(foodKey)
+                    || !reportedFoods.Add(foodKey)
+                    || !MentionsIngredient(instruction, ingredientIndex, ingredients)
+                )
+                {
+                    continue;
+                }
+
+                var linked = (step.IngredientIndices ?? [])
+                    .Concat(
+                        (step.IngredientAmounts ?? [])
+                            .Where(amount => amount.IngredientIndex.HasValue)
+                            .Select(amount => amount.IngredientIndex!.Value)
+                    )
+                    .Any(index =>
+                        index >= 0
+                        && index < ingredients.Count
+                        && SameFood(ingredient, ingredients[index])
+                    );
+                if (!linked)
+                {
+                    warnings.Add(
+                        $"Step {stepIndex + 1}: {DescribeIngredient(ingredientIndex, ingredient)} is mentioned but not linked; verify whether this step uses it."
+                    );
+                }
+            }
+        }
+
+        return warnings;
     }
 
     public static IReadOnlyList<string> GetIssues(
@@ -445,6 +529,67 @@ public static class RecipeExtractionDiagnostics
             .Distinct()
             .Take(3)
             .ToList();
+
+    private static bool MentionsIngredient(
+        string instruction,
+        int index,
+        IReadOnlyList<LlmExtractedIngredientItem> ingredients
+    )
+    {
+        var names = IngredientNames(ingredients[index]);
+        if (names.Any(name => ContainsIngredientTerm(instruction, name)))
+        {
+            return true;
+        }
+
+        foreach (var name in names)
+        {
+            var words = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            foreach (var term in new[] { words[0], words[^1] }.Distinct())
+            {
+                if (
+                    term.Length < 3
+                    || !ContainsIngredientTerm(instruction, term)
+                    || ingredients
+                        .Where(
+                            (other, otherIndex) =>
+                                otherIndex != index && !SameFood(ingredients[index], other)
+                        )
+                        .SelectMany(IngredientNames)
+                        .Any(other =>
+                            other.Split(' ').Contains(term, StringComparer.OrdinalIgnoreCase)
+                        )
+                )
+                {
+                    continue;
+                }
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static List<string> IngredientNames(LlmExtractedIngredientItem ingredient) =>
+        new[] { ingredient.DisplayName, ingredient.CanonicalFoodName }
+            .Select(name => Whitespace.Replace(name ?? "", " ").Trim())
+            .Where(name => name.Length >= 3)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    private static bool ContainsIngredientTerm(string instruction, string term) =>
+        Regex.IsMatch(
+            instruction,
+            $@"\b{Regex.Escape(term)}(?:e?s)?\b",
+            RegexOptions.IgnoreCase,
+            RegexTimeout
+        );
+
+    private static bool SameFood(
+        LlmExtractedIngredientItem first,
+        LlmExtractedIngredientItem second
+    ) =>
+        IngredientNames(first)
+            .Any(name => IngredientNames(second).Contains(name, StringComparer.OrdinalIgnoreCase));
 
     // Steps (1-based) whose text names an unlinked ingredient: the full name first, then its last
     // word (usually the food, as in "unsalted butter"), then its first word (as in "fennel bulb").

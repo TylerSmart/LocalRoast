@@ -316,6 +316,27 @@ public sealed class VisionAndPdfIngestionIntegrationTests
         );
         Assert.IsNotNull(imageJobDetail);
         fakeInspector.RenderedPage = imageJobDetail.SourceFiles[0];
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            var processor = scope.ServiceProvider.GetRequiredService<IIngestionProcessor>();
+            Assert.IsTrue(await processor.ProcessJobByIdAsync(imageJob.Id));
+        }
+        var imageReview = await client.GetFromJsonAsync<IngestionJobDetailDto>(
+            $"/api/ingestion/jobs/{imageJob.Id}"
+        );
+        Assert.IsNotNull(imageReview?.ExtractedDraft);
+        var imageRepair = await client.PostAsJsonAsync(
+            $"/api/ingestion/jobs/{imageJob.Id}/repair-preview",
+            new IngestionRepairPreviewRequest(imageReview.ExtractedDraft, "Check the image.")
+        );
+        Assert.AreEqual(
+            HttpStatusCode.OK,
+            imageRepair.StatusCode,
+            await imageRepair.Content.ReadAsStringAsync()
+        );
+        Assert.IsNotNull(fakeLlm.LastRepairContext);
+        Assert.HasCount(1, fakeLlm.LastRepairContext.Images);
+        Assert.IsFalse(string.IsNullOrEmpty(fakeLlm.LastRepairContext.Images[0].Base64Data));
 
         using var pdfForm = new MultipartFormDataContent();
         pdfForm.Add(
@@ -347,6 +368,19 @@ public sealed class VisionAndPdfIngestionIntegrationTests
         Assert.IsNull(processed.DownloadedCoverImagePath);
         Assert.IsNull(processed.ExtractedDraft?.CoverImagePath);
         Assert.IsNull(processed.ExtractedDraft?.ThumbnailImagePath);
+        Assert.IsNotNull(processed.ExtractedDraft);
+        var pdfRepair = await client.PostAsJsonAsync(
+            $"/api/ingestion/jobs/{pdfJob.Id}/repair-preview",
+            new IngestionRepairPreviewRequest(processed.ExtractedDraft, "Check the scanned page.")
+        );
+        Assert.AreEqual(
+            HttpStatusCode.OK,
+            pdfRepair.StatusCode,
+            await pdfRepair.Content.ReadAsStringAsync()
+        );
+        Assert.IsNotNull(fakeLlm.LastRepairContext);
+        Assert.HasCount(1, fakeLlm.LastRepairContext.Images);
+        Assert.AreEqual("Check the scanned page.", fakeLlm.LastRepairContext.UserHint);
     }
 
     private sealed class FakeScannedPdfInspector : IPdfIngestionInspector
@@ -379,6 +413,18 @@ public sealed class VisionAndPdfIngestionIntegrationTests
 
     private sealed class FakeVisionLlmExtractionClient : ILlmExtractionClient
     {
+        public LlmRecipeRepairContext? LastRepairContext { get; private set; }
+
+        public Task<LlmRecipeRepairResult> RepairRecipeDraftAsync(
+            EffectiveLlmConnectionConfig config,
+            LlmRecipeRepairContext context,
+            CancellationToken cancellationToken = default
+        )
+        {
+            LastRepairContext = context;
+            return Task.FromResult(new LlmRecipeRepairResult(context.Draft, []));
+        }
+
         public Task<string> AnswerKitchenQuestionAsync(
             EffectiveLlmConnectionConfig config,
             LlmKitchenQuestionContext context,

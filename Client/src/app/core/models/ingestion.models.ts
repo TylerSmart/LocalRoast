@@ -137,6 +137,7 @@ export interface IngestionDraftIngredientDto {
   matchedFoodItemId: string | null;
   matchedFoodItemName: string | null;
   isNewFoodItem: boolean;
+  createNewFoodItem?: boolean;
   proposedFoodItemName: string | null;
   suggestedIsPantryStaple: boolean;
   alternativeMeasurement?: RecipeMeasurement | null;
@@ -181,6 +182,18 @@ export interface IngestionExtractedDraftDto {
   extractedModel?: string | null;
   proposedTagNames?: string[] | null;
   measurementWarnings?: string[] | null;
+}
+
+export interface IngestionReviewDiagnosticsDto {
+  validationIssues: string[];
+  qualityWarnings: string[];
+}
+
+export interface IngestionRepairPreviewDto {
+  draft: IngestionExtractedDraftDto;
+  before: IngestionReviewDiagnosticsDto;
+  after: IngestionReviewDiagnosticsDto;
+  notices: string[];
 }
 
 export interface EnqueueWebUrlIngestionRequest {

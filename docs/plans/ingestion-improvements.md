@@ -10,7 +10,7 @@ See [LLM Model Settings](../llm-model-settings.md) for the per-model recommendat
 - [x] **2. Repair pass for every model.** Validation and correction currently run only for `gemma4:e2b`/`gemma4:e4b` tags. Run the diagnostics and correction after every text extraction, regardless of model.
 - [x] **3. Iterative repair loop.** Replace the single correction request with a configurable number of rounds (household setting). Keep the draft with the fewest issues, stop as soon as a round does not improve, and fall back to the best draft when a correction response is unusable or times out.
   - Validation issues now quote what they refer to: the full text of a missing source line, the step's fixed amounts, the ingredient's name and the timed sentences. Before, E2B was told "Source ingredient line 6: missing" without the text and returned the same draft. Unlinked ingredients also name the steps that mention them. Replay results are in [Repair rounds](../llm-model-settings.md#repair-rounds).
-  - [ ] Follow-up: E2B still restores rows without linking them, and fixed amounts left in step text are rarely fixed (3 of 30). Revisit once the review-screen repair (item 5) exists, since a user hint may do better than a second automatic round.
+  - [ ] Follow-up: E2B still restores rows without linking them, and fixed amounts left in step text are rarely fixed (3 of 30). A small review-screen hint sanity check also left fixed amounts and introduced other mistakes; evaluate more examples and improve the repair before relying on E2B.
 - [x] **4. Output cap follows the context window.** Ollama requests used a fixed 16,384-token `num_predict`, which truncated long thinking outputs even with a 32k context. Use the larger of 16,384 and the configured context window for text and vision extraction. Keep OpenAI-compatible requests at 16,384, because those servers can reject `max_tokens` larger than the remaining context.
 - [x] **4a. Request timeout limit.** The guide recommends 900 s for slow thinking models, but the API and dialog capped the timeout at 600 s. Raise the limit (now 1,800 s) so long-context, thinking, and repair-loop requests can finish.
 - [x] **9. Non-canonical evaluation sources (alongside batch 1).** Add evaluator source styles that remove headings and bullets, insert page noise, and hard-wrap lines. This shows whether sectioning and repair hold up without the canonical layout. The evaluator's `--source-style` option now offers `canonical`, `plain` (pasted notes) and `web` (page noise, bullets, numbered steps, 72-character wraps). Results are in [Source sectioning](../llm-model-settings.md#source-sectioning).
@@ -18,12 +18,14 @@ See [LLM Model Settings](../llm-model-settings.md) for the per-model recommendat
 
 ## Batch 2 — Review experience
 
-- [ ] **5. Review-screen issues and "Fix with AI".** Show the validation issues on the review screen instead of only in the status text. Add a "Fix with AI" action that accepts an optional user hint, runs the repair loop against the stored structured source, and shows a before/after diff before applying.
-- [ ] **6. Format-agnostic quality checks.** Add diagnostics that do not depend on source layout:
+- [x] **5. Review-screen issues and "Fix with AI".** Show the validation issues on the review screen instead of only in the status text. Add a "Fix with AI" action that accepts an optional user hint, runs the repair loop against the stored structured source, and shows a before/after diff before applying.
+  - Repair previews use the unsaved editor draft, preserve review metadata when it can be matched safely, and require a separate save or publish. Photos and scanned PDFs use the configured vision model and original images. Stale previews are rejected, and an unusable response can be retried once.
+- [x] **6. Format-agnostic quality checks.** Add diagnostics that do not depend on source layout:
   - very long or multi-action steps;
   - vague timer labels (for example "Timer" or "Cook");
   - ingredients mentioned in step prose but not linked;
   - steps that reference an unknown ingredient index.
+  - Quality warnings are advisory and do not change existing automatic publication gating.
 
 ## Batch 3 — Model strategy
 

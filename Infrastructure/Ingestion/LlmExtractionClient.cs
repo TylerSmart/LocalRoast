@@ -592,6 +592,174 @@ Do not invent ingredients or quantities. Preserve all other correct fields.
         return best;
     }
 
+    public async Task<LlmRecipeRepairResult> RepairRecipeDraftAsync(
+        EffectiveLlmConnectionConfig config,
+        LlmRecipeRepairContext context,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var usesImages = context.Images.Count > 0;
+        if (!usesImages && string.IsNullOrWhiteSpace(config.TextModel))
+        {
+            throw new LlmHostUnavailableException(
+                "No Text LLM model is configured in LLM Settings. Please select a Text Model and retry."
+            );
+        }
+
+        var notices = new List<string>();
+        if (!usesImages && string.IsNullOrWhiteSpace(context.SourceContent))
+        {
+            notices.Add(
+                "No readable original source is available to the model. Compare the proposal with the original source before applying it."
+            );
+        }
+
+        var best = context.Draft;
+        var originalIssues = GetManualRepairIssues(best, context.SourceContent);
+        var bestIssues = originalIssues;
+        var nextDraft = best;
+        var nextIssues = bestIssues;
+        var maxRounds = Math.Max(1, config.ExtractionRepairRounds);
+        var completedRounds = 0;
+        var retriedInvalidResponse = false;
+        var hasProposal = false;
+        while (completedRounds < maxRounds)
+        {
+            var source =
+                !string.IsNullOrWhiteSpace(context.SourceContent) ? context.SourceContent
+                : usesImages ? "The original recipe is in the attached images."
+                : "No original source text is available; rely on the draft and user guidance.";
+            var guidance = string.IsNullOrWhiteSpace(context.UserHint)
+                ? ""
+                : $"\n\nUSER GUIDANCE:\n{context.UserHint.Trim()}";
+            var prompt =
+                $"ORIGINAL SOURCE:\n{source}\n\nDRAFT:\n{JsonSerializer.Serialize(nextDraft, new JsonSerializerOptions(JsonSerializerDefaults.Web))}\n\nVALIDATION ISSUES AND ADVISORY QUALITY CHECKS:\n{string.Join("\n", nextIssues)}{guidance}";
+            var system =
+                RepairSystemPrompt
+                + "\n"
+                + MeasurementAndReferenceRules
+                + "\nThe user will compare your proposal before applying it. Preserve all correct draft details, and follow the user's guidance when consistent with the source.";
+            var content = usesImages
+                ? await SendStructuredVisionChatAsync(
+                    config,
+                    context.Images,
+                    system,
+                    prompt,
+                    cancellationToken
+                )
+                : await SendStructuredTextChatAsync(
+                    config,
+                    "recipe_extraction",
+                    GetRecipeExtractionJsonSchema(),
+                    system,
+                    prompt,
+                    0,
+                    cancellationToken
+                );
+
+            LlmExtractedRecipePayload? corrected = null;
+            DomainValidationException? invalidResponse = null;
+            try
+            {
+                corrected = DeserializeRecipeWithRepair(CleanMarkdownJsonFences(content));
+                IngestionDraftRepairMapper.ValidateProposalStructure(corrected);
+            }
+            catch (JsonException ex)
+            {
+                invalidResponse = new DomainValidationException(
+                    $"Failed to parse the AI repair response: {ex.Message}"
+                );
+            }
+            catch (DomainValidationException ex)
+            {
+                invalidResponse = ex;
+            }
+            if (invalidResponse is not null)
+            {
+                if (!retriedInvalidResponse)
+                {
+                    retriedInvalidResponse = true;
+                    nextDraft = corrected ?? nextDraft;
+                    nextIssues =
+                    [
+                        $"The previous proposal was unusable: {invalidResponse.Message} Return a complete corrected recipe with valid ingredient links.",
+                    ];
+                    notices.Add("An unusable AI response was retried once.");
+                    continue;
+                }
+                if (hasProposal)
+                {
+                    notices.Add(
+                        "A later repair response was unusable after a retry, so the earlier proposal was kept."
+                    );
+                    break;
+                }
+                throw new DomainValidationException(
+                    $"The AI returned an unusable proposal after one retry: {invalidResponse.Message}"
+                );
+            }
+
+            var proposal =
+                corrected
+                ?? throw new InvalidOperationException("A validated AI proposal is missing.");
+            completedRounds++;
+            var issues = GetManualRepairIssues(proposal, context.SourceContent);
+            logger?.LogInformation(
+                "Manual recipe repair round {Round}: {Before} -> {After} review issues.",
+                completedRounds,
+                bestIssues.Count,
+                issues.Count
+            );
+            if (issues.Count > bestIssues.Count)
+            {
+                if (!hasProposal)
+                {
+                    best = proposal;
+                    notices.Add(
+                        "The proposal has more review findings than the current draft. Compare it carefully before applying."
+                    );
+                }
+                else
+                {
+                    notices.Add(
+                        "A later repair round raised the issue count, so the earlier proposal was kept."
+                    );
+                }
+                break;
+            }
+            var improved = issues.Count < bestIssues.Count;
+            best = proposal;
+            bestIssues = issues;
+            hasProposal = true;
+            if (!improved || bestIssues.Count == 0)
+            {
+                break;
+            }
+            nextDraft = best;
+            nextIssues = bestIssues;
+        }
+        var finalIssues = GetManualRepairIssues(best, context.SourceContent);
+        if (
+            finalIssues.Count <= originalIssues.Count
+            && finalIssues.Except(originalIssues, StringComparer.Ordinal).Any()
+        )
+        {
+            notices.Add(
+                "The proposal has new or changed review findings. Compare the diagnostics and recipe carefully before applying."
+            );
+        }
+        return new LlmRecipeRepairResult(best, notices);
+    }
+
+    private static IReadOnlyList<string> GetManualRepairIssues(
+        LlmExtractedRecipePayload recipe,
+        string? source
+    ) =>
+        RecipeExtractionDiagnostics
+            .GetReviewIssues(recipe, source)
+            .Concat(RecipeExtractionDiagnostics.GetQualityWarnings(recipe))
+            .ToList();
+
     public async Task<LlmSubstitutionPayload> SuggestIngredientSubstitutionsAsync(
         EffectiveLlmConnectionConfig config,
         LlmSubstitutionContext context,
@@ -911,6 +1079,41 @@ Do not invent ingredients or quantities. Preserve all other correct fields.
         CancellationToken cancellationToken = default
     )
     {
+        var userPromptText =
+            "Transcribe and structure the culinary recipe shown across these page images into structured recipe JSON.";
+        if (!string.IsNullOrWhiteSpace(context.SupplementalHintText))
+        {
+            userPromptText +=
+                $"\nSupplemental Context/Hints: {context.SupplementalHintText.Trim()}";
+        }
+
+        var responseContent = await SendStructuredVisionChatAsync(
+            config,
+            context.Images,
+            BuildVisionExtractionSystemPrompt(context),
+            userPromptText,
+            cancellationToken
+        );
+        try
+        {
+            return DeserializeRecipeWithRepair(CleanMarkdownJsonFences(responseContent));
+        }
+        catch (JsonException ex)
+        {
+            throw new DomainValidationException(
+                $"Failed to parse recipe extraction JSON output from LLM: {ex.Message}"
+            );
+        }
+    }
+
+    private async Task<string> SendStructuredVisionChatAsync(
+        EffectiveLlmConnectionConfig config,
+        IReadOnlyList<LlmVisionImageInput> images,
+        string systemPrompt,
+        string userPromptText,
+        CancellationToken cancellationToken
+    )
+    {
         if (string.IsNullOrWhiteSpace(config.VisionModel))
         {
             throw new LlmHostUnavailableException(
@@ -918,13 +1121,12 @@ Do not invent ingredients or quantities. Preserve all other correct fields.
             );
         }
 
-        if (context.Images is null || context.Images.Count == 0)
+        if (images.Count == 0)
         {
             throw new DomainValidationException("No images provided for multimodal extraction.");
         }
 
         var normalizedBase = NormalizeBaseUrl(config.Provider, config.BaseUrl);
-        var systemPrompt = BuildVisionExtractionSystemPrompt(context);
         var timeout = TimeSpan.FromSeconds(Math.Max(20, config.RequestTimeoutSeconds));
         var sw = Stopwatch.StartNew();
 
@@ -933,14 +1135,6 @@ Do not invent ingredients or quantities. Preserve all other correct fields.
             cancellationToken,
             cts.Token
         );
-
-        var userPromptText =
-            "Transcribe and structure the culinary recipe shown across these page images into structured recipe JSON.";
-        if (!string.IsNullOrWhiteSpace(context.SupplementalHintText))
-        {
-            userPromptText +=
-                $"\nSupplemental Context/Hints: {context.SupplementalHintText.Trim()}";
-        }
 
         string responseContent;
 
@@ -974,7 +1168,7 @@ Do not invent ingredients or quantities. Preserve all other correct fields.
                         {
                             role = "user",
                             content = userPromptText,
-                            images = context.Images.Select(i => i.Base64Data).ToArray(),
+                            images = images.Select(i => i.Base64Data).ToArray(),
                         },
                     },
                 };
@@ -1006,7 +1200,7 @@ Do not invent ingredients or quantities. Preserve all other correct fields.
 
                 var contentList = new List<object> { new { type = "text", text = userPromptText } };
 
-                foreach (var img in context.Images)
+                foreach (var img in images)
                 {
                     contentList.Add(
                         new
@@ -1086,18 +1280,7 @@ Do not invent ingredients or quantities. Preserve all other correct fields.
             );
         }
 
-        var cleanedJson = CleanMarkdownJsonFences(responseContent);
-
-        try
-        {
-            return DeserializeRecipeWithRepair(cleanedJson);
-        }
-        catch (JsonException ex)
-        {
-            throw new DomainValidationException(
-                $"Failed to parse recipe extraction JSON output from LLM: {ex.Message}"
-            );
-        }
+        return responseContent;
     }
 
     private static int GetOllamaOutputTokenLimit(EffectiveLlmConnectionConfig config) =>

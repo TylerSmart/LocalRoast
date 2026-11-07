@@ -11,6 +11,8 @@ import type {
   IngestionJobStatus,
   IngestionJobSummaryDto,
   IngestionQueueSummaryDto,
+  IngestionRepairPreviewDto,
+  IngestionReviewDiagnosticsDto,
   RetryBatchJobsRequest,
   RetryBatchJobsResultDto,
   RetryWaitingJobsResultDto,
@@ -95,6 +97,27 @@ export class IngestionService {
     return this.http
       .put<IngestionJobDetailDto>(apiUrl(`/ingestion/jobs/${id}/draft`), draft)
       .pipe(tap(() => this.refreshSummary()));
+  }
+
+  getReviewDiagnostics(
+    id: string,
+    draft: IngestionExtractedDraftDto,
+  ): Observable<IngestionReviewDiagnosticsDto> {
+    return this.http.post<IngestionReviewDiagnosticsDto>(
+      apiUrl(`/ingestion/jobs/${id}/review-diagnostics`),
+      { draft },
+    );
+  }
+
+  previewRepair(
+    id: string,
+    draft: IngestionExtractedDraftDto,
+    hint: string | null,
+  ): Observable<IngestionRepairPreviewDto> {
+    return this.http.post<IngestionRepairPreviewDto>(
+      apiUrl(`/ingestion/jobs/${id}/repair-preview`),
+      { draft, hint },
+    );
   }
 
   approveAndPublish(id: string, draft: IngestionExtractedDraftDto): Observable<RecipeDetailDto> {

@@ -783,6 +783,12 @@ public static class RecipeDraftNormalizer
             }
 
             // Valid ingredient indices
+            if ((rawStep.IngredientIndices ?? []).Any(idx => idx < 0 || idx >= ingredientCount))
+            {
+                measurementWarnings.Add(
+                    $"Step {i + 1}: an unknown ingredient index was omitted; verify its ingredient links."
+                );
+            }
             var validIndices = (rawStep.IngredientIndices ?? [])
                 .Where(idx => idx >= 0 && idx < ingredientCount)
                 .Distinct()

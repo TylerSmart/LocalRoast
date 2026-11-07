@@ -20,6 +20,7 @@ public sealed class MockLanLlmAndBlogServer : IAsyncDisposable
     public double? LastTemperature { get; private set; }
     public double? LastTopP { get; private set; }
     public int? LastTopK { get; private set; }
+    public string? LastUserPrompt { get; private set; }
 
     private MockLanLlmAndBlogServer(WebApplication app, string baseUrl)
     {
@@ -66,6 +67,13 @@ public sealed class MockLanLlmAndBlogServer : IAsyncDisposable
             async (HttpRequest request) =>
             {
                 using var body = await JsonDocument.ParseAsync(request.Body);
+                var userContent = body
+                    .RootElement.GetProperty("messages")[1]
+                    .GetProperty("content");
+                server.LastUserPrompt =
+                    userContent.ValueKind == JsonValueKind.String
+                        ? userContent.GetString()
+                        : userContent[0].GetProperty("text").GetString();
                 var hasOptions = body.RootElement.TryGetProperty("options", out var options);
                 server.LastNumGpu =
                     hasOptions && options.TryGetProperty("num_gpu", out var numGpu)
@@ -229,6 +237,151 @@ public sealed class MockLanLlmAndBlogServer : IAsyncDisposable
 [TestClass]
 public sealed class LlmIngestionE2ETests : E2ETestBase
 {
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task ReviewRepair_PreviewsCancelsAppliesAndSavesWithoutLosingEditsOnMobile()
+    {
+        await using var mockServer = await MockLanLlmAndBlogServer.StartAsync();
+        mockServer.ResponsePayload = """
+            {
+              "title": "Repair Journey", "baseServings": 4,
+              "ingredients": [
+                {"displayName":"butter","canonicalFoodName":"butter","quantity":1,"unit":"Tbsp","originalRawText":"1 tbsp butter"},
+                {"displayName":"salt","canonicalFoodName":"salt","quantity":1,"unit":"Tsp","originalRawText":"1 tsp salt"}
+              ],
+              "steps": [
+                {"instruction":"Melt butter and add salt.","ingredientIndices":[0],
+                 "timers":[{"durationSeconds":60,"label":"Cook"}]}
+              ]
+            }
+            """;
+        await RegisterAndLoginAsync();
+        await Page.GotoAsync($"{ServerUrl}/ingest");
+        await Page.Locator(".llm-settings-btn").ClickAsync();
+        var settings = Page.Locator("app-llm-settings-dialog");
+        await settings.Locator("input[formcontrolname='baseUrl']").FillAsync(mockServer.BaseUrl);
+        await settings
+            .Locator("button[aria-label='Test LLM connection and refresh models']")
+            .ClickAsync();
+        await Expect(settings.Locator(".connection-status-banner.status-success"))
+            .ToBeVisibleAsync();
+        await settings.Locator("input[formcontrolname='textModel']").FillAsync("qwen2.5:14b");
+        await settings.Locator("button", new() { HasText = "Save Settings" }).ClickAsync();
+        await Expect(settings).Not.ToBeVisibleAsync();
+        await Page.Locator("button.tab-pill", new() { HasText = "Paste Raw Text" }).ClickAsync();
+        await Page.Locator("textarea[formcontrolname='rawText']")
+            .FillAsync(
+                "Repair Journey\nIngredients:\n- 1 tbsp butter\n- 1 tsp salt\nInstructions:\nMelt butter and add salt."
+            );
+        var queuedResponse = await Page.RunAndWaitForResponseAsync(
+            () => Page.Locator("button[aria-label='Queue raw text recipe']").ClickAsync(),
+            response =>
+                response.Url.EndsWith("/api/ingestion/jobs/text", StringComparison.Ordinal)
+                && response.Request.Method == "POST"
+        );
+        Assert.IsTrue(queuedResponse.Ok);
+        using var queuedJob = JsonDocument.Parse(await queuedResponse.TextAsync());
+        var jobId = queuedJob.RootElement.GetProperty("id").GetGuid();
+        try
+        {
+            var reviewButton = Page.Locator($"a.review-action-btn[href$='{jobId}']");
+            await WaitForLocatorWithRefreshAsync(reviewButton);
+            await reviewButton.ClickAsync();
+            await Page.SetViewportSizeAsync(360, 800);
+
+            var reviewCard = Page.Locator(".review-diagnostics-card");
+            await Expect(reviewCard).ToContainTextAsync("vague label");
+            await Expect(reviewCard).ToContainTextAsync("salt");
+            var title = Page.Locator("input[formcontrolname='title']");
+            await title.FillAsync("Unsaved user title");
+            await Expect(reviewCard).ToContainTextAsync("draft has changed");
+            await reviewCard.Locator("button", new() { HasText = "Recheck issues" }).ClickAsync();
+            await Expect(reviewCard).Not.ToContainTextAsync("draft has changed");
+
+            mockServer.ResponsePayload = """
+                {
+                  "title":"AI proposal","baseServings":4,
+                  "ingredients":[
+                    {"displayName":"butter","canonicalFoodName":"butter","quantity":1,"unit":"Tbsp","originalRawText":"1 tbsp butter"},
+                    {"displayName":"salt","canonicalFoodName":"salt","quantity":1,"unit":"Tsp","originalRawText":"1 tsp salt"}
+                  ],
+                  "steps":[
+                    {"instruction":"Melt butter, then add salt.","ingredientIndices":[0,1],
+                     "timers":[{"durationSeconds":60,"label":"Melt butter"}]}
+                  ]
+                }
+                """;
+            await reviewCard.Locator("textarea").FillAsync("Link the salt.");
+            await reviewCard.Locator("button", new() { HasText = "Fix with AI" }).ClickAsync();
+            var preview = Page.Locator("app-ingestion-repair-dialog");
+            await Expect(preview).ToBeVisibleAsync();
+            await Expect(preview).ToContainTextAsync("Unsaved user title");
+            await Expect(preview).ToContainTextAsync("AI proposal");
+            await Expect(preview).ToContainTextAsync("Linked ingredients");
+            await Expect(preview).ToContainTextAsync("Melt butter: 60s");
+            StringAssert.Contains(mockServer.LastUserPrompt!, "Link the salt.");
+            Assert.IsTrue(
+                await Page.EvaluateAsync<bool>(
+                    "document.documentElement.scrollWidth <= window.innerWidth"
+                ),
+                "The review page must fit a 360px viewport."
+            );
+            Assert.IsTrue(
+                await preview.EvaluateAsync<bool>("el => el.scrollWidth <= el.clientWidth"),
+                "The repair dialog must fit a 360px viewport."
+            );
+            await preview.Locator("button", new() { HasText = "Cancel" }).ClickAsync();
+            await Expect(title).ToHaveValueAsync("Unsaved user title");
+            await Page.ReloadAsync();
+            await Expect(title).ToHaveValueAsync("Repair Journey");
+
+            await title.FillAsync("Unsaved after reload");
+            mockServer.SimulateOffline = true;
+            await reviewCard.Locator("button", new() { HasText = "Fix with AI" }).ClickAsync();
+            await Expect(reviewCard.Locator("[role='alert']")).ToBeVisibleAsync();
+            await Expect(title).ToHaveValueAsync("Unsaved after reload");
+            mockServer.SimulateOffline = false;
+
+            await reviewCard.Locator("button", new() { HasText = "Fix with AI" }).ClickAsync();
+            await Expect(preview).ToBeVisibleAsync();
+            await preview.Locator("button", new() { HasText = "Apply to editor" }).ClickAsync();
+            await Expect(title).ToHaveValueAsync("AI proposal");
+            await Page.ReloadAsync();
+            await Expect(title).ToHaveValueAsync("Repair Journey");
+
+            await reviewCard.Locator("button", new() { HasText = "Fix with AI" }).ClickAsync();
+            await Expect(preview).ToBeVisibleAsync();
+            await preview.Locator("button", new() { HasText = "Apply to editor" }).ClickAsync();
+            await Expect(title).ToHaveValueAsync("AI proposal");
+            await Page.Locator("button[aria-label='Save review draft']").ClickAsync();
+            await Expect(
+                    Page.Locator("mat-snack-bar-container")
+                        .Filter(new() { HasText = "Review draft saved." })
+                )
+                .ToBeVisibleAsync();
+            await Page.ReloadAsync();
+            await Expect(title).ToHaveValueAsync("AI proposal");
+        }
+        finally
+        {
+            var status = await Page.EvaluateAsync<int>(
+                """
+                async jobId => {
+                    const tokenKey = Object.keys(localStorage).find(key => key.endsWith('-token'));
+                    const token = tokenKey ? localStorage.getItem(tokenKey) : null;
+                    const response = await fetch(`/api/ingestion/jobs/${jobId}`, {
+                        method: 'DELETE',
+                        headers: { Authorization: `Bearer ${token}` }
+                    });
+                    return response.status;
+                }
+                """,
+                jobId.ToString()
+            );
+            Assert.AreEqual(204, status, "The review journey must remove its own ingestion job.");
+        }
+    }
+
     [TestMethod]
     [Timeout(DefaultTestTimeoutMs)]
     public async Task StarterMeasurements_SaveReviewPublishScaleAndSwitchOnMobile_PreservesExplicitPortions()

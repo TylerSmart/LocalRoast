@@ -248,6 +248,44 @@ describe('IngestionService', () => {
     expect(publishedRecipe.id).toBe('rec-1');
   });
 
+  it('posts the current draft and optional hint to the read-only review endpoints', async () => {
+    const draft: IngestionExtractedDraftDto = {
+      title: 'Edited locally',
+      description: null,
+      baseServings: 4,
+      yieldDisplay: null,
+      prepTimeMinutes: null,
+      cookTimeMinutes: null,
+      totalTimeMinutes: null,
+      difficulty: null,
+      sourceUrl: null,
+      sourceName: null,
+      sourceAuthor: null,
+      coverImagePath: null,
+      thumbnailImagePath: null,
+      suggestedCollectionIds: [],
+      suggestedTagIds: [],
+      ingredients: [],
+      steps: [],
+      confidenceScore: 0.8,
+    };
+    const diagnostics = { validationIssues: ['Check the oil.'], qualityWarnings: [] };
+    const diagnosticsPromise = firstValueFrom(service.getReviewDiagnostics('job-1', draft));
+    const diagnosticRequest = httpMock.expectOne('/api/ingestion/jobs/job-1/review-diagnostics');
+    expect(diagnosticRequest.request.method).toBe('POST');
+    expect(diagnosticRequest.request.body).toEqual({ draft });
+    diagnosticRequest.flush(diagnostics);
+    expect(await diagnosticsPromise).toEqual(diagnostics);
+
+    const preview = { draft, before: diagnostics, after: diagnostics, notices: [] };
+    const previewPromise = firstValueFrom(service.previewRepair('job-1', draft, 'Check the oil'));
+    const repairRequest = httpMock.expectOne('/api/ingestion/jobs/job-1/repair-preview');
+    expect(repairRequest.request.method).toBe('POST');
+    expect(repairRequest.request.body).toEqual({ draft, hint: 'Check the oil' });
+    repairRequest.flush(preview);
+    expect(await previewPromise).toEqual(preview);
+  });
+
   it('retries all waiting jobs and discards job', async () => {
     const retryPromise = firstValueFrom(service.retryAllWaitingJobs());
     const retryReq = httpMock.expectOne('/api/ingestion/jobs/retry-waiting');

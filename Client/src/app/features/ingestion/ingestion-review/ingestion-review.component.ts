@@ -13,6 +13,7 @@ import {
   AbstractControl,
   FormArray,
   FormBuilder,
+  FormControl,
   FormGroup,
   ReactiveFormsModule,
   Validators,
@@ -42,6 +43,7 @@ import type {
   IngestionDraftStepDto,
   IngestionExtractedDraftDto,
   IngestionJobDetailDto,
+  IngestionReviewDiagnosticsDto,
 } from '../../../core/models/ingestion.models';
 import {
   MEASUREMENT_UNITS,
@@ -65,6 +67,10 @@ import {
   syncStepAmounts,
 } from '../../../core/utils/recipe-measurement-forms';
 import { RecipeDetailPreviewComponent } from '../recipe-detail-preview/recipe-detail-preview.component';
+import {
+  IngestionRepairDialogComponent,
+  IngestionRepairDialogData,
+} from '../ingestion-repair-dialog/ingestion-repair-dialog.component';
 import {
   RecipeDetailPreviewDialogComponent,
   RecipeDetailPreviewDialogData,
@@ -119,6 +125,16 @@ export class IngestionReviewComponent implements OnInit {
   readonly rightPaneMode = signal<'edit' | 'preview'>('edit');
   readonly previewData = signal<RecipePreviewData | null>(null);
   readonly isPromotingCover = signal<boolean>(false);
+  readonly diagnostics = signal<IngestionReviewDiagnosticsDto | null>(null);
+  readonly diagnosticsStale = signal<boolean>(false);
+  readonly isCheckingDiagnostics = signal<boolean>(false);
+  readonly isRepairing = signal<boolean>(false);
+  readonly reviewError = signal<string | null>(null);
+  readonly repairHint = new FormControl('', {
+    nonNullable: true,
+    validators: [Validators.maxLength(2000)],
+  });
+  private readonly ingredientRevision = signal(0);
 
   readonly foodItems = signal<FoodItemDto[]>([]);
   readonly collections = signal<CollectionDto[]>([]);
@@ -161,6 +177,7 @@ export class IngestionReviewComponent implements OnInit {
   protected readonly foodCategoryOptions = FOOD_CATEGORY_OPTIONS;
 
   protected readonly availableIngredientLabels = computed(() => {
+    this.ingredientRevision();
     return this.ingredientsArray.controls.map((ctrl, index) => {
       const name = ctrl.get('displayName')?.value || `Ingredient #${index + 1}`;
       return { index, label: `${index + 1}. ${name}` };
@@ -168,6 +185,10 @@ export class IngestionReviewComponent implements OnInit {
   });
 
   ngOnInit(): void {
+    this.form.valueChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
+      this.ingredientRevision.update((revision) => revision + 1);
+      this.markDiagnosticsStale();
+    });
     this.loadCatalogData();
     this.loadJob();
   }
@@ -208,6 +229,9 @@ export class IngestionReviewComponent implements OnInit {
           this.job.set(jobDetail);
           this.populateForm(jobDetail);
           this.isLoading.set(false);
+          if (jobDetail.extractedDraft) {
+            this.recheckReviewIssues();
+          }
         },
         error: (err) => {
           this.errorMessage.set(err?.error?.detail || 'Failed to load ingestion job.');
@@ -216,7 +240,7 @@ export class IngestionReviewComponent implements OnInit {
       });
   }
 
-  private populateForm(jobDetail: IngestionJobDetailDto): void {
+  private populateForm(jobDetail: IngestionJobDetailDto, applyingProposal = false): void {
     const draft = jobDetail.extractedDraft;
     if (!draft) {
       this.form.patchValue({
@@ -236,33 +260,37 @@ export class IngestionReviewComponent implements OnInit {
       prepTimeMinutes: draft.prepTimeMinutes,
       cookTimeMinutes: draft.cookTimeMinutes,
       totalTimeMinutes: draft.totalTimeMinutes,
-      difficulty: draft.difficulty ?? 'Medium',
-      sourceName: draft.sourceName ?? jobDetail.scrapedPage?.siteName ?? '',
-      sourceAuthor: draft.sourceAuthor ?? jobDetail.scrapedPage?.author ?? '',
-      sourceUrl: draft.sourceUrl ?? jobDetail.sourceUrl ?? '',
-      coverImagePath: draft.coverImagePath ?? jobDetail.downloadedCoverImagePath,
-      thumbnailImagePath: draft.thumbnailImagePath ?? jobDetail.downloadedThumbnailImagePath,
-      sourceBookTitle: draft.sourceBookTitle ?? jobDetail.sourceBookTitle ?? '',
-      sourceBookPage: draft.sourceBookPage ?? jobDetail.sourceBookPage ?? null,
+      difficulty: draft.difficulty ?? (applyingProposal ? null : 'Medium'),
+      sourceName:
+        draft.sourceName ?? (applyingProposal ? '' : (jobDetail.scrapedPage?.siteName ?? '')),
+      sourceAuthor:
+        draft.sourceAuthor ?? (applyingProposal ? '' : (jobDetail.scrapedPage?.author ?? '')),
+      sourceUrl: draft.sourceUrl ?? (applyingProposal ? '' : (jobDetail.sourceUrl ?? '')),
+      coverImagePath:
+        draft.coverImagePath ?? (applyingProposal ? null : jobDetail.downloadedCoverImagePath),
+      thumbnailImagePath:
+        draft.thumbnailImagePath ??
+        (applyingProposal ? null : jobDetail.downloadedThumbnailImagePath),
+      sourceBookTitle:
+        draft.sourceBookTitle ?? (applyingProposal ? '' : (jobDetail.sourceBookTitle ?? '')),
+      sourceBookPage:
+        draft.sourceBookPage ?? (applyingProposal ? null : (jobDetail.sourceBookPage ?? null)),
       retainSourceAttachments: draft.retainSourceAttachments ?? true,
     });
 
-    if (draft.suggestedCollectionIds && draft.suggestedCollectionIds.length > 0) {
-      this.selectedCollectionIds.set(new Set(draft.suggestedCollectionIds));
-    }
+    this.selectedCollectionIds.set(new Set(draft.suggestedCollectionIds ?? []));
     if (draft.suggestedTagIds && draft.suggestedTagIds.length > 0) {
       this.selectedTagIds.set(new Set(draft.suggestedTagIds));
     } else {
       this.selectedTagIds.set(new Set());
     }
     this.measurementWarnings.set(draft.measurementWarnings ?? []);
-    if (draft.proposedTagNames && draft.proposedTagNames.length > 0) {
-      this.proposedTagNames.set([...draft.proposedTagNames]);
-      this.selectedProposedTagNames.set(new Set(draft.proposedTagNames));
-    } else {
-      this.proposedTagNames.set([]);
-      this.selectedProposedTagNames.set(new Set());
-    }
+    this.proposedTagNames.set(
+      applyingProposal
+        ? Array.from(new Set([...this.proposedTagNames(), ...(draft.proposedTagNames ?? [])]))
+        : [...(draft.proposedTagNames ?? [])],
+    );
+    this.selectedProposedTagNames.set(new Set(draft.proposedTagNames ?? []));
 
     this.ingredientsArray.clear();
     if (draft.ingredients && draft.ingredients.length > 0) {
@@ -301,6 +329,7 @@ export class IngestionReviewComponent implements OnInit {
         matchedFoodItemId: [item?.matchedFoodItemId ?? null],
         matchedFoodItemName: [item?.matchedFoodItemName ?? null],
         isNewFoodItem: [item?.isNewFoodItem ?? !item?.matchedFoodItemId],
+        createNewFoodItem: [item?.createNewFoodItem ?? true],
         isRecipeReference: [item?.isRecipeReference ?? !!item?.referencedRecipeTitle],
         referencedRecipeTitle: [
           item?.referencedRecipeTitle ?? null,
@@ -328,12 +357,14 @@ export class IngestionReviewComponent implements OnInit {
       .subscribe((id) => {
         if (id) {
           fg.get('isNewFoodItem')?.setValue(false);
+          fg.get('createNewFoodItem')?.setValue(false);
           const found = this.foodItems().find((f) => f.id === id);
           if (found) {
             fg.get('matchedFoodItemName')?.setValue(found.name);
           }
         } else {
           fg.get('isNewFoodItem')?.setValue(true);
+          fg.get('createNewFoodItem')?.setValue(true);
           fg.get('matchedFoodItemName')?.setValue(null);
         }
       });
@@ -358,6 +389,7 @@ export class IngestionReviewComponent implements OnInit {
           matchedFoodItemId: null,
           matchedFoodItemName: null,
           isNewFoodItem: false,
+          createNewFoodItem: false,
           suggestedIsPantryStaple: false,
         },
         { emitEvent: false },
@@ -368,6 +400,7 @@ export class IngestionReviewComponent implements OnInit {
         {
           referencedRecipeTitle: null,
           isNewFoodItem: !group.get('matchedFoodItemId')?.value,
+          createNewFoodItem: !group.get('matchedFoodItemId')?.value,
           proposedFoodItemName:
             group.get('proposedFoodItemName')?.value || group.get('displayName')?.value,
         },
@@ -456,6 +489,7 @@ export class IngestionReviewComponent implements OnInit {
       next.add(id);
     }
     this.selectedCollectionIds.set(next);
+    this.markDiagnosticsStale();
   }
 
   toggleTag(id: string): void {
@@ -466,6 +500,7 @@ export class IngestionReviewComponent implements OnInit {
       next.add(id);
     }
     this.selectedTagIds.set(next);
+    this.markDiagnosticsStale();
   }
 
   toggleProposedTag(name: string): void {
@@ -476,6 +511,7 @@ export class IngestionReviewComponent implements OnInit {
       next.add(name);
     }
     this.selectedProposedTagNames.set(next);
+    this.markDiagnosticsStale();
   }
 
   setRightPaneMode(mode: 'edit' | 'preview'): void {
@@ -625,6 +661,7 @@ export class IngestionReviewComponent implements OnInit {
           matchedFoodItemId: val.isRecipeReference ? null : val.matchedFoodItemId || null,
           matchedFoodItemName: val.isRecipeReference ? null : val.matchedFoodItemName || null,
           isNewFoodItem: !val.isRecipeReference && !val.matchedFoodItemId,
+          createNewFoodItem: !val.isRecipeReference && Boolean(val.createNewFoodItem),
           proposedFoodItemName: val.isRecipeReference
             ? null
             : val.proposedFoodItemName?.trim() || val.displayName.trim(),
@@ -695,6 +732,143 @@ export class IngestionReviewComponent implements OnInit {
       confidenceScore: this.job()?.confidenceScore ?? 0.8,
       extractedModel: this.job()?.extractedModel ?? null,
     };
+  }
+
+  recheckReviewIssues(): void {
+    const currentJob = this.job();
+    if (!currentJob || this.isCheckingDiagnostics() || this.isRepairing()) return;
+
+    const snapshot = this.reviewEditSnapshot();
+    const draft = this.buildDraftPayload();
+    this.isCheckingDiagnostics.set(true);
+    this.reviewError.set(null);
+    this.ingestionService
+      .getReviewDiagnostics(currentJob.id, draft)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (diagnostics) => {
+          this.diagnostics.set(diagnostics);
+          this.diagnosticsStale.set(snapshot !== this.reviewEditSnapshot());
+          this.isCheckingDiagnostics.set(false);
+        },
+        error: (err) => {
+          this.isCheckingDiagnostics.set(false);
+          this.reviewError.set(
+            err?.error?.detail || err?.error?.title || 'Could not check the review draft.',
+          );
+        },
+      });
+  }
+
+  fixWithAi(): void {
+    const currentJob = this.job();
+    if (
+      !currentJob ||
+      currentJob.status !== 'ReadyForReview' ||
+      this.isRepairing() ||
+      this.isCheckingDiagnostics() ||
+      this.isSaving() ||
+      this.isPublishing() ||
+      this.isRerunning() ||
+      this.repairHint.invalid
+    ) {
+      return;
+    }
+
+    const snapshot = this.reviewEditSnapshot();
+    const draft = this.buildDraftPayload();
+    this.isRepairing.set(true);
+    this.reviewError.set(null);
+    this.ingestionService
+      .previewRepair(currentJob.id, draft, this.repairHint.value.trim() || null)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (preview) => {
+          this.isRepairing.set(false);
+          const data: IngestionRepairDialogData = {
+            before: draft,
+            preview,
+            collections: this.collections(),
+            tags: this.tags(),
+          };
+          this.dialog
+            .open<IngestionRepairDialogComponent, IngestionRepairDialogData, boolean>(
+              IngestionRepairDialogComponent,
+              { data, width: '1000px', maxWidth: '95vw', autoFocus: 'dialog' },
+            )
+            .afterClosed()
+            .pipe(takeUntilDestroyed(this.destroyRef))
+            .subscribe((apply) => {
+              if (!apply) return;
+              if (snapshot !== this.reviewEditSnapshot()) {
+                this.reviewError.set(
+                  'The draft changed while AI repair was running. Your edits were kept; rerun the repair to use the current draft.',
+                );
+                return;
+              }
+              this.isRepairing.set(true);
+              this.ingestionService
+                .getJobById(currentJob.id)
+                .pipe(takeUntilDestroyed(this.destroyRef))
+                .subscribe({
+                  next: (latest) => {
+                    this.isRepairing.set(false);
+                    if (
+                      latest.status !== 'ReadyForReview' ||
+                      latest.modifiedAt !== currentJob.modifiedAt ||
+                      snapshot !== this.reviewEditSnapshot()
+                    ) {
+                      this.reviewError.set(
+                        'The draft or job changed while AI repair was running. Your edits were kept; reload or rerun the repair before applying it.',
+                      );
+                      return;
+                    }
+                    this.populateForm({ ...currentJob, extractedDraft: preview.draft }, true);
+                    this.form.markAsDirty();
+                    this.diagnostics.set(preview.after);
+                    this.diagnosticsStale.set(true);
+                    this.recheckReviewIssues();
+                    this.snackBar.open(
+                      'AI changes applied to the editor. Save or publish separately.',
+                      'Close',
+                      { duration: 5000 },
+                    );
+                  },
+                  error: (err) => {
+                    this.isRepairing.set(false);
+                    this.reviewError.set(
+                      err?.error?.detail ||
+                        err?.error?.title ||
+                        'Could not verify the current job. Your draft was not changed.',
+                    );
+                  },
+                });
+            });
+        },
+        error: (err) => {
+          this.isRepairing.set(false);
+          this.reviewError.set(
+            err?.error?.detail ||
+              err?.error?.title ||
+              'AI repair failed. Your draft was not changed.',
+          );
+        },
+      });
+  }
+
+  private reviewEditSnapshot(): string {
+    return JSON.stringify({
+      form: this.form.getRawValue(),
+      collections: Array.from(this.selectedCollectionIds()),
+      tags: Array.from(this.selectedTagIds()),
+      proposedTags: Array.from(this.selectedProposedTagNames()),
+      availableProposedTags: this.proposedTagNames(),
+      measurementWarnings: this.measurementWarnings(),
+    });
+  }
+
+  private markDiagnosticsStale(): void {
+    if (this.diagnostics()) this.diagnosticsStale.set(true);
   }
 
   onPromotePageToCover(pageNumber: number): void {

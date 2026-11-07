@@ -15,6 +15,15 @@ public record LlmVisionExtractionContext(
     IReadOnlyList<string>? AvailableFoodNames = null
 );
 
+public record LlmRecipeRepairContext(
+    string? SourceContent,
+    IReadOnlyList<LlmVisionImageInput> Images,
+    LlmExtractedRecipePayload Draft,
+    string? UserHint = null
+);
+
+public record LlmRecipeRepairResult(LlmExtractedRecipePayload Draft, IReadOnlyList<string> Notices);
+
 public record LlmSubstitutionContext(
     string RecipeTitle,
     string? RecipeDescription,
@@ -111,6 +120,12 @@ public interface ILlmExtractionClient
     Task<LlmExtractedRecipePayload> ExtractRecipeFromImagesAsync(
         EffectiveLlmConnectionConfig config,
         LlmVisionExtractionContext context,
+        CancellationToken cancellationToken = default
+    );
+
+    Task<LlmRecipeRepairResult> RepairRecipeDraftAsync(
+        EffectiveLlmConnectionConfig config,
+        LlmRecipeRepairContext context,
         CancellationToken cancellationToken = default
     );
 

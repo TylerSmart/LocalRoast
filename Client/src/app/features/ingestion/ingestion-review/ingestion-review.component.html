@@ -22,9 +22,32 @@
           <div class="title-meta-row">
             <div class="channel-badge">
               <mat-icon class="channel-icon">
-                {{ job()?.channel === 'WebUrl' ? 'link' : 'description' }}
+                {{
+                  job()?.channel === 'WebUrl'
+                    ? 'link'
+                    : job()?.channel === 'Images'
+                      ? 'photo_library'
+                      : job()?.channel === 'Pdf'
+                        ? 'picture_as_pdf'
+                        : 'description'
+                }}
               </mat-icon>
-              <span>{{ job()?.channel === 'WebUrl' ? 'Web Recipe' : 'Raw Text' }}</span>
+              <span>
+                @switch (job()?.channel) {
+                  @case ('WebUrl') {
+                    Web Recipe
+                  }
+                  @case ('Images') {
+                    Photos
+                  }
+                  @case ('Pdf') {
+                    PDF
+                  }
+                  @default {
+                    Raw Text
+                  }
+                }
+              </span>
             </div>
             @if (job()?.extractedModel) {
               <div
@@ -45,6 +68,7 @@
           mat-button
           type="button"
           (click)="discardJob()"
+          [disabled]="isRepairing()"
           class="discard-btn"
           aria-label="Discard ingestion job"
         >
@@ -56,7 +80,7 @@
           mat-stroked-button
           type="button"
           (click)="rerunExtraction()"
-          [disabled]="isRerunning() || isSaving() || isPublishing()"
+          [disabled]="isRerunning() || isSaving() || isPublishing() || isRepairing()"
           matTooltip="Rerun extraction using currently configured LLM model"
           aria-label="Rerun extraction with current model"
           class="rerun-btn"
@@ -85,7 +109,7 @@
           mat-stroked-button
           type="button"
           (click)="saveDraft()"
-          [disabled]="isSaving() || isPublishing()"
+          [disabled]="isSaving() || isPublishing() || isRepairing()"
           aria-label="Save review draft"
         >
           @if (isSaving()) {
@@ -101,7 +125,7 @@
           color="primary"
           type="button"
           (click)="approveAndPublish()"
-          [disabled]="form.invalid || isPublishing() || isSaving()"
+          [disabled]="form.invalid || isPublishing() || isSaving() || isRepairing()"
           aria-label="Approve and publish recipe"
         >
           @if (isPublishing()) {
@@ -307,6 +331,97 @@
 
         @if (rightPaneMode() === 'edit') {
           <form [formGroup]="form" class="draft-form">
+            <mat-card class="editor-card review-diagnostics-card">
+              <mat-card-content class="editor-card-content">
+                <h2>Review issues</h2>
+                <p>
+                  These checks are suggestions, not a substitute for checking the original source.
+                  Quality warnings do not prevent publishing.
+                </p>
+                @if (isCheckingDiagnostics()) {
+                  <p role="status">Checking the current draft...</p>
+                } @else if (diagnostics(); as review) {
+                  @if (diagnosticsStale()) {
+                    <p class="stale-notice" role="status">
+                      The draft has changed since these checks. Recheck to update them.
+                    </p>
+                  }
+                  @if (!review.validationIssues.length && !review.qualityWarnings.length) {
+                    <p>No issues found by these checks.</p>
+                  }
+                  @if (review.validationIssues.length) {
+                    <h3>Validation issues</h3>
+                    <ul>
+                      @for (issue of review.validationIssues; track $index) {
+                        <li>{{ issue }}</li>
+                      }
+                    </ul>
+                  }
+                  @if (review.qualityWarnings.length) {
+                    <h3>Quality warnings</h3>
+                    <ul>
+                      @for (warning of review.qualityWarnings; track $index) {
+                        <li>{{ warning }}</li>
+                      }
+                    </ul>
+                  }
+                }
+
+                @if (reviewError()) {
+                  <p class="review-error" role="alert">{{ reviewError() }}</p>
+                }
+
+                <mat-form-field appearance="outline" class="form-field">
+                  <mat-label>Optional instructions for AI</mat-label>
+                  <textarea
+                    matInput
+                    [formControl]="repairHint"
+                    maxlength="2000"
+                    rows="2"
+                    placeholder="For example: split the butter between the two steps"
+                  ></textarea>
+                </mat-form-field>
+                <div class="review-actions">
+                  <button
+                    mat-stroked-button
+                    type="button"
+                    (click)="recheckReviewIssues()"
+                    [disabled]="isCheckingDiagnostics() || isRepairing()"
+                  >
+                    <mat-icon>fact_check</mat-icon>
+                    Recheck issues
+                  </button>
+                  <button
+                    mat-flat-button
+                    type="button"
+                    (click)="fixWithAi()"
+                    [disabled]="
+                      isCheckingDiagnostics() ||
+                      isRepairing() ||
+                      isSaving() ||
+                      isPublishing() ||
+                      isRerunning() ||
+                      repairHint.invalid ||
+                      job()?.status !== 'ReadyForReview'
+                    "
+                  >
+                    @if (isRepairing()) {
+                      <mat-spinner diameter="18" class="inline-spinner"></mat-spinner>
+                    } @else {
+                      <mat-icon>auto_fix_high</mat-icon>
+                    }
+                    {{ isRepairing() ? 'Preparing preview...' : 'Fix with AI' }}
+                  </button>
+                </div>
+                @if (isRepairing()) {
+                  <p role="status">
+                    AI repair can take several minutes and may retry an unusable response once. You
+                    can keep editing.
+                  </p>
+                }
+              </mat-card-content>
+            </mat-card>
+
             @if (measurementWarnings().length > 0) {
               <mat-card class="editor-card" role="status">
                 <mat-card-content>

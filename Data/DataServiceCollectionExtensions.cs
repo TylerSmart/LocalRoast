@@ -38,6 +38,7 @@ public static class DataServiceCollectionExtensions
         services.AddScoped<ILlmSettingsService, LlmSettingsService>();
         services.AddScoped<IIngestionProcessor, IngestionProcessor>();
         services.AddScoped<IIngestionService, IngestionService>();
+        services.AddScoped<IIngestionReviewService, IngestionReviewService>();
         services.AddScoped<IMcpCookbookService, McpCookbookService>();
         services.AddScoped<IMealPlanService, MealPlanService>();
         services.AddScoped<IMealPlanTemplateService, MealPlanTemplateService>();

@@ -170,6 +170,16 @@ The issue list was then rewritten so each issue quotes what it refers to: the fu
   - **E4B** scored **9** findings in a mean of 155 seconds per recipe, its best eight-case total so far (earlier canonical runs: 10 and 19). Five of its 7 corrections lowered the issue count, including the bundt cake from 5 issues to 0.
   - **E2B** scored 44 (earlier: 35). Only 2 of its 7 corrections lowered the count. Most of the difference is the shrimp risotto (17 findings against 11), whose first draft dropped five consecutive ingredient lines. Its correction kept all 12 issues: the model's thinking planned each fix ("Need to link the 4 cups stock"), but the JSON it returned did not include them. A single run is accurate only to about 5–10 findings, so this does not show that the new text hurt E2B; it does show that E2B often cannot carry out fixes it has identified.
 
+### Repairing a draft during review
+
+The review editor lists validation issues and advisory quality warnings, such as long or multi-action steps, vague timers, and ingredients mentioned in a step but not linked. These checks are format-independent where possible, can produce false positives, and do not prove a recipe is correct. The new advisory warnings do not change automatic publication eligibility. Use **Recheck issues** after editing.
+
+**Fix with AI** sends the current editor contents, the reported issues, and an optional instruction to the configured model. It uses the stored structured source when available, otherwise the normalized or original text; photo and scanned-PDF jobs send their original images to the Vision Model. A manual repair makes at least one request even when Repair Rounds is 0, and may use additional rounds up to the configured limit. It can make one extra request to correct an unusable response, such as a missing or out-of-range ingredient index. A first proposal that has more findings can still be inspected, with a warning; later worsening rounds are discarded. Requests use the same sampling, thinking, context and per-request timeout settings described above, so a repair can take several minutes.
+
+Compare the proposed fields, ingredient links, portions, timers and diagnostics with the source. The preview calls out new or changed findings even when the total finding count stays the same or decreases; diagnostics cannot catch every mistake. Applying the preview changes only the editor: **Save Draft** or **Approve & Publish** remains a separate action. Cancel leaves the editor unchanged. If the editor or stored job changes while repair is running or its preview is open, the proposal is not applied; keep your edits and rerun after resolving the conflict. Unsafe mappings of duplicate ingredient metadata or step images are rejected instead of guessed.
+
+A small, synthetic two-step sanity check used a hint to split butter portions and rename a two-minute timer; it is **not a benchmark**. E4B fixed the detected portion issues in 29 seconds but still called the timer "Cooking". E2B twice produced an invalid ingredient index; replaying one of those responses through the new retry produced valid links but left fixed amounts and a vague timer, and invented a 120-minute recipe time. Another E2B attempt returned a valid proposal with the wrong butter total. Even fewer reported issues can hide a new mistake, so inspect the complete diff.
+
 ### Run-to-run variation
 
 Temperature 0 does not make extraction repeatable on the test server. Two identical E4B requests (same prompt, settings and loaded model) produced the same reasoning for about 500 characters and then diverged, and the drafts and findings diverged with them. Likely causes are floating-point differences in GPU kernels and Ollama's prompt cache; this was not investigated further.
@@ -275,6 +285,5 @@ Temperature 0 does not make extraction repeatable on the test server. Two identi
 
 - Planned improvements are tracked in the [ingestion improvements plan](plans/ingestion-improvements.md). The ones that affect these settings:
   - Per-model profiles (staged mode, thinking, sampling, repair rounds and GPU layers) instead of tag-name checks and household-wide settings, so helpers and the Vision Model do not inherit a text model's sampling.
-  - Show validation issues on the review screen, with a "Fix with AI" action that runs the repair loop again with an optional hint.
   - An optional refine pass with a larger model for drafts that still have issues.
   - Find the cause of E2B's regression since `8eb9ac3`.
