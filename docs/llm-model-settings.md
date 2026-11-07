@@ -14,8 +14,9 @@ Results come from the [ATK ingestion evaluator](contributing.md#evaluating-atk-i
 4. [Measured Results](#measured-results)
 5. [Per-Model Notes](#per-model-notes)
 6. [Refine Model (background second pass)](#refine-model-background-second-pass)
-7. [Ollama Server Configuration](#ollama-server-configuration)
-8. [Limitations & Future Work](#limitations--future-work)
+7. [Hosted OpenAI-Compatible Providers (OpenRouter)](#hosted-openai-compatible-providers-openrouter)
+8. [Ollama Server Configuration](#ollama-server-configuration)
+9. [Limitations & Future Work](#limitations--future-work)
 
 ---
 
@@ -263,6 +264,20 @@ The optional **Refine Model** section in LLM Settings names a second, usually la
 - **What counts as an improvement:** the proposal is kept only when it has fewer validation issues, or the same number and fewer quality warnings. Otherwise the review screen reports that the refine model found nothing to improve.
 - **Reviewing it:** the review screen shows the status and the before → after count of issues plus warnings. **Compare refined draft** opens the same comparison as **Fix with AI**; applying it replaces the editor contents (your food links, collections and tags are kept) and does not save. If the saved draft changed after the refinement started, a warning asks you to compare carefully. **Dismiss** (or **Cancel refinement** while it waits or runs) removes it. Re-running a job's import discards any refinement.
 - **Memory:** with `OLLAMA_MAX_LOADED_MODELS=1`, switching between the Text Model and the Refine Model reloads each model. Expect the load time (about 10–60 seconds, longer for partly offloaded models) on top of the refinement itself.
+
+---
+
+## Hosted OpenAI-Compatible Providers (OpenRouter)
+
+LocalRoast's **OpenAI-Compatible (/v1)** provider works with hosted services such as OpenRouter; no code or server changes are needed.
+
+- **Connect:** choose the OpenAI-Compatible provider, set the Base URL to `https://openrouter.ai/api/v1` (LocalRoast adds `/v1` only when it is missing), paste the API key, and select **Test connection**. Every model the service lists (for example `google/gemini-…` IDs) is offered in the Text, Vision and Refine Model fields. Type any words from the name, such as `gemini flash`, to narrow the list.
+- **Pick models that support structured outputs.** Every request asks for strict JSON-schema output (`response_format: json_schema`). Models or routes without structured-output support may reject the request or return invalid JSON. OpenRouter's model list can be filtered by this feature.
+- **Settings that only apply to Ollama:** Context window, Keep alive, Run Ollama on CPU only and the thinking toggles are not sent. Each request may generate up to 16,384 tokens.
+- **Sampling:** Temperature is always sent. Top P and Top K are sent when set; leave Top K blank if the provider rejects it. The built-in profiles were measured on local Gemma models through Ollama, so treat their values only as a starting point.
+- **Extraction strategy:** with Automatic, model names that do not match a profile use a single request per recipe. Set it to **Staged** to try the two-step extraction instead.
+- **Refine Model:** it uses the same provider, Base URL and API key as the Text Model, so it cannot mix a local Ollama model with a hosted one.
+- **Privacy and cost:** the source text, photos and drafts are sent to the hosted provider, and usage is billed by that provider. LocalRoast still sends one request at a time.
 
 ---
 

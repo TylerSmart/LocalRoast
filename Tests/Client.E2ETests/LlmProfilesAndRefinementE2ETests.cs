@@ -85,6 +85,47 @@ public sealed class LlmProfilesAndRefinementE2ETests : E2ETestBase
 
     [TestMethod]
     [Timeout(DefaultTestTimeoutMs)]
+    public async Task LlmSettingsDialog_ModelInputsFilterDiscoveredModelsAsYouType()
+    {
+        await using var mockServer = await MockLanLlmAndBlogServer.StartAsync();
+        await RegisterAndLoginAsync();
+        await Page.GotoAsync($"{ServerUrl}/ingest");
+        await Page.SetViewportSizeAsync(360, 740);
+        await Page.Locator(".llm-settings-btn").ClickAsync();
+
+        var dialog = Page.Locator("app-llm-settings-dialog");
+        await dialog.Locator("input[formcontrolname='baseUrl']").FillAsync(mockServer.BaseUrl);
+        await dialog
+            .Locator("button[aria-label='Test LLM connection and refresh models']")
+            .ClickAsync();
+        await Expect(dialog.Locator(".connection-status-banner.status-success")).ToBeVisibleAsync();
+
+        var options = Page.Locator("mat-option");
+        var textModel = dialog.Locator("input[formcontrolname='textModel']");
+        await textModel.FillAsync("");
+        await textModel.ClickAsync();
+        await Expect(options).ToHaveCountAsync(2);
+
+        await textModel.PressSequentiallyAsync("VL 7");
+        await Expect(options).ToHaveCountAsync(1);
+        await Expect(options.First).ToHaveTextAsync("qwen2.5vl:7b");
+        await options.First.ClickAsync();
+        await Expect(textModel).ToHaveValueAsync("qwen2.5vl:7b");
+
+        var refineModel = dialog.Locator("[data-testid='llm-refine-model']");
+        await refineModel.ScrollIntoViewIfNeededAsync();
+        await refineModel.FillAsync("gemini");
+        await Expect(options).ToHaveCountAsync(1);
+        await Expect(options.First).ToHaveTextAsync("No discovered models match");
+        await Expect(options.First).ToHaveAttributeAsync("aria-disabled", "true");
+        await Page.Keyboard.PressAsync("Tab");
+
+        await dialog.Locator("button", new() { HasText = "Cancel" }).ClickAsync();
+        await Expect(dialog).Not.ToBeVisibleAsync();
+    }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
     public async Task ReviewRefinement_RefineModelProposalComparesAndAppliesOnMobile()
     {
         await using var mockServer = await MockLanLlmAndBlogServer.StartAsync();

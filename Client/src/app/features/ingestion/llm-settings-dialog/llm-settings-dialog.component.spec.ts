@@ -10,7 +10,11 @@ import type {
 } from '../../../core/models/ingestion.models';
 import { IngestionService } from '../../../core/services/ingestion/ingestion.service';
 import { LlmSettingsService } from '../../../core/services/llm-settings/llm-settings.service';
-import { LlmSettingsDialogComponent, matchModelProfile } from './llm-settings-dialog.component';
+import {
+  LlmSettingsDialogComponent,
+  filterModels,
+  matchModelProfile,
+} from './llm-settings-dialog.component';
 
 const testProfiles: LlmModelProfile[] = [
   {
@@ -164,6 +168,26 @@ describe('LlmSettingsDialogComponent', () => {
     expect(matchModelProfile([...testProfiles, extra], 'gemma4:e4b-it-q8')?.id).toBe('longer');
     expect(matchModelProfile(testProfiles, 'gemma4:12b')).toBeNull();
     expect(matchModelProfile(testProfiles, '  ')).toBeNull();
+  });
+
+  it('filters models by every typed word and shows all for a blank or exact query', () => {
+    const models = ['google/gemini-3.8-flash', 'google/gemini-3.8-pro', 'openai/gpt-5-mini'];
+    expect(filterModels(models, 'Gemini  FLASH')).toEqual(['google/gemini-3.8-flash']);
+    expect(filterModels(models, 'gemini')).toEqual(models.slice(0, 2));
+    expect(filterModels(models, 'claude')).toEqual([]);
+    expect(filterModels(models, '  ')).toEqual(models);
+    expect(filterModels(models, 'OPENAI/GPT-5-MINI')).toEqual(models);
+  });
+
+  it('narrows each model autocomplete independently as the user types', () => {
+    component.discoveredModels.set(['gemma4:e4b', 'gemma4:12b', 'qwen2.5:14b']);
+    component.form.controls.textModel.setValue('qwen');
+    component.form.controls.visionModel.setValue('');
+    component.form.controls.refineModel.setValue('12b');
+
+    expect(component.filteredTextModels()).toEqual(['qwen2.5:14b']);
+    expect(component.filteredVisionModels()).toEqual(['gemma4:e4b', 'gemma4:12b', 'qwen2.5:14b']);
+    expect(component.filteredRefineModels()).toEqual(['gemma4:12b']);
   });
 
   it('applies a profile without renaming the model and sets the strategy explicitly', () => {

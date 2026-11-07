@@ -141,11 +141,15 @@
               placeholder="e.g. qwen2.5:14b, llama3:8b"
             />
             <mat-autocomplete #textAuto="matAutocomplete">
-              @for (m of discoveredModels(); track m) {
+              @for (m of filteredTextModels(); track m) {
                 <mat-option [value]="m">{{ m }}</mat-option>
+              } @empty {
+                @if (discoveredModels().length > 0) {
+                  <mat-option disabled>No discovered models match</mat-option>
+                }
               }
             </mat-autocomplete>
-            <mat-hint>Used for structured recipe extraction</mat-hint>
+            <mat-hint>Used for recipe extraction. Type to filter discovered models.</mat-hint>
           </mat-form-field>
 
           <mat-form-field appearance="outline" class="form-field">
@@ -157,8 +161,12 @@
               placeholder="e.g. qwen2.5vl:7b, llava"
             />
             <mat-autocomplete #visionAuto="matAutocomplete">
-              @for (m of discoveredModels(); track m) {
+              @for (m of filteredVisionModels(); track m) {
                 <mat-option [value]="m">{{ m }}</mat-option>
+              } @empty {
+                @if (discoveredModels().length > 0) {
+                  <mat-option disabled>No discovered models match</mat-option>
+                }
               }
             </mat-autocomplete>
             <mat-hint>Reserved for cookbook photo scans (Phase 05)</mat-hint>
@@ -383,8 +391,12 @@
               data-testid="llm-refine-model"
             />
             <mat-autocomplete #refineAuto="matAutocomplete">
-              @for (m of discoveredModels(); track m) {
+              @for (m of filteredRefineModels(); track m) {
                 <mat-option [value]="m">{{ m }}</mat-option>
+              } @empty {
+                @if (discoveredModels().length > 0) {
+                  <mat-option disabled>No discovered models match</mat-option>
+                }
               }
             </mat-autocomplete>
             <mat-hint

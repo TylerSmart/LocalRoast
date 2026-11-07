@@ -7,7 +7,7 @@ import {
   inject,
   signal,
 } from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { MatAutocompleteModule } from '@angular/material/autocomplete';
 import { MatButtonModule } from '@angular/material/button';
@@ -50,6 +50,26 @@ export function matchModelProfile(
     }
   }
   return best;
+}
+
+/**
+ * Filters discovered model names by every whitespace-separated word in the query (case-insensitive),
+ * so "gemini flash" matches "google/gemini-3.8-flash". A blank query or one that exactly names a
+ * model returns the full list so the user can still switch models after picking one.
+ */
+export function filterModels(
+  models: readonly string[],
+  query: string | null | undefined,
+): string[] {
+  const normalized = query?.trim().toLowerCase() ?? '';
+  if (!normalized || models.some((model) => model.toLowerCase() === normalized)) {
+    return [...models];
+  }
+  const terms = normalized.split(/\s+/);
+  return models.filter((model) => {
+    const name = model.toLowerCase();
+    return terms.every((term) => name.includes(term));
+  });
 }
 
 @Component({
@@ -163,6 +183,25 @@ export class LlmSettingsDialogComponent implements OnInit {
       Validators.max(1800),
     ]),
   });
+
+  private readonly textModelQuery = toSignal(this.form.controls.textModel.valueChanges, {
+    initialValue: this.form.controls.textModel.value,
+  });
+  private readonly visionModelQuery = toSignal(this.form.controls.visionModel.valueChanges, {
+    initialValue: this.form.controls.visionModel.value,
+  });
+  private readonly refineModelQuery = toSignal(this.form.controls.refineModel.valueChanges, {
+    initialValue: this.form.controls.refineModel.value,
+  });
+  readonly filteredTextModels = computed(() =>
+    filterModels(this.discoveredModels(), this.textModelQuery()),
+  );
+  readonly filteredVisionModels = computed(() =>
+    filterModels(this.discoveredModels(), this.visionModelQuery()),
+  );
+  readonly filteredRefineModels = computed(() =>
+    filterModels(this.discoveredModels(), this.refineModelQuery()),
+  );
 
   ngOnInit(): void {
     this.loadSettings();
