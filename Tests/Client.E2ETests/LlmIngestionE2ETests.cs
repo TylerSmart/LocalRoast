@@ -253,6 +253,29 @@ public sealed class MockLanLlmAndBlogServer : IAsyncDisposable
 [TestClass]
 public sealed class LlmIngestionE2ETests : E2ETestBase
 {
+    // Tab (not Escape) leaves the model field: with no autocomplete panel open, Escape closes
+    // the dialog and cancels the in-flight save.
+    private async Task SaveLlmSettingsDialogAsync(ILocator dialog)
+    {
+        await Page.Keyboard.PressAsync("Tab");
+        await Page.RunAndWaitForResponseAsync(
+            () => dialog.Locator("button", new() { HasText = "Save Settings" }).ClickAsync(),
+            resp =>
+                resp.Url.EndsWith("/api/llm-settings") && resp.Request.Method == "PUT" && resp.Ok
+        );
+        await Expect(dialog).Not.ToBeVisibleAsync();
+    }
+
+    private async Task DiscardAllJobCardsAsync()
+    {
+        var discardButtons = Page.Locator(".job-card button.discard-btn");
+        for (var remaining = await discardButtons.CountAsync(); remaining > 0; remaining--)
+        {
+            await discardButtons.First.ClickAsync();
+            await Expect(discardButtons).ToHaveCountAsync(remaining - 1);
+        }
+    }
+
     [TestMethod]
     [Timeout(DefaultTestTimeoutMs)]
     public async Task ReviewRepair_PreviewsCancelsAppliesAndSavesWithoutLosingEditsOnMobile()
@@ -663,11 +686,7 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await Expect(dialog).ToBeVisibleAsync();
         await dialog.Locator("input[formcontrolname='baseUrl']").FillAsync(mockServer.BaseUrl);
         await dialog.Locator("input[formcontrolname='textModel']").FillAsync("qwen2.5:14b");
-        await Page.Keyboard.PressAsync("Escape");
-
-        await dialog
-            .Locator("button", new() { HasText = "Save Settings" })
-            .ClickAsync(new() { Force = true });
+        await SaveLlmSettingsDialogAsync(dialog);
         await Expect(dialog).Not.ToBeVisibleAsync();
 
         // 2. Simulate offline host
@@ -758,11 +777,7 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await Expect(dialog).ToBeVisibleAsync();
         await dialog.Locator("input[formcontrolname='baseUrl']").FillAsync(mockServer.BaseUrl);
         await dialog.Locator("input[formcontrolname='textModel']").FillAsync("qwen2.5:14b");
-        await Page.Keyboard.PressAsync("Escape");
-
-        await dialog
-            .Locator("button", new() { HasText = "Save Settings" })
-            .ClickAsync(new() { Force = true });
+        await SaveLlmSettingsDialogAsync(dialog);
         await Expect(dialog).Not.ToBeVisibleAsync();
 
         // 3. Submit a raw text recipe
@@ -913,6 +928,80 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         // Banner disappears and header button switches back to Pause Ingestion
         await Expect(pausedBanner).Not.ToBeVisibleAsync();
         await Expect(pauseBtn).ToContainTextAsync("Pause Ingestion");
+    }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task IngestionHub_RunNowWhilePaused_ProcessesOnlyTheChosenJob()
+    {
+        await using var mockServer = await MockLanLlmAndBlogServer.StartAsync();
+
+        await RegisterAndLoginAsync();
+
+        await Page.GotoAsync($"{ServerUrl}/ingest");
+        await Page.Locator(".llm-settings-btn").ClickAsync();
+
+        var dialog = Page.Locator("app-llm-settings-dialog");
+        await Expect(dialog).ToBeVisibleAsync();
+        await dialog.Locator("input[formcontrolname='baseUrl']").FillAsync(mockServer.BaseUrl);
+        await dialog.Locator("input[formcontrolname='textModel']").FillAsync("qwen2.5:14b");
+        await SaveLlmSettingsDialogAsync(dialog);
+        await Expect(dialog).Not.ToBeVisibleAsync();
+
+        var pauseBtn = Page.Locator(".toggle-ingestion-btn");
+        await pauseBtn.ClickAsync();
+        try
+        {
+            await Expect(pauseBtn).ToContainTextAsync("Resume Ingestion");
+            await Expect(Page.Locator(".paused-ingestion-banner")).ToContainTextAsync("Run now");
+
+            async Task QueueAsync(string title)
+            {
+                await Page.Locator("input[formcontrolname='titleHint']").FillAsync(title);
+                await Page.Locator("textarea[formcontrolname='rawText']")
+                    .FillAsync("1 lb noodles\n3 tbsp peanut butter\nMix together and serve.");
+                await Page.Locator("button[aria-label='Queue raw text recipe']").ClickAsync();
+                await Expect(Page.Locator(".job-card", new() { HasText = title }))
+                    .ToBeVisibleAsync();
+            }
+
+            await Page.Locator("button.tab-pill", new() { HasText = "Paste Raw Text" })
+                .ClickAsync();
+            // Jobs are shared across tests, so start from an empty list.
+            await DiscardAllJobCardsAsync();
+            await QueueAsync("Held Peanut Noodles");
+            await QueueAsync("Chosen Peanut Noodles");
+
+            var heldCard = Page.Locator(".job-card", new() { HasText = "Held Peanut Noodles" });
+            var chosenCard = Page.Locator(".job-card", new() { HasText = "Chosen Peanut Noodles" });
+            var runNowBtn = chosenCard.Locator("button.run-now-btn");
+            await Expect(runNowBtn).ToContainTextAsync("Run now");
+
+            await Page.RunAndWaitForResponseAsync(
+                () => runNowBtn.ClickAsync(),
+                resp => resp.Url.Contains("/run-now") && resp.Status == 202
+            );
+
+            // Extraction retitles the chosen card with the mock recipe's title.
+            var processedCard = Page.Locator(".job-card", new() { HasText = "Crispy Sesame Tofu" });
+            await WaitForLocatorWithRefreshAsync(processedCard.Locator("a.review-action-btn"));
+            await Expect(chosenCard).ToHaveCountAsync(0);
+            await Expect(Page.Locator(".job-card")).ToHaveCountAsync(2);
+            await Expect(heldCard.Locator("a.review-action-btn")).Not.ToBeVisibleAsync();
+            await Expect(heldCard.Locator("button.run-now-btn")).ToContainTextAsync("Run now");
+            await Expect(pauseBtn).ToContainTextAsync("Resume Ingestion");
+        }
+        finally
+        {
+            // Household settings and jobs are shared: drop this test's jobs (the held one targets a
+            // mock server that is about to stop) and never leave ingestion paused for later tests.
+            await DiscardAllJobCardsAsync();
+            if ((await pauseBtn.InnerTextAsync()).Contains("Resume Ingestion"))
+            {
+                await pauseBtn.ClickAsync();
+                await Expect(pauseBtn).ToContainTextAsync("Pause Ingestion");
+            }
+        }
     }
 
     [TestMethod]
@@ -1263,11 +1352,7 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await Expect(dialog).ToBeVisibleAsync();
         await dialog.Locator("input[formcontrolname='baseUrl']").FillAsync(mockServer.BaseUrl);
         await dialog.Locator("input[formcontrolname='textModel']").FillAsync("qwen2.5:14b");
-        await Page.Keyboard.PressAsync("Escape");
-
-        await dialog
-            .Locator("button", new() { HasText = "Save Settings" })
-            .ClickAsync(new() { Force = true });
+        await SaveLlmSettingsDialogAsync(dialog);
         await Expect(dialog).Not.ToBeVisibleAsync();
 
         // 2. Submit a raw text recipe

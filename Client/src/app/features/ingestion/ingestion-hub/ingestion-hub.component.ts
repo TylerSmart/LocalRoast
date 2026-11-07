@@ -670,6 +670,28 @@ export class IngestionHubComponent implements OnInit {
       });
   }
 
+  runJobNow(job: IngestionJobSummaryDto): void {
+    this.errorMessage.set(null);
+    const paused = !this.isIngestionEnabled();
+    this.ingestionService
+      .runJobNow(job.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.feedbackMessage.set(
+            paused
+              ? `Running "${job.displayTitle}" now while the rest of the queue stays paused.`
+              : `Moved "${job.displayTitle}" to the front of the queue.`,
+          );
+          this.loadJobs();
+        },
+        error: (err) =>
+          this.errorMessage.set(
+            err?.error?.detail || `Failed to run job "${job.displayTitle}" now.`,
+          ),
+      });
+  }
+
   retryAllWaiting(): void {
     if (this.isRetryingAll()) {
       return;

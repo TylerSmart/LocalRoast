@@ -341,6 +341,24 @@ describe('IngestionService', () => {
 
     await discardPromise;
   });
+
+  it('requests a queued job to run now and refreshes summary', async () => {
+    const promise = firstValueFrom(service.runJobNow('job-7'));
+    const req = httpMock.expectOne('/api/ingestion/jobs/job-7/run-now');
+    expect(req.request.method).toBe('POST');
+    req.flush({ id: 'job-7', status: 'Queued' } as IngestionJobSummaryDto);
+
+    httpMock.expectOne('/api/ingestion/jobs/summary').flush({
+      readyForReviewCount: 0,
+      activeProcessingCount: 1,
+      waitingForLlmHostCount: 0,
+      failedCount: 0,
+    });
+
+    const result = await promise;
+    expect(result.id).toBe('job-7');
+  });
+
   it('enqueues images and refreshes summary', async () => {
     const file1 = new File(['content1'], 'page1.png', { type: 'image/png' });
     const file2 = new File(['content2'], 'page2.png', { type: 'image/png' });

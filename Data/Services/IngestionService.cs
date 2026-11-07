@@ -1449,7 +1449,57 @@ public sealed class IngestionService(
 
         queueSignal.NotifyWorkAvailable();
 
-        return new IngestionJobSummaryDto(
+        return ToSummary(job);
+    }
+
+    public async Task<IngestionJobSummaryDto?> RunJobNowAsync(
+        Guid id,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var job = await dbContext.IngestionJobs.FirstOrDefaultAsync(
+            j => j.Id == id,
+            cancellationToken
+        );
+
+        if (job is null)
+        {
+            return null;
+        }
+
+        if (
+            job.Status
+            is not (
+                IngestionJobStatus.Queued
+                or IngestionJobStatus.WaitingForLlmHost
+                or IngestionJobStatus.Failed
+            )
+        )
+        {
+            throw new ConflictException(
+                "Only a queued, waiting or failed ingestion job can be run now."
+            );
+        }
+
+        if (job.Status is not IngestionJobStatus.Queued)
+        {
+            job.Status = IngestionJobStatus.Queued;
+            job.AttemptCount = 0;
+        }
+
+        job.NextRetryAt = null;
+        job.RunNowRequested = true;
+        job.StatusDetail = "Queued to run next, even while ingestion is paused.";
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        queueSignal.NotifyWorkAvailable();
+
+        return ToSummary(job);
+    }
+
+    private static IngestionJobSummaryDto ToSummary(IngestionJob job) =>
+        new(
             Id: job.Id,
             Channel: job.Channel,
             Status: job.Status,
@@ -1466,7 +1516,6 @@ public sealed class IngestionService(
             CreatedAt: job.CreatedAt,
             ModifiedAt: job.ModifiedAt
         );
-    }
 
     public async Task<RetryWaitingJobsResultDto> RetryAllWaitingJobsAsync(
         CancellationToken cancellationToken = default

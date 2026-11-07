@@ -156,6 +156,12 @@ export class IngestionService {
       .pipe(tap(() => this.refreshSummary()));
   }
 
+  runJobNow(id: string): Observable<IngestionJobSummaryDto> {
+    return this.http
+      .post<IngestionJobSummaryDto>(apiUrl(`/ingestion/jobs/${id}/run-now`), {})
+      .pipe(tap(() => this.refreshSummary()));
+  }
+
   retryAllWaitingJobs(): Observable<RetryWaitingJobsResultDto> {
     return this.http
       .post<RetryWaitingJobsResultDto>(apiUrl('/ingestion/jobs/retry-waiting'), {})

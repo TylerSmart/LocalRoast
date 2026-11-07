@@ -631,6 +631,30 @@ public sealed class IngestionJobsController(
         }
     }
 
+    [HttpPost("{id:guid}/run-now")]
+    [ProducesResponseType(typeof(IngestionJobSummaryDto), StatusCodes.Status202Accepted)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> RunJobNow(Guid id, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var queued = await ingestionService.RunJobNowAsync(id, cancellationToken);
+            return queued is not null ? Accepted(queued) : NotFound();
+        }
+        catch (ConflictException ex)
+        {
+            return Conflict(
+                new ProblemDetails
+                {
+                    Status = StatusCodes.Status409Conflict,
+                    Title = ex.Title,
+                    Detail = ex.Message,
+                }
+            );
+        }
+    }
+
     [HttpPost("retry-waiting")]
     [ProducesResponseType(typeof(RetryWaitingJobsResultDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> RetryAllWaitingJobs(CancellationToken cancellationToken)

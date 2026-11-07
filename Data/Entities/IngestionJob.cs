@@ -58,6 +58,12 @@ public sealed class IngestionJob : IAuditable
 
     public DateTimeOffset? NextRetryAt { get; set; }
 
+    /// <summary>
+    /// The user asked to run this queued job now: the worker picks it ahead of other jobs, even while
+    /// ingestion is paused. Cleared once processing starts or when ingestion is paused.
+    /// </summary>
+    public bool RunNowRequested { get; set; }
+
     public DateTimeOffset? ProcessedAt { get; set; }
 
     public Guid? ResultingRecipeId { get; set; }

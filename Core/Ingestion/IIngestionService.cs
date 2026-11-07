@@ -73,6 +73,14 @@ public interface IIngestionService
         CancellationToken cancellationToken = default
     );
 
+    /// <summary>
+    /// Queues a queued, waiting or failed job to run next, even while ingestion is paused.
+    /// </summary>
+    Task<IngestionJobSummaryDto?> RunJobNowAsync(
+        Guid id,
+        CancellationToken cancellationToken = default
+    );
+
     Task<RetryWaitingJobsResultDto> RetryAllWaitingJobsAsync(
         CancellationToken cancellationToken = default
     );

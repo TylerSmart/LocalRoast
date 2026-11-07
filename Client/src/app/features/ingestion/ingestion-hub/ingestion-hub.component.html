@@ -46,8 +46,8 @@
         <div class="banner-content">
           <strong>LLM Ingestion is Paused</strong>
           <span>
-            Background processing of queue items is held. Click Resume to continue extracting
-            recipes.
+            Background processing of queue items is held. Use Run now on a queued job to process
+            just that one, or click Resume to continue extracting recipes.
           </span>
         </div>
       </div>
@@ -803,6 +803,30 @@
                   <mat-icon>menu_book</mat-icon>
                   <span>Open Recipe</span>
                 </a>
+              }
+
+              @if (
+                job.status === 'Queued' ||
+                job.status === 'WaitingForLlmHost' ||
+                job.status === 'Failed'
+              ) {
+                <button
+                  mat-stroked-button
+                  type="button"
+                  class="run-now-btn"
+                  (click)="runJobNow(job)"
+                  [attr.aria-label]="
+                    (isIngestionEnabled() ? 'Run next: ' : 'Run now: ') + job.displayTitle
+                  "
+                  [matTooltip]="
+                    isIngestionEnabled()
+                      ? 'Move this job to the front of the queue'
+                      : 'Process just this job now, even though ingestion is paused'
+                  "
+                >
+                  <mat-icon>{{ isIngestionEnabled() ? 'skip_next' : 'play_arrow' }}</mat-icon>
+                  <span>{{ isIngestionEnabled() ? 'Run next' : 'Run now' }}</span>
+                </button>
               }
 
               @if (

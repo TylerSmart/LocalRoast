@@ -898,6 +898,99 @@ public sealed class IngestionIntegrationTests
         Assert.AreEqual(1, fakeLlm.MaxConcurrentRequests);
     }
 
+    [TestMethod]
+    public async Task RunNow_ProcessesOnlyFlaggedJobWhilePaused_AndPauseClearsRunNext()
+    {
+        var extractedTitles = new List<string>();
+        var fakeLlm = new FakeSequentialLlmExtractionClient(context =>
+        {
+            var title = context.SourceContent.Contains("Run Now Chosen Job")
+                ? "Run Now Chosen Job"
+                : "Run Now Held Job";
+            extractedTitles.Add(title);
+            return new LlmExtractedRecipePayload(Title: title, ConfidenceScore: 0.5m);
+        });
+        await using var customFactory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Llm:TextModel", "test-text");
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ILlmExtractionClient>();
+                services.AddSingleton<ILlmExtractionClient>(fakeLlm);
+            });
+        });
+        using var client = customFactory.CreateClient();
+        await AuthenticateAsync(client);
+
+        async Task<bool> ProcessNextAsync()
+        {
+            using var scope = customFactory.Services.CreateScope();
+            return await scope
+                .ServiceProvider.GetRequiredService<IIngestionProcessor>()
+                .ProcessNextQueuedJobAsync();
+        }
+
+        async Task<IngestionJobStatus> StatusOfAsync(Guid id) =>
+            (
+                await client.GetFromJsonAsync<IngestionJobDetailDto>($"/api/ingestion/jobs/{id}")
+            )!.Status;
+
+        var held = await EnqueueRawTextJobAsync(client, "Run Now Held Job");
+        var chosen = await EnqueueRawTextJobAsync(client, "Run Now Chosen Job");
+
+        // No settings saved yet: pausing must keep the configured Llm:TextModel default.
+        (
+            await client.PostAsync("/api/llm-settings/set-ingestion-enabled?enabled=false", null)
+        ).EnsureSuccessStatusCode();
+        try
+        {
+            Assert.IsFalse(await ProcessNextAsync());
+
+            var runNow = await client.PostAsync($"/api/ingestion/jobs/{chosen.Id}/run-now", null);
+            Assert.AreEqual(HttpStatusCode.Accepted, runNow.StatusCode);
+            var runNowSummary = await runNow.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
+            Assert.AreEqual(IngestionJobStatus.Queued, runNowSummary!.Status);
+            StringAssert.Contains(runNowSummary.StatusDetail, "even while ingestion is paused");
+
+            Assert.IsTrue(await ProcessNextAsync());
+            CollectionAssert.Contains(extractedTitles, "Run Now Chosen Job");
+            CollectionAssert.DoesNotContain(extractedTitles, "Run Now Held Job");
+            Assert.AreEqual(IngestionJobStatus.ReadyForReview, await StatusOfAsync(chosen.Id));
+            Assert.AreEqual(IngestionJobStatus.Queued, await StatusOfAsync(held.Id));
+            Assert.IsFalse(await ProcessNextAsync());
+
+            var conflict = await client.PostAsync($"/api/ingestion/jobs/{chosen.Id}/run-now", null);
+            Assert.AreEqual(HttpStatusCode.Conflict, conflict.StatusCode);
+            var missing = await client.PostAsync(
+                $"/api/ingestion/jobs/{Guid.NewGuid()}/run-now",
+                null
+            );
+            Assert.AreEqual(HttpStatusCode.NotFound, missing.StatusCode);
+
+            // A "run next" request made while enabled is dropped when ingestion is paused.
+            (
+                await client.PostAsync("/api/llm-settings/set-ingestion-enabled?enabled=true", null)
+            ).EnsureSuccessStatusCode();
+            (
+                await client.PostAsync($"/api/ingestion/jobs/{held.Id}/run-now", null)
+            ).EnsureSuccessStatusCode();
+            (
+                await client.PostAsync(
+                    "/api/llm-settings/set-ingestion-enabled?enabled=false",
+                    null
+                )
+            ).EnsureSuccessStatusCode();
+            Assert.IsFalse(await ProcessNextAsync());
+            Assert.AreEqual(IngestionJobStatus.Queued, await StatusOfAsync(held.Id));
+        }
+        finally
+        {
+            (
+                await client.PostAsync("/api/llm-settings/set-ingestion-enabled?enabled=true", null)
+            ).EnsureSuccessStatusCode();
+        }
+    }
+
     private static async Task<IngestionJobSummaryDto> EnqueueRawTextJobAsync(
         HttpClient client,
         string title

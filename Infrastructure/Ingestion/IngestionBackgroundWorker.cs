@@ -45,19 +45,16 @@ public sealed class IngestionBackgroundWorker(
                     Math.Max(1, options.Value.WorkerPollIntervalSeconds)
                 );
 
+                bool ingestionEnabled;
                 using (var checkScope = scopeFactory.CreateScope())
                 {
                     var settingsService =
                         checkScope.ServiceProvider.GetRequiredService<ILlmSettingsService>();
                     var config = await settingsService.GetEffectiveConfigAsync(stoppingToken);
-                    if (!config.EnableIngestion)
-                    {
-                        await queueSignal.WaitForWorkAsync(pollInterval, stoppingToken);
-                        continue;
-                    }
+                    ingestionEnabled = config.EnableIngestion;
                 }
 
-                // 1. Drain all pending queued jobs
+                // 1. Drain all pending queued jobs (only run-now requests while paused)
                 bool processedAny;
                 do
                 {
@@ -65,6 +62,12 @@ public sealed class IngestionBackgroundWorker(
                     var processor = scope.ServiceProvider.GetRequiredService<IIngestionProcessor>();
                     processedAny = await processor.ProcessNextQueuedJobAsync(stoppingToken);
                 } while (processedAny && !stoppingToken.IsCancellationRequested);
+
+                if (!ingestionEnabled)
+                {
+                    await queueSignal.WaitForWorkAsync(pollInterval, stoppingToken);
+                    continue;
+                }
 
                 // 2. Probe offline waiting jobs
                 using (var probeScope = scopeFactory.CreateScope())

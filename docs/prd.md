@@ -171,6 +171,7 @@ flowchart LR
 - Submitting any ingestion input immediately creates an `IngestionJob` in SQL Server and returns control to the user in `< 200ms` (allowing rapid batch submission of 5–10 URLs or cookbook snaps in a row).
 - **Job Lifecycle States:** `Queued` $\rightarrow$ `Preprocessing` $\rightarrow$ `Extracting` $\rightarrow$ `ReadyForReview` (or `Published` if auto-publish is enabled), plus `WaitingForLlmHost` and `Failed`.
 - **Asleep / Offline GPU Host Handling:** If the configured Ollama / OpenAI-compatible machine is unreachable or times out, the background worker transitions the job to `WaitingForLlmHost` (retaining all uploaded files and scraped HTML/JSON-LD safely on disk/DB), periodically probes host health with backoff, and exposes a 1-click **"Retry All Waiting Jobs"** action once the GPU machine wakes up.
+- **Pause & Run Now:** **Pause Ingestion** holds the whole queue (active jobs are returned to `Queued`). While paused, **Run now** on a `Queued`, `WaitingForLlmHost`, or `Failed` job processes just that job (`POST /api/ingestion/jobs/{id}/run-now`); the rest of the queue stays held. While ingestion is running, the same action is labelled **Run next** and moves the job to the front of the queue. A run-now request covers one attempt only: if that attempt ends waiting for the LLM host, the job waits for Resume like the rest of the queue, and pausing drops any pending Run next requests.
 
 #### 4.2.3 Side-by-Side Review Inbox
 

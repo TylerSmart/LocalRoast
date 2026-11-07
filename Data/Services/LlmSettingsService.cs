@@ -230,6 +230,7 @@ public sealed class LlmSettingsService(
                 .IngestionJobs.Where(j =>
                     j.Status == IngestionJobStatus.Preprocessing
                     || j.Status == IngestionJobStatus.Extracting
+                    || j.RunNowRequested
                 )
                 .ToListAsync(cancellationToken);
 
@@ -238,6 +239,7 @@ public sealed class LlmSettingsService(
                 job.Status = IngestionJobStatus.Queued;
                 job.NextRetryAt = null;
                 job.StatusDetail = "Paused. Queued to resume when ingestion is enabled.";
+                job.RunNowRequested = false;
             }
 
             if (workingJobs.Count > 0)
@@ -326,10 +328,7 @@ public sealed class LlmSettingsService(
 
         if (entity is null)
         {
-            entity = new HouseholdLlmSettings
-            {
-                SingletonKey = HouseholdLlmSettings.DefaultSingletonKey,
-            };
+            entity = CreateFromDefaults();
             dbContext.HouseholdLlmSettings.Add(entity);
         }
 
@@ -345,6 +344,7 @@ public sealed class LlmSettingsService(
                 .IngestionJobs.Where(j =>
                     j.Status == IngestionJobStatus.Preprocessing
                     || j.Status == IngestionJobStatus.Extracting
+                    || j.RunNowRequested
                 )
                 .ToListAsync(cancellationToken);
 
@@ -353,6 +353,7 @@ public sealed class LlmSettingsService(
                 job.Status = IngestionJobStatus.Queued;
                 job.NextRetryAt = null;
                 job.StatusDetail = "Paused. Queued to resume when ingestion is enabled.";
+                job.RunNowRequested = false;
             }
 
             if (workingJobs.Count > 0)
@@ -366,6 +367,40 @@ public sealed class LlmSettingsService(
         }
 
         return await GetSettingsAsync(cancellationToken);
+    }
+
+    // Toggling pause before any settings were saved must keep the configured defaults.
+    private HouseholdLlmSettings CreateFromDefaults()
+    {
+        var opt = defaultOptions.Value;
+        return new HouseholdLlmSettings
+        {
+            SingletonKey = HouseholdLlmSettings.DefaultSingletonKey,
+            Provider = opt.Provider,
+            BaseUrl = opt.BaseUrl,
+            ApiKey = opt.ApiKey,
+            TextModel = opt.TextModel,
+            VisionModel = opt.VisionModel,
+            OllamaKeepAlive = opt.OllamaKeepAlive,
+            RequestTimeoutSeconds = opt.RequestTimeoutSeconds,
+            AutoPublishHighConfidenceText = opt.AutoPublishHighConfidenceText,
+            EnableThinking = opt.EnableThinking,
+            MaxIngestionRetries = opt.MaxIngestionRetries,
+            EnableIngestion = opt.EnableIngestion,
+            ContextWindowTokens = opt.ContextWindowTokens,
+            OllamaCpuOnly = opt.OllamaCpuOnly,
+            Temperature = opt.Temperature,
+            TopP = opt.TopP,
+            TopK = opt.TopK,
+            ExtractionRepairRounds = opt.ExtractionRepairRounds,
+            ExtractionStrategy = opt.ExtractionStrategy,
+            RefineModel = opt.RefineModel,
+            RefineEnableThinking = opt.RefineEnableThinking,
+            RefineTemperature = opt.RefineTemperature,
+            RefineTopP = opt.RefineTopP,
+            RefineTopK = opt.RefineTopK,
+            RefineRequestTimeoutSeconds = opt.RefineRequestTimeoutSeconds,
+        };
     }
 
     private static void ValidateUrl(string? url)

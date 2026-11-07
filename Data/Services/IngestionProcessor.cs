@@ -80,11 +80,7 @@ public sealed class IngestionProcessor(
     public async Task<bool> ProcessNextQueuedJobAsync(CancellationToken cancellationToken = default)
     {
         var config = await llmSettingsService.GetEffectiveConfigAsync(cancellationToken);
-
-        if (!config.EnableIngestion)
-        {
-            return false;
-        }
+        var runNowOnly = !config.EnableIngestion;
 
         var now = DateTimeOffset.UtcNow;
 
@@ -92,8 +88,10 @@ public sealed class IngestionProcessor(
             .IngestionJobs.Where(j =>
                 j.Status == IngestionJobStatus.Queued
                 && (j.NextRetryAt == null || j.NextRetryAt <= now)
+                && (!runNowOnly || j.RunNowRequested)
             )
-            .OrderBy(j => j.CreatedAt)
+            .OrderByDescending(j => j.RunNowRequested)
+            .ThenBy(j => j.CreatedAt)
             .Select(j => j.Id)
             .FirstOrDefaultAsync(cancellationToken);
 
@@ -114,17 +112,16 @@ public sealed class IngestionProcessor(
 
         var initialConfig = await llmSettingsService.GetEffectiveConfigAsync(cancellationToken);
 
-        if (!initialConfig.EnableIngestion)
-        {
-            return false;
-        }
-
         var job = await dbContext.IngestionJobs.FirstOrDefaultAsync(
             j => j.Id == jobId,
             cancellationToken
         );
 
-        if (job is null || job.Status is not IngestionJobStatus.Queued)
+        if (
+            job is null
+            || job.Status is not IngestionJobStatus.Queued
+            || (!initialConfig.EnableIngestion && !job.RunNowRequested)
+        )
         {
             return false;
         }
@@ -142,6 +139,9 @@ public sealed class IngestionProcessor(
             job.Status = IngestionJobStatus.Preprocessing;
 
             job.StatusDetail = "Preprocessing source content...";
+
+            // A run-now request covers this attempt only; later retries follow the pause setting.
+            job.RunNowRequested = false;
 
             // A refine pass of an earlier draft no longer applies once the job is reprocessed.
             var staleRefinements = await dbContext

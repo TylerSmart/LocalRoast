@@ -23,6 +23,7 @@ describe('IngestionHubComponent', () => {
     enqueueUrls: ReturnType<typeof vi.fn>;
     enqueueRawText: ReturnType<typeof vi.fn>;
     retryJob: ReturnType<typeof vi.fn>;
+    runJobNow: ReturnType<typeof vi.fn>;
     retryAllWaitingJobs: ReturnType<typeof vi.fn>;
     retryBatchJobs: ReturnType<typeof vi.fn>;
     discardJob: ReturnType<typeof vi.fn>;
@@ -146,6 +147,7 @@ describe('IngestionHubComponent', () => {
       enqueueUrls: vi.fn().mockReturnValue(of([sampleJobs[0]])),
       enqueueRawText: vi.fn().mockReturnValue(of(sampleJobs[1])),
       retryJob: vi.fn().mockReturnValue(of(sampleJobs[1])),
+      runJobNow: vi.fn().mockReturnValue(of(sampleJobs[1])),
       retryAllWaitingJobs: vi.fn().mockReturnValue(of({ requeuedCount: 1 })),
       retryBatchJobs: vi.fn().mockReturnValue(of({ requeuedCount: 3 })),
       discardJob: vi.fn().mockReturnValue(of(undefined)),
@@ -470,5 +472,27 @@ describe('IngestionHubComponent', () => {
 
     expect(mockLlmSettingsService.setIngestionEnabled).toHaveBeenCalledWith(true);
     expect(component.isIngestionEnabled()).toBe(true);
+  });
+
+  it('shows Run next for waiting jobs while ingestion is enabled', () => {
+    const runButtons = fixture.nativeElement.querySelectorAll('button.run-now-btn');
+    expect(runButtons.length).toBe(1);
+    expect(runButtons[0].textContent).toContain('Run next');
+
+    component.runJobNow(sampleJobs[1]);
+    expect(mockIngestionService.runJobNow).toHaveBeenCalledWith('job-2');
+    expect(component.feedbackMessage()).toContain('front of the queue');
+  });
+
+  it('shows Run now while ingestion is paused and runs the single job', () => {
+    component.toggleIngestionState();
+    fixture.detectChanges();
+
+    const runButton = fixture.nativeElement.querySelector('button.run-now-btn');
+    expect(runButton.textContent).toContain('Run now');
+
+    runButton.click();
+    expect(mockIngestionService.runJobNow).toHaveBeenCalledWith('job-2');
+    expect(component.feedbackMessage()).toContain('rest of the queue stays paused');
   });
 });

@@ -512,6 +512,9 @@ namespace App.Data.Migrations
                     b.Property<Guid?>("ResultingRecipeId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<bool>("RunNowRequested")
+                        .HasColumnType("bit");
+
                     b.Property<string>("ScrapedPageJson")
                         .HasMaxLength(200000)
                         .HasColumnType("nvarchar(max)");
