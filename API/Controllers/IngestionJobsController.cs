@@ -476,6 +476,89 @@ public sealed class IngestionJobsController(
         }
     }
 
+    [HttpGet("{id:guid}/refinement")]
+    [ProducesResponseType(typeof(IngestionRefinementDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetRefinement(Guid id, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var refinement = await reviewService.GetRefinementAsync(id, cancellationToken);
+            return refinement is null ? NoContent() : Ok(refinement);
+        }
+        catch (NotFoundException)
+        {
+            return NotFound();
+        }
+    }
+
+    [HttpPost("{id:guid}/refinement")]
+    [ProducesResponseType(typeof(IngestionRefinementDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    public Task<IActionResult> RequestRefinement(Guid id, CancellationToken cancellationToken) =>
+        HandleRefinementAsync(async () =>
+            Ok(await reviewService.RequestRefinementAsync(id, cancellationToken))
+        );
+
+    [HttpDelete("{id:guid}/refinement")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public async Task<IActionResult> DismissRefinement(Guid id, CancellationToken cancellationToken)
+    {
+        await reviewService.DismissRefinementAsync(id, cancellationToken);
+        return NoContent();
+    }
+
+    [HttpPost("{id:guid}/refinement/preview")]
+    [ProducesResponseType(typeof(IngestionRepairPreviewDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    public Task<IActionResult> PreviewRefinement(
+        Guid id,
+        [FromBody] IngestionDraftDiagnosticsRequest request,
+        CancellationToken cancellationToken
+    ) =>
+        HandleRefinementAsync(async () =>
+            Ok(await reviewService.PreviewRefinementAsync(id, request.Draft, cancellationToken))
+        );
+
+    private async Task<IActionResult> HandleRefinementAsync(Func<Task<IActionResult>> action)
+    {
+        try
+        {
+            return await action();
+        }
+        catch (NotFoundException)
+        {
+            return NotFound();
+        }
+        catch (ConflictException ex)
+        {
+            return Conflict(
+                new ProblemDetails
+                {
+                    Status = StatusCodes.Status409Conflict,
+                    Title = ex.Title,
+                    Detail = ex.Message,
+                }
+            );
+        }
+        catch (DomainValidationException ex)
+        {
+            return BadRequest(
+                new ProblemDetails
+                {
+                    Status = StatusCodes.Status400BadRequest,
+                    Title = ex.Title,
+                    Detail = ex.Message,
+                }
+            );
+        }
+    }
+
     [HttpPost("{id:guid}/approve")]
     [ProducesResponseType(typeof(RecipeDetailDto), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]

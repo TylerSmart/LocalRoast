@@ -160,6 +160,13 @@ public sealed class McpCookbookServiceTests
         public IDisposable RegisterActiveJobExecution(Guid jobId, CancellationTokenSource cts) =>
             new DummyDisposable();
 
+        public IDisposable RegisterPreemptibleExecution(Guid jobId, CancellationTokenSource cts) =>
+            new DummyDisposable();
+
+        public void NotifyBackgroundWorkAvailable() { }
+
+        public void PreemptBackgroundWork() { }
+
         public Task<IDisposable> AcquireJobExecutionAsync(
             CancellationToken cancellationToken = default
         ) => Task.FromResult<IDisposable>(new DummyDisposable());

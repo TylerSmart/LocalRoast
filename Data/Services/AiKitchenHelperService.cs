@@ -12,7 +12,8 @@ public sealed class AiKitchenHelperService(
     AppDbContext dbContext,
     ILlmSettingsService llmSettingsService,
     ILlmExtractionClient llmClient,
-    TimeProvider? timeProvider = null
+    TimeProvider? timeProvider = null,
+    IIngestionQueueSignal? queueSignal = null
 ) : IAiKitchenHelperService
 {
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
@@ -157,6 +158,8 @@ public sealed class AiKitchenHelperService(
             DietaryOrPantryNote: request.DietaryOrPantryNote?.Trim()
         );
 
+        queueSignal?.PreemptBackgroundWork();
+
         var payload = await llmClient.SuggestIngredientSubstitutionsAsync(
             config,
             context,
@@ -281,6 +284,8 @@ public sealed class AiKitchenHelperService(
             StepNumber: step?.StepNumber,
             StepInstruction: step?.Instruction
         );
+
+        queueSignal?.PreemptBackgroundWork();
 
         var answer = await llmClient.AnswerKitchenQuestionAsync(config, context, cancellationToken);
         if (string.IsNullOrWhiteSpace(answer))
@@ -444,6 +449,8 @@ public sealed class AiKitchenHelperService(
             ExistingWeekScheduleLines: existingLines,
             CookbookCatalog: catalogList
         );
+
+        queueSignal?.PreemptBackgroundWork();
 
         var payload = await llmClient.DraftWeeklyMealPlanAsync(
             config,

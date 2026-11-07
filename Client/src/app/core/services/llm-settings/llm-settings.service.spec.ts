@@ -44,6 +44,14 @@ describe('LlmSettingsService', () => {
     httpMock.verify();
   });
 
+  it('gets model profiles via GET /api/llm-settings/model-profiles', async () => {
+    const promise = firstValueFrom(service.getModelProfiles());
+    const req = httpMock.expectOne('/api/llm-settings/model-profiles');
+    expect(req.request.method).toBe('GET');
+    req.flush([{ id: 'gemma4-e4b' }]);
+    expect((await promise)[0].id).toBe('gemma4-e4b');
+  });
+
   it('gets LLM settings via GET /api/llm-settings', async () => {
     const mockSettings: LlmSettingsDto = {
       provider: 'Ollama',

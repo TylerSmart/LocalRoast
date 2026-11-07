@@ -3,6 +3,7 @@ import {
   Component,
   DestroyRef,
   OnInit,
+  computed,
   inject,
   signal,
 } from '@angular/core';
@@ -21,11 +22,35 @@ import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import type {
   LlmConnectionTestResultDto,
+  LlmExtractionStrategy,
+  LlmModelProfile,
   LlmProvider,
   LlmSettingsDto,
 } from '../../../core/models/ingestion.models';
 import { IngestionService } from '../../../core/services/ingestion/ingestion.service';
 import { LlmSettingsService } from '../../../core/services/llm-settings/llm-settings.service';
+
+/** Returns the profile with the longest match prefix that starts the model tag. */
+export function matchModelProfile(
+  profiles: readonly LlmModelProfile[],
+  model: string | null | undefined,
+): LlmModelProfile | null {
+  const tag = model?.trim().toLowerCase() ?? '';
+  if (!tag) {
+    return null;
+  }
+  let best: LlmModelProfile | null = null;
+  let bestLength = 0;
+  for (const profile of profiles) {
+    for (const prefix of profile.matchPrefixes) {
+      if (tag.startsWith(prefix.toLowerCase()) && prefix.length > bestLength) {
+        best = profile;
+        bestLength = prefix.length;
+      }
+    }
+  }
+  return best;
+}
 
 @Component({
   selector: 'app-llm-settings-dialog',
@@ -62,6 +87,22 @@ export class LlmSettingsDialogComponent implements OnInit {
   readonly discoveredModels = signal<string[]>([]);
   readonly hasSavedApiKey = signal<boolean>(false);
   readonly apiKeyMasked = signal<string | null>(null);
+  readonly profiles = signal<LlmModelProfile[]>([]);
+  readonly refineProfiles = computed(() =>
+    this.profiles().filter((profile) => profile.recommendedAsRefineModel),
+  );
+  readonly selectedProfileId = signal<string>('');
+  readonly selectedRefineProfileId = signal<string>('');
+  readonly selectedProfile = computed(
+    () => this.profiles().find((profile) => profile.id === this.selectedProfileId()) ?? null,
+  );
+  readonly selectedRefineProfile = computed(
+    () =>
+      this.refineProfiles().find((profile) => profile.id === this.selectedRefineProfileId()) ??
+      null,
+  );
+  readonly profileMessage = signal<string | null>(null);
+  readonly refineProfileMessage = signal<string | null>(null);
 
   readonly form = this.fb.nonNullable.group({
     provider: this.fb.nonNullable.control<LlmProvider>('Ollama', [Validators.required]),
@@ -106,10 +147,26 @@ export class LlmSettingsDialogComponent implements OnInit {
       Validators.max(1000),
       Validators.pattern(/^\d+$/),
     ]),
+    extractionStrategy: this.fb.nonNullable.control<LlmExtractionStrategy>('Auto'),
+    refineModel: this.fb.nonNullable.control<string>('', [Validators.maxLength(200)]),
+    refineEnableThinking: this.fb.nonNullable.control<boolean>(true),
+    refineTemperature: this.fb.control<number | null>(null, [Validators.min(0), Validators.max(2)]),
+    refineTopP: this.fb.control<number | null>(null, [Validators.min(0), Validators.max(1)]),
+    refineTopK: this.fb.control<number | null>(null, [
+      Validators.min(1),
+      Validators.max(1000),
+      Validators.pattern(/^\d+$/),
+    ]),
+    refineRequestTimeoutSeconds: this.fb.nonNullable.control<number>(1200, [
+      Validators.required,
+      Validators.min(5),
+      Validators.max(1800),
+    ]),
   });
 
   ngOnInit(): void {
     this.loadSettings();
+    this.loadProfiles();
 
     this.form.controls.provider.valueChanges
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -157,9 +214,17 @@ export class LlmSettingsDialogComponent implements OnInit {
             temperature: settings.temperature ?? null,
             topP: settings.topP ?? null,
             topK: settings.topK ?? null,
+            extractionStrategy: settings.extractionStrategy ?? 'Auto',
+            refineModel: settings.refineModel ?? '',
+            refineEnableThinking: settings.refineEnableThinking ?? true,
+            refineTemperature: settings.refineTemperature ?? null,
+            refineTopP: settings.refineTopP ?? null,
+            refineTopK: settings.refineTopK ?? null,
+            refineRequestTimeoutSeconds: settings.refineRequestTimeoutSeconds ?? 1200,
           });
 
           this.isLoading.set(false);
+          this.selectDefaultProfiles();
 
           if (settings.baseUrl && settings.baseUrl.trim().length > 0) {
             this.testConnection();
@@ -244,6 +309,13 @@ export class LlmSettingsDialogComponent implements OnInit {
         temperature: values.temperature,
         topP: values.topP,
         topK: values.topK,
+        extractionStrategy: values.extractionStrategy,
+        refineModel: values.refineModel.trim() || null,
+        refineEnableThinking: values.refineEnableThinking,
+        refineTemperature: values.refineTemperature,
+        refineTopP: values.refineTopP,
+        refineTopK: values.refineTopK,
+        refineRequestTimeoutSeconds: values.refineRequestTimeoutSeconds,
       })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
@@ -262,6 +334,104 @@ export class LlmSettingsDialogComponent implements OnInit {
   onContextWindowSliderInput(event: Event): void {
     const slider = event.target as HTMLInputElement;
     this.form.controls.contextWindowTokens.setValue(slider.valueAsNumber);
+  }
+
+  loadProfiles(): void {
+    this.llmSettingsService
+      .getModelProfiles()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (profiles) => {
+          this.profiles.set(profiles);
+          this.selectDefaultProfiles();
+        },
+        error: () => this.profiles.set([]),
+      });
+  }
+
+  /**
+   * Fills the model settings with a profile's measured recommendations. The model name is kept
+   * so derived models (for example with a custom num_gpu) can use a profile; when the name does
+   * not match the profile, the extraction strategy is set explicitly instead of Auto.
+   */
+  applyProfile(): void {
+    const profile = this.selectedProfile();
+    if (!profile) {
+      return;
+    }
+    const controls = this.form.controls;
+    if (!controls.textModel.value.trim()) {
+      controls.textModel.setValue(profile.modelTag);
+    }
+    const matchesByName =
+      matchModelProfile(this.profiles(), controls.textModel.value)?.id === profile.id;
+    this.form.patchValue({
+      enableThinking: profile.enableThinking,
+      temperature: profile.temperature,
+      topP: profile.topP,
+      topK: profile.topK,
+      contextWindowTokens: profile.contextWindowTokens,
+      requestTimeoutSeconds: profile.requestTimeoutSeconds,
+      extractionRepairRounds: profile.extractionRepairRounds,
+      extractionStrategy: matchesByName
+        ? 'Auto'
+        : profile.useStagedExtraction
+          ? 'Staged'
+          : 'SinglePass',
+    });
+    this.form.markAsDirty();
+    this.profileMessage.set(
+      `Applied ${profile.displayName} recommendations. Save to keep them. ${profile.notes.join(' ')}`.trim(),
+    );
+  }
+
+  applyRefineProfile(): void {
+    const profile = this.selectedRefineProfile();
+    if (!profile) {
+      return;
+    }
+    const controls = this.form.controls;
+    if (!controls.refineModel.value.trim()) {
+      controls.refineModel.setValue(profile.modelTag);
+    }
+    this.form.patchValue({
+      refineEnableThinking: profile.enableThinking,
+      refineTemperature: profile.temperature,
+      refineTopP: profile.topP,
+      refineTopK: profile.topK,
+      refineRequestTimeoutSeconds: profile.requestTimeoutSeconds,
+    });
+    this.form.markAsDirty();
+    this.refineProfileMessage.set(
+      `Applied ${profile.displayName} recommendations. Save to keep them. ${profile.notes.join(' ')}`.trim(),
+    );
+  }
+
+  onProfileSelected(id: string): void {
+    this.selectedProfileId.set(id);
+    this.profileMessage.set(null);
+  }
+
+  onRefineProfileSelected(id: string): void {
+    this.selectedRefineProfileId.set(id);
+    this.refineProfileMessage.set(null);
+  }
+
+  private selectDefaultProfiles(): void {
+    const profiles = this.profiles();
+    if (profiles.length === 0 || this.isLoading()) {
+      return;
+    }
+    const values = this.form.getRawValue();
+    this.selectedProfileId.set(matchModelProfile(profiles, values.textModel)?.id ?? profiles[0].id);
+    const refineProfiles = this.refineProfiles();
+    const refineMatch = matchModelProfile(refineProfiles, values.refineModel);
+    this.selectedRefineProfileId.set(
+      refineMatch?.id ??
+        refineProfiles.find((profile) => profile.modelTag === values.refineModel.trim())?.id ??
+        refineProfiles[0]?.id ??
+        '',
+    );
   }
 
   onCancel(): void {

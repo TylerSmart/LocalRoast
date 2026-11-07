@@ -5,6 +5,7 @@ import { Observable, tap } from 'rxjs';
 import { apiUrl } from '../../api/api-url';
 import type {
   LlmConnectionTestResultDto,
+  LlmModelProfile,
   LlmSettingsDto,
   TestLlmConnectionRequest,
   UpdateLlmSettingsRequest,
@@ -19,6 +20,10 @@ export class LlmSettingsService {
 
   getSettings(): Observable<LlmSettingsDto> {
     return this.http.get<LlmSettingsDto>(apiUrl('/llm-settings'));
+  }
+
+  getModelProfiles(): Observable<LlmModelProfile[]> {
+    return this.http.get<LlmModelProfile[]>(apiUrl('/llm-settings/model-profiles'));
   }
 
   updateSettings(request: UpdateLlmSettingsRequest): Observable<LlmSettingsDto> {

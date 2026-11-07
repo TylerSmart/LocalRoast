@@ -16,6 +16,9 @@ public sealed class MockLanLlmAndBlogServer : IAsyncDisposable
     public string BaseUrl { get; }
     public bool SimulateOffline { get; set; }
     public string? ResponsePayload { get; set; }
+    public Dictionary<string, string> ResponsesByModel { get; } =
+        new(StringComparer.OrdinalIgnoreCase);
+    public List<string> RequestedModels { get; } = [];
     public int? LastNumGpu { get; private set; }
     public double? LastTemperature { get; private set; }
     public double? LastTopP { get; private set; }
@@ -96,8 +99,21 @@ public sealed class MockLanLlmAndBlogServer : IAsyncDisposable
                     return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
                 }
 
+                var requestedModel = body.RootElement.TryGetProperty("model", out var modelValue)
+                    ? modelValue.GetString() ?? ""
+                    : "";
+                lock (server.RequestedModels)
+                {
+                    server.RequestedModels.Add(requestedModel);
+                }
+
                 var payloadJson =
-                    server.ResponsePayload
+                    (
+                        server.ResponsesByModel.TryGetValue(requestedModel, out var modelPayload)
+                            ? modelPayload
+                            : null
+                    )
+                    ?? server.ResponsePayload
                     ?? """
                         {
                           "title": "Crispy Sesame Tofu",

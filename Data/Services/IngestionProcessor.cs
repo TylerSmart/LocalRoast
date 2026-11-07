@@ -38,8 +38,23 @@ public sealed class IngestionProcessor(
             )
             .ToListAsync(cancellationToken);
 
+        var interruptedRefinements = await dbContext
+            .IngestionDraftRefinements.Where(item =>
+                item.Status == IngestionRefinementStatus.Running
+            )
+            .ToListAsync(cancellationToken);
+        foreach (var refinement in interruptedRefinements)
+        {
+            refinement.Status = IngestionRefinementStatus.Pending;
+            refinement.Detail = "Resuming after an interrupted refine pass.";
+        }
+
         if (interrupted.Count == 0)
         {
+            if (interruptedRefinements.Count > 0)
+            {
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
             return 0;
         }
 
@@ -127,6 +142,12 @@ public sealed class IngestionProcessor(
             job.Status = IngestionJobStatus.Preprocessing;
 
             job.StatusDetail = "Preprocessing source content...";
+
+            // A refine pass of an earlier draft no longer applies once the job is reprocessed.
+            var staleRefinements = await dbContext
+                .IngestionDraftRefinements.Where(item => item.IngestionJobId == job.Id)
+                .ToListAsync(jobCt);
+            dbContext.IngestionDraftRefinements.RemoveRange(staleRefinements);
 
             await dbContext.SaveChangesAsync(jobCt);
 
@@ -732,6 +753,28 @@ public sealed class IngestionProcessor(
                     var detail =
                         $"{job.StatusDetail} Validation: {string.Join(" ", extractionIssues)}";
                     job.StatusDetail = detail[..Math.Min(detail.Length, 2000)];
+                }
+
+                var refineModel = config.RefineModel?.Trim();
+                if (
+                    !requiresVision
+                    && !string.IsNullOrWhiteSpace(refineModel)
+                    && !string.Equals(
+                        refineModel,
+                        config.TextModel?.Trim(),
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                    && IngestionReviewService.Diagnose(draft, IngestionReviewService.GetSource(job))
+                        is { } savedDiagnostics
+                    && (
+                        savedDiagnostics.ValidationIssues.Count > 0
+                        || savedDiagnostics.QualityWarnings.Count > 0
+                    )
+                )
+                {
+                    var refinement = new IngestionDraftRefinement { IngestionJobId = job.Id };
+                    IngestionReviewService.Requeue(refinement, refineModel, DateTimeOffset.UtcNow);
+                    dbContext.IngestionDraftRefinements.Add(refinement);
                 }
             }
 

@@ -42,6 +42,11 @@ public sealed class AppDataMaintenanceService(
             var shoppingLists = await dbContext.ShoppingLists.ToListAsync(cancellationToken);
             dbContext.ShoppingLists.RemoveRange(shoppingLists);
 
+            var refinements = await dbContext.IngestionDraftRefinements.ToListAsync(
+                cancellationToken
+            );
+            dbContext.IngestionDraftRefinements.RemoveRange(refinements);
+
             var ingestionJobs = await dbContext.IngestionJobs.ToListAsync(cancellationToken);
             dbContext.IngestionJobs.RemoveRange(ingestionJobs);
 

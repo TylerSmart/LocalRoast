@@ -279,6 +279,11 @@ namespace App.Data.Migrations
                     b.Property<int>("ExtractionRepairRounds")
                         .HasColumnType("int");
 
+                    b.Property<string>("ExtractionStrategy")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
                     b.Property<int>("MaxIngestionRetries")
                         .HasColumnType("int");
 
@@ -302,6 +307,25 @@ namespace App.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(32)
                         .HasColumnType("nvarchar(32)");
+
+                    b.Property<bool>("RefineEnableThinking")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("RefineModel")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int>("RefineRequestTimeoutSeconds")
+                        .HasColumnType("int");
+
+                    b.Property<double?>("RefineTemperature")
+                        .HasColumnType("float");
+
+                    b.Property<int?>("RefineTopK")
+                        .HasColumnType("int");
+
+                    b.Property<double?>("RefineTopP")
+                        .HasColumnType("float");
 
                     b.Property<int>("RequestTimeoutSeconds")
                         .HasColumnType("int");
@@ -334,6 +358,75 @@ namespace App.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("HouseholdLlmSettings", (string)null);
+                });
+
+            modelBuilder.Entity("App.Data.Entities.IngestionDraftRefinement", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("BaseDraftJson")
+                        .HasMaxLength(200000)
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("Detail")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<Guid>("IngestionJobId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("IssuesAfter")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("IssuesBefore")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Model")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTimeOffset>("ModifiedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("ModifiedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("ProposalJson")
+                        .HasMaxLength(200000)
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTimeOffset>("RequestedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IngestionJobId")
+                        .IsUnique();
+
+                    b.HasIndex("Status", "RequestedAt");
+
+                    b.ToTable("IngestionDraftRefinements", (string)null);
                 });
 
             modelBuilder.Entity("App.Data.Entities.IngestionJob", b =>
@@ -1630,6 +1723,17 @@ namespace App.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("FoodItem");
+                });
+
+            modelBuilder.Entity("App.Data.Entities.IngestionDraftRefinement", b =>
+                {
+                    b.HasOne("App.Data.Entities.IngestionJob", "IngestionJob")
+                        .WithOne()
+                        .HasForeignKey("App.Data.Entities.IngestionDraftRefinement", "IngestionJobId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("IngestionJob");
                 });
 
             modelBuilder.Entity("App.Data.Entities.IngestionJob", b =>

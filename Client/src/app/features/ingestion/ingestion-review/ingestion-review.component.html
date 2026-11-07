@@ -419,6 +419,102 @@
                     can keep editing.
                   </p>
                 }
+
+                @if (refinement(); as refined) {
+                  <section
+                    class="refinement-panel"
+                    aria-label="Background refinement"
+                    data-testid="refinement-panel"
+                  >
+                    <h3>Background refinement ({{ refined.model }})</h3>
+                    @switch (refined.status) {
+                      @case ('Pending') {
+                        <p role="status">
+                          Waiting to run. It starts when no imports are queued.
+                          @if (refined.detail) {
+                            {{ refined.detail }}
+                          }
+                        </p>
+                      }
+                      @case ('Running') {
+                        <p role="status">
+                          <mat-spinner diameter="16" class="inline-spinner"></mat-spinner>
+                          Refining in the background. You can keep editing.
+                        </p>
+                      }
+                      @case ('Improved') {
+                        <p role="status">
+                          A refined draft is ready: {{ refined.issuesBefore }} →
+                          {{ refined.issuesAfter }} issues and warnings.
+                        </p>
+                      }
+                      @case ('NoImprovement') {
+                        <p role="status">
+                          {{ refined.detail || 'The refine model found nothing to improve.' }}
+                        </p>
+                      }
+                      @case ('Failed') {
+                        <p class="review-error" role="status">
+                          {{ refined.detail || 'Refinement failed.' }}
+                        </p>
+                      }
+                    }
+                    @if (refined.basedOnEarlierDraft) {
+                      <p class="stale-notice" role="status">
+                        The saved draft changed after refinement started. Compare carefully before
+                        applying.
+                      </p>
+                    }
+                    <div class="review-actions">
+                      @if (refined.hasProposal) {
+                        <button
+                          mat-flat-button
+                          type="button"
+                          (click)="compareRefinement()"
+                          [disabled]="
+                            isRefinementBusy() ||
+                            isRepairing() ||
+                            isSaving() ||
+                            isPublishing() ||
+                            isRerunning() ||
+                            job()?.status !== 'ReadyForReview'
+                          "
+                          data-testid="compare-refinement"
+                        >
+                          <mat-icon>compare</mat-icon>
+                          Compare refined draft
+                        </button>
+                      }
+                      <button
+                        mat-stroked-button
+                        type="button"
+                        (click)="dismissRefinement()"
+                        [disabled]="isRefinementBusy()"
+                        data-testid="dismiss-refinement"
+                      >
+                        <mat-icon>close</mat-icon>
+                        {{ refinementActive() ? 'Cancel refinement' : 'Dismiss' }}
+                      </button>
+                    </div>
+                  </section>
+                } @else if (refineModel() && job()?.status === 'ReadyForReview') {
+                  <div class="review-actions">
+                    <button
+                      mat-stroked-button
+                      type="button"
+                      (click)="requestRefinement()"
+                      [disabled]="isRefinementBusy()"
+                      data-testid="request-refinement"
+                    >
+                      <mat-icon>psychology</mat-icon>
+                      Refine with {{ refineModel() }}
+                    </button>
+                  </div>
+                  <p class="refinement-hint">
+                    Runs a slower second pass in the background with the refine model. Your edits
+                    are not changed until you compare and apply it.
+                  </p>
+                }
               </mat-card-content>
             </mat-card>
 

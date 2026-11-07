@@ -20,6 +20,7 @@ export interface IngestionRepairDialogData {
   preview: IngestionRepairPreviewDto;
   collections: { id: string; name: string }[];
   tags: { id: string; name: string }[];
+  title?: string;
 }
 
 interface RepairChange {

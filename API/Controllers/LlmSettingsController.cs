@@ -18,6 +18,10 @@ public sealed class LlmSettingsController(ILlmSettingsService settingsService) :
         return Ok(settings);
     }
 
+    [HttpGet("model-profiles")]
+    [ProducesResponseType(typeof(IReadOnlyList<LlmModelProfileDto>), StatusCodes.Status200OK)]
+    public IActionResult GetModelProfiles() => Ok(LlmModelProfiles.All);
+
     [HttpPut]
     [ProducesResponseType(typeof(LlmSettingsDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]

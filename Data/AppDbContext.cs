@@ -35,6 +35,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
 
     public DbSet<IngestionJob> IngestionJobs => Set<IngestionJob>();
 
+    public DbSet<IngestionDraftRefinement> IngestionDraftRefinements =>
+        Set<IngestionDraftRefinement>();
+
     public DbSet<RecipeAttachment> RecipeAttachments => Set<RecipeAttachment>();
 
     public DbSet<PersonalAccessToken> PersonalAccessTokens => Set<PersonalAccessToken>();

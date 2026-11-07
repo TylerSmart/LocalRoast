@@ -312,6 +312,111 @@ public sealed class LlmSettingsIntegrationTests
     }
 
     [TestMethod]
+    public async Task ModelProfiles_ListRecommendedSettingsForEachModel()
+    {
+        await AuthenticateAsync(_client);
+
+        var profiles = await _client.GetFromJsonAsync<List<LlmModelProfileDto>>(
+            "/api/llm-settings/model-profiles"
+        );
+
+        Assert.IsNotNull(profiles);
+        var e4b = profiles.Single(profile => profile.Id == "gemma4-e4b");
+        Assert.IsTrue(e4b.UseStagedExtraction);
+        Assert.IsTrue(e4b.EnableThinking);
+        var thinking = profiles.Single(profile => profile.Id == "gemma4-12b-thinking");
+        Assert.IsTrue(thinking.RecommendedAsRefineModel);
+        Assert.AreEqual(1.0, thinking.Temperature);
+        Assert.AreEqual(64, thinking.TopK);
+    }
+
+    [TestMethod]
+    public async Task ExtractionStrategyAndRefineSettings_PersistAndReachRefineConfiguration()
+    {
+        await AuthenticateAsync(_client);
+
+        var response = await _client.PutAsJsonAsync(
+            "/api/llm-settings",
+            new UpdateLlmSettingsRequest(
+                TextModel: "my-tuned-e4b",
+                ExtractionStrategy: LlmExtractionStrategy.Staged,
+                RefineModel: "  gemma4:26b-a4b  ",
+                RefineEnableThinking: false,
+                RefineTemperature: 1.0,
+                RefineTopP: 0.95,
+                RefineTopK: 64,
+                RefineRequestTimeoutSeconds: 900
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+        var settings = await response.Content.ReadFromJsonAsync<LlmSettingsDto>();
+        Assert.IsNotNull(settings);
+        Assert.AreEqual(LlmExtractionStrategy.Staged, settings.ExtractionStrategy);
+        Assert.AreEqual("gemma4:26b-a4b", settings.RefineModel);
+        Assert.IsFalse(settings.RefineEnableThinking);
+        Assert.AreEqual(900, settings.RefineRequestTimeoutSeconds);
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var effective = await scope
+                .ServiceProvider.GetRequiredService<ILlmSettingsService>()
+                .GetEffectiveConfigAsync();
+            Assert.IsTrue(
+                LlmModelProfiles.UsesStagedExtraction(
+                    effective.ExtractionStrategy,
+                    effective.TextModel
+                )
+            );
+            var refine = effective.ForRefinement();
+            Assert.AreEqual("gemma4:26b-a4b", refine.TextModel);
+            Assert.AreEqual("gemma4:26b-a4b", refine.VisionModel);
+            Assert.IsFalse(refine.EnableThinking);
+            Assert.AreEqual(1.0, refine.Temperature);
+            Assert.AreEqual(0.95, refine.TopP);
+            Assert.AreEqual(64, refine.TopK);
+            Assert.AreEqual(900, refine.RequestTimeoutSeconds);
+            Assert.AreEqual(LlmExtractionStrategy.SinglePass, refine.ExtractionStrategy);
+        }
+
+        response = await _client.PutAsJsonAsync(
+            "/api/llm-settings",
+            new UpdateLlmSettingsRequest(TextModel: "gemma4:e4b", RefineModel: "   ")
+        );
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+        var cleared = await response.Content.ReadFromJsonAsync<LlmSettingsDto>();
+        Assert.IsNull(cleared!.RefineModel);
+        Assert.AreEqual(LlmExtractionStrategy.Auto, cleared.ExtractionStrategy);
+    }
+
+    [TestMethod]
+    [DataRow(2.01, null, null, 1200)]
+    [DataRow(null, 1.01, null, 1200)]
+    [DataRow(null, null, 0, 1200)]
+    [DataRow(null, null, null, 4)]
+    public async Task UpdateSettings_OutOfRangeRefineSettings_ReturnsBadRequest(
+        double? temperature,
+        double? topP,
+        int? topK,
+        int timeout
+    )
+    {
+        await AuthenticateAsync(_client);
+
+        var response = await _client.PutAsJsonAsync(
+            "/api/llm-settings",
+            new UpdateLlmSettingsRequest(
+                RefineModel: "gemma4:26b-a4b",
+                RefineTemperature: temperature,
+                RefineTopP: topP,
+                RefineTopK: topK,
+                RefineRequestTimeoutSeconds: timeout
+            )
+        );
+
+        Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [TestMethod]
     public async Task UpdateSettings_InvalidBaseUrl_ReturnsBadRequest()
     {
         await AuthenticateAsync(_client);

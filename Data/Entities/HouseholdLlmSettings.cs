@@ -40,6 +40,20 @@ public sealed class HouseholdLlmSettings : IAuditable
 
     public int ExtractionRepairRounds { get; set; } = 1;
 
+    public LlmExtractionStrategy ExtractionStrategy { get; set; } = LlmExtractionStrategy.Auto;
+
+    public string? RefineModel { get; set; }
+
+    public bool RefineEnableThinking { get; set; } = true;
+
+    public double? RefineTemperature { get; set; }
+
+    public double? RefineTopP { get; set; }
+
+    public int? RefineTopK { get; set; }
+
+    public int RefineRequestTimeoutSeconds { get; set; } = 1200;
+
     public int MaxIngestionRetries { get; set; } = 3;
 
     public bool EnableIngestion { get; set; } = true;

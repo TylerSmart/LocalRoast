@@ -165,6 +165,60 @@
           </mat-form-field>
         </div>
 
+        @if (profiles().length > 0) {
+          <div class="profile-section" role="group" aria-labelledby="profileHeading">
+            <div id="profileHeading" class="sampling-heading">Recommended settings</div>
+            <div class="profile-row">
+              <mat-form-field appearance="outline" class="form-field" subscriptSizing="dynamic">
+                <mat-label>Model profile</mat-label>
+                <mat-select
+                  [value]="selectedProfileId()"
+                  (selectionChange)="onProfileSelected($event.value)"
+                  data-testid="llm-profile-select"
+                >
+                  @for (profile of profiles(); track profile.id) {
+                    <mat-option [value]="profile.id">{{ profile.displayName }}</mat-option>
+                  }
+                </mat-select>
+                @if (selectedProfile(); as profile) {
+                  <mat-hint>{{ profile.summary }}</mat-hint>
+                }
+              </mat-form-field>
+              <button
+                mat-stroked-button
+                type="button"
+                class="apply-profile-btn"
+                (click)="applyProfile()"
+                [disabled]="!selectedProfile()"
+                data-testid="llm-apply-profile"
+              >
+                <mat-icon>auto_fix_high</mat-icon>
+                <span>Apply</span>
+              </button>
+            </div>
+            @if (profileMessage(); as message) {
+              <p class="profile-message" role="status">{{ message }}</p>
+            }
+          </div>
+        }
+
+        <mat-form-field
+          appearance="outline"
+          class="form-field full-width"
+          subscriptSizing="dynamic"
+        >
+          <mat-label>Extraction strategy</mat-label>
+          <mat-select formControlName="extractionStrategy" data-testid="llm-extraction-strategy">
+            <mat-option value="Auto">Automatic (from the model profile)</mat-option>
+            <mat-option value="Staged">Staged: ingredients, then instructions</mat-option>
+            <mat-option value="SinglePass">Single request per recipe</mat-option>
+          </mat-select>
+          <mat-hint>
+            Staged extraction helps small models such as Gemma 4 E2B/E4B. Choose it explicitly for
+            renamed or derived models.
+          </mat-hint>
+        </mat-form-field>
+
         <!-- Advanced Options Row -->
         <div class="form-row two-cols">
           @if (form.controls.provider.value === 'Ollama') {
@@ -306,6 +360,142 @@
             request. Gemma 4 12B with thinking needs 1 / 0.95 / 64. Some hosted OpenAI-compatible
             APIs reject Top K.
           </p>
+        </div>
+
+        <div class="profile-section refine-section" role="group" aria-labelledby="refineHeading">
+          <div id="refineHeading" class="sampling-heading">Refine model (optional)</div>
+          <p class="sampling-hint refine-intro">
+            A larger, slower model that re-checks review drafts which still have issues. It runs in
+            the background only while no imports are queued, and you choose whether to apply its
+            changes.
+          </p>
+          <mat-form-field
+            appearance="outline"
+            class="form-field full-width"
+            subscriptSizing="dynamic"
+          >
+            <mat-label>Refine Model</mat-label>
+            <input
+              matInput
+              formControlName="refineModel"
+              [matAutocomplete]="refineAuto"
+              placeholder="Leave blank to turn off"
+              data-testid="llm-refine-model"
+            />
+            <mat-autocomplete #refineAuto="matAutocomplete">
+              @for (m of discoveredModels(); track m) {
+                <mat-option [value]="m">{{ m }}</mat-option>
+              }
+            </mat-autocomplete>
+            <mat-hint
+              >Must differ from the text model. Leave blank to turn refinement off.</mat-hint
+            >
+          </mat-form-field>
+
+          @if (refineProfiles().length > 0) {
+            <div class="profile-row">
+              <mat-form-field appearance="outline" class="form-field" subscriptSizing="dynamic">
+                <mat-label>Refine profile</mat-label>
+                <mat-select
+                  [value]="selectedRefineProfileId()"
+                  (selectionChange)="onRefineProfileSelected($event.value)"
+                  data-testid="llm-refine-profile-select"
+                >
+                  @for (profile of refineProfiles(); track profile.id) {
+                    <mat-option [value]="profile.id">{{ profile.displayName }}</mat-option>
+                  }
+                </mat-select>
+                @if (selectedRefineProfile(); as profile) {
+                  <mat-hint>{{ profile.summary }}</mat-hint>
+                }
+              </mat-form-field>
+              <button
+                mat-stroked-button
+                type="button"
+                class="apply-profile-btn"
+                (click)="applyRefineProfile()"
+                [disabled]="!selectedRefineProfile()"
+                data-testid="llm-apply-refine-profile"
+              >
+                <mat-icon>auto_fix_high</mat-icon>
+                <span>Apply</span>
+              </button>
+            </div>
+            @if (refineProfileMessage(); as message) {
+              <p class="profile-message" role="status">{{ message }}</p>
+            }
+          }
+
+          <div class="form-row three-cols">
+            <mat-form-field appearance="outline" class="form-field">
+              <mat-label>Refine temperature</mat-label>
+              <input
+                matInput
+                type="number"
+                formControlName="refineTemperature"
+                min="0"
+                max="2"
+                step="0.05"
+                placeholder="Default"
+              />
+              @if (form.controls.refineTemperature.invalid) {
+                <mat-error>0 to 2</mat-error>
+              }
+            </mat-form-field>
+
+            <mat-form-field appearance="outline" class="form-field">
+              <mat-label>Refine Top P</mat-label>
+              <input
+                matInput
+                type="number"
+                formControlName="refineTopP"
+                min="0"
+                max="1"
+                step="0.05"
+                placeholder="Default"
+              />
+              @if (form.controls.refineTopP.invalid) {
+                <mat-error>0 to 1</mat-error>
+              }
+            </mat-form-field>
+
+            <mat-form-field appearance="outline" class="form-field">
+              <mat-label>Refine Top K</mat-label>
+              <input
+                matInput
+                type="number"
+                formControlName="refineTopK"
+                min="1"
+                max="1000"
+                step="1"
+                placeholder="Default"
+              />
+              @if (form.controls.refineTopK.invalid) {
+                <mat-error>Whole number 1 to 1000</mat-error>
+              }
+            </mat-form-field>
+          </div>
+
+          <div class="form-row two-cols">
+            <mat-form-field appearance="outline" class="form-field">
+              <mat-label>Refine timeout (seconds)</mat-label>
+              <input
+                matInput
+                type="number"
+                formControlName="refineRequestTimeoutSeconds"
+                min="5"
+                max="1800"
+              />
+              @if (form.controls.refineRequestTimeoutSeconds.invalid) {
+                <mat-error>5 to 1800</mat-error>
+              }
+            </mat-form-field>
+            <div class="toggle-section refine-thinking">
+              <mat-slide-toggle formControlName="refineEnableThinking" color="primary">
+                Refine with thinking
+              </mat-slide-toggle>
+            </div>
+          </div>
         </div>
 
         <!-- Ingestion Enable/Disable Toggle -->

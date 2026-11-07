@@ -284,6 +284,31 @@ describe('IngestionService', () => {
     expect(repairRequest.request.body).toEqual({ draft, hint: 'Check the oil' });
     repairRequest.flush(preview);
     expect(await previewPromise).toEqual(preview);
+
+    const emptyPromise = firstValueFrom(service.getRefinement('job-1'));
+    const emptyRequest = httpMock.expectOne('/api/ingestion/jobs/job-1/refinement');
+    expect(emptyRequest.request.method).toBe('GET');
+    emptyRequest.flush(null, { status: 204, statusText: 'No Content' });
+    expect(await emptyPromise).toBeNull();
+
+    const queuedPromise = firstValueFrom(service.requestRefinement('job-1'));
+    const queueRequest = httpMock.expectOne('/api/ingestion/jobs/job-1/refinement');
+    expect(queueRequest.request.method).toBe('POST');
+    queueRequest.flush({ status: 'Pending' });
+    expect((await queuedPromise).status).toBe('Pending');
+
+    const refinedPromise = firstValueFrom(service.previewRefinement('job-1', draft));
+    const refineRequest = httpMock.expectOne('/api/ingestion/jobs/job-1/refinement/preview');
+    expect(refineRequest.request.method).toBe('POST');
+    expect(refineRequest.request.body).toEqual({ draft });
+    refineRequest.flush(preview);
+    expect(await refinedPromise).toEqual(preview);
+
+    const dismissPromise = firstValueFrom(service.dismissRefinement('job-1'));
+    const dismissRequest = httpMock.expectOne('/api/ingestion/jobs/job-1/refinement');
+    expect(dismissRequest.request.method).toBe('DELETE');
+    dismissRequest.flush(null, { status: 204, statusText: 'No Content' });
+    await dismissPromise;
   });
 
   it('retries all waiting jobs and discards job', async () => {

@@ -74,7 +74,20 @@ public sealed class IngestionBackgroundWorker(
                     await processor.ProbeAndPromoteWaitingJobsAsync(stoppingToken);
                 }
 
-                // 3. Await signal or poll interval
+                // 3. Refine one review draft with the larger model while nothing is queued
+                bool refined;
+                using (var refineScope = scopeFactory.CreateScope())
+                {
+                    var reviewService =
+                        refineScope.ServiceProvider.GetRequiredService<IIngestionReviewService>();
+                    refined = await reviewService.RefineNextPendingDraftAsync(stoppingToken);
+                }
+                if (refined)
+                {
+                    continue;
+                }
+
+                // 4. Await signal or poll interval
                 pollInterval = TimeSpan.FromSeconds(
                     Math.Max(1, options.Value.WorkerPollIntervalSeconds)
                 );

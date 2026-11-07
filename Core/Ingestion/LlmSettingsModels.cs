@@ -40,6 +40,21 @@ public sealed class LlmDefaultsOptions
     /// <summary>Maximum validation-driven correction requests after each text extraction.</summary>
     public int ExtractionRepairRounds { get; set; } = 1;
 
+    public LlmExtractionStrategy ExtractionStrategy { get; set; } = LlmExtractionStrategy.Auto;
+
+    /// <summary>Optional larger model that refines drafts still flagged after the Text Model's repair rounds.</summary>
+    public string? RefineModel { get; set; }
+
+    public bool RefineEnableThinking { get; set; } = true;
+
+    public double? RefineTemperature { get; set; }
+
+    public double? RefineTopP { get; set; }
+
+    public int? RefineTopK { get; set; }
+
+    public int RefineRequestTimeoutSeconds { get; set; } = 1200;
+
     public int MaxIngestionRetries { get; set; } = 3;
 
     public bool EnableIngestion { get; set; } = true;
@@ -70,7 +85,14 @@ public record LlmSettingsDto(
     double? Temperature = null,
     double? TopP = null,
     int? TopK = null,
-    int ExtractionRepairRounds = 1
+    int ExtractionRepairRounds = 1,
+    LlmExtractionStrategy ExtractionStrategy = LlmExtractionStrategy.Auto,
+    string? RefineModel = null,
+    bool RefineEnableThinking = true,
+    double? RefineTemperature = null,
+    double? RefineTopP = null,
+    int? RefineTopK = null,
+    int RefineRequestTimeoutSeconds = 1200
 );
 
 public record EffectiveLlmConnectionConfig(
@@ -90,8 +112,30 @@ public record EffectiveLlmConnectionConfig(
     double? Temperature = null,
     double? TopP = null,
     int? TopK = null,
-    int ExtractionRepairRounds = 1
-);
+    int ExtractionRepairRounds = 1,
+    LlmExtractionStrategy ExtractionStrategy = LlmExtractionStrategy.Auto,
+    string? RefineModel = null,
+    bool RefineEnableThinking = true,
+    double? RefineTemperature = null,
+    double? RefineTopP = null,
+    int? RefineTopK = null,
+    int RefineRequestTimeoutSeconds = 1200
+)
+{
+    /// <summary>The connection settings for refine requests: the Refine Model with its own thinking, sampling and timeout.</summary>
+    public EffectiveLlmConnectionConfig ForRefinement() =>
+        this with
+        {
+            TextModel = RefineModel?.Trim(),
+            VisionModel = RefineModel?.Trim(),
+            EnableThinking = RefineEnableThinking,
+            Temperature = RefineTemperature,
+            TopP = RefineTopP,
+            TopK = RefineTopK,
+            RequestTimeoutSeconds = RefineRequestTimeoutSeconds,
+            ExtractionStrategy = LlmExtractionStrategy.SinglePass,
+        };
+}
 
 public record UpdateLlmSettingsRequest(
     LlmProvider Provider = LlmProvider.Ollama,
@@ -111,7 +155,14 @@ public record UpdateLlmSettingsRequest(
     [Range(0.0, 2.0)] double? Temperature = null,
     [Range(0.0, 1.0)] double? TopP = null,
     [Range(1, 1000)] int? TopK = null,
-    [Range(0, 5)] int ExtractionRepairRounds = 1
+    [Range(0, 5)] int ExtractionRepairRounds = 1,
+    LlmExtractionStrategy ExtractionStrategy = LlmExtractionStrategy.Auto,
+    [MaxLength(200)] string? RefineModel = null,
+    bool RefineEnableThinking = true,
+    [Range(0.0, 2.0)] double? RefineTemperature = null,
+    [Range(0.0, 1.0)] double? RefineTopP = null,
+    [Range(1, 1000)] int? RefineTopK = null,
+    [Range(5, 1800)] int RefineRequestTimeoutSeconds = 1200
 );
 
 public record TestLlmConnectionRequest(

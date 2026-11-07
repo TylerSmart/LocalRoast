@@ -11,6 +11,7 @@ import type {
   IngestionJobStatus,
   IngestionJobSummaryDto,
   IngestionQueueSummaryDto,
+  IngestionRefinementDto,
   IngestionRepairPreviewDto,
   IngestionReviewDiagnosticsDto,
   RetryBatchJobsRequest,
@@ -117,6 +118,29 @@ export class IngestionService {
     return this.http.post<IngestionRepairPreviewDto>(
       apiUrl(`/ingestion/jobs/${id}/repair-preview`),
       { draft, hint },
+    );
+  }
+
+  /** Returns null when the draft has no refine pass. */
+  getRefinement(id: string): Observable<IngestionRefinementDto | null> {
+    return this.http.get<IngestionRefinementDto | null>(apiUrl(`/ingestion/jobs/${id}/refinement`));
+  }
+
+  requestRefinement(id: string): Observable<IngestionRefinementDto> {
+    return this.http.post<IngestionRefinementDto>(apiUrl(`/ingestion/jobs/${id}/refinement`), null);
+  }
+
+  dismissRefinement(id: string): Observable<void> {
+    return this.http.delete<void>(apiUrl(`/ingestion/jobs/${id}/refinement`));
+  }
+
+  previewRefinement(
+    id: string,
+    draft: IngestionExtractedDraftDto,
+  ): Observable<IngestionRepairPreviewDto> {
+    return this.http.post<IngestionRepairPreviewDto>(
+      apiUrl(`/ingestion/jobs/${id}/refinement/preview`),
+      { draft },
     );
   }
 

@@ -45,7 +45,14 @@ public sealed class LlmSettingsService(
                 Temperature: entity.Temperature,
                 TopP: entity.TopP,
                 TopK: entity.TopK,
-                ExtractionRepairRounds: entity.ExtractionRepairRounds
+                ExtractionRepairRounds: entity.ExtractionRepairRounds,
+                ExtractionStrategy: entity.ExtractionStrategy,
+                RefineModel: entity.RefineModel,
+                RefineEnableThinking: entity.RefineEnableThinking,
+                RefineTemperature: entity.RefineTemperature,
+                RefineTopP: entity.RefineTopP,
+                RefineTopK: entity.RefineTopK,
+                RefineRequestTimeoutSeconds: entity.RefineRequestTimeoutSeconds
             );
         }
 
@@ -69,7 +76,14 @@ public sealed class LlmSettingsService(
             Temperature: opt.Temperature,
             TopP: opt.TopP,
             TopK: opt.TopK,
-            ExtractionRepairRounds: opt.ExtractionRepairRounds
+            ExtractionRepairRounds: opt.ExtractionRepairRounds,
+            ExtractionStrategy: opt.ExtractionStrategy,
+            RefineModel: opt.RefineModel,
+            RefineEnableThinking: opt.RefineEnableThinking,
+            RefineTemperature: opt.RefineTemperature,
+            RefineTopP: opt.RefineTopP,
+            RefineTopK: opt.RefineTopK,
+            RefineRequestTimeoutSeconds: opt.RefineRequestTimeoutSeconds
         );
     }
 
@@ -103,7 +117,14 @@ public sealed class LlmSettingsService(
                 Temperature: entity.Temperature,
                 TopP: entity.TopP,
                 TopK: entity.TopK,
-                ExtractionRepairRounds: entity.ExtractionRepairRounds
+                ExtractionRepairRounds: entity.ExtractionRepairRounds,
+                ExtractionStrategy: entity.ExtractionStrategy,
+                RefineModel: entity.RefineModel,
+                RefineEnableThinking: entity.RefineEnableThinking,
+                RefineTemperature: entity.RefineTemperature,
+                RefineTopP: entity.RefineTopP,
+                RefineTopK: entity.RefineTopK,
+                RefineRequestTimeoutSeconds: entity.RefineRequestTimeoutSeconds
             );
         }
 
@@ -125,7 +146,14 @@ public sealed class LlmSettingsService(
             Temperature: opt.Temperature,
             TopP: opt.TopP,
             TopK: opt.TopK,
-            ExtractionRepairRounds: opt.ExtractionRepairRounds
+            ExtractionRepairRounds: opt.ExtractionRepairRounds,
+            ExtractionStrategy: opt.ExtractionStrategy,
+            RefineModel: opt.RefineModel,
+            RefineEnableThinking: opt.RefineEnableThinking,
+            RefineTemperature: opt.RefineTemperature,
+            RefineTopP: opt.RefineTopP,
+            RefineTopK: opt.RefineTopK,
+            RefineRequestTimeoutSeconds: opt.RefineRequestTimeoutSeconds
         );
     }
 
@@ -183,6 +211,15 @@ public sealed class LlmSettingsService(
         entity.TopP = request.TopP;
         entity.TopK = request.TopK;
         entity.ExtractionRepairRounds = request.ExtractionRepairRounds;
+        entity.ExtractionStrategy = request.ExtractionStrategy;
+        entity.RefineModel = string.IsNullOrWhiteSpace(request.RefineModel)
+            ? null
+            : request.RefineModel.Trim();
+        entity.RefineEnableThinking = request.RefineEnableThinking;
+        entity.RefineTemperature = request.RefineTemperature;
+        entity.RefineTopP = request.RefineTopP;
+        entity.RefineTopK = request.RefineTopK;
+        entity.RefineRequestTimeoutSeconds = request.RefineRequestTimeoutSeconds;
 
         await dbContext.SaveChangesAsync(cancellationToken);
 

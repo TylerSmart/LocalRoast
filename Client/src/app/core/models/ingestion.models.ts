@@ -47,6 +47,26 @@ export type IngestionJobStatus =
   | 'Failed'
   | 'Discarded';
 
+export type LlmExtractionStrategy = 'Auto' | 'SinglePass' | 'Staged';
+
+export interface LlmModelProfile {
+  id: string;
+  displayName: string;
+  modelTag: string;
+  matchPrefixes: string[];
+  summary: string;
+  enableThinking: boolean;
+  temperature: number | null;
+  topP: number | null;
+  topK: number | null;
+  contextWindowTokens: number;
+  requestTimeoutSeconds: number;
+  extractionRepairRounds: number;
+  useStagedExtraction: boolean;
+  recommendedAsRefineModel: boolean;
+  notes: string[];
+}
+
 export interface LlmSettingsDto {
   provider: LlmProvider;
   baseUrl: string;
@@ -67,6 +87,13 @@ export interface LlmSettingsDto {
   topP?: number | null;
   topK?: number | null;
   extractionRepairRounds?: number;
+  extractionStrategy?: LlmExtractionStrategy;
+  refineModel?: string | null;
+  refineEnableThinking?: boolean;
+  refineTemperature?: number | null;
+  refineTopP?: number | null;
+  refineTopK?: number | null;
+  refineRequestTimeoutSeconds?: number;
 }
 
 export interface UpdateLlmSettingsRequest {
@@ -88,6 +115,13 @@ export interface UpdateLlmSettingsRequest {
   topP?: number | null;
   topK?: number | null;
   extractionRepairRounds?: number;
+  extractionStrategy?: LlmExtractionStrategy;
+  refineModel?: string | null;
+  refineEnableThinking?: boolean;
+  refineTemperature?: number | null;
+  refineTopP?: number | null;
+  refineTopK?: number | null;
+  refineRequestTimeoutSeconds?: number;
 }
 
 export interface TestLlmConnectionRequest {
@@ -194,6 +228,22 @@ export interface IngestionRepairPreviewDto {
   before: IngestionReviewDiagnosticsDto;
   after: IngestionReviewDiagnosticsDto;
   notices: string[];
+}
+
+export type IngestionRefinementStatus =
+  'Pending' | 'Running' | 'Improved' | 'NoImprovement' | 'Failed';
+
+/** issuesBefore and issuesAfter count validation issues plus quality warnings. */
+export interface IngestionRefinementDto {
+  status: IngestionRefinementStatus;
+  model: string;
+  detail: string | null;
+  issuesBefore: number | null;
+  issuesAfter: number | null;
+  requestedAt: string;
+  completedAt: string | null;
+  hasProposal: boolean;
+  basedOnEarlierDraft: boolean;
 }
 
 export interface EnqueueWebUrlIngestionRequest {

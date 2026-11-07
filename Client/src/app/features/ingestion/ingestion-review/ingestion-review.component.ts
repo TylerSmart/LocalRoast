@@ -43,6 +43,7 @@ import type {
   IngestionDraftStepDto,
   IngestionExtractedDraftDto,
   IngestionJobDetailDto,
+  IngestionRefinementDto,
   IngestionReviewDiagnosticsDto,
 } from '../../../core/models/ingestion.models';
 import {
@@ -55,6 +56,7 @@ import {
 import { CollectionDto, TagDto } from '../../../core/models/taxonomy.models';
 import { FoodCatalogService } from '../../../core/services/food-catalog/food-catalog.service';
 import { IngestionService } from '../../../core/services/ingestion/ingestion.service';
+import { LlmSettingsService } from '../../../core/services/llm-settings/llm-settings.service';
 import { TaxonomyService } from '../../../core/services/taxonomy/taxonomy.service';
 import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialog/confirm-dialog.component';
 import { MeasurementEditorComponent } from '../../../shared/components/measurement-editor/measurement-editor.component';
@@ -112,6 +114,9 @@ export class IngestionReviewComponent implements OnInit {
   private readonly taxonomyService = inject(TaxonomyService);
   private readonly dialog = inject(MatDialog);
   private readonly snackBar = inject(MatSnackBar);
+  private readonly llmSettingsService = inject(LlmSettingsService);
+  private refinementPollHandle: ReturnType<typeof setTimeout> | null = null;
+  static readonly refinementPollMs = 15000;
 
   readonly measurementUnits = MEASUREMENT_UNITS;
 
@@ -129,6 +134,13 @@ export class IngestionReviewComponent implements OnInit {
   readonly diagnosticsStale = signal<boolean>(false);
   readonly isCheckingDiagnostics = signal<boolean>(false);
   readonly isRepairing = signal<boolean>(false);
+  readonly refinement = signal<IngestionRefinementDto | null>(null);
+  readonly refineModel = signal<string | null>(null);
+  readonly isRefinementBusy = signal<boolean>(false);
+  readonly refinementActive = computed(() => {
+    const status = this.refinement()?.status;
+    return status === 'Pending' || status === 'Running';
+  });
   readonly reviewError = signal<string | null>(null);
   readonly repairHint = new FormControl('', {
     nonNullable: true,
@@ -190,7 +202,170 @@ export class IngestionReviewComponent implements OnInit {
       this.markDiagnosticsStale();
     });
     this.loadCatalogData();
+    this.loadRefineModel();
     this.loadJob();
+    this.destroyRef.onDestroy(() => this.clearRefinementPoll());
+  }
+
+  private loadRefineModel(): void {
+    this.llmSettingsService
+      .getSettings()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (settings) => this.refineModel.set(settings.refineModel?.trim() || null),
+        error: () => this.refineModel.set(null),
+      });
+  }
+
+  private loadRefinement(jobId: string): void {
+    this.clearRefinementPoll();
+    this.ingestionService
+      .getRefinement(jobId)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (refinement) => {
+          this.refinement.set(refinement);
+          this.scheduleRefinementPoll(jobId);
+        },
+        error: () => this.scheduleRefinementPoll(jobId),
+      });
+  }
+
+  private scheduleRefinementPoll(jobId: string): void {
+    this.clearRefinementPoll();
+    if (!this.refinementActive()) return;
+    this.refinementPollHandle = setTimeout(
+      () => this.loadRefinement(jobId),
+      IngestionReviewComponent.refinementPollMs,
+    );
+  }
+
+  private clearRefinementPoll(): void {
+    if (this.refinementPollHandle !== null) {
+      clearTimeout(this.refinementPollHandle);
+      this.refinementPollHandle = null;
+    }
+  }
+
+  requestRefinement(): void {
+    const currentJob = this.job();
+    if (!currentJob || currentJob.status !== 'ReadyForReview' || this.isRefinementBusy()) return;
+
+    this.isRefinementBusy.set(true);
+    this.ingestionService
+      .requestRefinement(currentJob.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (refinement) => {
+          this.isRefinementBusy.set(false);
+          this.refinement.set(refinement);
+          this.scheduleRefinementPoll(currentJob.id);
+          this.snackBar.open(
+            'Refinement queued. It runs in the background when no imports are waiting.',
+            'Close',
+            { duration: 5000 },
+          );
+        },
+        error: (err) => {
+          this.isRefinementBusy.set(false);
+          this.reviewError.set(
+            err?.error?.detail || err?.error?.title || 'Could not queue the refinement.',
+          );
+        },
+      });
+  }
+
+  dismissRefinement(): void {
+    const currentJob = this.job();
+    if (!currentJob || this.isRefinementBusy()) return;
+
+    this.isRefinementBusy.set(true);
+    this.ingestionService
+      .dismissRefinement(currentJob.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.isRefinementBusy.set(false);
+          this.clearRefinementPoll();
+          this.refinement.set(null);
+        },
+        error: (err) => {
+          this.isRefinementBusy.set(false);
+          this.reviewError.set(
+            err?.error?.detail || err?.error?.title || 'Could not dismiss the refinement.',
+          );
+        },
+      });
+  }
+
+  compareRefinement(): void {
+    const currentJob = this.job();
+    if (
+      !currentJob ||
+      currentJob.status !== 'ReadyForReview' ||
+      !this.refinement()?.hasProposal ||
+      this.isRefinementBusy() ||
+      this.isRepairing() ||
+      this.isSaving() ||
+      this.isPublishing() ||
+      this.isRerunning()
+    ) {
+      return;
+    }
+
+    const snapshot = this.reviewEditSnapshot();
+    const draft = this.buildDraftPayload();
+    this.isRefinementBusy.set(true);
+    this.reviewError.set(null);
+    this.ingestionService
+      .previewRefinement(currentJob.id, draft)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (preview) => {
+          this.isRefinementBusy.set(false);
+          const data: IngestionRepairDialogData = {
+            before: draft,
+            preview,
+            collections: this.collections(),
+            tags: this.tags(),
+            title: 'Review refined draft',
+          };
+          this.dialog
+            .open<IngestionRepairDialogComponent, IngestionRepairDialogData, boolean>(
+              IngestionRepairDialogComponent,
+              { data, width: '1000px', maxWidth: '95vw', autoFocus: 'dialog' },
+            )
+            .afterClosed()
+            .pipe(takeUntilDestroyed(this.destroyRef))
+            .subscribe((apply) => {
+              if (!apply) return;
+              if (snapshot !== this.reviewEditSnapshot()) {
+                this.reviewError.set(
+                  'The draft changed while the comparison was open. Your edits were kept; compare again to use the current draft.',
+                );
+                return;
+              }
+              this.populateForm({ ...currentJob, extractedDraft: preview.draft }, true);
+              this.form.markAsDirty();
+              this.diagnostics.set(preview.after);
+              this.diagnosticsStale.set(true);
+              this.recheckReviewIssues();
+              this.snackBar.open(
+                'Refined draft applied to the editor. Save or publish separately.',
+                'Close',
+                { duration: 5000 },
+              );
+            });
+        },
+        error: (err) => {
+          this.isRefinementBusy.set(false);
+          this.reviewError.set(
+            err?.error?.detail ||
+              err?.error?.title ||
+              'Could not load the refined draft. Your draft was not changed.',
+          );
+        },
+      });
   }
 
   private loadCatalogData(): void {
@@ -229,6 +404,7 @@ export class IngestionReviewComponent implements OnInit {
           this.job.set(jobDetail);
           this.populateForm(jobDetail);
           this.isLoading.set(false);
+          this.loadRefinement(jobDetail.id);
           if (jobDetail.extractedDraft) {
             this.recheckReviewIssues();
           }

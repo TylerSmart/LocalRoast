@@ -200,7 +200,7 @@ public sealed class LlmExtractionClient(
             );
         }
 
-        if (UsesStagedExtraction(config.TextModel))
+        if (LlmModelProfiles.UsesStagedExtraction(config.ExtractionStrategy, config.TextModel))
         {
             var staged = await ExtractRecipeInStagesAsync(config, context, cancellationToken);
             return await RepairRecipeAsync(config, context, staged, cancellationToken);
@@ -349,10 +349,6 @@ Example output:
             required = properties.Keys.ToArray(),
         };
     }
-
-    private static bool UsesStagedExtraction(string model) =>
-        model.Trim().StartsWith("gemma4:e2b", StringComparison.OrdinalIgnoreCase)
-        || model.Trim().StartsWith("gemma4:e4b", StringComparison.OrdinalIgnoreCase);
 
     private async Task<LlmExtractedRecipePayload> ExtractRecipeInStagesAsync(
         EffectiveLlmConnectionConfig config,

@@ -5,11 +5,49 @@ import { MatDialogRef } from '@angular/material/dialog';
 import { of, throwError } from 'rxjs';
 import type {
   LlmConnectionTestResultDto,
+  LlmModelProfile,
   LlmSettingsDto,
 } from '../../../core/models/ingestion.models';
 import { IngestionService } from '../../../core/services/ingestion/ingestion.service';
 import { LlmSettingsService } from '../../../core/services/llm-settings/llm-settings.service';
-import { LlmSettingsDialogComponent } from './llm-settings-dialog.component';
+import { LlmSettingsDialogComponent, matchModelProfile } from './llm-settings-dialog.component';
+
+const testProfiles: LlmModelProfile[] = [
+  {
+    id: 'gemma4-e4b',
+    displayName: 'Gemma 4 E4B',
+    modelTag: 'gemma4:e4b',
+    matchPrefixes: ['gemma4:e4b'],
+    summary: 'Fast default',
+    enableThinking: false,
+    temperature: 0.2,
+    topP: 0.95,
+    topK: 64,
+    contextWindowTokens: 16384,
+    requestTimeoutSeconds: 600,
+    extractionRepairRounds: 2,
+    useStagedExtraction: true,
+    recommendedAsRefineModel: false,
+    notes: ['Small model.'],
+  },
+  {
+    id: 'gemma4-12b-thinking',
+    displayName: 'Gemma 4 12B (thinking)',
+    modelTag: 'gemma4:12b',
+    matchPrefixes: [],
+    summary: 'Best quality',
+    enableThinking: true,
+    temperature: 1,
+    topP: 0.95,
+    topK: 64,
+    contextWindowTokens: 16384,
+    requestTimeoutSeconds: 1200,
+    extractionRepairRounds: 1,
+    useStagedExtraction: false,
+    recommendedAsRefineModel: true,
+    notes: [],
+  },
+];
 
 describe('LlmSettingsDialogComponent', () => {
   let component: LlmSettingsDialogComponent;
@@ -17,6 +55,7 @@ describe('LlmSettingsDialogComponent', () => {
   let mockDialogRef: { close: ReturnType<typeof vi.fn> };
   let mockLlmSettingsService: {
     getSettings: ReturnType<typeof vi.fn>;
+    getModelProfiles: ReturnType<typeof vi.fn>;
     updateSettings: ReturnType<typeof vi.fn>;
     testConnection: ReturnType<typeof vi.fn>;
   };
@@ -45,6 +84,7 @@ describe('LlmSettingsDialogComponent', () => {
     mockDialogRef = { close: vi.fn() };
     mockLlmSettingsService = {
       getSettings: vi.fn().mockReturnValue(of(initialSettings)),
+      getModelProfiles: vi.fn().mockReturnValue(of(testProfiles)),
       updateSettings: vi.fn().mockReturnValue(of(initialSettings)),
       testConnection: vi.fn().mockReturnValue(
         of({
@@ -116,6 +156,66 @@ describe('LlmSettingsDialogComponent', () => {
     expect(component.form.controls.temperature.value).toBe(1);
     expect(component.form.controls.topP.value).toBe(0.95);
     expect(component.form.controls.topK.value).toBe(64);
+  });
+
+  it('matches model profiles by the longest prefix, case-insensitively', () => {
+    const extra = { ...testProfiles[0], id: 'longer', matchPrefixes: ['gemma4:e4b-it'] };
+    expect(matchModelProfile(testProfiles, 'GEMMA4:E4B')?.id).toBe('gemma4-e4b');
+    expect(matchModelProfile([...testProfiles, extra], 'gemma4:e4b-it-q8')?.id).toBe('longer');
+    expect(matchModelProfile(testProfiles, 'gemma4:12b')).toBeNull();
+    expect(matchModelProfile(testProfiles, '  ')).toBeNull();
+  });
+
+  it('applies a profile without renaming the model and sets the strategy explicitly', () => {
+    component.form.controls.textModel.setValue('my-gemma-e4b-gpu');
+    component.onProfileSelected('gemma4-e4b');
+    component.applyProfile();
+
+    const values = component.form.getRawValue();
+    expect(values.textModel).toBe('my-gemma-e4b-gpu');
+    expect(values.enableThinking).toBe(false);
+    expect(values.temperature).toBe(0.2);
+    expect(values.contextWindowTokens).toBe(16384);
+    expect(values.extractionRepairRounds).toBe(2);
+    expect(values.extractionStrategy).toBe('Staged');
+    expect(component.profileMessage()).toContain('Gemma 4 E4B');
+
+    component.form.controls.textModel.setValue('gemma4:e4b');
+    component.applyProfile();
+    expect(component.form.controls.extractionStrategy.value).toBe('Auto');
+  });
+
+  it('fills a blank refine model from the refine profile and saves refine settings', () => {
+    expect(component.refineProfiles().map((p) => p.id)).toEqual(['gemma4-12b-thinking']);
+    component.form.controls.refineModel.setValue('');
+    component.onRefineProfileSelected('gemma4-12b-thinking');
+    component.applyRefineProfile();
+
+    expect(component.form.controls.refineModel.value).toBe('gemma4:12b');
+    expect(component.form.controls.refineEnableThinking.value).toBe(true);
+    expect(component.form.controls.refineRequestTimeoutSeconds.value).toBe(1200);
+
+    component.onSave();
+    expect(mockLlmSettingsService.updateSettings).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        refineModel: 'gemma4:12b',
+        refineEnableThinking: true,
+        refineTemperature: 1,
+        refineRequestTimeoutSeconds: 1200,
+      }),
+    );
+  });
+
+  it('renders the profile picker and hides it when profiles cannot load', () => {
+    fixture.detectChanges();
+    const element: HTMLElement = fixture.nativeElement;
+    expect(element.querySelector('[data-testid="llm-profile-select"]')).toBeTruthy();
+    expect(element.querySelector('[data-testid="llm-extraction-strategy"]')).toBeTruthy();
+
+    mockLlmSettingsService.getModelProfiles.mockReturnValue(throwError(() => new Error('down')));
+    component.loadProfiles();
+    fixture.detectChanges();
+    expect(element.querySelector('[data-testid="llm-profile-select"]')).toBeNull();
   });
 
   it('saves sampling overrides and sends blanks as null', () => {

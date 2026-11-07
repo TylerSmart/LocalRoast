@@ -29,8 +29,8 @@ See [LLM Model Settings](../llm-model-settings.md) for the per-model recommendat
 
 ## Batch 3 — Model strategy
 
-- [ ] **7. Per-model profiles.** Store recommended sampling, thinking, context, staged-extraction, and repair-round defaults per model tag. Applying a profile then becomes one click, and the staged-extraction tag check can move into data.
-- [ ] **8. Optional refine pass with a larger model.** Allow a second, slower model (for example Gemma 4 26B with partial offload) to refine drafts that still have issues after the primary model's repair loop. This can run in the background without blocking the queue.
+- [x] **7. Per-model profiles.** Store recommended sampling, thinking, context, staged-extraction, and repair-round defaults per model tag. Applying a profile then becomes one click, and the staged-extraction tag check can move into data.
+- [x] **8. Optional refine pass with a larger model.** Allow a second, slower model (for example Gemma 4 26B with partial offload) to refine drafts that still have issues after the primary model's repair loop. This can run in the background without blocking the queue.
 
 ## Batch 4 — Learning and investigation
 

@@ -18,6 +18,7 @@ public sealed class IngestionQueueSignal : IIngestionQueueSignal
     private readonly SemaphoreSlim _jobExecutionLock = new(1, 1);
     private Guid? _activeJobId;
     private CancellationTokenSource? _activeCts;
+    private bool _activeIsPreemptible;
 
     public Guid? ActiveJobId
     {
@@ -31,6 +32,30 @@ public sealed class IngestionQueueSignal : IIngestionQueueSignal
     }
 
     public void NotifyWorkAvailable()
+    {
+        _channel.Writer.TryWrite(true);
+        PreemptBackgroundWork();
+    }
+
+    public void PreemptBackgroundWork()
+    {
+        CancellationTokenSource? preemptibleCts;
+        lock (_lock)
+        {
+            preemptibleCts = _activeIsPreemptible ? _activeCts : null;
+        }
+
+        try
+        {
+            preemptibleCts?.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // ignore
+        }
+    }
+
+    public void NotifyBackgroundWorkAvailable()
     {
         _channel.Writer.TryWrite(true);
     }
@@ -63,12 +88,19 @@ public sealed class IngestionQueueSignal : IIngestionQueueSignal
         }
     }
 
-    public IDisposable RegisterActiveJobExecution(Guid jobId, CancellationTokenSource cts)
+    public IDisposable RegisterActiveJobExecution(Guid jobId, CancellationTokenSource cts) =>
+        Register(jobId, cts, preemptible: false);
+
+    public IDisposable RegisterPreemptibleExecution(Guid jobId, CancellationTokenSource cts) =>
+        Register(jobId, cts, preemptible: true);
+
+    private ActiveJobScope Register(Guid jobId, CancellationTokenSource cts, bool preemptible)
     {
         lock (_lock)
         {
             _activeJobId = jobId;
             _activeCts = cts;
+            _activeIsPreemptible = preemptible;
         }
 
         return new ActiveJobScope(this, jobId, cts);
@@ -108,6 +140,7 @@ public sealed class IngestionQueueSignal : IIngestionQueueSignal
             {
                 _activeJobId = null;
                 _activeCts = null;
+                _activeIsPreemptible = false;
             }
         }
     }
