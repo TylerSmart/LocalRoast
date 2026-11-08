@@ -31,16 +31,21 @@ public sealed class IngestionProcessor(
         CancellationToken cancellationToken = default
     )
     {
+        var activeId = queueSignal.ActiveJobId;
+
         var interrupted = await dbContext
             .IngestionJobs.Where(j =>
-                j.Status == IngestionJobStatus.Preprocessing
-                || j.Status == IngestionJobStatus.Extracting
+                (
+                    j.Status == IngestionJobStatus.Preprocessing
+                    || j.Status == IngestionJobStatus.Extracting
+                ) && (activeId == null || j.Id != activeId)
             )
             .ToListAsync(cancellationToken);
 
         var interruptedRefinements = await dbContext
             .IngestionDraftRefinements.Where(item =>
                 item.Status == IngestionRefinementStatus.Running
+                && (activeId == null || item.IngestionJobId != activeId)
             )
             .ToListAsync(cancellationToken);
         foreach (var refinement in interruptedRefinements)
@@ -780,19 +785,32 @@ public sealed class IngestionProcessor(
                 job.Id
             );
 
-            job.Status = IngestionJobStatus.Queued;
+            try
+            {
+                dbContext.ChangeTracker.Clear();
+                var trackedJob = await dbContext.IngestionJobs.FirstOrDefaultAsync(
+                    j => j.Id == job.Id,
+                    CancellationToken.None
+                );
 
-            job.NextRetryAt = null;
-
-            job.StatusDetail = "Paused. Queued to resume when ingestion is enabled.";
-
-            await dbContext.SaveChangesAsync(CancellationToken.None);
+                if (trackedJob is not null)
+                {
+                    trackedJob.Status = IngestionJobStatus.Queued;
+                    trackedJob.NextRetryAt = null;
+                    trackedJob.StatusDetail = "Paused. Queued to resume when ingestion is enabled.";
+                    await dbContext.SaveChangesAsync(CancellationToken.None);
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to revert canceled job {JobId} to Queued.", job.Id);
+            }
 
             return false;
         }
         catch (LlmHostUnavailableException ex)
         {
-            if (await IsJobDiscardedInDbAsync(job.Id, cancellationToken))
+            if (await IsJobDiscardedInDbAsync(job.Id, CancellationToken.None))
             {
                 return false;
             }
@@ -803,81 +821,118 @@ public sealed class IngestionProcessor(
                 job.Id
             );
 
-            job.Status = IngestionJobStatus.WaitingForLlmHost;
+            try
+            {
+                dbContext.ChangeTracker.Clear();
+                var trackedJob = await dbContext.IngestionJobs.FirstOrDefaultAsync(
+                    j => j.Id == job.Id,
+                    CancellationToken.None
+                );
 
-            job.AttemptCount++;
-
-            var delaySeconds = Math.Min(300, 15 * (1 << Math.Min(job.AttemptCount - 1, 5)));
-
-            job.NextRetryAt = DateTimeOffset.UtcNow.AddSeconds(delaySeconds);
-
-            job.StatusDetail = ex.Message;
-
-            await dbContext.SaveChangesAsync(cancellationToken);
+                if (trackedJob is not null)
+                {
+                    trackedJob.Status = IngestionJobStatus.WaitingForLlmHost;
+                    trackedJob.AttemptCount++;
+                    var delaySeconds = Math.Min(
+                        300,
+                        15 * (1 << Math.Min(trackedJob.AttemptCount - 1, 5))
+                    );
+                    trackedJob.NextRetryAt = DateTimeOffset.UtcNow.AddSeconds(delaySeconds);
+                    trackedJob.StatusDetail = ex.Message;
+                    await dbContext.SaveChangesAsync(CancellationToken.None);
+                }
+            }
+            catch (Exception saveEx)
+            {
+                logger.LogError(
+                    saveEx,
+                    "Failed to persist WaitingForLlmHost state for job {JobId}.",
+                    job.Id
+                );
+            }
 
             return false;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            if (await IsJobDiscardedInDbAsync(job.Id, cancellationToken))
+            if (await IsJobDiscardedInDbAsync(job.Id, CancellationToken.None))
             {
                 return false;
             }
-
-            job.AttemptCount++;
-
-            int maxRetries;
 
             try
             {
-                var cfg = await llmSettingsService.GetEffectiveConfigAsync(cancellationToken);
-
-                maxRetries = cfg.MaxIngestionRetries;
-            }
-            catch
-            {
-                maxRetries = 3;
-            }
-
-            if (job.AttemptCount <= maxRetries)
-            {
-                var delaySeconds = Math.Min(60, 5 * (1 << Math.Min(job.AttemptCount - 1, 4)));
-
-                job.Status = IngestionJobStatus.Queued;
-
-                job.NextRetryAt = DateTimeOffset.UtcNow.AddSeconds(delaySeconds);
-
-                job.StatusDetail =
-                    $"Attempt {job.AttemptCount}/{maxRetries} failed: {ex.Message}. Retrying shortly...";
-
-                logger.LogWarning(
-                    ex,
-                    "Error processing job {JobId} (attempt {AttemptCount}/{MaxRetries}). Scheduled auto-retry in {DelaySeconds}s.",
-                    job.Id,
-                    job.AttemptCount,
-                    maxRetries,
-                    delaySeconds
+                dbContext.ChangeTracker.Clear();
+                var trackedJob = await dbContext.IngestionJobs.FirstOrDefaultAsync(
+                    j => j.Id == job.Id,
+                    CancellationToken.None
                 );
 
-                await dbContext.SaveChangesAsync(cancellationToken);
+                if (trackedJob is not null)
+                {
+                    trackedJob.AttemptCount++;
 
-                return false;
+                    int maxRetries;
+                    try
+                    {
+                        var cfg = await llmSettingsService.GetEffectiveConfigAsync(
+                            CancellationToken.None
+                        );
+                        maxRetries = cfg.MaxIngestionRetries;
+                    }
+                    catch
+                    {
+                        maxRetries = 3;
+                    }
+
+                    if (trackedJob.AttemptCount <= maxRetries)
+                    {
+                        var delaySeconds = Math.Min(
+                            60,
+                            5 * (1 << Math.Min(trackedJob.AttemptCount - 1, 4))
+                        );
+                        trackedJob.Status = IngestionJobStatus.Queued;
+                        trackedJob.NextRetryAt = DateTimeOffset.UtcNow.AddSeconds(delaySeconds);
+                        trackedJob.StatusDetail =
+                            $"Attempt {trackedJob.AttemptCount}/{maxRetries} failed: {ex.Message}. Retrying shortly...";
+
+                        logger.LogWarning(
+                            ex,
+                            "Error processing job {JobId} (attempt {AttemptCount}/{MaxRetries}). Scheduled auto-retry in {DelaySeconds}s.",
+                            trackedJob.Id,
+                            trackedJob.AttemptCount,
+                            maxRetries,
+                            delaySeconds
+                        );
+
+                        await dbContext.SaveChangesAsync(CancellationToken.None);
+                        return false;
+                    }
+
+                    logger.LogError(
+                        ex,
+                        "Fatal error processing job {JobId} after {AttemptCount} attempt(s). Transitioning to Failed.",
+                        trackedJob.Id,
+                        trackedJob.AttemptCount
+                    );
+
+                    trackedJob.Status = IngestionJobStatus.Failed;
+                    trackedJob.NextRetryAt = null;
+                    trackedJob.StatusDetail = ex.Message;
+
+                    await dbContext.SaveChangesAsync(CancellationToken.None);
+                    return false;
+                }
             }
-
-            logger.LogError(
-                ex,
-                "Fatal error processing job {JobId} after {AttemptCount} attempt(s). Transitioning to Failed.",
-                job.Id,
-                job.AttemptCount
-            );
-
-            job.Status = IngestionJobStatus.Failed;
-
-            job.NextRetryAt = null;
-
-            job.StatusDetail = ex.Message;
-
-            await dbContext.SaveChangesAsync(cancellationToken);
+            catch (Exception saveEx)
+            {
+                logger.LogError(
+                    saveEx,
+                    "Failed to persist error state for job {JobId}. Original error: {OriginalError}",
+                    job.Id,
+                    ex.Message
+                );
+            }
 
             return false;
         }
@@ -1125,7 +1180,9 @@ public sealed class IngestionProcessor(
 
         var upsertRequest = new UpsertRecipeRequest(
             Title: draft.Title,
-            Description: draft.Description,
+            Description: draft.Description != null && draft.Description.Length > 2000
+                ? draft.Description[..2000].TrimEnd()
+                : draft.Description,
             Status: RecipeStatus.Published,
             BaseServings: draft.BaseServings,
             YieldDisplay: draft.YieldDisplay,

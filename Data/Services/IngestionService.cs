@@ -1435,7 +1435,10 @@ public sealed class IngestionService(
 
         if (job.Status is IngestionJobStatus.Preprocessing or IngestionJobStatus.Extracting)
         {
-            throw new ConflictException("Ingestion job is currently being processed.");
+            if (queueSignal.ActiveJobId == job.Id)
+            {
+                throw new ConflictException("Ingestion job is currently being processed.");
+            }
         }
 
         job.Status = IngestionJobStatus.Queued;
@@ -1474,12 +1477,22 @@ public sealed class IngestionService(
                 IngestionJobStatus.Queued
                 or IngestionJobStatus.WaitingForLlmHost
                 or IngestionJobStatus.Failed
+                or IngestionJobStatus.Preprocessing
+                or IngestionJobStatus.Extracting
             )
         )
         {
             throw new ConflictException(
-                "Only a queued, waiting or failed ingestion job can be run now."
+                "Only a queued, waiting, failed, or interrupted ingestion job can be run now."
             );
+        }
+
+        if (job.Status is IngestionJobStatus.Preprocessing or IngestionJobStatus.Extracting)
+        {
+            if (queueSignal.ActiveJobId == job.Id)
+            {
+                throw new ConflictException("Ingestion job is currently being processed.");
+            }
         }
 
         if (job.Status is not IngestionJobStatus.Queued)
@@ -1620,6 +1633,11 @@ public sealed class IngestionService(
         if (job is null)
         {
             return false;
+        }
+
+        if (queueSignal.ActiveJobId == job.Id)
+        {
+            queueSignal.CancelActiveExecution();
         }
 
         job.Status = IngestionJobStatus.Discarded;

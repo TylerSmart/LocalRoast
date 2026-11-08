@@ -1130,6 +1130,31 @@ public sealed class RecipeDraftNormalizerTests
     }
 
     [TestMethod]
+    public void NormalizeDescription_WithLengthExceeding2000Characters_ClampsTo2000Characters()
+    {
+        var longDescription = new string('a', 2500);
+        var result = RecipeDraftNormalizer.NormalizeDescription(longDescription);
+
+        Assert.IsNotNull(result);
+        Assert.AreEqual(2000, result.Length);
+    }
+
+    [TestMethod]
+    public void TryExtractAtkHeadnote_WithHeadnoteExceeding2000Characters_ClampsTo2000Characters()
+    {
+        var headnoteBody = new string('x', 2400);
+        var rawText =
+            "SLOW-COOKER BEEF CHILI\nWHY THIS RECIPE WORKS\n"
+            + headnoteBody
+            + "\n\nINGREDIENTS\n3 dried ancho chiles\n";
+
+        var headnote = RecipeDraftNormalizer.TryExtractAtkHeadnote(rawText);
+
+        Assert.IsNotNull(headnote);
+        Assert.AreEqual(2000, headnote.Length);
+    }
+
+    [TestMethod]
     public void Normalize_WithRawSourceContainingAtkHeadnote_PrefersVerbatimHeadnoteOverInferiorLlmSummary()
     {
         var rawSource = """

@@ -1827,6 +1827,81 @@ public sealed class IngestionIntegrationTests
         );
     }
 
+    [TestMethod]
+    public async Task RecoverInterruptedJobs_WhenJobsAreInExtractingStatus_RecoversNonActiveJobsToQueued()
+    {
+        var job1Id = Guid.NewGuid();
+        var job2Id = Guid.NewGuid();
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<App.Data.AppDbContext>();
+            db.IngestionJobs.AddRange(
+                new IngestionJob
+                {
+                    Id = job1Id,
+                    Channel = IngestionChannel.RawText,
+                    Status = IngestionJobStatus.Extracting,
+                    DisplayTitle = "Stuck Job 1",
+                    RawText = "Some recipe text",
+                },
+                new IngestionJob
+                {
+                    Id = job2Id,
+                    Channel = IngestionChannel.RawText,
+                    Status = IngestionJobStatus.Extracting,
+                    DisplayTitle = "Stuck Job 2",
+                    RawText = "Some recipe text 2",
+                }
+            );
+            await db.SaveChangesAsync();
+
+            var processor = scope.ServiceProvider.GetRequiredService<IIngestionProcessor>();
+            var recoveredCount = await processor.RecoverInterruptedJobsAsync();
+            Assert.AreEqual(2, recoveredCount);
+
+            var recoveredJobs = db
+                .IngestionJobs.Where(j => j.Id == job1Id || j.Id == job2Id)
+                .ToList();
+
+            Assert.IsTrue(recoveredJobs.All(j => j.Status == IngestionJobStatus.Queued));
+        }
+    }
+
+    [TestMethod]
+    public async Task RetryJob_WhenJobIsStuckInExtracting_AllowsRetryIfJobIsNotActivelyExecuting()
+    {
+        await AuthenticateAsync(_client);
+        var jobId = Guid.NewGuid();
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<App.Data.AppDbContext>();
+            db.IngestionJobs.Add(
+                new IngestionJob
+                {
+                    Id = jobId,
+                    Channel = IngestionChannel.RawText,
+                    Status = IngestionJobStatus.Extracting,
+                    DisplayTitle = "Stuck In Extraction",
+                    RawText = "Some recipe text",
+                }
+            );
+            await db.SaveChangesAsync();
+        }
+
+        var retryResponse = await _client.PostAsync($"/api/ingestion/jobs/{jobId}/retry", null);
+        Assert.AreEqual(HttpStatusCode.Accepted, retryResponse.StatusCode);
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<App.Data.AppDbContext>();
+            var job = db.IngestionJobs.FirstOrDefault(j => j.Id == jobId);
+            Assert.IsNotNull(job);
+            Assert.AreEqual(IngestionJobStatus.Queued, job.Status);
+        }
+    }
+
     private sealed class FakeSequentialLlmExtractionClient(
         Func<LlmExtractionContext, LlmExtractedRecipePayload> handler,
         Func<string, string?>? structureSource = null,

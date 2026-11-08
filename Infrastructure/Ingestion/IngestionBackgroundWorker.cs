@@ -54,7 +54,16 @@ public sealed class IngestionBackgroundWorker(
                     ingestionEnabled = config.EnableIngestion;
                 }
 
-                // 1. Drain all pending queued jobs (only run-now requests while paused)
+                // 1. Recover any orphaned/interrupted jobs if no active execution is running
+                if (queueSignal.ActiveJobId == null)
+                {
+                    using var recoverScope = scopeFactory.CreateScope();
+                    var processor =
+                        recoverScope.ServiceProvider.GetRequiredService<IIngestionProcessor>();
+                    await processor.RecoverInterruptedJobsAsync(stoppingToken);
+                }
+
+                // 2. Drain all pending queued jobs (only run-now requests while paused)
                 bool processedAny;
                 do
                 {

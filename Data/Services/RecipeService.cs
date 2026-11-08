@@ -694,7 +694,7 @@ public sealed partial class RecipeService(
         {
             Title = request.Title.Trim(),
             Slug = slug,
-            Description = request.Description?.Trim(),
+            Description = ClampDescription(request.Description),
             Status = request.Status,
             BaseServings = request.BaseServings,
             YieldDisplay = request.YieldDisplay?.Trim(),
@@ -790,7 +790,7 @@ public sealed partial class RecipeService(
 
         recipe.Title = request.Title.Trim();
         recipe.Slug = slug;
-        recipe.Description = request.Description?.Trim();
+        recipe.Description = ClampDescription(request.Description);
         recipe.Status = request.Status;
         recipe.BaseServings = request.BaseServings;
         recipe.YieldDisplay = request.YieldDisplay?.Trim();
@@ -1903,6 +1903,17 @@ public sealed partial class RecipeService(
             attachment.Label,
             attachment.CreatedAt
         );
+    }
+
+    private static string? ClampDescription(string? description)
+    {
+        var trimmed = description?.Trim();
+        if (string.IsNullOrWhiteSpace(trimmed))
+        {
+            return null;
+        }
+
+        return trimmed.Length > 2000 ? trimmed[..2000].TrimEnd() : trimmed;
     }
 
     public async Task<bool> DeleteRecipeAttachmentAsync(

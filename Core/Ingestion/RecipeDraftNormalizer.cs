@@ -428,6 +428,11 @@ public static class RecipeDraftNormalizer
 
         cleaned = cleaned.TrimStart(':', '-', '–', '—', '.', ' ', '\t', '\r', '\n').TrimEnd();
 
+        if (cleaned.Length > 2000)
+        {
+            cleaned = cleaned[..2000].TrimEnd();
+        }
+
         return string.IsNullOrWhiteSpace(cleaned) ? null : cleaned;
     }
 
@@ -1112,7 +1117,7 @@ public static class RecipeDraftNormalizer
                 || atkHeadnote.Length > (normalizedDescription.Length * 1.5)
             )
             {
-                normalizedDescription = atkHeadnote;
+                normalizedDescription = NormalizeDescription(atkHeadnote);
             }
         }
 
