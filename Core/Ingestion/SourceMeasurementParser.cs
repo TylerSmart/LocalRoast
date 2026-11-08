@@ -14,7 +14,7 @@ public static class SourceMeasurementParser
 {
     private const string Number = @"(?:\d+\s*)?[½¼¾⅓⅔⅛⅜⅝⅞]|\d+(?:[\s-]+\d+/\d+|/\d+|\.\d+)?";
     private const string Unit =
-        @"fluid ounces?|fl[._ ]+oz|tablespoons?|tbsp|teaspoons?|tsp|cups?|c\b|pints?|pt|quarts?|qt|gallons?|gal|ounces?|oz|pounds?|lbs?|grams?|g|kilograms?|kg|millilit(?:er|re)s?|ml|lit(?:er|re)s?|l|pinch(?:es)?|dash(?:es)?|cloves?|cans?|bunch(?:es)?|slices?|whole";
+        @"fluid ounces?|fl[._ ]+oz|tablespoons?|tbsp|teaspoons?|tsp|cups?|c\b|pints?|pt|quarts?|qt|gallons?|gal|ounces?|oz|pounds?|lbs?|grams?|g|kilograms?|kg|millilit(?:er|re)s?|ml|lit(?:er|re)s?|l|pinch(?:es)?|dash(?:es)?|cloves?|cans?|bunch(?:es)?|slices?|whole|sticks?";
     private static readonly Regex Measurement = new(
         $@"(?<![-−\d/])(?<quantity>{Number})(?:\s*(?:to|[-–—])\s*(?<maximum>{Number}))?\s*(?<unit>{Unit})\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled
@@ -30,6 +30,33 @@ public static class SourceMeasurementParser
     );
     private static readonly Regex AlternativeOpen = new(@"^\s*\(\s*$", RegexOptions.Compiled);
     private static readonly Regex AlternativeClose = new(@"^\s*\)", RegexOptions.Compiled);
+
+    private static readonly Regex ParentheticalAlternative = new(
+        @"\((?:about\s+|approx\.?\s+)?(?<alt>[^()]+)\)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled
+    );
+
+    private static readonly Regex LeadingCount = new(
+        @"^(?<quantity>" + Number + @")(?:\s*(?:to|[-–—])\s*(?<maximum>" + Number + @"))?\s+",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled
+    );
+
+    private static readonly Regex ContainerUnitRegex = new(
+        @"\(\s*(?<quantity>"
+            + Number
+            + @")\s*[-–—\s]\s*(?<unit>ounces?|oz\.?|fluid ounces?|fl[._ ]+oz|grams?|g|millilit(?:er|re)s?|ml|lit(?:er|re)s?|l|pounds?|lbs?\.?)\s*\)\s*cans?\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled
+    );
+
+    public static RecipeMeasurement? FindContainerUnitSize(string? source)
+    {
+        if (string.IsNullOrWhiteSpace(source))
+            return null;
+        var match = ContainerUnitRegex.Match(source);
+        if (!match.Success)
+            return null;
+        return ParseMatch(match);
+    }
 
     /// <summary>
     /// Finds every measured amount in prose with its exact span. "1/4 cup plus 2 tablespoons" is
@@ -65,7 +92,10 @@ public static class SourceMeasurementParser
             if (
                 i + 1 < matches.Count
                 && AlternativeOpen.IsMatch(text[end..matches[i + 1].Match.Index])
-                && matches[i + 1].Value!.Unit != primary.Unit
+                && (
+                    matches[i + 1].Value!.Unit != primary.Unit
+                    || matches[i + 1].Value!.CustomUnitName != primary.CustomUnitName
+                )
             )
             {
                 var alternativeEnd = matches[i + 1].Match.Index + matches[i + 1].Match.Length;
@@ -127,32 +157,104 @@ public static class SourceMeasurementParser
         if (trimmed.StartsWith("- "))
             trimmed = trimmed[2..].TrimStart();
         var primaryMatch = Measurement.Match(trimmed);
-        if (!primaryMatch.Success || primaryMatch.Index != 0)
+        if (primaryMatch.Success && primaryMatch.Index == 0)
+        {
+            var remaining = trimmed[(primaryMatch.Index + primaryMatch.Length)..];
+            var marker = AlternativeStart.Match(remaining);
+            if (marker.Success)
+            {
+                var alternativeMatch = Measurement.Match(remaining, marker.Index + marker.Length);
+                if (
+                    alternativeMatch.Success
+                    && alternativeMatch.Index == marker.Index + marker.Length
+                )
+                {
+                    var isParen = marker.Value.TrimStart().StartsWith('(');
+                    var afterAlt = remaining[(alternativeMatch.Index + alternativeMatch.Length)..];
+                    var isImmediateOr =
+                        !isParen && marker.Index == remaining.Length - remaining.TrimStart().Length;
+                    var isValidParen = isParen && afterAlt.TrimStart().StartsWith(')');
+                    if (isImmediateOr || isValidParen)
+                    {
+                        var primary = ParseMatch(primaryMatch);
+                        var alternative = ParseMatch(alternativeMatch);
+                        if (
+                            primary is not null
+                            && alternative is not null
+                            && (
+                                primary.Unit != alternative.Unit
+                                || primary.CustomUnitName != alternative.CustomUnitName
+                            )
+                        )
+                        {
+                            return (primary, alternative);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Secondary scan: check parenthetical expressions anywhere in the line
+        RecipeMeasurement? basePrimary = null;
+        int searchStart = 0;
+        if (primaryMatch.Success && primaryMatch.Index == 0)
+        {
+            basePrimary = ParseMatch(primaryMatch);
+            searchStart = primaryMatch.Length;
+        }
+        else
+        {
+            var countMatch = LeadingCount.Match(trimmed);
+            if (countMatch.Success)
+            {
+                var qty = FlexibleNullableDecimalJsonConverter.ParseNumber(
+                    countMatch.Groups["quantity"].Value
+                );
+                var max = countMatch.Groups["maximum"].Success
+                    ? FlexibleNullableDecimalJsonConverter.ParseNumber(
+                        countMatch.Groups["maximum"].Value
+                    )
+                    : null;
+                if (qty is >= 0.0001m and <= 999999.9999m)
+                {
+                    basePrimary = new RecipeMeasurement(qty, MeasurementUnit.Whole, max);
+                    searchStart = countMatch.Length;
+                }
+            }
+        }
+
+        if (basePrimary is null)
             return null;
-        var remaining = trimmed[(primaryMatch.Index + primaryMatch.Length)..];
-        var marker = AlternativeStart.Match(remaining);
-        if (!marker.Success)
-            return null;
-        var alternativeMatch = Measurement.Match(remaining, marker.Index + marker.Length);
-        if (!alternativeMatch.Success || alternativeMatch.Index != marker.Index + marker.Length)
-            return null;
-        if (
-            marker.Value.TrimStart().StartsWith('(')
-            && !remaining[(alternativeMatch.Index + alternativeMatch.Length)..]
-                .TrimStart()
-                .StartsWith(')')
-        )
-            return null;
-        if (
-            !marker.Value.TrimStart().StartsWith('(')
-            && marker.Index != remaining.Length - remaining.TrimStart().Length
-        )
-            return null;
-        var primary = ParseMatch(primaryMatch);
-        var alternative = ParseMatch(alternativeMatch);
-        return primary is not null && alternative is not null && primary.Unit != alternative.Unit
-            ? (primary, alternative)
-            : null;
+
+        var parenMatches = ParentheticalAlternative.Matches(trimmed);
+        foreach (Match paren in parenMatches)
+        {
+            if (paren.Index < searchStart)
+                continue;
+            // Skip container multipliers like "2 (15-ounce) cans"
+            var afterParen = trimmed[(paren.Index + paren.Length)..].TrimStart();
+            if (Regex.IsMatch(afterParen, @"^cans?\b", RegexOptions.IgnoreCase))
+                continue;
+
+            var altText = paren.Groups["alt"].Value.Trim();
+            var altMatch = Measurement.Match(altText);
+            if (altMatch.Success && altMatch.Length == altText.Length)
+            {
+                var alt = ParseMatch(altMatch);
+                if (
+                    alt is not null
+                    && (
+                        alt.Unit != basePrimary.Unit
+                        || alt.CustomUnitName != basePrimary.CustomUnitName
+                    )
+                )
+                {
+                    return (basePrimary, alt);
+                }
+            }
+        }
+
+        return null;
     }
 
     private static RecipeMeasurement? ParseMatch(Match match)
@@ -163,15 +265,21 @@ public static class SourceMeasurementParser
         var maximum = match.Groups["maximum"].Success
             ? FlexibleNullableDecimalJsonConverter.ParseNumber(match.Groups["maximum"].Value)
             : null;
-        var (unit, custom) = RecipeDraftNormalizer.NormalizeUnit(
-            Regex.Replace(match.Groups["unit"].Value.Replace(".", ""), @"\s+", " ").Trim()
-        );
+        var rawUnit = Regex
+            .Replace(match.Groups["unit"].Value.Replace(".", ""), @"\s+", " ")
+            .Trim();
+        var (unit, custom) = RecipeDraftNormalizer.NormalizeUnit(rawUnit);
+        var isStick =
+            string.Equals(rawUnit, "stick", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(rawUnit, "sticks", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(custom, "stick", StringComparison.OrdinalIgnoreCase);
+
         return
             quantity is >= 0.0001m and <= 999999.9999m
             && (!maximum.HasValue || (maximum >= quantity && maximum <= 999999.9999m))
             && unit.HasValue
-            && unit != MeasurementUnit.Custom
-            ? new RecipeMeasurement(quantity, unit, maximum, custom)
+            && (unit != MeasurementUnit.Custom || isStick)
+            ? new RecipeMeasurement(quantity, unit, maximum, isStick ? "stick" : custom)
             : null;
     }
 }

@@ -1447,4 +1447,75 @@ public sealed class LlmExtractionClientTests
         Assert.IsNotNull(capturedRequestBody);
         Assert.IsTrue(capturedRequestBody.Contains("\"think\":true"));
     }
+
+    [TestMethod]
+    public async Task TriageAndRepairRecipeAsync_SendsValidationIssuesInPrompt_AndParsesTriageDecisions()
+    {
+        string? capturedPrompt = null;
+        var repairedRecipeJson = """
+            {
+                "title": "Repaired Soup",
+                "ingredients": [
+                    { "displayName": "carrots", "quantity": 2, "unit": "whole", "originalRawText": "2 carrots" }
+                ],
+                "steps": [
+                    { "instruction": "Chop 2 carrots.", "ingredientIndices": [0] }
+                ]
+            }
+            """;
+
+        var triageResponseJson = """
+            {
+                "decisions": [
+                    {
+                        "issue": "carrots: not used in any step.",
+                        "resolution": "Resolved",
+                        "reason": "Step now correctly links carrots."
+                    }
+                ]
+            }
+            """;
+
+        var handler = new MockHttpMessageHandler(req =>
+        {
+            var body = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            capturedPrompt = body;
+            if (IsMethodTagRequest(body))
+                return OllamaReply("{}");
+            if (body.Contains("recipe_issue_triage"))
+                return OllamaReply(triageResponseJson);
+            return OllamaReply(repairedRecipeJson);
+        });
+
+        var client = new LlmExtractionClient(new HttpClient(handler));
+        var config = new EffectiveLlmConnectionConfig(
+            Provider: LlmProvider.Ollama,
+            BaseUrl: "http://localhost:11434",
+            ApiKey: null,
+            TextModel: "gemma4:e4b",
+            VisionModel: null,
+            OllamaKeepAlive: "5m",
+            RequestTimeoutSeconds: 30,
+            AutoPublishHighConfidenceText: false,
+            EnableThinking: false
+        );
+
+        var context = new LlmAutoRepairAndTriageContext(
+            SourceContent: "Ingredients:\n- 2 carrots\nInstructions:\nChop 2 carrots.",
+            Draft: new LlmExtractedRecipePayload(Title: "Soup"),
+            ValidationIssues: ["carrots: not used in any step."],
+            QualityWarnings: []
+        );
+
+        var result = await client.TriageAndRepairRecipeAsync(config, context);
+
+        Assert.IsNotNull(result);
+        Assert.AreEqual("Repaired Soup", result.Draft.Title);
+        Assert.IsNotNull(result.TriageDecisions);
+        Assert.HasCount(1, result.TriageDecisions);
+        Assert.AreEqual(
+            IngestionIssueTriageResolution.Resolved,
+            result.TriageDecisions[0].Resolution
+        );
+    }
 }

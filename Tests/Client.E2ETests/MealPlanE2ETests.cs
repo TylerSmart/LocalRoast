@@ -340,6 +340,7 @@ public sealed class MealPlanE2ETests : E2ETestBase
         await Page.Locator("nav.desktop-nav a", new() { HasText = "Meal Plan" }).ClickAsync();
         await Expect(Page).ToHaveURLAsync(new Regex(".*/meal-plan.*"));
         await Page.Locator("mat-button-toggle[value='week'] button").ClickAsync();
+        await Expect(Page.Locator(".week-days-grid")).ToBeVisibleAsync();
 
         // Clear current week if any entries exist from prior tests
         if (await Page.Locator("button.clear-week-btn").IsVisibleAsync())

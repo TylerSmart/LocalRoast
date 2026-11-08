@@ -217,6 +217,41 @@ public sealed class RecipeExtractionDiagnosticsTests
         CollectionAssert.AreEqual(new[] { "4 tablespoons oil" }, lines.ToArray());
     }
 
+    [TestMethod]
+    public void GetQualityWarnings_SkipsMentionedWarning_WhenIngredientLinkedInEarlierStep()
+    {
+        var mushrooms = new LlmExtractedIngredientItem(
+            null,
+            8,
+            null,
+            "oz",
+            "cremini mushrooms",
+            "cremini mushrooms",
+            OriginalRawText: "8 ounces cremini mushrooms, sliced"
+        );
+        var pasta = new LlmExtractedIngredientItem(
+            null,
+            1,
+            null,
+            "lb",
+            "penne",
+            "penne",
+            OriginalRawText: "1 pound penne"
+        );
+        var recipe = Recipe(
+            [mushrooms, pasta],
+            [
+                new(null, "Cook mushrooms in skillet until browned.", [0]),
+                new(null, "Add pasta and basil to mushrooms and toss.", [1]),
+            ]
+        );
+        var warnings = RecipeExtractionDiagnostics.GetQualityWarnings(recipe);
+        Assert.IsFalse(
+            warnings.Any(w => w.Contains("mushrooms") && w.Contains("mentioned but not linked")),
+            "Should not warn about mushrooms mentioned in step 2 because it was linked in step 1."
+        );
+    }
+
     private const string Source = "Ingredients:\n- 4 tablespoons oil\nInstructions:\nCook.";
 
     private static LlmExtractedIngredientItem Ingredient(decimal quantity, string unit) =>

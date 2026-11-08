@@ -25,6 +25,26 @@ public record LlmRecipeRepairContext(
 
 public record LlmRecipeRepairResult(LlmExtractedRecipePayload Draft, IReadOnlyList<string> Notices);
 
+public record LlmIssueTriageItem(
+    string Issue,
+    IngestionIssueTriageResolution Resolution,
+    string? Reason = null
+);
+
+public record LlmAutoRepairAndTriageContext(
+    string SourceContent,
+    LlmExtractedRecipePayload Draft,
+    IReadOnlyList<string> ValidationIssues,
+    IReadOnlyList<string> QualityWarnings,
+    IReadOnlyList<string>? AvailableTagNames = null,
+    IReadOnlyList<string>? AvailableFoodNames = null
+);
+
+public record LlmAutoRepairAndTriageResult(
+    LlmExtractedRecipePayload Draft,
+    IReadOnlyList<LlmIssueTriageItem> TriageDecisions
+);
+
 public record LlmSubstitutionContext(
     string RecipeTitle,
     string? RecipeDescription,
@@ -151,6 +171,12 @@ public interface ILlmExtractionClient
     Task<LlmDraftMealPlanPayload> DraftWeeklyMealPlanAsync(
         EffectiveLlmConnectionConfig config,
         LlmDraftMealPlanContext context,
+        CancellationToken cancellationToken = default
+    );
+
+    Task<LlmAutoRepairAndTriageResult> TriageAndRepairRecipeAsync(
+        EffectiveLlmConnectionConfig config,
+        LlmAutoRepairAndTriageContext context,
         CancellationToken cancellationToken = default
     );
 }

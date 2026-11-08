@@ -838,9 +838,12 @@ public static class RecipeDraftNormalizer
                     {
                         AlternativeMeasurement = alternative,
                     };
-                    measurementWarnings.Add(
-                        $"{displayName}: verify the model-proposed alternative measurement against the source."
-                    );
+                    if (!IsAlternativeConfirmedBySource(rawIng.OriginalRawText, alternative))
+                    {
+                        measurementWarnings.Add(
+                            $"{displayName}: verify the model-proposed alternative measurement against the source."
+                        );
+                    }
                 }
                 else if (alternative is not null)
                 {
@@ -1093,20 +1096,14 @@ public static class RecipeDraftNormalizer
             ? fallbackCollectionIds.Distinct().ToList()
             : [];
 
-        var confidence = raw.ConfidenceScore switch
-        {
-            >= 0.0m and <= 1.0m => raw.ConfidenceScore.Value,
-            > 1.0m and <= 100.0m => Math.Round(raw.ConfidenceScore.Value / 100.0m, 2),
-            _ => 0.8m,
-        };
-        if (normalizedIngredients.Count == 0 || normalizedSteps.Count == 0)
-        {
-            confidence = Math.Min(confidence, 0.25m);
-        } //
-        if (measurementWarnings.Count > 0)
-        {
-            confidence = Math.Min(confidence, 0.70m);
-        }
+        var confidence = CalculateConfidenceScore(
+            raw.ConfidenceScore,
+            normalizedIngredients.Count,
+            normalizedSteps.Count,
+            validationIssueCount: 0,
+            measurementWarningCount: measurementWarnings.Count,
+            qualityWarningCount: 0
+        );
 
         var normalizedDescription = NormalizeDescription(raw.Description);
         var atkHeadnote = TryExtractAtkHeadnote(rawSourceText);
@@ -1384,5 +1381,137 @@ public static class RecipeDraftNormalizer
             words[i] = char.ToUpperInvariant(w[0]) + w[1..];
         }
         return string.Join(" ", words);
+    }
+
+    public static decimal CalculateConfidenceScore(
+        decimal? rawConfidence,
+        int ingredientCount,
+        int stepCount,
+        int validationIssueCount,
+        int measurementWarningCount,
+        int qualityWarningCount
+    )
+    {
+        if (ingredientCount == 0 || stepCount == 0)
+        {
+            return 0.25m;
+        }
+
+        var normalizedRaw = rawConfidence switch
+        {
+            >= 0.0m and <= 1.0m => rawConfidence.Value,
+            > 1.0m and <= 100.0m => Math.Round(rawConfidence.Value / 100.0m, 2),
+            _ => (decimal?)null,
+        };
+
+        var baseScore = normalizedRaw is >= 0.50m and <= 1.0m
+            ? Math.Max(normalizedRaw.Value, 0.92m)
+            : 0.95m;
+
+        var deductions =
+            (0.08m * validationIssueCount)
+            + (0.03m * (measurementWarningCount + qualityWarningCount));
+        var score = baseScore - deductions;
+        return Math.Clamp(Math.Round(score, 2), 0.15m, 1.00m);
+    }
+
+    private static bool IsAlternativeConfirmedBySource(
+        string? originalRawText,
+        RecipeMeasurement alternative
+    )
+    {
+        if (string.IsNullOrWhiteSpace(originalRawText))
+        {
+            return false;
+        }
+
+        var spans = SourceMeasurementParser.FindSpans(originalRawText);
+        foreach (var span in spans)
+        {
+            if (
+                MatchesMeasurement(span.Measurement, alternative)
+                || (
+                    span.Alternative is not null
+                    && MatchesMeasurement(span.Alternative, alternative)
+                )
+            )
+            {
+                return true;
+            }
+        }
+
+        if (Regex.IsMatch(originalRawText, @"\bsticks?\b", RegexOptions.IgnoreCase))
+        {
+            var stickMatch = Regex.Match(
+                originalRawText,
+                @"(?<qty>(?:\d+\s*)?[½¼¾⅓⅔⅛⅜⅝⅞]|\d+(?:[\s-]+\d+/\d+|/\d+|\.\d+)?)\s*sticks?\b",
+                RegexOptions.IgnoreCase
+            );
+            var stickQty = stickMatch.Success
+                ? FlexibleNullableDecimalJsonConverter.ParseNumber(stickMatch.Groups["qty"].Value)
+                : 1m;
+            if (stickQty is > 0)
+            {
+                var n = stickQty.Value;
+                if (
+                    alternative.Unit == MeasurementUnit.Tbsp
+                    && Math.Abs((alternative.Quantity ?? 0) - n * 8m) <= 0.05m
+                )
+                {
+                    return true;
+                }
+                if (
+                    alternative.Unit == MeasurementUnit.Oz
+                    && Math.Abs((alternative.Quantity ?? 0) - n * 4m) <= 0.05m
+                )
+                {
+                    return true;
+                }
+                if (
+                    alternative.Unit == MeasurementUnit.Cup
+                    && Math.Abs((alternative.Quantity ?? 0) - n * 0.5m) <= 0.05m
+                )
+                {
+                    return true;
+                }
+                if (
+                    string.Equals(
+                        alternative.CustomUnitName,
+                        "stick",
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                    && Math.Abs((alternative.Quantity ?? 0) - n) <= 0.01m
+                )
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool MatchesMeasurement(RecipeMeasurement a, RecipeMeasurement b)
+    {
+        if (a.Unit != b.Unit)
+        {
+            return false;
+        }
+        if (
+            a.Unit == MeasurementUnit.Custom
+            && !string.Equals(
+                a.CustomUnitName,
+                b.CustomUnitName,
+                StringComparison.OrdinalIgnoreCase
+            )
+        )
+        {
+            return false;
+        }
+        if (a.Quantity is null || b.Quantity is null)
+        {
+            return false;
+        }
+        return Math.Abs(a.Quantity.Value - b.Quantity.Value) <= 0.01m;
     }
 }

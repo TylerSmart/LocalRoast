@@ -333,6 +333,204 @@ public sealed class InstructionAmountTaggerTests
         Assert.AreEqual(24.75m, rows[5].AlternativeMeasurement!.Quantity);
     }
 
+    [TestMethod]
+    public void RepairIngredientRows_PastaAllaTrapanese_SanitizesFoodNamesAndPrepNotes()
+    {
+        var rawRows = new LlmExtractedIngredientItem[]
+        {
+            new(
+                null,
+                1m,
+                null,
+                "pound",
+                "linguine or spaghetti",
+                "linguine or spaghetti",
+                OriginalRawText: "1 pound linguine or spaghetti"
+            ),
+            new(
+                null,
+                12m,
+                null,
+                "ounces",
+                "cherry or grape tomatoes",
+                "cherry or grape tomatoes",
+                OriginalRawText: "12 ounces cherry or grape tomatoes"
+            ),
+        };
+
+        var repaired = InstructionAmountTagger.RepairIngredientRows(rawRows);
+        Assert.HasCount(2, repaired);
+        Assert.AreEqual("linguine", repaired[0].DisplayName);
+        Assert.AreEqual("linguine", repaired[0].CanonicalFoodName);
+        Assert.AreEqual("or spaghetti", repaired[0].PreparationNote);
+
+        Assert.AreEqual("cherry tomatoes", repaired[1].DisplayName);
+        Assert.AreEqual("cherry tomatoes", repaired[1].CanonicalFoodName);
+        Assert.AreEqual("or grape tomatoes", repaired[1].PreparationNote);
+
+        var dummyRecipe = new LlmExtractedRecipePayload(
+            Title: "Pasta alla Trapanese",
+            ConfidenceScore: 0.95m,
+            Ingredients: repaired,
+            Steps: [new(null, "Cook pasta and tomatoes.", [0, 1])]
+        );
+        var issues = RecipeExtractionDiagnostics.GetIssues(dummyRecipe);
+        Assert.IsFalse(
+            issues.Any(i => i.Contains("out of food names")),
+            "Should have zero food name alternative issues after repair."
+        );
+    }
+
+    [TestMethod]
+    public void RepairIngredientRows_AntipastoPastaSalad_SplitsPlusRowAndReconciles()
+    {
+        var saltRow = new LlmExtractedIngredientItem(
+            null,
+            0.5m,
+            null,
+            "teaspoon",
+            "salt",
+            "table salt",
+            OriginalRawText: "1/2 teaspoon table salt, plus salt for cooking pasta"
+        );
+        var pastaRow = new LlmExtractedIngredientItem(
+            null,
+            1m,
+            null,
+            "pound",
+            "campanelle",
+            "pasta",
+            OriginalRawText: "1 pound campanelle"
+        );
+
+        var repaired = InstructionAmountTagger.RepairIngredientRows([saltRow, pastaRow]);
+        Assert.HasCount(3, repaired);
+        Assert.AreEqual("table salt", repaired[0].DisplayName);
+        Assert.AreEqual(0.5m, repaired[0].Quantity);
+        Assert.AreEqual("teaspoon", repaired[0].Unit);
+        Assert.IsNull(repaired[0].PreparationNote);
+
+        Assert.AreEqual("table salt", repaired[1].DisplayName);
+        Assert.IsNull(repaired[1].Quantity);
+        Assert.IsNull(repaired[1].Unit);
+        Assert.AreEqual("for cooking pasta", repaired[1].PreparationNote);
+
+        var steps = new List<LlmExtractedStepItem>
+        {
+            new(
+                null,
+                "Whisk oil, vinegar, and 1/2 teaspoon salt in large bowl.",
+                [0],
+                IngredientAmounts: [new(0, new(0.5m, "tsp"))]
+            ),
+            new(
+                null,
+                "Bring 4 quarts water to boil in large pot. Add 1 tablespoon salt and pasta; cook until al dente.",
+                [1, 2],
+                IngredientAmounts: [new(1, new(1m, "tbsp"))] // Linked to unmeasured sibling row 1
+            ),
+        };
+
+        var issues = InstructionAmountTagger.Reconcile(repaired, steps);
+        Assert.IsEmpty(
+            issues,
+            $"Expected 0 reconciliation issues but got: {string.Join("; ", issues)}"
+        );
+    }
+
+    [TestMethod]
+    public void Reconcile_UltracreamyHummus_CansAndCloveConversions_ZeroErrors()
+    {
+        var chickpeas = new LlmExtractedIngredientItem(
+            null,
+            2m,
+            null,
+            "can",
+            "chickpeas",
+            "chickpeas",
+            OriginalRawText: "2 (15-ounce) cans chickpeas, rinsed"
+        );
+        var garlic = new LlmExtractedIngredientItem(
+            null,
+            4m,
+            null,
+            "clove",
+            "garlic",
+            "garlic",
+            OriginalRawText: "4 garlic cloves, peeled"
+        );
+
+        var ingredients = new[] { chickpeas, garlic };
+        var steps = new List<LlmExtractedStepItem>
+        {
+            new(
+                null,
+                "Combine chickpeas, water, and baking soda in saucepan and simmer.",
+                [0] // Bulk step using chickpeas without stated sub-portion amount
+            ),
+            new(
+                null,
+                "Set aside 2 tablespoons whole chickpeas for garnish.",
+                [0],
+                IngredientAmounts: [new(0, new(2m, "tbsp"))]
+            ),
+            new(
+                null,
+                "Measure out 1 tablespoon garlic and set aside; discard remaining garlic.",
+                [1],
+                IngredientAmounts: [new(1, new(1m, "tbsp"))] // 1 tbsp = 3 cloves <= 4 cloves
+            ),
+            new(null, "Process chickpeas with tahini and garlic.", [0, 1]),
+        };
+
+        var issues = InstructionAmountTagger.Reconcile(ingredients, steps);
+        Assert.IsEmpty(
+            issues,
+            $"Expected 0 reconciliation issues for hummus but got: {string.Join("; ", issues)}"
+        );
+    }
+
+    [TestMethod]
+    public void Normalize_ParentheticalEquivalentAnywhere_ConfirmsAlternativeWithoutWarnings()
+    {
+        var raw = new LlmExtractedRecipePayload(
+            Title: "Chicken Breasts",
+            ConfidenceScore: 0.95m,
+            Ingredients:
+            [
+                new(
+                    null,
+                    4m,
+                    null,
+                    "whole",
+                    "boneless chicken breasts",
+                    "chicken breast",
+                    AlternativeMeasurement: new(1.5m, "lb"),
+                    OriginalRawText: "4 boneless chicken breasts (about 1 1/2 pounds)"
+                ),
+            ],
+            Steps:
+            [
+                new(
+                    null,
+                    "Season chicken with salt and pepper.",
+                    [0],
+                    OriginalRawText: "Season chicken with salt and pepper."
+                ),
+            ]
+        );
+
+        var draft = RecipeDraftNormalizer.Normalize(raw, [], [], null, null, null, null, null);
+        Assert.IsEmpty(draft.MeasurementWarnings!);
+        Assert.IsNotNull(draft.Ingredients![0].AlternativeMeasurement);
+        Assert.AreEqual(1.5m, draft.Ingredients[0].AlternativeMeasurement!.Quantity);
+        Assert.AreEqual(MeasurementUnit.Lb, draft.Ingredients[0].AlternativeMeasurement!.Unit);
+        Assert.IsTrue(
+            draft.ConfidenceScore >= 0.92m,
+            $"Expected confidence >= 0.92 but got {draft.ConfidenceScore}"
+        );
+    }
+
     private static LlmExtractedIngredientItem Ingredient(
         string name,
         decimal? quantity,

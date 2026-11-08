@@ -109,9 +109,27 @@ public static class RecipeExtractionDiagnostics
                     );
                 if (!linked)
                 {
-                    warnings.Add(
-                        $"Step {stepIndex + 1}: {DescribeIngredient(ingredientIndex, ingredient)} is mentioned but not linked; verify whether this step uses it."
-                    );
+                    var linkedInEarlierStep = steps
+                        .Take(stepIndex)
+                        .Any(prevStep =>
+                            (prevStep.IngredientIndices ?? [])
+                                .Concat(
+                                    (prevStep.IngredientAmounts ?? [])
+                                        .Where(a => a.IngredientIndex.HasValue)
+                                        .Select(a => a.IngredientIndex!.Value)
+                                )
+                                .Any(idx =>
+                                    idx >= 0
+                                    && idx < ingredients.Count
+                                    && SameFood(ingredient, ingredients[idx])
+                                )
+                        );
+                    if (!linkedInEarlierStep)
+                    {
+                        warnings.Add(
+                            $"Step {stepIndex + 1}: {DescribeIngredient(ingredientIndex, ingredient)} is mentioned but not linked; verify whether this step uses it."
+                        );
+                    }
                 }
             }
         }

@@ -107,3 +107,17 @@ dotnet csharpier format .
 npm run format
 npm run lint:fix
 ```
+
+
+---
+
+## 6. Live Local Environment & Ollama Hardware Constraints
+
+1. **Running App & Pre-Populated Database (`http://localhost:4200` & `localhost,14333`):**
+   - The local app is running at `http://localhost:4200` (proxying `/api` to `http://localhost:5041`) backed by the Docker SQL Server container `local-roast-sqlserver` (`localhost,14333`, database `LocalRoast`).
+   - This database **already contains the 1,562 imported ATK cookbook recipes** exhibiting the ~50/50 split (`761` `Published`, `801` `ReadyForReview`, including *Ultracreamy Hummus*, *Antipasto Pasta Salad*, *Pasta alla Trapanese*, and *Blueberry Pie* at `/recipes/d70c27f6-dfd2-4452-84c2-277823121962`).
+   - Agents can inspect/query `LocalRoast` on `localhost,14333` or browse `http://localhost:4200` to verify real-world recipes and diagnostics. **Never drop, truncate, or wipe the `LocalRoast` development database.**
+2. **Remote Ollama Host (`http://ThinkStationP3:11434`) — Strictly One Request at a Time:**
+   - The live Ollama server runs on the home server at `http://ThinkStationP3:11434` (typically using `gemma4:e4b`).
+   - **CRITICAL HARDWARE CONSTRAINT:** Because of hardware limits on `ThinkStationP3`, **only send ONE LLM request at a time (concurrency = 1)**.
+   - Never run parallel LLM tests or concurrent evaluator processes against `http://ThinkStationP3:11434`. Before sending a live test/evaluator request to `ThinkStationP3`, ensure the local app's background ingestion queue is paused (`EnableIngestion = false`) so the app worker and your test do not send overlapping requests.

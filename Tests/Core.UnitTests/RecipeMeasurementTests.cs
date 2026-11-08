@@ -161,7 +161,7 @@ public sealed class RecipeMeasurementTests
         var draft = Normalize(raw);
         Assert.IsEmpty(draft.Steps![0].IngredientAmounts!);
         Assert.HasCount(4, draft.MeasurementWarnings!);
-        Assert.AreEqual(0.70m, draft.ConfidenceScore);
+        Assert.AreEqual(0.87m, draft.ConfidenceScore);
     }
 
     [TestMethod]

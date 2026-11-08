@@ -1271,12 +1271,99 @@ public sealed class IngestionIntegrationTests
         );
         Assert.IsNotNull(detail);
         Assert.AreEqual(IngestionJobStatus.ReadyForReview, detail.Status);
-        Assert.AreEqual(0.59m, detail.ConfidenceScore);
+        Assert.AreEqual(invalidFoodName ? 0.91m : 0.88m, detail.ConfidenceScore);
         StringAssert.Contains(
             detail.StatusDetail,
             invalidFoodName ? "out of food names" : "exceed the ingredient list"
         );
         Assert.IsNull(detail.ResultingRecipeId);
+    }
+
+    [TestMethod]
+    public async Task TextIngestion_RunsAutoRepair_WhenExtractionHasIssues_AndPublishesWhenResolved()
+    {
+        var initialDraft = new LlmExtractedRecipePayload(
+            Title: "Carrot Soup",
+            ConfidenceScore: 0.95m,
+            Ingredients:
+            [
+                new(null, 2, null, "whole", "carrots", "carrots", OriginalRawText: "2 carrots"),
+                new(null, 1, null, "tsp", "salt", "salt", OriginalRawText: "1 tsp salt"),
+            ],
+            Steps: [new(null, "Season with salt.", [1], OriginalRawText: "Season with salt.")]
+        );
+
+        var repairedDraft = new LlmExtractedRecipePayload(
+            Title: "Carrot Soup",
+            ConfidenceScore: 0.98m,
+            Ingredients:
+            [
+                new(null, 2, null, "whole", "carrots", "carrots", OriginalRawText: "2 carrots"),
+                new(null, 1, null, "tsp", "salt", "salt", OriginalRawText: "1 tsp salt"),
+            ],
+            Steps:
+            [
+                new(
+                    null,
+                    "Chop carrots and season with salt.",
+                    [0, 1],
+                    OriginalRawText: "Chop carrots and season with salt."
+                ),
+            ]
+        );
+
+        var fakeLlm = new FakeSequentialLlmExtractionClient(_ => initialDraft)
+        {
+            TriageAndRepair = ctx => new LlmAutoRepairAndTriageResult(
+                repairedDraft,
+                [
+                    new(
+                        "carrots: not used in any step.",
+                        IngestionIssueTriageResolution.Resolved,
+                        "Linked in step"
+                    ),
+                ]
+            ),
+        };
+
+        await using var factory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Llm:TextModel", "gemma4:e4b");
+            builder.UseSetting("Llm:AutoPublishHighConfidenceText", "true");
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ILlmExtractionClient>();
+                services.AddSingleton<ILlmExtractionClient>(fakeLlm);
+            });
+        });
+
+        using var client = factory.CreateClient();
+        await AuthenticateAsync(client);
+        var response = await client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest(
+                "Ingredients:\n- 2 carrots\n- 1 tsp salt\nInstructions:\nChop carrots and season with salt.",
+                AutoPublish: true
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Accepted, response.StatusCode);
+        var job = await response.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
+        Assert.IsNotNull(job);
+
+        using var scope = factory.Services.CreateScope();
+        Assert.IsTrue(
+            await scope
+                .ServiceProvider.GetRequiredService<IIngestionProcessor>()
+                .ProcessNextQueuedJobAsync()
+        );
+
+        var detail = await client.GetFromJsonAsync<IngestionJobDetailDto>(
+            $"/api/ingestion/jobs/{job.Id}"
+        );
+        Assert.IsNotNull(detail);
+        Assert.AreEqual(IngestionJobStatus.Published, detail.Status);
+        Assert.IsNotNull(detail.ResultingRecipeId);
+        Assert.IsTrue(detail.ConfidenceScore >= 0.85m);
     }
 
     [TestMethod]
@@ -1908,6 +1995,21 @@ public sealed class IngestionIntegrationTests
         Func<LlmRecipeRepairContext, LlmRecipeRepairResult>? repair = null
     ) : ILlmExtractionClient
     {
+        public Func<
+            LlmAutoRepairAndTriageContext,
+            LlmAutoRepairAndTriageResult
+        >? TriageAndRepair { get; set; }
+
+        public Task<LlmAutoRepairAndTriageResult> TriageAndRepairRecipeAsync(
+            EffectiveLlmConnectionConfig config,
+            LlmAutoRepairAndTriageContext context,
+            CancellationToken cancellationToken = default
+        ) =>
+            Task.FromResult(
+                TriageAndRepair?.Invoke(context)
+                    ?? new LlmAutoRepairAndTriageResult(context.Draft, [])
+            );
+
         public List<string> StructuredSources { get; } = [];
         public LlmRecipeRepairContext? LastRepairContext { get; private set; }
 
@@ -1980,6 +2082,12 @@ public sealed class IngestionIntegrationTests
 
     private sealed class BlockingLlmExtractionClient : ILlmExtractionClient
     {
+        public Task<LlmAutoRepairAndTriageResult> TriageAndRepairRecipeAsync(
+            EffectiveLlmConnectionConfig config,
+            LlmAutoRepairAndTriageContext context,
+            CancellationToken cancellationToken = default
+        ) => Task.FromResult(new LlmAutoRepairAndTriageResult(context.Draft, []));
+
         public Task<LlmRecipeRepairResult> RepairRecipeDraftAsync(
             EffectiveLlmConnectionConfig config,
             LlmRecipeRepairContext context,

@@ -649,6 +649,78 @@ public sealed class IngestionProcessor(
                 rawExtracted,
                 diagnosticsSource
             );
+            var qualityWarnings = RecipeExtractionDiagnostics.GetQualityWarnings(rawExtracted);
+            var unresolvedIssues = new List<string>(extractionIssues);
+
+            if (extractionIssues.Count > 0)
+            {
+                job.StatusDetail = "Auto-repairing recipe issues via local LLM...";
+                await dbContext.SaveChangesAsync(jobCt);
+                try
+                {
+                    var repairResult = await llmClient.TriageAndRepairRecipeAsync(
+                        config,
+                        new LlmAutoRepairAndTriageContext(
+                            SourceContent: diagnosticsSource,
+                            Draft: rawExtracted,
+                            ValidationIssues: extractionIssues,
+                            QualityWarnings: qualityWarnings,
+                            AvailableTagNames: tagNames,
+                            AvailableFoodNames: availableFoodNames
+                        ),
+                        jobCt
+                    );
+
+                    var postRepairIssues = RecipeExtractionDiagnostics.GetReviewIssues(
+                        repairResult.Draft,
+                        diagnosticsSource
+                    );
+
+                    var remainingHumanReviewIssues = postRepairIssues
+                        .Where(issue =>
+                        {
+                            var decision = repairResult.TriageDecisions.FirstOrDefault(d =>
+                                string.Equals(
+                                    d.Issue?.Trim(),
+                                    issue.Trim(),
+                                    StringComparison.OrdinalIgnoreCase
+                                )
+                                || issue.Contains(
+                                    d.Issue?.Trim() ?? "",
+                                    StringComparison.OrdinalIgnoreCase
+                                )
+                            );
+                            return decision is null
+                                || decision.Resolution
+                                    == IngestionIssueTriageResolution.NeedsHumanReview;
+                        })
+                        .ToList();
+
+                    if (remainingHumanReviewIssues.Count < extractionIssues.Count)
+                    {
+                        rawExtracted = repairResult.Draft;
+                        unresolvedIssues = remainingHumanReviewIssues;
+                        qualityWarnings = RecipeExtractionDiagnostics.GetQualityWarnings(
+                            rawExtracted
+                        );
+                        logger.LogInformation(
+                            "Auto-repair improved job {JobId}: issues reduced from {Initial} to {Remaining}",
+                            job.Id,
+                            extractionIssues.Count,
+                            unresolvedIssues.Count
+                        );
+                    }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    logger.LogWarning(
+                        ex,
+                        "Auto-repair pass failed for job {JobId}; continuing with initial extraction.",
+                        job.Id
+                    );
+                }
+            }
+
             var draft = RecipeDraftNormalizer.Normalize(
                 raw: rawExtracted,
                 catalogFoods: catalogFoods,
@@ -669,13 +741,24 @@ public sealed class IngestionProcessor(
                 rawSourceText: job.NormalizedSourceText ?? job.RawText
             );
 
-            if (extractionIssues.Count > 0)
+            draft = draft with
             {
-                draft = draft with { ConfidenceScore = Math.Min(draft.ConfidenceScore, 0.59m) };
+                ConfidenceScore = RecipeDraftNormalizer.CalculateConfidenceScore(
+                    rawExtracted.ConfidenceScore,
+                    draft.Ingredients?.Count ?? 0,
+                    draft.Steps?.Count ?? 0,
+                    validationIssueCount: unresolvedIssues.Count,
+                    measurementWarningCount: draft.MeasurementWarnings?.Count ?? 0,
+                    qualityWarningCount: qualityWarnings.Count
+                ),
+            };
+
+            if (unresolvedIssues.Count > 0)
+            {
                 logger.LogWarning(
                     "Recipe extraction for job {JobId} requires review: {Issues}",
                     job.Id,
-                    string.Join(" ", extractionIssues)
+                    string.Join(" ", unresolvedIssues)
                 );
             }
 
@@ -697,7 +780,7 @@ public sealed class IngestionProcessor(
             // Auto-Publish check
 
             var canAutoPublish =
-                extractionIssues.Count == 0
+                unresolvedIssues.Count == 0
                 && (config.AutoPublishHighConfidenceText || job.AutoPublish)
                 && (
                     job.Channel == IngestionChannel.WebUrl
@@ -740,10 +823,10 @@ public sealed class IngestionProcessor(
                 job.ProcessedAt = DateTimeOffset.UtcNow;
 
                 job.StatusDetail = $"Ready for side-by-side review ({modelUsed}).";
-                if (extractionIssues.Count > 0)
+                if (unresolvedIssues.Count > 0)
                 {
                     var detail =
-                        $"{job.StatusDetail} Validation: {string.Join(" ", extractionIssues)}";
+                        $"{job.StatusDetail} Validation: {string.Join(" ", unresolvedIssues)}";
                     job.StatusDetail = detail[..Math.Min(detail.Length, 2000)];
                 }
 

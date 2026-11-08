@@ -388,6 +388,12 @@ public sealed class IngestionRefinementIntegrationTests
         > repair
     ) : ILlmExtractionClient
     {
+        public Task<LlmAutoRepairAndTriageResult> TriageAndRepairRecipeAsync(
+            EffectiveLlmConnectionConfig config,
+            LlmAutoRepairAndTriageContext context,
+            CancellationToken cancellationToken = default
+        ) => Task.FromResult(new LlmAutoRepairAndTriageResult(context.Draft, []));
+
         public LlmExtractedRecipePayload Extraction { get; set; } = extraction;
         public EffectiveLlmConnectionConfig? LastRepairConfig { get; private set; }
         public LlmRecipeRepairContext? LastRepairContext { get; private set; }

@@ -50,6 +50,12 @@ public sealed class AiKitchenHelperServiceTests
 
     private sealed class MockLlmExtractionClient : ILlmExtractionClient
     {
+        public Task<LlmAutoRepairAndTriageResult> TriageAndRepairRecipeAsync(
+            EffectiveLlmConnectionConfig config,
+            LlmAutoRepairAndTriageContext context,
+            CancellationToken cancellationToken = default
+        ) => throw new NotImplementedException();
+
         public Task<LlmRecipeRepairResult> RepairRecipeDraftAsync(
             EffectiveLlmConnectionConfig config,
             LlmRecipeRepairContext context,

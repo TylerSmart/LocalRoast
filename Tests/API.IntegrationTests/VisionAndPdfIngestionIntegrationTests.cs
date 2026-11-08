@@ -413,6 +413,12 @@ public sealed class VisionAndPdfIngestionIntegrationTests
 
     private sealed class FakeVisionLlmExtractionClient : ILlmExtractionClient
     {
+        public Task<LlmAutoRepairAndTriageResult> TriageAndRepairRecipeAsync(
+            EffectiveLlmConnectionConfig config,
+            LlmAutoRepairAndTriageContext context,
+            CancellationToken cancellationToken = default
+        ) => Task.FromResult(new LlmAutoRepairAndTriageResult(context.Draft, []));
+
         public LlmRecipeRepairContext? LastRepairContext { get; private set; }
 
         public Task<LlmRecipeRepairResult> RepairRecipeDraftAsync(

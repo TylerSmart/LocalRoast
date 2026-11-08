@@ -57,6 +57,26 @@ public static class InstructionAmountTagger
         RegexOptions.IgnoreCase,
         TimeSpan.FromSeconds(1)
     );
+    private static readonly Regex AlternativeFoodName = new(
+        @"^(?<first>.+?)\s+(?:and/or|or)\s+(?<second>.+)$",
+        RegexOptions.IgnoreCase,
+        RegexTimeout
+    );
+    private static readonly Regex TrailingPreparation = new(
+        @",\s*(?<prep>(?:(?:finely|coarsely|roughly|thinly)\s+)?(?:chopped|minced|diced|sliced|grated|peeled|softened|melted|drained|toasted|cut)\b.*)$",
+        RegexOptions.IgnoreCase,
+        RegexTimeout
+    );
+    private static readonly Regex PlusPurposeRegex = new(
+        @",\s*plus\s+(?:more\s+|extra\s+)?(?<extraFood>[a-z\s]*?)\bfor\s+(?<purpose>[^,.;()]+)\s*$",
+        RegexOptions.IgnoreCase,
+        RegexTimeout
+    );
+    private static readonly Regex CleanPlusFromPrepNote = new(
+        @"\(?\s*plus\s+.*?\bfor\s+[^)]+\)?",
+        RegexOptions.IgnoreCase,
+        RegexTimeout
+    );
     private static readonly Regex NotATimerBefore = new(
         @"\b(?:every|within|up\s+to|no\s+(?:more|longer)\s+than)\s+(?:about\s+)?$",
         RegexOptions.IgnoreCase,
@@ -499,6 +519,77 @@ public static class InstructionAmountTagger
                 if (total <= rowHigh + tolerance)
                     break;
             }
+
+            if (total > rowHigh + tolerance)
+            {
+                var unmeasuredSiblings = Enumerable
+                    .Range(0, ingredients.Count)
+                    .Where(j =>
+                        j != i
+                        && ingredients[j].Quantity is null
+                        && string.Equals(
+                            FoodName(ingredients[j]),
+                            FoodName(row),
+                            StringComparison.OrdinalIgnoreCase
+                        )
+                    )
+                    .ToList();
+                foreach (var j in unmeasuredSiblings)
+                {
+                    var sibling = ingredients[j];
+                    var match = spans.FindIndex(x =>
+                        (
+                            !string.IsNullOrWhiteSpace(sibling.PreparationNote)
+                            && x.Step.Paragraph.Text.Contains(
+                                sibling.PreparationNote.Replace("for ", "").Trim(),
+                                StringComparison.OrdinalIgnoreCase
+                            )
+                        )
+                        || (
+                            TryToRowUnit(
+                                x.Amount.Measurement.Quantity!.Value,
+                                x.Amount.Measurement.Unit,
+                                row,
+                                out var v
+                            )
+                            && v > rowHigh
+                        )
+                    );
+                    if (match < 0 && spans.Count > 1)
+                    {
+                        match = spans.FindIndex(x =>
+                            TryToRowUnit(
+                                x.Amount.Measurement.Quantity!.Value,
+                                x.Amount.Measurement.Unit,
+                                row,
+                                out var v
+                            )
+                            && v > (rowHigh - (total - v))
+                        );
+                    }
+                    if (match < 0)
+                        continue;
+                    var (step, k, amount) = spans[match];
+                    spans.RemoveAt(match);
+                    step.Inline[k] = amount with { IngredientIndex = j };
+                    RebuildAmount(step.Inline, step.Amounts, i);
+                    RebuildAmount(step.Inline, step.Amounts, j);
+                    step.Indices.Add(j);
+                    if (!step.Inline.Any(a => a.IngredientIndex == i))
+                        step.Indices.Remove(i);
+                    if (
+                        TryToRowUnit(
+                            amount.Measurement.Quantity!.Value,
+                            amount.Measurement.Unit,
+                            row,
+                            out var moved
+                        )
+                    )
+                        total -= moved;
+                    if (total <= rowHigh + tolerance)
+                        break;
+                }
+            }
         }
 
         for (var i = 0; i < ingredients.Count; i++)
@@ -632,8 +723,93 @@ public static class InstructionAmountTagger
                 )
             )
             {
+                var incompatibleAmounts =
+                    new List<(
+                        int StepNum,
+                        LlmExtractedStepIngredientAmountItem Amount,
+                        decimal? InTbsp
+                    )>();
+                for (var sIdx = 0; sIdx < steps.Count; sIdx++)
+                {
+                    var a = steps[sIdx]
+                        .IngredientAmounts?.FirstOrDefault(x =>
+                            x.IngredientIndex == i && x.Measurement?.Quantity is not null
+                        );
+                    if (a is null)
+                        continue;
+                    var m = ToMeasurement(a.Measurement);
+                    if (
+                        !TryToRowUnit(m.Quantity!.Value, m.Unit, ingredient, out _)
+                        || !TryToRowUnit(
+                            m.MaxQuantity ?? m.Quantity!.Value,
+                            m.Unit,
+                            ingredient,
+                            out _
+                        )
+                    )
+                    {
+                        decimal? inTbsp = null;
+                        if (
+                            m.Unit.HasValue
+                            && CulinaryMath.TryConvertQuantity(
+                                m.Quantity!.Value,
+                                m.Unit.Value,
+                                MeasurementUnit.Tbsp,
+                                out var tbspVal
+                            )
+                        )
+                        {
+                            inTbsp = tbspVal;
+                        }
+                        incompatibleAmounts.Add((sIdx + 1, a, inTbsp));
+                    }
+                }
+
+                var hasBulkStep = steps.Any(s =>
+                    (
+                        s.IngredientIndices?.Contains(i) == true
+                        || s.IngredientAmounts?.Any(a => a.IngredientIndex == i) == true
+                    )
+                    && (
+                        s.IngredientAmounts is null
+                        || !s.IngredientAmounts.Any(a =>
+                            a.IngredientIndex == i
+                            && a.Measurement?.Quantity is not null
+                            && incompatibleAmounts.Any(ia => ia.Amount == a)
+                        )
+                    )
+                );
+
+                var allSubPortions =
+                    incompatibleAmounts.Count > 0
+                    && incompatibleAmounts.All(ia => ia.InTbsp is <= 4m);
+
+                if (hasBulkStep && allSubPortions)
+                {
+                    continue;
+                }
+
+                var firstIncompatible = incompatibleAmounts.FirstOrDefault();
+                var stepNum = firstIncompatible.StepNum > 0 ? firstIncompatible.StepNum : 1;
+                var amountText = firstIncompatible.Amount?.Measurement?.Quantity is not null
+                    ? $"{FormatNumber(firstIncompatible.Amount.Measurement.Quantity.Value)} {firstIncompatible.Amount.Measurement.Unit}"
+                    : "amount";
+                if (firstIncompatible.StepNum > 0 && firstIncompatible.StepNum <= steps.Count)
+                {
+                    var matchingInline = steps[firstIncompatible.StepNum - 1]
+                        .InlineAmounts?.FirstOrDefault(ia => ia.IngredientIndex == i);
+                    if (!string.IsNullOrWhiteSpace(matchingInline?.Text))
+                    {
+                        amountText = matchingInline.Text;
+                    }
+                }
+                var stepUnit =
+                    firstIncompatible.Amount?.Measurement?.Unit?.ToString() ?? "unknown unit";
+                var rowLowFmt = FormatNumber(ingredient.Quantity ?? 0);
+                var rowUnitFmt = ingredient.Unit?.ToString() ?? ingredient.CustomUnitName ?? "unit";
+
                 issues.Add(
-                    $"{name}: step amounts use units that cannot be compared with the ingredient list."
+                    $"Step {stepNum} (\"{amountText}\"): {name} step amount uses a unit ({stepUnit}) that cannot be compared with the ingredient list ({rowLowFmt} {rowUnitFmt})."
                 );
                 continue;
             }
@@ -660,7 +836,34 @@ public static class InstructionAmountTagger
                 )
                 .Count();
             // A single linked step without a stated amount implicitly uses the rest.
-            if (untagged == 1)
+            // When remaining/rest is mentioned or stated amounts are small sub-portions (<= 4 tbsp),
+            // the linked bulk steps consume the row.
+            var hasRemainingStep = steps.Any(s =>
+                (
+                    s.IngredientIndices?.Contains(i) == true
+                    || s.IngredientAmounts?.Any(a => a.IngredientIndex == i) == true
+                )
+                && (
+                    s.Instruction?.Contains("remaining", StringComparison.OrdinalIgnoreCase) == true
+                    || s.Instruction?.Contains("the rest", StringComparison.OrdinalIgnoreCase)
+                        == true
+                )
+            );
+            var isSmallSubPortion = amounts
+                .Where(a => a is not null)
+                .All(a =>
+                {
+                    var m = ToMeasurement(a!.Measurement);
+                    return m.Unit.HasValue
+                        && CulinaryMath.TryConvertQuantity(
+                            m.Quantity ?? 0,
+                            m.Unit.Value,
+                            MeasurementUnit.Tbsp,
+                            out var tbsp
+                        )
+                        && tbsp <= 4m;
+                });
+            if (untagged == 1 || (untagged > 1 && (hasRemainingStep || isSmallSubPortion)))
                 continue;
             issues.Add(
                 untagged == 0
@@ -713,10 +916,11 @@ public static class InstructionAmountTagger
         IReadOnlyList<LlmExtractedIngredientItem> rows
     )
     {
+        var sanitized = rows.Select(SanitizeFoodNamesAndAlternatives).ToList();
         var result = new List<LlmExtractedIngredientItem>();
-        foreach (var row in rows)
+        for (var i = 0; i < sanitized.Count; i++)
         {
-            var current = RestoreSourceMeasurement(row);
+            var current = RestoreSourceMeasurement(sanitized[i]);
             if (result.Count > 0 && IsSplitAlternative(result[^1], current))
             {
                 var note = $"or {current.DisplayName ?? current.CanonicalFoodName}";
@@ -728,9 +932,139 @@ public static class InstructionAmountTagger
                 };
                 continue;
             }
+
+            if (
+                !string.IsNullOrWhiteSpace(current.OriginalRawText)
+                && rows.Count(r =>
+                    string.Equals(
+                        SourceLine(r),
+                        SourceLine(current),
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                ) == 1
+            )
+            {
+                var plusMatch = PlusPurposeRegex.Match(current.OriginalRawText);
+                if (plusMatch.Success)
+                {
+                    var purpose = plusMatch.Groups["purpose"].Value.Trim();
+                    var cleanedPrep = current.PreparationNote;
+                    if (!string.IsNullOrWhiteSpace(cleanedPrep))
+                    {
+                        cleanedPrep = CleanPlusFromPrepNote
+                            .Replace(cleanedPrep, "")
+                            .Trim()
+                            .Trim(';', ',')
+                            .Trim();
+                        if (string.IsNullOrWhiteSpace(cleanedPrep))
+                            cleanedPrep = null;
+                    }
+                    var primaryRow = current with { PreparationNote = cleanedPrep };
+                    var siblingRow = primaryRow with
+                    {
+                        Quantity = null,
+                        MaxQuantity = null,
+                        Unit = null,
+                        CustomUnitName = null,
+                        AlternativeMeasurement = null,
+                        IsOptional = false,
+                        PreparationNote = $"for {purpose}",
+                    };
+                    result.Add(primaryRow);
+                    result.Add(siblingRow);
+                    continue;
+                }
+            }
+
             result.Add(current);
         }
         return result;
+    }
+
+    private static LlmExtractedIngredientItem SanitizeFoodNamesAndAlternatives(
+        LlmExtractedIngredientItem row
+    )
+    {
+        var displayName = row.DisplayName;
+        var canonical = row.CanonicalFoodName;
+        var prepNote = row.PreparationNote;
+
+        var nameToCheck = !string.IsNullOrWhiteSpace(displayName) ? displayName : canonical;
+        if (!string.IsNullOrWhiteSpace(nameToCheck))
+        {
+            var match = AlternativeFoodName.Match(nameToCheck);
+            if (match.Success)
+            {
+                var first = match.Groups["first"].Value.Trim();
+                var second = match.Groups["second"].Value.Trim();
+                var secondWords = second.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                string firstChoice;
+                if (!first.Contains(' ') && secondWords.Length >= 2)
+                {
+                    var lastNoun = secondWords[^1];
+                    firstChoice = $"{first} {lastNoun}";
+                }
+                else
+                {
+                    firstChoice = first;
+                }
+
+                displayName = firstChoice;
+                canonical = firstChoice;
+                var noteToAdd = $"or {second}";
+                if (string.IsNullOrWhiteSpace(prepNote))
+                {
+                    prepNote = noteToAdd;
+                }
+                else if (!prepNote.Contains(noteToAdd, StringComparison.OrdinalIgnoreCase))
+                {
+                    prepNote = $"{prepNote.TrimEnd(';', ',')}; {noteToAdd}";
+                }
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(displayName))
+        {
+            var prepMatch = TrailingPreparation.Match(displayName);
+            if (prepMatch.Success)
+            {
+                var prep = prepMatch.Groups["prep"].Value.Trim();
+                displayName = TrailingPreparation.Replace(displayName, "").Trim();
+                if (string.IsNullOrWhiteSpace(prepNote))
+                {
+                    prepNote = prep;
+                }
+                else if (!prepNote.Contains(prep, StringComparison.OrdinalIgnoreCase))
+                {
+                    prepNote = $"{prepNote.TrimEnd(';', ',')}; {prep}";
+                }
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(canonical))
+        {
+            var prepMatch = TrailingPreparation.Match(canonical);
+            if (prepMatch.Success)
+            {
+                var prep = prepMatch.Groups["prep"].Value.Trim();
+                canonical = TrailingPreparation.Replace(canonical, "").Trim();
+                if (string.IsNullOrWhiteSpace(prepNote))
+                {
+                    prepNote = prep;
+                }
+                else if (!prepNote.Contains(prep, StringComparison.OrdinalIgnoreCase))
+                {
+                    prepNote = $"{prepNote.TrimEnd(';', ',')}; {prep}";
+                }
+            }
+        }
+
+        return row with
+        {
+            DisplayName = displayName,
+            CanonicalFoodName = canonical,
+            PreparationNote = prepNote,
+        };
     }
 
     private static string SourceLine(LlmExtractedIngredientItem row) =>
@@ -889,6 +1223,123 @@ public static class InstructionAmountTagger
             result = inAlternative * ingredient.Quantity!.Value / alternative.Quantity.Value;
             return true;
         }
+
+        // Check container unit size in OriginalRawText (e.g., 2 (15-ounce) cans chickpeas)
+        if (rowUnit == MeasurementUnit.Can && ingredient.Quantity is > 0)
+        {
+            var container = SourceMeasurementParser.FindContainerUnitSize(
+                ingredient.OriginalRawText
+            );
+            if (container?.Unit is not null && container.Quantity is > 0)
+            {
+                if (
+                    CulinaryMath.TryConvertQuantity(
+                        quantity,
+                        fromUnit,
+                        container.Unit.Value,
+                        out var inContainerUnit
+                    )
+                )
+                {
+                    result = inContainerUnit / container.Quantity.Value;
+                    return true;
+                }
+                if (
+                    CulinaryMath.TryConvertQuantity(
+                        quantity,
+                        fromUnit,
+                        MeasurementUnit.Tbsp,
+                        out var inTbsp
+                    )
+                )
+                {
+                    var canTbsp = container.Unit.Value is MeasurementUnit.Oz or MeasurementUnit.FlOz
+                        ? (
+                            container.Quantity.Value >= 14m && container.Quantity.Value <= 16m
+                                ? 28m
+                                : container.Quantity.Value * 2m
+                        )
+                        : 28m;
+                    result = inTbsp / canTbsp;
+                    return true;
+                }
+            }
+            else if (
+                CulinaryMath.TryConvertQuantity(
+                    quantity,
+                    fromUnit,
+                    MeasurementUnit.Tbsp,
+                    out var inTbsp
+                )
+            )
+            {
+                result = inTbsp / 28m;
+                return true;
+            }
+        }
+
+        // Culinary count conversions: Clove
+        if (rowUnit == MeasurementUnit.Clove)
+        {
+            // 1 clove ≈ 1 tsp minced = 1/3 tbsp
+            if (
+                CulinaryMath.TryConvertQuantity(
+                    quantity,
+                    fromUnit,
+                    MeasurementUnit.Tsp,
+                    out var inTsp
+                )
+            )
+            {
+                result = inTsp;
+                return true;
+            }
+        }
+
+        // Culinary count conversions: Whole citrus
+        if (rowUnit == MeasurementUnit.Whole)
+        {
+            var food = FoodName(ingredient);
+            if (!string.IsNullOrWhiteSpace(food))
+            {
+                if (
+                    food.Contains("lemon", StringComparison.OrdinalIgnoreCase)
+                    || food.Contains("lime", StringComparison.OrdinalIgnoreCase)
+                )
+                {
+                    // 1 whole lemon/lime ≈ 3 tbsp juice
+                    if (
+                        CulinaryMath.TryConvertQuantity(
+                            quantity,
+                            fromUnit,
+                            MeasurementUnit.Tbsp,
+                            out var inTbsp
+                        )
+                    )
+                    {
+                        result = inTbsp / 3m;
+                        return true;
+                    }
+                }
+                else if (food.Contains("orange", StringComparison.OrdinalIgnoreCase))
+                {
+                    // 1 whole orange ≈ 1/3 cup ≈ 5.3333 tbsp
+                    if (
+                        CulinaryMath.TryConvertQuantity(
+                            quantity,
+                            fromUnit,
+                            MeasurementUnit.Tbsp,
+                            out var inTbsp
+                        )
+                    )
+                    {
+                        result = inTbsp / 5.3333m;
+                        return true;
+                    }
+                }
+            }
+        }
+
         return false;
     }
 

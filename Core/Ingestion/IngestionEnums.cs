@@ -47,3 +47,11 @@ public enum PdfExtractionMode
     DigitalText = 0,
     VisionRaster = 1,
 }
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum IngestionIssueTriageResolution
+{
+    NeedsHumanReview = 0,
+    Resolved = 1,
+    IgnoreAsFalsePositive = 2,
+}

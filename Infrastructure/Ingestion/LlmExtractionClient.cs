@@ -568,6 +568,123 @@ Field example for "2 cups finely chopped red onion":
         );
     }
 
+    public async Task<LlmAutoRepairAndTriageResult> TriageAndRepairRecipeAsync(
+        EffectiveLlmConnectionConfig config,
+        LlmAutoRepairAndTriageContext context,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var hintBuilder = new StringBuilder();
+        hintBuilder.AppendLine(
+            "Fix these validation issues if caused by extraction/tagging mistakes:"
+        );
+        foreach (var issue in context.ValidationIssues)
+        {
+            hintBuilder.AppendLine($"- {issue}");
+        }
+        if (context.QualityWarnings is { Count: > 0 })
+        {
+            hintBuilder.AppendLine("Also consider resolving these quality warnings:");
+            foreach (var warning in context.QualityWarnings)
+            {
+                hintBuilder.AppendLine($"- {warning}");
+            }
+        }
+
+        var repaired = await ExtractRecipeFromTextAsync(
+            config,
+            new LlmExtractionContext(
+                SourceContent: context.SourceContent,
+                AvailableTagNames: context.AvailableTagNames
+                    ?? context.Draft.SuggestedTagNames
+                    ?? [],
+                AvailableFoodNames: context.AvailableFoodNames,
+                ReviewerHint: hintBuilder.ToString(),
+                CurrentIngredients: context.Draft.Ingredients
+            ),
+            cancellationToken
+        );
+
+        var remainingIssues = RecipeExtractionDiagnostics.GetReviewIssues(
+            repaired,
+            context.SourceContent
+        );
+        if (remainingIssues.Count == 0)
+        {
+            var resolvedDecisions = context
+                .ValidationIssues.Select(v => new LlmIssueTriageItem(
+                    v,
+                    IngestionIssueTriageResolution.Resolved,
+                    "Resolved during repair re-extraction."
+                ))
+                .ToList();
+            return new LlmAutoRepairAndTriageResult(repaired, resolvedDecisions);
+        }
+
+        var triageDecisions = await TriageRemainingIssuesAsync(
+            config,
+            context.SourceContent,
+            remainingIssues,
+            cancellationToken
+        );
+
+        return new LlmAutoRepairAndTriageResult(repaired, triageDecisions);
+    }
+
+    private async Task<IReadOnlyList<LlmIssueTriageItem>> TriageRemainingIssuesAsync(
+        EffectiveLlmConnectionConfig config,
+        string sourceContent,
+        IReadOnlyList<string> remainingIssues,
+        CancellationToken cancellationToken
+    )
+    {
+        try
+        {
+            var systemPrompt =
+                "You are an expert culinary editor. You are reviewing diagnostic issues from automated recipe extraction.\n"
+                + "For each issue, decide its resolution:\n"
+                + "- \"Resolved\": The issue is resolved or no longer applies.\n"
+                + "- \"IgnoreAsFalsePositive\": The diagnostic is triggered by a harmless culinary quirk, stylistic phrasing in the source recipe, or an unmeasured garnish/seasoning that does not affect the recipe's correctness.\n"
+                + "- \"NeedsHumanReview\": A genuine ambiguity, missing ingredient row, or measurement conflict that requires a human reviewer to inspect.\n"
+                + "Provide a concise reason for your decision.";
+
+            var userPrompt =
+                $"Source Recipe:\n{sourceContent}\n\n"
+                + $"Remaining Diagnostic Issues:\n{string.Join("\n", remainingIssues.Select(i => $"- {i}"))}";
+
+            var responseContent = await SendStructuredTextChatAsync(
+                config,
+                "recipe_issue_triage",
+                GetRecipeIssueTriageJsonSchema(),
+                systemPrompt,
+                userPrompt,
+                temperature: 0.1,
+                cancellationToken: cancellationToken
+            );
+
+            var cleanedJson = CleanMarkdownJsonFences(responseContent);
+            var parsed = JsonSerializer.Deserialize<RecipeIssueTriagePayload>(
+                cleanedJson,
+                JsonOptions
+            );
+            if (parsed?.Decisions is { Count: > 0 })
+            {
+                return parsed.Decisions;
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(
+                ex,
+                "Failed to triage remaining recipe issues via LLM; falling back to NeedsHumanReview."
+            );
+        }
+
+        return remainingIssues
+            .Select(i => new LlmIssueTriageItem(i, IngestionIssueTriageResolution.NeedsHumanReview))
+            .ToList();
+    }
+
     public async Task<LlmSubstitutionPayload> SuggestIngredientSubstitutionsAsync(
         EffectiveLlmConnectionConfig config,
         LlmSubstitutionContext context,
@@ -1827,4 +1944,44 @@ Household Cookbook Catalog:
             required = new[] { "proposals" },
         };
     }
+
+    private static object GetRecipeIssueTriageJsonSchema()
+    {
+        return new
+        {
+            type = "object",
+            properties = new
+            {
+                decisions = new
+                {
+                    type = "array",
+                    items = new
+                    {
+                        type = "object",
+                        properties = new
+                        {
+                            issue = new { type = "string" },
+                            resolution = new
+                            {
+                                type = "string",
+                                @enum = new[]
+                                {
+                                    "NeedsHumanReview",
+                                    "Resolved",
+                                    "IgnoreAsFalsePositive",
+                                },
+                            },
+                            reason = new { type = "string" },
+                        },
+                        required = new[] { "issue", "resolution" },
+                        additionalProperties = false,
+                    },
+                },
+            },
+            required = new[] { "decisions" },
+            additionalProperties = false,
+        };
+    }
 }
+
+file sealed record RecipeIssueTriagePayload(IReadOnlyList<LlmIssueTriageItem>? Decisions);
