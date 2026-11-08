@@ -12,7 +12,7 @@ Extracts:
 - Ingredient lists (with HTML fractions converted to standard fractions like '1 1/2')
 - Ingredient sections (e.g. "For the Marinade", "For the Sauce")
 - Ordered preparation steps
-- Sub-recipes & variation notes attached to parent recipes
+- Sub-recipes & recipe variations extracted as standalone recipes with inherited parent base ingredients
 - High-resolution dish photos matched from EPUB figures/captions
 - Chapter categorization (mapped to LocalRoast Collections / Tags)
 
@@ -332,6 +332,7 @@ def parse_atk_epub(epub_path):
                         "steps": [],
                         "variations": [],
                         "image_path": matched_img,
+                        "parent_recipe": parent_master_recipe if is_h3 else None,
                     }
 
                     current_recipe = new_recipe
@@ -342,7 +343,12 @@ def parse_atk_epub(epub_path):
                         # Sub-recipe: we will check if it has standalone ingredients or is a variation
                         recipes.append(new_recipe)
                 elif current_recipe is not None:
-                    if "head_note" in cls:
+                    if "yield" in cls and not current_recipe["yield"]:
+                        ytext = extract_node_text(elem)
+                        if ytext:
+                            current_recipe["yield"] = ytext
+                            current_recipe["base_servings"] = parse_servings_from_yield(ytext)
+                    elif "head_note" in cls:
                         desc = extract_node_text(elem)
                         current_recipe["description"] = (
                             (current_recipe["description"] + " " + desc)
@@ -362,7 +368,7 @@ def parse_atk_epub(epub_path):
                                 current_recipe["ingredients"].append(
                                     {"section": current_section, "text": ptext}
                                 )
-                    elif "method" in cls:
+                    elif "method" in cls or "indent" in cls:
                         mtext = extract_node_text(elem)
                         if mtext:
                             if current_step_phase:
@@ -370,31 +376,48 @@ def parse_atk_epub(epub_path):
                                 current_step_phase = None
                             current_recipe["steps"].append(mtext)
 
-    # Post-process: attach zero-ingredient variations to parent master recipe & prune empty placeholders
+    # Post-process: extract zero-ingredient variations as standalone recipes inheriting parent properties & prune empty placeholders
     final_recipes = []
     variation_count = 0
     empty_pruned_count = 0
 
     for r in recipes:
         if r["type"] == "sub" and len(r["ingredients"]) == 0:
-            # This is a variation note (e.g. "Substitute Gruyère for cheddar...")
-            variation_count += 1
-            if final_recipes:
-                # Attach to previous recipe as a variation
-                target_recipe = final_recipes[-1]
-                var_text = f"**Variation: {r['title']}**\n" + "\n\n".join(r["steps"])
-                target_recipe["variations"].append(var_text)
-                if target_recipe["description"]:
-                    target_recipe["description"] += f"\n\n{var_text}"
-                else:
-                    target_recipe["description"] = var_text
+            parent = r.get("parent_recipe")
+            if parent and (len(r["steps"]) > 0 or r.get("description")):
+                variation_count += 1
+                if not r["yield"] and parent.get("yield"):
+                    r["yield"] = parent["yield"]
+                    r["base_servings"] = parent.get("base_servings", 4.0)
+                elif not r["base_servings"] and parent.get("base_servings"):
+                    r["base_servings"] = parent["base_servings"]
+
+                if not r["page"] and parent.get("page"):
+                    r["page"] = parent["page"]
+
+                if not r["image_path"] and parent.get("image_path"):
+                    r["image_path"] = parent["image_path"]
+
+                r["ingredients"] = [dict(ing) for ing in parent.get("ingredients", [])]
+                r["parent_recipe_title"] = parent["title"]
+                r["parent_recipe_id"] = parent.get("id")
+                r["parent_steps"] = list(parent.get("steps", []))
+
+                parent["variations"].append(r["title"])
+
+                if not r["description"]:
+                    r["description"] = f"Variation of {parent['title']}."
+
+                final_recipes.append(r)
+            else:
+                empty_pruned_count += 1
         elif len(r["ingredients"]) == 0 and len(r["steps"]) == 0:
             empty_pruned_count += 1
         else:
             final_recipes.append(r)
 
     print(
-        f"Parsed {len(final_recipes)} complete recipes ({variation_count} variations consolidated into parent recipes, {empty_pruned_count} empty placeholders pruned)."
+        f"Parsed {len(final_recipes)} complete recipes ({variation_count} variations extracted as standalone recipes, {empty_pruned_count} empty placeholders pruned)."
     )
     return final_recipes
 
@@ -421,8 +444,12 @@ def format_recipe_as_llm_raw_text(r):
         lines.append("Description & Kitchen Notes:")
         lines.append(r["description"])
 
-    lines.append("")
-    lines.append("Ingredients:")
+    if r.get("parent_recipe_title"):
+        lines.append("")
+        lines.append(f"Base Ingredients (from {r['parent_recipe_title']}):")
+    else:
+        lines.append("")
+        lines.append("Ingredients:")
     last_section = None
     for ing in r["ingredients"]:
         sec = ing.get("section")
@@ -432,10 +459,20 @@ def format_recipe_as_llm_raw_text(r):
         lines.append(f"- {ing['text']}")
 
     lines.append("")
-    lines.append("Instructions:")
+    if r.get("parent_recipe_title"):
+        lines.append(f"Variation Instructions ({r['title']}):")
+    else:
+        lines.append("Instructions:")
     for i, step_text in enumerate(r["steps"]):
         clean_step = re.sub(r"^(\[[^\]]+\]\s*)?\d+\.\s*", r"\1", step_text)
         lines.append(f"{i + 1}. {clean_step}")
+
+    if r.get("parent_steps"):
+        lines.append("")
+        lines.append(f"Base Master Instructions (from {r['parent_recipe_title']}):")
+        for i, step_text in enumerate(r["parent_steps"]):
+            clean_step = re.sub(r"^(\[[^\]]+\]\s*)?\d+\.\s*", r"\1", step_text)
+            lines.append(f"{i + 1}. {clean_step}")
 
     return "\n".join(lines)[:99000]
 
@@ -458,6 +495,15 @@ def format_recipe_for_localroast(r, collection_id=None):
     for i, step_text in enumerate(r["steps"]):
         clean_step = re.sub(r"^(\[[^\]]+\]\s*)?\d+\.\s*", r"\1", step_text)
         steps_input.append({"stepNumber": i + 1, "instruction": clean_step[:4000]})
+
+    if r.get("parent_steps"):
+        offset = len(steps_input)
+        for j, step_text in enumerate(r["parent_steps"]):
+            clean_step = re.sub(r"^(\[[^\]]+\]\s*)?\d+\.\s*", r"\1", step_text)
+            steps_input.append({
+                "stepNumber": offset + j + 1,
+                "instruction": f"[{r['parent_recipe_title']} Base Step {j + 1}] {clean_step}"[:4000],
+            })
 
     desc = r["description"] or ""
 
