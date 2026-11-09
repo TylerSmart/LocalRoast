@@ -404,13 +404,17 @@ Field example for "2 cups finely chopped red onion":
                 $"Failed to parse recipe ingredient JSON output from LLM: {ex.Message}"
             );
         }
-        var ingredients = InstructionAmountTagger.RepairIngredientRows(recipe.Ingredients ?? []);
-        if (ingredients.Count == 0)
+        if ((recipe.Ingredients ?? []).Count == 0)
         {
             throw new DomainValidationException(
                 "The LLM returned no ingredients in the ingredient extraction phase."
             );
         }
+        var ingredients = InstructionAmountTagger.RepairIngredientRows(
+            recipe.Ingredients ?? [],
+            context.SourceContent
+        );
+        recipe = recipe with { Ingredients = ingredients };
 
         var candidates = InstructionAmountTagger.FindCandidates(paragraphs);
         var labels = InstructionAmountTagger.GetIngredientLabels(ingredients);
@@ -517,7 +521,7 @@ Field example for "2 cups finely chopped red onion":
         var assembled = InstructionAmountTagger.Assemble(ingredients, candidates, tags);
         return recipe with
         {
-            Ingredients = ingredients,
+            Ingredients = assembled.Ingredients ?? ingredients,
             Steps = assembled.Steps,
             TaggerIssues = assembled.Issues,
         };

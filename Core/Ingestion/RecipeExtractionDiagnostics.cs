@@ -62,6 +62,7 @@ public static class RecipeExtractionDiagnostics
         var warnings = new List<string>();
         var ingredients = recipe.Ingredients ?? [];
         var steps = recipe.Steps ?? [];
+        var reportedFoods = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         for (var stepIndex = 0; stepIndex < steps.Count; stepIndex++)
         {
@@ -78,7 +79,6 @@ public static class RecipeExtractionDiagnostics
                 }
             }
 
-            var reportedFoods = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             for (var ingredientIndex = 0; ingredientIndex < ingredients.Count; ingredientIndex++)
             {
                 var ingredient = ingredients[ingredientIndex];

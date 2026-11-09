@@ -53,6 +53,202 @@ public static class SourceMeasurementParser
         RegexOptions.IgnoreCase | RegexOptions.Compiled
     );
 
+    public static RecipeMeasurement? TrySumCompoundLeadingMeasurement(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return null;
+        var trimmed = text.TrimStart(' ', '\t', '*', '•');
+        if (trimmed.StartsWith("- "))
+            trimmed = trimmed[2..].TrimStart();
+
+        var matches = Measurement.Matches(trimmed);
+        if (matches.Count < 2 || matches[0].Index != 0)
+            return null;
+
+        var measurements = new List<RecipeMeasurement>();
+        var first = ParseMatch(matches[0]);
+        if (first?.Quantity is null || first.Unit is null)
+            return null;
+        measurements.Add(first);
+
+        var end = matches[0].Length;
+        for (var i = 1; i < matches.Count; i++)
+        {
+            var match = matches[i];
+            var between = trimmed[end..match.Index];
+            if (!PlusJoin.IsMatch(between))
+                break;
+            var parsed = ParseMatch(match);
+            if (parsed?.Quantity is null || parsed.Unit is null)
+                break;
+            measurements.Add(parsed);
+            end = match.Index + match.Length;
+        }
+
+        if (measurements.Count < 2)
+            return null;
+
+        var largestUnit = measurements[0].Unit!.Value;
+        for (var i = 1; i < measurements.Count; i++)
+        {
+            var currentUnit = measurements[i].Unit!.Value;
+            if (
+                CulinaryMath.TryConvertQuantity(1m, currentUnit, largestUnit, out var factor)
+                && factor > 1m
+            )
+            {
+                largestUnit = currentUnit;
+            }
+        }
+
+        decimal totalInLargest = 0m;
+        foreach (var m in measurements)
+        {
+            if (
+                !CulinaryMath.TryConvertQuantity(
+                    m.Quantity!.Value,
+                    m.Unit!.Value,
+                    largestUnit,
+                    out var converted
+                )
+            )
+                return null;
+            totalInLargest += converted;
+        }
+
+        return new RecipeMeasurement(Math.Round(totalInLargest, 4), largestUnit);
+    }
+
+    public static LlmExtractedIngredientItem? TryParseSourceIngredientLine(
+        string rawLine,
+        string? sectionName = null
+    )
+    {
+        if (string.IsNullOrWhiteSpace(rawLine))
+            return null;
+
+        var line = rawLine.Trim();
+        var trimmed = line.TrimStart('-', '•', '*', ' ');
+        if (string.IsNullOrWhiteSpace(trimmed))
+            return null;
+
+        RecipeMeasurement? primary = TrySumCompoundLeadingMeasurement(trimmed);
+        RecipeMeasurement? alternative = null;
+        string foodText = trimmed;
+
+        if (primary is not null)
+        {
+            var spans = FindSpans(trimmed);
+            if (spans.Count > 0 && spans[0].Index == 0)
+            {
+                foodText = trimmed[spans[0].Length..].Trim();
+            }
+        }
+        else
+        {
+            var pair = FindAlternative(trimmed);
+            if (pair is not null)
+            {
+                primary = pair.Value.Primary;
+                alternative = pair.Value.Alternative;
+                var spans = FindSpans(trimmed);
+                if (spans.Count > 0 && spans[0].Index == 0)
+                {
+                    foodText = trimmed[spans[0].Length..].Trim();
+                }
+            }
+            else
+            {
+                var spans = FindSpans(trimmed);
+                if (spans.Count > 0 && spans[0].Index == 0)
+                {
+                    primary = spans[0].Measurement;
+                    alternative = spans[0].Alternative;
+                    foodText = trimmed[spans[0].Length..].Trim();
+                }
+            }
+        }
+
+        foodText = Regex
+            .Replace(
+                foodText,
+                @"^\((?:about\s+|approx\.?\s+)?[^()]+\)\s*",
+                "",
+                RegexOptions.IgnoreCase
+            )
+            .Trim();
+
+        string displayName;
+        string? prepNote = null;
+
+        var commaIndex = foodText.IndexOf(',');
+        if (commaIndex >= 0)
+        {
+            displayName = foodText[..commaIndex].Trim();
+            prepNote = foodText[(commaIndex + 1)..].Trim();
+        }
+        else
+        {
+            var prepMatch = Regex.Match(
+                foodText,
+                @"\b(?<prep>divided|drained|minced|chopped|sliced|grated|peeled|rinsed|crushed|halved|trimmed|cut|beaten|thawed)\b.*",
+                RegexOptions.IgnoreCase
+            );
+            if (prepMatch.Success && prepMatch.Index > 0)
+            {
+                displayName = foodText[..prepMatch.Index].Trim();
+                prepNote = prepMatch.Value.Trim();
+            }
+            else
+            {
+                displayName = foodText.Trim();
+            }
+        }
+
+        var isOptional = Regex.IsMatch(line, @"\boptional\b", RegexOptions.IgnoreCase);
+        if (isOptional && prepNote is not null)
+        {
+            prepNote = Regex
+                .Replace(prepNote, @"\(?\s*optional\s*\)?", "", RegexOptions.IgnoreCase)
+                .Trim(' ', ',', ';', '.');
+            if (string.IsNullOrWhiteSpace(prepNote))
+                prepNote = null;
+        }
+
+        var isStaple = Regex.IsMatch(
+            displayName,
+            @"\b(?:salt|water|black\s+pepper|pepper|flour|sugar|olive\s+oil|vegetable\s+oil)\b",
+            RegexOptions.IgnoreCase
+        );
+
+        LlmExtractedMeasurementItem? altItem = alternative is not null
+            ? new LlmExtractedMeasurementItem(
+                alternative.Quantity,
+                alternative.Unit == MeasurementUnit.Custom
+                    ? alternative.CustomUnitName
+                    : alternative.Unit?.ToString().ToLowerInvariant(),
+                alternative.MaxQuantity
+            )
+            : null;
+
+        return new LlmExtractedIngredientItem(
+            SectionName: sectionName,
+            Quantity: primary?.Quantity,
+            MaxQuantity: primary?.MaxQuantity,
+            Unit: primary?.Unit == MeasurementUnit.Custom
+                ? primary.CustomUnitName
+                : primary?.Unit?.ToString().ToLowerInvariant(),
+            CanonicalFoodName: displayName,
+            DisplayName: displayName,
+            PreparationNote: string.IsNullOrWhiteSpace(prepNote) ? null : prepNote,
+            IsOptional: isOptional,
+            OriginalRawText: line,
+            SuggestedIsPantryStaple: isStaple,
+            AlternativeMeasurement: altItem,
+            CustomUnitName: primary?.Unit == MeasurementUnit.Custom ? primary.CustomUnitName : null
+        );
+    }
+
     public static RecipeMeasurement? FindContainerUnitSize(string? source)
     {
         if (string.IsNullOrWhiteSpace(source))

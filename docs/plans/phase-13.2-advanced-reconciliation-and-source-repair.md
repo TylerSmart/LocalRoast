@@ -1,5 +1,7 @@
 # Phase 13.2: Advanced Step Reconciliation, Per-Item Multipliers & Source Line Repair
 
+**Status: [x] Complete**
+
 ## 1. Objective & Scope
 
 Following Phase 13.1, auto-publish accuracy across the 1,381 processed recipes in `LocalRoast` reached **97.1%** (1,341 Published, 40 ReadyForReview; 91.2% of requeued review jobs auto-published). Detailed inspection of all 40 remaining `ReadyForReview` jobs showed that **39 of the 40** stem from 5 deterministic categories in [`InstructionAmountTagger.cs`](../../Core/Ingestion/InstructionAmountTagger.cs), [`RecipeDraftNormalizer.cs`](../../Core/Ingestion/RecipeDraftNormalizer.cs), [`RecipeExtractionDiagnostics.cs`](../../Core/Ingestion/RecipeExtractionDiagnostics.cs), and [`LlmExtractionClient.cs`](../../Infrastructure/Ingestion/LlmExtractionClient.cs) (with the 40th, *Best Beef Stew*, being a genuinely truncated source document that stops at Step 4):
@@ -143,12 +145,12 @@ Following Phase 13.1, auto-publish accuracy across the 1,381 processed recipes i
 
 ## 4. Verification & Ordered Execution Checklist
 
-- [ ] **Task 1:** Implement `TrySumCompoundLeadingMeasurement` and `TryParseSourceIngredientLine` in `Core/Ingestion/SourceMeasurementParser.cs`, and update `RepairIngredientRows`, `RestoreSourceMeasurement`, `IsSplitAlternative`, and `RecipeDraftNormalizer.Normalize` to synthesize missing source lines, sum single-row `"X plus Y"` lines, fix repeating-fraction tolerance, and deduplicate split `"A or B"` rows.
-- [ ] **Task 2:** Update `InstructionAmountTagger.TryToRowUnit` and `Reconcile` to prioritize `AlternativeMeasurement` before generic cheese density and handle `Whole` scallions / sub-portion greens with `"remaining"`.
-- [ ] **Task 3:** Implement rate-phrase (`"at a time"`, `"every X minutes"`) and conditional top-up reclassification plus per-item/per-batch multiplier resolution in `InstructionAmountTagger.Assemble` and `Reconcile`.
-- [ ] **Task 4:** Implement multi-row same-food spillover/reconciliation, rendered pan fat / reserved-portion / drained-boiling-salt handling, broadened batch repetition, and unstated-remainder step linking in `InstructionAmountTagger.Assemble` and `Reconcile`.
-- [ ] **Task 5:** Deduplicate `reportedFoods` across steps in `RecipeExtractionDiagnostics.GetQualityWarnings`, auto-link `"to taste"` unmeasured seasonings, and auto-heal explicit `"remaining <amount>"` divided-ingredient arithmetic typos in `InstructionAmountTagger.Assemble`.
-- [ ] **Task 6:** Create `Tests/Core.UnitTests/Ingestion/Phase132ReconciliationTests.cs` and run full verification:
+- [x] **Task 1:** Implement `TrySumCompoundLeadingMeasurement` and `TryParseSourceIngredientLine` in `Core/Ingestion/SourceMeasurementParser.cs`, and update `RepairIngredientRows`, `RestoreSourceMeasurement`, `IsSplitAlternative`, and `RecipeDraftNormalizer.Normalize` to synthesize missing source lines, sum single-row `"X plus Y"` lines, fix repeating-fraction tolerance, and deduplicate split `"A or B"` rows.
+- [x] **Task 2:** Update `InstructionAmountTagger.TryToRowUnit` and `Reconcile` to prioritize `AlternativeMeasurement` before generic cheese density and handle `Whole` scallions / sub-portion greens with `"remaining"`.
+- [x] **Task 3:** Implement rate-phrase (`"at a time"`, `"every X minutes"`) and conditional top-up reclassification plus per-item/per-batch multiplier resolution in `InstructionAmountTagger.Assemble` and `Reconcile`.
+- [x] **Task 4:** Implement multi-row same-food spillover/reconciliation, rendered pan fat / reserved-portion / drained-boiling-salt handling, broadened batch repetition, and unstated-remainder step linking in `InstructionAmountTagger.Assemble` and `Reconcile`.
+- [x] **Task 5:** Deduplicate `reportedFoods` across steps in `RecipeExtractionDiagnostics.GetQualityWarnings`, auto-link `"to taste"` unmeasured seasonings, and auto-heal explicit `"remaining <amount>"` divided-ingredient arithmetic typos in `InstructionAmountTagger.Assemble`.
+- [x] **Task 6:** Create `Tests/Core.UnitTests/Ingestion/Phase132ReconciliationTests.cs` and run full verification:
   - `dotnet test Tests/Core.UnitTests/App.Core.UnitTests.csproj`
   - `dotnet test Tests/API.IntegrationTests/App.API.IntegrationTests.csproj`
   - `dotnet csharpier check .`

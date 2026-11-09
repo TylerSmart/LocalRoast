@@ -609,8 +609,44 @@ public static class RecipeDraftNormalizer
                 rawIng.Quantity,
                 rawIng.MaxQuantity
             );
+            if (
+                !isSplitSourceLine
+                && SourceMeasurementParser.TrySumCompoundLeadingMeasurement(rawIng.OriginalRawText)
+                    is { } compoundLeading
+            )
+            {
+                cleanQuantity = compoundLeading.Quantity;
+                cleanMaxQuantity = compoundLeading.MaxQuantity;
+                unit = compoundLeading.Unit;
+                customUnit = compoundLeading.CustomUnitName;
+            }
+            else if (
+                isSplitSourceLine
+                && cleanMaxQuantity.HasValue
+                && !string.IsNullOrWhiteSpace(rawIng.OriginalRawText)
+            )
+            {
+                var spans = SourceMeasurementParser.FindSpans(rawIng.OriginalRawText);
+                var span = spans.FirstOrDefault(s =>
+                    s.Measurement.Quantity is { } sq && Math.Abs(sq - (cleanQuantity ?? 0)) <= 0.02m
+                );
+                if (span is not null && span.Measurement.MaxQuantity is null)
+                {
+                    cleanMaxQuantity = null;
+                }
+            }
             var sourceAmount = TryGetSourceAmount(rawIng.OriginalRawText);
-            if (!isSplitSourceLine && sourceAmount is { } parsedAmount)
+            var isAutoHealedDivided =
+                cleanQuantity.HasValue
+                && sourceAmount is { } sa
+                && cleanQuantity.Value > sa.Quantity
+                && Regex.IsMatch(
+                    rawIng.OriginalRawText ?? "",
+                    @"\bdivided\b",
+                    RegexOptions.IgnoreCase
+                );
+
+            if (!isSplitSourceLine && sourceAmount is { } parsedAmount && !isAutoHealedDivided)
             {
                 cleanQuantity = parsedAmount.Quantity;
                 cleanMaxQuantity = parsedAmount.MaxQuantity;
