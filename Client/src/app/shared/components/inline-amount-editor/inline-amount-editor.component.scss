@@ -48,6 +48,11 @@
     color: var(--mat-sys-on-surface);
   }
 
+  &.tagged-ingredient {
+    background: var(--mat-sys-secondary-container);
+    color: var(--mat-sys-on-secondary-container);
+  }
+
   &[data-kind='Mixture'] {
     background: var(--mat-sys-tertiary-container);
     color: var(--mat-sys-on-tertiary-container);

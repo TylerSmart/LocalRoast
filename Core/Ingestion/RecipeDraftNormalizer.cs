@@ -60,6 +60,25 @@ public static class RecipeDraftNormalizer
                 amount.Kind == InlineStepAmountKind.Ingredient && !validIndex
                     ? InlineStepAmountKind.Fixed
                     : amount.Kind;
+
+            int? ingSpanStart = null;
+            int? ingSpanLength = null;
+            if (amount.IngredientSpanStart.HasValue && amount.IngredientSpanLength.HasValue)
+            {
+                var shiftedIngStart = amount.IngredientSpanStart.Value - leadingTrim;
+                var len = amount.IngredientSpanLength.Value;
+                if (
+                    len >= 1
+                    && len <= 200
+                    && shiftedIngStart >= start + amount.Length
+                    && shiftedIngStart + len <= instruction.Length
+                )
+                {
+                    ingSpanStart = shiftedIngStart;
+                    ingSpanLength = len;
+                }
+            }
+
             result.Add(
                 new RecipeStepInlineAmountInput(
                     start,
@@ -69,10 +88,14 @@ public static class RecipeDraftNormalizer
                     amount.Measurement,
                     IsValidMeasurement(amount.AlternativeMeasurement)
                         ? amount.AlternativeMeasurement
-                        : null
+                        : null,
+                    ingSpanStart,
+                    ingSpanLength
                 )
             );
-            end = start + amount.Length;
+            end = ingSpanStart.HasValue
+                ? ingSpanStart.Value + ingSpanLength!.Value
+                : start + amount.Length;
         }
         return result;
     }

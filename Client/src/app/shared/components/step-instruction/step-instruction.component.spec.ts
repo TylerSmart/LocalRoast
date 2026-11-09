@@ -60,4 +60,32 @@ describe('StepInstructionComponent', () => {
     expect(chip.classList).toContain('is-scaled');
     expect(el.textContent).toContain('350°F');
   });
+
+  it('renders both .inline-amount and .inline-ingredient chips when ingredient span is present', () => {
+    const stepWithIngSpan: InstructionStep = {
+      instruction: 'Combine 2 cans chickpeas and water.',
+      inlineAmounts: [
+        {
+          start: 8,
+          length: 6,
+          kind: 'Ingredient',
+          ingredientId: 'chickpeas',
+          measurement: { quantity: 2, unit: 'Can' },
+          ingredientSpanStart: 15,
+          ingredientSpanLength: 9,
+        },
+      ],
+    };
+    fixture.componentRef.setInput('step', stepWithIngSpan);
+    fixture.componentRef.setInput('ingredients', [
+      { id: 'chickpeas', displayName: 'chickpeas', quantity: 2, unit: 'Can' },
+    ]);
+    fixture.detectChanges();
+    const el: HTMLElement = fixture.nativeElement;
+    const amountChip = el.querySelector('.inline-amount');
+    const ingChip = el.querySelector('.inline-ingredient');
+    expect(amountChip?.textContent).toBe('2 cans');
+    expect(ingChip?.textContent).toBe('chickpeas');
+    expect(ingChip?.getAttribute('title')).toBe('chickpeas');
+  });
 });

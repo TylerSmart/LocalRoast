@@ -1,7 +1,7 @@
 # Phase 14: Inline Step Measurement Insertion, Ingredient Highlights & Step Linking Consistency
 
 > **Branch:** `feature/phase-14-inline-step-amounts-and-ingredient-highlights`
-> **Status:** `[ ]` Not Started
+> **Status:** `[x]` Completed
 > **PRD Reference:** `docs/prd.md` — Sections 4.1.4, 4.1.5, 4.2.1; `docs/todo.md` — Ingestion items 2, 3
 > **Target Execution:** Run `/execute-phase` to execute this plan step-by-step.
 > **Live Environment Note:**
@@ -209,7 +209,7 @@ Update/add scenarios in `TaggedInstructionAmountsE2ETests.cs`:
 
 ## 6. Step-by-Step Execution Checklist (For Implementation Agent)
 
-- [ ] **Task 1: Backend Core, Data & Migration**
+- [x] **Task 1: Backend Core, Data & Migration**
   - Add `IngredientSpanStart` and `IngredientSpanLength` to `RecipeStepInlineAmount`, `InlineStepAmount`, `RecipeStepInlineAmountInput`, and `RecipeStepInlineAmountDto`.
   - Update `InstructionAmountTagger.Assemble` to:
     1. Link active unmeasured/multi-step ingredients and exclude passive references (`"While chickpeas cook"`).
@@ -228,7 +228,7 @@ Update/add scenarios in `TaggedInstructionAmountsE2ETests.cs`:
     dotnet test --project Tests/API.IntegrationTests/App.API.IntegrationTests.csproj
     ```
 
-- [ ] **Task 2: Angular Client & Spec Tests**
+- [x] **Task 2: Angular Client & Spec Tests**
   - Update `recipe.models.ts`, `step-instruction.ts`, `step-instruction.component.{html,scss}`, and `recipe-detail` / `public-shared-recipe` / `recipe-detail-preview` `"Divided"` checks.
   - Update `step-instruction.spec.ts` and component specs.
   - Run frontend verification in `Client/`:
@@ -238,7 +238,7 @@ Update/add scenarios in `TaggedInstructionAmountsE2ETests.cs`:
     npm test -- --watch=false
     ```
 
-- [ ] **Task 3: Playwright E2E & Final Formatting**
+- [x] **Task 3: Playwright E2E & Final Formatting**
   - Update `Tests/Client.E2ETests/TaggedInstructionAmountsE2ETests.cs` and run E2E tests:
     ```powershell
     dotnet test --project Tests/Client.E2ETests/App.Client.E2ETests.csproj

@@ -22,7 +22,12 @@
     <p class="tagged-preview" data-testid="inline-amount-preview">
       @for (segment of preview(); track $index) {
         @if (segment.kind) {
-          <mark class="tagged-span" [attr.data-kind]="segment.kind">{{ segment.text }}</mark>
+          <mark
+            class="tagged-span"
+            [class.tagged-ingredient]="segment.isIngredient"
+            [attr.data-kind]="segment.kind"
+            >{{ segment.text }}</mark
+          >
         } @else {
           <span>{{ segment.text }}</span>
         }

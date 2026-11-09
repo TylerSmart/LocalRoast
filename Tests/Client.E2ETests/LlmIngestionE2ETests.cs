@@ -1409,7 +1409,7 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await Expect(inlinePreview.Locator(".recipe-stats-strip")).ToContainTextAsync("15 min");
         await Expect(inlinePreview.Locator(".ingredients-column")).ToContainTextAsync("Garlic");
         await Expect(inlinePreview.Locator(".instructions-column"))
-            .ToContainTextAsync("Heat oil and sauté");
+            .ToContainTextAsync("oil and sauté");
 
         // Verify expand button in pane toolbar
         var expandBtn = paneToolbar.Locator(".open-modal-preview-btn");

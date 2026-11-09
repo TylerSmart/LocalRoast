@@ -16,6 +16,11 @@ public sealed class RecipeStepInlineAmount : IAuditable
 
     public int Length { get; set; }
 
+    /// <summary>Optional character offset into the trimmed <see cref="RecipeStep.Instruction"/> for the associated ingredient name.</summary>
+    public int? IngredientSpanStart { get; set; }
+
+    public int? IngredientSpanLength { get; set; }
+
     public InlineStepAmountKind Kind { get; set; }
 
     /// <summary>Set if and only if <see cref="Kind"/> is <see cref="InlineStepAmountKind.Ingredient"/>.</summary>

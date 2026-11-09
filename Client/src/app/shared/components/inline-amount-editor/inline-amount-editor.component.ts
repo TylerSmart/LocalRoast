@@ -32,6 +32,7 @@ export interface InlineAmountIngredientOption {
 interface PreviewSegment {
   text: string;
   kind: InlineStepAmountKind | null;
+  isIngredient?: boolean;
 }
 
 @Component({
@@ -85,6 +86,25 @@ export class InlineAmountEditorComponent {
         kind: amount.kind,
       });
       cursor = amount.start + amount.length;
+      if (
+        amount.ingredientSpanStart != null &&
+        amount.ingredientSpanLength != null &&
+        amount.ingredientSpanStart >= cursor &&
+        amount.ingredientSpanStart + amount.ingredientSpanLength <= text.length
+      ) {
+        if (amount.ingredientSpanStart > cursor) {
+          segments.push({ text: text.slice(cursor, amount.ingredientSpanStart), kind: null });
+        }
+        segments.push({
+          text: text.slice(
+            amount.ingredientSpanStart,
+            amount.ingredientSpanStart + amount.ingredientSpanLength,
+          ),
+          kind: amount.kind,
+          isIngredient: true,
+        });
+        cursor = amount.ingredientSpanStart + amount.ingredientSpanLength;
+      }
     }
     if (cursor < text.length) segments.push({ text: text.slice(cursor), kind: null });
     return segments;

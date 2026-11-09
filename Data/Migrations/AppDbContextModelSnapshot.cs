@@ -1265,6 +1265,12 @@ namespace App.Data.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
 
+                    b.Property<int?>("IngredientSpanLength")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("IngredientSpanStart")
+                        .HasColumnType("int");
+
                     b.Property<string>("Kind")
                         .IsRequired()
                         .HasMaxLength(16)

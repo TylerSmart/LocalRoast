@@ -5,6 +5,7 @@ import {
   buildInstructionSegments,
   formatIngredientUses,
   ingredientUses,
+  isIngredientDivided,
   relocateInlineAmounts,
   renderScaledInstruction,
   trimInstructionWithAmounts,
@@ -203,5 +204,189 @@ describe('step-instruction utils', () => {
     expect(stepIngredientCallouts(dto, ingredients, 1, 'Original').map((c) => c.id)).toEqual([
       'milk',
     ]);
+  });
+
+  it('renders separate segments for amount and ingredient name highlights', () => {
+    const hummusStep = {
+      instruction: 'Combine 2 cans chickpeas, 1/2 tsp baking soda, and 6 cups water in saucepan.',
+      inlineAmounts: [
+        {
+          start: 8,
+          length: 6,
+          kind: 'Ingredient' as const,
+          ingredientId: 'chickpeas',
+          measurement: { quantity: 2, unit: 'Can' as const },
+          ingredientSpanStart: 15,
+          ingredientSpanLength: 9,
+        },
+        {
+          start: 26,
+          length: 7,
+          kind: 'Ingredient' as const,
+          ingredientId: 'baking-soda',
+          measurement: { quantity: 0.5, unit: 'Tsp' as const },
+          ingredientSpanStart: 34,
+          ingredientSpanLength: 11,
+        },
+      ],
+    };
+    const localIngredients: InstructionIngredient[] = [
+      { id: 'chickpeas', displayName: 'chickpeas', quantity: 2, unit: 'Can' },
+      { id: 'baking-soda', displayName: 'baking soda', quantity: 0.5, unit: 'Tsp' },
+    ];
+    const segments = buildInstructionSegments(hummusStep, localIngredients, 2, 'Original');
+    expect(segments.map((s) => s.text).join('')).toBe(
+      'Combine 4 cans chickpeas, 1 tsp baking soda, and 6 cups water in saucepan.',
+    );
+    const amountSeg = segments.find((s) => s.amount?.ingredientId === 'chickpeas');
+    expect(amountSeg?.text).toBe('4 cans');
+    expect(amountSeg?.amount?.scaled).toBe(true);
+
+    const ingHighlightSeg = segments.find(
+      (s) => s.ingredientHighlight?.ingredientId === 'chickpeas',
+    );
+    expect(ingHighlightSeg?.text).toBe('chickpeas');
+    expect(ingHighlightSeg?.ingredientHighlight?.ingredientName).toBe('chickpeas');
+  });
+
+  it('relocates ingredient spans alongside amount spans when text is inserted before them', () => {
+    const originalText = 'Combine 2 cans chickpeas and water.';
+    const amounts = [
+      {
+        start: 8,
+        length: 6,
+        kind: 'Ingredient' as const,
+        ingredientId: 'chickpeas',
+        measurement: { quantity: 2, unit: 'Can' as const },
+        ingredientSpanStart: 15,
+        ingredientSpanLength: 9,
+      },
+    ];
+    const newText = 'In a large pot, combine 2 cans chickpeas and water.';
+    const result = relocateInlineAmounts(originalText, newText, amounts);
+    expect(result.dropped).toBe(0);
+    expect(result.amounts[0].start).toBe(24);
+    expect(result.amounts[0].ingredientSpanStart).toBe(31);
+    expect(result.amounts[0].ingredientSpanLength).toBe(9);
+  });
+
+  it('clears ingredient span if ingredient text is modified or removed without dropping amount', () => {
+    const originalText = 'Combine 2 cans chickpeas and water.';
+    const amounts = [
+      {
+        start: 8,
+        length: 6,
+        kind: 'Ingredient' as const,
+        ingredientId: 'chickpeas',
+        measurement: { quantity: 2, unit: 'Can' as const },
+        ingredientSpanStart: 15,
+        ingredientSpanLength: 9,
+      },
+    ];
+    const newText = 'Combine 2 cans beans and water.';
+    const result = relocateInlineAmounts(originalText, newText, amounts);
+    expect(result.dropped).toBe(0);
+    expect(result.amounts[0].start).toBe(8);
+    expect(result.amounts[0].ingredientSpanStart).toBeNull();
+    expect(result.amounts[0].ingredientSpanLength).toBeNull();
+  });
+
+  describe('isIngredientDivided', () => {
+    const lemonJuice: InstructionIngredient = {
+      id: 'lemon-juice',
+      displayName: 'lemon juice',
+      quantity: 1 / 3,
+      unit: 'Cup',
+    };
+    const sugar: InstructionIngredient = {
+      id: 'sugar',
+      displayName: 'sugar',
+      quantity: 1,
+      unit: 'Cup',
+    };
+
+    it('returns false when an ingredient is used in full in a single step', () => {
+      const singleStep = [
+        {
+          instruction: 'Whisk 1/3 cup lemon juice with garlic.',
+          inlineAmounts: [
+            {
+              start: 6,
+              length: 7,
+              kind: 'Ingredient' as const,
+              ingredientId: 'lemon-juice',
+              measurement: { quantity: 1 / 3, unit: 'Cup' as const },
+            },
+          ],
+        },
+      ];
+      expect(isIngredientDivided(singleStep, 'lemon-juice', [lemonJuice])).toBe(false);
+    });
+
+    it('returns true when an ingredient is divided across multiple steps', () => {
+      const multiSteps = [
+        {
+          instruction: 'Whisk 1/4 cup lemon juice.',
+          inlineAmounts: [
+            {
+              start: 6,
+              length: 7,
+              kind: 'Ingredient' as const,
+              ingredientId: 'lemon-juice',
+              measurement: { quantity: 0.25, unit: 'Cup' as const },
+            },
+          ],
+        },
+        {
+          instruction: 'Add remaining lemon juice.',
+          inlineAmounts: [
+            {
+              start: 14,
+              length: 7,
+              kind: 'Ingredient' as const,
+              ingredientId: 'lemon-juice',
+              measurement: { quantity: 1 / 12, unit: 'Cup' as const },
+            },
+          ],
+        },
+      ];
+      expect(isIngredientDivided(multiSteps, 'lemon-juice', [lemonJuice])).toBe(true);
+    });
+
+    it('returns true when only a partial amount of a row is used in a single step', () => {
+      const partialStep = [
+        {
+          instruction: 'Add 2 tablespoons sugar.',
+          inlineAmounts: [
+            {
+              start: 4,
+              length: 13,
+              kind: 'Ingredient' as const,
+              ingredientId: 'sugar',
+              measurement: { quantity: 2, unit: 'Tbsp' as const },
+            },
+          ],
+        },
+      ];
+      expect(isIngredientDivided(partialStep, 'sugar', [sugar])).toBe(true);
+    });
+
+    it('returns false when the full row amount is used in a single step via equivalent unit', () => {
+      const fullEquivalentStep = [
+        {
+          instruction: 'Add 16 tablespoons sugar.',
+          inlineAmounts: [
+            {
+              start: 4,
+              length: 14,
+              kind: 'Ingredient' as const,
+              ingredientId: 'sugar',
+              measurement: { quantity: 16, unit: 'Tbsp' as const },
+            },
+          ],
+        },
+      ];
+      expect(isIngredientDivided(fullEquivalentStep, 'sugar', [sugar])).toBe(false);
+    });
   });
 });

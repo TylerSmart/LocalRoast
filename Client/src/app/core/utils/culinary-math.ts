@@ -39,7 +39,10 @@ export function scaleIngredient(
   );
 }
 
-function measurementUnitFactor(from: RecipeMeasurement, to: RecipeMeasurement): number | null {
+export function measurementUnitFactor(
+  from: RecipeMeasurement,
+  to: RecipeMeasurement,
+): number | null {
   if (!from.unit || !to.unit) return null;
   if (
     from.unit === to.unit &&

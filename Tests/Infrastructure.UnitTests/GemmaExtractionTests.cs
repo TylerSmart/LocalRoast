@@ -114,7 +114,7 @@ public sealed class GemmaExtractionTests
         Assert.AreEqual(2, calls);
         Assert.AreEqual("Butter sauce", result.Title);
         Assert.AreEqual(2, result.Ingredients![0].Quantity);
-        Assert.AreEqual("Melt the butter.", result.Steps![0].Instruction);
+        Assert.AreEqual("Melt the 2 tbsp butter.", result.Steps![0].Instruction);
         CollectionAssert.AreEqual(new[] { 0 }, result.Steps[0].IngredientIndices!.ToArray());
         Assert.IsEmpty(result.TaggerIssues ?? []);
     }
@@ -282,7 +282,7 @@ Add 2 tablespoons remaining oil and the dough.
         );
         Assert.AreEqual(2m, draft.Ingredients![0].AlternativeMeasurement!.Quantity);
         Assert.AreEqual("Dough", draft.Ingredients[1].ReferencedRecipeTitle);
-        var draftInline = draft.Steps![1].InlineAmounts!.Single();
+        var draftInline = draft.Steps![1].InlineAmounts!.First(a => a.IngredientIndex == 0);
         Assert.AreEqual(InlineStepAmountKind.Ingredient, draftInline.Kind);
         Assert.AreEqual(0, draftInline.IngredientIndex);
         Assert.AreEqual(2m, draftInline.Measurement.Quantity);
@@ -354,7 +354,7 @@ Add 2 tablespoons remaining oil and the dough.
         );
 
         Assert.AreEqual(2, calls);
-        Assert.AreEqual("Melt the butter.", result.Draft.Steps![0].Instruction);
+        Assert.AreEqual("Melt the 2 tbsp butter.", result.Draft.Steps![0].Instruction);
         Assert.IsEmpty(result.Notices);
     }
 

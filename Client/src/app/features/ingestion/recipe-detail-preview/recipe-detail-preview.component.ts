@@ -34,6 +34,7 @@ import {
   formatIngredientUses,
   ingredientUses,
   inlineAmountInputsToDtos,
+  isIngredientDivided,
   validInlineSpans,
 } from '../../../core/utils/step-instruction';
 import { StepInstructionComponent } from '../../../shared/components/step-instruction/step-instruction.component';
@@ -172,8 +173,13 @@ export class RecipeDetailPreviewComponent {
         this.targetSystem(),
       );
       if (
-        uses.length >= 2 ||
-        (uses.length === 1 && uses[0].label !== item.displayQuantityAndUnit)
+        isIngredientDivided(
+          steps,
+          item.ingredient.id,
+          ingredients,
+          this.scaleFactor(),
+          this.targetSystem(),
+        )
       ) {
         result.set(item.ingredient.id, formatIngredientUses(uses));
       }

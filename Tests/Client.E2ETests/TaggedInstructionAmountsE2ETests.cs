@@ -258,4 +258,194 @@ public sealed class TaggedInstructionAmountsE2ETests : E2ETestBase
         );
         Assert.IsFalse(editorOverflow, "Recipe editor at 360px must not overflow horizontally.");
     }
+
+    private async Task<string> SeedSeparatelyHighlightedRecipeAsync(string title)
+    {
+        const string step1 =
+            "Combine 2 cans chickpeas, 1/2 tsp baking soda, and 6 cups water in saucepan.";
+        const string step2 = "While chickpeas cook, whisk 1/3 cup lemon juice and salt in bowl.";
+
+        var payload = new
+        {
+            title,
+            baseServings = 4,
+            ingredients = new object[]
+            {
+                new
+                {
+                    displayName = "chickpeas",
+                    quantity = 2,
+                    unit = "Can",
+                },
+                new
+                {
+                    displayName = "baking soda",
+                    quantity = 0.5,
+                    unit = "Tsp",
+                },
+                new
+                {
+                    displayName = "lemon juice",
+                    quantity = 1.0 / 3.0,
+                    unit = "Cup",
+                },
+            },
+            steps = new object[]
+            {
+                new
+                {
+                    instruction = step1,
+                    ingredientIndices = new[] { 0, 1 },
+                    inlineAmounts = new object[]
+                    {
+                        new
+                        {
+                            start = step1.IndexOf("2 cans", StringComparison.Ordinal),
+                            length = 6,
+                            kind = "Ingredient",
+                            ingredientIndex = (int?)0,
+                            measurement = new { quantity = 2, unit = "Can" },
+                            ingredientSpanStart = step1.IndexOf(
+                                "chickpeas",
+                                StringComparison.Ordinal
+                            ),
+                            ingredientSpanLength = 9,
+                        },
+                        new
+                        {
+                            start = step1.IndexOf("1/2 tsp", StringComparison.Ordinal),
+                            length = 7,
+                            kind = "Ingredient",
+                            ingredientIndex = (int?)1,
+                            measurement = new { quantity = 0.5, unit = "Tsp" },
+                            ingredientSpanStart = step1.IndexOf(
+                                "baking soda",
+                                StringComparison.Ordinal
+                            ),
+                            ingredientSpanLength = 11,
+                        },
+                    },
+                },
+                new
+                {
+                    instruction = step2,
+                    ingredientIndices = new[] { 2 },
+                    inlineAmounts = new object[]
+                    {
+                        new
+                        {
+                            start = step2.IndexOf("1/3 cup", StringComparison.Ordinal),
+                            length = 7,
+                            kind = "Ingredient",
+                            ingredientIndex = (int?)2,
+                            measurement = new { quantity = 1.0 / 3.0, unit = "Cup" },
+                            ingredientSpanStart = step2.IndexOf(
+                                "lemon juice",
+                                StringComparison.Ordinal
+                            ),
+                            ingredientSpanLength = 11,
+                        },
+                    },
+                },
+            },
+        };
+
+        var result = await Page.EvaluateAsync<string>(
+            @"async (payload) => {
+                const tokenKey = Object.keys(localStorage).find(k => k.endsWith('-token'));
+                const token = tokenKey ? localStorage.getItem(tokenKey) : null;
+                const res = await fetch('/api/recipes', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify(payload)
+                });
+                const text = await res.text();
+                if (!res.ok) return 'ERROR ' + res.status + ': ' + text;
+                return JSON.parse(text).id;
+            }",
+            payload
+        );
+        Assert.IsFalse(result.StartsWith("ERROR", StringComparison.Ordinal), result);
+        return result;
+    }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task InlineAmounts_RecipeDetail_HighlightsBothAmountAndIngredientNameSeparately()
+    {
+        await RegisterAndLoginAsync();
+        var recipeId = await SeedSeparatelyHighlightedRecipeAsync(
+            $"Hummus Tagged {Guid.NewGuid():N}"[..22]
+        );
+
+        await Page.GotoAsync($"{ServerUrl}/recipes/{recipeId}");
+        var stepTexts = Page.Locator(".step-instruction-text");
+        await Expect(stepTexts).ToHaveCountAsync(2);
+
+        // Step 1: Both "2 cans" (.inline-amount) and "chickpeas" (.inline-ingredient) are separate chips
+        var step1Amounts = stepTexts.Nth(0).Locator(".inline-amount");
+        var step1Ingredients = stepTexts.Nth(0).Locator(".inline-ingredient");
+        await Expect(step1Amounts).ToHaveCountAsync(2);
+        await Expect(step1Ingredients).ToHaveCountAsync(2);
+
+        await Expect(step1Amounts.Nth(0)).ToHaveTextAsync("2 cans");
+        await Expect(step1Ingredients.Nth(0)).ToHaveTextAsync("chickpeas");
+        await Expect(step1Ingredients.Nth(0)).ToHaveAttributeAsync("title", "chickpeas");
+
+        await Expect(step1Amounts.Nth(1)).ToHaveTextAsync("1/2 tsp");
+        await Expect(step1Ingredients.Nth(1)).ToHaveTextAsync("baking soda");
+        await Expect(step1Ingredients.Nth(1)).ToHaveAttributeAsync("title", "baking soda");
+
+        // Step 2: "While chickpeas cook" has NO chips around chickpeas (passive reference)
+        var step2Text = stepTexts.Nth(1);
+        await Expect(step2Text).ToContainTextAsync("While chickpeas cook");
+        // Only 1 inline-amount (1/3 cup) and 1 inline-ingredient (lemon juice)
+        var step2Amounts = step2Text.Locator(".inline-amount");
+        var step2Ingredients = step2Text.Locator(".inline-ingredient");
+        await Expect(step2Amounts).ToHaveCountAsync(1);
+        await Expect(step2Ingredients).ToHaveCountAsync(1);
+        await Expect(step2Amounts.First).ToHaveTextAsync("1/3 cup");
+        await Expect(step2Ingredients.First).ToHaveTextAsync("lemon juice");
+
+        // Scale to 2x: amounts scale, ingredients stay unchanged
+        await Page.Locator(".mult-chip", new() { HasTextRegex = TwoX }).ClickAsync();
+        await Expect(step1Amounts.Nth(0)).ToHaveTextAsync("4 cans");
+        await Expect(step1Amounts.Nth(0)).ToHaveClassAsync(new Regex("is-scaled"));
+        await Expect(step1Ingredients.Nth(0)).ToHaveTextAsync("chickpeas");
+
+        await Expect(step1Amounts.Nth(1)).ToHaveTextAsync("1 tsp");
+        await Expect(step1Amounts.Nth(1)).ToHaveClassAsync(new Regex("is-scaled"));
+        await Expect(step1Ingredients.Nth(1)).ToHaveTextAsync("baking soda");
+
+        await Expect(step2Amounts.First).ToHaveTextAsync("2/3 cup");
+        await Expect(step2Amounts.First).ToHaveClassAsync(new Regex("is-scaled"));
+        await Expect(step2Ingredients.First).ToHaveTextAsync("lemon juice");
+    }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task InlineAmounts_SingleUseIngredient_DoesNotShowDividedBadge()
+    {
+        await RegisterAndLoginAsync();
+        var recipeId = await SeedSeparatelyHighlightedRecipeAsync(
+            $"SingleUse {Guid.NewGuid():N}"[..22]
+        );
+
+        await Page.GotoAsync($"{ServerUrl}/recipes/{recipeId}");
+
+        // Chickpeas is used in full in step 1 -> no Divided badge
+        var chickpeasRow = Page.Locator(".ingredient-text", new() { HasText = "chickpeas" });
+        await Expect(chickpeasRow.Locator(".ingredient-uses")).ToHaveCountAsync(0);
+
+        // Lemon juice is used in full in step 2 -> no Divided badge
+        var lemonJuiceRow = Page.Locator(".ingredient-text", new() { HasText = "lemon juice" });
+        await Expect(lemonJuiceRow.Locator(".ingredient-uses")).ToHaveCountAsync(0);
+
+        // Baking soda is used in full in step 1 -> no Divided badge
+        var bakingSodaRow = Page.Locator(".ingredient-text", new() { HasText = "baking soda" });
+        await Expect(bakingSodaRow.Locator(".ingredient-uses")).ToHaveCountAsync(0);
+    }
 }

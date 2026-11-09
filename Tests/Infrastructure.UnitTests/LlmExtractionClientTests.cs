@@ -727,7 +727,7 @@ public sealed class LlmExtractionClientTests
         Assert.AreEqual(2, result.Ingredients?.Count);
         Assert.IsTrue(result.Ingredients![1].IsRecipeReference);
         Assert.AreEqual("Foolproof All-Butter Dough", result.Ingredients[1].ReferencedRecipeTitle);
-        Assert.AreEqual("Brown beef in a skillet.", result.Steps![0].Instruction);
+        Assert.AreEqual("Brown 1 lb beef in a skillet.", result.Steps![0].Instruction);
     }
 
     [TestMethod]
@@ -1481,8 +1481,8 @@ public sealed class LlmExtractionClientTests
             var body = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
             capturedPrompt = body;
             if (IsMethodTagRequest(body))
-                return OllamaReply("{}");
-            if (body.Contains("recipe_issue_triage"))
+                return OllamaReply("""{"amounts":{"A1":"0 carrots"}}""");
+            if (body.Contains("recipe_issue_triage") || body.Contains("expert culinary editor"))
                 return OllamaReply(triageResponseJson);
             return OllamaReply(repairedRecipeJson);
         });

@@ -79,6 +79,8 @@ export interface RecipeStepInlineAmountDto {
   ingredientId: string | null;
   measurement: RecipeMeasurement;
   alternativeMeasurement?: RecipeMeasurement | null;
+  ingredientSpanStart?: number | null;
+  ingredientSpanLength?: number | null;
 }
 
 export interface RecipeStepInlineAmountInput {
@@ -88,6 +90,8 @@ export interface RecipeStepInlineAmountInput {
   ingredientIndex: number | null;
   measurement: RecipeMeasurement;
   alternativeMeasurement?: RecipeMeasurement | null;
+  ingredientSpanStart?: number | null;
+  ingredientSpanLength?: number | null;
 }
 
 export interface DetectedStepAmountDto {

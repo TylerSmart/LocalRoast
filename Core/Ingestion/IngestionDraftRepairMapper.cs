@@ -393,6 +393,9 @@ public static class IngestionDraftRepairMapper
                     && start + amount.Length <= instruction.Length
                         ? instruction.Substring(start, amount.Length)
                         : "";
+                var ingStart = amount.IngredientSpanStart.HasValue
+                    ? amount.IngredientSpanStart.Value + lead
+                    : (int?)null;
                 return new InlineStepAmount(
                     start,
                     amount.Length,
@@ -400,7 +403,9 @@ public static class IngestionDraftRepairMapper
                     amount.Kind,
                     amount.IngredientIndex,
                     amount.Measurement,
-                    amount.AlternativeMeasurement
+                    amount.AlternativeMeasurement,
+                    ingStart,
+                    amount.IngredientSpanLength
                 );
             })
             .ToList();

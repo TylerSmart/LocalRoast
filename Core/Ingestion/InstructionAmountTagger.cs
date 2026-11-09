@@ -143,6 +143,31 @@ public static class InstructionAmountTagger
         RegexOptions.IgnoreCase,
         RegexTimeout
     );
+    private static readonly Regex PassivePrecedingClauseRegex = new(
+        @"^\b(?:while|as|until|once|after|when|drain|rinse|return|transfer)\b",
+        RegexOptions.IgnoreCase,
+        RegexTimeout
+    );
+    private static readonly Regex PassivePrecedingPrepositionRegex = new(
+        @"(?:to|over|into)\s+(?:the\s+|warm\s+|hot\s+|cooled\s+|cooked\s+)?$|with\s+(?:the\s+|warm\s+|hot\s+|cooled\s+|cooked\s+)$",
+        RegexOptions.IgnoreCase,
+        RegexTimeout
+    );
+    private static readonly Regex IngredientPrefixRegex = new(
+        @"^\s*(?:of\s+)?(?:the\s+)?(?:reserved\s+|extra\s+|warm\s+|hot\s+|cold\s+|boiling\s+|minced\s+|chopped\s+|sliced\s+|diced\s+|grated\s+|crushed\s+|ground\s+|fresh\s+|dry\s+|whole\s+|melted\s+|softened\s+|raw\s+|cooked\s+)*",
+        RegexOptions.IgnoreCase,
+        RegexTimeout
+    );
+    private static readonly Regex IngredientPrefixFullRegex = new(
+        @"^\s*(?:of\s+)?(?:the\s+)?(?:reserved\s+|extra\s+|warm\s+|hot\s+|cold\s+|boiling\s+|minced\s+|chopped\s+|sliced\s+|diced\s+|grated\s+|crushed\s+|ground\s+|fresh\s+|dry\s+|whole\s+|melted\s+|softened\s+|raw\s+|cooked\s+)*$",
+        RegexOptions.IgnoreCase,
+        RegexTimeout
+    );
+    private static readonly Regex MixtureWordRegex = new(
+        @"^(?:water|mixture|broth|stock|liquid|sauce)\b",
+        RegexOptions.IgnoreCase,
+        RegexTimeout
+    );
 
     private static readonly Dictionary<string, decimal> NumberWords = new(
         StringComparer.OrdinalIgnoreCase
@@ -1082,16 +1107,81 @@ public static class InstructionAmountTagger
         {
             if (ingredients[i].Quantity is not > 0)
                 continue;
-            if (steps.Any(s => s.Indices.Contains(i)))
-                continue;
             var mention = MentionPattern(ingredients[i]);
             if (mention is null)
                 continue;
             for (var sIdx = 0; sIdx < steps.Count; sIdx++)
             {
-                if (mention.IsMatch(steps[sIdx].Paragraph.Text))
+                var step = steps[sIdx];
+                if (step.Indices.Contains(i))
+                    continue;
+
+                var alreadyHasFood =
+                    step.Amounts.Keys.Any(k =>
+                        string.Equals(
+                            FoodName(ingredients[k]),
+                            FoodName(ingredients[i]),
+                            StringComparison.OrdinalIgnoreCase
+                        )
+                    )
+                    || step.Inline.Any(a =>
+                        a.IngredientIndex.HasValue
+                        && string.Equals(
+                            FoodName(ingredients[a.IngredientIndex.Value]),
+                            FoodName(ingredients[i]),
+                            StringComparison.OrdinalIgnoreCase
+                        )
+                    );
+                if (alreadyHasFood)
+                    continue;
+
+                var stepText = step.Paragraph.Text;
+                var alreadyUsedInEarlierStep = steps
+                    .Take(sIdx)
+                    .Any(s => s.Amounts.ContainsKey(i) || s.Indices.Contains(i));
+
+                var matches = mention.Matches(stepText);
+                var hasActiveMention = matches
+                    .Cast<Match>()
+                    .Any(m => !IsPassiveReference(stepText, m, alreadyUsedInEarlierStep));
+
+                if (hasActiveMention)
                 {
-                    steps[sIdx].Indices.Add(i);
+                    step.Indices.Add(i);
+                }
+            }
+        }
+
+        for (var sIdx = 0; sIdx < steps.Count; sIdx++)
+        {
+            var step = steps[sIdx];
+            var stepText = step.Paragraph.Text;
+            foreach (var i in step.Indices.ToList())
+            {
+                if (step.Amounts.ContainsKey(i) || step.Inline.Any(a => a.IngredientIndex == i))
+                    continue;
+
+                var alreadyUsedInEarlierStep = steps
+                    .Take(sIdx)
+                    .Any(s => s.Amounts.ContainsKey(i) || s.Indices.Contains(i));
+
+                if (!alreadyUsedInEarlierStep)
+                    continue;
+
+                var mention = MentionPattern(ingredients[i]);
+                if (mention is null)
+                    continue;
+
+                var matches = mention.Matches(stepText);
+                var allPassive =
+                    matches.Count > 0
+                    && matches
+                        .Cast<Match>()
+                        .All(m => IsPassiveReference(stepText, m, alreadyUsedInEarlierStep));
+
+                if (allPassive)
+                {
+                    step.Indices.Remove(i);
                 }
             }
         }
@@ -1213,6 +1303,31 @@ public static class InstructionAmountTagger
 
         for (var i = 0; i < ingredients.Count; i++)
         {
+            var ingredient = ingredients[i];
+            if (ingredient.Quantity is not > 0)
+                continue;
+            var linkedSteps = steps.Where(s => s.Indices.Contains(i)).ToList();
+            if (
+                linkedSteps.Count == 1
+                && !linkedSteps[0].Amounts.ContainsKey(i)
+                && !linkedSteps[0].Inline.Any(a => a.IngredientIndex == i)
+            )
+            {
+                var (unit, custom) = RecipeDraftNormalizer.NormalizeUnit(
+                    ingredient.Unit,
+                    ingredient.CustomUnitName
+                );
+                linkedSteps[0].Amounts[i] = new RecipeMeasurement(
+                    ingredient.Quantity.Value,
+                    unit,
+                    ingredient.MaxQuantity,
+                    custom
+                );
+            }
+        }
+
+        for (var i = 0; i < ingredients.Count; i++)
+        {
             // A single linked step without a stated amount receives the unstated remainder.
             var ingredient = ingredients[i];
             var tagged = steps.Where(s => s.Amounts.ContainsKey(i)).ToList();
@@ -1324,6 +1439,232 @@ public static class InstructionAmountTagger
             }
         }
 
+        for (var stepIdx = 0; stepIdx < steps.Count; stepIdx++)
+        {
+            var step = steps[stepIdx];
+            var stepText = step.Paragraph.Text;
+            var unstatedIngredients = step
+                .Amounts.Keys.Where(i => !step.Inline.Any(a => a.IngredientIndex == i))
+                .ToList();
+
+            if (unstatedIngredients.Count > 0)
+            {
+                var candidatesToInsert = new List<(int IngredientIndex, Match Match)>();
+                foreach (var i in unstatedIngredients)
+                {
+                    var pattern = MentionPattern(ingredients[i]);
+                    if (pattern is null)
+                        continue;
+
+                    foreach (Match m in pattern.Matches(stepText))
+                    {
+                        var overlaps = step.Inline.Any(span =>
+                            m.Index < span.Start + span.Length && span.Start < m.Index + m.Length
+                        );
+                        if (!overlaps)
+                        {
+                            candidatesToInsert.Add((i, m));
+                            break;
+                        }
+                    }
+                }
+
+                foreach (var (i, _) in candidatesToInsert.OrderBy(c => c.Match.Index))
+                {
+                    var amount = step.Amounts[i];
+                    var scaleResult = CulinaryMath.ScaleAndConvert(
+                        amount.Quantity,
+                        amount.MaxQuantity,
+                        amount.Unit,
+                        amount.CustomUnitName,
+                        1m,
+                        UnitSystem.Original
+                    );
+                    var formattedAmount = string.IsNullOrWhiteSpace(scaleResult.UnitLabel)
+                        ? scaleResult.FormattedAmount
+                        : $"{scaleResult.FormattedAmount} {scaleResult.UnitLabel}";
+
+                    if (string.IsNullOrWhiteSpace(formattedAmount))
+                        continue;
+
+                    var pattern = MentionPattern(ingredients[i]);
+                    if (pattern is null)
+                        continue;
+
+                    Match? mentionMatch = null;
+                    foreach (Match m in pattern.Matches(stepText))
+                    {
+                        var overlaps = step.Inline.Any(span =>
+                        {
+                            var spanEnd = span.Start + span.Length;
+                            if (m.Index < spanEnd && span.Start < m.Index + m.Length)
+                                return true;
+                            if (
+                                span.IngredientSpanStart.HasValue
+                                && span.IngredientSpanLength.HasValue
+                            )
+                            {
+                                var ingEnd =
+                                    span.IngredientSpanStart.Value
+                                    + span.IngredientSpanLength.Value;
+                                if (
+                                    m.Index < ingEnd
+                                    && span.IngredientSpanStart.Value < m.Index + m.Length
+                                )
+                                    return true;
+                            }
+                            return false;
+                        });
+                        if (!overlaps)
+                        {
+                            mentionMatch = m;
+                            break;
+                        }
+                    }
+
+                    if (mentionMatch is null)
+                        continue;
+
+                    var hasPrecedingAmount = step.Inline.Any(span =>
+                    {
+                        var spanEnd = span.Start + span.Length;
+                        if (spanEnd > mentionMatch.Index)
+                            return false;
+                        var between = stepText[spanEnd..mentionMatch.Index];
+                        return IngredientPrefixFullRegex.IsMatch(between) && between.Length <= 25;
+                    });
+                    if (hasPrecedingAmount)
+                        continue;
+
+                    var sourceSpans = SourceMeasurementParser.FindSpans(
+                        stepText[..mentionMatch.Index]
+                    );
+                    if (sourceSpans.Count > 0)
+                    {
+                        var lastSpan = sourceSpans[^1];
+                        var lastSpanEnd = lastSpan.Index + lastSpan.Length;
+                        var between = stepText[lastSpanEnd..mentionMatch.Index];
+                        if (IngredientPrefixFullRegex.IsMatch(between) && between.Length <= 25)
+                        {
+                            continue;
+                        }
+                    }
+
+                    var insertedPrefix = $"{formattedAmount} ";
+                    var insertIndex = mentionMatch.Index;
+
+                    stepText = stepText.Insert(insertIndex, insertedPrefix);
+
+                    for (var sIdx = 0; sIdx < step.Inline.Count; sIdx++)
+                    {
+                        var existing = step.Inline[sIdx];
+                        var newStart =
+                            existing.Start >= insertIndex
+                                ? existing.Start + insertedPrefix.Length
+                                : existing.Start;
+                        var newIngStart =
+                            existing.IngredientSpanStart.HasValue
+                            && existing.IngredientSpanStart.Value >= insertIndex
+                                ? existing.IngredientSpanStart.Value + insertedPrefix.Length
+                                : existing.IngredientSpanStart;
+
+                        step.Inline[sIdx] = existing with
+                        {
+                            Start = newStart,
+                            IngredientSpanStart = newIngStart,
+                        };
+                    }
+
+                    var newSpan = new InlineStepAmount(
+                        Start: insertIndex,
+                        Length: formattedAmount.Length,
+                        Text: formattedAmount,
+                        Kind: InlineStepAmountKind.Ingredient,
+                        IngredientIndex: i,
+                        Measurement: amount,
+                        AlternativeMeasurement: null,
+                        IngredientSpanStart: insertIndex + insertedPrefix.Length,
+                        IngredientSpanLength: mentionMatch.Length
+                    );
+                    step.Inline.Add(newSpan);
+                }
+
+                step = step with { Paragraph = step.Paragraph with { Text = stepText } };
+                steps[stepIdx] = step;
+            }
+
+            for (var sIdx = 0; sIdx < step.Inline.Count; sIdx++)
+            {
+                var span = step.Inline[sIdx];
+                if (span.IngredientSpanStart.HasValue)
+                    continue;
+
+                var afterIndex = span.Start + span.Length;
+                if (afterIndex >= stepText.Length)
+                    continue;
+
+                var afterAmount = stepText[afterIndex..];
+                var prefixMatch = IngredientPrefixRegex.Match(afterAmount);
+                var candidateOffset = prefixMatch.Success ? prefixMatch.Length : 0;
+                var candidateText = afterAmount[candidateOffset..];
+
+                if (span.Kind == InlineStepAmountKind.Ingredient && span.IngredientIndex.HasValue)
+                {
+                    var ing = ingredients[span.IngredientIndex.Value];
+                    var pattern = MentionPattern(ing);
+                    if (pattern is not null)
+                    {
+                        var nameMatch = pattern.Match(candidateText);
+                        if (nameMatch.Success && nameMatch.Index == 0)
+                        {
+                            var ingStart = afterIndex + candidateOffset;
+                            var ingLength = nameMatch.Length;
+                            step.Inline[sIdx] = span with
+                            {
+                                IngredientSpanStart = ingStart,
+                                IngredientSpanLength = ingLength,
+                            };
+                        }
+                    }
+                }
+                else if (span.Kind == InlineStepAmountKind.Mixture)
+                {
+                    var mixtureMatch = MixtureWordRegex.Match(candidateText);
+                    if (mixtureMatch.Success && mixtureMatch.Index == 0)
+                    {
+                        var ingStart = afterIndex + candidateOffset;
+                        var ingLength = mixtureMatch.Length;
+                        step.Inline[sIdx] = span with
+                        {
+                            IngredientSpanStart = ingStart,
+                            IngredientSpanLength = ingLength,
+                        };
+                    }
+                    else
+                    {
+                        for (var ingI = 0; ingI < ingredients.Count; ingI++)
+                        {
+                            var pattern = MentionPattern(ingredients[ingI]);
+                            if (pattern is null)
+                                continue;
+                            var nameMatch = pattern.Match(candidateText);
+                            if (nameMatch.Success && nameMatch.Index == 0)
+                            {
+                                var ingStart = afterIndex + candidateOffset;
+                                var ingLength = nameMatch.Length;
+                                step.Inline[sIdx] = span with
+                                {
+                                    IngredientSpanStart = ingStart,
+                                    IngredientSpanLength = ingLength,
+                                };
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         var result = steps
             .Select(s => new LlmExtractedStepItem(
                 s.Paragraph.SectionName,
@@ -1343,7 +1684,7 @@ public static class InstructionAmountTagger
                     ))
                     .ToList(),
                 s.Paragraph.Text,
-                s.Inline
+                s.Inline.OrderBy(a => a.Start).ToList()
             ))
             .ToList();
         issues.AddRange(Reconcile(ingredients, result));
@@ -2147,6 +2488,33 @@ public static class InstructionAmountTagger
             ? name
             : null;
 
+    public static bool IsPassiveReference(
+        string stepText,
+        Match mentionMatch,
+        bool alreadyUsedInEarlierStep
+    )
+    {
+        if (!alreadyUsedInEarlierStep)
+        {
+            return false;
+        }
+
+        var beforeMatch = stepText[..mentionMatch.Index];
+        if (PassivePrecedingPrepositionRegex.IsMatch(beforeMatch))
+        {
+            return true;
+        }
+
+        var lastBoundary = beforeMatch.LastIndexOfAny(['.', ';', ',', '\n']);
+        var clause = (lastBoundary >= 0 ? beforeMatch[(lastBoundary + 1)..] : beforeMatch).Trim();
+        if (PassivePrecedingClauseRegex.IsMatch(clause))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
     /// <summary>Matches the ingredient's name or head noun, but not "flour mixture".</summary>
     private static Regex? MentionPattern(LlmExtractedIngredientItem ingredient)
     {
@@ -2155,6 +2523,7 @@ public static class InstructionAmountTagger
             .SelectMany(n => new[] { n!.Trim(), n.Trim().Split(' ')[^1] })
             .Where(n => n.Length >= 3)
             .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(n => n.Length)
             .Select(n => Regex.Escape(n.TrimEnd('s')))
             .ToList();
         return names.Count == 0

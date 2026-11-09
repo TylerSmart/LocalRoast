@@ -36,7 +36,11 @@ import {
   scaleIngredient,
   stepIngredientCallouts,
 } from '../../../core/utils/culinary-math';
-import { formatIngredientUses, ingredientUses } from '../../../core/utils/step-instruction';
+import {
+  formatIngredientUses,
+  ingredientUses,
+  isIngredientDivided,
+} from '../../../core/utils/step-instruction';
 import { StepInstructionComponent } from '../../../shared/components/step-instruction/step-instruction.component';
 import { getTodayIsoLocal } from '../../../core/utils/meal-plan-date';
 import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialog/confirm-dialog.component';
@@ -201,8 +205,13 @@ export class RecipeDetailComponent implements OnInit {
         this.targetSystem(),
       );
       if (
-        uses.length >= 2 ||
-        (uses.length === 1 && uses[0].label !== item.displayQuantityAndUnit)
+        isIngredientDivided(
+          r.steps,
+          item.ingredient.id,
+          ingredients,
+          this.scaleFactor(),
+          this.targetSystem(),
+        )
       ) {
         result.set(item.ingredient.id, formatIngredientUses(uses));
       }

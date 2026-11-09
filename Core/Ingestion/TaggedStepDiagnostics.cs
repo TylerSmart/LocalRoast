@@ -47,6 +47,32 @@ public static class TaggedStepDiagnostics
                     issues.Add($"{prefix} references an ingredient but is not tagged as one.");
                 if (SourceMeasurementParser.FindSpans(text).Count == 0)
                     issues.Add($"{prefix} is no longer a measured amount.");
+
+                if (amount.IngredientSpanStart.HasValue && amount.IngredientSpanLength.HasValue)
+                {
+                    var ingStart = amount.IngredientSpanStart.Value;
+                    var ingLen = amount.IngredientSpanLength.Value;
+                    if (
+                        ingStart < amount.Start + amount.Length
+                        || ingStart + ingLen > instruction.Length
+                        || ingLen < 1
+                    )
+                    {
+                        issues.Add(
+                            $"{prefix} ingredient name span is invalid or outside the step text."
+                        );
+                    }
+                    else
+                    {
+                        previousEnd = Math.Max(previousEnd, ingStart + ingLen);
+                    }
+                }
+                else if (
+                    amount.IngredientSpanStart.HasValue != amount.IngredientSpanLength.HasValue
+                )
+                {
+                    issues.Add($"{prefix} ingredient name span is incomplete.");
+                }
             }
         }
         issues.AddRange(InstructionAmountTagger.Reconcile(ingredients, steps));

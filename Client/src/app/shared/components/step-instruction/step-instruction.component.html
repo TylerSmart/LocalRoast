@@ -9,6 +9,10 @@
       [attr.title]="amount.ingredientName ?? (amount.kind === 'Mixture' ? 'Mixture' : null)"
       >{{ segment.text }}</span
     >
+  } @else if (segment.ingredientHighlight; as ing) {
+    <span class="inline-ingredient" [attr.data-kind]="ing.kind" [attr.title]="ing.ingredientName">{{
+      segment.text
+    }}</span>
   } @else {
     <span>{{ segment.text }}</span>
   }

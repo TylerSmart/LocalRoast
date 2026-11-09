@@ -219,7 +219,7 @@ public sealed class InstructionAmountTaggerTests
 
         Assert.IsEmpty(result.Issues);
         CollectionAssert.AreEqual(new[] { 0 }, result.Steps[0].IngredientIndices!.ToArray());
-        Assert.IsEmpty(result.Steps[0].IngredientAmounts!);
+        Assert.AreEqual(5m, result.Steps[0].IngredientAmounts!.Single().Measurement.Quantity);
         var second = result.Steps[1];
         Assert.AreEqual(1, second.IngredientAmounts!.Single().IngredientIndex);
         CollectionAssert.AreEqual(new[] { 1 }, second.IngredientIndices!.ToArray());
@@ -615,6 +615,150 @@ public sealed class InstructionAmountTaggerTests
 
         var result = InstructionAmountTagger.Assemble(ingredients, candidates, tags);
         Assert.IsEmpty(result.Issues, string.Join("; ", result.Issues));
+    }
+
+    [TestMethod]
+    public void Assemble_InsertsUnstatedSingleUseMeasurements_AndPopulatesIngredientSpans()
+    {
+        var ingredients = new List<LlmExtractedIngredientItem>
+        {
+            new(null, 2m, null, "can", "chickpeas", "chickpeas"),
+            new(null, 0.5m, null, "tsp", "baking soda", "baking soda"),
+            new(null, 6m, null, "cup", "water", "water"),
+        };
+
+        var candidates = InstructionAmountTagger.FindCandidates([
+            new MethodParagraph(
+                1,
+                null,
+                "Combine chickpeas, baking soda, and 6 cups water in saucepan."
+            ),
+        ]);
+
+        var tags = new MethodTags(
+            new Dictionary<string, string> { ["A1"] = "2 water" },
+            new Dictionary<string, string>(),
+            new Dictionary<int, IReadOnlyList<string>>
+            {
+                [1] = ["0 chickpeas", "1 baking soda", "2 water"],
+            }
+        );
+
+        var result = InstructionAmountTagger.Assemble(ingredients, candidates, tags);
+        Assert.IsEmpty(result.Issues, string.Join("; ", result.Issues));
+
+        var step = result.Steps.Single();
+        Assert.AreEqual(
+            "Combine 2 cans chickpeas, 1/2 tsp baking soda, and 6 cups water in saucepan.",
+            step.Instruction
+        );
+        Assert.AreEqual(3, step.InlineAmounts!.Count);
+
+        // Check chickpeas span
+        var chickpeasSpan = step.InlineAmounts[0];
+        Assert.AreEqual("2 cans", chickpeasSpan.Text);
+        Assert.AreEqual(0, chickpeasSpan.IngredientIndex);
+        Assert.IsNotNull(chickpeasSpan.IngredientSpanStart);
+        Assert.IsNotNull(chickpeasSpan.IngredientSpanLength);
+        Assert.AreEqual(
+            "chickpeas",
+            step.Instruction.Substring(
+                chickpeasSpan.IngredientSpanStart.Value,
+                chickpeasSpan.IngredientSpanLength.Value
+            )
+        );
+
+        // Check baking soda span
+        var bakingSodaSpan = step.InlineAmounts[1];
+        Assert.AreEqual("1/2 tsp", bakingSodaSpan.Text);
+        Assert.AreEqual(1, bakingSodaSpan.IngredientIndex);
+        Assert.IsNotNull(bakingSodaSpan.IngredientSpanStart);
+        Assert.IsNotNull(bakingSodaSpan.IngredientSpanLength);
+        Assert.AreEqual(
+            "baking soda",
+            step.Instruction.Substring(
+                bakingSodaSpan.IngredientSpanStart.Value,
+                bakingSodaSpan.IngredientSpanLength.Value
+            )
+        );
+
+        // Check water span (explicit span that should have ingredient name attached)
+        var waterSpan = step.InlineAmounts[2];
+        Assert.AreEqual("6 cups", waterSpan.Text);
+        Assert.AreEqual(2, waterSpan.IngredientIndex);
+        Assert.IsNotNull(waterSpan.IngredientSpanStart);
+        Assert.IsNotNull(waterSpan.IngredientSpanLength);
+        Assert.AreEqual(
+            "water",
+            step.Instruction.Substring(
+                waterSpan.IngredientSpanStart.Value,
+                waterSpan.IngredientSpanLength.Value
+            )
+        );
+    }
+
+    [TestMethod]
+    public void Assemble_ExcludesPassiveReferencesFromEarlierStep_AndLinksActiveStepIngredients()
+    {
+        var ingredients = new List<LlmExtractedIngredientItem>
+        {
+            new(null, 2m, null, "can", "chickpeas", "chickpeas"),
+            new(null, 1.25m, null, "tsp", "salt", "salt"),
+        };
+
+        var candidates = InstructionAmountTagger.FindCandidates([
+            new MethodParagraph(1, null, "Combine chickpeas and water."),
+            new MethodParagraph(
+                2,
+                null,
+                "While chickpeas cook, whisk lemon juice and salt together."
+            ),
+            new MethodParagraph(3, null, "Drain chickpeas and cool."),
+            new MethodParagraph(4, null, "Season with 1/2 tsp salt."),
+        ]);
+
+        var tags = new MethodTags(
+            new Dictionary<string, string> { ["A1"] = "1 salt" },
+            new Dictionary<string, string>(),
+            new Dictionary<int, IReadOnlyList<string>>
+            {
+                [1] = ["0 chickpeas"],
+                [2] = ["0 chickpeas"], // Model mistakenly tagged chickpeas in Step 2
+                [3] = ["0 chickpeas"], // Model mistakenly tagged chickpeas in Step 3
+                [4] = ["1 salt"],
+            }
+        );
+
+        var result = InstructionAmountTagger.Assemble(ingredients, candidates, tags);
+        Assert.IsEmpty(result.Issues, string.Join("; ", result.Issues));
+
+        // Step 1: uses chickpeas
+        Assert.IsTrue(result.Steps[0].IngredientIndices!.Contains(0));
+
+        // Step 2: chickpeas is passive ("While chickpeas cook"), so removed!
+        Assert.IsFalse(result.Steps[1].IngredientIndices!.Contains(0));
+        // Step 2: salt is active mention ("and salt together"), so linked and receives remainder (3/4 tsp)!
+        Assert.IsTrue(result.Steps[1].IngredientIndices!.Contains(1));
+        Assert.AreEqual(
+            0.75m,
+            result
+                .Steps[1]
+                .IngredientAmounts!.Single(a => a.IngredientIndex == 1)
+                .Measurement.Quantity
+        );
+
+        // Step 3: chickpeas is passive ("Drain chickpeas"), so removed!
+        Assert.IsFalse(result.Steps[2].IngredientIndices!.Contains(0));
+
+        // Step 4: explicit 1/2 tsp salt
+        Assert.IsTrue(result.Steps[3].IngredientIndices!.Contains(1));
+        Assert.AreEqual(
+            0.5m,
+            result
+                .Steps[3]
+                .IngredientAmounts!.Single(a => a.IngredientIndex == 1)
+                .Measurement.Quantity
+        );
     }
 
     private static LlmExtractedIngredientItem Ingredient(

@@ -11,8 +11,17 @@
   font-weight: 500;
 }
 
+.inline-ingredient {
+  background: var(--mat-sys-secondary-container);
+  color: var(--mat-sys-on-secondary-container);
+  border-radius: 6px;
+  padding: 0 5px;
+  font-weight: 500;
+}
+
 @media print {
-  .inline-amount {
+  .inline-amount,
+  .inline-ingredient {
     background: none;
     color: inherit;
     padding: 0;

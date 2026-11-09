@@ -4,7 +4,13 @@ import {
   RecipeStepInlineAmountDto,
   UnitSystem,
 } from '../models/recipe.models';
-import { IngredientMeasurements, scaleAndConvert, scaleStepIngredient } from './culinary-math';
+import {
+  IngredientMeasurements,
+  measurementUnitFactor,
+  preferredIngredientMeasurement,
+  scaleAndConvert,
+  scaleStepIngredient,
+} from './culinary-math';
 
 export interface InstructionSegment {
   text: string;
@@ -13,6 +19,11 @@ export interface InstructionSegment {
     ingredientId: string | null;
     ingredientName: string | null;
     scaled: boolean;
+  };
+  ingredientHighlight?: {
+    kind: InlineStepAmountKind;
+    ingredientId: string | null;
+    ingredientName: string | null;
   };
 }
 
@@ -30,6 +41,8 @@ export type InstructionIngredient = IngredientMeasurements & { id: string; displ
 export interface InlineSpan {
   start: number;
   length: number;
+  ingredientSpanStart?: number | null;
+  ingredientSpanLength?: number | null;
 }
 
 export function validInlineSpans<T extends InlineSpan>(text: string, amounts: readonly T[]): T[] {
@@ -45,9 +58,40 @@ export function validInlineSpans<T extends InlineSpan>(text: string, amounts: re
       amount.start + amount.length > text.length
     )
       continue;
-    valid.push(amount);
+
+    const item: T = { ...amount };
+    if (amount.ingredientSpanStart != null && amount.ingredientSpanLength != null) {
+      if (
+        !Number.isInteger(amount.ingredientSpanStart) ||
+        !Number.isInteger(amount.ingredientSpanLength) ||
+        amount.ingredientSpanLength < 1 ||
+        amount.ingredientSpanStart < amount.start + amount.length ||
+        amount.ingredientSpanStart + amount.ingredientSpanLength > text.length
+      ) {
+        item.ingredientSpanStart = null;
+        item.ingredientSpanLength = null;
+      }
+    } else if (amount.ingredientSpanStart !== undefined) {
+      item.ingredientSpanStart = null;
+      item.ingredientSpanLength = null;
+    }
+
+    valid.push(item);
     end = amount.start + amount.length;
   }
+
+  for (let i = 0; i < valid.length; i++) {
+    const item = valid[i];
+    if (item.ingredientSpanStart != null && item.ingredientSpanLength != null) {
+      const ingEnd = item.ingredientSpanStart + item.ingredientSpanLength;
+      const nextAmount = valid[i + 1];
+      if (nextAmount && ingEnd > nextAmount.start) {
+        item.ingredientSpanStart = null;
+        item.ingredientSpanLength = null;
+      }
+    }
+  }
+
   return valid;
 }
 
@@ -122,7 +166,32 @@ export function buildInstructionSegments(
         scaled: scaledText !== null,
       },
     });
-    cursor = amount.start + amount.length;
+
+    const amountEnd = amount.start + amount.length;
+    if (
+      amount.ingredientSpanStart != null &&
+      amount.ingredientSpanLength != null &&
+      amount.ingredientSpanStart >= amountEnd &&
+      amount.ingredientSpanStart + amount.ingredientSpanLength <= text.length
+    ) {
+      if (amount.ingredientSpanStart > amountEnd) {
+        segments.push({ text: text.slice(amountEnd, amount.ingredientSpanStart) });
+      }
+      segments.push({
+        text: text.slice(
+          amount.ingredientSpanStart,
+          amount.ingredientSpanStart + amount.ingredientSpanLength,
+        ),
+        ingredientHighlight: {
+          kind: amount.kind,
+          ingredientId: amount.kind === 'Ingredient' ? amount.ingredientId : null,
+          ingredientName: ingredient?.displayName ?? null,
+        },
+      });
+      cursor = amount.ingredientSpanStart + amount.ingredientSpanLength;
+    } else {
+      cursor = amountEnd;
+    }
   }
   if (cursor < text.length || segments.length === 0) segments.push({ text: text.slice(cursor) });
   return segments;
@@ -163,6 +232,82 @@ export function formatIngredientUses(uses: readonly { stepNumber: number; label:
   return `Divided: ${uses.map((u) => `${u.label} (step ${u.stepNumber})`).join(' · ')}`;
 }
 
+export function convertToIngredientUnit(
+  amount: RecipeMeasurement,
+  ingredient: IngredientMeasurements,
+): number | null {
+  if (amount.quantity == null) return null;
+  const target = preferredIngredientMeasurement(ingredient);
+  if (!target.unit) return null;
+
+  if (
+    amount.unit === target.unit &&
+    (amount.unit !== 'Custom' ||
+      amount.customUnitName?.toLowerCase() === target.customUnitName?.toLowerCase())
+  ) {
+    return amount.quantity;
+  }
+
+  const directFactor = measurementUnitFactor(amount, target);
+  if (directFactor !== null) {
+    return amount.quantity * directFactor;
+  }
+
+  const primary: RecipeMeasurement = {
+    quantity: ingredient.quantity ?? null,
+    maxQuantity: ingredient.maxQuantity,
+    unit: ingredient.unit ?? null,
+    customUnitName: ingredient.customUnitName,
+  };
+  const other = ingredient.preferAlternativeMeasurement
+    ? primary
+    : ingredient.alternativeMeasurement;
+
+  if (other?.quantity && target.quantity && other.unit) {
+    const otherFactor = measurementUnitFactor(amount, other);
+    if (otherFactor !== null) {
+      const ratio = (otherFactor * target.quantity) / other.quantity;
+      return amount.quantity * ratio;
+    }
+  }
+
+  return null;
+}
+
+export function isIngredientDivided(
+  steps: readonly InstructionStep[],
+  ingredientId: string,
+  ingredients: readonly InstructionIngredient[],
+  factor = 1,
+  _system: UnitSystem = 'Original',
+): boolean {
+  const matchingSpans = steps.flatMap((step) =>
+    validInlineSpans(step.instruction ?? '', step.inlineAmounts ?? []).filter(
+      (a) => a.kind === 'Ingredient' && a.ingredientId === ingredientId,
+    ),
+  );
+
+  if (matchingSpans.length >= 2) return true;
+  if (matchingSpans.length !== 1) return false;
+
+  const ingredient = ingredients.find((i) => i.id === ingredientId);
+  if (!ingredient) return false;
+
+  const target = preferredIngredientMeasurement(ingredient);
+  if (target.quantity == null || target.quantity <= 0) return false;
+
+  const useMeasurement = matchingSpans[0].measurement;
+  if (useMeasurement?.quantity == null || useMeasurement.quantity <= 0) return false;
+
+  const convertedQuantity = convertToIngredientUnit(useMeasurement, ingredient);
+  if (convertedQuantity == null) return false;
+
+  const scaledTargetQuantity = target.quantity * factor;
+  const scaledUseQuantity = convertedQuantity * factor;
+
+  return scaledUseQuantity < scaledTargetQuantity * 0.99;
+}
+
 /** Converts editor inputs (row indices) to the DTO shape (row ids) used by the renderers. */
 export function inlineAmountInputsToDtos(
   amounts: readonly {
@@ -172,6 +317,8 @@ export function inlineAmountInputsToDtos(
     ingredientIndex: number | null;
     measurement: RecipeMeasurement;
     alternativeMeasurement?: RecipeMeasurement | null;
+    ingredientSpanStart?: number | null;
+    ingredientSpanLength?: number | null;
   }[],
   ingredientIdAt: (index: number) => string | null | undefined,
 ): RecipeStepInlineAmountDto[] {
@@ -185,6 +332,8 @@ export function inlineAmountInputsToDtos(
         : null,
     measurement: a.measurement,
     alternativeMeasurement: a.alternativeMeasurement ?? null,
+    ingredientSpanStart: a.ingredientSpanStart ?? null,
+    ingredientSpanLength: a.ingredientSpanLength ?? null,
   }));
 }
 
@@ -243,7 +392,54 @@ export function relocateInlineAmounts<T extends InlineSpan>(
       dropped++;
       continue;
     }
-    placed.push({ ...amount, start: best });
+
+    const placedItem: T = { ...amount, start: best };
+    if (
+      amount.ingredientSpanStart != null &&
+      amount.ingredientSpanLength != null &&
+      amount.ingredientSpanStart >= amount.start + amount.length &&
+      amount.ingredientSpanStart + amount.ingredientSpanLength <= oldText.length
+    ) {
+      const ingText = oldText.slice(
+        amount.ingredientSpanStart,
+        amount.ingredientSpanStart + amount.ingredientSpanLength,
+      );
+      if (ingText) {
+        const ingExpected =
+          amount.ingredientSpanStart <= prefix
+            ? amount.ingredientSpanStart
+            : amount.ingredientSpanStart >= oldText.length - suffix
+              ? amount.ingredientSpanStart + delta
+              : amount.ingredientSpanStart + (best - amount.start);
+
+        let bestIng: number | null = null;
+        for (
+          let j = newText.indexOf(ingText, best + spanText.length);
+          j >= 0;
+          j = newText.indexOf(ingText, j + 1)
+        ) {
+          if (overlaps(j, ingText.length)) continue;
+          if (bestIng === null || Math.abs(j - ingExpected) < Math.abs(bestIng - ingExpected)) {
+            bestIng = j;
+          }
+        }
+        if (bestIng !== null && bestIng >= best + spanText.length) {
+          placedItem.ingredientSpanStart = bestIng;
+          placedItem.ingredientSpanLength = ingText.length;
+        } else {
+          placedItem.ingredientSpanStart = null;
+          placedItem.ingredientSpanLength = null;
+        }
+      } else {
+        placedItem.ingredientSpanStart = null;
+        placedItem.ingredientSpanLength = null;
+      }
+    } else if (amount.ingredientSpanStart !== undefined) {
+      placedItem.ingredientSpanStart = null;
+      placedItem.ingredientSpanLength = null;
+    }
+
+    placed.push(placedItem);
   }
   return { amounts: placed.sort((a, b) => a.start - b.start), dropped };
 }
@@ -255,6 +451,12 @@ export function trimInstructionWithAmounts<T extends InlineSpan>(
 ): { instruction: string; amounts: T[] } {
   const trimmed = instruction.trim();
   const lead = instruction.length - instruction.trimStart().length;
-  const shifted = amounts.map((a) => ({ ...a, start: a.start - lead }));
+  const shifted = amounts.map((a) => {
+    const item: T = { ...a, start: a.start - lead };
+    if (a.ingredientSpanStart != null) {
+      item.ingredientSpanStart = a.ingredientSpanStart - lead;
+    }
+    return item;
+  });
   return { instruction: trimmed, amounts: validInlineSpans(trimmed, shifted) };
 }

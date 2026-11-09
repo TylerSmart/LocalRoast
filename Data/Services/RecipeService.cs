@@ -677,7 +677,9 @@ public sealed partial class RecipeService(
                     a.AlternativeMaxQuantity,
                     a.AlternativeCustomUnitName
                 )
-                : null
+                : null,
+            a.IngredientSpanStart,
+            a.IngredientSpanLength
         );
 
     public async Task<RecipeDetailDto> CreateRecipeAsync(
@@ -1372,12 +1374,39 @@ public sealed partial class RecipeService(
                             "Each inline amount must cover a distinct part of its step and reference a valid ingredient."
                         );
                     }
+                    if (inline.IngredientSpanStart.HasValue || inline.IngredientSpanLength.HasValue)
+                    {
+                        if (
+                            !inline.IngredientSpanStart.HasValue
+                            || !inline.IngredientSpanLength.HasValue
+                        )
+                        {
+                            throw new DomainValidationException(
+                                "Each inline ingredient span must specify both start and length."
+                            );
+                        }
+                        var ingStart = inline.IngredientSpanStart.Value - lead;
+                        var ingLength = inline.IngredientSpanLength.Value;
+                        if (
+                            ingLength < 1
+                            || ingStart < start!.Value + inline.Length
+                            || ingStart + ingLength > trimmedLength
+                        )
+                        {
+                            throw new DomainValidationException(
+                                "Each inline amount must cover a distinct part of its step and reference a valid ingredient."
+                            );
+                        }
+                    }
                     RecipeMeasurementValidation.Validate(inline.Measurement);
                     if (inline.AlternativeMeasurement is not null)
                     {
                         RecipeMeasurementValidation.Validate(inline.AlternativeMeasurement);
                     }
-                    inlineEnd = start!.Value + inline.Length;
+                    inlineEnd = inline.IngredientSpanStart.HasValue
+                        ? (inline.IngredientSpanStart.Value - lead)
+                            + inline.IngredientSpanLength!.Value
+                        : start!.Value + inline.Length;
                 }
             }
         }
@@ -1610,6 +1639,10 @@ public sealed partial class RecipeService(
                         AlternativeUnit = inline.AlternativeMeasurement?.Unit,
                         AlternativeCustomUnitName =
                             inline.AlternativeMeasurement?.CustomUnitName?.Trim(),
+                        IngredientSpanStart = inline.IngredientSpanStart.HasValue
+                            ? inline.IngredientSpanStart.Value - leadingTrim
+                            : null,
+                        IngredientSpanLength = inline.IngredientSpanLength,
                     }
                 );
             }

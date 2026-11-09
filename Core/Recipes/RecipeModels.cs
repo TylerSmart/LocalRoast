@@ -91,7 +91,9 @@ public record RecipeStepInlineAmountDto(
     InlineStepAmountKind Kind,
     Guid? IngredientId,
     RecipeMeasurement Measurement,
-    RecipeMeasurement? AlternativeMeasurement = null
+    RecipeMeasurement? AlternativeMeasurement = null,
+    int? IngredientSpanStart = null,
+    int? IngredientSpanLength = null
 );
 
 public record RecipeStepInlineAmountInput(
@@ -100,7 +102,9 @@ public record RecipeStepInlineAmountInput(
     InlineStepAmountKind Kind,
     int? IngredientIndex,
     [Required] RecipeMeasurement Measurement,
-    RecipeMeasurement? AlternativeMeasurement = null
+    RecipeMeasurement? AlternativeMeasurement = null,
+    [Range(0, 3999)] int? IngredientSpanStart = null,
+    [Range(1, 200)] int? IngredientSpanLength = null
 );
 
 public record DetectedStepAmountDto(

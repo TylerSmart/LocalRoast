@@ -88,7 +88,9 @@ public record InlineStepAmount(
     InlineStepAmountKind Kind,
     int? IngredientIndex,
     RecipeMeasurement Measurement,
-    RecipeMeasurement? AlternativeMeasurement = null
+    RecipeMeasurement? AlternativeMeasurement = null,
+    int? IngredientSpanStart = null,
+    int? IngredientSpanLength = null
 );
 
 public record LlmExtractedRecipePayload(
