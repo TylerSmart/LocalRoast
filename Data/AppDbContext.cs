@@ -35,6 +35,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
 
     public DbSet<HouseholdLlmSettings> HouseholdLlmSettings => Set<HouseholdLlmSettings>();
 
+    public DbSet<LlmModelProfile> LlmModelProfiles => Set<LlmModelProfile>();
+
     public DbSet<IngestionJob> IngestionJobs => Set<IngestionJob>();
 
     public DbSet<IngestionDraftRefinement> IngestionDraftRefinements =>

@@ -62,6 +62,38 @@ export interface LlmModelProfile {
   requestTimeoutSeconds: number;
   recommendedAsRefineModel: boolean;
   notes: string[];
+  isBuiltInDefault?: boolean;
+}
+
+export interface UpsertLlmModelProfileRequest {
+  displayName: string;
+  modelTag: string;
+  matchPrefixes?: string[];
+  summary?: string | null;
+  enableThinking?: boolean;
+  temperature?: number | null;
+  topP?: number | null;
+  topK?: number | null;
+  contextWindowTokens?: number;
+  requestTimeoutSeconds?: number;
+  recommendedAsRefineModel?: boolean;
+  notes?: string[];
+  isBuiltInDefault?: boolean;
+}
+
+export interface UpsertLlmModelProfileRequest {
+  displayName: string;
+  modelTag: string;
+  matchPrefixes?: string[];
+  summary?: string | null;
+  enableThinking?: boolean;
+  temperature?: number | null;
+  topP?: number | null;
+  topK?: number | null;
+  contextWindowTokens?: number;
+  requestTimeoutSeconds?: number;
+  recommendedAsRefineModel?: boolean;
+  notes?: string[];
 }
 
 export interface LlmSettingsDto {

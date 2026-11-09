@@ -14,9 +14,11 @@ import type {
   IngestionRefinementDto,
   IngestionRepairPreviewDto,
   IngestionReviewDiagnosticsDto,
+  LlmModelProfile,
   RetryBatchJobsRequest,
   RetryBatchJobsResultDto,
   RetryWaitingJobsResultDto,
+  UpsertLlmModelProfileRequest,
 } from '../../models/ingestion.models';
 import type { RecipeDetailDto } from '../../models/recipe.models';
 
@@ -45,6 +47,28 @@ export class IngestionService {
     return this.http
       .get<IngestionQueueSummaryDto>(apiUrl('/ingestion/jobs/summary'))
       .pipe(tap((summary) => this.summary.set(summary)));
+  }
+
+  createModelProfile(request: UpsertLlmModelProfileRequest): Observable<LlmModelProfile> {
+    return this.http.post<LlmModelProfile>(apiUrl('/llm-settings/model-profiles'), request);
+  }
+
+  updateModelProfile(
+    id: string,
+    request: UpsertLlmModelProfileRequest,
+  ): Observable<LlmModelProfile> {
+    return this.http.put<LlmModelProfile>(apiUrl(`/llm-settings/model-profiles/${id}`), request);
+  }
+
+  deleteModelProfile(id: string): Observable<void> {
+    return this.http.delete<void>(apiUrl(`/llm-settings/model-profiles/${id}`));
+  }
+
+  restoreDefaultModelProfiles(): Observable<LlmModelProfile[]> {
+    return this.http.post<LlmModelProfile[]>(
+      apiUrl('/llm-settings/model-profiles/restore-defaults'),
+      null,
+    );
   }
 
   getJobsPaged(

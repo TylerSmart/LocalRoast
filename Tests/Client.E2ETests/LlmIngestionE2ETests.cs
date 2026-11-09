@@ -468,10 +468,12 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
             .ClickAsync();
         await Expect(dialog.Locator(".connection-status-banner.status-success")).ToBeVisibleAsync();
         await dialog.Locator("input[formcontrolname='textModel']").FillAsync("qwen2.5:14b");
+        await dialog.Locator(".mdc-tab", new() { HasText = "Sampling & Runtime" }).ClickAsync();
         await dialog.Locator("mat-checkbox[formcontrolname='ollamaCpuOnly'] label").ClickAsync();
         await dialog.Locator("button", new() { HasText = "Save Settings" }).ClickAsync();
         await Expect(dialog).Not.ToBeVisibleAsync();
         await Page.Locator(".llm-settings-btn").ClickAsync();
+        await dialog.Locator(".mdc-tab", new() { HasText = "Sampling & Runtime" }).ClickAsync();
         await Expect(dialog.Locator("mat-checkbox[formcontrolname='ollamaCpuOnly'] input"))
             .ToBeCheckedAsync();
         await dialog.Locator("button", new() { HasText = "Save Settings" }).ClickAsync();
@@ -1154,6 +1156,8 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await Expect(statusBanner).ToBeVisibleAsync();
         await Expect(statusBanner).ToContainTextAsync("model(s) discovered");
 
+        await dialog.Locator(".mdc-tab", new() { HasText = "Sampling & Runtime" }).ClickAsync();
+
         // Check Thinking toggle
         var thinkingToggle = dialog.Locator(
             "mat-slide-toggle[formcontrolname='enableThinking'] button"
@@ -1163,6 +1167,8 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         {
             await thinkingToggle.ClickAsync();
         }
+
+        await dialog.Locator(".mdc-tab", new() { HasText = "Refinement & Queue" }).ClickAsync();
 
         // Check retries input
         var retriesInput = dialog.Locator("input[formcontrolname='maxIngestionRetries']");
@@ -1183,8 +1189,10 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await Page.Locator(".llm-settings-btn").ClickAsync();
         await Expect(dialog).ToBeVisibleAsync();
 
+        await dialog.Locator(".mdc-tab", new() { HasText = "Refinement & Queue" }).ClickAsync();
         var savedRetries = dialog.Locator("input[formcontrolname='maxIngestionRetries']");
         await Expect(savedRetries).ToHaveValueAsync("4");
+        await dialog.Locator(".mdc-tab", new() { HasText = "Sampling & Runtime" }).ClickAsync();
         await Expect(dialog.Locator("mat-slide-toggle[formcontrolname='enableThinking'] button"))
             .ToHaveAttributeAsync("aria-checked", "true");
         await dialog.Locator("button", new() { HasText = "Cancel" }).ClickAsync();
@@ -1201,6 +1209,7 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
 
         var dialog = Page.Locator("app-llm-settings-dialog");
         await Expect(dialog).ToBeVisibleAsync();
+        await dialog.Locator(".mdc-tab", new() { HasText = "Sampling & Runtime" }).ClickAsync();
 
         var contextInput = dialog.Locator("input[formcontrolname='contextWindowTokens']");
         await contextInput.FillAsync("16384");
@@ -1211,6 +1220,7 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
 
         await Page.Locator(".llm-settings-btn").ClickAsync();
         await Expect(dialog).ToBeVisibleAsync();
+        await dialog.Locator(".mdc-tab", new() { HasText = "Sampling & Runtime" }).ClickAsync();
         await Expect(contextInput).ToHaveValueAsync("16384");
         await Expect(dialog.Locator("#contextWindowSlider")).ToHaveValueAsync("16384");
         await dialog.Locator("button", new() { HasText = "Cancel" }).ClickAsync();
@@ -1227,6 +1237,7 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await Page.Locator(".llm-settings-btn").ClickAsync();
 
         var dialog = Page.Locator("app-llm-settings-dialog");
+        await dialog.Locator(".mdc-tab", new() { HasText = "Sampling & Runtime" }).ClickAsync();
         var timeout = dialog.Locator("input[formcontrolname='requestTimeoutSeconds']");
         var save = dialog.Locator("button", new() { HasText = "Save Settings" });
         await Expect(dialog.Locator("input[formcontrolname='extractionRepairRounds']"))
@@ -1260,6 +1271,7 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await save.ClickAsync();
         await Expect(dialog).Not.ToBeVisibleAsync();
         await Page.Locator(".llm-settings-btn").ClickAsync();
+        await dialog.Locator(".mdc-tab", new() { HasText = "Sampling & Runtime" }).ClickAsync();
         await Expect(timeout).ToHaveValueAsync("1800");
         await dialog.Locator("button", new() { HasText = "Cancel" }).ClickAsync();
         await Expect(dialog).Not.ToBeVisibleAsync();
@@ -1280,14 +1292,15 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         var topK = dialog.Locator("input[formcontrolname='topK']");
         var save = dialog.Locator("button", new() { HasText = "Save Settings" });
         await dialog.Locator("input[formcontrolname='baseUrl']").FillAsync(mockServer.BaseUrl);
+        await dialog.Locator("input[formcontrolname='textModel']").FillAsync("qwen2.5:14b");
+        await Page.Keyboard.PressAsync("Tab");
+        await dialog.Locator(".mdc-tab", new() { HasText = "Sampling & Runtime" }).ClickAsync();
         await Expect(temperature).ToHaveValueAsync("");
         await temperature.FillAsync("1");
         await topP.FillAsync("0.95");
         await topK.FillAsync("12.5");
         await Expect(save).ToBeDisabledAsync();
         await topK.FillAsync("64");
-        await dialog.Locator("input[formcontrolname='textModel']").FillAsync("qwen2.5:14b");
-        await Page.Keyboard.PressAsync("Tab");
 
         await Page.SetViewportSizeAsync(360, 740);
         var sampling = dialog.Locator(".sampling-section");
@@ -1317,6 +1330,7 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await Page.SetViewportSizeAsync(1280, 720);
 
         await Page.Locator(".llm-settings-btn").ClickAsync();
+        await dialog.Locator(".mdc-tab", new() { HasText = "Sampling & Runtime" }).ClickAsync();
         await Expect(temperature).ToHaveValueAsync("1");
         await Expect(topP).ToHaveValueAsync("0.95");
         await Expect(topK).ToHaveValueAsync("64");
@@ -1332,6 +1346,7 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         Assert.AreEqual(64, mockServer.LastTopK);
 
         await Page.Locator(".llm-settings-btn").ClickAsync();
+        await dialog.Locator(".mdc-tab", new() { HasText = "Sampling & Runtime" }).ClickAsync();
         await Expect(temperature).ToHaveValueAsync("1");
         await temperature.FillAsync("");
         await topP.FillAsync("");
@@ -1341,6 +1356,7 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await Page.Locator(".llm-settings-btn").ClickAsync();
         await Expect(dialog.Locator("input[formcontrolname='baseUrl']"))
             .ToHaveValueAsync(mockServer.BaseUrl);
+        await dialog.Locator(".mdc-tab", new() { HasText = "Sampling & Runtime" }).ClickAsync();
         await Expect(temperature).ToHaveValueAsync("");
         await Expect(topP).ToHaveValueAsync("");
         await Expect(topK).ToHaveValueAsync("");
@@ -1433,6 +1449,180 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await previewModal.Locator("button.back-btn").ClickAsync();
         await Expect(previewModal).Not.ToBeVisibleAsync();
         await Expect(Page.Locator(".draft-form")).ToBeVisibleAsync();
+        await Expect(dialog).Not.ToBeVisibleAsync();
+    }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task LlmSettingsDialog_TabsAndModelProfileCrud_WorksEndToEnd()
+    {
+        await RegisterAndLoginAsync();
+
+        await Page.GotoAsync($"{ServerUrl}/ingest");
+        await Page.Locator(".llm-settings-btn").ClickAsync();
+
+        var dialog = Page.Locator("app-llm-settings-dialog");
+        await Expect(dialog).ToBeVisibleAsync();
+
+        // 1. Verify 4 tabs exist and switch between them
+        var tab1 = dialog.Locator(".mdc-tab", new() { HasText = "Connection & Models" });
+        var tab2 = dialog.Locator(".mdc-tab", new() { HasText = "Sampling & Runtime" });
+        var tab3 = dialog.Locator(".mdc-tab", new() { HasText = "Refinement & Queue" });
+        var tab4 = dialog.Locator(".mdc-tab", new() { HasText = "Model Profiles" });
+
+        await Expect(tab1).ToBeVisibleAsync();
+        await Expect(tab2).ToBeVisibleAsync();
+        await Expect(tab3).ToBeVisibleAsync();
+        await Expect(tab4).ToBeVisibleAsync();
+
+        // Switch to Tab 2
+        await tab2.EvaluateAsync("el => el.click()");
+        await Expect(dialog.Locator("input[formcontrolname='contextWindowTokens']"))
+            .ToBeVisibleAsync();
+
+        // Switch to Tab 3
+        await tab3.EvaluateAsync("el => el.click()");
+        await Expect(dialog.Locator("[data-testid='llm-refine-model']")).ToBeVisibleAsync();
+
+        // Switch to Tab 4
+        await tab4.EvaluateAsync("el => el.click()");
+        var addProfileBtn = dialog.Locator("[data-testid='add-profile-btn']");
+        await Expect(addProfileBtn).ToBeVisibleAsync();
+
+        // 2. Click Add Profile to open editor form
+        await addProfileBtn.ClickAsync();
+        var editorForm = dialog.Locator("[data-testid='profile-editor-form']");
+        await Expect(editorForm).ToBeVisibleAsync();
+
+        await dialog.Locator("[data-testid='profile-form-name']").FillAsync("Qwen 2.5 14B Custom");
+        await dialog.Locator("[data-testid='profile-form-tag']").FillAsync("qwen2.5:14b");
+        await dialog
+            .Locator("[data-testid='profile-form-prefixes']")
+            .FillAsync("qwen2.5:14b, qwen");
+        await dialog
+            .Locator("[data-testid='profile-form-summary']")
+            .FillAsync("Fast and accurate extraction profile.");
+        await dialog.Locator("[data-testid='profile-form-context']").FillAsync("16384");
+        await dialog.Locator("[data-testid='profile-form-timeout']").FillAsync("450");
+        await dialog.Locator("[data-testid='profile-form-temperature']").FillAsync("0.7");
+        await dialog.Locator("[data-testid='profile-form-top-p']").FillAsync("0.9");
+        await dialog.Locator("[data-testid='profile-form-top-k']").FillAsync("40");
+        await dialog.Locator("[data-testid='profile-form-notes']").FillAsync("Custom profile note");
+
+        // Save profile
+        await Page.RunAndWaitForResponseAsync(
+            () => dialog.Locator("[data-testid='save-profile-btn']").ClickAsync(),
+            resp =>
+                resp.Url.Contains("/api/llm-settings/model-profiles")
+                && resp.Request.Method == "POST"
+                && resp.Ok
+        );
+        await Expect(editorForm).Not.ToBeVisibleAsync();
+
+        // Verify custom card appears in profile list
+        var customCard = dialog.Locator(".profile-card", new() { HasText = "Qwen 2.5 14B Custom" });
+        await Expect(customCard).ToBeVisibleAsync();
+        await Expect(customCard.Locator(".profile-card-summary"))
+            .ToContainTextAsync("Fast and accurate extraction profile.");
+
+        // 3. Switch to Connection & Models tab and verify custom profile appears in primary select
+        await tab1.EvaluateAsync("el => el.click()");
+        var profileSelect = dialog.Locator("[data-testid='llm-profile-select']");
+        await Expect(profileSelect).ToBeVisibleAsync();
+        await profileSelect.ClickAsync();
+        var customOption = Page.Locator("mat-option", new() { HasText = "Qwen 2.5 14B Custom" });
+        await Expect(customOption).ToBeVisibleAsync();
+        // Close select menu
+        await Page.Keyboard.PressAsync("Escape");
+
+        // 4. Switch back to Model Profiles tab, edit custom profile
+        await tab4.EvaluateAsync("el => el.click()");
+        await Expect(customCard).ToBeVisibleAsync();
+        await customCard.Locator(".edit-card-btn").ClickAsync();
+        await Expect(editorForm).ToBeVisibleAsync();
+
+        await dialog
+            .Locator("[data-testid='profile-form-summary']")
+            .FillAsync("Updated summary for testing.");
+        await Page.RunAndWaitForResponseAsync(
+            () => dialog.Locator("[data-testid='save-profile-btn']").ClickAsync(),
+            resp =>
+                resp.Url.Contains("/api/llm-settings/model-profiles")
+                && resp.Request.Method == "PUT"
+                && resp.Ok
+        );
+        await Expect(editorForm).Not.ToBeVisibleAsync();
+        await Expect(customCard.Locator(".profile-card-summary"))
+            .ToContainTextAsync("Updated summary for testing.");
+
+        // 5. Delete a default profile
+        var defaultCard = dialog.Locator(".profile-card", new() { HasText = "Gemma 4 E2B" });
+        await Expect(defaultCard).ToBeVisibleAsync();
+        await Page.RunAndWaitForResponseAsync(
+            () => defaultCard.Locator(".delete-card-btn").ClickAsync(),
+            resp =>
+                resp.Url.Contains("/api/llm-settings/model-profiles")
+                && resp.Request.Method == "DELETE"
+                && resp.Ok
+        );
+        await Expect(defaultCard).Not.ToBeVisibleAsync();
+
+        // 6. Restore Defaults
+        await Page.RunAndWaitForResponseAsync(
+            () => dialog.Locator("[data-testid='restore-defaults-btn']").ClickAsync(),
+            resp =>
+                resp.Url.Contains("/api/llm-settings/model-profiles/restore-defaults")
+                && resp.Request.Method == "POST"
+                && resp.Ok
+        );
+        // Default is restored
+        await Expect(dialog.Locator(".profile-card", new() { HasText = "Gemma 4 E2B" }))
+            .ToBeVisibleAsync();
+        // Custom profile is still present
+        await Expect(dialog.Locator(".profile-card", new() { HasText = "Qwen 2.5 14B Custom" }))
+            .ToBeVisibleAsync();
+
+        // 7. Cancel dialog
+        await dialog.Locator("button", new() { HasText = "Cancel" }).ClickAsync();
+        await Expect(dialog).Not.ToBeVisibleAsync();
+    }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task LlmSettingsDialog_MobileViewport_360px_RendersTabsWithoutOverflow()
+    {
+        await Page.SetViewportSizeAsync(360, 640);
+        await RegisterAndLoginAsync();
+
+        await Page.GotoAsync($"{ServerUrl}/ingest");
+        await Page.Locator(".llm-settings-btn").ClickAsync();
+
+        var dialog = Page.Locator("app-llm-settings-dialog");
+        await Expect(dialog).ToBeVisibleAsync();
+
+        string[] tabNames =
+        [
+            "Connection & Models",
+            "Sampling & Runtime",
+            "Refinement & Queue",
+            "Model Profiles",
+        ];
+
+        foreach (var tabName in tabNames)
+        {
+            var tab = dialog.Locator(".mdc-tab", new() { HasText = tabName });
+            await tab.EvaluateAsync("el => el.click()");
+            await Page.WaitForTimeoutAsync(150);
+
+            Assert.IsTrue(
+                await Page.EvaluateAsync<bool>(
+                    "document.documentElement.scrollWidth <= window.innerWidth"
+                ),
+                $"Viewport horizontal overflow detected on tab '{tabName}'."
+            );
+        }
+
+        await dialog.Locator("button", new() { HasText = "Cancel" }).ClickAsync();
         await Expect(dialog).Not.ToBeVisibleAsync();
     }
 }
