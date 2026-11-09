@@ -207,6 +207,226 @@ public static class CulinaryMath
         (0.875m, "7/8"),
     ];
 
+    private static readonly (decimal Fraction, decimal Snapped)[] CleanCupFractions =
+    [
+        (0.000m, 0.000m),
+        (0.250m, 0.250m),
+        (1m / 3m, 1m / 3m),
+        (0.500m, 0.500m),
+        (2m / 3m, 2m / 3m),
+        (0.750m, 0.750m),
+        (1.000m, 1.000m),
+    ];
+
+    private static bool IsCleanMultiple(decimal val, decimal step, out decimal snappedVal)
+    {
+        if (step <= 0m || val <= 0m)
+        {
+            snappedVal = val;
+            return false;
+        }
+
+        var ratio = val / step;
+        var rounded = Math.Round(ratio, MidpointRounding.AwayFromZero);
+        if (Math.Abs(ratio - rounded) <= 0.015m)
+        {
+            snappedVal = rounded * step;
+            return true;
+        }
+
+        snappedVal = val;
+        return false;
+    }
+
+    private static bool IsCleanCupAmount(decimal cups, out decimal snappedCups)
+    {
+        var whole = Math.Floor(cups);
+        var frac = cups - whole;
+
+        foreach (var (target, snapped) in CleanCupFractions)
+        {
+            if (Math.Abs(frac - target) <= 0.015m)
+            {
+                snappedCups = whole + snapped;
+                return true;
+            }
+        }
+
+        snappedCups = cups;
+        return false;
+    }
+
+    private static (decimal Qty, MeasurementUnit Unit) SimplifySingleUnit(
+        decimal qty,
+        MeasurementUnit unit
+    )
+    {
+        switch (unit)
+        {
+            case MeasurementUnit.Cup:
+                if (qty < 0.25m)
+                {
+                    var tsp = qty * 48m;
+                    if (IsCleanMultiple(tsp, 1.5m, out var cleanTsp))
+                    {
+                        return (cleanTsp / 3m, MeasurementUnit.Tbsp);
+                    }
+                    if (IsCleanMultiple(tsp, 0.25m, out cleanTsp))
+                    {
+                        return (cleanTsp, MeasurementUnit.Tsp);
+                    }
+                }
+                break;
+
+            case MeasurementUnit.Tbsp:
+                if (qty < 1m)
+                {
+                    var tsp = qty * 3m;
+                    if (IsCleanMultiple(tsp, 0.25m, out var cleanTsp))
+                    {
+                        return (cleanTsp, MeasurementUnit.Tsp);
+                    }
+                }
+                else if (qty >= 4m)
+                {
+                    var cups = qty / 16m;
+                    if (cups >= 4m && IsCleanMultiple(cups / 4m, 0.25m, out var cleanQt))
+                    {
+                        return (cleanQt, MeasurementUnit.Qt);
+                    }
+                    if (IsCleanCupAmount(cups, out var cleanCups))
+                    {
+                        return (cleanCups, MeasurementUnit.Cup);
+                    }
+                }
+                break;
+
+            case MeasurementUnit.Tsp:
+                if (qty >= 3m)
+                {
+                    var cups = qty / 48m;
+                    if (qty >= 12m && IsCleanCupAmount(cups, out var cleanCups))
+                    {
+                        if (
+                            cleanCups >= 4m
+                            && IsCleanMultiple(cleanCups / 4m, 0.25m, out var cleanQt)
+                        )
+                        {
+                            return (cleanQt, MeasurementUnit.Qt);
+                        }
+                        return (cleanCups, MeasurementUnit.Cup);
+                    }
+
+                    var tbsp = qty / 3m;
+                    if (IsCleanMultiple(tbsp, 0.5m, out var cleanTbsp))
+                    {
+                        return (cleanTbsp, MeasurementUnit.Tbsp);
+                    }
+                }
+                break;
+
+            case MeasurementUnit.Qt:
+                if (qty < 1m)
+                {
+                    var cups = qty * 4m;
+                    if (cups < 4m && IsCleanCupAmount(cups, out var cleanCups))
+                    {
+                        if (cleanCups < 0.25m)
+                        {
+                            var tsp = cleanCups * 48m;
+                            if (IsCleanMultiple(tsp, 1.5m, out var cleanTsp))
+                            {
+                                return (cleanTsp / 3m, MeasurementUnit.Tbsp);
+                            }
+                            if (IsCleanMultiple(tsp, 0.25m, out cleanTsp))
+                            {
+                                return (cleanTsp, MeasurementUnit.Tsp);
+                            }
+                        }
+                        return (cleanCups, MeasurementUnit.Cup);
+                    }
+                }
+                break;
+
+            case MeasurementUnit.Oz:
+                if (qty >= 16m)
+                {
+                    var lbs = qty / 16m;
+                    if (IsCleanMultiple(lbs, 0.25m, out var cleanLbs))
+                    {
+                        return (cleanLbs, MeasurementUnit.Lb);
+                    }
+                }
+                break;
+
+            case MeasurementUnit.Lb:
+                if (qty < 0.25m)
+                {
+                    var oz = qty * 16m;
+                    return (oz, MeasurementUnit.Oz);
+                }
+                break;
+
+            case MeasurementUnit.L:
+                if (qty < 0.1m)
+                {
+                    return (qty * 1000m, MeasurementUnit.Ml);
+                }
+                break;
+
+            case MeasurementUnit.Ml:
+                if (qty >= 1000m)
+                {
+                    return (qty / 1000m, MeasurementUnit.L);
+                }
+                break;
+
+            case MeasurementUnit.Kg:
+                if (qty < 0.1m)
+                {
+                    return (qty * 1000m, MeasurementUnit.G);
+                }
+                break;
+
+            case MeasurementUnit.G:
+                if (qty >= 1000m)
+                {
+                    return (qty / 1000m, MeasurementUnit.Kg);
+                }
+                break;
+        }
+
+        return (qty, unit);
+    }
+
+    private static (decimal Qty, decimal? MaxQty, MeasurementUnit Unit) SimplifyIntraSystemUnit(
+        decimal qty,
+        decimal? maxQty,
+        MeasurementUnit unit
+    )
+    {
+        var (simplifiedQty, targetUnit) = SimplifySingleUnit(qty, unit);
+
+        if (!maxQty.HasValue || maxQty.Value <= qty)
+        {
+            decimal? simplifiedMaxQty = null;
+            if (maxQty.HasValue)
+            {
+                var (sMax, _) = SimplifySingleUnit(maxQty.Value, unit);
+                simplifiedMaxQty = sMax;
+            }
+            return (simplifiedQty, simplifiedMaxQty, targetUnit);
+        }
+
+        var (simplifiedMax, maxTargetUnit) = SimplifySingleUnit(maxQty.Value, unit);
+        if (targetUnit == maxTargetUnit)
+        {
+            return (simplifiedQty, simplifiedMax, targetUnit);
+        }
+
+        return (qty, maxQty, unit);
+    }
+
     public static FormattedQuantityResult ScaleAndConvert(
         decimal? quantity,
         decimal? maxQuantity,
@@ -234,7 +454,8 @@ public static class CulinaryMath
             scaledQty,
             scaledMaxQty,
             unit,
-            targetSystem
+            targetSystem,
+            scaleFactor
         );
 
         var isMetric = IsMetricUnit(finalUnit);
@@ -255,42 +476,75 @@ public static class CulinaryMath
         decimal qty,
         decimal? maxQty,
         MeasurementUnit? unit,
-        UnitSystem targetSystem
+        UnitSystem targetSystem,
+        decimal scaleFactor
     )
     {
-        if (unit is null || targetSystem == UnitSystem.Original)
+        if (unit is null)
         {
             return (qty, maxQty, unit);
         }
 
+        if (targetSystem == UnitSystem.Original)
+        {
+            if (scaleFactor == 1m)
+            {
+                return (qty, maxQty, unit);
+            }
+            return SimplifyIntraSystemUnit(qty, maxQty, unit.Value);
+        }
+
         if (targetSystem == UnitSystem.Metric)
         {
+            decimal convQty = qty;
+            decimal? convMaxQty = maxQty;
+            MeasurementUnit convUnit = unit.Value;
+
             if (TryGetVolumeMlFactor(unit.Value, out var mlFactor))
             {
                 var ml = qty * mlFactor;
-                var maxMl = maxQty * mlFactor;
+                var maxMl = maxQty.HasValue ? maxQty.Value * mlFactor : (decimal?)null;
 
                 if (ml >= 1000m)
                 {
-                    return (ml / 1000m, maxMl / 1000m, MeasurementUnit.L);
+                    convQty = ml / 1000m;
+                    convMaxQty = maxMl.HasValue ? maxMl.Value / 1000m : null;
+                    convUnit = MeasurementUnit.L;
                 }
-                return (ml, maxMl, MeasurementUnit.Ml);
+                else
+                {
+                    convQty = ml;
+                    convMaxQty = maxMl;
+                    convUnit = MeasurementUnit.Ml;
+                }
             }
-
-            if (TryGetWeightGFactor(unit.Value, out var gFactor))
+            else if (TryGetWeightGFactor(unit.Value, out var gFactor))
             {
                 var g = qty * gFactor;
-                var maxG = maxQty * gFactor;
+                var maxG = maxQty.HasValue ? maxQty.Value * gFactor : (decimal?)null;
 
                 if (g >= 1000m)
                 {
-                    return (g / 1000m, maxG / 1000m, MeasurementUnit.Kg);
+                    convQty = g / 1000m;
+                    convMaxQty = maxG.HasValue ? maxG.Value / 1000m : null;
+                    convUnit = MeasurementUnit.Kg;
                 }
-                return (g, maxG, MeasurementUnit.G);
+                else
+                {
+                    convQty = g;
+                    convMaxQty = maxG;
+                    convUnit = MeasurementUnit.G;
+                }
             }
+
+            return SimplifyIntraSystemUnit(convQty, convMaxQty, convUnit);
         }
         else if (targetSystem == UnitSystem.UsCustomary)
         {
+            decimal convQty = qty;
+            decimal? convMaxQty = maxQty;
+            MeasurementUnit convUnit = unit.Value;
+
             if (unit == MeasurementUnit.Ml || unit == MeasurementUnit.L)
             {
                 var ml = unit == MeasurementUnit.L ? qty * 1000m : qty;
@@ -301,23 +555,33 @@ public static class CulinaryMath
                 if (ml < 14.7868m)
                 {
                     var f = 4.92892m;
-                    return (ml / f, maxMl / f, MeasurementUnit.Tsp);
+                    convQty = ml / f;
+                    convMaxQty = maxMl.HasValue ? maxMl.Value / f : null;
+                    convUnit = MeasurementUnit.Tsp;
                 }
-                if (ml < 59.147m)
+                else if (ml < 59.147m)
                 {
                     var f = 14.7868m;
-                    return (ml / f, maxMl / f, MeasurementUnit.Tbsp);
+                    convQty = ml / f;
+                    convMaxQty = maxMl.HasValue ? maxMl.Value / f : null;
+                    convUnit = MeasurementUnit.Tbsp;
                 }
-                if (ml < 946.353m)
+                else if (ml < 946.353m)
                 {
                     var f = 236.588m;
-                    return (ml / f, maxMl / f, MeasurementUnit.Cup);
+                    convQty = ml / f;
+                    convMaxQty = maxMl.HasValue ? maxMl.Value / f : null;
+                    convUnit = MeasurementUnit.Cup;
                 }
-                var qtf = 946.353m;
-                return (ml / qtf, maxMl / qtf, MeasurementUnit.Qt);
+                else
+                {
+                    var qtf = 946.353m;
+                    convQty = ml / qtf;
+                    convMaxQty = maxMl.HasValue ? maxMl.Value / qtf : null;
+                    convUnit = MeasurementUnit.Qt;
+                }
             }
-
-            if (unit == MeasurementUnit.G || unit == MeasurementUnit.Kg)
+            else if (unit == MeasurementUnit.G || unit == MeasurementUnit.Kg)
             {
                 var g = unit == MeasurementUnit.Kg ? qty * 1000m : qty;
                 var maxG = maxQty.HasValue
@@ -327,11 +591,20 @@ public static class CulinaryMath
                 if (g < 453.592m)
                 {
                     var ozf = 28.3495m;
-                    return (g / ozf, maxG / ozf, MeasurementUnit.Oz);
+                    convQty = g / ozf;
+                    convMaxQty = maxG.HasValue ? maxG.Value / ozf : null;
+                    convUnit = MeasurementUnit.Oz;
                 }
-                var lbf = 453.592m;
-                return (g / lbf, maxG / lbf, MeasurementUnit.Lb);
+                else
+                {
+                    var lbf = 453.592m;
+                    convQty = g / lbf;
+                    convMaxQty = maxG.HasValue ? maxG.Value / lbf : null;
+                    convUnit = MeasurementUnit.Lb;
+                }
             }
+
+            return SimplifyIntraSystemUnit(convQty, convMaxQty, convUnit);
         }
 
         return (qty, maxQty, unit);

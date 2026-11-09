@@ -1,7 +1,7 @@
 # Phase 17: Culinary Measurement Simplification & Mobile/Recipe Detail UI Polish
 
 > **Branch:** `feature/phase-17-culinary-unit-simplification-and-ui-polish`
-> **Status:** `[ ]` Not Started
+> **Status:** `[x]` Completed
 > **PRD Reference:** `docs/prd.md` — Sections 4.1.2, 4.1.4, 4.1.6; `docs/todo.md` — Various items 2, 3, 4, 8, 9
 > **Target Execution:** Run `/execute-phase` to execute this plan step-by-step.
 > **Live Environment Note:**
@@ -219,7 +219,7 @@ Add/update E2E test methods in `RecipeDetailE2ETests.cs` / `RecipeListE2ETests.c
 
 ## 6. Step-by-Step Execution Checklist (For Implementation Agent)
 
-- [ ] **Task 1: Backend `CulinaryMath.cs` & Unit Tests**
+- [x] **Task 1: Backend `CulinaryMath.cs` & Unit Tests**
   - Implement intra-system unit simplification in `Core/Recipes/CulinaryMath.cs`.
   - Add unit tests in `Tests/Core.UnitTests/CulinaryMathTests.cs` covering `1 tbsp * 4 -> 1/4 cup`, `1/4 cup * 0.5 -> 2 tbsp`, `1 tbsp * 0.5 -> 1 1/2 tsp`, `8 oz * 2 -> 1 lb`, `1/4 lb * 0.5 -> 2 oz`, and `1x` preservation.
   - Run Core unit tests:
@@ -227,7 +227,7 @@ Add/update E2E test methods in `RecipeDetailE2ETests.cs` / `RecipeListE2ETests.c
     dotnet test --project Tests/Core.UnitTests/App.Core.UnitTests.csproj
     ```
 
-- [ ] **Task 2: Frontend `culinary-math.ts` & UI/SCSS Fixes**
+- [x] **Task 2: Frontend `culinary-math.ts` & UI/SCSS Fixes**
   - Mirror unit simplification in `Client/src/app/core/utils/culinary-math.ts` and add tests in `culinary-math.spec.ts`.
   - Update `recipe-detail.component.scss` and `public-shared-recipe.component.scss` for sub-recipe panel layout and unresolved recipe badge styling.
   - Update `recipe-list.component.scss` for `.collection-pill-group` mobile wrapping and circular `.collection-pill-action` / `.tag-pill-action` buttons.
@@ -239,7 +239,7 @@ Add/update E2E test methods in `RecipeDetailE2ETests.cs` / `RecipeListE2ETests.c
     npm test -- --watch=false
     ```
 
-- [ ] **Task 3: Playwright E2E Verification & Final Formatting**
+- [x] **Task 3: Playwright E2E Verification & Final Formatting**
   - Add E2E tests in `Tests/Client.E2ETests/` and run:
     ```powershell
     dotnet test --project Tests/Client.E2ETests/App.Client.E2ETests.csproj

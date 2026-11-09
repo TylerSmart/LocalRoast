@@ -69,6 +69,8 @@
   background-color: var(--mat-sys-surface, #ffffff);
   padding-right: 0.25rem;
   flex-shrink: 0;
+  max-width: 100%;
+  box-sizing: border-box;
   transition: all 0.15s ease-in-out;
 
   &.active {
@@ -77,11 +79,14 @@
   }
 
   .collection-pill {
+    flex: 1 1 auto;
+    flex-shrink: 1;
     border: none;
     background: transparent;
     padding-right: 0.45rem;
     min-width: 0;
     white-space: normal;
+    overflow-wrap: anywhere;
     text-align: left;
 
     &.active {
@@ -95,10 +100,12 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 44px;
+  width: 34px;
+  height: 34px;
+  aspect-ratio: 1;
   flex-shrink: 0;
   padding: 0;
+  margin: 2px;
   border: none;
   border-radius: 50%;
   background: transparent;
@@ -360,10 +367,12 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 36px;
-    height: 44px;
+    width: 34px;
+    height: 34px;
+    aspect-ratio: 1;
     flex-shrink: 0;
     padding: 0;
+    margin: 2px;
     border: none;
     border-radius: 50%;
     background: transparent;

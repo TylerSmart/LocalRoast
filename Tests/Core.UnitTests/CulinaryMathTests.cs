@@ -184,4 +184,201 @@ public sealed class CulinaryMathTests
         Assert.AreEqual("2 hr", CulinaryMath.FormatMinutes(120));
         Assert.AreEqual("7 hr 45 min", CulinaryMath.FormatMinutes(465));
     }
+
+    [TestMethod]
+    public void ScaleAndConvert_SimplifiesUnits_ScalingQuadrupleTbspToQuarterCup()
+    {
+        // 1 tbsp * 4 -> 1/4 cup in Original
+        var originalResult = CulinaryMath.ScaleAndConvert(
+            quantity: 1.0m,
+            maxQuantity: null,
+            unit: MeasurementUnit.Tbsp,
+            customUnitName: null,
+            scaleFactor: 4.0m,
+            targetSystem: UnitSystem.Original
+        );
+        Assert.AreEqual(0.25m, originalResult.Quantity);
+        Assert.AreEqual(MeasurementUnit.Cup, originalResult.Unit);
+        Assert.AreEqual("cup", originalResult.UnitLabel);
+        Assert.AreEqual("1/4", originalResult.FormattedAmount);
+
+        // 1 tbsp * 4 -> 1/4 cup in UsCustomary
+        var usResult = CulinaryMath.ScaleAndConvert(
+            quantity: 1.0m,
+            maxQuantity: null,
+            unit: MeasurementUnit.Tbsp,
+            customUnitName: null,
+            scaleFactor: 4.0m,
+            targetSystem: UnitSystem.UsCustomary
+        );
+        Assert.AreEqual(0.25m, usResult.Quantity);
+        Assert.AreEqual(MeasurementUnit.Cup, usResult.Unit);
+        Assert.AreEqual("cup", usResult.UnitLabel);
+        Assert.AreEqual("1/4", usResult.FormattedAmount);
+    }
+
+    [TestMethod]
+    public void ScaleAndConvert_SimplifiesUnits_HalvingQuarterCupToTwoTbsp()
+    {
+        // 1/4 cup * 0.5 -> 2 tbsp in Original
+        var originalResult = CulinaryMath.ScaleAndConvert(
+            quantity: 0.25m,
+            maxQuantity: null,
+            unit: MeasurementUnit.Cup,
+            customUnitName: null,
+            scaleFactor: 0.5m,
+            targetSystem: UnitSystem.Original
+        );
+        Assert.AreEqual(2.0m, originalResult.Quantity);
+        Assert.AreEqual(MeasurementUnit.Tbsp, originalResult.Unit);
+        Assert.AreEqual("tbsp", originalResult.UnitLabel);
+        Assert.AreEqual("2", originalResult.FormattedAmount);
+
+        // 1/4 cup * 0.5 -> 2 tbsp in UsCustomary
+        var usResult = CulinaryMath.ScaleAndConvert(
+            quantity: 0.25m,
+            maxQuantity: null,
+            unit: MeasurementUnit.Cup,
+            customUnitName: null,
+            scaleFactor: 0.5m,
+            targetSystem: UnitSystem.UsCustomary
+        );
+        Assert.AreEqual(2.0m, usResult.Quantity);
+        Assert.AreEqual(MeasurementUnit.Tbsp, usResult.Unit);
+        Assert.AreEqual("tbsp", usResult.UnitLabel);
+        Assert.AreEqual("2", usResult.FormattedAmount);
+    }
+
+    [TestMethod]
+    public void ScaleAndConvert_SimplifiesUnits_HalvingTbspToOneAndHalfTsp()
+    {
+        var result = CulinaryMath.ScaleAndConvert(
+            quantity: 1.0m,
+            maxQuantity: null,
+            unit: MeasurementUnit.Tbsp,
+            customUnitName: null,
+            scaleFactor: 0.5m,
+            targetSystem: UnitSystem.Original
+        );
+        Assert.AreEqual(1.5m, result.Quantity);
+        Assert.AreEqual(MeasurementUnit.Tsp, result.Unit);
+        Assert.AreEqual("tsp", result.UnitLabel);
+        Assert.AreEqual("1 1/2", result.FormattedAmount);
+    }
+
+    [TestMethod]
+    public void ScaleAndConvert_SimplifiesUnits_TriplingTspToTbsp()
+    {
+        var result = CulinaryMath.ScaleAndConvert(
+            quantity: 2.0m,
+            maxQuantity: null,
+            unit: MeasurementUnit.Tsp,
+            customUnitName: null,
+            scaleFactor: 3.0m,
+            targetSystem: UnitSystem.Original
+        );
+        Assert.AreEqual(2.0m, result.Quantity);
+        Assert.AreEqual(MeasurementUnit.Tbsp, result.Unit);
+        Assert.AreEqual("tbsp", result.UnitLabel);
+        Assert.AreEqual("2", result.FormattedAmount);
+    }
+
+    [TestMethod]
+    public void ScaleAndConvert_SimplifiesUnits_WeightOzToLbAndLbToOz()
+    {
+        // 8 oz * 2 -> 1 lb
+        var ozResult = CulinaryMath.ScaleAndConvert(
+            quantity: 8.0m,
+            maxQuantity: null,
+            unit: MeasurementUnit.Oz,
+            customUnitName: null,
+            scaleFactor: 2.0m,
+            targetSystem: UnitSystem.Original
+        );
+        Assert.AreEqual(1.0m, ozResult.Quantity);
+        Assert.AreEqual(MeasurementUnit.Lb, ozResult.Unit);
+        Assert.AreEqual("lb", ozResult.UnitLabel);
+        Assert.AreEqual("1", ozResult.FormattedAmount);
+
+        // 1/4 lb * 0.5 -> 2 oz
+        var lbResult = CulinaryMath.ScaleAndConvert(
+            quantity: 0.25m,
+            maxQuantity: null,
+            unit: MeasurementUnit.Lb,
+            customUnitName: null,
+            scaleFactor: 0.5m,
+            targetSystem: UnitSystem.Original
+        );
+        Assert.AreEqual(2.0m, lbResult.Quantity);
+        Assert.AreEqual(MeasurementUnit.Oz, lbResult.Unit);
+        Assert.AreEqual("oz", lbResult.UnitLabel);
+        Assert.AreEqual("2", lbResult.FormattedAmount);
+    }
+
+    [TestMethod]
+    public void ScaleAndConvert_PreservesOriginalUnitAtOneX()
+    {
+        var result = CulinaryMath.ScaleAndConvert(
+            quantity: 1.0m,
+            maxQuantity: null,
+            unit: MeasurementUnit.Tbsp,
+            customUnitName: null,
+            scaleFactor: 1.0m,
+            targetSystem: UnitSystem.Original
+        );
+        Assert.AreEqual(1.0m, result.Quantity);
+        Assert.AreEqual(MeasurementUnit.Tbsp, result.Unit);
+        Assert.AreEqual("tbsp", result.UnitLabel);
+        Assert.AreEqual("1", result.FormattedAmount);
+    }
+
+    [TestMethod]
+    public void ScaleAndConvert_SimplifiesRangesWhenBothBoundsMatch()
+    {
+        // 1-2 tbsp * 4 -> 4-8 tbsp -> 1/4-1/2 cup
+        var result = CulinaryMath.ScaleAndConvert(
+            quantity: 1.0m,
+            maxQuantity: 2.0m,
+            unit: MeasurementUnit.Tbsp,
+            customUnitName: null,
+            scaleFactor: 4.0m,
+            targetSystem: UnitSystem.Original
+        );
+        Assert.AreEqual(0.25m, result.Quantity);
+        Assert.AreEqual(0.5m, result.MaxQuantity);
+        Assert.AreEqual(MeasurementUnit.Cup, result.Unit);
+        Assert.AreEqual("1/4–1/2", result.FormattedAmount);
+    }
+
+    [TestMethod]
+    public void ScaleAndConvert_PreservesRangeUnitsWhenBoundsMismatch()
+    {
+        // 2-3 tsp * 1.5 -> 3-4.5 tsp (3 tsp -> 1 tbsp, 4.5 tsp -> 1.5 tbsp, both match -> 1-1 1/2 tbsp)
+        var resultMatching = CulinaryMath.ScaleAndConvert(
+            quantity: 2.0m,
+            maxQuantity: 3.0m,
+            unit: MeasurementUnit.Tsp,
+            customUnitName: null,
+            scaleFactor: 1.5m,
+            targetSystem: UnitSystem.Original
+        );
+        Assert.AreEqual(1.0m, resultMatching.Quantity);
+        Assert.AreEqual(1.5m, resultMatching.MaxQuantity);
+        Assert.AreEqual(MeasurementUnit.Tbsp, resultMatching.Unit);
+        Assert.AreEqual("1–1 1/2", resultMatching.FormattedAmount);
+
+        // 2-3 tsp * 2 -> 4-6 tsp (4 tsp does not simplify to tbsp cleanly, 6 tsp simplifies to 2 tbsp -> bounds mismatch)
+        var resultMismatch = CulinaryMath.ScaleAndConvert(
+            quantity: 2.0m,
+            maxQuantity: 3.0m,
+            unit: MeasurementUnit.Tsp,
+            customUnitName: null,
+            scaleFactor: 2.0m,
+            targetSystem: UnitSystem.Original
+        );
+        Assert.AreEqual(4.0m, resultMismatch.Quantity);
+        Assert.AreEqual(6.0m, resultMismatch.MaxQuantity);
+        Assert.AreEqual(MeasurementUnit.Tsp, resultMismatch.Unit);
+        Assert.AreEqual("4–6", resultMismatch.FormattedAmount);
+    }
 }

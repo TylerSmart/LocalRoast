@@ -106,7 +106,7 @@ describe('step-instruction utils', () => {
       ],
     };
     expect(renderScaledInstruction(withAlt, ingredients, 2, 'Original')).toBe(
-      'Add 4 cups (20 oz) flour.',
+      'Add 4 cups (1 1/4 lb) flour.',
     );
   });
 

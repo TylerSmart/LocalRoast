@@ -1210,6 +1210,17 @@
     }
   }
 
+  .exit-cook-btn,
+  .wake-lock-pill,
+  .narration-pill-btn,
+  .voice-control-pill-btn {
+    padding: 0.35rem 0.5rem;
+
+    mat-icon {
+      margin: 0 !important;
+    }
+  }
+
   .top-bar-left .exit-label {
     display: none;
   }

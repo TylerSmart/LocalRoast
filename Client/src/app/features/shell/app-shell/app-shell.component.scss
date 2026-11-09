@@ -240,10 +240,14 @@
   }
 
   .user-profile-btn {
-    padding-inline: 0.5rem;
+    padding: 0 !important;
+    min-width: 36px !important;
+    width: 40px;
+    height: 40px;
 
-    .user-avatar-icon {
-      margin: 0;
+    .user-avatar-icon,
+    mat-icon {
+      margin: 0 !important;
     }
   }
 
