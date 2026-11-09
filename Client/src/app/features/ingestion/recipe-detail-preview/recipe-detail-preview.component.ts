@@ -27,7 +27,6 @@ import {
   FormattedQuantityResult,
   formatMinutes,
   scaleIngredient,
-  formatStepIngredient,
 } from '../../../core/utils/culinary-math';
 import {
   NumberedInstructionStep,
@@ -35,7 +34,7 @@ import {
   ingredientUses,
   inlineAmountInputsToDtos,
   isIngredientDivided,
-  validInlineSpans,
+  stepIngredientCallouts,
 } from '../../../core/utils/step-instruction';
 import { StepInstructionComponent } from '../../../shared/components/step-instruction/step-instruction.component';
 
@@ -107,9 +106,7 @@ export class RecipeDetailPreviewComponent {
     for (const ing of r.ingredients) {
       const scaled = scaleIngredient(ing, factor, sys);
 
-      const qtyAndUnit = [scaled.formattedAmount, scaled.unitLabel]
-        .filter((s) => s.length > 0)
-        .join(' ');
+      const qtyAndUnit = scaled.formattedMeasurement;
 
       map.set(ing.index, {
         ingredient: ing,
@@ -157,6 +154,10 @@ export class RecipeDetailPreviewComponent {
         step.inlineAmounts ?? [],
         (index) => map.get(index)?.ingredient.id,
       ),
+      ingredientIds: (step.ingredientIndices ?? []).flatMap((idx) => {
+        const item = map.get(idx);
+        return item ? [item.ingredient.id] : [];
+      }),
     }));
   });
 
@@ -195,29 +196,26 @@ export class RecipeDetailPreviewComponent {
 
     for (const [stepIndex, step] of r.steps.entries()) {
       const instructionStep = instructionSteps[stepIndex];
-      const spanned = new Set(
-        validInlineSpans(instructionStep.instruction ?? '', instructionStep.inlineAmounts ?? [])
-          .filter((a) => a.kind === 'Ingredient')
-          .map((a) => a.ingredientId),
-      );
       const section = step.sectionName?.trim() || '';
       if (!sectionsMap.has(section)) {
         sectionsMap.set(section, []);
       }
 
-      const callouts = (step.ingredientIndices || [])
-        .map((idx) => {
-          const item = map.get(idx);
-          if (!item || spanned.has(item.ingredient.id)) return null;
-          const label = formatStepIngredient(
-            item.ingredient,
-            step.ingredientAmounts?.find((a) => a.ingredientIndex === idx)?.measurement,
-            this.scaleFactor(),
-            this.targetSystem(),
-          );
-          return { id: item.ingredient.id, label };
-        })
-        .filter((c): c is { id: string; label: string } => c !== null);
+      const callouts = stepIngredientCallouts(
+        {
+          ...instructionStep,
+          ingredientIds: instructionStep.ingredientIds ?? [],
+          ingredientAmounts: (step.ingredientAmounts ?? []).flatMap((amount) => {
+            const item = map.get(amount.ingredientIndex);
+            return item
+              ? [{ ingredientId: item.ingredient.id, measurement: amount.measurement }]
+              : [];
+          }),
+        },
+        this.displayIngredients(),
+        this.scaleFactor(),
+        this.targetSystem(),
+      );
 
       sectionsMap.get(section)!.push({
         step,

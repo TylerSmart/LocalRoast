@@ -335,8 +335,8 @@
 }
 
 .ingredient-row {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   justify-content: space-between;
   row-gap: 0.35rem;
@@ -345,8 +345,16 @@
   transition: background-color 0.15s ease;
 
   mat-checkbox {
-    flex: 1 1 auto;
     min-width: 0;
+  }
+
+  .ingredient-actions {
+    display: flex;
+    align-items: center;
+
+    > button {
+      flex: 0 0 auto;
+    }
   }
 
   .explain-ing-btn {
@@ -388,6 +396,7 @@
   gap: 0.35rem;
   flex-wrap: wrap;
   font-size: 0.95rem;
+  overflow-wrap: anywhere;
 
   .scaled-qty {
     color: var(--mat-sys-primary, #6b5e43);
@@ -424,6 +433,7 @@
 }
 
 .sub-recipe-inline-panel {
+  grid-column: 1 / -1;
   flex: 0 0 100%;
   width: 100%;
   box-sizing: border-box;
@@ -477,6 +487,7 @@
 }
 
 .unresolved-recipe-reference {
+  grid-column: 1 / -1;
   flex: 0 0 100%;
   width: 100%;
   box-sizing: border-box;

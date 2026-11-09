@@ -183,6 +183,72 @@ describe('culinary-math', () => {
   });
 
   describe('scaleAndConvert', () => {
+    it('preserves every quarter-teaspoon amount through eight cups using the minimum scoop count', () => {
+      const sizes = [192, 96, 64, 48, 12, 4, 2, 1];
+      const minimum = [0];
+      for (let ticks = 1; ticks <= 1536; ticks++) {
+        minimum[ticks] = Math.min(
+          ...sizes.filter((size) => size <= ticks).map((size) => minimum[ticks - size] + 1),
+        );
+      }
+      for (let ticks = 1; ticks <= 1536; ticks++) {
+        const result = scaleAndConvert(ticks / 8, null, 'Tsp', null, 2, 'Original');
+        let total = 0;
+        let scoops = 0;
+        for (const part of result.formattedMeasurement.split(' + ')) {
+          const words = part.split(' ');
+          const unit = words.pop();
+          const amount = words.reduce((sum, word) => {
+            const [numerator, denominator] = word.split('/').map(Number);
+            return sum + numerator / (denominator ?? 1);
+          }, 0);
+          const partTicks = Math.round(amount * (unit === 'tsp' ? 4 : unit === 'tbsp' ? 12 : 192));
+          total += partTicks;
+          scoops += minimum[partTicks];
+        }
+        expect(total, result.formattedMeasurement).toBe(ticks);
+        expect(scoops, result.formattedMeasurement).toBe(minimum[ticks]);
+      }
+    });
+
+    it.each([
+      [1 / 3, 0.5, '2 tbsp + 2 tsp'],
+      [1 / 3, 2, '2/3 cup'],
+      [1 / 4, 0.5, '2 tbsp'],
+      [1, 1.5, '1 1/2 cups'],
+      [1 / 2, 1.5, '3/4 cup'],
+      [1 / 3, 2.5, '1/2 cup + 1/3 cup'],
+    ])('uses minimum standard scoops for %s cup at %sx', (quantity, factor, display) => {
+      expect(
+        scaleAndConvert(Number(quantity), null, 'Cup', null, Number(factor), 'Original')
+          .formattedMeasurement,
+      ).toBe(display);
+    });
+
+    it('preserves numeric quantities, ranges, small amounts, metric and original units', () => {
+      const halfThird = scaleAndConvert(1 / 3, null, 'Cup', null, 0.5, 'Original');
+      expect(halfThird.quantity).toBe(8);
+      expect(halfThird.unit).toBe('Tsp');
+      expect(scaleAndConvert(1 / 3, null, 'Cup', null, 1, 'Original').formattedMeasurement).toBe(
+        '1/3 cup',
+      );
+      expect(scaleAndConvert(1 / 3, null, 'Cup', null, 0.5, 'Metric').formattedMeasurement).toBe(
+        '39 ml',
+      );
+      expect(scaleAndConvert(1, 2, 'Tbsp', null, 2, 'Original').formattedMeasurement).toBe(
+        '2–4 tbsp',
+      );
+      expect(scaleAndConvert(0.01, null, 'Tsp', null, 0.5, 'Original').formattedMeasurement).toBe(
+        '0.01 tsp',
+      );
+      expect(scaleAndConvert(1, null, 'Tbsp', null, 0.5, 'Original').formattedMeasurement).toBe(
+        '1 1/2 tsp',
+      );
+      expect(scaleAndConvert(8, null, 'Tsp', null, 1, 'UsCustomary').formattedMeasurement).toBe(
+        '2 tbsp + 2 tsp',
+      );
+    });
+
     it('should double quantities when scaling 2x with Original unit system', () => {
       const res = scaleAndConvert(1, null, 'Cup', null, 2, 'Original');
       expect(res.quantity).toBe(2);

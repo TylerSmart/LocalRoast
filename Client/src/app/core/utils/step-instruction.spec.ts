@@ -1,5 +1,4 @@
 import { RecipeStepDto } from '../models/recipe.models';
-import { stepIngredientCallouts } from './culinary-math';
 import {
   InstructionIngredient,
   buildInstructionSegments,
@@ -9,6 +8,7 @@ import {
   relocateInlineAmounts,
   renderScaledInstruction,
   trimInstructionWithAmounts,
+  stepIngredientCallouts,
 } from './step-instruction';
 
 const flour: InstructionIngredient = {
@@ -190,7 +190,7 @@ describe('step-instruction utils', () => {
     expect(result).toEqual({ instruction: 'Add 1 cup.', amounts: [{ start: 4, length: 5 }] });
   });
 
-  it('skips callouts for rows that have an ingredient span in the step', () => {
+  it('includes tagged and untagged ingredients in callouts', () => {
     const dto: RecipeStepDto = {
       id: 's1',
       stepNumber: 1,
@@ -202,11 +202,12 @@ describe('step-instruction utils', () => {
       inlineAmounts: step.inlineAmounts,
     };
     expect(stepIngredientCallouts(dto, ingredients, 1, 'Original').map((c) => c.id)).toEqual([
+      'flour',
       'milk',
     ]);
   });
 
-  it('renders separate segments for amount and ingredient name highlights', () => {
+  it('combines amount, connecting text and ingredient name in one highlight', () => {
     const hummusStep = {
       instruction: 'Combine 2 cans chickpeas, 1/2 tsp baking soda, and 6 cups water in saucepan.',
       inlineAmounts: [
@@ -239,14 +240,185 @@ describe('step-instruction utils', () => {
       'Combine 4 cans chickpeas, 1 tsp baking soda, and 6 cups water in saucepan.',
     );
     const amountSeg = segments.find((s) => s.amount?.ingredientId === 'chickpeas');
-    expect(amountSeg?.text).toBe('4 cans');
+    expect(amountSeg?.text).toBe('4 cans chickpeas');
     expect(amountSeg?.amount?.scaled).toBe(true);
 
-    const ingHighlightSeg = segments.find(
-      (s) => s.ingredientHighlight?.ingredientId === 'chickpeas',
+    expect(segments.filter((s) => s.amount).length).toBe(2);
+    expect(segments.find((s) => s.amount?.ingredientId === 'baking-soda')?.text).toBe(
+      '1 tsp baking soda',
     );
-    expect(ingHighlightSeg?.text).toBe('chickpeas');
-    expect(ingHighlightSeg?.ingredientHighlight?.ingredientName).toBe('chickpeas');
+  });
+
+  it('omits stale step links without confusing similar names or substrings', () => {
+    const localIngredients: InstructionIngredient[] = [
+      { id: 'chickpeas', displayName: 'chickpeas' },
+      { id: 'garlic', displayName: 'garlic clove' },
+      { id: 'lemon', displayName: 'lemon juice' },
+      { id: 'lime', displayName: 'lime juice' },
+      { id: 'salt', displayName: 'kosher salt' },
+      { id: 'ham', displayName: 'ham' },
+    ];
+    const localStep = {
+      instruction: 'Combine chickpeas and lime juice in a chamber.',
+      ingredientIds: localIngredients.map((i) => i.id),
+    };
+    expect(
+      stepIngredientCallouts(localStep, localIngredients, 1, 'Original').map((c) => c.id),
+    ).toEqual(['chickpeas', 'lime']);
+  });
+
+  it('recognizes shortened ingredient names, plurals and collective references', () => {
+    const localIngredients: InstructionIngredient[] = [
+      { id: 'garlic', displayName: 'garlic clove' },
+      { id: 'tomato', displayName: 'plum tomato' },
+      { id: 'serrano', displayName: 'serrano chile' },
+    ];
+    const localStep = {
+      instruction: 'Mince garlic, tomatoes, and serrano.',
+      ingredientIds: localIngredients.map((i) => i.id),
+    };
+    expect(stepIngredientCallouts(localStep, localIngredients, 1, 'Original').length).toBe(3);
+    expect(
+      stepIngredientCallouts(
+        { ...localStep, instruction: 'Add remaining ingredients.' },
+        localIngredients,
+        1,
+        'Original',
+      ).length,
+    ).toBe(3);
+  });
+
+  it('shows all eight guacamole ingredients rather than only the untagged chile', () => {
+    const names = [
+      'onion',
+      'serrano chile',
+      'kosher salt',
+      'lime zest',
+      'lime juice',
+      'avocado',
+      'plum tomato',
+      'cilantro',
+    ];
+    const localIngredients: InstructionIngredient[] = names.map((displayName, index) => ({
+      id: String(index),
+      displayName,
+    }));
+    const localStep = {
+      instruction:
+        'Combine 2 tbsp onion, serrano, salt, lime zest and lime juice; mash avocados and stir in tomato and cilantro.',
+      ingredientIds: localIngredients.map((i) => i.id),
+      inlineAmounts: [
+        {
+          start: 8,
+          length: 6,
+          kind: 'Ingredient' as const,
+          ingredientId: '0',
+          ingredientSpanStart: 15,
+          ingredientSpanLength: 5,
+          measurement: { quantity: 2, unit: 'Tbsp' as const },
+        },
+      ],
+    };
+    const callouts = stepIngredientCallouts(localStep, localIngredients, 1, 'Original');
+    expect(callouts.length).toBe(8);
+    expect(callouts[0].label).toBe('2 tbsp onion');
+    expect(
+      buildInstructionSegments(localStep, localIngredients, 1, 'Original').find(
+        (segment) => segment.amount,
+      )?.text,
+    ).toBe('2 tbsp onion');
+  });
+
+  it('highlights the first name of each linked ingredient without a tagged amount', () => {
+    const localIngredients: InstructionIngredient[] = [
+      { id: 'onion', displayName: 'onion' },
+      { id: 'serrano', displayName: 'serrano chile' },
+      { id: 'salt', displayName: 'kosher salt' },
+      { id: 'lime', displayName: 'lime juice' },
+      { id: 'ham', displayName: 'ham' },
+    ];
+    const instruction =
+      'Chop 2 tbsp onion, serrano, and salt. Transfer onion mixture to a bowl; season with salt and Lime Juice in a chamber.';
+    const localStep = {
+      instruction,
+      ingredientIds: ['onion', 'serrano', 'salt', 'lime'],
+      inlineAmounts: [
+        {
+          start: 5,
+          length: 6,
+          kind: 'Ingredient' as const,
+          ingredientId: 'onion',
+          ingredientSpanStart: 12,
+          ingredientSpanLength: 5,
+          measurement: { quantity: 2, unit: 'Tbsp' as const },
+        },
+      ],
+    };
+
+    const segments = buildInstructionSegments(localStep, localIngredients, 2, 'Original');
+    expect(segments.map((s) => s.text).join('')).toBe(instruction.replace('2 tbsp', '1/4 cup'));
+    expect(segments.filter((s) => s.mention).map((s) => [s.text, s.mention!.ingredientId])).toEqual(
+      [
+        ['serrano', 'serrano'],
+        ['salt', 'salt'],
+        ['Lime Juice', 'lime'],
+      ],
+    );
+    // Tagged onion gets no second highlight on "onion mixture"; unlinked "ham" is never matched.
+    expect(segments.find((s) => s.amount)?.text).toBe('1/4 cup onion');
+    expect(renderScaledInstruction(localStep, localIngredients, 1, 'Original')).toBe(instruction);
+  });
+
+  it('adds no name highlights when the step has no linked ingredients', () => {
+    expect(
+      buildInstructionSegments(
+        { instruction: 'Add serrano.' },
+        [{ id: 'serrano', displayName: 'serrano chile' }],
+        1,
+        'Original',
+      ).some((s) => s.mention),
+    ).toBe(false);
+  });
+
+  it('uses valid inline references even when missing from the saved step links', () => {
+    const callouts = stepIngredientCallouts(
+      { ...step, ingredientIds: [] },
+      ingredients,
+      2,
+      'Original',
+    );
+    expect(callouts).toEqual([{ id: 'flour', label: '3 cups all-purpose flour' }]);
+  });
+
+  it('sums repeated inline portions into one step callout', () => {
+    const text = 'Add 1 cup flour, then 3 tbsp more.';
+    expect(
+      stepIngredientCallouts(
+        {
+          instruction: text,
+          ingredientIds: ['flour'],
+          inlineAmounts: [
+            {
+              start: 4,
+              length: 5,
+              kind: 'Ingredient',
+              ingredientId: 'flour',
+              measurement: { quantity: 1, unit: 'Cup' },
+            },
+            {
+              start: text.indexOf('3 tbsp'),
+              length: 6,
+              kind: 'Ingredient',
+              ingredientId: 'flour',
+              measurement: { quantity: 3, unit: 'Tbsp' },
+            },
+          ],
+        },
+        ingredients,
+        1,
+        'Metric',
+      ),
+    ).toEqual([{ id: 'flour', label: '281 ml all-purpose flour' }]);
   });
 
   it('relocates ingredient spans alongside amount spans when text is inserted before them', () => {

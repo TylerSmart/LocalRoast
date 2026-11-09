@@ -22,7 +22,6 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatButtonToggleModule } from '@angular/material/button-toggle';
 import { MatCardModule } from '@angular/material/card';
 import { MatCheckboxModule } from '@angular/material/checkbox';
-import { MatChipsModule } from '@angular/material/chips';
 import { MatDialog } from '@angular/material/dialog';
 import { MatDividerModule } from '@angular/material/divider';
 import { MatFormFieldModule } from '@angular/material/form-field';
@@ -83,6 +82,13 @@ import {
   RecipeDetailPreviewDialogResult,
 } from '../recipe-detail-preview-dialog/recipe-detail-preview-dialog.component';
 
+export interface DiagnosticJumpTarget {
+  id: string;
+  label: string;
+  severity: 'error' | 'warning';
+  issues: IngestionDiagnosticTargetDto[];
+}
+
 @Component({
   selector: 'app-ingestion-review',
   imports: [
@@ -92,7 +98,6 @@ import {
     MatButtonToggleModule,
     MatCardModule,
     MatCheckboxModule,
-    MatChipsModule,
     MatDividerModule,
     MatFormFieldModule,
     MatIconModule,
@@ -278,44 +283,50 @@ export class IngestionReviewComponent implements OnInit {
     );
   });
 
-  readonly diagnosticJumpTargets = computed<
-    { id: string; label: string; severity: 'error' | 'warning' }[]
-  >(() => {
-    const targets: { id: string; label: string; severity: 'error' | 'warning' }[] = [];
+  readonly diagnosticJumpTargets = computed<DiagnosticJumpTarget[]>(() => {
+    const targets: DiagnosticJumpTarget[] = [];
     const ingIndices = Array.from(this.ingredientIssuesMap().keys()).sort((a, b) => a - b);
     for (const idx of ingIndices) {
       const issues = this.ingredientIssuesMap().get(idx) || [];
-      const hasError = issues.some((i) => i.severity === 'error');
       const ctrl = this.ingredientsArray.at(idx);
       const name = ctrl?.get('displayName')?.value || `Ingredient #${idx + 1}`;
       targets.push({
         id: `ingredient-card-${idx}`,
         label: `${idx + 1}. ${name}`,
-        severity: hasError ? 'error' : 'warning',
+        severity: issues.some((i) => i.severity === 'error') ? 'error' : 'warning',
+        issues,
       });
     }
 
     const stepNums = Array.from(this.stepIssuesMap().keys()).sort((a, b) => a - b);
     for (const num of stepNums) {
       const issues = this.stepIssuesMap().get(num) || [];
-      const hasError = issues.some((i) => i.severity === 'error');
       targets.push({
         id: `step-card-${num}`,
         label: `Step ${num}`,
-        severity: hasError ? 'error' : 'warning',
+        severity: issues.some((i) => i.severity === 'error') ? 'error' : 'warning',
+        issues,
       });
     }
 
     return targets;
   });
 
-  scrollToTarget(targetId: string): void {
+  private highlightTimer: ReturnType<typeof setTimeout> | null = null;
+
+  scrollToTarget(targetId: string, severity: 'error' | 'warning'): void {
     const el = document.getElementById(targetId);
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      el.classList.add('highlight-pulse');
-      setTimeout(() => el.classList.remove('highlight-pulse'), 2000);
-    }
+    if (!el) return;
+    document
+      .querySelectorAll('.highlight-error, .highlight-warning')
+      .forEach((node) => node.classList.remove('highlight-error', 'highlight-warning'));
+    if (this.highlightTimer) clearTimeout(this.highlightTimer);
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.add(`highlight-${severity}`);
+    this.highlightTimer = setTimeout(
+      () => el.classList.remove('highlight-error', 'highlight-warning'),
+      2500,
+    );
   }
   readonly isCheckingDiagnostics = signal<boolean>(false);
   readonly isRepairing = signal<boolean>(false);
@@ -389,7 +400,10 @@ export class IngestionReviewComponent implements OnInit {
     this.loadCatalogData();
     this.loadRefineModel();
     this.loadJob();
-    this.destroyRef.onDestroy(() => this.clearRefinementPoll());
+    this.destroyRef.onDestroy(() => {
+      this.clearRefinementPoll();
+      if (this.highlightTimer) clearTimeout(this.highlightTimer);
+    });
   }
 
   private loadRefineModel(): void {

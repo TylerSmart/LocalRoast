@@ -845,10 +845,44 @@ describe('IngestionReviewComponent', () => {
     const jumpTargets = component.diagnosticJumpTargets();
     expect(jumpTargets.length).toBe(2);
     expect(jumpTargets[0].label).toContain('firm tofu');
+    expect(jumpTargets[0].severity).toBe('warning');
     expect(jumpTargets[1].label).toBe('Step 1');
+    expect(jumpTargets[1].severity).toBe('error');
 
     const banners = fixture.nativeElement.querySelectorAll('.inline-diagnostic-banner');
     expect(banners.length).toBeGreaterThanOrEqual(2);
+
+    const targetButtons: HTMLButtonElement[] = Array.from(
+      fixture.nativeElement.querySelectorAll('.diagnostic-target'),
+    );
+    expect(targetButtons.length).toBe(2);
+    expect(targetButtons[0].classList).toContain('severity-warning');
+    expect(targetButtons[0].textContent).toContain('Ingredient 1 missing food item match');
+    expect(targetButtons[1].classList).toContain('severity-error');
+    expect(targetButtons[1].textContent).toContain('Step 1 mentions unlinked ingredient tofu');
+
+    vi.useFakeTimers();
+    try {
+      const stepCard: HTMLElement = fixture.nativeElement.querySelector('#step-card-1');
+      const ingredientCard: HTMLElement = fixture.nativeElement.querySelector('#ingredient-card-0');
+      stepCard.scrollIntoView = vi.fn();
+      ingredientCard.scrollIntoView = vi.fn();
+      document.body.appendChild(fixture.nativeElement);
+
+      targetButtons[1].click();
+      expect(stepCard.scrollIntoView).toHaveBeenCalled();
+      expect(stepCard.classList).toContain('highlight-error');
+
+      targetButtons[0].click();
+      expect(stepCard.classList).not.toContain('highlight-error');
+      expect(ingredientCard.classList).toContain('highlight-warning');
+
+      vi.advanceTimersByTime(2500);
+      expect(ingredientCard.classList).not.toContain('highlight-warning');
+    } finally {
+      fixture.nativeElement.remove();
+      vi.useRealTimers();
+    }
   });
 
   it('allows published jobs to be edited and approved, displaying Update Published Recipe', () => {

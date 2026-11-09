@@ -2,26 +2,19 @@
   display: inline;
 }
 
-.inline-amount {
+.inline-amount,
+.inline-mention {
   background: var(--mat-sys-primary-container);
   color: var(--mat-sys-on-primary-container);
   border-radius: 6px;
   padding: 0 4px;
-  white-space: nowrap;
-  font-weight: 500;
-}
-
-.inline-ingredient {
-  background: var(--mat-sys-secondary-container);
-  color: var(--mat-sys-on-secondary-container);
-  border-radius: 6px;
-  padding: 0 5px;
+  box-decoration-break: clone;
   font-weight: 500;
 }
 
 @media print {
   .inline-amount,
-  .inline-ingredient {
+  .inline-mention {
     background: none;
     color: inherit;
     padding: 0;

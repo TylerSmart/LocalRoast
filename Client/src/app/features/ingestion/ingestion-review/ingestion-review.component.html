@@ -385,22 +385,36 @@
                   }
 
                   @if (diagnosticJumpTargets().length) {
-                    <div class="diagnostic-jump-chips">
-                      <span class="jump-chips-label">Jump to issue:</span>
-                      <mat-chip-set>
-                        @for (target of diagnosticJumpTargets(); track target.id) {
-                          <mat-chip
-                            (click)="scrollToTarget(target.id)"
-                            [class.chip-error]="target.severity === 'error'"
-                            [class.chip-warning]="target.severity === 'warning'"
-                          >
-                            <mat-icon>{{
-                              target.severity === 'error' ? 'error_outline' : 'warning_amber'
-                            }}</mat-icon>
-                            <span>{{ target.label }}</span>
-                          </mat-chip>
-                        }
-                      </mat-chip-set>
+                    <div class="diagnostic-targets">
+                      @for (target of diagnosticJumpTargets(); track target.id) {
+                        <button
+                          type="button"
+                          class="diagnostic-target"
+                          [class.severity-error]="target.severity === 'error'"
+                          [class.severity-warning]="target.severity === 'warning'"
+                          [attr.aria-label]="'Go to ' + target.label"
+                          (click)="scrollToTarget(target.id, target.severity)"
+                        >
+                          <span class="diagnostic-target-header">
+                            <span class="diagnostic-target-label">{{ target.label }}</span>
+                            <mat-icon class="diagnostic-target-jump" aria-hidden="true"
+                              >arrow_downward</mat-icon
+                            >
+                          </span>
+                          @for (issue of target.issues; track $index) {
+                            <span
+                              class="diagnostic-item"
+                              [class.severity-error]="issue.severity === 'error'"
+                              [class.severity-warning]="issue.severity === 'warning'"
+                            >
+                              <mat-icon aria-hidden="true">{{
+                                issue.severity === 'error' ? 'error_outline' : 'warning_amber'
+                              }}</mat-icon>
+                              <span>{{ issue.message }}</span>
+                            </span>
+                          }
+                        </button>
+                      }
                     </div>
                   }
                 }

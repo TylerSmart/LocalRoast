@@ -158,10 +158,9 @@ public sealed class TaggedInstructionAmountsE2ETests : E2ETestBase
         await Expect(amountChip).ToHaveClassAsync(new Regex("is-scaled"));
         await Expect(instruction.Locator(".fixed-amount")).ToHaveTextAsync("1 cup");
 
-        // The flour amount is already in the text, so only the untagged milk gets a callout.
         var callouts = Page.Locator(".step-callouts-box");
         await Expect(callouts).ToContainTextAsync("whole milk");
-        await Expect(callouts).Not.ToContainTextAsync("flour");
+        await Expect(callouts).ToContainTextAsync("2 cups all-purpose flour");
     }
 
     [TestMethod]
@@ -206,7 +205,7 @@ public sealed class TaggedInstructionAmountsE2ETests : E2ETestBase
 
         await Page.Locator(".mult-chip", new() { HasTextRegex = TwoX }).ClickAsync();
         var milkChip = stepTexts.Nth(2).Locator(".inline-amount[data-kind=Ingredient]");
-        await Expect(milkChip).ToHaveTextAsync(new Regex(@"^6 (tbsp|tablespoons)$"));
+        await Expect(milkChip).ToHaveTextAsync("1/3 cup + 2 tsp");
         await Expect(milkChip).ToHaveAttributeAsync("title", "whole milk");
         // Tagged amounts from the seeded steps survive the editor round trip.
         await Expect(stepTexts.Nth(1)).ToHaveTextAsync("Stir in the remaining 2 cups flour.");
@@ -259,7 +258,7 @@ public sealed class TaggedInstructionAmountsE2ETests : E2ETestBase
         Assert.IsFalse(editorOverflow, "Recipe editor at 360px must not overflow horizontally.");
     }
 
-    private async Task<string> SeedSeparatelyHighlightedRecipeAsync(string title)
+    private async Task<string> SeedHighlightedRecipeAsync(string title)
     {
         const string step1 =
             "Combine 2 cans chickpeas, 1/2 tsp baking soda, and 6 cups water in saucepan.";
@@ -289,13 +288,19 @@ public sealed class TaggedInstructionAmountsE2ETests : E2ETestBase
                     quantity = 1.0 / 3.0,
                     unit = "Cup",
                 },
+                new
+                {
+                    displayName = "garlic clove",
+                    quantity = 1,
+                    unit = "Whole",
+                },
             },
             steps = new object[]
             {
                 new
                 {
                     instruction = step1,
-                    ingredientIndices = new[] { 0, 1 },
+                    ingredientIndices = new[] { 0, 1, 3 },
                     inlineAmounts = new object[]
                     {
                         new
@@ -374,55 +379,61 @@ public sealed class TaggedInstructionAmountsE2ETests : E2ETestBase
 
     [TestMethod]
     [Timeout(DefaultTestTimeoutMs)]
-    public async Task InlineAmounts_RecipeDetail_HighlightsBothAmountAndIngredientNameSeparately()
+    public async Task InlineAmounts_RecipeDetail_CombinesHighlightsAndShowsCompleteCallouts()
     {
         await RegisterAndLoginAsync();
-        var recipeId = await SeedSeparatelyHighlightedRecipeAsync(
-            $"Hummus Tagged {Guid.NewGuid():N}"[..22]
-        );
+        var recipeId = await SeedHighlightedRecipeAsync($"Hummus Tagged {Guid.NewGuid():N}"[..22]);
 
         await Page.GotoAsync($"{ServerUrl}/recipes/{recipeId}");
         var stepTexts = Page.Locator(".step-instruction-text");
         await Expect(stepTexts).ToHaveCountAsync(2);
 
-        // Step 1: Both "2 cans" (.inline-amount) and "chickpeas" (.inline-ingredient) are separate chips
         var step1Amounts = stepTexts.Nth(0).Locator(".inline-amount");
-        var step1Ingredients = stepTexts.Nth(0).Locator(".inline-ingredient");
         await Expect(step1Amounts).ToHaveCountAsync(2);
-        await Expect(step1Ingredients).ToHaveCountAsync(2);
-
-        await Expect(step1Amounts.Nth(0)).ToHaveTextAsync("2 cans");
-        await Expect(step1Ingredients.Nth(0)).ToHaveTextAsync("chickpeas");
-        await Expect(step1Ingredients.Nth(0)).ToHaveAttributeAsync("title", "chickpeas");
-
-        await Expect(step1Amounts.Nth(1)).ToHaveTextAsync("1/2 tsp");
-        await Expect(step1Ingredients.Nth(1)).ToHaveTextAsync("baking soda");
-        await Expect(step1Ingredients.Nth(1)).ToHaveAttributeAsync("title", "baking soda");
+        await Expect(stepTexts.Nth(0).Locator(".inline-ingredient")).ToHaveCountAsync(0);
+        await Expect(step1Amounts.Nth(0)).ToHaveTextAsync("2 cans chickpeas");
+        await Expect(step1Amounts.Nth(0)).ToHaveAttributeAsync("title", "chickpeas");
+        await Expect(step1Amounts.Nth(1)).ToHaveTextAsync("1/2 tsp baking soda");
+        var callouts = Page.Locator(".step-callouts-strip").First;
+        await Expect(callouts).ToContainTextAsync("2 cans chickpeas");
+        await Expect(callouts).ToContainTextAsync("1/2 tsp baking soda");
+        await Expect(callouts).Not.ToContainTextAsync("garlic");
 
         // Step 2: "While chickpeas cook" has NO chips around chickpeas (passive reference)
         var step2Text = stepTexts.Nth(1);
         await Expect(step2Text).ToContainTextAsync("While chickpeas cook");
-        // Only 1 inline-amount (1/3 cup) and 1 inline-ingredient (lemon juice)
         var step2Amounts = step2Text.Locator(".inline-amount");
-        var step2Ingredients = step2Text.Locator(".inline-ingredient");
         await Expect(step2Amounts).ToHaveCountAsync(1);
-        await Expect(step2Ingredients).ToHaveCountAsync(1);
-        await Expect(step2Amounts.First).ToHaveTextAsync("1/3 cup");
-        await Expect(step2Ingredients.First).ToHaveTextAsync("lemon juice");
+        await Expect(step2Amounts.First).ToHaveTextAsync("1/3 cup lemon juice");
 
         // Scale to 2x: amounts scale, ingredients stay unchanged
         await Page.Locator(".mult-chip", new() { HasTextRegex = TwoX }).ClickAsync();
-        await Expect(step1Amounts.Nth(0)).ToHaveTextAsync("4 cans");
+        await Expect(step1Amounts.Nth(0)).ToHaveTextAsync("4 cans chickpeas");
         await Expect(step1Amounts.Nth(0)).ToHaveClassAsync(new Regex("is-scaled"));
-        await Expect(step1Ingredients.Nth(0)).ToHaveTextAsync("chickpeas");
 
-        await Expect(step1Amounts.Nth(1)).ToHaveTextAsync("1 tsp");
+        await Expect(step1Amounts.Nth(1)).ToHaveTextAsync("1 tsp baking soda");
         await Expect(step1Amounts.Nth(1)).ToHaveClassAsync(new Regex("is-scaled"));
-        await Expect(step1Ingredients.Nth(1)).ToHaveTextAsync("baking soda");
 
-        await Expect(step2Amounts.First).ToHaveTextAsync("2/3 cup");
+        await Expect(step2Amounts.First).ToHaveTextAsync("2/3 cup lemon juice");
         await Expect(step2Amounts.First).ToHaveClassAsync(new Regex("is-scaled"));
-        await Expect(step2Ingredients.First).ToHaveTextAsync("lemon juice");
+        await Page.Locator(".mult-chip").Filter(new() { HasText = "0.5x" }).ClickAsync();
+        await Expect(step2Amounts.First).ToHaveTextAsync("2 tbsp + 2 tsp lemon juice");
+        await Expect(
+                Page.Locator(".ingredient-row", new() { HasText = "lemon juice" })
+                    .Locator(".scaled-qty")
+            )
+            .ToHaveTextAsync("2 tbsp + 2 tsp");
+
+        await Page.SetViewportSizeAsync(360, 740);
+        Assert.IsLessThanOrEqualTo(
+            360,
+            await Page.EvaluateAsync<int>("() => document.documentElement.scrollWidth")
+        );
+        await Page.Locator(".start-cooking-btn").ClickAsync();
+        var cookCallouts = Page.Locator(".step-callouts-box");
+        await Expect(cookCallouts).ToContainTextAsync("chickpeas");
+        await Expect(cookCallouts).ToContainTextAsync("baking soda");
+        await Expect(cookCallouts).Not.ToContainTextAsync("garlic");
     }
 
     [TestMethod]
@@ -430,9 +441,7 @@ public sealed class TaggedInstructionAmountsE2ETests : E2ETestBase
     public async Task InlineAmounts_SingleUseIngredient_DoesNotShowDividedBadge()
     {
         await RegisterAndLoginAsync();
-        var recipeId = await SeedSeparatelyHighlightedRecipeAsync(
-            $"SingleUse {Guid.NewGuid():N}"[..22]
-        );
+        var recipeId = await SeedHighlightedRecipeAsync($"SingleUse {Guid.NewGuid():N}"[..22]);
 
         await Page.GotoAsync($"{ServerUrl}/recipes/{recipeId}");
 

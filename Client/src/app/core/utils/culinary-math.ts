@@ -1,9 +1,4 @@
-import {
-  MeasurementUnit,
-  RecipeMeasurement,
-  RecipeStepDto,
-  UnitSystem,
-} from '../models/recipe.models';
+import { MeasurementUnit, RecipeMeasurement, UnitSystem } from '../models/recipe.models';
 
 export interface IngredientMeasurements extends Partial<RecipeMeasurement> {
   alternativeMeasurement?: RecipeMeasurement | null;
@@ -114,49 +109,7 @@ export function formatStepIngredient(
   system: UnitSystem,
 ): string {
   const scaled = scaleStepIngredient(ingredient, amount, factor, system);
-  return [scaled.formattedAmount, scaled.unitLabel, ingredient.displayName]
-    .filter(Boolean)
-    .join(' ');
-}
-
-export function stepIngredientCallouts(
-  step: Pick<
-    RecipeStepDto,
-    'ingredientIds' | 'ingredientAmounts' | 'instruction' | 'inlineAmounts'
-  >,
-  ingredients: readonly (IngredientMeasurements & { id: string; displayName: string })[],
-  factor: number,
-  system: UnitSystem,
-): { id: string; label: string }[] {
-  const instruction = step.instruction ?? '';
-  const spanned = new Set(
-    (step.inlineAmounts ?? [])
-      .filter(
-        (a) =>
-          a.kind === 'Ingredient' &&
-          a.ingredientId &&
-          a.start >= 0 &&
-          a.length > 0 &&
-          a.start + a.length <= instruction.length,
-      )
-      .map((a) => a.ingredientId),
-  );
-  return step.ingredientIds.flatMap((id) => {
-    const ingredient = spanned.has(id) ? undefined : ingredients.find((i) => i.id === id);
-    return ingredient
-      ? [
-          {
-            id,
-            label: formatStepIngredient(
-              ingredient,
-              step.ingredientAmounts?.find((a) => a.ingredientId === id)?.measurement,
-              factor,
-              system,
-            ),
-          },
-        ]
-      : [];
-  });
+  return [scaled.formattedMeasurement, ingredient.displayName].filter(Boolean).join(' ');
 }
 
 export interface FormattedQuantityResult {
@@ -165,6 +118,79 @@ export interface FormattedQuantityResult {
   unit: MeasurementUnit | null;
   unitLabel: string;
   formattedAmount: string;
+  formattedMeasurement: string;
+}
+
+// Sizes in quarter-teaspoons. Greedy change is not optimal: 2/3 cup needs two
+// 1/3-cup scoops, not a 1/2 cup followed by spoons.
+const MEASURING_SIZES = [192, 96, 64, 48, 12, 4, 2, 1];
+const MEASURING_COUNTS: number[][] = [MEASURING_SIZES.map(() => 0)];
+for (let total = 1; total < 384; total++) {
+  let best = [...MEASURING_COUNTS[total - 1]];
+  best[MEASURING_SIZES.length - 1]++;
+  for (let index = 0; index < MEASURING_SIZES.length; index++) {
+    if (MEASURING_SIZES[index] > total) continue;
+    const candidate = [...MEASURING_COUNTS[total - MEASURING_SIZES[index]]];
+    candidate[index]++;
+    if (candidate.reduce((a, b) => a + b) < best.reduce((a, b) => a + b)) {
+      best = candidate;
+    }
+  }
+  MEASURING_COUNTS.push(best);
+}
+
+function practicalVolume(
+  quantity: number,
+  unit: MeasurementUnit | null | undefined,
+): string | null {
+  const teaspoonsPerUnit: Partial<Record<MeasurementUnit, number>> = {
+    Cup: 48,
+    Tbsp: 3,
+    Tsp: 1,
+    FlOz: 6,
+    Pt: 96,
+    Qt: 192,
+    Gal: 768,
+  };
+  const multiplier = unit ? teaspoonsPerUnit[unit] : undefined;
+  if (!multiplier || !Number.isFinite(quantity) || quantity <= 0) return null;
+  const ticks = quantity * multiplier * 4;
+  const rounded = Math.round(ticks);
+  // Only snap conversion/decimal noise, never round arbitrary amounts to a scoop.
+  if (!Number.isSafeInteger(rounded) || rounded < 1 || Math.abs(ticks - rounded) > 0.06)
+    return null;
+  // Keep a cup available for rebalancing: 1 1/6 cups is three scoops
+  // (1/2 + 1/3 + 1/3), cheaper than a full cup plus four spoons.
+  const fullCups = Math.max(0, Math.floor(rounded / 192) - 1);
+  const counts = [...MEASURING_COUNTS[rounded - fullCups * 192]];
+  counts[0] += fullCups;
+  const cups = counts
+    .slice(0, 4)
+    .reduce((sum, count, i) => sum + (count * MEASURING_SIZES[i]) / 192, 0);
+  const cupParts: string[] = [];
+  if (cups > 0) {
+    const fraction = cups % 1;
+    if (CLEAN_CUP_FRACTIONS.some(([value]) => Math.abs(fraction - value) < 0.00001)) {
+      cupParts.push(`${formatNumber(cups, false)} ${getUnitLabel('Cup', null, cups)}`);
+    } else {
+      counts.slice(0, 4).forEach((count, i) => {
+        if (count) {
+          const value = (count * MEASURING_SIZES[i]) / 192;
+          cupParts.push(`${formatNumber(value, false)} ${getUnitLabel('Cup', null, value)}`);
+        }
+      });
+    }
+  }
+  const tsp = counts
+    .slice(5)
+    .reduce((sum, count, i) => sum + (count * MEASURING_SIZES[i + 5]) / 4, 0);
+  return [
+    ...cupParts,
+    counts[4] ? `${counts[4]} tbsp` : '',
+    tsp ? `${formatNumber(tsp, false)} tsp` : '',
+  ]
+    .filter(Boolean)
+    .join(' + ');
 }
 
 const KNOWN_FRACTIONS: { target: number; fraction: string }[] = [
@@ -693,6 +719,7 @@ export function scaleAndConvert(
       unit: unit || null,
       unitLabel: emptyUnitLabel,
       formattedAmount: '',
+      formattedMeasurement: emptyUnitLabel,
     };
   }
 
@@ -704,6 +731,17 @@ export function scaleAndConvert(
   const isMetric = isMetricUnit(converted.unit);
   const unitLabel = getUnitLabel(converted.unit, customUnitName, converted.qty);
   const formattedAmount = formatAmount(converted.qty, converted.maxQty, isMetric);
+  const practical =
+    !isMetric &&
+    (effectiveFactor !== 1 || targetSystem === 'UsCustomary') &&
+    (scaledMaxQty == null || scaledMaxQty <= scaledQty)
+      ? practicalVolume(
+          unit === 'Ml' || unit === 'L'
+            ? (scaledQty * (unit === 'L' ? 1000 : 1)) / 4.92892
+            : scaledQty,
+          unit === 'Ml' || unit === 'L' ? 'Tsp' : unit,
+        )
+      : null;
 
   return {
     quantity: converted.qty,
@@ -711,6 +749,7 @@ export function scaleAndConvert(
     unit: converted.unit ?? null,
     unitLabel,
     formattedAmount,
+    formattedMeasurement: practical ?? [formattedAmount, unitLabel].filter(Boolean).join(' '),
   };
 }
 

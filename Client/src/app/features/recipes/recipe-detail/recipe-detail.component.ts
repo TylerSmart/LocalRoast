@@ -34,12 +34,12 @@ import {
   formatDuration,
   formatMinutes,
   scaleIngredient,
-  stepIngredientCallouts,
 } from '../../../core/utils/culinary-math';
 import {
   formatIngredientUses,
   ingredientUses,
   isIngredientDivided,
+  stepIngredientCallouts,
 } from '../../../core/utils/step-instruction';
 import { StepInstructionComponent } from '../../../shared/components/step-instruction/step-instruction.component';
 import { getTodayIsoLocal } from '../../../core/utils/meal-plan-date';
@@ -172,9 +172,7 @@ export class RecipeDetailComponent implements OnInit {
       };
       const scaled = scaleIngredient(ing, factor, sys);
 
-      const qtyAndUnit = [scaled.formattedAmount, scaled.unitLabel]
-        .filter((s) => s.length > 0)
-        .join(' ');
+      const qtyAndUnit = scaled.formattedMeasurement;
 
       map.set(ing.id, {
         ingredient: ing,
@@ -508,9 +506,7 @@ export class RecipeDetailComponent implements OnInit {
       this.scaleFactor() * (quantity ?? 1),
       this.targetSystem(),
     );
-    return [scaled.formattedAmount, scaled.unitLabel, ingredient.displayName]
-      .filter(Boolean)
-      .join(' ');
+    return [scaled.formattedMeasurement, ingredient.displayName].filter(Boolean).join(' ');
   }
 
   isTextAttachment(att: RecipeAttachmentDto): boolean {

@@ -61,7 +61,7 @@ describe('StepInstructionComponent', () => {
     expect(el.textContent).toContain('350°F');
   });
 
-  it('renders both .inline-amount and .inline-ingredient chips when ingredient span is present', () => {
+  it('renders one combined highlight when an ingredient span is present', () => {
     const stepWithIngSpan: InstructionStep = {
       instruction: 'Combine 2 cans chickpeas and water.',
       inlineAmounts: [
@@ -83,9 +83,30 @@ describe('StepInstructionComponent', () => {
     fixture.detectChanges();
     const el: HTMLElement = fixture.nativeElement;
     const amountChip = el.querySelector('.inline-amount');
-    const ingChip = el.querySelector('.inline-ingredient');
-    expect(amountChip?.textContent).toBe('2 cans');
-    expect(ingChip?.textContent).toBe('chickpeas');
-    expect(ingChip?.getAttribute('title')).toBe('chickpeas');
+    expect(amountChip?.textContent).toBe('2 cans chickpeas');
+    expect(amountChip?.getAttribute('title')).toBe('chickpeas');
+    expect(el.querySelectorAll('.inline-amount').length).toBe(1);
+    expect(el.textContent).toBe('Combine 2 cans chickpeas and water.');
+    fixture.componentRef.setInput('factor', 2);
+    fixture.detectChanges();
+    expect(el.querySelector('.inline-amount')?.textContent).toBe('4 cans chickpeas');
+  });
+
+  it('highlights a linked ingredient named without an amount, unscaled', () => {
+    fixture.componentRef.setInput('step', {
+      instruction: 'Chop the serrano finely.',
+      ingredientIds: ['serrano'],
+    } satisfies InstructionStep);
+    fixture.componentRef.setInput('ingredients', [
+      { id: 'serrano', displayName: 'serrano chile', quantity: 1, unit: 'Whole' },
+    ]);
+    fixture.componentRef.setInput('factor', 2);
+    fixture.detectChanges();
+    const el: HTMLElement = fixture.nativeElement;
+    const mention = el.querySelector('.inline-mention');
+    expect(mention?.textContent).toBe('serrano');
+    expect(mention?.getAttribute('title')).toBe('serrano chile');
+    expect(el.querySelectorAll('.inline-amount').length).toBe(0);
+    expect(el.textContent).toBe('Chop the serrano finely.');
   });
 });

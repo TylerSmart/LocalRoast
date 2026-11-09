@@ -435,48 +435,50 @@
                     </span>
                   </mat-checkbox>
 
-                  @if (item.ingredient.alternativeMeasurement) {
-                    <button
-                      mat-icon-button
-                      type="button"
-                      class="no-print"
-                      [attr.aria-label]="'Switch measurement for ' + item.ingredient.displayName"
-                      matTooltip="Switch between equivalent measurements"
-                      (click)="toggleIngredientMeasurement(item.ingredient)"
-                    >
-                      <mat-icon>swap_horiz</mat-icon>
-                    </button>
-                  }
-                  @if (aiHelper.isAvailable() && !item.ingredient.linkedRecipeId) {
-                    <button
-                      type="button"
-                      mat-icon-button
-                      class="substitute-ing-btn no-print"
-                      matTooltip="Suggest ingredient substitution"
-                      aria-label="Suggest ingredient substitution"
-                      (click)="openIngredientSubstitution(item)"
-                    >
-                      <mat-icon>auto_awesome</mat-icon>
-                    </button>
-                  }
+                  <div class="ingredient-actions">
+                    @if (item.ingredient.alternativeMeasurement) {
+                      <button
+                        mat-icon-button
+                        type="button"
+                        class="no-print"
+                        [attr.aria-label]="'Switch measurement for ' + item.ingredient.displayName"
+                        matTooltip="Switch between equivalent measurements"
+                        (click)="toggleIngredientMeasurement(item.ingredient)"
+                      >
+                        <mat-icon>swap_horiz</mat-icon>
+                      </button>
+                    }
+                    @if (aiHelper.isAvailable() && !item.ingredient.linkedRecipeId) {
+                      <button
+                        type="button"
+                        mat-icon-button
+                        class="substitute-ing-btn no-print"
+                        matTooltip="Suggest ingredient substitution"
+                        aria-label="Suggest ingredient substitution"
+                        (click)="openIngredientSubstitution(item)"
+                      >
+                        <mat-icon>auto_awesome</mat-icon>
+                      </button>
+                    }
 
-                  @if (aiHelper.isAvailable()) {
-                    <button
-                      type="button"
-                      mat-icon-button
-                      class="explain-ing-btn no-print"
-                      matTooltip="Ask AI about this ingredient"
-                      [attr.aria-label]="'Ask AI about ' + item.ingredient.displayName"
-                      (click)="
-                        openKitchenQuestion({
-                          recipeIngredientId: item.ingredient.id,
-                          ingredientName: item.ingredient.displayName,
-                        })
-                      "
-                    >
-                      <mat-icon>help_outline</mat-icon>
-                    </button>
-                  }
+                    @if (aiHelper.isAvailable()) {
+                      <button
+                        type="button"
+                        mat-icon-button
+                        class="explain-ing-btn no-print"
+                        matTooltip="Ask AI about this ingredient"
+                        [attr.aria-label]="'Ask AI about ' + item.ingredient.displayName"
+                        (click)="
+                          openKitchenQuestion({
+                            recipeIngredientId: item.ingredient.id,
+                            ingredientName: item.ingredient.displayName,
+                          })
+                        "
+                      >
+                        <mat-icon>help_outline</mat-icon>
+                      </button>
+                    }
+                  </div>
 
                   <!-- Linked Sub-Recipe inline expansion if applicable -->
                   @if (item.ingredient.linkedRecipeId) {

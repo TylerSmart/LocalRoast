@@ -43,9 +43,11 @@ import {
   formatCountdown,
   formatDuration,
   scaleIngredient,
-  stepIngredientCallouts,
 } from '../../../core/utils/culinary-math';
-import { renderScaledInstruction } from '../../../core/utils/step-instruction';
+import {
+  renderScaledInstruction,
+  stepIngredientCallouts,
+} from '../../../core/utils/step-instruction';
 import { StepInstructionComponent } from '../../../shared/components/step-instruction/step-instruction.component';
 import {
   CookLogDialogComponent,
@@ -148,9 +150,7 @@ export class CookModeComponent implements OnInit, OnDestroy {
       };
       const scaled = scaleIngredient(ing, factor, sys);
 
-      const qtyAndUnit = [scaled.formattedAmount, scaled.unitLabel]
-        .filter((s) => s.length > 0)
-        .join(' ');
+      const qtyAndUnit = scaled.formattedMeasurement;
 
       map.set(ing.id, {
         ingredient: ing,
@@ -230,9 +230,7 @@ export class CookModeComponent implements OnInit, OnDestroy {
     const quantity =
       this.recipe()?.ingredients.find((i) => i.linkedRecipeId === sub.id)?.quantity ?? 1;
     const scaled = scaleIngredient(ingredient, this.scaleFactor() * quantity, this.targetSystem());
-    return [scaled.formattedAmount, scaled.unitLabel, ingredient.displayName]
-      .filter(Boolean)
-      .join(' ');
+    return [scaled.formattedMeasurement, ingredient.displayName].filter(Boolean).join(' ');
   }
 
   protected readonly totalStepsCount = computed<number>(() => this.flattenedSteps().length);

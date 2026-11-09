@@ -528,19 +528,19 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await Page.Locator("mat-button-toggle[value='Metric']").ClickAsync();
         // Tagged portions scale in place through the preferred 25-ounce weight.
         var chips = Page.Locator(".step-instruction-text .inline-amount");
-        await Expect(chips.First).ToHaveTextAsync("142 g");
-        await Expect(chips.Nth(1)).ToHaveTextAsync("567 g");
+        await Expect(chips.First).ToHaveTextAsync("142 g Starter Flour");
+        await Expect(chips.Nth(1)).ToHaveTextAsync("567 g Starter Flour");
         await Page.GetByRole(AriaRole.Button, new() { Name = "0.5x", Exact = true }).ClickAsync();
-        await Expect(chips.First).ToHaveTextAsync("71 g");
+        await Expect(chips.First).ToHaveTextAsync("71 g Starter Flour");
         await Page.GetByRole(AriaRole.Button, new() { Name = "2x", Exact = true }).ClickAsync();
-        await Expect(chips.First).ToHaveTextAsync("283 g");
+        await Expect(chips.First).ToHaveTextAsync("283 g Starter Flour");
         var switchButton = Page.Locator(
             "button[aria-label='Switch measurement for Starter Flour']"
         );
         await switchButton.ClickAsync();
-        await Expect(chips.First).ToHaveTextAsync("473 ml");
+        await Expect(chips.First).ToHaveTextAsync("473 ml Starter Flour");
         await switchButton.ClickAsync();
-        await Expect(chips.First).ToHaveTextAsync("283 g");
+        await Expect(chips.First).ToHaveTextAsync("283 g Starter Flour");
         Assert.IsTrue(
             await Page.EvaluateAsync<bool>(
                 "document.documentElement.scrollWidth <= window.innerWidth"
@@ -551,18 +551,18 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await Page.Locator("button[aria-label='Start cooking in kitchen mode']").ClickAsync();
         var cookChip = Page.Locator(".instruction-text .inline-amount").First;
         await Page.Locator("mat-button-toggle[value='Metric']").ClickAsync();
-        await Expect(cookChip).ToHaveTextAsync("283 g");
+        await Expect(cookChip).ToHaveTextAsync("283 g Starter Flour");
         await Page.GetByRole(AriaRole.Button, new() { Name = "0.5x", Exact = true }).ClickAsync();
-        await Expect(cookChip).ToHaveTextAsync("71 g");
+        await Expect(cookChip).ToHaveTextAsync("71 g Starter Flour");
         await Page.GetByRole(AriaRole.Button, new() { Name = "2x", Exact = true }).ClickAsync();
-        await Expect(cookChip).ToHaveTextAsync("283 g");
+        await Expect(cookChip).ToHaveTextAsync("283 g Starter Flour");
         await Page.Locator("button[aria-label='Open ingredients drawer']").ClickAsync();
         await Page.Locator(
                 ".mobile-ingredients-drawer button[aria-label='Switch measurement for Starter Flour']"
             )
             .ClickAsync();
         await Page.Locator("button[aria-label='Close ingredients drawer']").ClickAsync();
-        await Expect(cookChip).ToHaveTextAsync("473 ml");
+        await Expect(cookChip).ToHaveTextAsync("473 ml Starter Flour");
         Assert.IsTrue(
             await Page.EvaluateAsync<bool>(
                 "document.documentElement.scrollWidth <= window.innerWidth"
@@ -1513,12 +1513,13 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
 
         await Expect(Page).ToHaveURLAsync(new Regex(".*/ingest/review/.*"));
 
-        // Verify review diagnostics card with jump chips
+        // Verify review diagnostics card lists each targeted issue with its message
         var reviewCard = Page.Locator(".review-diagnostics-card");
         await Expect(reviewCard).ToBeVisibleAsync();
-        var jumpChips = reviewCard.Locator(".diagnostic-jump-chips mat-chip");
-        await Expect(jumpChips.First).ToBeVisibleAsync();
-        await Expect(jumpChips).ToHaveCountAsync(2);
+        var jumpTargets = reviewCard.Locator(".diagnostic-targets .diagnostic-target");
+        await Expect(jumpTargets.First).ToBeVisibleAsync();
+        await Expect(jumpTargets).ToHaveCountAsync(2);
+        await Expect(jumpTargets.First).ToContainTextAsync("meaningful food name");
 
         // Verify inline diagnostic banner inside ingredient card 0
         var ingredientCard = Page.Locator("#ingredient-card-0");
@@ -1534,9 +1535,17 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await Expect(stepBanner).ToBeVisibleAsync();
         await Expect(stepBanner).ToContainTextAsync("salt");
 
-        // Clicking jump chip scrolls to target
-        await jumpChips.First.ClickAsync();
-        await Expect(ingredientCard).ToBeVisibleAsync();
+        // Clicking an issue scrolls to its card and highlights it in the issue's color
+        var firstTargetClass = await jumpTargets.First.GetAttributeAsync("class") ?? "";
+        var expectedHighlight = firstTargetClass.Contains(
+            "severity-error",
+            StringComparison.Ordinal
+        )
+            ? "highlight-error"
+            : "highlight-warning";
+        await jumpTargets.First.ClickAsync();
+        await Expect(ingredientCard).ToBeInViewportAsync();
+        await Expect(ingredientCard).ToHaveClassAsync(new Regex($@"\b{expectedHighlight}\b"));
     }
 
     [TestMethod]

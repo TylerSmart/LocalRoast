@@ -400,6 +400,48 @@ public sealed class FoodItemMergeAndAiHelpersE2ETests : E2ETestBase
 
     [TestMethod]
     [Timeout(DefaultTestTimeoutMs)]
+    public async Task IngredientActions_StayBesideLongNamesAndNotes_OnDesktopAndMobile()
+    {
+        await using var mockServer = await MockKitchenAiOllamaServer.StartAsync();
+        await RegisterAndLoginAsync();
+        await ConfigureLlmProviderAsync(mockServer.BaseUrl);
+        await CreateRecipeWithIngredientAsync(
+            "Long Ingredient Layout",
+            "Extra-virgin cold-pressed olive oil from a very long ingredient name",
+            preparationNote: "finely chopped, drained thoroughly, and divided into several portions for serving"
+        );
+
+        foreach (var width in new[] { 1280, 360 })
+        {
+            await Page.SetViewportSizeAsync(width, 740);
+            var row = Page.Locator(".ingredient-row").First;
+            var ask = row.Locator(".explain-ing-btn");
+            var substitute = row.Locator(".substitute-ing-btn");
+            await Expect(ask).ToBeVisibleAsync();
+            await Expect(substitute).ToBeVisibleAsync();
+            var checkboxBox = await row.Locator("mat-checkbox").BoundingBoxAsync();
+            var askBox = await ask.BoundingBoxAsync();
+            var substituteBox = await substitute.BoundingBoxAsync();
+            Assert.IsNotNull(checkboxBox);
+            Assert.IsNotNull(askBox);
+            Assert.IsNotNull(substituteBox);
+            Assert.IsLessThanOrEqualTo(substituteBox.X + 1, checkboxBox.X + checkboxBox.Width);
+            Assert.IsLessThanOrEqualTo(askBox.X + 1, substituteBox.X + substituteBox.Width);
+            Assert.IsLessThanOrEqualTo(
+                checkboxBox.Y + checkboxBox.Height + 1,
+                askBox.Y + askBox.Height / 2,
+                $"Ingredient actions must not wrap below the checkbox at {width}px."
+            );
+            Assert.IsLessThanOrEqualTo(
+                width,
+                await Page.EvaluateAsync<int>("() => document.documentElement.scrollWidth"),
+                $"Recipe must fit at {width}px."
+            );
+        }
+    }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
     public async Task KitchenAi_AnswersIngredientStepAndGeneralQuestions_OnDesktopAndMobile()
     {
         await using var mockServer = await MockKitchenAiOllamaServer.StartAsync();

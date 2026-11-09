@@ -173,6 +173,7 @@ describe('RecipeDetailPreviewComponent', () => {
     };
     const step = {
       ...mockRecipeData.steps[0],
+      instruction: `Mix ${ingredient.displayName}.`,
       ingredientIndices: [ingredient.index],
       ingredientAmounts: [
         { ingredientIndex: ingredient.index, measurement: { quantity: 1, unit: 'Cup' as const } },
@@ -221,7 +222,7 @@ describe('RecipeDetailPreviewComponent', () => {
       'Divided: 2 tbsp (step 2) · 2 tbsp (step 2)',
     );
     expect(component.groupedSteps()[0].items[0].ingredientCallouts.map((c) => c.id)).toEqual([
-      'ing-1',
+      'ing-0',
     ]);
   });
 

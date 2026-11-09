@@ -211,19 +211,19 @@ public sealed class CookModeAndCookLogsE2ETests : E2ETestBase
 
         // Verify pinned ingredients at 4 servings
         var ingredientsPane = Page.Locator(".cook-ingredients-pane");
-        await Expect(ingredientsPane).ToContainTextAsync("Soy Sauce");
-        await Expect(ingredientsPane).ToContainTextAsync("2 tbsp");
-        await Expect(ingredientsPane).ToContainTextAsync("Garlic");
-        await Expect(ingredientsPane).ToContainTextAsync("4 clove");
+        var soySauce = ingredientsPane.Locator(".ingredient-item", new() { HasText = "Soy Sauce" });
+        var garlic = ingredientsPane.Locator(".ingredient-item", new() { HasText = "Garlic" });
+        await Expect(soySauce.Locator(".item-qty")).ToHaveTextAsync("2 tbsp");
+        await Expect(garlic.Locator(".item-qty")).ToHaveTextAsync("4 cloves");
 
         // 4. Live scaling: scale to 2x (8 servings)
         await Page.Locator("button.mult-chip", new() { HasText = "2x" }).ClickAsync();
-        await Expect(ingredientsPane).ToContainTextAsync("4 tbsp");
-        await Expect(ingredientsPane).ToContainTextAsync("8 clove");
+        await Expect(soySauce.Locator(".item-qty")).ToHaveTextAsync("1/4 cup");
+        await Expect(garlic.Locator(".item-qty")).ToHaveTextAsync("8 cloves");
 
         // Toggle to Metric
         await Page.Locator("mat-button-toggle[value='Metric'] button").ClickAsync();
-        await Expect(ingredientsPane).ToContainTextAsync("ml");
+        await Expect(soySauce.Locator(".item-qty")).ToContainTextAsync("ml");
 
         // 5. Multi-timer Engine
         // Start Step 1's timer ("Simmer glaze")

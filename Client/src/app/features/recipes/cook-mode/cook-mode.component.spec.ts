@@ -184,7 +184,7 @@ describe('CookModeComponent', () => {
     modifiedBy: 'system',
   };
 
-  it('renders scaled inline amount chips, skips spanned callouts and narrates the scaled text', () => {
+  it('renders scaled inline amount chips and callouts and narrates the scaled text', () => {
     const ingredient = { ...mockRecipe.ingredients[0], quantity: 2, unit: 'Cup' as const };
     const step = {
       ...mockRecipe.steps[0],
@@ -219,7 +219,9 @@ describe('CookModeComponent', () => {
       'Whisk 2 cups in, then reduce to 1 cup.',
     );
     expect(el.querySelector('.inline-amount')?.textContent).toBe('2 cups');
-    expect(component['flattenedSteps']()[0].ingredientCallouts).toEqual([]);
+    expect(component['flattenedSteps']()[0].ingredientCallouts).toEqual([
+      { id: ingredient.id, label: '2 cups Ground Beef' },
+    ]);
     component['narrateCurrentStep']();
     expect(mockSpeechNarrationService.speakStep).toHaveBeenLastCalledWith(
       step.stepNumber,

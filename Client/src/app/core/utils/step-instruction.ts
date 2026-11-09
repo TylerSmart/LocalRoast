@@ -2,6 +2,7 @@ import {
   InlineStepAmountKind,
   RecipeMeasurement,
   RecipeStepInlineAmountDto,
+  RecipeStepDto,
   UnitSystem,
 } from '../models/recipe.models';
 import {
@@ -10,6 +11,7 @@ import {
   preferredIngredientMeasurement,
   scaleAndConvert,
   scaleStepIngredient,
+  formatStepIngredient,
 } from './culinary-math';
 
 export interface InstructionSegment {
@@ -20,16 +22,17 @@ export interface InstructionSegment {
     ingredientName: string | null;
     scaled: boolean;
   };
-  ingredientHighlight?: {
-    kind: InlineStepAmountKind;
-    ingredientId: string | null;
-    ingredientName: string | null;
+  // A linked ingredient named in the text without a tagged amount; never scaled.
+  mention?: {
+    ingredientId: string;
+    ingredientName: string;
   };
 }
 
 export interface InstructionStep {
   instruction: string;
   inlineAmounts?: readonly RecipeStepInlineAmountDto[] | null;
+  ingredientIds?: readonly string[] | null;
 }
 
 export interface NumberedInstructionStep extends InstructionStep {
@@ -95,8 +98,8 @@ export function validInlineSpans<T extends InlineSpan>(text: string, amounts: re
   return valid;
 }
 
-function joinAmount(amount: { formattedAmount: string; unitLabel: string }): string {
-  return [amount.formattedAmount, amount.unitLabel].filter(Boolean).join(' ');
+function joinAmount(amount: { formattedMeasurement: string }): string {
+  return amount.formattedMeasurement;
 }
 
 function scaleMeasurement(
@@ -145,9 +148,26 @@ export function buildInstructionSegments(
   const text = step.instruction ?? '';
   const segments: InstructionSegment[] = [];
   const isOriginal = factor === 1 && system === 'Original';
+  const amounts = validInlineSpans(text, step.inlineAmounts ?? []);
+  const mentions = ingredientMentions(text, step.ingredientIds ?? [], amounts, ingredients);
+  const pushText = (from: number, to: number) => {
+    for (const mention of mentions) {
+      if (mention.start < from || mention.end > to) continue;
+      if (mention.start > from) segments.push({ text: text.slice(from, mention.start) });
+      segments.push({
+        text: text.slice(mention.start, mention.end),
+        mention: {
+          ingredientId: mention.ingredient.id,
+          ingredientName: mention.ingredient.displayName,
+        },
+      });
+      from = mention.end;
+    }
+    if (to > from) segments.push({ text: text.slice(from, to) });
+  };
   let cursor = 0;
-  for (const amount of validInlineSpans(text, step.inlineAmounts ?? [])) {
-    if (amount.start > cursor) segments.push({ text: text.slice(cursor, amount.start) });
+  for (const amount of amounts) {
+    pushText(cursor, amount.start);
     const verbatim = text.slice(amount.start, amount.start + amount.length);
     const ingredient =
       amount.kind === 'Ingredient' && amount.ingredientId
@@ -157,8 +177,10 @@ export function buildInstructionSegments(
       amount.kind === 'Fixed' || isOriginal
         ? null
         : scaledAmountText(amount, ingredient, factor, system, true);
+    const amountEnd = amount.start + amount.length;
+    const end = amountHighlightEnd(amount);
     segments.push({
-      text: scaledText ?? verbatim,
+      text: (scaledText ?? verbatim) + text.slice(amountEnd, end),
       amount: {
         kind: amount.kind,
         ingredientId: amount.kind === 'Ingredient' ? amount.ingredientId : null,
@@ -167,34 +189,183 @@ export function buildInstructionSegments(
       },
     });
 
-    const amountEnd = amount.start + amount.length;
-    if (
-      amount.ingredientSpanStart != null &&
-      amount.ingredientSpanLength != null &&
-      amount.ingredientSpanStart >= amountEnd &&
-      amount.ingredientSpanStart + amount.ingredientSpanLength <= text.length
-    ) {
-      if (amount.ingredientSpanStart > amountEnd) {
-        segments.push({ text: text.slice(amountEnd, amount.ingredientSpanStart) });
-      }
-      segments.push({
-        text: text.slice(
-          amount.ingredientSpanStart,
-          amount.ingredientSpanStart + amount.ingredientSpanLength,
-        ),
-        ingredientHighlight: {
-          kind: amount.kind,
-          ingredientId: amount.kind === 'Ingredient' ? amount.ingredientId : null,
-          ingredientName: ingredient?.displayName ?? null,
-        },
-      });
-      cursor = amount.ingredientSpanStart + amount.ingredientSpanLength;
-    } else {
-      cursor = amountEnd;
+    cursor = end;
+  }
+  pushText(cursor, text.length);
+  if (segments.length === 0) segments.push({ text });
+  return segments;
+}
+
+function amountHighlightEnd(amount: RecipeStepInlineAmountDto): number {
+  return amount.ingredientSpanStart != null && amount.ingredientSpanLength != null
+    ? amount.ingredientSpanStart + amount.ingredientSpanLength
+    : amount.start + amount.length;
+}
+
+interface WordToken {
+  word: string;
+  start: number;
+  end: number;
+}
+
+function tokenizeWords(text: string): WordToken[] {
+  return Array.from(text.matchAll(/[\p{L}\p{M}]+/gu), (match) => ({
+    word: ingredientWords(match[0]).join(''),
+    start: match.index,
+    end: match.index + match[0].length,
+  })).filter((token) => token.word);
+}
+
+// Whole names plus trailing words ("olive oil", "oil") unless another ingredient's name
+// also ends with that tail, so "juice" never matches when both lemon and lime juice exist.
+function ingredientAliases(
+  ingredient: InstructionIngredient,
+  ingredients: readonly InstructionIngredient[],
+): string[][] {
+  const others = ingredients
+    .filter((other) => other.id !== ingredient.id)
+    .flatMap((other) => ingredientNames(other).map((name) => name.join(' ')));
+  return ingredientNames(ingredient)
+    .flatMap((words) =>
+      words.flatMap((_, index) => {
+        const alias = words.slice(index);
+        const tail = ` ${alias.join(' ')}`;
+        return index === 0 ||
+          !others.some((name) => name !== words.join(' ') && ` ${name}`.endsWith(tail))
+          ? [alias]
+          : [];
+      }),
+    )
+    .sort((a, b) => b.length - a.length);
+}
+
+function findMention(
+  tokens: readonly WordToken[],
+  aliases: readonly string[][],
+  isFree: (start: number, end: number) => boolean = () => true,
+): { start: number; end: number } | null {
+  for (let i = 0; i < tokens.length; i++) {
+    for (const alias of aliases) {
+      if (!alias.length || i + alias.length > tokens.length) continue;
+      if (!alias.every((word, offset) => tokens[i + offset].word === word)) continue;
+      const span = { start: tokens[i].start, end: tokens[i + alias.length - 1].end };
+      if (isFree(span.start, span.end)) return span;
     }
   }
-  if (cursor < text.length || segments.length === 0) segments.push({ text: text.slice(cursor) });
-  return segments;
+  return null;
+}
+
+function ingredientMentions(
+  text: string,
+  ingredientIds: readonly string[],
+  amounts: readonly RecipeStepInlineAmountDto[],
+  ingredients: readonly InstructionIngredient[],
+): { start: number; end: number; ingredient: InstructionIngredient }[] {
+  if (!ingredientIds.length) return [];
+  const tokens = tokenizeWords(text);
+  const taken = amounts.map((a) => ({ start: a.start, end: amountHighlightEnd(a) }));
+  const tagged = new Set(amounts.filter((a) => a.kind === 'Ingredient').map((a) => a.ingredientId));
+  const mentions: { start: number; end: number; ingredient: InstructionIngredient }[] = [];
+  for (const id of new Set(ingredientIds)) {
+    const ingredient = tagged.has(id) ? undefined : ingredients.find((i) => i.id === id);
+    if (!ingredient) continue;
+    const span = findMention(tokens, ingredientAliases(ingredient, ingredients), (start, end) =>
+      taken.every((t) => end <= t.start || start >= t.end),
+    );
+    if (span) {
+      taken.push(span);
+      mentions.push({ ...span, ingredient });
+    }
+  }
+  return mentions.sort((a, b) => a.start - b.start);
+}
+
+function ingredientWords(text: string): string[] {
+  return (
+    text
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .match(/\p{L}+/gu) ?? []
+  ).map((word) =>
+    word === 'chilies'
+      ? 'chile'
+      : word.endsWith('oes')
+        ? word.slice(0, -2)
+        : word.endsWith('ies')
+          ? `${word.slice(0, -3)}y`
+          : word.endsWith('s') && !word.endsWith('ss')
+            ? word.slice(0, -1)
+            : word,
+  );
+}
+
+function ingredientNames(
+  ingredient: InstructionIngredient & { foodItemName?: string | null },
+): string[][] {
+  return [ingredient.displayName, ingredient.foodItemName ?? ''].filter(Boolean).map((name) => {
+    const words = ingredientWords(name);
+    // These are often omitted in instructions: "garlic" for "garlic cloves", "serrano" for "serrano chile".
+    return words.length > 1 && ['clove', 'chile'].includes(words[words.length - 1])
+      ? words.slice(0, -1)
+      : words;
+  });
+}
+
+export function stepIngredientCallouts(
+  step: InstructionStep & { ingredientIds: readonly string[] } & Pick<
+      RecipeStepDto,
+      'ingredientAmounts'
+    >,
+  ingredients: readonly InstructionIngredient[],
+  factor: number,
+  system: UnitSystem,
+): { id: string; label: string }[] {
+  const amounts = validInlineSpans(step.instruction ?? '', step.inlineAmounts ?? []).filter(
+    (a) => a.kind === 'Ingredient' && a.ingredientId,
+  );
+  const ids = new Set([...step.ingredientIds, ...amounts.map((a) => a.ingredientId)]);
+  const tokens = tokenizeWords(step.instruction ?? '');
+  const collective = /\b(?:remaining|all|rest of the|other) ingredients\b/i.test(step.instruction);
+
+  return ingredients.flatMap((ingredient) => {
+    if (!ids.has(ingredient.id)) return [];
+    const tagged = amounts.filter((a) => a.ingredientId === ingredient.id);
+    const mentioned = findMention(tokens, ingredientAliases(ingredient, ingredients)) !== null;
+    if (!tagged.length && !mentioned && !collective) return [];
+    const first = tagged[0]?.measurement;
+    const portions = tagged.flatMap((a) => {
+      const conversion = first ? measurementUnitFactor(a.measurement, first) : null;
+      return conversion != null && a.measurement.quantity != null
+        ? [
+            {
+              quantity: a.measurement.quantity * conversion,
+              maxQuantity: (a.measurement.maxQuantity ?? a.measurement.quantity) * conversion,
+            },
+          ]
+        : [];
+    });
+    const total =
+      first && portions.length === tagged.length
+        ? {
+            ...first,
+            quantity: portions.reduce((sum, p) => sum + p.quantity, 0),
+            maxQuantity: tagged.some((a) => a.measurement.maxQuantity != null)
+              ? portions.reduce((sum, p) => sum + p.maxQuantity, 0)
+              : null,
+          }
+        : null;
+    const assigned = step.ingredientAmounts?.find(
+      (a) => a.ingredientId === ingredient.id,
+    )?.measurement;
+    const label =
+      tagged.length && !total
+        ? tagged
+            .map((a) => formatStepIngredient(ingredient, a.measurement, factor, system))
+            .join(' + ')
+        : formatStepIngredient(ingredient, total ?? assigned, factor, system);
+    return [{ id: ingredient.id, label }];
+  });
 }
 
 export function renderScaledInstruction(

@@ -364,7 +364,9 @@ describe('RecipeDetailComponent', () => {
       'Whisk 1 cup noodles, then reduce to 1 cup.',
       'Stir in the remaining 1 cup noodles.',
     ]);
-    expect(component['groupedSteps']()[0].items[0].ingredientCallouts).toEqual([]);
+    expect(component['groupedSteps']()[0].items[0].ingredientCallouts).toEqual([
+      { id: ingredient.id, label: '1 cup Egg Noodles' },
+    ]);
 
     component.setMultiplier(2);
     fixture.detectChanges();

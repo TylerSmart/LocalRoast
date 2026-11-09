@@ -168,6 +168,7 @@ describe('PublicSharedRecipeComponent', () => {
     };
     const step = {
       ...mockPublicRecipe.steps[0],
+      instruction: `Mix ${ingredient.displayName}.`,
       ingredientIds: [ingredient.id],
       ingredientAmounts: [
         { ingredientId: ingredient.id, measurement: { quantity: 1, unit: 'Cup' as const } },
@@ -226,7 +227,9 @@ describe('PublicSharedRecipeComponent', () => {
     expect(el.querySelector('.ingredient-uses')?.textContent).toBe(
       'Divided: 2 lb (step 1) · 2 lb (step 1)',
     );
-    expect(component['groupedSteps']()[0].items[0].ingredientCallouts).toEqual([]);
+    expect(component['groupedSteps']()[0].items[0].ingredientCallouts).toEqual([
+      { id: ingredient.id, label: '4 lb Pork Shoulder' },
+    ]);
   });
 
   it('sets isUnavailable true when API returns error', () => {

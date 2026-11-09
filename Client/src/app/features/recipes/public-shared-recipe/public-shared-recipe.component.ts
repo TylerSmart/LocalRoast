@@ -25,12 +25,12 @@ import {
   formatDuration,
   formatMinutes,
   scaleIngredient,
-  stepIngredientCallouts,
 } from '../../../core/utils/culinary-math';
 import {
   formatIngredientUses,
   ingredientUses,
   isIngredientDivided,
+  stepIngredientCallouts,
 } from '../../../core/utils/step-instruction';
 import { StepInstructionComponent } from '../../../shared/components/step-instruction/step-instruction.component';
 
@@ -120,9 +120,7 @@ export class PublicSharedRecipeComponent implements OnInit {
       };
       const scaled = scaleIngredient(ing, factor, sys);
 
-      const qtyAndUnit = [scaled.formattedAmount, scaled.unitLabel]
-        .filter((s) => s.length > 0)
-        .join(' ');
+      const qtyAndUnit = scaled.formattedMeasurement;
 
       map.set(ing.id, {
         ingredient: ing,
@@ -299,9 +297,7 @@ export class PublicSharedRecipeComponent implements OnInit {
     const factor = this.scaleFactor() * (quantity ?? 1);
     const sys = this.targetSystem();
     const scaled = scaleIngredient(ing, factor, sys);
-    const qtyAndUnit = [scaled.formattedAmount, scaled.unitLabel]
-      .filter((s) => s.length > 0)
-      .join(' ');
+    const qtyAndUnit = scaled.formattedMeasurement;
     return qtyAndUnit ? `${qtyAndUnit} ${ing.displayName}` : ing.displayName;
   }
 
