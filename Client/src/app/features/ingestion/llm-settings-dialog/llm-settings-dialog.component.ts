@@ -19,12 +19,14 @@ import { MatInputModule } from '@angular/material/input';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSelectModule } from '@angular/material/select';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
+import { MatTabsModule } from '@angular/material/tabs';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import type {
   LlmConnectionTestResultDto,
   LlmModelProfile,
   LlmProvider,
   LlmSettingsDto,
+  UpsertLlmModelProfileRequest,
 } from '../../../core/models/ingestion.models';
 import { IngestionService } from '../../../core/services/ingestion/ingestion.service';
 import { LlmSettingsService } from '../../../core/services/llm-settings/llm-settings.service';
@@ -85,6 +87,7 @@ export function filterModels(
     MatCheckboxModule,
     MatIconModule,
     MatProgressSpinnerModule,
+    MatTabsModule,
     MatTooltipModule,
   ],
   templateUrl: './llm-settings-dialog.component.html',
@@ -122,6 +125,12 @@ export class LlmSettingsDialogComponent implements OnInit {
   );
   readonly profileMessage = signal<string | null>(null);
   readonly refineProfileMessage = signal<string | null>(null);
+
+  readonly selectedTabIndex = signal<number>(0);
+  readonly isEditingProfile = signal<boolean>(false);
+  readonly editingProfileId = signal<string | null>(null);
+  readonly isSavingProfile = signal<boolean>(false);
+  readonly profileCrudError = signal<string | null>(null);
 
   readonly form = this.fb.nonNullable.group({
     provider: this.fb.nonNullable.control<LlmProvider>('Ollama', [Validators.required]),
@@ -174,6 +183,35 @@ export class LlmSettingsDialogComponent implements OnInit {
       Validators.min(5),
       Validators.max(1800),
     ]),
+  });
+
+  readonly profileForm = this.fb.nonNullable.group({
+    displayName: this.fb.nonNullable.control<string>('', [
+      Validators.required,
+      Validators.maxLength(150),
+    ]),
+    modelTag: this.fb.nonNullable.control<string>('', [
+      Validators.required,
+      Validators.maxLength(200),
+    ]),
+    matchPrefixes: this.fb.nonNullable.control<string>(''),
+    summary: this.fb.nonNullable.control<string>('', [Validators.maxLength(500)]),
+    contextWindowTokens: this.fb.nonNullable.control<number>(32768, [
+      Validators.required,
+      Validators.min(2048),
+      Validators.max(65536),
+    ]),
+    requestTimeoutSeconds: this.fb.nonNullable.control<number>(600, [
+      Validators.required,
+      Validators.min(5),
+      Validators.max(1800),
+    ]),
+    enableThinking: this.fb.nonNullable.control<boolean>(false),
+    recommendedAsRefineModel: this.fb.nonNullable.control<boolean>(false),
+    temperature: this.fb.control<number | null>(null, [Validators.min(0), Validators.max(2)]),
+    topP: this.fb.control<number | null>(null, [Validators.min(0), Validators.max(1)]),
+    topK: this.fb.control<number | null>(null, [Validators.min(1), Validators.max(1000)]),
+    notes: this.fb.nonNullable.control<string>(''),
   });
 
   private readonly textModelQuery = toSignal(this.form.controls.textModel.valueChanges, {
@@ -433,6 +471,202 @@ export class LlmSettingsDialogComponent implements OnInit {
   onRefineProfileSelected(id: string): void {
     this.selectedRefineProfileId.set(id);
     this.refineProfileMessage.set(null);
+  }
+
+  saveCurrentSettingsAsProfile(): void {
+    const values = this.form.getRawValue();
+    const modelTag = values.textModel.trim() || 'custom:model';
+    const displayName = values.textModel.trim()
+      ? `${values.textModel.trim()} Profile`
+      : 'New Custom Profile';
+    this.profileForm.reset({
+      displayName,
+      modelTag,
+      matchPrefixes: values.textModel.trim() || '',
+      summary: 'Custom profile saved from current settings.',
+      contextWindowTokens: values.contextWindowTokens || 32768,
+      requestTimeoutSeconds: values.requestTimeoutSeconds || 600,
+      enableThinking: values.enableThinking,
+      recommendedAsRefineModel: false,
+      temperature: values.temperature,
+      topP: values.topP,
+      topK: values.topK,
+      notes: '',
+    });
+    this.editingProfileId.set(null);
+    this.isEditingProfile.set(true);
+    this.profileCrudError.set(null);
+    this.selectedTabIndex.set(3);
+  }
+
+  startAddProfile(): void {
+    this.profileForm.reset({
+      displayName: '',
+      modelTag: '',
+      matchPrefixes: '',
+      summary: '',
+      contextWindowTokens: 32768,
+      requestTimeoutSeconds: 600,
+      enableThinking: false,
+      recommendedAsRefineModel: false,
+      temperature: null,
+      topP: null,
+      topK: null,
+      notes: '',
+    });
+    this.editingProfileId.set(null);
+    this.isEditingProfile.set(true);
+    this.profileCrudError.set(null);
+  }
+
+  startEditProfile(profile: LlmModelProfile): void {
+    this.profileForm.reset({
+      displayName: profile.displayName,
+      modelTag: profile.modelTag,
+      matchPrefixes: profile.matchPrefixes?.join(', ') ?? '',
+      summary: profile.summary ?? '',
+      contextWindowTokens: profile.contextWindowTokens ?? 32768,
+      requestTimeoutSeconds: profile.requestTimeoutSeconds ?? 600,
+      enableThinking: profile.enableThinking ?? false,
+      recommendedAsRefineModel: profile.recommendedAsRefineModel ?? false,
+      temperature: profile.temperature ?? null,
+      topP: profile.topP ?? null,
+      topK: profile.topK ?? null,
+      notes: profile.notes?.join('\n') ?? '',
+    });
+    this.editingProfileId.set(profile.id);
+    this.isEditingProfile.set(true);
+    this.profileCrudError.set(null);
+  }
+
+  cancelProfileEdit(): void {
+    this.isEditingProfile.set(false);
+    this.editingProfileId.set(null);
+    this.profileCrudError.set(null);
+  }
+
+  saveProfile(): void {
+    if (this.profileForm.invalid || this.isSavingProfile()) {
+      return;
+    }
+
+    this.isSavingProfile.set(true);
+    this.profileCrudError.set(null);
+
+    const val = this.profileForm.getRawValue();
+    const req: UpsertLlmModelProfileRequest = {
+      displayName: val.displayName.trim(),
+      modelTag: val.modelTag.trim(),
+      matchPrefixes: val.matchPrefixes
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean),
+      summary: val.summary.trim() || null,
+      contextWindowTokens: val.contextWindowTokens,
+      requestTimeoutSeconds: val.requestTimeoutSeconds,
+      enableThinking: val.enableThinking,
+      recommendedAsRefineModel: val.recommendedAsRefineModel,
+      temperature: val.temperature,
+      topP: val.topP,
+      topK: val.topK,
+      notes: val.notes
+        .split('\n')
+        .map((s) => s.trim())
+        .filter(Boolean),
+    };
+
+    const editId = this.editingProfileId();
+    const request$ = editId
+      ? this.llmSettingsService.updateModelProfile(editId, req)
+      : this.llmSettingsService.createModelProfile(req);
+
+    request$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (saved) => {
+        this.isSavingProfile.set(false);
+        this.isEditingProfile.set(false);
+        this.editingProfileId.set(null);
+        this.loadProfiles();
+        this.selectedProfileId.set(saved.id);
+      },
+      error: (err) => {
+        this.profileCrudError.set(err?.error?.detail || err?.message || 'Failed to save profile.');
+        this.isSavingProfile.set(false);
+      },
+    });
+  }
+
+  deleteProfile(profile: LlmModelProfile): void {
+    if (this.isSavingProfile()) {
+      return;
+    }
+    this.isSavingProfile.set(true);
+    this.profileCrudError.set(null);
+
+    this.llmSettingsService
+      .deleteModelProfile(profile.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.isSavingProfile.set(false);
+          if (this.editingProfileId() === profile.id) {
+            this.cancelProfileEdit();
+          }
+          this.loadProfiles();
+        },
+        error: (err) => {
+          this.profileCrudError.set(
+            err?.error?.detail || err?.message || 'Failed to delete profile.',
+          );
+          this.isSavingProfile.set(false);
+        },
+      });
+  }
+
+  restoreDefaults(): void {
+    if (this.isSavingProfile()) {
+      return;
+    }
+    this.isSavingProfile.set(true);
+    this.profileCrudError.set(null);
+
+    this.llmSettingsService
+      .restoreDefaultModelProfiles()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (restored) => {
+          this.isSavingProfile.set(false);
+          this.profiles.set(restored);
+          this.selectDefaultProfiles();
+          if (this.editingProfileId()) {
+            this.cancelProfileEdit();
+          }
+        },
+        error: (err) => {
+          this.profileCrudError.set(
+            err?.error?.detail || err?.message || 'Failed to restore default profiles.',
+          );
+          this.isSavingProfile.set(false);
+        },
+      });
+  }
+
+  applyProfileToPrimary(profile: LlmModelProfile): void {
+    const controls = this.form.controls;
+    controls.textModel.setValue(profile.modelTag);
+    this.form.patchValue({
+      enableThinking: profile.enableThinking,
+      temperature: profile.temperature,
+      topP: profile.topP,
+      topK: profile.topK,
+      contextWindowTokens: profile.contextWindowTokens,
+      requestTimeoutSeconds: profile.requestTimeoutSeconds,
+    });
+    this.form.markAsDirty();
+    this.selectedProfileId.set(profile.id);
+    this.profileMessage.set(
+      `Applied ${profile.displayName} recommendations. Save to keep them. ${profile.notes.join(' ')}`.trim(),
+    );
+    this.selectedTabIndex.set(0);
   }
 
   private selectDefaultProfiles(): void {

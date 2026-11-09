@@ -16,7 +16,8 @@ public sealed record LlmModelProfileDto(
     int ContextWindowTokens,
     int RequestTimeoutSeconds,
     bool RecommendedAsRefineModel,
-    IReadOnlyList<string> Notes
+    IReadOnlyList<string> Notes,
+    bool IsBuiltInDefault = true
 );
 
 public static class LlmModelProfiles

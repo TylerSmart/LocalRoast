@@ -56,6 +56,10 @@ describe('LlmSettingsDialogComponent', () => {
   let mockLlmSettingsService: {
     getSettings: ReturnType<typeof vi.fn>;
     getModelProfiles: ReturnType<typeof vi.fn>;
+    createModelProfile: ReturnType<typeof vi.fn>;
+    updateModelProfile: ReturnType<typeof vi.fn>;
+    deleteModelProfile: ReturnType<typeof vi.fn>;
+    restoreDefaultModelProfiles: ReturnType<typeof vi.fn>;
     updateSettings: ReturnType<typeof vi.fn>;
     testConnection: ReturnType<typeof vi.fn>;
   };
@@ -85,6 +89,10 @@ describe('LlmSettingsDialogComponent', () => {
     mockLlmSettingsService = {
       getSettings: vi.fn().mockReturnValue(of(initialSettings)),
       getModelProfiles: vi.fn().mockReturnValue(of(testProfiles)),
+      createModelProfile: vi.fn().mockImplementation((req) => of({ ...req, id: 'custom-profile' })),
+      updateModelProfile: vi.fn().mockImplementation((id, req) => of({ ...req, id })),
+      deleteModelProfile: vi.fn().mockReturnValue(of(undefined)),
+      restoreDefaultModelProfiles: vi.fn().mockReturnValue(of(testProfiles)),
       updateSettings: vi.fn().mockReturnValue(of(initialSettings)),
       testConnection: vi.fn().mockReturnValue(
         of({
@@ -338,9 +346,199 @@ describe('LlmSettingsDialogComponent', () => {
     expect(mockDialogRef.close).toHaveBeenCalledWith(true);
   });
 
+  it('renders all 4 tabs and supports tab switching', () => {
+    expect(component.selectedTabIndex()).toBe(0);
+    component.selectedTabIndex.set(1);
+    expect(component.selectedTabIndex()).toBe(1);
+    component.selectedTabIndex.set(2);
+    expect(component.selectedTabIndex()).toBe(2);
+    component.selectedTabIndex.set(3);
+    expect(component.selectedTabIndex()).toBe(3);
+  });
+
+  it('pre-fills profile editor form and switches to tab 3 on saveCurrentSettingsAsProfile', () => {
+    component.form.controls.textModel.setValue('qwen2.5:14b');
+    component.form.controls.enableThinking.setValue(true);
+    component.form.controls.temperature.setValue(0.7);
+    component.form.controls.topP.setValue(0.9);
+    component.form.controls.topK.setValue(40);
+    component.form.controls.contextWindowTokens.setValue(16384);
+    component.form.controls.requestTimeoutSeconds.setValue(450);
+
+    component.saveCurrentSettingsAsProfile();
+
+    expect(component.selectedTabIndex()).toBe(3);
+    expect(component.isEditingProfile()).toBe(true);
+    expect(component.editingProfileId()).toBeNull();
+    expect(component.profileForm.controls.displayName.value).toBe('qwen2.5:14b Profile');
+    expect(component.profileForm.controls.modelTag.value).toBe('qwen2.5:14b');
+    expect(component.profileForm.controls.enableThinking.value).toBe(true);
+    expect(component.profileForm.controls.temperature.value).toBe(0.7);
+    expect(component.profileForm.controls.contextWindowTokens.value).toBe(16384);
+    expect(component.profileForm.controls.requestTimeoutSeconds.value).toBe(450);
+  });
+
+  it('creates a new custom profile via createModelProfile', () => {
+    component.startAddProfile();
+    expect(component.isEditingProfile()).toBe(true);
+    expect(component.editingProfileId()).toBeNull();
+
+    component.profileForm.controls.displayName.setValue('My New Profile');
+    component.profileForm.controls.modelTag.setValue('new-model:latest');
+    component.profileForm.controls.contextWindowTokens.setValue(32768);
+    component.profileForm.controls.requestTimeoutSeconds.setValue(600);
+
+    component.saveProfile();
+
+    expect(mockLlmSettingsService.createModelProfile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        displayName: 'My New Profile',
+        modelTag: 'new-model:latest',
+        contextWindowTokens: 32768,
+        requestTimeoutSeconds: 600,
+      }),
+    );
+    expect(component.isEditingProfile()).toBe(false);
+  });
+
+  it('updates an existing profile via updateModelProfile', () => {
+    component.startEditProfile(testProfiles[0]);
+    expect(component.isEditingProfile()).toBe(true);
+    expect(component.editingProfileId()).toBe('gemma4-e4b');
+    expect(component.profileForm.controls.displayName.value).toBe('Gemma 4 E4B');
+
+    component.profileForm.controls.summary.setValue('Updated summary note');
+    component.saveProfile();
+
+    expect(mockLlmSettingsService.updateModelProfile).toHaveBeenCalledWith(
+      'gemma4-e4b',
+      expect.objectContaining({
+        displayName: 'Gemma 4 E4B',
+        summary: 'Updated summary note',
+      }),
+    );
+    expect(component.isEditingProfile()).toBe(false);
+  });
+
+  it('deletes a profile via deleteModelProfile', () => {
+    component.deleteProfile(testProfiles[0]);
+    expect(mockLlmSettingsService.deleteModelProfile).toHaveBeenCalledWith('gemma4-e4b');
+  });
+
+  it('restores defaults via restoreDefaultModelProfiles', () => {
+    component.restoreDefaults();
+    expect(mockLlmSettingsService.restoreDefaultModelProfiles).toHaveBeenCalled();
+  });
+
+  it('applies profile from card to primary settings and switches to tab 0', () => {
+    component.selectedTabIndex.set(3);
+    component.applyProfileToPrimary(testProfiles[0]);
+
+    expect(component.selectedTabIndex()).toBe(0);
+    expect(component.form.controls.textModel.value).toBe('gemma4:e4b');
+    expect(component.form.controls.temperature.value).toBe(0.2);
+    expect(component.form.controls.contextWindowTokens.value).toBe(16384);
+    expect(component.form.controls.requestTimeoutSeconds.value).toBe(600);
+  });
+
   it('cancels dialog without saving', () => {
     component.onCancel();
     expect(mockDialogRef.close).toHaveBeenCalledWith(false);
     expect(mockLlmSettingsService.updateSettings).not.toHaveBeenCalled();
+  });
+
+  it('renders all 4 tabs and supports tab switching', () => {
+    expect(component.selectedTabIndex()).toBe(0);
+    component.selectedTabIndex.set(1);
+    expect(component.selectedTabIndex()).toBe(1);
+    component.selectedTabIndex.set(2);
+    expect(component.selectedTabIndex()).toBe(2);
+    component.selectedTabIndex.set(3);
+    expect(component.selectedTabIndex()).toBe(3);
+  });
+
+  it('pre-fills profile editor form and switches to tab 3 on saveCurrentSettingsAsProfile', () => {
+    component.form.controls.textModel.setValue('qwen2.5:14b');
+    component.form.controls.enableThinking.setValue(true);
+    component.form.controls.temperature.setValue(0.7);
+    component.form.controls.topP.setValue(0.9);
+    component.form.controls.topK.setValue(40);
+    component.form.controls.contextWindowTokens.setValue(16384);
+    component.form.controls.requestTimeoutSeconds.setValue(450);
+
+    component.saveCurrentSettingsAsProfile();
+
+    expect(component.selectedTabIndex()).toBe(3);
+    expect(component.isEditingProfile()).toBe(true);
+    expect(component.editingProfileId()).toBeNull();
+    expect(component.profileForm.controls.displayName.value).toBe('qwen2.5:14b Profile');
+    expect(component.profileForm.controls.modelTag.value).toBe('qwen2.5:14b');
+    expect(component.profileForm.controls.enableThinking.value).toBe(true);
+    expect(component.profileForm.controls.temperature.value).toBe(0.7);
+    expect(component.profileForm.controls.contextWindowTokens.value).toBe(16384);
+    expect(component.profileForm.controls.requestTimeoutSeconds.value).toBe(450);
+  });
+
+  it('creates a new custom profile via createModelProfile', () => {
+    component.startAddProfile();
+    expect(component.isEditingProfile()).toBe(true);
+    expect(component.editingProfileId()).toBeNull();
+
+    component.profileForm.controls.displayName.setValue('My New Profile');
+    component.profileForm.controls.modelTag.setValue('new-model:latest');
+    component.profileForm.controls.contextWindowTokens.setValue(32768);
+    component.profileForm.controls.requestTimeoutSeconds.setValue(600);
+
+    component.saveProfile();
+
+    expect(mockLlmSettingsService.createModelProfile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        displayName: 'My New Profile',
+        modelTag: 'new-model:latest',
+        contextWindowTokens: 32768,
+        requestTimeoutSeconds: 600,
+      }),
+    );
+    expect(component.isEditingProfile()).toBe(false);
+  });
+
+  it('updates an existing profile via updateModelProfile', () => {
+    component.startEditProfile(testProfiles[0]);
+    expect(component.isEditingProfile()).toBe(true);
+    expect(component.editingProfileId()).toBe('gemma4-e4b');
+    expect(component.profileForm.controls.displayName.value).toBe('Gemma 4 E4B');
+
+    component.profileForm.controls.summary.setValue('Updated summary note');
+    component.saveProfile();
+
+    expect(mockLlmSettingsService.updateModelProfile).toHaveBeenCalledWith(
+      'gemma4-e4b',
+      expect.objectContaining({
+        displayName: 'Gemma 4 E4B',
+        summary: 'Updated summary note',
+      }),
+    );
+    expect(component.isEditingProfile()).toBe(false);
+  });
+
+  it('deletes a profile via deleteModelProfile', () => {
+    component.deleteProfile(testProfiles[0]);
+    expect(mockLlmSettingsService.deleteModelProfile).toHaveBeenCalledWith('gemma4-e4b');
+  });
+
+  it('restores defaults via restoreDefaultModelProfiles', () => {
+    component.restoreDefaults();
+    expect(mockLlmSettingsService.restoreDefaultModelProfiles).toHaveBeenCalled();
+  });
+
+  it('applies profile from card to primary settings and switches to tab 0', () => {
+    component.selectedTabIndex.set(3);
+    component.applyProfileToPrimary(testProfiles[0]);
+
+    expect(component.selectedTabIndex()).toBe(0);
+    expect(component.form.controls.textModel.value).toBe('gemma4:e4b');
+    expect(component.form.controls.temperature.value).toBe(0.2);
+    expect(component.form.controls.contextWindowTokens.value).toBe(16384);
+    expect(component.form.controls.requestTimeoutSeconds.value).toBe(600);
   });
 });

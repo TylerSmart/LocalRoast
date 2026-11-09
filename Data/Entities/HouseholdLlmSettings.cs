@@ -54,6 +54,8 @@ public sealed class HouseholdLlmSettings : IAuditable
 
     public bool EnableIngestion { get; set; } = true;
 
+    public bool ModelProfilesSeeded { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
 
     public string CreatedBy { get; set; } = "System";

@@ -31,11 +31,13 @@ public sealed class LlmProfilesAndRefinementE2ETests : E2ETestBase
         await Expect(dialog.Locator(".profile-message").First)
             .ToContainTextAsync("Applied Gemma 4 12B with thinking");
         await Expect(textModel).ToHaveValueAsync("my-custom-e4b");
+        await dialog.Locator(".mdc-tab", new() { HasText = "Sampling & Runtime" }).ClickAsync();
         await Expect(dialog.Locator("input[formcontrolname='temperature']")).ToHaveValueAsync("1");
         await Expect(dialog.Locator("input[formcontrolname='topK']")).ToHaveValueAsync("64");
         await Expect(dialog.Locator("input[formcontrolname='requestTimeoutSeconds']"))
             .ToHaveValueAsync("900");
 
+        await dialog.Locator(".mdc-tab", new() { HasText = "Refinement & Queue" }).ClickAsync();
         var refineSection = dialog.Locator(".refine-section");
         await refineSection.ScrollIntoViewIfNeededAsync();
         await refineSection.Locator("[data-testid='llm-refine-profile-select']").ClickAsync();
@@ -72,6 +74,7 @@ public sealed class LlmProfilesAndRefinementE2ETests : E2ETestBase
 
         await Page.Locator(".llm-settings-btn").ClickAsync();
         await Expect(textModel).ToHaveValueAsync("my-custom-e4b");
+        await dialog.Locator(".mdc-tab", new() { HasText = "Refinement & Queue" }).ClickAsync();
         await Expect(refineModelInput).ToHaveValueAsync("gemma4:26b-a4b");
         await Expect(dialog.Locator("input[formcontrolname='refineTemperature']"))
             .ToHaveValueAsync("1");
@@ -108,6 +111,7 @@ public sealed class LlmProfilesAndRefinementE2ETests : E2ETestBase
         await options.First.ClickAsync();
         await Expect(textModel).ToHaveValueAsync("qwen2.5vl:7b");
 
+        await dialog.Locator(".mdc-tab", new() { HasText = "Refinement & Queue" }).ClickAsync();
         var refineModel = dialog.Locator("[data-testid='llm-refine-model']");
         await refineModel.ScrollIntoViewIfNeededAsync();
         await refineModel.FillAsync("gemini");
@@ -158,6 +162,7 @@ public sealed class LlmProfilesAndRefinementE2ETests : E2ETestBase
         var settings = Page.Locator("app-llm-settings-dialog");
         await settings.Locator("input[formcontrolname='baseUrl']").FillAsync(mockServer.BaseUrl);
         await settings.Locator("input[formcontrolname='textModel']").FillAsync("qwen2.5:14b");
+        await settings.Locator(".mdc-tab", new() { HasText = "Refinement & Queue" }).ClickAsync();
         await settings.Locator("[data-testid='llm-refine-model']").FillAsync(RefineModel);
         await Page.Keyboard.PressAsync("Tab");
         await settings.Locator("button", new() { HasText = "Save Settings" }).ClickAsync();

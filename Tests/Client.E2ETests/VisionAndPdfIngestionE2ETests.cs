@@ -257,6 +257,7 @@ public sealed class VisionAndPdfIngestionE2ETests : E2ETestBase
         await visionModelInput.FillAsync("qwen2.5vl:7b");
 
         await Page.Keyboard.PressAsync("Escape");
+        await dialog.Locator(".mdc-tab", new() { HasText = "Refinement & Queue" }).ClickAsync();
 
         var ingestionToggle = dialog.Locator(
             "mat-slide-toggle[formcontrolname='enableIngestion'] button"

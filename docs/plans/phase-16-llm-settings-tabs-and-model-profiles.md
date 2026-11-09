@@ -1,7 +1,7 @@
 # Phase 16: LLM Settings Modal Tabs & Database-Backed Model Profile Management
 
 > **Branch:** `feature/phase-16-llm-settings-tabs-and-model-profiles`
-> **Status:** `[ ]` Not Started
+> **Status:** `[x]` Completed
 > **PRD Reference:** `docs/prd.md` — Section 4.2.4; `docs/todo.md` — Various items 5, 6
 > **Target Execution:** Run `/execute-phase` to execute this plan step-by-step.
 > **Live Environment Note:**
@@ -171,7 +171,7 @@ Add E2E test methods in `LlmIngestionE2ETests.cs`:
 
 ## 6. Step-by-Step Execution Checklist (For Implementation Agent)
 
-- [ ] **Task 1: Backend Core, Entity, Migration & Service**
+- [x] **Task 1: Backend Core, Entity, Migration & Service**
   - Create `Data/Entities/LlmModelProfile.cs` and `Data/Configurations/LlmModelProfileConfiguration.cs`.
   - Register `DbSet<LlmModelProfile>` in `Data/AppDbContext.cs`.
   - Add `UpsertLlmModelProfileRequest` and `ILlmSettingsService` CRUD methods in `Core/Ingestion/`.
@@ -189,7 +189,7 @@ Add E2E test methods in `LlmIngestionE2ETests.cs`:
     dotnet test --project Tests/API.IntegrationTests/App.API.IntegrationTests.csproj
     ```
 
-- [ ] **Task 2: Angular Tabbed Modal & Profile Management UI**
+- [x] **Task 2: Angular Tabbed Modal & Profile Management UI**
   - Update `ingestion.models.ts` and `ingestion.service.ts`.
   - Refactor `llm-settings-dialog.component.{ts,html,scss}` into the 4-tab layout with inline Model Profile CRUD.
   - Update `llm-settings-dialog.component.spec.ts` to test tab organization and profile CRUD operations.
@@ -200,7 +200,7 @@ Add E2E test methods in `LlmIngestionE2ETests.cs`:
     npm test -- --watch=false
     ```
 
-- [ ] **Task 3: Playwright E2E Verification & Final Formatting**
+- [x] **Task 3: Playwright E2E Verification & Final Formatting**
   - Add E2E tests in `Tests/Client.E2ETests/LlmIngestionE2ETests.cs` and run:
     ```powershell
     dotnet test --project Tests/Client.E2ETests/App.Client.E2ETests.csproj

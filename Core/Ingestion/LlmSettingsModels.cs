@@ -161,6 +161,21 @@ public record TestLlmConnectionRequest(
     [Range(5, 120)] int? TimeoutSeconds = 15
 );
 
+public record UpsertLlmModelProfileRequest(
+    [Required, MaxLength(150)] string DisplayName,
+    [Required, MaxLength(200)] string ModelTag,
+    IReadOnlyList<string>? MatchPrefixes = null,
+    [MaxLength(500)] string? Summary = null,
+    bool EnableThinking = false,
+    [Range(0.0, 2.0)] double? Temperature = null,
+    [Range(0.0, 1.0)] double? TopP = null,
+    [Range(1, 1000)] int? TopK = null,
+    [Range(2048, 65536)] int ContextWindowTokens = 32768,
+    [Range(5, 1800)] int RequestTimeoutSeconds = 600,
+    bool RecommendedAsRefineModel = false,
+    IReadOnlyList<string>? Notes = null
+);
+
 public record LlmConnectionTestResultDto(
     bool IsReachable,
     LlmProvider Provider,

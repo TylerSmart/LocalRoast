@@ -9,6 +9,7 @@ import type {
   LlmSettingsDto,
   TestLlmConnectionRequest,
   UpdateLlmSettingsRequest,
+  UpsertLlmModelProfileRequest,
 } from '../../models/ingestion.models';
 import { AiKitchenHelperService } from '../ai-helpers/ai-kitchen-helper.service';
 
@@ -24,6 +25,28 @@ export class LlmSettingsService {
 
   getModelProfiles(): Observable<LlmModelProfile[]> {
     return this.http.get<LlmModelProfile[]>(apiUrl('/llm-settings/model-profiles'));
+  }
+
+  createModelProfile(request: UpsertLlmModelProfileRequest): Observable<LlmModelProfile> {
+    return this.http.post<LlmModelProfile>(apiUrl('/llm-settings/model-profiles'), request);
+  }
+
+  updateModelProfile(
+    id: string,
+    request: UpsertLlmModelProfileRequest,
+  ): Observable<LlmModelProfile> {
+    return this.http.put<LlmModelProfile>(apiUrl(`/llm-settings/model-profiles/${id}`), request);
+  }
+
+  deleteModelProfile(id: string): Observable<void> {
+    return this.http.delete<void>(apiUrl(`/llm-settings/model-profiles/${id}`));
+  }
+
+  restoreDefaultModelProfiles(): Observable<LlmModelProfile[]> {
+    return this.http.post<LlmModelProfile[]>(
+      apiUrl('/llm-settings/model-profiles/restore-defaults'),
+      null,
+    );
   }
 
   updateSettings(request: UpdateLlmSettingsRequest): Observable<LlmSettingsDto> {
@@ -55,7 +78,7 @@ export class LlmSettingsService {
     const { LlmSettingsDialogComponent } =
       await import('../../../features/ingestion/llm-settings-dialog/llm-settings-dialog.component');
     return this.dialog.open(LlmSettingsDialogComponent, {
-      width: '620px',
+      width: '680px',
       maxWidth: '95vw',
       panelClass: 'llm-settings-dialog-panel',
       autoFocus: false,

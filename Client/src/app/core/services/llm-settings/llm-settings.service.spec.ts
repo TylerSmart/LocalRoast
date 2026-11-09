@@ -165,4 +165,168 @@ describe('LlmSettingsService', () => {
     const result = await promise;
     expect(result).toEqual(mockResult);
   });
+
+  it('creates model profile via POST /api/llm-settings/model-profiles', async () => {
+    const request = {
+      displayName: 'Qwen Custom',
+      modelTag: 'qwen:14b',
+    };
+    const mockCreated = {
+      id: 'qwen-custom',
+      displayName: 'Qwen Custom',
+      modelTag: 'qwen:14b',
+      matchPrefixes: [],
+      summary: '',
+      enableThinking: false,
+      temperature: null,
+      topP: null,
+      topK: null,
+      contextWindowTokens: 32768,
+      requestTimeoutSeconds: 600,
+      recommendedAsRefineModel: false,
+      notes: [],
+    };
+
+    const promise = firstValueFrom(service.createModelProfile(request));
+    const req = httpMock.expectOne('/api/llm-settings/model-profiles');
+    expect(req.request.method).toBe('POST');
+    expect(req.request.body).toEqual(request);
+    req.flush(mockCreated);
+
+    const result = await promise;
+    expect(result.id).toBe('qwen-custom');
+  });
+
+  it('updates model profile via PUT /api/llm-settings/model-profiles/:id', async () => {
+    const request = {
+      displayName: 'Updated Profile',
+      modelTag: 'updated:tag',
+    };
+    const mockUpdated = {
+      id: 'existing-profile',
+      displayName: 'Updated Profile',
+      modelTag: 'updated:tag',
+      matchPrefixes: [],
+      summary: '',
+      enableThinking: false,
+      temperature: null,
+      topP: null,
+      topK: null,
+      contextWindowTokens: 32768,
+      requestTimeoutSeconds: 600,
+      recommendedAsRefineModel: false,
+      notes: [],
+    };
+
+    const promise = firstValueFrom(service.updateModelProfile('existing-profile', request));
+    const req = httpMock.expectOne('/api/llm-settings/model-profiles/existing-profile');
+    expect(req.request.method).toBe('PUT');
+    req.flush(mockUpdated);
+
+    const result = await promise;
+    expect(result.displayName).toBe('Updated Profile');
+  });
+
+  it('deletes model profile via DELETE /api/llm-settings/model-profiles/:id', async () => {
+    const promise = firstValueFrom(service.deleteModelProfile('to-delete'));
+    const req = httpMock.expectOne('/api/llm-settings/model-profiles/to-delete');
+    expect(req.request.method).toBe('DELETE');
+    req.flush(null);
+
+    await promise;
+  });
+
+  it('restores default model profiles via POST /api/llm-settings/model-profiles/restore-defaults', async () => {
+    const mockList = [{ id: 'gemma4-e4b', displayName: 'Gemma 4 E4B' }];
+    const promise = firstValueFrom(service.restoreDefaultModelProfiles());
+    const req = httpMock.expectOne('/api/llm-settings/model-profiles/restore-defaults');
+    expect(req.request.method).toBe('POST');
+    req.flush(mockList);
+
+    const result = await promise;
+    expect(result.length).toBe(1);
+    expect(result[0].id).toBe('gemma4-e4b');
+  });
+
+  it('creates model profile via POST /api/llm-settings/model-profiles', async () => {
+    const request = {
+      displayName: 'Qwen Custom',
+      modelTag: 'qwen:14b',
+    };
+    const mockCreated = {
+      id: 'qwen-custom',
+      displayName: 'Qwen Custom',
+      modelTag: 'qwen:14b',
+      matchPrefixes: [],
+      summary: '',
+      enableThinking: false,
+      temperature: null,
+      topP: null,
+      topK: null,
+      contextWindowTokens: 32768,
+      requestTimeoutSeconds: 600,
+      recommendedAsRefineModel: false,
+      notes: [],
+    };
+
+    const promise = firstValueFrom(service.createModelProfile(request));
+    const req = httpMock.expectOne('/api/llm-settings/model-profiles');
+    expect(req.request.method).toBe('POST');
+    expect(req.request.body).toEqual(request);
+    req.flush(mockCreated);
+
+    const result = await promise;
+    expect(result.id).toBe('qwen-custom');
+  });
+
+  it('updates model profile via PUT /api/llm-settings/model-profiles/:id', async () => {
+    const request = {
+      displayName: 'Updated Profile',
+      modelTag: 'updated:tag',
+    };
+    const mockUpdated = {
+      id: 'existing-profile',
+      displayName: 'Updated Profile',
+      modelTag: 'updated:tag',
+      matchPrefixes: [],
+      summary: '',
+      enableThinking: false,
+      temperature: null,
+      topP: null,
+      topK: null,
+      contextWindowTokens: 32768,
+      requestTimeoutSeconds: 600,
+      recommendedAsRefineModel: false,
+      notes: [],
+    };
+
+    const promise = firstValueFrom(service.updateModelProfile('existing-profile', request));
+    const req = httpMock.expectOne('/api/llm-settings/model-profiles/existing-profile');
+    expect(req.request.method).toBe('PUT');
+    req.flush(mockUpdated);
+
+    const result = await promise;
+    expect(result.displayName).toBe('Updated Profile');
+  });
+
+  it('deletes model profile via DELETE /api/llm-settings/model-profiles/:id', async () => {
+    const promise = firstValueFrom(service.deleteModelProfile('to-delete'));
+    const req = httpMock.expectOne('/api/llm-settings/model-profiles/to-delete');
+    expect(req.request.method).toBe('DELETE');
+    req.flush(null);
+
+    await promise;
+  });
+
+  it('restores default model profiles via POST /api/llm-settings/model-profiles/restore-defaults', async () => {
+    const mockList = [{ id: 'gemma4-e4b', displayName: 'Gemma 4 E4B' }];
+    const promise = firstValueFrom(service.restoreDefaultModelProfiles());
+    const req = httpMock.expectOne('/api/llm-settings/model-profiles/restore-defaults');
+    expect(req.request.method).toBe('POST');
+    req.flush(mockList);
+
+    const result = await promise;
+    expect(result.length).toBe(1);
+    expect(result[0].id).toBe('gemma4-e4b');
+  });
 });

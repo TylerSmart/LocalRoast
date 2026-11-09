@@ -18,6 +18,27 @@ public interface ILlmSettingsService
         CancellationToken cancellationToken = default
     );
 
+    Task<IReadOnlyList<LlmModelProfileDto>> GetModelProfilesAsync(
+        CancellationToken cancellationToken = default
+    );
+
+    Task<LlmModelProfileDto> CreateModelProfileAsync(
+        UpsertLlmModelProfileRequest request,
+        CancellationToken cancellationToken = default
+    );
+
+    Task<LlmModelProfileDto> UpdateModelProfileAsync(
+        string id,
+        UpsertLlmModelProfileRequest request,
+        CancellationToken cancellationToken = default
+    );
+
+    Task DeleteModelProfileAsync(string id, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<LlmModelProfileDto>> RestoreDefaultModelProfilesAsync(
+        CancellationToken cancellationToken = default
+    );
+
     Task<LlmSettingsDto> SetIngestionEnabledAsync(
         bool enabled,
         CancellationToken cancellationToken = default

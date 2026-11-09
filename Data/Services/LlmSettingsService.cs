@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.RegularExpressions;
 using App.Core.Exceptions;
 using App.Core.Ingestion;
 using App.Data.Entities;
@@ -417,5 +419,357 @@ public sealed class LlmSettingsService(
         }
 
         return "••••" + trimmed[^4..];
+    }
+
+    public async Task<IReadOnlyList<LlmModelProfileDto>> GetModelProfilesAsync(
+        CancellationToken cancellationToken = default
+    )
+    {
+        await EnsureModelProfilesSeededAsync(cancellationToken);
+
+        var entities = await dbContext
+            .LlmModelProfiles.AsNoTracking()
+            .OrderBy(p => p.SortOrder)
+            .ThenBy(p => p.DisplayName)
+            .ToListAsync(cancellationToken);
+
+        return entities.Select(ToDto).ToList();
+    }
+
+    public async Task<LlmModelProfileDto> CreateModelProfileAsync(
+        UpsertLlmModelProfileRequest request,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ValidateProfileRequest(request);
+        await EnsureModelProfilesSeededAsync(cancellationToken);
+
+        var slug = await GenerateSlugAsync(request.DisplayName, cancellationToken);
+        var maxSortOrder =
+            await dbContext.LlmModelProfiles.MaxAsync(p => (int?)p.SortOrder, cancellationToken)
+            ?? -1;
+
+        var entity = new LlmModelProfile
+        {
+            Id = Guid.NewGuid(),
+            Slug = slug,
+            DisplayName = request.DisplayName.Trim(),
+            ModelTag = request.ModelTag.Trim(),
+            MatchPrefixesJson = JsonSerializer.Serialize(request.MatchPrefixes ?? []),
+            Summary = request.Summary?.Trim() ?? string.Empty,
+            EnableThinking = request.EnableThinking,
+            Temperature = request.Temperature,
+            TopP = request.TopP,
+            TopK = request.TopK,
+            ContextWindowTokens = request.ContextWindowTokens,
+            RequestTimeoutSeconds = request.RequestTimeoutSeconds,
+            RecommendedAsRefineModel = request.RecommendedAsRefineModel,
+            NotesJson = JsonSerializer.Serialize(request.Notes ?? []),
+            SortOrder = maxSortOrder + 1,
+            IsBuiltInDefault = false,
+            CreatedBy = "System",
+            ModifiedBy = "System",
+        };
+
+        dbContext.LlmModelProfiles.Add(entity);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return ToDto(entity);
+    }
+
+    public async Task<LlmModelProfileDto> UpdateModelProfileAsync(
+        string id,
+        UpsertLlmModelProfileRequest request,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ValidateProfileRequest(request);
+        await EnsureModelProfilesSeededAsync(cancellationToken);
+
+        var entity = await FindProfileAsync(id, cancellationToken);
+        if (entity is null)
+        {
+            throw new NotFoundException($"Model profile '{id}' not found.");
+        }
+
+        entity.DisplayName = request.DisplayName.Trim();
+        entity.ModelTag = request.ModelTag.Trim();
+        entity.MatchPrefixesJson = JsonSerializer.Serialize(request.MatchPrefixes ?? []);
+        entity.Summary = request.Summary?.Trim() ?? string.Empty;
+        entity.EnableThinking = request.EnableThinking;
+        entity.Temperature = request.Temperature;
+        entity.TopP = request.TopP;
+        entity.TopK = request.TopK;
+        entity.ContextWindowTokens = request.ContextWindowTokens;
+        entity.RequestTimeoutSeconds = request.RequestTimeoutSeconds;
+        entity.RecommendedAsRefineModel = request.RecommendedAsRefineModel;
+        entity.NotesJson = JsonSerializer.Serialize(request.Notes ?? []);
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return ToDto(entity);
+    }
+
+    public async Task DeleteModelProfileAsync(
+        string id,
+        CancellationToken cancellationToken = default
+    )
+    {
+        await EnsureModelProfilesSeededAsync(cancellationToken);
+
+        var entity = await FindProfileAsync(id, cancellationToken);
+        if (entity is null)
+        {
+            throw new NotFoundException($"Model profile '{id}' not found.");
+        }
+
+        dbContext.LlmModelProfiles.Remove(entity);
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<LlmModelProfileDto>> RestoreDefaultModelProfilesAsync(
+        CancellationToken cancellationToken = default
+    )
+    {
+        await EnsureModelProfilesSeededAsync(cancellationToken);
+
+        for (var i = 0; i < LlmModelProfiles.All.Count; i++)
+        {
+            var def = LlmModelProfiles.All[i];
+            var existing = await dbContext.LlmModelProfiles.FirstOrDefaultAsync(
+                p => p.Slug.ToLower() == def.Id.ToLower(),
+                cancellationToken
+            );
+
+            if (existing is not null)
+            {
+                existing.DisplayName = def.DisplayName;
+                existing.ModelTag = def.ModelTag;
+                existing.MatchPrefixesJson = JsonSerializer.Serialize(def.MatchPrefixes);
+                existing.Summary = def.Summary;
+                existing.EnableThinking = def.EnableThinking;
+                existing.Temperature = def.Temperature;
+                existing.TopP = def.TopP;
+                existing.TopK = def.TopK;
+                existing.ContextWindowTokens = def.ContextWindowTokens;
+                existing.RequestTimeoutSeconds = def.RequestTimeoutSeconds;
+                existing.RecommendedAsRefineModel = def.RecommendedAsRefineModel;
+                existing.NotesJson = JsonSerializer.Serialize(def.Notes);
+                existing.SortOrder = i;
+                existing.IsBuiltInDefault = true;
+            }
+            else
+            {
+                dbContext.LlmModelProfiles.Add(
+                    new LlmModelProfile
+                    {
+                        Id = Guid.NewGuid(),
+                        Slug = def.Id,
+                        DisplayName = def.DisplayName,
+                        ModelTag = def.ModelTag,
+                        MatchPrefixesJson = JsonSerializer.Serialize(def.MatchPrefixes),
+                        Summary = def.Summary,
+                        EnableThinking = def.EnableThinking,
+                        Temperature = def.Temperature,
+                        TopP = def.TopP,
+                        TopK = def.TopK,
+                        ContextWindowTokens = def.ContextWindowTokens,
+                        RequestTimeoutSeconds = def.RequestTimeoutSeconds,
+                        RecommendedAsRefineModel = def.RecommendedAsRefineModel,
+                        NotesJson = JsonSerializer.Serialize(def.Notes),
+                        SortOrder = i,
+                        IsBuiltInDefault = true,
+                        CreatedBy = "System",
+                        ModifiedBy = "System",
+                    }
+                );
+            }
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return await GetModelProfilesAsync(cancellationToken);
+    }
+
+    private async Task EnsureModelProfilesSeededAsync(CancellationToken cancellationToken)
+    {
+        var settings = await dbContext.HouseholdLlmSettings.FirstOrDefaultAsync(
+            s => s.SingletonKey == HouseholdLlmSettings.DefaultSingletonKey,
+            cancellationToken
+        );
+
+        if (settings is null)
+        {
+            settings = CreateFromDefaults();
+            dbContext.HouseholdLlmSettings.Add(settings);
+        }
+
+        if (!settings.ModelProfilesSeeded)
+        {
+            var anyProfiles = await dbContext.LlmModelProfiles.AnyAsync(cancellationToken);
+            if (!anyProfiles)
+            {
+                for (var i = 0; i < LlmModelProfiles.All.Count; i++)
+                {
+                    var p = LlmModelProfiles.All[i];
+                    dbContext.LlmModelProfiles.Add(
+                        new LlmModelProfile
+                        {
+                            Id = Guid.NewGuid(),
+                            Slug = p.Id,
+                            DisplayName = p.DisplayName,
+                            ModelTag = p.ModelTag,
+                            MatchPrefixesJson = JsonSerializer.Serialize(p.MatchPrefixes),
+                            Summary = p.Summary,
+                            EnableThinking = p.EnableThinking,
+                            Temperature = p.Temperature,
+                            TopP = p.TopP,
+                            TopK = p.TopK,
+                            ContextWindowTokens = p.ContextWindowTokens,
+                            RequestTimeoutSeconds = p.RequestTimeoutSeconds,
+                            RecommendedAsRefineModel = p.RecommendedAsRefineModel,
+                            NotesJson = JsonSerializer.Serialize(p.Notes),
+                            SortOrder = i,
+                            IsBuiltInDefault = true,
+                            CreatedBy = "System",
+                            ModifiedBy = "System",
+                        }
+                    );
+                }
+            }
+
+            settings.ModelProfilesSeeded = true;
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+    }
+
+    private async Task<LlmModelProfile?> FindProfileAsync(
+        string id,
+        CancellationToken cancellationToken
+    )
+    {
+        var trimmed = id.Trim();
+        if (Guid.TryParse(trimmed, out var guid))
+        {
+            var byGuid = await dbContext.LlmModelProfiles.FirstOrDefaultAsync(
+                p => p.Id == guid,
+                cancellationToken
+            );
+            if (byGuid is not null)
+            {
+                return byGuid;
+            }
+        }
+
+        return await dbContext.LlmModelProfiles.FirstOrDefaultAsync(
+            p => p.Slug.ToLower() == trimmed.ToLower(),
+            cancellationToken
+        );
+    }
+
+    private async Task<string> GenerateSlugAsync(
+        string displayName,
+        CancellationToken cancellationToken
+    )
+    {
+        var raw = displayName.Trim().ToLowerInvariant();
+        var slug = Regex.Replace(raw, @"[^a-z0-9]+", "-").Trim('-');
+        if (string.IsNullOrEmpty(slug))
+        {
+            slug = "custom-profile";
+        }
+
+        var candidate = slug;
+        var counter = 2;
+        while (
+            await dbContext.LlmModelProfiles.AnyAsync(p => p.Slug == candidate, cancellationToken)
+        )
+        {
+            candidate = $"{slug}-{counter}";
+            counter++;
+        }
+
+        return candidate;
+    }
+
+    private static void ValidateProfileRequest(UpsertLlmModelProfileRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.DisplayName))
+        {
+            throw new DomainValidationException("DisplayName is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.ModelTag))
+        {
+            throw new DomainValidationException("ModelTag is required.");
+        }
+
+        if (request.ContextWindowTokens < 2048 || request.ContextWindowTokens > 65536)
+        {
+            throw new DomainValidationException(
+                "ContextWindowTokens must be between 2048 and 65536."
+            );
+        }
+
+        if (request.RequestTimeoutSeconds < 5 || request.RequestTimeoutSeconds > 1800)
+        {
+            throw new DomainValidationException(
+                "RequestTimeoutSeconds must be between 5 and 1800."
+            );
+        }
+
+        if (request.Temperature is < 0.0 or > 2.0)
+        {
+            throw new DomainValidationException("Temperature must be between 0.0 and 2.0.");
+        }
+
+        if (request.TopP is < 0.0 or > 1.0)
+        {
+            throw new DomainValidationException("TopP must be between 0.0 and 1.0.");
+        }
+
+        if (request.TopK is < 1 or > 1000)
+        {
+            throw new DomainValidationException("TopK must be between 1 and 1000.");
+        }
+    }
+
+    private static LlmModelProfileDto ToDto(LlmModelProfile p)
+    {
+        IReadOnlyList<string> matchPrefixes;
+        try
+        {
+            matchPrefixes = JsonSerializer.Deserialize<List<string>>(p.MatchPrefixesJson) ?? [];
+        }
+        catch
+        {
+            matchPrefixes = [];
+        }
+
+        IReadOnlyList<string> notes;
+        try
+        {
+            notes = JsonSerializer.Deserialize<List<string>>(p.NotesJson) ?? [];
+        }
+        catch
+        {
+            notes = [];
+        }
+
+        return new LlmModelProfileDto(
+            Id: p.Slug,
+            DisplayName: p.DisplayName,
+            ModelTag: p.ModelTag,
+            MatchPrefixes: matchPrefixes,
+            Summary: p.Summary,
+            EnableThinking: p.EnableThinking,
+            Temperature: p.Temperature,
+            TopP: p.TopP,
+            TopK: p.TopK,
+            ContextWindowTokens: p.ContextWindowTokens,
+            RequestTimeoutSeconds: p.RequestTimeoutSeconds,
+            RecommendedAsRefineModel: p.RecommendedAsRefineModel,
+            Notes: notes,
+            IsBuiltInDefault: p.IsBuiltInDefault
+        );
     }
 }

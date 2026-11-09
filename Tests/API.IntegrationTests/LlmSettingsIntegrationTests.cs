@@ -481,4 +481,227 @@ public sealed class LlmSettingsIntegrationTests
         Assert.IsNotNull(enabled);
         Assert.IsTrue(enabled.EnableIngestion);
     }
+
+    [TestMethod]
+    public async Task GetModelProfiles_Authenticated_ReturnsSeededDefaults()
+    {
+        await AuthenticateAsync(_client);
+
+        var response = await _client.GetAsync("/api/llm-settings/model-profiles");
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+
+        var profiles = await response.Content.ReadFromJsonAsync<List<LlmModelProfileDto>>();
+        Assert.IsNotNull(profiles);
+        Assert.AreEqual(5, profiles.Count);
+        Assert.IsTrue(profiles.Any(p => p.Id == "gemma4-e4b" && p.IsBuiltInDefault));
+        Assert.IsTrue(profiles.Any(p => p.Id == "gemma4-e2b" && p.IsBuiltInDefault));
+        Assert.IsTrue(profiles.Any(p => p.Id == "gemma4-12b" && p.IsBuiltInDefault));
+        Assert.IsTrue(
+            profiles.Any(p => p.Id == "gemma4-12b-thinking" && p.RecommendedAsRefineModel)
+        );
+        Assert.IsTrue(profiles.Any(p => p.Id == "gemma4-26b-a4b" && p.RecommendedAsRefineModel));
+    }
+
+    [TestMethod]
+    public async Task CreateModelProfile_ValidRequest_CreatesAndReturns201()
+    {
+        await AuthenticateAsync(_client);
+
+        var req = new UpsertLlmModelProfileRequest(
+            DisplayName: "Qwen 2.5 14B Custom",
+            ModelTag: "qwen2.5:14b",
+            MatchPrefixes: ["qwen2.5:14b"],
+            Summary: "Solid mid-size model for high-fidelity extraction.",
+            EnableThinking: true,
+            Temperature: 0.7,
+            TopP: 0.9,
+            TopK: 40,
+            ContextWindowTokens: 16384,
+            RequestTimeoutSeconds: 450,
+            RecommendedAsRefineModel: true,
+            Notes: ["Custom Ollama build"]
+        );
+
+        var postResponse = await _client.PostAsJsonAsync("/api/llm-settings/model-profiles", req);
+        Assert.AreEqual(HttpStatusCode.Created, postResponse.StatusCode);
+
+        var created = await postResponse.Content.ReadFromJsonAsync<LlmModelProfileDto>();
+        Assert.IsNotNull(created);
+        Assert.AreEqual("qwen-2-5-14b-custom", created.Id);
+        Assert.AreEqual("Qwen 2.5 14B Custom", created.DisplayName);
+        Assert.AreEqual("qwen2.5:14b", created.ModelTag);
+        Assert.IsFalse(created.IsBuiltInDefault);
+        Assert.AreEqual(16384, created.ContextWindowTokens);
+        Assert.AreEqual(450, created.RequestTimeoutSeconds);
+        Assert.IsTrue(created.RecommendedAsRefineModel);
+
+        var getResponse = await _client.GetAsync("/api/llm-settings/model-profiles");
+        var list = await getResponse.Content.ReadFromJsonAsync<List<LlmModelProfileDto>>();
+        Assert.IsNotNull(list);
+        Assert.AreEqual(6, list.Count);
+        Assert.IsTrue(list.Any(p => p.Id == created.Id));
+    }
+
+    [TestMethod]
+    public async Task UpdateModelProfile_ValidRequest_UpdatesAndReturns200()
+    {
+        await AuthenticateAsync(_client);
+
+        var req = new UpsertLlmModelProfileRequest(
+            DisplayName: "Test Custom Model",
+            ModelTag: "test:latest",
+            Summary: "Initial summary."
+        );
+        var postResponse = await _client.PostAsJsonAsync("/api/llm-settings/model-profiles", req);
+        var created = await postResponse.Content.ReadFromJsonAsync<LlmModelProfileDto>();
+        Assert.IsNotNull(created);
+
+        var updateReq = req with
+        {
+            Summary = "Updated summary.",
+            Temperature = 0.5,
+            RequestTimeoutSeconds = 800,
+        };
+        var putResponse = await _client.PutAsJsonAsync(
+            $"/api/llm-settings/model-profiles/{created.Id}",
+            updateReq
+        );
+        Assert.AreEqual(HttpStatusCode.OK, putResponse.StatusCode);
+
+        var updated = await putResponse.Content.ReadFromJsonAsync<LlmModelProfileDto>();
+        Assert.IsNotNull(updated);
+        Assert.AreEqual("Updated summary.", updated.Summary);
+        Assert.AreEqual(0.5, updated.Temperature);
+        Assert.AreEqual(800, updated.RequestTimeoutSeconds);
+    }
+
+    [TestMethod]
+    public async Task UpdateModelProfile_NotFound_Returns404()
+    {
+        await AuthenticateAsync(_client);
+
+        var updateReq = new UpsertLlmModelProfileRequest(
+            DisplayName: "Missing Model",
+            ModelTag: "missing:tag"
+        );
+        var putResponse = await _client.PutAsJsonAsync(
+            "/api/llm-settings/model-profiles/does-not-exist",
+            updateReq
+        );
+        Assert.AreEqual(HttpStatusCode.NotFound, putResponse.StatusCode);
+    }
+
+    [TestMethod]
+    public async Task DeleteModelProfile_ValidId_DeletesAndReturns204()
+    {
+        await AuthenticateAsync(_client);
+
+        var req = new UpsertLlmModelProfileRequest(
+            DisplayName: "To Be Deleted",
+            ModelTag: "delete-me:latest"
+        );
+        var postResponse = await _client.PostAsJsonAsync("/api/llm-settings/model-profiles", req);
+        var created = await postResponse.Content.ReadFromJsonAsync<LlmModelProfileDto>();
+        Assert.IsNotNull(created);
+
+        var deleteResponse = await _client.DeleteAsync(
+            $"/api/llm-settings/model-profiles/{created.Id}"
+        );
+        Assert.AreEqual(HttpStatusCode.NoContent, deleteResponse.StatusCode);
+
+        var getResponse = await _client.GetAsync("/api/llm-settings/model-profiles");
+        var list = await getResponse.Content.ReadFromJsonAsync<List<LlmModelProfileDto>>();
+        Assert.IsNotNull(list);
+        Assert.IsFalse(list.Any(p => p.Id == created.Id));
+    }
+
+    [TestMethod]
+    public async Task DeleteModelProfile_NotFound_Returns404()
+    {
+        await AuthenticateAsync(_client);
+
+        var deleteResponse = await _client.DeleteAsync(
+            "/api/llm-settings/model-profiles/does-not-exist"
+        );
+        Assert.AreEqual(HttpStatusCode.NotFound, deleteResponse.StatusCode);
+    }
+
+    [TestMethod]
+    public async Task RestoreDefaultModelProfiles_RestoresDefaultsPreservingCustomProfiles()
+    {
+        await AuthenticateAsync(_client);
+
+        // Create a custom profile
+        var customReq = new UpsertLlmModelProfileRequest(
+            DisplayName: "Custom Profile To Keep",
+            ModelTag: "keep-me:latest"
+        );
+        var postResponse = await _client.PostAsJsonAsync(
+            "/api/llm-settings/model-profiles",
+            customReq
+        );
+        var customCreated = await postResponse.Content.ReadFromJsonAsync<LlmModelProfileDto>();
+        Assert.IsNotNull(customCreated);
+
+        // Delete one default profile
+        var deleteResponse = await _client.DeleteAsync(
+            "/api/llm-settings/model-profiles/gemma4-e2b"
+        );
+        Assert.AreEqual(HttpStatusCode.NoContent, deleteResponse.StatusCode);
+
+        // Modify another default profile
+        var updateReq = new UpsertLlmModelProfileRequest(
+            DisplayName: "Modified Gemma 4 E4B",
+            ModelTag: "gemma4:e4b",
+            Summary: "Overridden summary."
+        );
+        var putResponse = await _client.PutAsJsonAsync(
+            "/api/llm-settings/model-profiles/gemma4-e4b",
+            updateReq
+        );
+        Assert.AreEqual(HttpStatusCode.OK, putResponse.StatusCode);
+
+        // Restore defaults
+        var restoreResponse = await _client.PostAsync(
+            "/api/llm-settings/model-profiles/restore-defaults",
+            null
+        );
+        Assert.AreEqual(HttpStatusCode.OK, restoreResponse.StatusCode);
+
+        var list = await restoreResponse.Content.ReadFromJsonAsync<List<LlmModelProfileDto>>();
+        Assert.IsNotNull(list);
+
+        // Both gemma4-e2b restored and gemma4-e4b reset to default
+        var e2b = list.FirstOrDefault(p => p.Id == "gemma4-e2b");
+        Assert.IsNotNull(e2b);
+
+        var e4b = list.FirstOrDefault(p => p.Id == "gemma4-e4b");
+        Assert.IsNotNull(e4b);
+        Assert.AreEqual("Gemma 4 E4B", e4b.DisplayName);
+        StringAssert.Contains(e4b.Summary, "Default choice");
+
+        // Custom profile is still intact
+        var custom = list.FirstOrDefault(p => p.Id == customCreated.Id);
+        Assert.IsNotNull(custom);
+    }
+
+    [TestMethod]
+    public async Task CreateModelProfile_ValidationErrors_ReturnsBadRequest()
+    {
+        await AuthenticateAsync(_client);
+
+        // Missing DisplayName
+        var invalidReq = new UpsertLlmModelProfileRequest(DisplayName: "", ModelTag: "valid:tag");
+        var resp1 = await _client.PostAsJsonAsync("/api/llm-settings/model-profiles", invalidReq);
+        Assert.AreEqual(HttpStatusCode.BadRequest, resp1.StatusCode);
+
+        // Invalid temperature
+        var invalidTemp = new UpsertLlmModelProfileRequest(
+            DisplayName: "Bad Temp",
+            ModelTag: "valid:tag",
+            Temperature: 3.5
+        );
+        var resp2 = await _client.PostAsJsonAsync("/api/llm-settings/model-profiles", invalidTemp);
+        Assert.AreEqual(HttpStatusCode.BadRequest, resp2.StatusCode);
+    }
 }

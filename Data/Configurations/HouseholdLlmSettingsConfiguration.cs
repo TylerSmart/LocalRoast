@@ -24,6 +24,7 @@ public sealed class HouseholdLlmSettingsConfiguration
         builder.Property(s => s.OllamaKeepAlive).IsRequired().HasMaxLength(32);
         builder.Property(s => s.ContextWindowTokens).HasDefaultValue(8192);
         builder.Property(s => s.RefineModel).HasMaxLength(200);
+        builder.Property(s => s.ModelProfilesSeeded).HasDefaultValue(false);
 
         builder.Property(s => s.CreatedBy).IsRequired().HasMaxLength(256);
         builder.Property(s => s.ModifiedBy).IsRequired().HasMaxLength(256);
