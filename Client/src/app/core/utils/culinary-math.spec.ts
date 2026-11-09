@@ -214,6 +214,64 @@ describe('culinary-math', () => {
       expect(res.unitLabel).toBe('cloves');
       expect(res.formattedAmount).toBe('4');
     });
+
+    describe('unit simplification during scaling', () => {
+      it('should simplify 1 tbsp * 4 to 1/4 cup', () => {
+        const res = scaleAndConvert(1, null, 'Tbsp', null, 4, 'Original');
+        expect(res.unit).toBe('Cup');
+        expect(res.unitLabel).toBe('cup');
+        expect(res.formattedAmount).toBe('1/4');
+      });
+
+      it('should simplify 2 tbsp * 4 to 1/2 cup', () => {
+        const res = scaleAndConvert(2, null, 'Tbsp', null, 4, 'Original');
+        expect(res.unit).toBe('Cup');
+        expect(res.unitLabel).toBe('cup');
+        expect(res.formattedAmount).toBe('1/2');
+      });
+
+      it('should simplify 3 tsp to 1 tbsp when scaling 1 tsp * 3', () => {
+        const res = scaleAndConvert(1, null, 'Tsp', null, 3, 'Original');
+        expect(res.unit).toBe('Tbsp');
+        expect(res.unitLabel).toBe('tbsp');
+        expect(res.formattedAmount).toBe('1');
+      });
+
+      it('should simplify 16 oz to 1 lb when scaling 8 oz * 2', () => {
+        const res = scaleAndConvert(8, null, 'Oz', null, 2, 'Original');
+        expect(res.unit).toBe('Lb');
+        expect(res.unitLabel).toBe('lb');
+        expect(res.formattedAmount).toBe('1');
+      });
+
+      it('should simplify 1/4 cup * 0.5 to 2 tbsp', () => {
+        const res = scaleAndConvert(0.25, null, 'Cup', null, 0.5, 'Original');
+        expect(res.unit).toBe('Tbsp');
+        expect(res.unitLabel).toBe('tbsp');
+        expect(res.formattedAmount).toBe('2');
+      });
+
+      it('should simplify 1 tbsp * 0.5 to 1 1/2 tsp', () => {
+        const res = scaleAndConvert(1, null, 'Tbsp', null, 0.5, 'Original');
+        expect(res.unit).toBe('Tsp');
+        expect(res.unitLabel).toBe('tsp');
+        expect(res.formattedAmount).toBe('1 1/2');
+      });
+
+      it('should simplify 1/4 lb * 0.5 to 2 oz', () => {
+        const res = scaleAndConvert(0.25, null, 'Lb', null, 0.5, 'Original');
+        expect(res.unit).toBe('Oz');
+        expect(res.unitLabel).toBe('oz');
+        expect(res.formattedAmount).toBe('2');
+      });
+
+      it('should preserve original unit when scale factor is 1', () => {
+        const res = scaleAndConvert(4, null, 'Tbsp', null, 1, 'Original');
+        expect(res.unit).toBe('Tbsp');
+        expect(res.unitLabel).toBe('tbsp');
+        expect(res.formattedAmount).toBe('4');
+      });
+    });
   });
 
   describe('formatCountdown', () => {

@@ -383,37 +383,249 @@ export function formatMinutes(minutes: number | null | undefined): string {
   return remMins > 0 ? `${hrs} hr ${remMins} min` : `${hrs} hr`;
 }
 
+const CLEAN_CUP_FRACTIONS: [number, number][] = [
+  [0.0, 0.0],
+  [0.25, 0.25],
+  [1 / 3, 1 / 3],
+  [0.5, 0.5],
+  [2 / 3, 2 / 3],
+  [0.75, 0.75],
+  [1.0, 1.0],
+];
+
+function isCleanMultiple(val: number, step: number): { isClean: boolean; snappedVal: number } {
+  if (step <= 0 || val <= 0) {
+    return { isClean: false, snappedVal: val };
+  }
+  const ratio = val / step;
+  const rounded = Math.round(ratio);
+  if (Math.abs(ratio - rounded) <= 0.015) {
+    return { isClean: true, snappedVal: rounded * step };
+  }
+  return { isClean: false, snappedVal: val };
+}
+
+function isCleanCupAmount(cups: number): { isClean: boolean; snappedCups: number } {
+  const whole = Math.floor(cups);
+  const frac = cups - whole;
+  for (const [target, snapped] of CLEAN_CUP_FRACTIONS) {
+    if (Math.abs(frac - target) <= 0.015) {
+      return { isClean: true, snappedCups: whole + snapped };
+    }
+  }
+  return { isClean: false, snappedCups: cups };
+}
+
+function simplifySingleUnit(
+  qty: number,
+  unit: MeasurementUnit,
+): { qty: number; unit: MeasurementUnit } {
+  switch (unit) {
+    case 'Cup':
+      if (qty < 0.25) {
+        const tsp = qty * 48;
+        const cleanTsp15 = isCleanMultiple(tsp, 1.5);
+        if (cleanTsp15.isClean) {
+          return { qty: cleanTsp15.snappedVal / 3, unit: 'Tbsp' };
+        }
+        const cleanTsp025 = isCleanMultiple(tsp, 0.25);
+        if (cleanTsp025.isClean) {
+          return { qty: cleanTsp025.snappedVal, unit: 'Tsp' };
+        }
+      }
+      break;
+
+    case 'Tbsp':
+      if (qty < 1) {
+        const tsp = qty * 3;
+        const cleanTsp = isCleanMultiple(tsp, 0.25);
+        if (cleanTsp.isClean) {
+          return { qty: cleanTsp.snappedVal, unit: 'Tsp' };
+        }
+      } else if (qty >= 4) {
+        const cups = qty / 16;
+        if (cups >= 4) {
+          const cleanQt = isCleanMultiple(cups / 4, 0.25);
+          if (cleanQt.isClean) {
+            return { qty: cleanQt.snappedVal, unit: 'Qt' };
+          }
+        }
+        const cleanCups = isCleanCupAmount(cups);
+        if (cleanCups.isClean) {
+          return { qty: cleanCups.snappedCups, unit: 'Cup' };
+        }
+      }
+      break;
+
+    case 'Tsp':
+      if (qty >= 3) {
+        const cups = qty / 48;
+        if (qty >= 12) {
+          const cleanCups = isCleanCupAmount(cups);
+          if (cleanCups.isClean) {
+            if (cleanCups.snappedCups >= 4) {
+              const cleanQt = isCleanMultiple(cleanCups.snappedCups / 4, 0.25);
+              if (cleanQt.isClean) {
+                return { qty: cleanQt.snappedVal, unit: 'Qt' };
+              }
+            }
+            return { qty: cleanCups.snappedCups, unit: 'Cup' };
+          }
+        }
+        const tbsp = qty / 3;
+        const cleanTbsp = isCleanMultiple(tbsp, 0.5);
+        if (cleanTbsp.isClean) {
+          return { qty: cleanTbsp.snappedVal, unit: 'Tbsp' };
+        }
+      }
+      break;
+
+    case 'Qt':
+      if (qty < 1) {
+        const cups = qty * 4;
+        if (cups < 4) {
+          const cleanCups = isCleanCupAmount(cups);
+          if (cleanCups.isClean) {
+            if (cleanCups.snappedCups < 0.25) {
+              const tsp = cleanCups.snappedCups * 48;
+              const cleanTsp15 = isCleanMultiple(tsp, 1.5);
+              if (cleanTsp15.isClean) {
+                return { qty: cleanTsp15.snappedVal / 3, unit: 'Tbsp' };
+              }
+              const cleanTsp025 = isCleanMultiple(tsp, 0.25);
+              if (cleanTsp025.isClean) {
+                return { qty: cleanTsp025.snappedVal, unit: 'Tsp' };
+              }
+            }
+            return { qty: cleanCups.snappedCups, unit: 'Cup' };
+          }
+        }
+      }
+      break;
+
+    case 'Oz':
+      if (qty >= 16) {
+        const lbs = qty / 16;
+        const cleanLbs = isCleanMultiple(lbs, 0.25);
+        if (cleanLbs.isClean) {
+          return { qty: cleanLbs.snappedVal, unit: 'Lb' };
+        }
+      }
+      break;
+
+    case 'Lb':
+      if (qty < 0.25) {
+        return { qty: qty * 16, unit: 'Oz' };
+      }
+      break;
+
+    case 'L':
+      if (qty < 0.1) {
+        return { qty: qty * 1000, unit: 'Ml' };
+      }
+      break;
+
+    case 'Ml':
+      if (qty >= 1000) {
+        return { qty: qty / 1000, unit: 'L' };
+      }
+      break;
+
+    case 'Kg':
+      if (qty < 0.1) {
+        return { qty: qty * 1000, unit: 'G' };
+      }
+      break;
+
+    case 'G':
+      if (qty >= 1000) {
+        return { qty: qty / 1000, unit: 'Kg' };
+      }
+      break;
+  }
+  return { qty, unit };
+}
+
+function simplifyIntraSystemUnit(
+  qty: number,
+  maxQty: number | null | undefined,
+  unit: MeasurementUnit,
+): { qty: number; maxQty: number | null | undefined; unit: MeasurementUnit } {
+  const { qty: simplifiedQty, unit: targetUnit } = simplifySingleUnit(qty, unit);
+  if (maxQty === null || maxQty === undefined || maxQty <= qty) {
+    let simplifiedMaxQty: number | null = null;
+    if (maxQty !== null && maxQty !== undefined) {
+      simplifiedMaxQty = simplifySingleUnit(maxQty, unit).qty;
+    }
+    return { qty: simplifiedQty, maxQty: simplifiedMaxQty, unit: targetUnit };
+  }
+
+  const { qty: simplifiedMax, unit: maxTargetUnit } = simplifySingleUnit(maxQty, unit);
+  if (targetUnit === maxTargetUnit) {
+    return { qty: simplifiedQty, maxQty: simplifiedMax, unit: targetUnit };
+  }
+
+  return { qty, maxQty, unit };
+}
+
 function convertUnit(
   qty: number,
   maxQty: number | null | undefined,
   unit: MeasurementUnit | null | undefined,
   targetSystem: UnitSystem,
+  scaleFactor: number,
 ): { qty: number; maxQty: number | null | undefined; unit: MeasurementUnit | null | undefined } {
-  if (!unit || targetSystem === 'Original') {
+  if (!unit) {
     return { qty, maxQty, unit };
   }
 
+  if (targetSystem === 'Original') {
+    if (scaleFactor === 1) {
+      return { qty, maxQty, unit };
+    }
+    return simplifyIntraSystemUnit(qty, maxQty, unit);
+  }
+
   if (targetSystem === 'Metric') {
+    let convQty = qty;
+    let convMaxQty = maxQty;
+    let convUnit = unit;
+
     const mlFactor = getVolumeMlFactor(unit);
     if (mlFactor !== null) {
       const ml = qty * mlFactor;
       const maxMl = maxQty !== null && maxQty !== undefined ? maxQty * mlFactor : null;
       if (ml >= 1000) {
-        return { qty: ml / 1000, maxQty: maxMl !== null ? maxMl / 1000 : null, unit: 'L' };
+        convQty = ml / 1000;
+        convMaxQty = maxMl !== null ? maxMl / 1000 : null;
+        convUnit = 'L';
+      } else {
+        convQty = ml;
+        convMaxQty = maxMl;
+        convUnit = 'Ml';
       }
-      return { qty: ml, maxQty: maxMl, unit: 'Ml' };
-    }
-
-    const gFactor = getWeightGFactor(unit);
-    if (gFactor !== null) {
-      const g = qty * gFactor;
-      const maxG = maxQty !== null && maxQty !== undefined ? maxQty * gFactor : null;
-      if (g >= 1000) {
-        return { qty: g / 1000, maxQty: maxG !== null ? maxG / 1000 : null, unit: 'Kg' };
+    } else {
+      const gFactor = getWeightGFactor(unit);
+      if (gFactor !== null) {
+        const g = qty * gFactor;
+        const maxG = maxQty !== null && maxQty !== undefined ? maxQty * gFactor : null;
+        if (g >= 1000) {
+          convQty = g / 1000;
+          convMaxQty = maxG !== null ? maxG / 1000 : null;
+          convUnit = 'Kg';
+        } else {
+          convQty = g;
+          convMaxQty = maxG;
+          convUnit = 'G';
+        }
       }
-      return { qty: g, maxQty: maxG, unit: 'G' };
     }
+    return simplifyIntraSystemUnit(convQty, convMaxQty, convUnit);
   } else if (targetSystem === 'UsCustomary') {
+    let convQty = qty;
+    let convMaxQty = maxQty;
+    let convUnit = unit;
+
     if (unit === 'Ml' || unit === 'L') {
       const ml = unit === 'L' ? qty * 1000 : qty;
       const maxMl =
@@ -421,32 +633,43 @@ function convertUnit(
 
       if (ml < 14.7868) {
         const f = 4.92892;
-        return { qty: ml / f, maxQty: maxMl !== null ? maxMl / f : null, unit: 'Tsp' };
-      }
-      if (ml < 59.147) {
+        convQty = ml / f;
+        convMaxQty = maxMl !== null ? maxMl / f : null;
+        convUnit = 'Tsp';
+      } else if (ml < 59.147) {
         const f = 14.7868;
-        return { qty: ml / f, maxQty: maxMl !== null ? maxMl / f : null, unit: 'Tbsp' };
-      }
-      if (ml < 946.353) {
+        convQty = ml / f;
+        convMaxQty = maxMl !== null ? maxMl / f : null;
+        convUnit = 'Tbsp';
+      } else if (ml < 946.353) {
         const f = 236.588;
-        return { qty: ml / f, maxQty: maxMl !== null ? maxMl / f : null, unit: 'Cup' };
+        convQty = ml / f;
+        convMaxQty = maxMl !== null ? maxMl / f : null;
+        convUnit = 'Cup';
+      } else {
+        const qtf = 946.353;
+        convQty = ml / qtf;
+        convMaxQty = maxMl !== null ? maxMl / qtf : null;
+        convUnit = 'Qt';
       }
-      const qtf = 946.353;
-      return { qty: ml / qtf, maxQty: maxMl !== null ? maxMl / qtf : null, unit: 'Qt' };
-    }
-
-    if (unit === 'G' || unit === 'Kg') {
+    } else if (unit === 'G' || unit === 'Kg') {
       const g = unit === 'Kg' ? qty * 1000 : qty;
       const maxG =
         maxQty !== null && maxQty !== undefined ? (unit === 'Kg' ? maxQty * 1000 : maxQty) : null;
 
       if (g < 453.592) {
         const ozf = 28.3495;
-        return { qty: g / ozf, maxQty: maxG !== null ? maxG / ozf : null, unit: 'Oz' };
+        convQty = g / ozf;
+        convMaxQty = maxG !== null ? maxG / ozf : null;
+        convUnit = 'Oz';
+      } else {
+        const lbf = 453.592;
+        convQty = g / lbf;
+        convMaxQty = maxG !== null ? maxG / lbf : null;
+        convUnit = 'Lb';
       }
-      const lbf = 453.592;
-      return { qty: g / lbf, maxQty: maxG !== null ? maxG / lbf : null, unit: 'Lb' };
     }
+    return simplifyIntraSystemUnit(convQty, convMaxQty, convUnit);
   }
 
   return { qty, maxQty, unit };
@@ -477,7 +700,7 @@ export function scaleAndConvert(
   const scaledMaxQty =
     maxQuantity !== null && maxQuantity !== undefined ? maxQuantity * effectiveFactor : null;
 
-  const converted = convertUnit(scaledQty, scaledMaxQty, unit, targetSystem);
+  const converted = convertUnit(scaledQty, scaledMaxQty, unit, targetSystem, effectiveFactor);
   const isMetric = isMetricUnit(converted.unit);
   const unitLabel = getUnitLabel(converted.unit, customUnitName, converted.qty);
   const formattedAmount = formatAmount(converted.qty, converted.maxQty, isMetric);

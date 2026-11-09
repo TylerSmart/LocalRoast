@@ -159,7 +159,8 @@ describe('RecipeDetailPreviewComponent', () => {
     expect(component.scaleFactor()).toBe(2);
 
     const map = component.scaledIngredientsMap();
-    expect(map.get(0)?.scaled.formattedAmount).toBe('4'); // 2 tbsp * 2 = 4 tbsp
+    expect(map.get(0)?.scaled.formattedAmount).toBe('1/4'); // 2 tbsp * 2 = 4 tbsp -> 1/4 cup
+    expect(map.get(0)?.scaled.unit).toBe('Cup');
   });
 
   it('scales a one-serving starter to half with the assigned step amount and authored weight equivalent', () => {

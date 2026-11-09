@@ -275,9 +275,21 @@
     .toggle-label {
       display: none;
     }
+    mat-icon {
+      margin: 0 !important;
+    }
   }
 
-  .cover-action button span {
-    display: none;
+  .cover-action button {
+    padding: 0 8px;
+    min-width: 36px;
+
+    span {
+      display: none;
+    }
+
+    mat-icon {
+      margin: 0 !important;
+    }
   }
 }
