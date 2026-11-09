@@ -93,6 +93,18 @@
           <span>{{ isRerunning() ? 'Re-queueing...' : 'Rerun' }}</span>
         </button>
 
+        @if (job()?.resultingRecipeId; as publishedRecipeId) {
+          <a
+            mat-stroked-button
+            [routerLink]="['/recipes', publishedRecipeId]"
+            class="open-recipe-btn"
+            aria-label="Open published recipe"
+          >
+            <mat-icon>open_in_new</mat-icon>
+            <span>Open Published Recipe</span>
+          </a>
+        }
+
         <button
           mat-stroked-button
           type="button"
@@ -124,6 +136,7 @@
           mat-flat-button
           color="primary"
           type="button"
+          class="publish-btn"
           (click)="approveAndPublish()"
           [disabled]="form.invalid || isPublishing() || isSaving() || isRepairing()"
           aria-label="Approve and publish recipe"
@@ -135,11 +148,11 @@
           }
           <span>{{
             isPublishing()
-              ? job()?.resultingRecipeId
+              ? job()?.status === 'Published' || job()?.resultingRecipeId
                 ? 'Updating...'
                 : 'Publishing...'
-              : job()?.resultingRecipeId
-                ? 'Update Recipe'
+              : job()?.status === 'Published' || job()?.resultingRecipeId
+                ? 'Update Published Recipe'
                 : 'Approve & Publish'
           }}</span>
         </button>
@@ -346,24 +359,49 @@
                       The draft has changed since these checks. Recheck to update them.
                     </p>
                   }
-                  @if (!review.validationIssues.length && !review.qualityWarnings.length) {
+                  @if (
+                    !review.validationIssues.length &&
+                    !review.qualityWarnings.length &&
+                    !measurementWarnings().length
+                  ) {
                     <p>No issues found by these checks.</p>
                   }
-                  @if (review.validationIssues.length) {
-                    <h3>Validation issues</h3>
-                    <ul>
-                      @for (issue of review.validationIssues; track $index) {
-                        <li>{{ issue }}</li>
+
+                  @if (generalDiagnostics().length) {
+                    <div class="general-diagnostics">
+                      @for (diag of generalDiagnostics(); track $index) {
+                        <div
+                          class="diagnostic-item"
+                          [class.severity-error]="diag.severity === 'error'"
+                          [class.severity-warning]="diag.severity === 'warning'"
+                        >
+                          <mat-icon>{{
+                            diag.severity === 'error' ? 'error_outline' : 'warning_amber'
+                          }}</mat-icon>
+                          <span>{{ diag.message }}</span>
+                        </div>
                       }
-                    </ul>
+                    </div>
                   }
-                  @if (review.qualityWarnings.length) {
-                    <h3>Quality warnings</h3>
-                    <ul>
-                      @for (warning of review.qualityWarnings; track $index) {
-                        <li>{{ warning }}</li>
-                      }
-                    </ul>
+
+                  @if (diagnosticJumpTargets().length) {
+                    <div class="diagnostic-jump-chips">
+                      <span class="jump-chips-label">Jump to issue:</span>
+                      <mat-chip-set>
+                        @for (target of diagnosticJumpTargets(); track target.id) {
+                          <mat-chip
+                            (click)="scrollToTarget(target.id)"
+                            [class.chip-error]="target.severity === 'error'"
+                            [class.chip-warning]="target.severity === 'warning'"
+                          >
+                            <mat-icon>{{
+                              target.severity === 'error' ? 'error_outline' : 'warning_amber'
+                            }}</mat-icon>
+                            <span>{{ target.label }}</span>
+                          </mat-chip>
+                        }
+                      </mat-chip-set>
+                    </div>
                   }
                 }
 
@@ -402,7 +440,7 @@
                       isPublishing() ||
                       isRerunning() ||
                       repairHint.invalid ||
-                      job()?.status !== 'ReadyForReview'
+                      !canEditReview()
                     "
                   >
                     @if (isRepairing()) {
@@ -704,7 +742,27 @@
 
               <mat-card-content class="editor-card-content" formArrayName="ingredients">
                 @for (ingGroup of ingredientsArray.controls; track $index) {
-                  <div [formGroupName]="$index" class="ingredient-row-card">
+                  <div
+                    [formGroupName]="$index"
+                    class="ingredient-row-card"
+                    [attr.id]="'ingredient-card-' + $index"
+                  >
+                    @if (ingredientIssuesMap().get($index); as issues) {
+                      <div class="inline-diagnostic-banner">
+                        @for (issue of issues; track $index) {
+                          <div
+                            class="inline-diagnostic-item"
+                            [class.severity-error]="issue.severity === 'error'"
+                            [class.severity-warning]="issue.severity === 'warning'"
+                          >
+                            <mat-icon class="diagnostic-icon">{{
+                              issue.severity === 'error' ? 'error_outline' : 'warning_amber'
+                            }}</mat-icon>
+                            <span class="diagnostic-message">{{ issue.message }}</span>
+                          </div>
+                        }
+                      </div>
+                    }
                     <!-- Original Raw Text Caption -->
                     @if (ingGroup.get('originalRawText')?.value) {
                       <div class="raw-ingredient-caption">
@@ -897,7 +955,11 @@
 
               <mat-card-content class="editor-card-content" formArrayName="steps">
                 @for (stepGroup of stepsArray.controls; track $index) {
-                  <div [formGroupName]="$index" class="step-row-card">
+                  <div
+                    [formGroupName]="$index"
+                    class="step-row-card"
+                    [attr.id]="'step-card-' + ($index + 1)"
+                  >
                     <div class="step-card-header">
                       <span class="step-number-badge">Step {{ $index + 1 }}</span>
                       <button
@@ -910,6 +972,23 @@
                         <mat-icon>delete_outline</mat-icon>
                       </button>
                     </div>
+
+                    @if (stepIssuesMap().get($index + 1); as issues) {
+                      <div class="inline-diagnostic-banner">
+                        @for (issue of issues; track $index) {
+                          <div
+                            class="inline-diagnostic-item"
+                            [class.severity-error]="issue.severity === 'error'"
+                            [class.severity-warning]="issue.severity === 'warning'"
+                          >
+                            <mat-icon class="diagnostic-icon">{{
+                              issue.severity === 'error' ? 'error_outline' : 'warning_amber'
+                            }}</mat-icon>
+                            <span class="diagnostic-message">{{ issue.message }}</span>
+                          </div>
+                        }
+                      </div>
+                    }
 
                     <mat-form-field appearance="outline" class="form-field full-width">
                       <mat-label>Step Instruction</mat-label>

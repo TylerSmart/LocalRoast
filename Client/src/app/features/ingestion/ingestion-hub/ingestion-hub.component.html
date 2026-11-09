@@ -557,7 +557,7 @@
         type="button"
         class="retry-all-tab-btn"
         (click)="retryAllInCurrentTab()"
-        [disabled]="isRetryingAll() || filteredJobs().length === 0"
+        [disabled]="isRetryingAll() || totalCount() === 0"
         aria-label="Retry all jobs in current tab"
       >
         @if (isRetryingAll()) {
@@ -565,9 +565,7 @@
         } @else {
           <mat-icon>replay</mat-icon>
         }
-        <span>{{
-          isRetryingAll() ? 'Retrying...' : 'Retry All (' + filteredJobs().length + ')'
-        }}</span>
+        <span>{{ isRetryingAll() ? 'Retrying...' : 'Retry All (' + totalCount() + ')' }}</span>
       </button>
 
       <!-- Unified Refresh & Auto-Refresh Timing Control -->
@@ -783,7 +781,7 @@
 
             <!-- Job Actions -->
             <div class="job-actions">
-              @if (job.status === 'ReadyForReview') {
+              @if (job.status === 'ReadyForReview' || job.status === 'Published') {
                 <a
                   mat-flat-button
                   color="primary"

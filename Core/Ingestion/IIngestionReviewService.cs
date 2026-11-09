@@ -2,10 +2,22 @@ using System.ComponentModel.DataAnnotations;
 
 namespace App.Core.Ingestion;
 
+public record IngestionDiagnosticTargetDto(
+    string Message,
+    string Severity,
+    int? IngredientIndex = null,
+    int? StepNumber = null
+);
+
 public sealed record IngestionReviewDiagnosticsDto(
     IReadOnlyList<string> ValidationIssues,
-    IReadOnlyList<string> QualityWarnings
-);
+    IReadOnlyList<string> QualityWarnings,
+    IReadOnlyList<IngestionDiagnosticTargetDto>? TargetedDiagnostics = null
+)
+{
+    public IReadOnlyList<IngestionDiagnosticTargetDto> TargetedDiagnostics { get; init; } =
+        TargetedDiagnostics ?? [];
+};
 
 public sealed record IngestionDraftDiagnosticsRequest([Required] IngestionExtractedDraftDto Draft);
 

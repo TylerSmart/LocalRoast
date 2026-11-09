@@ -802,4 +802,81 @@ describe('IngestionReviewComponent', () => {
     expect(mockIngestionService.dismissRefinement).toHaveBeenCalledWith('job-123');
     expect(component.refinement()).toBeNull();
   });
+  it('maps targeted diagnostics to ingredient and step cards and generates jump targets', () => {
+    component.diagnostics.set({
+      validationIssues: ['Draft title is missing'],
+      qualityWarnings: ['Step 1 mentions unlinked ingredient tofu'],
+      targetedDiagnostics: [
+        {
+          ingredientIndex: 0,
+          stepNumber: null,
+          severity: 'warning',
+          message: 'Ingredient 1 missing food item match',
+        },
+        {
+          ingredientIndex: null,
+          stepNumber: 1,
+          severity: 'error',
+          message: 'Step 1 mentions unlinked ingredient tofu',
+        },
+        {
+          ingredientIndex: null,
+          stepNumber: null,
+          severity: 'error',
+          message: 'Draft title is missing',
+        },
+      ],
+    });
+    fixture.detectChanges();
+
+    expect(component.ingredientIssuesMap().get(0)?.length).toBe(1);
+    expect(component.ingredientIssuesMap().get(0)?.[0].message).toBe(
+      'Ingredient 1 missing food item match',
+    );
+
+    expect(component.stepIssuesMap().get(1)?.length).toBe(1);
+    expect(component.stepIssuesMap().get(1)?.[0].message).toBe(
+      'Step 1 mentions unlinked ingredient tofu',
+    );
+
+    expect(component.generalDiagnostics().length).toBe(1);
+    expect(component.generalDiagnostics()[0].message).toBe('Draft title is missing');
+
+    const jumpTargets = component.diagnosticJumpTargets();
+    expect(jumpTargets.length).toBe(2);
+    expect(jumpTargets[0].label).toContain('firm tofu');
+    expect(jumpTargets[1].label).toBe('Step 1');
+
+    const banners = fixture.nativeElement.querySelectorAll('.inline-diagnostic-banner');
+    expect(banners.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('allows published jobs to be edited and approved, displaying Update Published Recipe', () => {
+    const publishedJob: IngestionJobDetailDto = {
+      ...sampleJob,
+      status: 'Published',
+      resultingRecipeId: 'rec-123',
+      resultingRecipeSlug: 'crispy-sesame-tofu',
+    };
+    mockIngestionService.getJobById.mockReturnValue(of(publishedJob));
+    const publishedFixture = TestBed.createComponent(IngestionReviewComponent);
+    const pubComp = publishedFixture.componentInstance;
+    publishedFixture.detectChanges();
+
+    expect(pubComp.canEditReview()).toBe(true);
+
+    const publishBtn = publishedFixture.nativeElement.querySelector('.publish-btn');
+    expect(publishBtn).toBeTruthy();
+    expect(publishBtn.textContent).toContain('Update Published Recipe');
+
+    const openRecipeLink = publishedFixture.nativeElement.querySelector('.open-recipe-btn');
+    expect(openRecipeLink).toBeTruthy();
+
+    pubComp.approveAndPublish();
+    expect(mockIngestionService.approveAndPublish).toHaveBeenCalledWith(
+      'job-123',
+      expect.any(Object),
+    );
+    expect(router.navigate).toHaveBeenCalledWith(['/recipes', 'rec-1']);
+  });
 });

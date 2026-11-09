@@ -340,8 +340,11 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
             await Page.SetViewportSizeAsync(360, 800);
 
             var reviewCard = Page.Locator(".review-diagnostics-card");
-            await Expect(reviewCard).ToContainTextAsync("vague label");
-            await Expect(reviewCard).ToContainTextAsync("salt");
+            await Expect(reviewCard).ToContainTextAsync("Step 1");
+            var stepCard = Page.Locator("#step-card-1");
+            await Expect(stepCard.Locator(".inline-diagnostic-banner"))
+                .ToContainTextAsync("vague label");
+            await Expect(stepCard.Locator(".inline-diagnostic-banner")).ToContainTextAsync("salt");
             var title = Page.Locator("input[formcontrolname='title']");
             await title.FillAsync("Unsaved user title");
             await Expect(reviewCard).ToContainTextAsync("draft has changed");
@@ -627,15 +630,24 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
 
         var recipeUrl = $"{mockServer.BaseUrl}/blog/crispy-sesame-tofu";
         await Page.Locator("textarea[formcontrolname='urlsText']").FillAsync(recipeUrl);
-        await Page.Locator("button[aria-label='Queue recipe URLs']").ClickAsync();
 
-        // 3. Wait for job to process and reach ReadyForReview
-        var reviewButton = Page.Locator("a.review-action-btn").First;
+        var queuedResponse = await Page.RunAndWaitForResponseAsync(
+            () => Page.Locator("button[aria-label='Queue recipe URLs']").ClickAsync(),
+            response =>
+                response.Url.EndsWith("/api/ingestion/jobs/urls", StringComparison.Ordinal)
+                && response.Request.Method == "POST"
+        );
+        Assert.IsTrue(queuedResponse.Ok);
+        using var queuedJobsDoc = JsonDocument.Parse(await queuedResponse.TextAsync());
+        var jobId = queuedJobsDoc.RootElement[0].GetProperty("id").GetGuid();
+
+        // 3. Wait for THIS job to process and reach ReadyForReview
+        var reviewButton = Page.Locator($"a.review-action-btn[href$='{jobId}']");
         await WaitForLocatorWithRefreshAsync(reviewButton);
 
-        // Shell Ingest badge should display "1"
+        // Shell Ingest badge should display at least "1"
         var navBadge = Page.Locator("nav.desktop-nav .inbox-count-badge");
-        await Expect(navBadge).ToContainTextAsync("1");
+        await Expect(navBadge).ToBeVisibleAsync();
 
         // 4. Click "Review Side-by-Side"
         await reviewButton.ClickAsync();
@@ -1434,5 +1446,200 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await Expect(previewModal).Not.ToBeVisibleAsync();
         await Expect(Page.Locator(".draft-form")).ToBeVisibleAsync();
         await Expect(dialog).Not.ToBeVisibleAsync();
+    }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task IngestionReview_DisplaysInlineIssuesOnIngredientAndStepCards()
+    {
+        await using var mockServer = await MockLanLlmAndBlogServer.StartAsync();
+        mockServer.ResponsePayload = """
+            {
+              "title": "Inline Diagnostics Recipe",
+              "baseServings": 4,
+              "ingredients": [
+                {"displayName":"unknown","canonicalFoodName":"unknown","quantity":1,"unit":"Tbsp","originalRawText":"1 tbsp unknown"},
+                {"displayName":"salt","canonicalFoodName":"salt","quantity":null,"unit":null,"originalRawText":"Salt"}
+              ],
+              "steps": [
+                {"instruction":"Melt unknown and add salt.","ingredientIndices":[0],
+                 "timers":[{"durationSeconds":60,"label":"Cook"}]}
+              ]
+            }
+            """;
+        await RegisterAndLoginAsync();
+        await Page.GotoAsync($"{ServerUrl}/ingest");
+        await Page.Locator(".llm-settings-btn").ClickAsync();
+        var settings = Page.Locator("app-llm-settings-dialog");
+        await settings.Locator("input[formcontrolname='baseUrl']").FillAsync(mockServer.BaseUrl);
+        await settings.Locator("input[formcontrolname='textModel']").FillAsync("qwen2.5:14b");
+        await SaveLlmSettingsDialogAsync(settings);
+
+        await Page.Locator("button.tab-pill", new() { HasText = "Paste Raw Text" }).ClickAsync();
+        await Page.Locator("textarea[formcontrolname='rawText']")
+            .FillAsync(
+                "Inline Diagnostics Recipe\nIngredients:\n- 1 tbsp unknown\n- Salt\nInstructions:\nMelt unknown and add salt, about 1 minute."
+            );
+
+        var queuedResponse = await Page.RunAndWaitForResponseAsync(
+            () => Page.Locator("button[aria-label='Queue raw text recipe']").ClickAsync(),
+            response =>
+                response.Url.EndsWith("/api/ingestion/jobs/text", StringComparison.Ordinal)
+                && response.Request.Method == "POST"
+        );
+        Assert.IsTrue(queuedResponse.Ok);
+        using var queuedJob = JsonDocument.Parse(await queuedResponse.TextAsync());
+        var jobId = queuedJob.RootElement.GetProperty("id").GetGuid();
+
+        var reviewButton = Page.Locator($"a.review-action-btn[href$='{jobId}']");
+        await WaitForLocatorWithRefreshAsync(reviewButton);
+        await reviewButton.ClickAsync();
+
+        await Expect(Page).ToHaveURLAsync(new Regex(".*/ingest/review/.*"));
+
+        // Verify review diagnostics card with jump chips
+        var reviewCard = Page.Locator(".review-diagnostics-card");
+        await Expect(reviewCard).ToBeVisibleAsync();
+        var jumpChips = reviewCard.Locator(".diagnostic-jump-chips mat-chip");
+        await Expect(jumpChips.First).ToBeVisibleAsync();
+        await Expect(jumpChips).ToHaveCountAsync(2);
+
+        // Verify inline diagnostic banner inside ingredient card 0
+        var ingredientCard = Page.Locator("#ingredient-card-0");
+        await Expect(ingredientCard).ToBeVisibleAsync();
+        var ingredientBanner = ingredientCard.Locator(".inline-diagnostic-banner");
+        await Expect(ingredientBanner).ToBeVisibleAsync();
+        await Expect(ingredientBanner).ToContainTextAsync("meaningful food name");
+
+        // Verify inline diagnostic banner inside step card 1
+        var stepCard = Page.Locator("#step-card-1");
+        await Expect(stepCard).ToBeVisibleAsync();
+        var stepBanner = stepCard.Locator(".inline-diagnostic-banner");
+        await Expect(stepBanner).ToBeVisibleAsync();
+        await Expect(stepBanner).ToContainTextAsync("salt");
+
+        // Clicking jump chip scrolls to target
+        await jumpChips.First.ClickAsync();
+        await Expect(ingredientCard).ToBeVisibleAsync();
+    }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task IngestionReview_PublishedJob_CanOpenReviewAndUpdatePublishedRecipe()
+    {
+        await using var mockServer = await MockLanLlmAndBlogServer.StartAsync();
+        await RegisterAndLoginAsync();
+
+        // 1. Configure LLM settings pointing to mock server
+        await Page.GotoAsync($"{ServerUrl}/ingest");
+        await Page.Locator(".llm-settings-btn").ClickAsync();
+        var dialog = Page.Locator("app-llm-settings-dialog");
+        await Expect(dialog).ToBeVisibleAsync();
+        await dialog.Locator("input[formcontrolname='baseUrl']").FillAsync(mockServer.BaseUrl);
+        await dialog.Locator("input[formcontrolname='textModel']").FillAsync("qwen2.5:14b");
+        await SaveLlmSettingsDialogAsync(dialog);
+
+        // 2. Queue raw text recipe and wait for review
+        await Page.Locator("button.tab-pill", new() { HasText = "Paste Raw Text" }).ClickAsync();
+        await Page.Locator("textarea[formcontrolname='rawText']").FillAsync(TofuSourceText);
+
+        var queuedResponse = await Page.RunAndWaitForResponseAsync(
+            () => Page.Locator("button[aria-label='Queue raw text recipe']").ClickAsync(),
+            response =>
+                response.Url.EndsWith("/api/ingestion/jobs/text", StringComparison.Ordinal)
+                && response.Request.Method == "POST"
+        );
+        Assert.IsTrue(queuedResponse.Ok);
+        using var queuedJob = JsonDocument.Parse(await queuedResponse.TextAsync());
+        var jobId = queuedJob.RootElement.GetProperty("id").GetGuid();
+
+        var reviewBtn = Page.Locator($"a.review-action-btn[href$='{jobId}']");
+        await WaitForLocatorWithRefreshAsync(reviewBtn);
+        await reviewBtn.ClickAsync();
+        await Expect(Page).ToHaveURLAsync(new Regex($".*/ingest/review/{jobId}"));
+
+        // 3. Publish initial recipe
+        var publishBtn = Page.Locator(".publish-btn");
+        await Expect(publishBtn).ToContainTextAsync("Approve & Publish");
+        await publishBtn.ClickAsync();
+        await Expect(Page).ToHaveURLAsync(new Regex(".*/recipes/[a-zA-Z0-9-]+"));
+        await Expect(Page.Locator("h1.recipe-title")).ToContainTextAsync("Crispy Sesame Tofu");
+
+        // 4. Return to Ingest Hub and check Published tab
+        await Page.GotoAsync($"{ServerUrl}/ingest");
+        var publishedFilterTab = Page.Locator(
+            "button.filter-pill",
+            new() { HasText = "Published" }
+        );
+        await publishedFilterTab.ClickAsync();
+
+        var jobCard = Page.Locator(
+            ".job-card",
+            new() { Has = Page.Locator($"a.review-action-btn[href$='{jobId}']") }
+        );
+        await Expect(jobCard).ToBeVisibleAsync();
+
+        // Published job card has BOTH Open Recipe AND Review Side-by-Side
+        var openRecipeBtn = jobCard.Locator("a.open-recipe-btn");
+        var reviewSideBySideBtn = jobCard.Locator("a.review-action-btn");
+        await Expect(openRecipeBtn).ToBeVisibleAsync();
+        await Expect(reviewSideBySideBtn).ToBeVisibleAsync();
+
+        // 5. Open Review Side-by-Side from the Published job card
+        await reviewSideBySideBtn.ClickAsync();
+        await Expect(Page).ToHaveURLAsync(new Regex($".*/ingest/review/{jobId}"));
+
+        // Verify "Open Published Recipe" link and "Update Published Recipe" button
+        var openPublishedHeaderLink = Page.Locator(".header-actions a.open-recipe-btn");
+        await Expect(openPublishedHeaderLink).ToBeVisibleAsync();
+
+        var updateBtn = Page.Locator(".publish-btn");
+        await Expect(updateBtn).ToContainTextAsync("Update Published Recipe");
+
+        // 6. Edit recipe title
+        var titleInput = Page.Locator("input[formcontrolname='title']");
+        await titleInput.FillAsync("Crispy Sesame Tofu Deluxe");
+
+        // Click "Update Published Recipe"
+        await updateBtn.ClickAsync();
+
+        // 7. Verify redirected to published recipe and title updated in place
+        await Expect(Page).ToHaveURLAsync(new Regex(".*/recipes/[a-zA-Z0-9-]+"));
+        await Expect(Page.Locator("h1.recipe-title"))
+            .ToContainTextAsync("Crispy Sesame Tofu Deluxe");
+    }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task IngestionHub_RetryAll_RetriesAllMatchingFilterAcrossPages()
+    {
+        await using var mockServer = await MockLanLlmAndBlogServer.StartAsync();
+        await RegisterAndLoginAsync();
+
+        // 1. Configure LLM settings pointing to mock server
+        await Page.GotoAsync($"{ServerUrl}/ingest");
+        await Page.Locator(".llm-settings-btn").ClickAsync();
+        var dialog = Page.Locator("app-llm-settings-dialog");
+        await Expect(dialog).ToBeVisibleAsync();
+        await dialog.Locator("input[formcontrolname='baseUrl']").FillAsync(mockServer.BaseUrl);
+        await dialog.Locator("input[formcontrolname='textModel']").FillAsync("qwen2.5:14b");
+        await SaveLlmSettingsDialogAsync(dialog);
+
+        // 2. Queue raw text recipe
+        await Page.Locator("button.tab-pill", new() { HasText = "Paste Raw Text" }).ClickAsync();
+        await Page.Locator("textarea[formcontrolname='rawText']").FillAsync(TofuSourceText);
+        await Page.Locator("button[aria-label='Queue raw text recipe']").ClickAsync();
+
+        // 3. On the default All tab, verify Retry All reflects total count and is clickable
+        var retryAllBtn = Page.Locator(".queue-toolbar button.retry-all-tab-btn");
+        await Expect(retryAllBtn).ToBeVisibleAsync();
+        await Expect(retryAllBtn).ToBeEnabledAsync();
+        await Expect(retryAllBtn).ToContainTextAsync("Retry All (");
+
+        // Click Retry All and verify feedback banner
+        await retryAllBtn.ClickAsync();
+        var feedback = Page.Locator(".alert-banner.info-banner");
+        await Expect(feedback).ToBeVisibleAsync();
+        await Expect(feedback).ToContainTextAsync("Requeued");
     }
 }

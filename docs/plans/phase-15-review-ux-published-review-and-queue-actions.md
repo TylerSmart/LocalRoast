@@ -1,7 +1,7 @@
 # Phase 15: Ingestion Review UX, Inline Issue Placement, Published Recipe Review & Paused-Queue Actions
 
 > **Branch:** `feature/phase-15-review-ux-published-review-and-queue-actions`
-> **Status:** `[ ]` Not Started
+> **Status:** `[x]` Completed
 > **PRD Reference:** `docs/prd.md` — Sections 4.2.2, 4.2.3, 4.2.4; `docs/todo.md` — Ingestion items 4, 5 & Various items 1, 7
 > **Target Execution:** Run `/execute-phase` to execute this plan step-by-step.
 > **Live Environment Note:**
@@ -153,7 +153,7 @@ Add/update E2E test methods in `LlmIngestionE2ETests.cs`:
 
 ## 6. Step-by-Step Execution Checklist (For Implementation Agent)
 
-- [ ] **Task 1: Backend Core, Data & Background Worker**
+- [x] **Task 1: Backend Core, Data & Background Worker**
   - Update `Core/Ingestion/IngestionModels.cs` and `Core/Ingestion/IIngestionService.cs`.
   - Update `Data/Services/IngestionReviewService.cs` (targeted diagnostics mapping, allow `Published` status, remove pause blocker in `RefineNextPendingDraftAsync` and `HasRunnableImportAsync`).
   - Update `Infrastructure/Ingestion/IngestionBackgroundWorker.cs` (run pending refinements even when bulk ingestion is paused).
@@ -170,7 +170,7 @@ Add/update E2E test methods in `LlmIngestionE2ETests.cs`:
     dotnet test --project Tests/API.IntegrationTests/App.API.IntegrationTests.csproj
     ```
 
-- [ ] **Task 2: Angular Client & Spec Tests**
+- [x] **Task 2: Angular Client & Spec Tests**
   - Update `ingestion.models.ts`, `ingestion.service.ts`, `ingestion-review.component.{ts,html,scss}`, and `ingestion-hub.component.{ts,html}`.
   - Update `ingestion-review.component.spec.ts` and `ingestion-hub.component.spec.ts`.
   - Run frontend lint, build, and unit tests in `Client/`:
@@ -180,7 +180,7 @@ Add/update E2E test methods in `LlmIngestionE2ETests.cs`:
     npm test -- --watch=false
     ```
 
-- [ ] **Task 3: Playwright E2E Verification & Final Formatting**
+- [x] **Task 3: Playwright E2E Verification & Final Formatting**
   - Add E2E tests in `Tests/Client.E2ETests/LlmIngestionE2ETests.cs` and run:
     ```powershell
     dotnet test --project Tests/Client.E2ETests/App.Client.E2ETests.csproj

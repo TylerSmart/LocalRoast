@@ -44,6 +44,7 @@ import type {
   IngestionExtractedDraftDto,
   IngestionJobDetailDto,
   IngestionRefinementDto,
+  IngestionDiagnosticTargetDto,
   IngestionReviewDiagnosticsDto,
 } from '../../../core/models/ingestion.models';
 import {
@@ -136,6 +137,186 @@ export class IngestionReviewComponent implements OnInit {
   readonly isPromotingCover = signal<boolean>(false);
   readonly diagnostics = signal<IngestionReviewDiagnosticsDto | null>(null);
   readonly diagnosticsStale = signal<boolean>(false);
+  readonly canEditReview = computed(() => {
+    const s = this.job()?.status;
+    return s === 'ReadyForReview' || s === 'Published';
+  });
+
+  readonly allDiagnostics = computed<IngestionDiagnosticTargetDto[]>(() => {
+    const diag = this.diagnostics();
+    const result: IngestionDiagnosticTargetDto[] = [];
+    const seenMessages = new Set<string>();
+
+    const addDiag = (d: IngestionDiagnosticTargetDto) => {
+      const key = `${d.severity}:${d.message}:${d.ingredientIndex ?? ''}:${d.stepNumber ?? ''}`;
+      if (!seenMessages.has(key)) {
+        seenMessages.add(key);
+        result.push(d);
+      }
+    };
+
+    if (diag?.targetedDiagnostics && diag.targetedDiagnostics.length > 0) {
+      for (const td of diag.targetedDiagnostics) {
+        addDiag(td);
+      }
+    } else if (diag) {
+      const stepRegex = /^Step\s+(\d+)\b/i;
+      const ingRegex = /^Ingredient\s+#?(\d+)\b/i;
+      const colonRegex = /^([^:]+):/;
+
+      const ingredients = this.ingredientsArray.controls.map((c) => ({
+        displayName: (c.get('displayName')?.value || '').trim(),
+        proposedName: (c.get('proposedFoodItemName')?.value || '').trim(),
+      }));
+
+      const matchTarget = (msg: string): { ingIndex: number | null; stepNumber: number | null } => {
+        const stepMatch = stepRegex.exec(msg);
+        if (stepMatch) return { ingIndex: null, stepNumber: parseInt(stepMatch[1], 10) };
+
+        const ingMatch = ingRegex.exec(msg);
+        if (ingMatch) {
+          const num = parseInt(ingMatch[1], 10);
+          if (num >= 0 && num < ingredients.length) return { ingIndex: num, stepNumber: null };
+          if (num >= 1 && num - 1 < ingredients.length)
+            return { ingIndex: num - 1, stepNumber: null };
+          return { ingIndex: num, stepNumber: null };
+        }
+
+        const colonMatch = colonRegex.exec(msg);
+        if (colonMatch) {
+          const rawFood = colonMatch[1].replace(/["']/g, '').trim();
+          const cleanFood = rawFood.split(' portion ')[0].trim().toLowerCase();
+          const foundIdx = ingredients.findIndex(
+            (ing) =>
+              ing.displayName.toLowerCase() === cleanFood ||
+              ing.proposedName.toLowerCase() === cleanFood,
+          );
+          if (foundIdx >= 0) return { ingIndex: foundIdx, stepNumber: null };
+        }
+        return { ingIndex: null, stepNumber: null };
+      };
+
+      for (const issue of diag.validationIssues || []) {
+        const target = matchTarget(issue);
+        addDiag({
+          message: issue,
+          severity: 'error',
+          ingredientIndex: target.ingIndex,
+          stepNumber: target.stepNumber,
+        });
+      }
+      for (const warning of diag.qualityWarnings || []) {
+        const target = matchTarget(warning);
+        addDiag({
+          message: warning,
+          severity: 'warning',
+          ingredientIndex: target.ingIndex,
+          stepNumber: target.stepNumber,
+        });
+      }
+    }
+
+    const colonRegex = /^([^:]+):/;
+    const ingredients = this.ingredientsArray.controls.map((c) => ({
+      displayName: (c.get('displayName')?.value || '').trim(),
+      proposedName: (c.get('proposedFoodItemName')?.value || '').trim(),
+    }));
+
+    for (const mw of this.measurementWarnings() || []) {
+      const colonMatch = colonRegex.exec(mw);
+      let matchedIndex: number | null = null;
+      if (colonMatch) {
+        const rawFood = colonMatch[1].replace(/["']/g, '').trim();
+        const cleanFood = rawFood.split(' portion ')[0].trim().toLowerCase();
+        const foundIdx = ingredients.findIndex(
+          (ing) =>
+            ing.displayName.toLowerCase() === cleanFood ||
+            ing.proposedName.toLowerCase() === cleanFood,
+        );
+        if (foundIdx >= 0) matchedIndex = foundIdx;
+      }
+      addDiag({
+        message: mw,
+        severity: 'warning',
+        ingredientIndex: matchedIndex,
+        stepNumber: null,
+      });
+    }
+
+    return result;
+  });
+
+  readonly ingredientIssuesMap = computed<Map<number, IngestionDiagnosticTargetDto[]>>(() => {
+    const map = new Map<number, IngestionDiagnosticTargetDto[]>();
+    for (const item of this.allDiagnostics()) {
+      if (item.ingredientIndex !== null && item.ingredientIndex !== undefined) {
+        const list = map.get(item.ingredientIndex) || [];
+        list.push(item);
+        map.set(item.ingredientIndex, list);
+      }
+    }
+    return map;
+  });
+
+  readonly stepIssuesMap = computed<Map<number, IngestionDiagnosticTargetDto[]>>(() => {
+    const map = new Map<number, IngestionDiagnosticTargetDto[]>();
+    for (const item of this.allDiagnostics()) {
+      if (item.stepNumber !== null && item.stepNumber !== undefined) {
+        const list = map.get(item.stepNumber) || [];
+        list.push(item);
+        map.set(item.stepNumber, list);
+      }
+    }
+    return map;
+  });
+
+  readonly generalDiagnostics = computed<IngestionDiagnosticTargetDto[]>(() => {
+    return this.allDiagnostics().filter(
+      (item) =>
+        (item.ingredientIndex === null || item.ingredientIndex === undefined) &&
+        (item.stepNumber === null || item.stepNumber === undefined),
+    );
+  });
+
+  readonly diagnosticJumpTargets = computed<
+    { id: string; label: string; severity: 'error' | 'warning' }[]
+  >(() => {
+    const targets: { id: string; label: string; severity: 'error' | 'warning' }[] = [];
+    const ingIndices = Array.from(this.ingredientIssuesMap().keys()).sort((a, b) => a - b);
+    for (const idx of ingIndices) {
+      const issues = this.ingredientIssuesMap().get(idx) || [];
+      const hasError = issues.some((i) => i.severity === 'error');
+      const ctrl = this.ingredientsArray.at(idx);
+      const name = ctrl?.get('displayName')?.value || `Ingredient #${idx + 1}`;
+      targets.push({
+        id: `ingredient-card-${idx}`,
+        label: `${idx + 1}. ${name}`,
+        severity: hasError ? 'error' : 'warning',
+      });
+    }
+
+    const stepNums = Array.from(this.stepIssuesMap().keys()).sort((a, b) => a - b);
+    for (const num of stepNums) {
+      const issues = this.stepIssuesMap().get(num) || [];
+      const hasError = issues.some((i) => i.severity === 'error');
+      targets.push({
+        id: `step-card-${num}`,
+        label: `Step ${num}`,
+        severity: hasError ? 'error' : 'warning',
+      });
+    }
+
+    return targets;
+  });
+
+  scrollToTarget(targetId: string): void {
+    const el = document.getElementById(targetId);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.classList.add('highlight-pulse');
+      setTimeout(() => el.classList.remove('highlight-pulse'), 2000);
+    }
+  }
   readonly isCheckingDiagnostics = signal<boolean>(false);
   readonly isRepairing = signal<boolean>(false);
   readonly refinement = signal<IngestionRefinementDto | null>(null);
@@ -253,7 +434,7 @@ export class IngestionReviewComponent implements OnInit {
 
   requestRefinement(): void {
     const currentJob = this.job();
-    if (!currentJob || currentJob.status !== 'ReadyForReview' || this.isRefinementBusy()) return;
+    if (!currentJob || !this.canEditReview() || this.isRefinementBusy()) return;
 
     this.isRefinementBusy.set(true);
     this.ingestionService
@@ -306,7 +487,7 @@ export class IngestionReviewComponent implements OnInit {
     const currentJob = this.job();
     if (
       !currentJob ||
-      currentJob.status !== 'ReadyForReview' ||
+      !this.canEditReview() ||
       !this.refinement()?.hasProposal ||
       this.isRefinementBusy() ||
       this.isRepairing() ||
@@ -970,7 +1151,7 @@ export class IngestionReviewComponent implements OnInit {
     const currentJob = this.job();
     if (
       !currentJob ||
-      currentJob.status !== 'ReadyForReview' ||
+      !this.canEditReview() ||
       this.isRepairing() ||
       this.isCheckingDiagnostics() ||
       this.isSaving() ||
@@ -1020,7 +1201,7 @@ export class IngestionReviewComponent implements OnInit {
                   next: (latest) => {
                     this.isRepairing.set(false);
                     if (
-                      latest.status !== 'ReadyForReview' ||
+                      !this.canEditReview() ||
                       latest.modifiedAt !== currentJob.modifiedAt ||
                       snapshot !== this.reviewEditSnapshot()
                     ) {

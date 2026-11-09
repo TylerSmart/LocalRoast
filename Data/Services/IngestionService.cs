@@ -22,6 +22,12 @@ public sealed class IngestionService(
         PropertyNameCaseInsensitive = true,
     };
 
+    private static bool CanEditOrReview(IngestionJobStatus status) =>
+        status
+            is IngestionJobStatus.Queued
+                or IngestionJobStatus.ReadyForReview
+                or IngestionJobStatus.Published;
+
     public async Task<IngestionQueueSummaryDto> GetSummaryAsync(
         CancellationToken cancellationToken = default
     )
@@ -898,10 +904,10 @@ public sealed class IngestionService(
             return null;
         }
 
-        if (job.Status is IngestionJobStatus.Published or IngestionJobStatus.Discarded)
+        if (!CanEditOrReview(job.Status))
         {
             throw new ConflictException(
-                "Cannot modify cover image for a published or discarded ingestion job."
+                "Cannot modify cover image for a job not awaiting review or already published."
             );
         }
 
@@ -991,6 +997,19 @@ public sealed class IngestionService(
         job.DownloadedCoverImagePath = promotedCover.CoverImagePath;
 
         job.DownloadedThumbnailImagePath = promotedCover.ThumbnailImagePath;
+
+        if (job.ResultingRecipeId.HasValue)
+        {
+            var linkedRecipe = await dbContext.Recipes.FirstOrDefaultAsync(
+                r => r.Id == job.ResultingRecipeId.Value,
+                cancellationToken
+            );
+            if (linkedRecipe is not null)
+            {
+                linkedRecipe.CoverImagePath = promotedCover.CoverImagePath;
+                linkedRecipe.ThumbnailImagePath = promotedCover.ThumbnailImagePath;
+            }
+        }
 
         if (!string.IsNullOrWhiteSpace(job.ExtractedDraftJson))
         {
@@ -1197,10 +1216,10 @@ public sealed class IngestionService(
             return null;
         }
 
-        if (job.Status is IngestionJobStatus.Published or IngestionJobStatus.Discarded)
+        if (!CanEditOrReview(job.Status))
         {
             throw new ConflictException(
-                "Cannot update draft for a published or discarded ingestion job."
+                "Only an ingestion job awaiting review or already published can be edited."
             );
         }
 
@@ -1243,14 +1262,11 @@ public sealed class IngestionService(
             throw new NotFoundException("Ingestion job not found.");
         }
 
-        if (job.Status == IngestionJobStatus.Published)
+        if (!CanEditOrReview(job.Status))
         {
-            throw new ConflictException("Ingestion job has already been published.");
-        }
-
-        if (job.Status == IngestionJobStatus.Discarded)
-        {
-            throw new ConflictException("Cannot approve a discarded ingestion job.");
+            throw new ConflictException(
+                "Only an ingestion job awaiting review or already published can be approved."
+            );
         }
 
         // 1. Create missing food items
@@ -1498,6 +1514,8 @@ public sealed class IngestionService(
 
         job.AttemptCount = 0;
 
+        job.RunNowRequested = true;
+
         job.StatusDetail = "Queued for retry.";
 
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -1611,9 +1629,14 @@ public sealed class IngestionService(
         return new RetryWaitingJobsResultDto(waitingJobs.Count);
     }
 
-    public async Task<RetryBatchJobsResultDto> RetryBatchJobsAsync(
+    public Task<RetryBatchJobsResultDto> RetryBatchJobsAsync(
         IReadOnlyList<Guid>? jobIds,
         string? filter = null,
+        CancellationToken cancellationToken = default
+    ) => RetryBatchJobsAsync(new RetryBatchJobsRequest(jobIds, filter), cancellationToken);
+
+    public async Task<RetryBatchJobsResultDto> RetryBatchJobsAsync(
+        RetryBatchJobsRequest request,
         CancellationToken cancellationToken = default
     )
     {
@@ -1621,32 +1644,49 @@ public sealed class IngestionService(
             j.Status != IngestionJobStatus.Discarded
         );
 
-        if (jobIds is { Count: > 0 })
+        var activeId = queueSignal.ActiveJobId;
+        if (activeId.HasValue)
         {
-            query = query.Where(j => jobIds.Contains(j.Id));
+            query = query.Where(j => j.Id != activeId.Value);
+        }
+
+        if (request.JobIds is { Count: > 0 })
+        {
+            query = query.Where(j => request.JobIds.Contains(j.Id));
         }
         else if (
-            !string.IsNullOrWhiteSpace(filter)
-            && !filter.Equals("All", StringComparison.OrdinalIgnoreCase)
+            !string.IsNullOrWhiteSpace(request.Filter)
+            && !request.Filter.Equals("All", StringComparison.OrdinalIgnoreCase)
         )
         {
-            query = filter.ToLowerInvariant() switch
+            query = request.Filter.Trim().ToLowerInvariant() switch
             {
-                "readyforreview" => query.Where(j => j.Status == IngestionJobStatus.ReadyForReview),
-
-                "activewaiting" => query.Where(j =>
+                "readyforreview" or "review" => query.Where(j =>
+                    j.Status == IngestionJobStatus.ReadyForReview
+                ),
+                "activewaiting" or "active" => query.Where(j =>
                     j.Status == IngestionJobStatus.Queued
                     || j.Status == IngestionJobStatus.Preprocessing
                     || j.Status == IngestionJobStatus.Extracting
                     || j.Status == IngestionJobStatus.WaitingForLlmHost
                 ),
-
+                "waiting" => query.Where(j => j.Status == IngestionJobStatus.WaitingForLlmHost),
                 "published" => query.Where(j => j.Status == IngestionJobStatus.Published),
-
                 "failed" => query.Where(j => j.Status == IngestionJobStatus.Failed),
-
                 _ => query,
             };
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.Search))
+        {
+            var term = request.Search.Trim();
+            query = query.Where(j =>
+                j.DisplayTitle.Contains(term)
+                || (j.SourceUrl != null && j.SourceUrl.Contains(term))
+                || (j.StatusDetail != null && j.StatusDetail.Contains(term))
+                || (j.ExtractedModel != null && j.ExtractedModel.Contains(term))
+                || (j.ResultingRecipe != null && j.ResultingRecipe.Title.Contains(term))
+            );
         }
 
         var jobs = await query.ToListAsync(cancellationToken);
