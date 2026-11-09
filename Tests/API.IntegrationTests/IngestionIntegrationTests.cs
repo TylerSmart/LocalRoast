@@ -1989,6 +1989,81 @@ public sealed class IngestionIntegrationTests
         }
     }
 
+    [TestMethod]
+    public async Task SubRecipe_WhenPublishedAfterParent_AutomaticallyBacklinksParentIngredient()
+    {
+        await AuthenticateAsync(_client);
+
+        // 1. Create parent recipe with unresolved sub-recipe reference
+        var parentReq = new UpsertRecipeRequest(
+            Title: "Denver Omelets",
+            Description: "Classic diner style",
+            Status: RecipeStatus.Published,
+            BaseServings: 2,
+            Ingredients:
+            [
+                new RecipeIngredientInput(
+                    DisplayName: "Filling for Denver Omelets (recipe follows)",
+                    Quantity: 1,
+                    Unit: MeasurementUnit.Whole,
+                    UnresolvedRecipeTitle: "Filling for Denver Omelets"
+                ),
+                new RecipeIngredientInput(
+                    DisplayName: "large eggs",
+                    Quantity: 6,
+                    Unit: MeasurementUnit.Whole
+                ),
+            ],
+            Steps: [new RecipeStepInput(Instruction: "Fold the filling into the omelet.")]
+        );
+
+        var parentRes = await _client.PostAsJsonAsync("/api/recipes", parentReq);
+        Assert.AreEqual(HttpStatusCode.Created, parentRes.StatusCode);
+        var parent = await parentRes.Content.ReadFromJsonAsync<RecipeDetailDto>();
+        Assert.IsNotNull(parent);
+        Assert.IsNull(parent.Ingredients[0].LinkedRecipeId);
+        Assert.AreEqual("Filling for Denver Omelets", parent.Ingredients[0].UnresolvedRecipeTitle);
+
+        // 2. Create child recipe "Filling for Denver Omelets"
+        var childReq = new UpsertRecipeRequest(
+            Title: "Filling for Denver Omelets",
+            Description: "Ham, peppers, and onions",
+            Status: RecipeStatus.Published,
+            BaseServings: 2,
+            Ingredients:
+            [
+                new RecipeIngredientInput(
+                    DisplayName: "diced ham",
+                    Quantity: 1,
+                    Unit: MeasurementUnit.Cup
+                ),
+                new RecipeIngredientInput(
+                    DisplayName: "onion",
+                    Quantity: 1,
+                    Unit: MeasurementUnit.Whole
+                ),
+            ],
+            Steps:
+            [
+                new RecipeStepInput(Instruction: "Sauté the ham and onions until lightly browned."),
+            ]
+        );
+
+        var childRes = await _client.PostAsJsonAsync("/api/recipes", childReq);
+        Assert.AreEqual(HttpStatusCode.Created, childRes.StatusCode);
+        var child = await childRes.Content.ReadFromJsonAsync<RecipeDetailDto>();
+        Assert.IsNotNull(child);
+
+        // 3. Fetch parent recipe and verify it was automatically back-linked
+        var updatedParentRes = await _client.GetAsync($"/api/recipes/{parent.Id}");
+        Assert.AreEqual(HttpStatusCode.OK, updatedParentRes.StatusCode);
+        var updatedParent = await updatedParentRes.Content.ReadFromJsonAsync<RecipeDetailDto>();
+        Assert.IsNotNull(updatedParent);
+        Assert.AreEqual(child.Id, updatedParent.Ingredients[0].LinkedRecipeId);
+        Assert.AreEqual(child.Title, updatedParent.Ingredients[0].LinkedRecipeTitle);
+        Assert.IsNull(updatedParent.Ingredients[0].UnresolvedRecipeTitle);
+    }
+
     private sealed class FakeSequentialLlmExtractionClient(
         Func<LlmExtractionContext, LlmExtractedRecipePayload> handler,
         Func<string, string?>? structureSource = null,

@@ -140,7 +140,10 @@ public record IngestionDraftIngredientDto(
     bool PreferAlternativeMeasurement = false,
     FoodCategory? SuggestedCategory = null,
     bool IsRecipeReference = false,
-    [MaxLength(200)] string? ReferencedRecipeTitle = null
+    [MaxLength(200)] string? ReferencedRecipeTitle = null,
+    Guid? MatchedRecipeId = null,
+    [MaxLength(200)] string? MatchedRecipeTitle = null,
+    [MaxLength(250)] string? MatchedRecipeSlug = null
 );
 
 public record IngestionDraftStepDto(

@@ -172,6 +172,9 @@ export interface IngestionDraftIngredientDto {
   suggestedCategory?: FoodCategory | null;
   isRecipeReference?: boolean;
   referencedRecipeTitle?: string | null;
+  matchedRecipeId?: string | null;
+  matchedRecipeTitle?: string | null;
+  matchedRecipeSlug?: string | null;
 }
 
 export interface IngestionDraftStepDto {

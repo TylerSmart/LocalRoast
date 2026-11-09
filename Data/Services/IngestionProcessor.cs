@@ -753,6 +753,61 @@ public sealed class IngestionProcessor(
                 ),
             };
 
+            if (
+                draft.Ingredients is { Count: > 0 }
+                && draft.Ingredients.Any(i => i.IsRecipeReference)
+            )
+            {
+                var updatedIngredients = new List<IngestionDraftIngredientDto>();
+                foreach (var ing in draft.Ingredients)
+                {
+                    if (
+                        ing.IsRecipeReference
+                        && !string.IsNullOrWhiteSpace(ing.ReferencedRecipeTitle)
+                    )
+                    {
+                        var cleanTitle =
+                            RecipeDraftNormalizer.NormalizeRecipeReferenceTitle(
+                                ing.ReferencedRecipeTitle
+                            ) ?? ing.ReferencedRecipeTitle.Trim();
+                        var normalizedTitle = cleanTitle.ToUpperInvariant();
+                        var matchedRecipe = await dbContext
+                            .Recipes.AsNoTracking()
+                            .Where(r =>
+                                r.Title.ToUpper() == normalizedTitle
+                                && (
+                                    !job.ResultingRecipeId.HasValue
+                                    || r.Id != job.ResultingRecipeId.Value
+                                )
+                            )
+                            .Select(r => new
+                            {
+                                r.Id,
+                                r.Title,
+                                r.Slug,
+                            })
+                            .FirstOrDefaultAsync(jobCt);
+
+                        if (matchedRecipe is not null)
+                        {
+                            updatedIngredients.Add(
+                                ing with
+                                {
+                                    MatchedRecipeId = matchedRecipe.Id,
+                                    MatchedRecipeTitle = matchedRecipe.Title,
+                                    MatchedRecipeSlug = matchedRecipe.Slug,
+                                }
+                            );
+                            continue;
+                        }
+                    }
+
+                    updatedIngredients.Add(ing);
+                }
+
+                draft = draft with { Ingredients = updatedIngredients };
+            }
+
             if (unresolvedIssues.Count > 0)
             {
                 logger.LogWarning(
@@ -787,10 +842,9 @@ public sealed class IngestionProcessor(
                     || job.Channel == IngestionChannel.RawText
                 )
                 && !string.IsNullOrWhiteSpace(draft.Title)
-                && (draft.Ingredients?.Count ?? 0) >= (job.AutoPublish ? 1 : 2)
+                && (draft.Ingredients?.Count ?? 0) >= 1
                 && (draft.Steps?.Count ?? 0) >= 1
-                && draft.ConfidenceScore >= (job.AutoPublish ? 0.60m : 0.85m)
-                && (draft.MeasurementWarnings?.Count ?? 0) == 0;
+                && draft.ConfidenceScore >= (job.AutoPublish ? 0.60m : 0.85m);
 
             if (canAutoPublish)
             {
@@ -1157,12 +1211,14 @@ public sealed class IngestionProcessor(
 
                 if (!string.IsNullOrWhiteSpace(recipeTitle))
                 {
-                    linkedRecipeId = await IngestionCatalogMaterializer.ResolveRecipeReferenceAsync(
-                        dbContext,
-                        recipeTitle,
-                        job.ResultingRecipeId,
-                        cancellationToken
-                    );
+                    linkedRecipeId =
+                        ing.MatchedRecipeId
+                        ?? await IngestionCatalogMaterializer.ResolveRecipeReferenceAsync(
+                            dbContext,
+                            recipeTitle,
+                            job.ResultingRecipeId,
+                            cancellationToken
+                        );
                 }
 
                 if (

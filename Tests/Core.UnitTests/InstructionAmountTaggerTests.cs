@@ -531,6 +531,92 @@ public sealed class InstructionAmountTaggerTests
         );
     }
 
+    [TestMethod]
+    public void Reconcile_DenverOmeletsWithRepeatStepAndCheeseVolume_HasZeroIssues()
+    {
+        var ingredients = new List<LlmExtractedIngredientItem>
+        {
+            new(
+                null,
+                1m,
+                null,
+                "whole",
+                "Filling for Denver Omelets",
+                "Filling for Denver Omelets",
+                IsRecipeReference: true,
+                ReferencedRecipeTitle: "Filling for Denver Omelets"
+            ),
+            new(null, 2m, null, "tbsp", "unsalted butter", "unsalted butter"),
+            new(
+                null,
+                4m,
+                null,
+                "oz",
+                "Monterey Jack cheese",
+                "monterey jack cheese",
+                PreparationNote: "shredded"
+            ),
+            new(null, 4m, null, "whole", "eggs", "eggs"),
+        };
+
+        var steps = new List<LlmExtractedStepItem>
+        {
+            new(null, "Beat eggs in bowl.", [3]),
+            new(
+                null,
+                "Melt 1 tablespoon butter in skillet.",
+                [1],
+                IngredientAmounts: [new(1, new LlmExtractedMeasurementItem(1m, "tbsp"))]
+            ),
+            new(
+                null,
+                "Sprinkle 1/2 cup cheese and 1/2 cup filling over eggs.",
+                [0, 2],
+                IngredientAmounts:
+                [
+                    new(0, new LlmExtractedMeasurementItem(0.5m, "cup")),
+                    new(2, new LlmExtractedMeasurementItem(0.5m, "cup")),
+                ]
+            ),
+            new(null, "Repeat the instructions for the second omelet.", [0, 1, 2, 3]),
+        };
+
+        var issues = InstructionAmountTagger.Reconcile(ingredients, steps);
+        Assert.IsEmpty(issues, string.Join("; ", issues));
+    }
+
+    [TestMethod]
+    public void Reconcile_BoilingWaterInPot_DoesNotOverflowFillingWaterRow()
+    {
+        var ingredients = new List<LlmExtractedIngredientItem>
+        {
+            new(null, 2m, null, "tbsp", "water", "water", PreparationNote: "for filling"),
+            new(null, 1m, null, "lb", "ground pork", "pork"),
+        };
+
+        var candidates = InstructionAmountTagger.FindCandidates([
+            new MethodParagraph(1, null, "Mix pork and 2 tablespoons water for filling."),
+            new MethodParagraph(
+                2,
+                null,
+                "Bring 4 quarts water to boil in large pot; cook wontons."
+            ),
+        ]);
+
+        var tags = new MethodTags(
+            new Dictionary<string, string> { ["A1"] = "0 water", ["A2"] = "0 water" },
+            new Dictionary<string, string>(),
+            new Dictionary<int, IReadOnlyList<string>>
+            {
+                [1] = ["0 water", "1 ground pork"],
+                [2] = ["0 water"],
+            }
+        );
+
+        var result = InstructionAmountTagger.Assemble(ingredients, candidates, tags);
+        Assert.IsEmpty(result.Issues, string.Join("; ", result.Issues));
+    }
+
     private static LlmExtractedIngredientItem Ingredient(
         string name,
         decimal? quantity,

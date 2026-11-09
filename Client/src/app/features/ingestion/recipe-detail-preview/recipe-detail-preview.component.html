@@ -264,7 +264,11 @@
                     <strong class="scaled-qty">{{ item.displayQuantityAndUnit }}</strong>
                   }
                   <span class="ing-name">{{ item.ingredient.displayName }}</span>
-                  @if (item.ingredient.unresolvedRecipeTitle) {
+                  @if (item.ingredient.linkedRecipeTitle) {
+                    <span class="linked-recipe-label"
+                      >Linked Recipe: {{ item.ingredient.linkedRecipeTitle }}</span
+                    >
+                  } @else if (item.ingredient.unresolvedRecipeTitle) {
                     <span class="unresolved-recipe-label">Recipe component not linked</span>
                   }
                   @if (item.ingredient.preparationNote) {

@@ -543,6 +543,35 @@ describe('IngestionReviewComponent', () => {
     });
   });
 
+  it('preserves matched recipe references and includes them in preview data', () => {
+    const matchedRecipeId = '00000000-0000-0000-0000-000000000001';
+    component.addIngredient({
+      displayName: '1 recipe Foolproof All-Butter Dough',
+      isRecipeReference: true,
+      referencedRecipeTitle: 'Foolproof All-Butter Dough',
+      matchedRecipeId,
+      matchedRecipeTitle: 'Foolproof All-Butter Dough',
+      matchedRecipeSlug: 'foolproof-all-butter-dough',
+    });
+
+    const ingredient = component.buildDraftPayload().ingredients?.[2];
+    expect(ingredient).toMatchObject({
+      isRecipeReference: true,
+      referencedRecipeTitle: 'Foolproof All-Butter Dough',
+      matchedRecipeId,
+      matchedRecipeTitle: 'Foolproof All-Butter Dough',
+      matchedRecipeSlug: 'foolproof-all-butter-dough',
+    });
+
+    component.refreshPreviewData();
+    const preview = component.previewData();
+    expect(preview).not.toBeNull();
+    const previewIng = preview!.ingredients[2];
+    expect(previewIng.linkedRecipeId).toBe(matchedRecipeId);
+    expect(previewIng.linkedRecipeTitle).toBe('Foolproof All-Butter Dough');
+    expect(previewIng.unresolvedRecipeTitle).toBeNull();
+  });
+
   it('adds and removes steps and timers', () => {
     component.addStep({ instruction: 'Serve warm over rice.' });
     expect(component.stepsArray.length).toBe(2);

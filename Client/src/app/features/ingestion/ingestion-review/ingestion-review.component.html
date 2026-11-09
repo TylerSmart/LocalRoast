@@ -718,10 +718,23 @@
                     <!-- Matched FoodItem vs New FoodItem Banner -->
                     <div class="food-item-binding-strip">
                       @if (ingGroup.get('isRecipeReference')?.value) {
-                        <div class="matched-food-pill recipe-reference-pill">
-                          <mat-icon>restaurant_menu</mat-icon>
-                          <span>Recipe component (not a food item)</span>
-                        </div>
+                        @if (ingGroup.get('matchedRecipeId')?.value) {
+                          <div class="matched-food-pill recipe-reference-pill">
+                            <mat-icon>restaurant_menu</mat-icon>
+                            <span
+                              >Linked Recipe:
+                              {{
+                                ingGroup.get('matchedRecipeTitle')?.value ||
+                                  ingGroup.get('referencedRecipeTitle')?.value
+                              }}</span
+                            >
+                          </div>
+                        } @else {
+                          <div class="matched-food-pill recipe-reference-pill">
+                            <mat-icon>restaurant_menu</mat-icon>
+                            <span>Recipe component (will link when published)</span>
+                          </div>
+                        }
                       } @else if (ingGroup.get('matchedFoodItemId')?.value) {
                         <div class="matched-food-pill">
                           <mat-icon>link</mat-icon>
@@ -758,7 +771,12 @@
                           required
                         />
                         <mat-hint>
-                          It will link automatically if this recipe is already in your cookbook.
+                          @if (ingGroup.get('matchedRecipeId')?.value) {
+                            Matched in your cookbook:
+                            {{ ingGroup.get('matchedRecipeTitle')?.value }}
+                          } @else {
+                            It will link automatically if this recipe is already in your cookbook.
+                          }
                         </mat-hint>
                       </mat-form-field>
                     }

@@ -218,6 +218,10 @@ using (var scope = app.Services.CreateScope())
     if (db.Database.IsRelational())
     {
         db.Database.Migrate();
+        IngestionCatalogMaterializer
+            .RepairAllUnresolvedRecipeReferencesAsync(db)
+            .GetAwaiter()
+            .GetResult();
     }
 }
 

@@ -729,6 +729,13 @@ public sealed partial class RecipeService(
             );
         }
 
+        await IngestionCatalogMaterializer.BacklinkUnresolvedRecipeReferencesAsync(
+            dbContext,
+            recipe.Id,
+            recipe.Title,
+            cancellationToken
+        );
+
         return (await GetRecipeByIdAsync(recipe.Id, cancellationToken))!;
     }
 
@@ -825,6 +832,13 @@ public sealed partial class RecipeService(
                 ex
             );
         }
+
+        await IngestionCatalogMaterializer.BacklinkUnresolvedRecipeReferencesAsync(
+            dbContext,
+            recipe.Id,
+            recipe.Title,
+            cancellationToken
+        );
 
         // Clean up media files removed
         if (!string.IsNullOrEmpty(oldCover) && oldCover != recipe.CoverImagePath)
@@ -1485,10 +1499,37 @@ public sealed partial class RecipeService(
                 AlternativeCustomUnitName = input.AlternativeMeasurement?.CustomUnitName?.Trim(),
                 PreferAlternativeMeasurement = input.PreferAlternativeMeasurement,
                 FoodItemId = input.FoodItemId,
-                LinkedRecipeId = input.LinkedRecipeId,
-                UnresolvedRecipeTitle = string.IsNullOrWhiteSpace(input.UnresolvedRecipeTitle)
-                    ? null
-                    : input.UnresolvedRecipeTitle.Trim(),
+                LinkedRecipeId =
+                    input.LinkedRecipeId
+                    ?? (
+                        !string.IsNullOrWhiteSpace(input.UnresolvedRecipeTitle)
+                            ? await IngestionCatalogMaterializer.ResolveRecipeReferenceAsync(
+                                dbContext,
+                                input.UnresolvedRecipeTitle,
+                                recipe.Id,
+                                cancellationToken
+                            )
+                            : null
+                    ),
+                UnresolvedRecipeTitle =
+                    (
+                        input.LinkedRecipeId != null
+                        || (
+                            !string.IsNullOrWhiteSpace(input.UnresolvedRecipeTitle)
+                            && await IngestionCatalogMaterializer.ResolveRecipeReferenceAsync(
+                                dbContext,
+                                input.UnresolvedRecipeTitle,
+                                recipe.Id,
+                                cancellationToken
+                            ) != null
+                        )
+                    )
+                        ? null
+                        : (
+                            string.IsNullOrWhiteSpace(input.UnresolvedRecipeTitle)
+                                ? null
+                                : input.UnresolvedRecipeTitle.Trim()
+                        ),
                 DisplayName = input.DisplayName.Trim(),
                 PreparationNote = input.PreparationNote?.Trim(),
                 IsOptional = input.IsOptional,

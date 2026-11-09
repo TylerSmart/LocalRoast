@@ -275,7 +275,7 @@ public static class RecipeExtractionDiagnostics
             : $"\"{value[..(maxLength - 3)].TrimEnd()}...\"";
     }
 
-    private static bool MentionsIngredient(
+    public static bool MentionsIngredient(
         string instruction,
         int index,
         IReadOnlyList<LlmExtractedIngredientItem> ingredients

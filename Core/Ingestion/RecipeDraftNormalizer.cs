@@ -165,8 +165,8 @@ public static class RecipeDraftNormalizer
         RegexOptions.IgnoreCase | RegexOptions.Compiled
     );
 
-    private static readonly Regex RecipeReferenceRegex = new(
-        @"^\s*(?:\d+(?:\s+\d+/\d+|/\d+)?\s+)?(?:recipe|batch\s+of)\s+(?<title>.+?)(?:\s*\(this page\))?\s*$",
+    public static readonly Regex RecipeReferenceRegex = new(
+        @"^\s*(?:(?:\d+(?:\s+\d+/\d+|/\d+)?|\d+(?:\.\d+)?)\s*(?:recipe|batch(?:\s+of)?)\s+(?<title>.+?)(?:\s*\((?:optional\s*;\s*)?(?:see\s+)?(?:recipes?\s+follows?|this\s+page(?:\s+and\s+this\s+page)?|pages?\s+\d+)\))?|(?<title>.+?)\s*\((?:optional\s*;\s*)?(?:see\s+)?(?:recipes?\s+follows?|this\s+page(?:\s+and\s+this\s+page)?|pages?\s+\d+)\))\s*$",
         RegexOptions.IgnoreCase | RegexOptions.Compiled
     );
 
@@ -193,7 +193,7 @@ public static class RecipeDraftNormalizer
         return string.IsNullOrWhiteSpace(cleaned) ? displayName : cleaned;
     }
 
-    private static string? NormalizeRecipeReferenceTitle(string? title)
+    public static string? NormalizeRecipeReferenceTitle(string? title)
     {
         if (string.IsNullOrWhiteSpace(title))
         {
@@ -203,17 +203,40 @@ public static class RecipeDraftNormalizer
         var normalized = title.Trim();
         normalized = Regex.Replace(
             normalized,
-            @"\s*\(this page\)\s*$",
+            @",\s*(?:warm|room\s+temperature|chilled|divided|optional|melted|cooled|thawed|at\s+room\s+temperature)\s*$",
             "",
             RegexOptions.IgnoreCase
         );
         normalized = Regex.Replace(
             normalized,
-            @"^(?:recipe|batch\s+of)\s+",
+            @"\s+for\s+serving\s*$",
             "",
             RegexOptions.IgnoreCase
         );
-        return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
+        normalized = Regex.Replace(
+            normalized,
+            @"\s*\((?:optional\s*;\s*)?(?:see\s+)?(?:recipes?\s+follows?|this\s+page(?:\s+and\s+this\s+page)?|pages?\s+\d+)\)\s*$",
+            "",
+            RegexOptions.IgnoreCase
+        );
+        normalized = Regex.Replace(
+            normalized,
+            @",\s*(?:warm|room\s+temperature|chilled|divided|optional|melted|cooled|thawed|at\s+room\s+temperature)\s*$",
+            "",
+            RegexOptions.IgnoreCase
+        );
+        normalized = Regex.Replace(
+            normalized,
+            @"^(?:\d+(?:\s+\d+/\d+|/\d+)?|\d+(?:\.\d+)?)?\s*(?:recipe|batch(?:\s+of)?)\s+",
+            "",
+            RegexOptions.IgnoreCase
+        );
+        var spans = SourceMeasurementParser.FindSpans(normalized);
+        if (spans.Count > 0 && spans[0].Index == 0)
+        {
+            normalized = normalized[spans[0].Length..].TrimStart();
+        }
+        return string.IsNullOrWhiteSpace(normalized) ? null : normalized.Trim();
     }
 
     public static (MeasurementUnit? Unit, string? CustomUnitName) NormalizeUnit(
@@ -272,7 +295,14 @@ public static class RecipeDraftNormalizer
             "can" or "cans" => (MeasurementUnit.Can, null),
             "bunch" or "bunches" => (MeasurementUnit.Bunch, null),
             "slice" or "slices" => (MeasurementUnit.Slice, null),
-            "whole" or "large" or "medium" or "small" => (MeasurementUnit.Whole, null),
+            "whole"
+            or "large"
+            or "medium"
+            or "small"
+            or "recipe"
+            or "recipes"
+            or "batch"
+            or "batches" => (MeasurementUnit.Whole, null),
             _ => (MeasurementUnit.Custom, trimmed[..Math.Min(50, trimmed.Length)]),
         };
     }
@@ -675,6 +705,23 @@ public static class RecipeDraftNormalizer
 
             if (isRecipeReference)
             {
+                if (
+                    unit == MeasurementUnit.Custom
+                    && (
+                        string.IsNullOrWhiteSpace(customUnit)
+                        || customUnit.Equals("custom", StringComparison.OrdinalIgnoreCase)
+                        || customUnit.Equals("recipe", StringComparison.OrdinalIgnoreCase)
+                        || customUnit.Equals("batch", StringComparison.OrdinalIgnoreCase)
+                    )
+                )
+                {
+                    unit = MeasurementUnit.Whole;
+                    customUnit = null;
+                }
+                if (cleanQuantity is null && unit is MeasurementUnit.Whole)
+                {
+                    cleanQuantity = 1m;
+                }
                 displayName = recipeReferenceTitle ?? displayName;
                 normalizedIngredients.Add(
                     new IngestionDraftIngredientDto(
@@ -798,10 +845,20 @@ public static class RecipeDraftNormalizer
             var sourcePair = SourceMeasurementParser.FindAlternative(rawIng.OriginalRawText);
             if (sourcePair is not null && isSplitSourceLine)
             {
-                if (!isUnmeasuredSplitRow)
-                    measurementWarnings.Add(
-                        $"{displayName}: the source equivalent applies to a whole ingredient line, not each split portion; verify portion measurements."
+                if (rawIng.AlternativeMeasurement is not null && !isUnmeasuredSplitRow)
+                {
+                    var alt = NormalizeMeasurement(
+                        rawIng.AlternativeMeasurement,
+                        measurementWarnings,
+                        displayName
                     );
+                    if (alt is not null && MatchesMeasurement(alt, sourcePair.Value.Alternative))
+                    {
+                        measurementWarnings.Add(
+                            $"{displayName}: the source equivalent applies to a whole ingredient line, not each split portion; verify portion measurements."
+                        );
+                    }
+                }
             }
             else if (sourcePair is { } pair)
             {
@@ -1425,16 +1482,10 @@ public static class RecipeDraftNormalizer
             return false;
         }
 
-        var spans = SourceMeasurementParser.FindSpans(originalRawText);
-        foreach (var span in spans)
+        var confirmables = SourceMeasurementParser.FindAllConfirmableMeasurements(originalRawText);
+        foreach (var measurement in confirmables)
         {
-            if (
-                MatchesMeasurement(span.Measurement, alternative)
-                || (
-                    span.Alternative is not null
-                    && MatchesMeasurement(span.Alternative, alternative)
-                )
-            )
+            if (MatchesMeasurement(measurement, alternative))
             {
                 return true;
             }
@@ -1491,27 +1542,45 @@ public static class RecipeDraftNormalizer
         return false;
     }
 
-    private static bool MatchesMeasurement(RecipeMeasurement a, RecipeMeasurement b)
+    public static bool MatchesMeasurement(RecipeMeasurement a, RecipeMeasurement b)
     {
-        if (a.Unit != b.Unit)
+        if (a.Unit == b.Unit)
+        {
+            if (
+                a.Unit == MeasurementUnit.Custom
+                && !string.Equals(
+                    a.CustomUnitName,
+                    b.CustomUnitName,
+                    StringComparison.OrdinalIgnoreCase
+                )
+            )
+            {
+                return false;
+            }
+            if (a.Quantity is null || b.Quantity is null)
+            {
+                return false;
+            }
+            return Math.Abs(a.Quantity.Value - b.Quantity.Value) <= 0.05m;
+        }
+
+        if (a.Quantity is null || b.Quantity is null || !a.Unit.HasValue || !b.Unit.HasValue)
         {
             return false;
         }
+
         if (
-            a.Unit == MeasurementUnit.Custom
-            && !string.Equals(
-                a.CustomUnitName,
-                b.CustomUnitName,
-                StringComparison.OrdinalIgnoreCase
+            CulinaryMath.TryConvertQuantity(
+                a.Quantity.Value,
+                a.Unit.Value,
+                b.Unit.Value,
+                out var converted
             )
         )
         {
-            return false;
+            return Math.Abs(converted - b.Quantity.Value) <= 0.05m;
         }
-        if (a.Quantity is null || b.Quantity is null)
-        {
-            return false;
-        }
-        return Math.Abs(a.Quantity.Value - b.Quantity.Value) <= 0.01m;
+
+        return false;
     }
 }

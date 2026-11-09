@@ -14,9 +14,9 @@ public static class SourceMeasurementParser
 {
     private const string Number = @"(?:\d+\s*)?[½¼¾⅓⅔⅛⅜⅝⅞]|\d+(?:[\s-]+\d+/\d+|/\d+|\.\d+)?";
     private const string Unit =
-        @"fluid ounces?|fl[._ ]+oz|tablespoons?|tbsp|teaspoons?|tsp|cups?|c\b|pints?|pt|quarts?|qt|gallons?|gal|ounces?|oz|pounds?|lbs?|grams?|g|kilograms?|kg|millilit(?:er|re)s?|ml|lit(?:er|re)s?|l|pinch(?:es)?|dash(?:es)?|cloves?|cans?|bunch(?:es)?|slices?|whole|sticks?";
+        @"fluid ounces?|fl[._ ]+oz|tablespoons?|tbsp|teaspoons?|tsp|cups?|c\b|pints?|pt|quarts?|qt|gallons?|gal|ounces?|oz|pounds?|lbs?|grams?|g|kilograms?|kg|millilit(?:er|re)s?|ml|lit(?:er|re)s?|l|pinch(?:es)?|dash(?:es)?|cloves?|cans?|bunch(?:es)?|slices?|whole|sticks?|small|medium|large|recipes?|batch(?:es)?";
     private static readonly Regex Measurement = new(
-        $@"(?<![-−\d/])(?<quantity>{Number})(?:\s*(?:to|[-–—])\s*(?<maximum>{Number}))?\s*(?<unit>{Unit})\b",
+        $@"(?<![-−\d/])(?<quantity>{Number})(?:[-–—]?\s*(?:to|[-–—])\s*(?<maximum>{Number}))?(?:[-–—]+|\s*)(?<unit>{Unit})\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled
     );
     private static readonly Regex AlternativeStart = new(
@@ -45,6 +45,11 @@ public static class SourceMeasurementParser
         @"\(\s*(?<quantity>"
             + Number
             + @")\s*[-–—\s]\s*(?<unit>ounces?|oz\.?|fluid ounces?|fl[._ ]+oz|grams?|g|millilit(?:er|re)s?|ml|lit(?:er|re)s?|l|pounds?|lbs?\.?)\s*\)\s*cans?\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled
+    );
+
+    private static readonly Regex EquipmentSuffix = new(
+        @"^\s+(?:container|pot|stockpot|saucepan|skillet|bowl|dish|pan|baker|casserole|dutch\s+oven)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled
     );
 
@@ -77,6 +82,10 @@ public static class SourceMeasurementParser
         {
             var start = matches[i].Match.Index;
             var end = start + matches[i].Match.Length;
+            if (EquipmentSuffix.IsMatch(text[end..]))
+            {
+                continue;
+            }
             var primary = matches[i].Value!;
             while (
                 i + 1 < matches.Count
@@ -237,24 +246,109 @@ public static class SourceMeasurementParser
                 continue;
 
             var altText = paren.Groups["alt"].Value.Trim();
-            var altMatch = Measurement.Match(altText);
-            if (altMatch.Success && altMatch.Length == altText.Length)
+            var segments = Regex.Split(altText, @"\s*\bor\s+", RegexOptions.IgnoreCase);
+            foreach (var segment in segments)
             {
-                var alt = ParseMatch(altMatch);
-                if (
-                    alt is not null
-                    && (
-                        alt.Unit != basePrimary.Unit
-                        || alt.CustomUnitName != basePrimary.CustomUnitName
-                    )
-                )
+                var cleanSeg = segment.Trim();
+                var altMatch = Measurement.Match(cleanSeg);
+                if (altMatch.Success && altMatch.Length == cleanSeg.Length)
                 {
-                    return (basePrimary, alt);
+                    var alt = ParseMatch(altMatch);
+                    if (
+                        alt is not null
+                        && (
+                            alt.Unit != basePrimary.Unit
+                            || alt.CustomUnitName != basePrimary.CustomUnitName
+                        )
+                    )
+                    {
+                        return (basePrimary, alt);
+                    }
                 }
             }
         }
 
         return null;
+    }
+
+    public static IReadOnlyList<RecipeMeasurement> FindAllConfirmableMeasurements(string? source)
+    {
+        var result = new List<RecipeMeasurement>();
+        if (string.IsNullOrWhiteSpace(source))
+            return result;
+
+        foreach (var span in FindSpans(source))
+        {
+            result.Add(span.Measurement);
+            if (span.Alternative is not null)
+                result.Add(span.Alternative);
+        }
+
+        foreach (var m in Parse(source))
+        {
+            if (!result.Any(r => RecipeDraftNormalizer.MatchesMeasurement(r, m)))
+                result.Add(m);
+        }
+
+        // Check parentheticals for "or" variants e.g. "(2 1/2 cups or 5 ounces)"
+        var parenMatches = Regex.Matches(source, @"\((?<content>[^()]+)\)");
+        foreach (Match paren in parenMatches)
+        {
+            var content = paren.Groups["content"].Value;
+            var segments = Regex.Split(content, @"\s*\bor\s+", RegexOptions.IgnoreCase);
+            if (segments.Length > 1)
+            {
+                foreach (var seg in segments)
+                {
+                    foreach (var m in Parse(seg))
+                    {
+                        if (!result.Any(r => RecipeDraftNormalizer.MatchesMeasurement(r, m)))
+                            result.Add(m);
+                    }
+                }
+            }
+        }
+
+        // Check container or piece size multiplier: e.g. "8 (5- to 6-ounce) chicken thighs" or "1 (14.5-ounce) can"
+        var trimmed = source.TrimStart(' ', '\t', '*', '•');
+        var countMatch = LeadingCount.Match(trimmed);
+        if (countMatch.Success)
+        {
+            var count = FlexibleNullableDecimalJsonConverter.ParseNumber(
+                countMatch.Groups["quantity"].Value
+            );
+            if (count is > 0)
+            {
+                foreach (Match paren in parenMatches)
+                {
+                    var parenMeasurements = Parse(paren.Groups["content"].Value);
+                    foreach (var pm in parenMeasurements)
+                    {
+                        if (
+                            pm.Quantity.HasValue
+                            && pm.Unit.HasValue
+                            && pm.Unit != MeasurementUnit.Whole
+                        )
+                        {
+                            var multiplied = new RecipeMeasurement(
+                                pm.Quantity.Value * count.Value,
+                                pm.Unit,
+                                pm.MaxQuantity.HasValue ? pm.MaxQuantity.Value * count.Value : null,
+                                pm.CustomUnitName
+                            );
+                            if (
+                                !result.Any(r =>
+                                    RecipeDraftNormalizer.MatchesMeasurement(r, multiplied)
+                                )
+                            )
+                                result.Add(multiplied);
+                        }
+                    }
+                }
+            }
+        }
+
+        return result;
     }
 
     private static RecipeMeasurement? ParseMatch(Match match)

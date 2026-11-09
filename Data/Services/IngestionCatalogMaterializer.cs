@@ -111,7 +111,8 @@ public static class IngestionCatalogMaterializer
         CancellationToken cancellationToken
     )
     {
-        var normalizedTitle = title.Trim().ToUpperInvariant();
+        var cleanTitle = RecipeDraftNormalizer.NormalizeRecipeReferenceTitle(title) ?? title.Trim();
+        var normalizedTitle = cleanTitle.ToUpperInvariant();
         return await dbContext
             .Recipes.AsNoTracking()
             .Where(r =>
@@ -120,6 +121,110 @@ public static class IngestionCatalogMaterializer
             )
             .Select(r => (Guid?)r.Id)
             .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    public static async Task<int> BacklinkUnresolvedRecipeReferencesAsync(
+        AppDbContext dbContext,
+        Guid recipeId,
+        string recipeTitle,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var cleanTitle =
+            RecipeDraftNormalizer.NormalizeRecipeReferenceTitle(recipeTitle) ?? recipeTitle.Trim();
+        if (string.IsNullOrWhiteSpace(cleanTitle))
+            return 0;
+
+        var waitingIngredients = await dbContext
+            .RecipeIngredients.Where(ri =>
+                ri.LinkedRecipeId == null
+                && ri.UnresolvedRecipeTitle != null
+                && ri.RecipeId != recipeId
+            )
+            .ToListAsync(cancellationToken);
+
+        var updatedCount = 0;
+        foreach (var ri in waitingIngredients)
+        {
+            var candidateTitle =
+                RecipeDraftNormalizer.NormalizeRecipeReferenceTitle(ri.UnresolvedRecipeTitle)
+                ?? ri.UnresolvedRecipeTitle!.Trim();
+            if (string.Equals(candidateTitle, cleanTitle, StringComparison.OrdinalIgnoreCase))
+            {
+                ri.LinkedRecipeId = recipeId;
+                ri.UnresolvedRecipeTitle = null;
+                updatedCount++;
+            }
+        }
+
+        if (updatedCount > 0)
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        return updatedCount;
+    }
+
+    public static async Task<int> RepairAllUnresolvedRecipeReferencesAsync(
+        AppDbContext dbContext,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var waitingIngredients = await dbContext
+            .RecipeIngredients.Where(ri =>
+                ri.LinkedRecipeId == null && ri.UnresolvedRecipeTitle != null
+            )
+            .ToListAsync(cancellationToken);
+
+        if (waitingIngredients.Count == 0)
+            return 0;
+
+        var allRecipes = await dbContext
+            .Recipes.AsNoTracking()
+            .Select(r => new { r.Id, r.Title })
+            .ToListAsync(cancellationToken);
+
+        var recipeMap = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+        foreach (var r in allRecipes)
+        {
+            var clean =
+                RecipeDraftNormalizer.NormalizeRecipeReferenceTitle(r.Title) ?? r.Title.Trim();
+            if (!recipeMap.ContainsKey(clean))
+            {
+                recipeMap[clean] = r.Id;
+            }
+            if (!recipeMap.ContainsKey(r.Title.Trim()))
+            {
+                recipeMap[r.Title.Trim()] = r.Id;
+            }
+        }
+
+        var updatedCount = 0;
+        foreach (var ri in waitingIngredients)
+        {
+            var candidateTitle =
+                RecipeDraftNormalizer.NormalizeRecipeReferenceTitle(ri.UnresolvedRecipeTitle)
+                ?? ri.UnresolvedRecipeTitle!.Trim();
+            if (
+                recipeMap.TryGetValue(candidateTitle, out var matchedId)
+                || recipeMap.TryGetValue(ri.UnresolvedRecipeTitle!.Trim(), out matchedId)
+            )
+            {
+                if (matchedId != ri.RecipeId)
+                {
+                    ri.LinkedRecipeId = matchedId;
+                    ri.UnresolvedRecipeTitle = null;
+                    updatedCount++;
+                }
+            }
+        }
+
+        if (updatedCount > 0)
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        return updatedCount;
     }
 
     public static async Task<IReadOnlyList<Guid>> ResolveAndMaterializeTagsAsync(

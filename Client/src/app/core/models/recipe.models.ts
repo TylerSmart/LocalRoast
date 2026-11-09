@@ -383,6 +383,9 @@ export interface RecipePreviewIngredient {
   matchedFoodItemName?: string | null;
   alternativeMeasurement?: RecipeMeasurement | null;
   preferAlternativeMeasurement?: boolean;
+  linkedRecipeId?: string | null;
+  linkedRecipeTitle?: string | null;
+  linkedRecipeSlug?: string | null;
   unresolvedRecipeTitle?: string | null;
 }
 

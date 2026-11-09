@@ -511,6 +511,9 @@ export class IngestionReviewComponent implements OnInit {
         isNewFoodItem: [item?.isNewFoodItem ?? !item?.matchedFoodItemId],
         createNewFoodItem: [item?.createNewFoodItem ?? true],
         isRecipeReference: [item?.isRecipeReference ?? !!item?.referencedRecipeTitle],
+        matchedRecipeId: [item?.matchedRecipeId ?? null],
+        matchedRecipeTitle: [item?.matchedRecipeTitle ?? null],
+        matchedRecipeSlug: [item?.matchedRecipeSlug ?? null],
         referencedRecipeTitle: [
           item?.referencedRecipeTitle ?? null,
           item?.isRecipeReference || item?.referencedRecipeTitle
@@ -579,6 +582,9 @@ export class IngestionReviewComponent implements OnInit {
       group.patchValue(
         {
           referencedRecipeTitle: null,
+          matchedRecipeId: null,
+          matchedRecipeTitle: null,
+          matchedRecipeSlug: null,
           isNewFoodItem: !group.get('matchedFoodItemId')?.value,
           createNewFoodItem: !group.get('matchedFoodItemId')?.value,
           proposedFoodItemName:
@@ -775,7 +781,11 @@ export class IngestionReviewComponent implements OnInit {
         matchedFoodItemName: ing.matchedFoodItemName || ing.proposedFoodItemName,
         alternativeMeasurement: ing.alternativeMeasurement,
         preferAlternativeMeasurement: ing.preferAlternativeMeasurement,
-        unresolvedRecipeTitle: ing.isRecipeReference ? ing.referencedRecipeTitle : null,
+        linkedRecipeId: ing.isRecipeReference ? (ing.matchedRecipeId ?? null) : null,
+        linkedRecipeTitle: ing.isRecipeReference ? (ing.matchedRecipeTitle ?? null) : null,
+        linkedRecipeSlug: ing.isRecipeReference ? (ing.matchedRecipeSlug ?? null) : null,
+        unresolvedRecipeTitle:
+          ing.isRecipeReference && !ing.matchedRecipeId ? ing.referencedRecipeTitle : null,
       })),
       steps: (draft.steps || []).map((st, i) => ({
         id: `step-${i}`,
@@ -846,6 +856,9 @@ export class IngestionReviewComponent implements OnInit {
           referencedRecipeTitle: val.isRecipeReference
             ? val.referencedRecipeTitle?.trim() || null
             : null,
+          matchedRecipeId: val.isRecipeReference ? val.matchedRecipeId || null : null,
+          matchedRecipeTitle: val.isRecipeReference ? val.matchedRecipeTitle || null : null,
+          matchedRecipeSlug: val.isRecipeReference ? val.matchedRecipeSlug || null : null,
           matchedFoodItemId: val.isRecipeReference ? null : val.matchedFoodItemId || null,
           matchedFoodItemName: val.isRecipeReference ? null : val.matchedFoodItemName || null,
           isNewFoodItem: !val.isRecipeReference && !val.matchedFoodItemId,

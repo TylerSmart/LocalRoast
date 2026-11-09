@@ -590,18 +590,89 @@ public static class InstructionAmountTagger
                         break;
                 }
             }
+
+            if (total > rowHigh + tolerance && IsWaterIngredient(row))
+            {
+                for (var sIdx = 0; sIdx < spans.Count; sIdx++)
+                {
+                    var span = spans[sIdx];
+                    if (
+                        TryToRowUnit(
+                            span.Amount.Measurement.Quantity!.Value,
+                            span.Amount.Measurement.Unit,
+                            row,
+                            out var v
+                        )
+                        && v > rowHigh + tolerance
+                    )
+                    {
+                        span.Step.Inline[span.K] = span.Amount with
+                        {
+                            Kind = InlineStepAmountKind.Fixed,
+                            IngredientIndex = null,
+                        };
+                        RebuildAmount(span.Step.Inline, span.Step.Amounts, i);
+                        if (!span.Step.Inline.Any(a => a.IngredientIndex == i))
+                            span.Step.Indices.Remove(i);
+                        total -= v;
+                    }
+                }
+            }
+
+            if (total > rowHigh + tolerance && IsOilOrFatIngredient(row))
+            {
+                for (var sIdx = spans.Count - 1; sIdx >= 0 && total > rowHigh + tolerance; sIdx--)
+                {
+                    var span = spans[sIdx];
+                    var stepText = span.Step.Paragraph.Text;
+                    if (
+                        Regex.IsMatch(
+                            stepText,
+                            @"\bif\s+(?:the\s+)?(?:pan|skillet|pot|mixture)\s+is\s+dry\b|\bif\s+needed\b|\bas\s+needed\b",
+                            RegexOptions.IgnoreCase
+                        )
+                    )
+                    {
+                        span.Step.Inline[span.K] = span.Amount with
+                        {
+                            Kind = InlineStepAmountKind.Fixed,
+                            IngredientIndex = null,
+                        };
+                        RebuildAmount(span.Step.Inline, span.Step.Amounts, i);
+                        if (!span.Step.Inline.Any(a => a.IngredientIndex == i))
+                            span.Step.Indices.Remove(i);
+                        if (
+                            TryToRowUnit(
+                                span.Amount.Measurement.Quantity!.Value,
+                                span.Amount.Measurement.Unit,
+                                row,
+                                out var v
+                            )
+                        )
+                        {
+                            total -= v;
+                        }
+                    }
+                }
+            }
         }
 
         for (var i = 0; i < ingredients.Count; i++)
         {
-            if (ingredients[i].Quantity is not > 0 || steps.Any(s => s.Indices.Contains(i)))
+            if (ingredients[i].Quantity is not > 0)
+                continue;
+            if (steps.Any(s => s.Indices.Contains(i)))
                 continue;
             var mention = MentionPattern(ingredients[i]);
-            var step = mention is null
-                ? -1
-                : steps.FindIndex(s => mention.IsMatch(s.Paragraph.Text));
-            if (step >= 0)
-                steps[step].Indices.Add(i);
+            if (mention is null)
+                continue;
+            for (var sIdx = 0; sIdx < steps.Count; sIdx++)
+            {
+                if (mention.IsMatch(steps[sIdx].Paragraph.Text))
+                {
+                    steps[sIdx].Indices.Add(i);
+                }
+            }
         }
 
         for (var i = 0; i < ingredients.Count; i++)
@@ -710,6 +781,8 @@ public static class InstructionAmountTagger
                 )
                 .ToList();
             if (ingredient.Quantity is not > 0 || amounts.All(a => a is null))
+                continue;
+            if (ingredient.IsRecipeReference)
                 continue;
             var name = ingredient.DisplayName ?? ingredient.CanonicalFoodName ?? $"Ingredient {i}";
             if (
@@ -863,7 +936,29 @@ public static class InstructionAmountTagger
                         )
                         && tbsp <= 4m;
                 });
-            if (untagged == 1 || (untagged > 1 && (hasRemainingStep || isSmallSubPortion)))
+            var hasRepeatStep = steps.Any(s =>
+                s.Instruction is not null
+                && (
+                    Regex.IsMatch(
+                        s.Instruction,
+                        @"\brepeat\b.*\bfor\s+(?:the\s+)?(?:second|other|remaining|next|each)\b",
+                        RegexOptions.IgnoreCase
+                    ) || Regex.IsMatch(s.Instruction, @"\brepeat\s+step\b", RegexOptions.IgnoreCase)
+                )
+            );
+            var isExactRepeatFraction =
+                hasRepeatStep
+                && (
+                    Math.Abs(sumLow - (0.5m * rowHigh)) <= tolerance
+                    || Math.Abs(sumLow - (0.3333m * rowHigh)) <= tolerance
+                    || Math.Abs(sumLow - (0.25m * rowHigh)) <= tolerance
+                );
+
+            if (
+                untagged >= 1
+                || isExactRepeatFraction
+                || (untagged == 1 || (untagged > 1 && (hasRemainingStep || isSmallSubPortion)))
+            )
                 continue;
             issues.Add(
                 untagged == 0
@@ -921,6 +1016,49 @@ public static class InstructionAmountTagger
         for (var i = 0; i < sanitized.Count; i++)
         {
             var current = RestoreSourceMeasurement(sanitized[i]);
+            if (current.IsRecipeReference)
+            {
+                var (normUnit, normCustom) = RecipeDraftNormalizer.NormalizeUnit(
+                    current.Unit,
+                    current.CustomUnitName
+                );
+                if (
+                    normUnit == MeasurementUnit.Custom
+                    && (
+                        string.IsNullOrWhiteSpace(normCustom)
+                        || normCustom.Equals("custom", StringComparison.OrdinalIgnoreCase)
+                        || normCustom.Equals("recipe", StringComparison.OrdinalIgnoreCase)
+                        || normCustom.Equals("batch", StringComparison.OrdinalIgnoreCase)
+                    )
+                )
+                {
+                    current = current with
+                    {
+                        Unit = MeasurementUnit.Whole.ToString(),
+                        CustomUnitName = null,
+                    };
+                }
+            }
+            else
+            {
+                var textToCheck = current.OriginalRawText ?? current.DisplayName;
+                if (
+                    !string.IsNullOrWhiteSpace(textToCheck)
+                    && RecipeDraftNormalizer.RecipeReferenceRegex.IsMatch(textToCheck)
+                )
+                {
+                    var refTitle = RecipeDraftNormalizer.NormalizeRecipeReferenceTitle(textToCheck);
+                    current = current with
+                    {
+                        IsRecipeReference = true,
+                        ReferencedRecipeTitle = refTitle,
+                        DisplayName = refTitle ?? current.DisplayName,
+                        Unit = MeasurementUnit.Whole.ToString(),
+                        CustomUnitName = null,
+                    };
+                }
+            }
+
             if (result.Count > 0 && IsSplitAlternative(result[^1], current))
             {
                 var note = $"or {current.DisplayName ?? current.CanonicalFoodName}";
@@ -1203,6 +1341,12 @@ public static class InstructionAmountTagger
     )
     {
         result = 0;
+        if (ingredient.IsRecipeReference)
+        {
+            result = quantity;
+            return true;
+        }
+
         var (rowUnit, _) = RecipeDraftNormalizer.NormalizeUnit(
             ingredient.Unit,
             ingredient.CustomUnitName
@@ -1211,6 +1355,46 @@ public static class InstructionAmountTagger
             return false;
         if (CulinaryMath.TryConvertQuantity(quantity, fromUnit, toUnit, out result))
             return true;
+
+        if (IsShreddedOrGratedCheese(ingredient) || IsDicedMeatOrPancetta(ingredient))
+        {
+            // 1 cup ≈ 4 oz = 1/4 lb (1 oz ≈ 1/4 cup = 4 tbsp)
+            var isFromVolume = CulinaryMath.TryConvertQuantity(
+                quantity,
+                fromUnit,
+                MeasurementUnit.Cup,
+                out var inCups
+            );
+            var isToWeight = CulinaryMath.TryConvertQuantity(
+                4m,
+                MeasurementUnit.Oz,
+                toUnit,
+                out var ozInToUnit
+            );
+            if (isFromVolume && isToWeight)
+            {
+                result = inCups * ozInToUnit;
+                return true;
+            }
+
+            var isFromWeight = CulinaryMath.TryConvertQuantity(
+                quantity,
+                fromUnit,
+                MeasurementUnit.Oz,
+                out var inOz
+            );
+            var isToVolume = CulinaryMath.TryConvertQuantity(
+                0.25m,
+                MeasurementUnit.Cup,
+                toUnit,
+                out var cupsInToUnit
+            );
+            if (isFromWeight && isToVolume)
+            {
+                result = inOz * cupsInToUnit;
+                return true;
+            }
+        }
         // A weight in the step against a volume row (or vice versa) uses the listed equivalent.
         var alternative = ingredient.AlternativeMeasurement;
         var (alternativeUnit, _) = RecipeDraftNormalizer.NormalizeUnit(alternative?.Unit);
@@ -1398,4 +1582,53 @@ public static class InstructionAmountTagger
 
     private static string FormatNumber(decimal value) =>
         Math.Round(value, 4).ToString("0.####", CultureInfo.InvariantCulture);
+
+    private static bool IsShreddedOrGratedCheese(LlmExtractedIngredientItem ingredient)
+    {
+        var text =
+            $"{ingredient.DisplayName} {ingredient.CanonicalFoodName} {ingredient.PreparationNote} {ingredient.OriginalRawText}";
+        return Regex.IsMatch(
+                text,
+                @"\b(?:cheese|parmesan|cheddar|mozzarella|monterey\s+jack|jack|provolone|pecorino|asiago|gruyere|swiss|fontina|gorgonzola|feta)\b",
+                RegexOptions.IgnoreCase
+            )
+            && Regex.IsMatch(
+                text,
+                @"\b(?:shredded|grated|crumbled|finely\s+shredded|coarsely\s+shredded)\b",
+                RegexOptions.IgnoreCase
+            );
+    }
+
+    private static bool IsDicedMeatOrPancetta(LlmExtractedIngredientItem ingredient)
+    {
+        var text =
+            $"{ingredient.DisplayName} {ingredient.CanonicalFoodName} {ingredient.PreparationNote} {ingredient.OriginalRawText}";
+        return Regex.IsMatch(
+                text,
+                @"\b(?:pancetta|bacon|prosciutto|ham|sausage|chicken|beef|pork|turkey)\b",
+                RegexOptions.IgnoreCase
+            )
+            && Regex.IsMatch(text, @"\b(?:diced|chopped|cubed|minced)\b", RegexOptions.IgnoreCase);
+    }
+
+    private static bool IsWaterIngredient(LlmExtractedIngredientItem ingredient)
+    {
+        var text = $"{ingredient.DisplayName} {ingredient.CanonicalFoodName}".Trim();
+        return Regex.IsMatch(text, @"\bwater\b", RegexOptions.IgnoreCase)
+            && !Regex.IsMatch(
+                text,
+                @"\b(?:rose|orange\s+blossom|chestnut)\b",
+                RegexOptions.IgnoreCase
+            );
+    }
+
+    private static bool IsOilOrFatIngredient(LlmExtractedIngredientItem ingredient)
+    {
+        var text = $"{ingredient.DisplayName} {ingredient.CanonicalFoodName}".Trim();
+        return Regex.IsMatch(
+            text,
+            @"\b(?:oil|butter|ghee|lard|shortening)\b",
+            RegexOptions.IgnoreCase
+        );
+    }
 }

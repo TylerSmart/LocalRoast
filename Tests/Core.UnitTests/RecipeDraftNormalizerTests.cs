@@ -1268,4 +1268,162 @@ public sealed class RecipeDraftNormalizerTests
         Assert.AreEqual("Simmer (20m)", timers[1].Label);
         Assert.AreEqual(1200, timers[1].DurationSeconds);
     }
+
+    [TestMethod]
+    public void Normalize_HyphenatedAndSizeWordParentheticals_DoNotEmitMeasurementWarnings()
+    {
+        var rawPayload = new LlmExtractedRecipePayload(
+            Title: "Chicken Provençal",
+            Ingredients:
+            [
+                new(
+                    SectionName: null,
+                    Quantity: 8,
+                    MaxQuantity: null,
+                    Unit: "whole",
+                    DisplayName: "chicken thighs",
+                    CanonicalFoodName: "chicken thighs",
+                    PreparationNote: "trimmed",
+                    OriginalRawText: "8 (5- to 6-ounce) bone-in, skin-on chicken thighs, trimmed",
+                    AlternativeMeasurement: new LlmExtractedMeasurementItem(2.5m, "lb", 3m)
+                ),
+                new(
+                    SectionName: null,
+                    Quantity: 1,
+                    MaxQuantity: null,
+                    Unit: "can",
+                    DisplayName: "diced tomatoes",
+                    CanonicalFoodName: "diced tomatoes",
+                    OriginalRawText: "1 (14.5-ounce) can diced tomatoes",
+                    AlternativeMeasurement: new LlmExtractedMeasurementItem(14.5m, "oz")
+                ),
+                new(
+                    SectionName: null,
+                    Quantity: 1,
+                    MaxQuantity: null,
+                    Unit: "lb",
+                    DisplayName: "Yukon Gold potatoes",
+                    CanonicalFoodName: "Yukon Gold potatoes",
+                    OriginalRawText: "1 pound (2 medium) Yukon Gold potatoes",
+                    AlternativeMeasurement: new LlmExtractedMeasurementItem(2m, "whole")
+                ),
+                new(
+                    SectionName: null,
+                    Quantity: 2.5m,
+                    MaxQuantity: null,
+                    Unit: "cup",
+                    DisplayName: "pecans",
+                    CanonicalFoodName: "pecans",
+                    OriginalRawText: "2 1/2 cups pecans (5 ounces or 2 1/2 cups)",
+                    AlternativeMeasurement: new LlmExtractedMeasurementItem(5m, "oz")
+                ),
+            ]
+        );
+
+        var draft = RecipeDraftNormalizer.Normalize(
+            raw: rawPayload,
+            catalogFoods: [],
+            tags: [],
+            sourceUrl: null,
+            fallbackSourceName: null,
+            fallbackSourceAuthor: null,
+            coverImagePath: null,
+            thumbnailImagePath: null
+        );
+
+        Assert.IsNotNull(draft.MeasurementWarnings);
+        Assert.AreEqual(
+            0,
+            draft.MeasurementWarnings.Count,
+            string.Join("; ", draft.MeasurementWarnings)
+        );
+    }
+
+    [TestMethod]
+    public void Normalize_SubRecipeDetectionAndUnitNormalization()
+    {
+        var rawPayload = new LlmExtractedRecipePayload(
+            Title: "Denver Omelets",
+            Ingredients:
+            [
+                new(
+                    SectionName: null,
+                    Quantity: 1,
+                    MaxQuantity: null,
+                    Unit: "custom",
+                    DisplayName: "Filling for Denver Omelets",
+                    CanonicalFoodName: null,
+                    OriginalRawText: "1 recipe Filling for Denver Omelets (this page)",
+                    IsRecipeReference: true,
+                    ReferencedRecipeTitle: "Filling for Denver Omelets",
+                    CustomUnitName: "custom"
+                ),
+                new(
+                    SectionName: null,
+                    Quantity: 0.5m,
+                    MaxQuantity: null,
+                    Unit: "cup",
+                    DisplayName: "Fried Shallots",
+                    CanonicalFoodName: null,
+                    OriginalRawText: "1/2 cup Fried Shallots (recipe follows)",
+                    IsRecipeReference: false
+                ),
+            ]
+        );
+
+        var draft = RecipeDraftNormalizer.Normalize(
+            raw: rawPayload,
+            catalogFoods: [],
+            tags: [],
+            sourceUrl: null,
+            fallbackSourceName: null,
+            fallbackSourceAuthor: null,
+            coverImagePath: null,
+            thumbnailImagePath: null
+        );
+
+        Assert.IsNotNull(draft.Ingredients);
+        Assert.AreEqual(2, draft.Ingredients.Count);
+
+        var filling = draft.Ingredients[0];
+        Assert.IsTrue(filling.IsRecipeReference);
+        Assert.AreEqual("Filling for Denver Omelets", filling.ReferencedRecipeTitle);
+        Assert.AreEqual(MeasurementUnit.Whole, filling.Unit);
+        Assert.IsNull(filling.CustomUnitName);
+
+        var shallots = draft.Ingredients[1];
+        Assert.IsTrue(shallots.IsRecipeReference);
+        Assert.AreEqual("Fried Shallots", shallots.ReferencedRecipeTitle);
+        Assert.AreEqual(0.5m, shallots.Quantity);
+        Assert.AreEqual(MeasurementUnit.Cup, shallots.Unit);
+    }
+
+    [TestMethod]
+    public void NormalizeRecipeReferenceTitle_StripsPrepClausesAndPageMarkers()
+    {
+        Assert.AreEqual(
+            "Filling for Denver Omelets",
+            RecipeDraftNormalizer.NormalizeRecipeReferenceTitle(
+                "1 recipe Filling for Denver Omelets (this page)"
+            )
+        );
+        Assert.AreEqual(
+            "Classic Tomato Sauce",
+            RecipeDraftNormalizer.NormalizeRecipeReferenceTitle(
+                "Classic Tomato Sauce (recipe follows), warm"
+            )
+        );
+        Assert.AreEqual(
+            "Sichuan Chili Oil",
+            RecipeDraftNormalizer.NormalizeRecipeReferenceTitle(
+                "Sichuan Chili Oil (optional; recipe follows)"
+            )
+        );
+        Assert.AreEqual(
+            "Quick Tart Dough",
+            RecipeDraftNormalizer.NormalizeRecipeReferenceTitle(
+                "1 batch of Quick Tart Dough (this page and this page)"
+            )
+        );
+    }
 }
