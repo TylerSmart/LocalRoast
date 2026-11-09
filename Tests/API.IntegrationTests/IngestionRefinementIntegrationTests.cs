@@ -334,6 +334,121 @@ public sealed class IngestionRefinementIntegrationTests
     }
 
     [TestMethod]
+    public async Task PausedQueue_RefineWith_RunsEvenWhenQueueIsPausedAndInboxHasQueuedJobs()
+    {
+        var fakeLlm = new RefineLlmClient(
+            Extraction(linkSalt: false),
+            (_, context, _) =>
+                Task.FromResult(
+                    new LlmRecipeRepairResult(
+                        context.Draft with
+                        {
+                            Steps = [context.Draft.Steps![0] with { IngredientIndices = [0, 1] }],
+                        },
+                        []
+                    )
+                )
+        );
+        await using var factory = CreateFactory(fakeLlm);
+        using var client = factory.CreateClient();
+        await AuthenticateAsync(client);
+        var reviewJobId = await ImportAndProcessAsync(factory, client);
+
+        // Pause ingestion queue and add an un-run queued job
+        using (var scope = factory.Services.CreateScope())
+        {
+            var settings = scope.ServiceProvider.GetRequiredService<ILlmSettingsService>();
+            await settings.SetIngestionEnabledAsync(false);
+
+            var db = scope.ServiceProvider.GetRequiredService<App.Data.AppDbContext>();
+            db.IngestionJobs.Add(
+                new IngestionJob
+                {
+                    DisplayTitle = "Paused Background Job",
+                    Status = IngestionJobStatus.Queued,
+                    RunNowRequested = false,
+                }
+            );
+            await db.SaveChangesAsync();
+        }
+
+        // Request refinement on the review job
+        var refineRes = await client.PostAsync(
+            $"/api/ingestion/jobs/{reviewJobId}/refinement",
+            null
+        );
+        Assert.AreEqual(HttpStatusCode.OK, refineRes.StatusCode);
+
+        // Run background refinement while queue is paused
+        Assert.IsTrue(await RefineNextAsync(factory));
+
+        var refinement = await GetRefinementAsync(client, reviewJobId);
+        Assert.IsNotNull(refinement);
+        Assert.AreEqual(IngestionRefinementStatus.Improved, refinement.Status);
+    }
+
+    [TestMethod]
+    public async Task PublishedJob_CanRequestAndCompleteRefinement()
+    {
+        var fakeLlm = new RefineLlmClient(
+            Extraction(linkSalt: false),
+            (_, context, _) =>
+                Task.FromResult(
+                    new LlmRecipeRepairResult(
+                        context.Draft with
+                        {
+                            Steps = [context.Draft.Steps![0] with { IngredientIndices = [0, 1] }],
+                        },
+                        []
+                    )
+                )
+        );
+        await using var factory = CreateFactory(fakeLlm);
+        using var client = factory.CreateClient();
+        await AuthenticateAsync(client);
+        var jobId = await ImportAndProcessAsync(factory, client);
+
+        // Publish the job first
+        IngestionExtractedDraftDto draft;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var ingestion = scope.ServiceProvider.GetRequiredService<IIngestionService>();
+            var detail = await ingestion.GetJobByIdAsync(jobId);
+            Assert.IsNotNull(detail?.ExtractedDraft);
+            draft = detail.ExtractedDraft;
+            await ingestion.ApproveAndPublishAsync(jobId, draft);
+        }
+
+        // Verify it is Published
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<App.Data.AppDbContext>();
+            var job = await db.IngestionJobs.FindAsync(jobId);
+            Assert.AreEqual(IngestionJobStatus.Published, job!.Status);
+        }
+
+        // Request refinement on the Published job
+        var refineRes = await client.PostAsync($"/api/ingestion/jobs/{jobId}/refinement", null);
+        Assert.AreEqual(HttpStatusCode.OK, refineRes.StatusCode);
+
+        // Run background refinement
+        Assert.IsTrue(await RefineNextAsync(factory));
+
+        var refinement = await GetRefinementAsync(client, jobId);
+        Assert.IsNotNull(refinement);
+        Assert.AreEqual(IngestionRefinementStatus.Improved, refinement.Status);
+
+        // Preview refinement on Published job
+        var previewRes = await client.PostAsJsonAsync(
+            $"/api/ingestion/jobs/{jobId}/refinement/preview",
+            new IngestionDraftDiagnosticsRequest(draft)
+        );
+        Assert.AreEqual(HttpStatusCode.OK, previewRes.StatusCode);
+        var preview = await previewRes.Content.ReadFromJsonAsync<IngestionRepairPreviewDto>();
+        Assert.IsNotNull(preview);
+    }
+
+    [TestMethod]
     public async Task ReprocessingAndRestartRecovery_ResetRefinementState()
     {
         var fakeLlm = new RefineLlmClient(

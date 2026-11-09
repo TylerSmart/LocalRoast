@@ -215,9 +215,17 @@ export interface IngestionExtractedDraftDto {
   measurementWarnings?: string[] | null;
 }
 
+export interface IngestionDiagnosticTargetDto {
+  message: string;
+  severity: 'error' | 'warning';
+  ingredientIndex?: number | null;
+  stepNumber?: number | null;
+}
+
 export interface IngestionReviewDiagnosticsDto {
   validationIssues: string[];
   qualityWarnings: string[];
+  targetedDiagnostics?: IngestionDiagnosticTargetDto[];
 }
 
 export interface IngestionRepairPreviewDto {
@@ -330,6 +338,7 @@ export interface RetryWaitingJobsResultDto {
 export interface RetryBatchJobsRequest {
   jobIds?: string[];
   filter?: string;
+  search?: string;
 }
 
 export interface RetryBatchJobsResultDto {

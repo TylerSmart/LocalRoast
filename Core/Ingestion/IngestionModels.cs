@@ -256,7 +256,7 @@ public record IngestionQueueSummaryDto(
 
 public record IngestionJobQueryParameters(
     IngestionJobStatus? Status = null,
-    string? Search = null,
+    [MaxLength(200)] string? Search = null,
     int PageNumber = 1,
     int PageSize = 25,
     bool ActiveWaitingOnly = false
@@ -318,7 +318,8 @@ public record RetryWaitingJobsResultDto(int RequeuedCount);
 
 public sealed record RetryBatchJobsRequest(
     IReadOnlyList<Guid>? JobIds = null,
-    string? Filter = null
+    [MaxLength(50)] string? Filter = null,
+    [MaxLength(200)] string? Search = null
 );
 
 public sealed record RetryBatchJobsResultDto(int RequeuedCount);

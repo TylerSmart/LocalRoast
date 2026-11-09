@@ -670,11 +670,7 @@ public sealed class IngestionJobsController(
         CancellationToken cancellationToken
     )
     {
-        var result = await ingestionService.RetryBatchJobsAsync(
-            request.JobIds,
-            request.Filter,
-            cancellationToken
-        );
+        var result = await ingestionService.RetryBatchJobsAsync(request, cancellationToken);
         return Ok(result);
     }
 

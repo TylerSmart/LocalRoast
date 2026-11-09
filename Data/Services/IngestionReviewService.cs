@@ -21,6 +21,9 @@ public sealed class IngestionReviewService(
         PropertyNameCaseInsensitive = true,
     };
 
+    private static bool CanEditOrReview(IngestionJobStatus status) =>
+        status is IngestionJobStatus.ReadyForReview or IngestionJobStatus.Published;
+
     public async Task<IngestionReviewDiagnosticsDto> GetDiagnosticsAsync(
         Guid id,
         IngestionExtractedDraftDto draft,
@@ -38,7 +41,7 @@ public sealed class IngestionReviewService(
     )
     {
         var job = await FindJobAsync(id, cancellationToken);
-        if (job.Status != IngestionJobStatus.ReadyForReview)
+        if (!CanEditOrReview(job.Status))
         {
             throw new ConflictException("Only a recipe awaiting review can be repaired.");
         }
@@ -64,7 +67,7 @@ public sealed class IngestionReviewService(
             .FirstOrDefaultAsync(cancellationToken);
         if (
             currentJob is null
-            || currentJob.Status != IngestionJobStatus.ReadyForReview
+            || !CanEditOrReview(currentJob.Status)
             || currentJob.ModifiedAt != job.ModifiedAt
         )
         {
@@ -101,7 +104,7 @@ public sealed class IngestionReviewService(
     )
     {
         var job = await FindJobAsync(id, cancellationToken);
-        if (job.Status != IngestionJobStatus.ReadyForReview)
+        if (!CanEditOrReview(job.Status))
         {
             throw new ConflictException("Only a recipe awaiting review can be refined.");
         }
@@ -169,7 +172,7 @@ public sealed class IngestionReviewService(
     )
     {
         var job = await FindJobAsync(id, cancellationToken);
-        if (job.Status != IngestionJobStatus.ReadyForReview)
+        if (!CanEditOrReview(job.Status))
         {
             throw new ConflictException("Only a recipe awaiting review can be refined.");
         }
@@ -229,9 +232,8 @@ public sealed class IngestionReviewService(
     {
         var config = await llmSettingsService.GetEffectiveConfigAsync(cancellationToken);
         if (
-            !config.EnableIngestion
-            || string.IsNullOrWhiteSpace(config.RefineModel)
-            || await HasRunnableImportAsync(cancellationToken)
+            string.IsNullOrWhiteSpace(config.RefineModel)
+            || await HasRunnableImportAsync(config.EnableIngestion, cancellationToken)
         )
         {
             return false;
@@ -240,7 +242,10 @@ public sealed class IngestionReviewService(
         var refinementId = await dbContext
             .IngestionDraftRefinements.Where(item =>
                 item.Status == IngestionRefinementStatus.Pending
-                && item.IngestionJob!.Status == IngestionJobStatus.ReadyForReview
+                && (
+                    item.IngestionJob!.Status == IngestionJobStatus.ReadyForReview
+                    || item.IngestionJob.Status == IngestionJobStatus.Published
+                )
             )
             .OrderBy(item => item.RequestedAt)
             .Select(item => item.Id)
@@ -266,7 +271,7 @@ public sealed class IngestionReviewService(
             refineCts
         );
         // An import queued while this pass waited for the execution lock goes first.
-        if (await HasRunnableImportAsync(cancellationToken))
+        if (await HasRunnableImportAsync(config.EnableIngestion, cancellationToken))
         {
             return false;
         }
@@ -276,7 +281,7 @@ public sealed class IngestionReviewService(
             .FirstOrDefaultAsync(item => item.Id == refinement.IngestionJobId, cancellationToken);
         if (
             job is null
-            || job.Status != IngestionJobStatus.ReadyForReview
+            || !CanEditOrReview(job.Status)
             || string.IsNullOrWhiteSpace(job.ExtractedDraftJson)
         )
         {
@@ -387,13 +392,17 @@ public sealed class IngestionReviewService(
         return true;
     }
 
-    private async Task<bool> HasRunnableImportAsync(CancellationToken cancellationToken)
+    private async Task<bool> HasRunnableImportAsync(
+        bool ingestionEnabled,
+        CancellationToken cancellationToken
+    )
     {
         var now = DateTimeOffset.UtcNow;
         return await dbContext.IngestionJobs.AnyAsync(
             item =>
                 item.Status == IngestionJobStatus.Queued
-                && (item.NextRetryAt == null || item.NextRetryAt <= now),
+                && (item.NextRetryAt == null || item.NextRetryAt <= now)
+                && (ingestionEnabled || item.RunNowRequested),
             cancellationToken
         );
     }
@@ -476,16 +485,117 @@ public sealed class IngestionReviewService(
         : !string.IsNullOrWhiteSpace(job.NormalizedSourceText) ? job.NormalizedSourceText
         : job.RawText;
 
+    private static readonly System.Text.RegularExpressions.Regex StepPattern = new(
+        @"^Step\s+(?<step>\d+)\b",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase,
+        TimeSpan.FromSeconds(1)
+    );
+    private static readonly System.Text.RegularExpressions.Regex IngredientPattern = new(
+        @"^Ingredient\s+#?(?<ing>\d+)\b",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase,
+        TimeSpan.FromSeconds(1)
+    );
+    private static readonly System.Text.RegularExpressions.Regex PrefixColonPattern = new(
+        @"^(?<food>[^:]+):",
+        System.Text.RegularExpressions.RegexOptions.None,
+        TimeSpan.FromSeconds(1)
+    );
+
     internal static IngestionReviewDiagnosticsDto Diagnose(
         IngestionExtractedDraftDto draft,
         string? source
     )
     {
         var payload = IngestionDraftRepairMapper.ToPayload(draft);
-        return new IngestionReviewDiagnosticsDto(
-            RecipeExtractionDiagnostics.GetReviewIssues(payload, source),
-            RecipeExtractionDiagnostics.GetQualityWarnings(payload)
-        );
+        var issues = RecipeExtractionDiagnostics.GetReviewIssues(payload, source);
+        var warnings = RecipeExtractionDiagnostics.GetQualityWarnings(payload);
+        var targeted = BuildTargetedDiagnostics(issues, warnings, draft);
+        return new IngestionReviewDiagnosticsDto(issues, warnings, targeted);
+    }
+
+    internal static List<IngestionDiagnosticTargetDto> BuildTargetedDiagnostics(
+        IReadOnlyList<string> issues,
+        IReadOnlyList<string> warnings,
+        IngestionExtractedDraftDto draft
+    )
+    {
+        var result = new List<IngestionDiagnosticTargetDto>();
+        foreach (var issue in issues)
+        {
+            var (ingIndex, stepNumber) = MatchTarget(issue, draft);
+            result.Add(new IngestionDiagnosticTargetDto(issue, "error", ingIndex, stepNumber));
+        }
+        foreach (var warning in warnings)
+        {
+            var (ingIndex, stepNumber) = MatchTarget(warning, draft);
+            result.Add(new IngestionDiagnosticTargetDto(warning, "warning", ingIndex, stepNumber));
+        }
+        return result;
+    }
+
+    private static (int? IngredientIndex, int? StepNumber) MatchTarget(
+        string message,
+        IngestionExtractedDraftDto draft
+    )
+    {
+        var stepMatch = StepPattern.Match(message);
+        if (stepMatch.Success && int.TryParse(stepMatch.Groups["step"].Value, out var stepNum))
+        {
+            return (null, stepNum);
+        }
+
+        var ingMatch = IngredientPattern.Match(message);
+        if (ingMatch.Success && int.TryParse(ingMatch.Groups["ing"].Value, out var ingNum))
+        {
+            var count = draft.Ingredients?.Count ?? 0;
+            if (count > 0)
+            {
+                if (ingNum >= 0 && ingNum < count)
+                {
+                    return (ingNum, null);
+                }
+                if (ingNum >= 1 && ingNum - 1 < count)
+                {
+                    return (ingNum - 1, null);
+                }
+            }
+            return (ingNum, null);
+        }
+
+        var colonMatch = PrefixColonPattern.Match(message);
+        if (colonMatch.Success && draft.Ingredients is { Count: > 0 })
+        {
+            var foodPrefix = colonMatch.Groups["food"].Value.Trim().Trim('"', '\'');
+            var portionSplit = foodPrefix.IndexOf(" portion ", StringComparison.OrdinalIgnoreCase);
+            var searchName = portionSplit >= 0 ? foodPrefix[..portionSplit].Trim() : foodPrefix;
+
+            for (var i = 0; i < draft.Ingredients.Count; i++)
+            {
+                var ing = draft.Ingredients[i];
+                if (
+                    string.Equals(
+                        ing.DisplayName?.Trim(),
+                        searchName,
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                    || string.Equals(
+                        ing.ProposedFoodItemName?.Trim(),
+                        searchName,
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                    || string.Equals(
+                        ing.MatchedFoodItemName?.Trim(),
+                        searchName,
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                )
+                {
+                    return (i, null);
+                }
+            }
+        }
+
+        return (null, null);
     }
 
     private static string RequireSource(IngestionJob job) =>

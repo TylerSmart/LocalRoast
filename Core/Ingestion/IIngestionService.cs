@@ -86,6 +86,11 @@ public interface IIngestionService
     );
 
     Task<RetryBatchJobsResultDto> RetryBatchJobsAsync(
+        RetryBatchJobsRequest request,
+        CancellationToken cancellationToken = default
+    );
+
+    Task<RetryBatchJobsResultDto> RetryBatchJobsAsync(
         IReadOnlyList<Guid>? jobIds,
         string? filter = null,
         CancellationToken cancellationToken = default

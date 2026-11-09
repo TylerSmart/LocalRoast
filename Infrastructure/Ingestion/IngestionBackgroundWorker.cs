@@ -72,15 +72,10 @@ public sealed class IngestionBackgroundWorker(
                     processedAny = await processor.ProcessNextQueuedJobAsync(stoppingToken);
                 } while (processedAny && !stoppingToken.IsCancellationRequested);
 
-                if (!ingestionEnabled)
+                // 2. Probe offline waiting jobs (only when ingestion is enabled)
+                if (ingestionEnabled)
                 {
-                    await queueSignal.WaitForWorkAsync(pollInterval, stoppingToken);
-                    continue;
-                }
-
-                // 2. Probe offline waiting jobs
-                using (var probeScope = scopeFactory.CreateScope())
-                {
+                    using var probeScope = scopeFactory.CreateScope();
                     var processor =
                         probeScope.ServiceProvider.GetRequiredService<IIngestionProcessor>();
                     await processor.ProbeAndPromoteWaitingJobsAsync(stoppingToken);

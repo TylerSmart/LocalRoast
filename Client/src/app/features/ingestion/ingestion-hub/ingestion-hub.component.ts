@@ -717,7 +717,7 @@ export class IngestionHubComponent implements OnInit {
   }
 
   retryAllInCurrentTab(): void {
-    if (this.isRetryingAll() || this.filteredJobs().length === 0) {
+    if (this.isRetryingAll() || this.totalCount() === 0) {
       return;
     }
 
@@ -726,12 +726,12 @@ export class IngestionHubComponent implements OnInit {
     this.feedbackMessage.set(null);
 
     const currentFilter = this.filter();
-    const jobIds = this.filteredJobs().map((j) => j.id);
 
     this.ingestionService
       .retryBatchJobs({
-        jobIds,
+        jobIds: [],
         filter: currentFilter,
+        search: this.searchQuery().trim() || undefined,
       })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({

@@ -411,8 +411,9 @@ describe('IngestionHubComponent', () => {
     component.retryAllInCurrentTab();
 
     expect(mockIngestionService.retryBatchJobs).toHaveBeenCalledWith({
-      jobIds: ['job-1', 'job-2', 'job-3'],
+      jobIds: [],
       filter: 'All',
+      search: undefined,
     });
     expect(component.feedbackMessage()).toContain('Requeued 3 job(s) for extraction.');
   });
@@ -422,8 +423,9 @@ describe('IngestionHubComponent', () => {
     component.retryAllInCurrentTab();
 
     expect(mockIngestionService.retryBatchJobs).toHaveBeenCalledWith({
-      jobIds: ['job-1'],
+      jobIds: [],
       filter: 'ReadyForReview',
+      search: undefined,
     });
   });
 
@@ -494,5 +496,17 @@ describe('IngestionHubComponent', () => {
     runButton.click();
     expect(mockIngestionService.runJobNow).toHaveBeenCalledWith('job-2');
     expect(component.feedbackMessage()).toContain('rest of the queue stays paused');
+  });
+  it('renders Review Side-by-Side button for Published jobs alongside Open Recipe', () => {
+    component.setFilter('Published');
+    fixture.detectChanges();
+
+    const reviewBtn = fixture.nativeElement.querySelector('.review-action-btn');
+    expect(reviewBtn).toBeTruthy();
+    expect(reviewBtn.textContent).toContain('Review Side-by-Side');
+
+    const openRecipeBtn = fixture.nativeElement.querySelector('.open-recipe-btn');
+    expect(openRecipeBtn).toBeTruthy();
+    expect(openRecipeBtn.textContent).toContain('Open Recipe');
   });
 });

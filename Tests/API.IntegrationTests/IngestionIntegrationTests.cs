@@ -7,6 +7,7 @@ using App.Core.FoodCatalog;
 using App.Core.Ingestion;
 using App.Core.Recipes;
 using App.Data.Entities;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -264,12 +265,12 @@ public sealed class IngestionIntegrationTests
         Assert.AreEqual(IngestionJobStatus.Published, jobDetail.Status);
         Assert.AreEqual(recipe.Id, jobDetail.ResultingRecipeId);
 
-        // Approving again returns 409 Conflict
+        // Approving again updates the published recipe in place (Phase 15)
         var secondApprove = await _client.PostAsJsonAsync(
             $"/api/ingestion/jobs/{job.Id}/approve",
             draft
         );
-        Assert.AreEqual(HttpStatusCode.Conflict, secondApprove.StatusCode);
+        Assert.AreEqual(HttpStatusCode.Created, secondApprove.StatusCode);
 
         // 4. Discarding a published job removes it from the ingestion list while keeping the recipe intact
         var discardPublishedResp = await _client.DeleteAsync($"/api/ingestion/jobs/{job.Id}");
@@ -2062,6 +2063,285 @@ public sealed class IngestionIntegrationTests
         Assert.AreEqual(child.Id, updatedParent.Ingredients[0].LinkedRecipeId);
         Assert.AreEqual(child.Title, updatedParent.Ingredients[0].LinkedRecipeTitle);
         Assert.IsNull(updatedParent.Ingredients[0].UnresolvedRecipeTitle);
+    }
+
+    [TestMethod]
+    public async Task PausedQueue_SingleJobRerun_SetsRunNowRequestedAndRunsWhilePaused()
+    {
+        var fakeLlm = new FakeSequentialLlmExtractionClient(_ => new LlmExtractedRecipePayload(
+            Title: "Single Job Rerun Paused Test",
+            ConfidenceScore: 0.95m,
+            Ingredients:
+            [
+                new LlmExtractedIngredientItem(
+                    null,
+                    1m,
+                    null,
+                    "cup",
+                    "sugar",
+                    "sugar",
+                    OriginalRawText: "1 cup sugar"
+                ),
+            ],
+            Steps: [new LlmExtractedStepItem(null, "Stir sugar.", [0])]
+        ));
+
+        await using var customFactory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Llm:TextModel", "test-model");
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ILlmExtractionClient>();
+                services.AddSingleton<ILlmExtractionClient>(fakeLlm);
+            });
+        });
+
+        using var client = customFactory.CreateClient();
+        await AuthenticateAsync(client);
+
+        Guid jobId;
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<App.Data.AppDbContext>();
+            var job = new IngestionJob
+            {
+                DisplayTitle = "Single Job Rerun Paused Test",
+                Channel = IngestionChannel.RawText,
+                Status = IngestionJobStatus.Failed,
+                RunNowRequested = false,
+                RawText = "Ingredients:\n- 1 cup sugar\nInstructions:\nStir sugar.",
+            };
+            db.IngestionJobs.Add(job);
+            await db.SaveChangesAsync();
+            jobId = job.Id;
+
+            // Pause queue
+            var settings = scope.ServiceProvider.GetRequiredService<ILlmSettingsService>();
+            await settings.SetIngestionEnabledAsync(false);
+        }
+
+        // Call POST /api/ingestion/jobs/{id}/retry
+        var retryRes = await client.PostAsync($"/api/ingestion/jobs/{jobId}/retry", null);
+        Assert.AreEqual(HttpStatusCode.Accepted, retryRes.StatusCode);
+        var summary = await retryRes.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
+        Assert.IsNotNull(summary);
+        Assert.AreEqual(IngestionJobStatus.Queued, summary.Status);
+
+        // Verify in DB that RunNowRequested is true
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<App.Data.AppDbContext>();
+            var job = await db.IngestionJobs.FindAsync(jobId);
+            Assert.IsNotNull(job);
+            Assert.AreEqual(IngestionJobStatus.Queued, job.Status);
+            Assert.IsTrue(job.RunNowRequested);
+
+            // Verify processor runs it even though EnableIngestion is false
+            var processor = scope.ServiceProvider.GetRequiredService<IIngestionProcessor>();
+            var processed = await processor.ProcessNextQueuedJobAsync();
+            Assert.IsTrue(processed);
+        }
+    }
+
+    [TestMethod]
+    public async Task PublishedJob_CanUpdateDraft_RepairPreview_AndApproveUpdatesLinkedRecipe()
+    {
+        await AuthenticateAsync(_client);
+
+        Guid jobId;
+        Guid recipeId;
+        var initialDraft = new IngestionExtractedDraftDto(
+            Title: "Initial Pancake Recipe",
+            Ingredients:
+            [
+                new IngestionDraftIngredientDto(
+                    DisplayName: "Flour",
+                    Quantity: 2m,
+                    Unit: MeasurementUnit.Cup,
+                    OriginalRawText: "2 cups flour"
+                ),
+            ],
+            Steps: [new IngestionDraftStepDto(Instruction: "Mix flour.", IngredientIndices: [0])]
+        );
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<App.Data.AppDbContext>();
+            var ingestion = scope.ServiceProvider.GetRequiredService<IIngestionService>();
+
+            var job = new IngestionJob
+            {
+                DisplayTitle = "Initial Pancake Recipe",
+                Status = IngestionJobStatus.ReadyForReview,
+                RawText = "Ingredients:\n- 2 cups flour\nInstructions:\nMix flour.",
+                ExtractedDraftJson = System.Text.Json.JsonSerializer.Serialize(initialDraft),
+            };
+            db.IngestionJobs.Add(job);
+            await db.SaveChangesAsync();
+            jobId = job.Id;
+
+            // Approve & publish it
+            var published = await ingestion.ApproveAndPublishAsync(jobId, initialDraft);
+            recipeId = published.Id;
+        }
+
+        // 1. Verify job is now Published
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<App.Data.AppDbContext>();
+            var job = await db.IngestionJobs.FindAsync(jobId);
+            Assert.AreEqual(IngestionJobStatus.Published, job!.Status);
+            Assert.AreEqual(recipeId, job.ResultingRecipeId);
+        }
+
+        // 2. PUT /api/ingestion/jobs/{id}/draft with updated title & ingredients on the Published job
+        var updatedDraft = initialDraft with
+        {
+            Title = "Fluffy Buttermilk Pancakes",
+            Ingredients =
+            [
+                new IngestionDraftIngredientDto(
+                    DisplayName: "Flour",
+                    Quantity: 3m,
+                    Unit: MeasurementUnit.Cup,
+                    OriginalRawText: "3 cups flour"
+                ),
+            ],
+        };
+        var updateDraftRes = await _client.PutAsJsonAsync(
+            $"/api/ingestion/jobs/{jobId}/draft",
+            updatedDraft
+        );
+        Assert.AreEqual(HttpStatusCode.OK, updateDraftRes.StatusCode);
+
+        // 3. POST /api/ingestion/jobs/{id}/approve to update the published recipe in place
+        var approveRes = await _client.PostAsJsonAsync(
+            $"/api/ingestion/jobs/{jobId}/approve",
+            updatedDraft
+        );
+        Assert.AreEqual(HttpStatusCode.Created, approveRes.StatusCode);
+        var updatedRecipe = await approveRes.Content.ReadFromJsonAsync<RecipeDetailDto>();
+        Assert.IsNotNull(updatedRecipe);
+        Assert.AreEqual(recipeId, updatedRecipe.Id);
+        Assert.AreEqual("Fluffy Buttermilk Pancakes", updatedRecipe.Title);
+
+        // 4. Verify fetched recipe from /api/recipes/{recipeId} has the updated title
+        var getRecipeRes = await _client.GetAsync($"/api/recipes/{recipeId}");
+        Assert.AreEqual(HttpStatusCode.OK, getRecipeRes.StatusCode);
+        var fetchedRecipe = await getRecipeRes.Content.ReadFromJsonAsync<RecipeDetailDto>();
+        Assert.AreEqual("Fluffy Buttermilk Pancakes", fetchedRecipe!.Title);
+    }
+
+    [TestMethod]
+    public async Task RetryBatchJobs_MatchesFilterAndSearchAcrossAllPages()
+    {
+        await AuthenticateAsync(_client);
+
+        var batchTag = $"BatchSearch_{Guid.NewGuid():N}"[..18];
+        const int totalJobs = 30; // Greater than standard page size of 25
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<App.Data.AppDbContext>();
+            for (var i = 0; i < totalJobs; i++)
+            {
+                db.IngestionJobs.Add(
+                    new IngestionJob
+                    {
+                        DisplayTitle = $"{batchTag} Job {i + 1}",
+                        Status = IngestionJobStatus.Failed,
+                        StatusDetail = "Temporary network error",
+                        RawText = "Some recipe text",
+                    }
+                );
+            }
+            await db.SaveChangesAsync();
+        }
+
+        // Call POST /api/ingestion/jobs/retry-batch with empty jobIds, Filter = Failed, Search = batchTag
+        var request = new RetryBatchJobsRequest(JobIds: [], Filter: "Failed", Search: batchTag);
+        var response = await _client.PostAsJsonAsync("/api/ingestion/jobs/retry-batch", request);
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+
+        var result = await response.Content.ReadFromJsonAsync<RetryBatchJobsResultDto>();
+        Assert.IsNotNull(result);
+        Assert.AreEqual(totalJobs, result.RequeuedCount);
+
+        // Verify in DB that all 30 jobs are now Queued
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<App.Data.AppDbContext>();
+            var requeuedCount = (
+                await db
+                    .IngestionJobs.Where(j =>
+                        j.DisplayTitle.StartsWith(batchTag) && j.Status == IngestionJobStatus.Queued
+                    )
+                    .ToListAsync()
+            ).Count;
+            Assert.AreEqual(totalJobs, requeuedCount);
+        }
+    }
+
+    [TestMethod]
+    public async Task IngestionReview_Diagnose_ReturnsTargetedDiagnostics()
+    {
+        await AuthenticateAsync(_client);
+
+        Guid jobId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<App.Data.AppDbContext>();
+            var job = new IngestionJob
+            {
+                DisplayTitle = "Diagnostics Target Test",
+                Status = IngestionJobStatus.ReadyForReview,
+                RawText = "Ingredients:\n- 1 cup sugar\nInstructions:\nStep 1: stir sugar.",
+            };
+            db.IngestionJobs.Add(job);
+            await db.SaveChangesAsync();
+            jobId = job.Id;
+        }
+
+        var draftWithIssues = new IngestionExtractedDraftDto(
+            Title: "Diagnostics Test",
+            Ingredients:
+            [
+                new IngestionDraftIngredientDto(
+                    DisplayName: "Sugar",
+                    Quantity: -1m, // Invalid: non-positive measurement
+                    Unit: MeasurementUnit.Cup,
+                    OriginalRawText: "1 cup sugar"
+                ),
+            ],
+            Steps:
+            [
+                new IngestionDraftStepDto(
+                    Instruction: "Stir sugar.",
+                    IngredientIndices: [99] // Invalid: index out of range
+                ),
+            ]
+        );
+
+        var response = await _client.PostAsJsonAsync(
+            $"/api/ingestion/jobs/{jobId}/review-diagnostics",
+            new IngestionDraftDiagnosticsRequest(draftWithIssues)
+        );
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+
+        var diagnostics = await response.Content.ReadFromJsonAsync<IngestionReviewDiagnosticsDto>();
+        Assert.IsNotNull(diagnostics);
+        Assert.IsNotNull(diagnostics.TargetedDiagnostics);
+        Assert.IsTrue(diagnostics.TargetedDiagnostics.Count >= 2);
+
+        // One should target IngredientIndex 0
+        var ingDiag = diagnostics.TargetedDiagnostics.FirstOrDefault(d => d.IngredientIndex == 0);
+        Assert.IsNotNull(ingDiag, "Expected diagnostic targeting IngredientIndex 0");
+        Assert.AreEqual("error", ingDiag.Severity);
+
+        // One should target StepNumber 1
+        var stepDiag = diagnostics.TargetedDiagnostics.FirstOrDefault(d => d.StepNumber == 1);
+        Assert.IsNotNull(stepDiag, "Expected diagnostic targeting StepNumber 1");
+        Assert.AreEqual("error", stepDiag.Severity);
     }
 
     private sealed class FakeSequentialLlmExtractionClient(
