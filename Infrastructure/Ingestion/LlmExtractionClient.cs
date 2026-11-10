@@ -861,6 +861,54 @@ Field example for "2 cups finely chopped red onion":
         bool? enableThinking = null
     )
     {
+        var thinking = enableThinking ?? config.EnableThinking;
+        try
+        {
+            return await SendStructuredTextChatOnceAsync(
+                config,
+                schemaName,
+                jsonSchema,
+                systemPrompt,
+                userPrompt,
+                temperature,
+                cancellationToken,
+                maxTokens,
+                thinking
+            );
+        }
+        // A thinking model can reason until it runs out of tokens; answer directly instead.
+        catch (LlmOutputTruncatedException) when (config.Provider == LlmProvider.Ollama && thinking)
+        {
+            logger?.LogWarning(
+                "{Schema} response ran out of tokens while thinking; retrying without thinking.",
+                schemaName
+            );
+            return await SendStructuredTextChatOnceAsync(
+                config,
+                schemaName,
+                jsonSchema,
+                systemPrompt,
+                userPrompt,
+                temperature,
+                cancellationToken,
+                maxTokens,
+                enableThinking: false
+            );
+        }
+    }
+
+    private async Task<string> SendStructuredTextChatOnceAsync(
+        EffectiveLlmConnectionConfig config,
+        string schemaName,
+        object jsonSchema,
+        string systemPrompt,
+        string userPrompt,
+        double temperature,
+        CancellationToken cancellationToken,
+        int? maxTokens,
+        bool enableThinking
+    )
+    {
         var normalizedBase = NormalizeBaseUrl(config.Provider, config.BaseUrl);
         var timeout = TimeSpan.FromSeconds(Math.Max(15, config.RequestTimeoutSeconds));
         var sw = Stopwatch.StartNew();
@@ -887,7 +935,7 @@ Field example for "2 cups finely chopped red onion":
                 {
                     model = config.TextModel!.Trim(),
                     stream = false,
-                    think = enableThinking ?? config.EnableThinking,
+                    think = enableThinking,
                     keep_alive = string.IsNullOrWhiteSpace(config.OllamaKeepAlive)
                         ? "5m"
                         : config.OllamaKeepAlive.Trim(),
@@ -1437,7 +1485,7 @@ Transcribe the recipe printed in these page images. Copy text verbatim: never re
 
         if (string.Equals(doneReason, "length", StringComparison.OrdinalIgnoreCase))
         {
-            throw new DomainValidationException(
+            throw new LlmOutputTruncatedException(
                 "LLM output reached the maximum token limit before completing the structured JSON response (done_reason: length). Increase context/output limits or use an instruct/non-thinking model."
             );
         }
@@ -1989,3 +2037,5 @@ Household Cookbook Catalog:
 }
 
 file sealed record RecipeIssueTriagePayload(IReadOnlyList<LlmIssueTriageItem>? Decisions);
+
+file sealed class LlmOutputTruncatedException(string message) : DomainValidationException(message);

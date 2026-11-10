@@ -761,9 +761,194 @@ public sealed class InstructionAmountTaggerTests
         );
     }
 
+    [TestMethod]
+    public void Assemble_InsertsAmountsAheadOfTheWholeIngredientName()
+    {
+        var ingredients = new List<LlmExtractedIngredientItem>
+        {
+            new(null, 0.25m, null, "tsp", "red pepper flakes", "red pepper flakes"),
+            new(null, 1m, null, "tbsp", "fermented black beans", "fermented black beans"),
+            new(null, 2m, null, "tbsp", "unsalted butter", "butter"),
+            new(null, 0.5m, null, "cup", "mayonnaise", "mayonnaise"),
+        };
+        var candidates = InstructionAmountTagger.FindCandidates([
+            new MethodParagraph(1, null, "Add pepper flakes and black beans."),
+            new MethodParagraph(2, null, "Drizzle with melted butter."),
+            new MethodParagraph(3, null, "In a bowl, whisk together mayonnaise."),
+        ]);
+        var tags = new MethodTags(
+            new Dictionary<string, string>(),
+            new Dictionary<string, string>(),
+            new Dictionary<int, IReadOnlyList<string>>
+            {
+                [1] = ["0 red pepper flakes", "1 fermented black beans"],
+                [2] = ["2 unsalted butter"],
+                [3] = ["3 mayonnaise"],
+            }
+        );
+
+        var result = InstructionAmountTagger.Assemble(ingredients, candidates, tags);
+
+        Assert.IsEmpty(result.Issues, string.Join("; ", result.Issues));
+        Assert.AreEqual(
+            "Add 1/4 tsp pepper flakes and 1 tbsp black beans.",
+            result.Steps[0].Instruction
+        );
+        Assert.AreEqual("Drizzle with 2 tbsp melted butter.", result.Steps[1].Instruction);
+        Assert.AreEqual(
+            "In a bowl, whisk together 1/2 cup mayonnaise.",
+            result.Steps[2].Instruction
+        );
+        var flakes = result.Steps[0].InlineAmounts![0];
+        Assert.AreEqual(
+            "pepper flakes",
+            result
+                .Steps[0]
+                .Instruction.Substring(
+                    flakes.IngredientSpanStart!.Value,
+                    flakes.IngredientSpanLength!.Value
+                )
+        );
+    }
+
+    [TestMethod]
+    [DataRow("Cut six 6-inch corn tortillas into strips.", "corn tortillas", 6, null)]
+    [DataRow("Add 1 finely chopped onion and cook.", "onion", 1, null)]
+    [DataRow("Rinse fish under cold running water and pat dry.", "water", 2, "cup")]
+    [DataRow("Heat 1 inch of oil in large Dutch oven.", "vegetable oil", 3, "cup")]
+    [DataRow("Sprinkle with remaining parsley.", "parsley", 2, "tbsp")]
+    [DataRow("Salt the chicken and let rest.", "kosher salt", 1, "tsp")]
+    public void Assemble_LeavesTheTextAloneWhenAnAmountWouldNotReadNaturally(
+        string instruction,
+        string ingredient,
+        int quantity,
+        string? unit
+    )
+    {
+        var ingredients = new List<LlmExtractedIngredientItem>
+        {
+            new(null, quantity, null, unit, ingredient, ingredient),
+        };
+        var candidates = InstructionAmountTagger.FindCandidates([
+            new MethodParagraph(1, null, instruction),
+        ]);
+        var tags = new MethodTags(
+            candidates.Amounts.ToDictionary(a => a.Id, _ => "fixed"),
+            new Dictionary<string, string>(),
+            new Dictionary<int, IReadOnlyList<string>> { [1] = [$"0 {ingredient}"] }
+        );
+
+        var result = InstructionAmountTagger.Assemble(ingredients, candidates, tags);
+
+        Assert.AreEqual(instruction, result.Steps[0].Instruction);
+        Assert.IsTrue(result.Steps[0].IngredientIndices!.Contains(0));
+    }
+
+    [TestMethod]
+    public void Assemble_FollowsTheFoodNamedAfterAnAmountOverTheTag()
+    {
+        var ingredients = new List<LlmExtractedIngredientItem>
+        {
+            new(null, 2m, null, "cup", "table salt", "salt"),
+            new(null, 4m, null, "tbsp", "unsalted butter", "butter"),
+        };
+        var candidates = InstructionAmountTagger.FindCandidates([
+            new MethodParagraph(1, null, "Dissolve the salt in 2 gallons cold water."),
+            new MethodParagraph(
+                2,
+                null,
+                "Melt 2 tablespoons butter in skillet; refrigerate remaining 2 tablespoons butter."
+            ),
+            new MethodParagraph(3, null, "Off heat, whisk in 2 tablespoons chilled butter."),
+        ]);
+        var tags = new MethodTags(
+            new Dictionary<string, string>
+            {
+                ["A1"] = "0 table salt",
+                ["A2"] = "1 unsalted butter",
+                ["A3"] = "1 unsalted butter",
+                ["A4"] = "1 unsalted butter",
+            },
+            new Dictionary<string, string>(),
+            new Dictionary<int, IReadOnlyList<string>>
+            {
+                [1] = ["0 table salt"],
+                [2] = ["1 unsalted butter"],
+                [3] = ["1 unsalted butter"],
+            }
+        );
+
+        var result = InstructionAmountTagger.Assemble(ingredients, candidates, tags);
+
+        Assert.IsEmpty(result.Issues, string.Join("; ", result.Issues));
+        var water = result.Steps[0].InlineAmounts!.Single(a => a.Text == "2 gallons");
+        Assert.AreEqual(InlineStepAmountKind.Fixed, water.Kind);
+        Assert.IsNull(water.IngredientIndex);
+        Assert.IsTrue(result.Steps[0].IngredientIndices!.Contains(0));
+        Assert.AreEqual(
+            2m,
+            result
+                .Steps[1]
+                .IngredientAmounts!.Single(a => a.IngredientIndex == 1)
+                .Measurement.Quantity
+        );
+    }
+
+    [TestMethod]
+    public void Assemble_ReadsStepOuncesAsFluidOuncesForAVolumeRow()
+    {
+        var ingredients = new List<LlmExtractedIngredientItem>
+        {
+            Ingredient("vodka", 2m, "fl oz"),
+            Ingredient("lime juice", 1m, "tbsp"),
+        };
+        var candidates = InstructionAmountTagger.FindCandidates([
+            new MethodParagraph(1, null, "Shake 2 ounces vodka with the lime juice and ice."),
+        ]);
+        var tags = new MethodTags(
+            new Dictionary<string, string> { ["A1"] = "0 vodka" },
+            new Dictionary<string, string>(),
+            new Dictionary<int, IReadOnlyList<string>> { [1] = ["0 vodka", "1 lime juice"] }
+        );
+
+        var result = InstructionAmountTagger.Assemble(ingredients, candidates, tags);
+
+        Assert.IsEmpty(result.Issues, string.Join("; ", result.Issues));
+    }
+
     private static LlmExtractedIngredientItem Ingredient(
         string name,
         decimal? quantity,
         string? unit
     ) => new(null, quantity, null, unit, name, name);
+
+    [TestMethod]
+    public void RepairIngredientRows_DoesNotTurnATechniqueCrossReferenceIntoASubRecipe()
+    {
+        var rows = InstructionAmountTagger.RepairIngredientRows([
+            new(
+                null,
+                18m,
+                null,
+                "whole",
+                "shrimp",
+                "medium-large shrimp",
+                OriginalRawText: "18 medium-large shrimp (31 to 40 per pound), peeled, deveined, and tails removed (see this page)"
+            ),
+            new(
+                null,
+                1m,
+                null,
+                "whole",
+                null,
+                "Garlic Mayonnaise",
+                OriginalRawText: "1 recipe Garlic Mayonnaise (this page)"
+            ),
+        ]);
+
+        Assert.IsFalse(rows[0].IsRecipeReference);
+        Assert.AreEqual("medium-large shrimp", rows[0].DisplayName);
+        Assert.IsTrue(rows[1].IsRecipeReference);
+        Assert.AreEqual("Garlic Mayonnaise", rows[1].ReferencedRecipeTitle);
+    }
 }

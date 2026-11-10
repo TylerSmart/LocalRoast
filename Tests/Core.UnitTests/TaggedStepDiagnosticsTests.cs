@@ -87,6 +87,54 @@ public sealed class TaggedStepDiagnosticsTests
     }
 
     [TestMethod]
+    public void GetIssues_AcceptsBareCountsForWholeAndCustomUnitRows()
+    {
+        const string text = "Add 2 apples and 1 piece ginger.";
+        var recipe = new LlmExtractedRecipePayload(
+            Title: "Counts",
+            Ingredients:
+            [
+                new(null, 2, null, "whole", "apples", "apples", OriginalRawText: "2 apples"),
+                new(null, 1, null, "piece", "ginger", "ginger", OriginalRawText: "1 piece ginger"),
+            ],
+            Steps:
+            [
+                new(
+                    null,
+                    text,
+                    [0, 1],
+                    InlineAmounts:
+                    [
+                        new(
+                            4,
+                            1,
+                            "2",
+                            InlineStepAmountKind.Ingredient,
+                            0,
+                            new RecipeMeasurement(2, MeasurementUnit.Whole)
+                        ),
+                        new(
+                            17,
+                            7,
+                            "1 piece",
+                            InlineStepAmountKind.Ingredient,
+                            1,
+                            new RecipeMeasurement(1, MeasurementUnit.Custom, null, "piece")
+                        ),
+                    ]
+                ),
+            ]
+        );
+
+        Assert.IsFalse(
+            TaggedStepDiagnostics
+                .GetIssues(recipe)
+                .Any(issue => issue.Contains("no longer a measured amount")),
+            string.Join("; ", TaggedStepDiagnostics.GetIssues(recipe))
+        );
+    }
+
+    [TestMethod]
     public void GetIssues_FlagsStepAmountsThatExceedTheIngredientRow()
     {
         const string second = "Add 2 tbsp butter.";

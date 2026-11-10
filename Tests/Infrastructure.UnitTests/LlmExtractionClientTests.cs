@@ -1153,6 +1153,51 @@ public sealed class LlmExtractionClientTests
     }
 
     [TestMethod]
+    public async Task ExtractRecipeFromTextAsync_Ollama_ThinkingRunsOutOfTokens_RetriesWithoutThinking()
+    {
+        var ollamaResponse = """
+            {
+                "done": true,
+                "done_reason": "length",
+                "message": { "role": "assistant", "content": "", "thinking": "..." }
+            }
+            """;
+        var thinkFlags = new List<bool>();
+        var handler = new MockHttpMessageHandler(request =>
+        {
+            using var body = JsonDocument.Parse(request.Content!.ReadAsStringAsync().Result);
+            thinkFlags.Add(body.RootElement.GetProperty("think").GetBoolean());
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(ollamaResponse, Encoding.UTF8, "application/json"),
+            };
+        });
+
+        var client = new LlmExtractionClient(new HttpClient(handler));
+        var config = new EffectiveLlmConnectionConfig(
+            Provider: LlmProvider.Ollama,
+            BaseUrl: "http://localhost:11434",
+            ApiKey: null,
+            TextModel: "gemma4:12b",
+            VisionModel: null,
+            OllamaKeepAlive: "5m",
+            RequestTimeoutSeconds: 30,
+            AutoPublishHighConfidenceText: false,
+            EnableThinking: true
+        );
+
+        await Assert.ThrowsAsync<DomainValidationException>(async () =>
+        {
+            await client.ExtractRecipeFromTextAsync(
+                config,
+                new LlmExtractionContext(TaggedSource, [])
+            );
+        });
+
+        CollectionAssert.AreEqual(new[] { true, false }, thinkFlags);
+    }
+
+    [TestMethod]
     public async Task ExtractRecipeFromTextAsync_Ollama_ThinkingOnlyWithoutContent_ThrowsDomainValidationException()
     {
         var ollamaResponse = """

@@ -168,6 +168,134 @@ public static class InstructionAmountTagger
         RegexOptions.IgnoreCase,
         RegexTimeout
     );
+    private static readonly Regex WordRegex = new(
+        @"[\p{L}][\p{L}'’-]*",
+        RegexOptions.None,
+        RegexTimeout
+    );
+    private static readonly Regex PrecedingWordRegex = new(
+        @"(?<![\p{L}\p{N}'’-])(?<word>[\p{L}][\p{L}'’-]*)\s+$",
+        RegexOptions.None,
+        RegexTimeout
+    );
+    private static readonly Regex ClauseBoundaryRegex = new(
+        @"[,;:.()]|\b(?:and|or|with|plus|then)\b",
+        RegexOptions.IgnoreCase,
+        RegexTimeout
+    );
+    private static readonly Regex QuantityWordRegex = new(
+        @"\d|[½¼¾⅓⅔⅛⅜⅝⅞]|\b(?:a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|dozen|half|pinch|dash|handful|enough|some|remaining|rest|more|additional|equal|each|both|several|few|inch|inches)\b",
+        RegexOptions.IgnoreCase,
+        RegexTimeout
+    );
+    private static readonly Regex DecimalAmountRegex = new(
+        @"\d\.\d",
+        RegexOptions.None,
+        RegexTimeout
+    );
+    private static readonly Regex StoredRemainderBeforeRegex = new(
+        @"\b(?:refrigerate|chill|freeze)\s+(?:the\s+)?remaining\s*$",
+        RegexOptions.IgnoreCase,
+        RegexTimeout
+    );
+    private static readonly Regex LeadingWaterRegex = new(
+        @"^water\b",
+        RegexOptions.IgnoreCase,
+        RegexTimeout
+    );
+
+    // Words after which an amount reads naturally: "add 1 cup broth", "with 2 tbsp butter".
+    private static readonly HashSet<string> InsertionSlotWords = new(
+        [
+            "add",
+            "adding",
+            "stir",
+            "stirring",
+            "whisk",
+            "whisking",
+            "combine",
+            "combining",
+            "toss",
+            "tossing",
+            "mix",
+            "mixing",
+            "fold",
+            "beat",
+            "blend",
+            "process",
+            "pulse",
+            "puree",
+            "purée",
+            "sprinkle",
+            "season",
+            "drizzle",
+            "pour",
+            "place",
+            "melt",
+            "heat",
+            "dissolve",
+            "bring",
+            "microwave",
+            "measure",
+            "rub",
+            "brush",
+            "spread",
+            "top",
+            "scatter",
+            "arrange",
+            "layer",
+            "coat",
+            "simmer",
+            "boil",
+            "toast",
+            "cook",
+            "sauté",
+            "saute",
+            "grind",
+            "divide",
+            "together",
+            "and",
+            "or",
+            "with",
+            "in",
+            "plus",
+            "of",
+            "then",
+            "over",
+            "onto",
+            "using",
+            "use",
+        ],
+        StringComparer.OrdinalIgnoreCase
+    );
+
+    // Descriptors that belong in front of the amount's food: "1 tbsp melted butter".
+    private static readonly HashSet<string> InsertionModifierWords = new(
+        [
+            "melted",
+            "softened",
+            "chopped",
+            "minced",
+            "grated",
+            "shredded",
+            "sliced",
+            "diced",
+            "crushed",
+            "ground",
+            "fresh",
+            "toasted",
+            "cooked",
+            "cold",
+            "warm",
+            "hot",
+            "boiling",
+            "beaten",
+            "extra-virgin",
+            "unsalted",
+            "salted",
+        ],
+        StringComparer.OrdinalIgnoreCase
+    );
 
     private static readonly Dictionary<string, decimal> NumberWords = new(
         StringComparer.OrdinalIgnoreCase
@@ -485,6 +613,75 @@ public static class InstructionAmountTagger
             }
         }
 
+        // Follow the text when the words right after a tagged amount name a different food than
+        // its row ("Dissolve the salt in 2 gallons cold water" tagged as salt), and don't count
+        // a stored remainder ("refrigerate remaining 2 tablespoons butter") as a use.
+        foreach (var step in steps)
+        {
+            var text = step.Paragraph.Text;
+            for (var k = 0; k < step.Inline.Count; k++)
+            {
+                var span = step.Inline[k];
+                if (
+                    span.Kind != InlineStepAmountKind.Ingredient
+                    || span.IngredientIndex is not { } own
+                    || own < 0
+                    || own >= ingredients.Count
+                )
+                    continue;
+                if (StoredRemainderBeforeRegex.IsMatch(text[..span.Start]))
+                {
+                    step.Inline[k] = span with
+                    {
+                        Kind = InlineStepAmountKind.Fixed,
+                        IngredientIndex = null,
+                    };
+                    RebuildAmount(step.Inline, step.Amounts, own);
+                    continue;
+                }
+                var after = text[(span.Start + span.Length)..];
+                var phrase = after[IngredientPrefixRegex.Match(after).Length..];
+                var phraseEnd = ClauseBoundaryRegex.Match(phrase) is { Success: true } b
+                    ? b.Index
+                    : phrase.Length;
+                phrase = phrase[..phraseEnd];
+                if (
+                    phrase.Length == 0
+                    || MentionPattern(ingredients[own])?.IsMatch(phrase) != false
+                )
+                    continue;
+                var others = Enumerable
+                    .Range(0, ingredients.Count)
+                    .Where(j =>
+                        j != own
+                        && MentionPattern(ingredients[j])?.Match(phrase)
+                            is { Success: true, Index: 0 }
+                    )
+                    .ToList();
+                if (others.Count == 1)
+                {
+                    var other = others[0];
+                    step.Inline[k] = span with { IngredientIndex = other };
+                    RebuildAmount(step.Inline, step.Amounts, own);
+                    RebuildAmount(step.Inline, step.Amounts, other);
+                    step.Indices.Add(other);
+                }
+                else if (
+                    others.Count == 0
+                    && LeadingWaterRegex.IsMatch(phrase)
+                    && !IsWaterIngredient(ingredients[own])
+                )
+                {
+                    step.Inline[k] = span with
+                    {
+                        Kind = InlineStepAmountKind.Fixed,
+                        IngredientIndex = null,
+                    };
+                    RebuildAmount(step.Inline, step.Amounts, own);
+                }
+            }
+        }
+
         for (var i = 0; i < ingredients.Count; i++)
         {
             // "5 cups flour, plus extra": once a step has used the whole row without stating an
@@ -570,6 +767,7 @@ public static class InstructionAmountTagger
                     && Math.Abs(value - sibling.Quantity!.Value)
                         <= Math.Max(0.0005m, sibling.Quantity.Value * 0.01m)
                 );
+                var movedStepGroup = false;
                 if (match < 0)
                 {
                     var stepGroups = spans.GroupBy(x => x.Step).ToList();
@@ -619,10 +817,16 @@ public static class InstructionAmountTagger
                             targetStep.Indices.Remove(i);
                             spans.RemoveAll(x => x.Step == targetStep);
                             total -= stepSum;
-                            match = 0;
+                            movedStepGroup = true;
                             break;
                         }
                     }
+                }
+                if (movedStepGroup)
+                {
+                    if (total <= rowHigh + tolerance)
+                        break;
+                    continue;
                 }
                 if (match < 0)
                     continue;
@@ -1550,8 +1754,30 @@ public static class InstructionAmountTagger
                         }
                     }
 
+                    if (DecimalAmountRegex.IsMatch(formattedAmount))
+                        continue;
+                    if (
+                        FindAmountInsertionPoint(stepText, mentionMatch, ingredients[i])
+                        is not { } insertIndex
+                    )
+                        continue;
+                    var mentionEnd = mentionMatch.Index + mentionMatch.Length;
+                    if (
+                        insertIndex < mentionMatch.Index
+                        && step.Inline.Any(span =>
+                            span.Start < mentionMatch.Index
+                            && insertIndex
+                                < (
+                                    span.IngredientSpanStart is { } s
+                                    && span.IngredientSpanLength is { } l
+                                        ? s + l
+                                        : span.Start + span.Length
+                                )
+                        )
+                    )
+                        continue;
+
                     var insertedPrefix = $"{formattedAmount} ";
-                    var insertIndex = mentionMatch.Index;
 
                     stepText = stepText.Insert(insertIndex, insertedPrefix);
 
@@ -1584,7 +1810,7 @@ public static class InstructionAmountTagger
                         Measurement: amount,
                         AlternativeMeasurement: null,
                         IngredientSpanStart: insertIndex + insertedPrefix.Length,
-                        IngredientSpanLength: mentionMatch.Length
+                        IngredientSpanLength: mentionEnd - insertIndex
                     );
                     step.Inline.Add(newSpan);
                 }
@@ -1985,7 +2211,14 @@ public static class InstructionAmountTagger
         for (var i = 0; i < sanitized.Count; i++)
         {
             var current = RestoreSourceMeasurement(sanitized[i], sanitized);
-            if (current.IsRecipeReference)
+            var isTechniqueReference = RecipeDraftNormalizer.IsTechniqueCrossReference(
+                current.OriginalRawText ?? current.DisplayName
+            );
+            if (current.IsRecipeReference && isTechniqueReference)
+            {
+                current = current with { IsRecipeReference = false, ReferencedRecipeTitle = null };
+            }
+            else if (current.IsRecipeReference)
             {
                 var (normUnit, normCustom) = RecipeDraftNormalizer.NormalizeUnit(
                     current.Unit,
@@ -2008,7 +2241,7 @@ public static class InstructionAmountTagger
                     };
                 }
             }
-            else
+            else if (!isTechniqueReference)
             {
                 var textToCheck = current.OriginalRawText ?? current.DisplayName;
                 if (
@@ -2515,6 +2748,65 @@ public static class InstructionAmountTagger
         return false;
     }
 
+    /// <summary>
+    /// Finds where an unstated step amount can be inserted ahead of an ingredient mention without
+    /// splitting the ingredient's name ("pepper flakes", "black beans") or doubling an amount the
+    /// text already gives ("six 6-inch corn tortillas", "1 inch of oil"). Returns null when the
+    /// mention does not sit in an obvious "add this ingredient" slot.
+    /// </summary>
+    private static int? FindAmountInsertionPoint(
+        string text,
+        Match mention,
+        LlmExtractedIngredientItem ingredient
+    )
+    {
+        var nameWords = new[] { ingredient.DisplayName, ingredient.CanonicalFoodName }
+            .Where(n => !string.IsNullOrWhiteSpace(n))
+            .SelectMany(n => WordRegex.Matches(n!).Select(m => NormalizeWord(m.Value)))
+            .Where(w => w.Length >= 2 && !InsertionSlotWords.Contains(w))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var start = mention.Index;
+        while (true)
+        {
+            var preceding = PrecedingWordRegex.Match(text[..start]);
+            if (!preceding.Success)
+            {
+                var before = text[..start].TrimEnd();
+                if (before.Length == 0 || !",;:(".Contains(before[^1]))
+                    return null;
+                break;
+            }
+            var word = preceding.Groups["word"].Value;
+            if (string.Equals(word, "the", StringComparison.OrdinalIgnoreCase))
+            {
+                var verb = PrecedingWordRegex.Match(text[..preceding.Index]);
+                if (!verb.Success || !InsertionSlotWords.Contains(verb.Groups["word"].Value))
+                    return null;
+                break;
+            }
+            if (InsertionSlotWords.Contains(word))
+                break;
+            if (nameWords.Contains(NormalizeWord(word)) || InsertionModifierWords.Contains(word))
+            {
+                start = preceding.Index;
+                continue;
+            }
+            // The opening word of a sentence is its imperative verb: "Brown 1 lb beef".
+            var leading = text[..preceding.Index].TrimEnd();
+            if (leading.Length == 0 || ".!?;:".Contains(leading[^1]))
+                break;
+            return null;
+        }
+
+        var head = text[..start];
+        var boundary = ClauseBoundaryRegex.Matches(head).LastOrDefault();
+        var clauseTail = boundary is null ? head : head[(boundary.Index + boundary.Length)..];
+        return QuantityWordRegex.IsMatch(clauseTail) ? null : start;
+    }
+
+    private static string NormalizeWord(string word) => word.ToLowerInvariant().TrimEnd('s');
+
     /// <summary>Matches the ingredient's name or head noun, but not "flour mixture".</summary>
     private static Regex? MentionPattern(LlmExtractedIngredientItem ingredient)
     {
@@ -2586,6 +2878,13 @@ public static class InstructionAmountTagger
             result = inAlternative * ingredient.Quantity.Value / altQty.Value;
             return true;
         }
+
+        // "2 ounces vodka" against a volume row means fluid ounces.
+        if (
+            fromUnit == MeasurementUnit.Oz
+            && CulinaryMath.TryConvertQuantity(quantity, MeasurementUnit.FlOz, toUnit, out result)
+        )
+            return true;
 
         if (IsShreddedOrGratedCheese(ingredient) || IsDicedMeatOrPancetta(ingredient))
         {

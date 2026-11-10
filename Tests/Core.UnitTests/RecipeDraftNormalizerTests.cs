@@ -1399,6 +1399,62 @@ public sealed class RecipeDraftNormalizerTests
     }
 
     [TestMethod]
+    [DataRow(
+        "1 pound extra-large shrimp (21 to 25 per pound), peeled and deveined (see this page)",
+        true
+    )]
+    [DataRow("2 leeks, chopped and washed thoroughly (2 1/2 cups); (see this page)", true)]
+    [DataRow("1 recipe Simple Farro, room temperature (this page)", false)]
+    [DataRow("4 cups Chicken Broth (this page)", false)]
+    [DataRow("1/2 cup Fried Shallots, warm (recipe follows)", false)]
+    [DataRow("1 recipe single-crust pie dough (this page), rolled into 12-inch round", false)]
+    public void IsTechniqueCrossReference_SeparatesTechniquePagesFromSubRecipes(
+        string line,
+        bool expected
+    )
+    {
+        Assert.AreEqual(expected, RecipeDraftNormalizer.IsTechniqueCrossReference(line));
+    }
+
+    [TestMethod]
+    public void Normalize_KeepsAPreparedIngredientWithAPageCrossReferenceAsFood()
+    {
+        var rawPayload = new LlmExtractedRecipePayload(
+            Title: "Summer Rolls",
+            Ingredients:
+            [
+                new(
+                    SectionName: null,
+                    Quantity: 18,
+                    MaxQuantity: null,
+                    Unit: "whole",
+                    DisplayName: "medium-large shrimp",
+                    CanonicalFoodName: "shrimp",
+                    OriginalRawText: "18 medium-large shrimp (31 to 40 per pound), peeled, deveined, and tails removed (see this page)",
+                    IsRecipeReference: true,
+                    ReferencedRecipeTitle: "medium-large shrimp"
+                ),
+            ]
+        );
+
+        var draft = RecipeDraftNormalizer.Normalize(
+            raw: rawPayload,
+            catalogFoods: [],
+            tags: [],
+            sourceUrl: null,
+            fallbackSourceName: null,
+            fallbackSourceAuthor: null,
+            coverImagePath: null,
+            thumbnailImagePath: null
+        );
+
+        var shrimp = draft.Ingredients!.Single();
+        Assert.IsFalse(shrimp.IsRecipeReference);
+        Assert.IsNull(shrimp.ReferencedRecipeTitle);
+        Assert.AreEqual("medium-large shrimp", shrimp.DisplayName);
+    }
+
+    [TestMethod]
     public void NormalizeRecipeReferenceTitle_StripsPrepClausesAndPageMarkers()
     {
         Assert.AreEqual(

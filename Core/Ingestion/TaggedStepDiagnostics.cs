@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using App.Core.Recipes;
 
 namespace App.Core.Ingestion;
@@ -45,7 +46,10 @@ public static class TaggedStepDiagnostics
                     && amount.IngredientIndex is not null
                 )
                     issues.Add($"{prefix} references an ingredient but is not tagged as one.");
-                if (SourceMeasurementParser.FindSpans(text).Count == 0)
+                if (
+                    SourceMeasurementParser.FindSpans(text).Count == 0
+                    && !IsCountAmount(text, amount.Measurement)
+                )
                     issues.Add($"{prefix} is no longer a measured amount.");
 
                 if (amount.IngredientSpanStart.HasValue && amount.IngredientSpanLength.HasValue)
@@ -77,5 +81,32 @@ public static class TaggedStepDiagnostics
         }
         issues.AddRange(InstructionAmountTagger.Reconcile(ingredients, steps));
         return issues;
+    }
+
+    private static readonly Regex CountAmountRegex = new(
+        @"^(?:\d+(?:\s+\d+/\d+)?|\d+/\d+|\d*[½¼¾⅓⅔⅛]|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)(?:\s+(?<unit>[a-z]+))?$",
+        RegexOptions.IgnoreCase,
+        TimeSpan.FromSeconds(1)
+    );
+
+    /// <summary>
+    /// A bare count ("2" in "2 apples") or a count of a custom unit ("1 piece") is a valid
+    /// amount for a whole-item or custom-unit row even though it has no standard unit.
+    /// </summary>
+    private static bool IsCountAmount(string text, RecipeMeasurement measurement)
+    {
+        var match = CountAmountRegex.Match(text.Trim());
+        if (!match.Success)
+            return false;
+        var unit = match.Groups["unit"];
+        if (!unit.Success)
+            return measurement.Unit is null or MeasurementUnit.Whole;
+        return measurement.Unit == MeasurementUnit.Custom
+            && measurement.CustomUnitName is { } custom
+            && string.Equals(
+                custom.Trim().TrimEnd('s'),
+                unit.Value.TrimEnd('s'),
+                StringComparison.OrdinalIgnoreCase
+            );
     }
 }

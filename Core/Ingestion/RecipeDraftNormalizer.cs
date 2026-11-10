@@ -216,6 +216,30 @@ public static class RecipeDraftNormalizer
         return string.IsNullOrWhiteSpace(cleaned) ? displayName : cleaned;
     }
 
+    /// <summary>
+    /// "1 pound shrimp, peeled and deveined (see this page)" points to a technique, not a
+    /// sub-recipe: a page cross-reference after a preparation clause, without "1 recipe".
+    /// </summary>
+    public static bool IsTechniqueCrossReference(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+        var page = Regex.Match(
+            text,
+            @"\((?:see\s+)?(?:this\s+page(?:\s+and\s+this\s+page)?|pages?\s+\d+)\)\s*$",
+            RegexOptions.IgnoreCase,
+            TimeSpan.FromSeconds(1)
+        );
+        return page.Success
+            && text[..page.Index].IndexOfAny([',', ';']) >= 0
+            && !Regex.IsMatch(
+                text,
+                @"^\s*[-•]?\s*\d+(?:\s+\d+/\d+|/\d+|\.\d+)?\s*(?:recipe|batch)\b",
+                RegexOptions.IgnoreCase,
+                TimeSpan.FromSeconds(1)
+            );
+    }
+
     public static string? NormalizeRecipeReferenceTitle(string? title)
     {
         if (string.IsNullOrWhiteSpace(title))
@@ -701,11 +725,17 @@ public static class RecipeDraftNormalizer
             var sourceIngredientText = !string.IsNullOrWhiteSpace(rawIng.OriginalRawText)
                 ? rawIng.OriginalRawText
                 : displayName;
-            var recipeReferenceMatch = RecipeReferenceRegex.Match(sourceIngredientText);
+            var isTechniqueReference = IsTechniqueCrossReference(sourceIngredientText);
+            var recipeReferenceMatch = isTechniqueReference
+                ? Match.Empty
+                : RecipeReferenceRegex.Match(sourceIngredientText);
             var isRecipeReference =
-                rawIng.IsRecipeReference
-                || recipeReferenceMatch.Success
-                || rawRecipeReferenceTitle is not null;
+                !isTechniqueReference
+                && (
+                    rawIng.IsRecipeReference
+                    || recipeReferenceMatch.Success
+                    || rawRecipeReferenceTitle is not null
+                );
             var recipeReferenceTitle =
                 rawRecipeReferenceTitle
                 ?? (
