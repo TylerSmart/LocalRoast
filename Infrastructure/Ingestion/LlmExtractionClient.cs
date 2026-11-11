@@ -361,11 +361,13 @@ Example output:
                 3. Units: tsp, tbsp, cup, fl_oz, pt, qt, gal, oz, lb, g, kg, ml, l, pinch, dash, clove, can, bunch, slice, whole, custom, or null.
                 4. isOptional follows source; suggestedIsPantryStaple is true only for basic shelf-stable staples.
                 5. suggestedCategory: Produce, MeatAndSeafood, DairyAndEggs, Refrigerated, Bakery, PantryDryGoods, CannedAndJarred, CondimentsAndSauces, SpicesAndSeasonings, Baking, Snacks, Beverages, Frozen, Other.
+                6. sectionName: ONLY use when the source text explicitly groups ingredients under subheadings (e.g. 'Dressing', 'Crust', 'Filling', 'Sauce'). If the recipe has a single list of ingredients without subheadings, set sectionName to null. NEVER use the ingredient's own name as its sectionName, and NEVER use generic names like 'Ingredients' or 'Main'.
                 """
             + foodCatalogSnippet
             + """
 
                 Steps (ordered instructions):
+                - sectionName: ONLY use when the source text explicitly groups multiple instructions under distinct multi-step subheadings (e.g. 'Make the Dough', 'Bake the Crust'). Otherwise, set sectionName to null. NEVER summarize or title individual steps as a sectionName, and NEVER use generic names like 'Instructions', 'Preparation', or 'Steps'.
                 In the step instructions, embed all ingredient references, timers, and temperatures as inline JSON tokens enclosed in ||{...}||.
                 - Ingredients: ||{"ingredient": "name", "amount": total_number, "unit": "unit_name", "displayAmount": portion_number, "displayUnit": "unit_name"}||
                   * Replace the ingredient mention AND its preceding quantity and unit in the prose with the token. Never leave the quantity or unit in plain text in front of the token (e.g. write "stir in ||{\"ingredient\": \"lime juice\", \"amount\": 1.5, \"unit\": \"tbsp\"}||", NEVER "stir in 1 1/2 tablespoons ||{\"ingredient\": \"lime juice\"...}||").
@@ -1933,7 +1935,11 @@ Household Cookbook Catalog:
                         additionalProperties = false,
                         properties = new
                         {
-                            sectionName = new { type = new[] { "string", "null" } },
+                            sectionName = new
+                            {
+                                type = new[] { "string", "null" },
+                                description = "Explicit subheading name (e.g. 'Make the Dough', 'Bake the Crust') ONLY if the source explicitly groups multiple steps under that subheading. Otherwise null. Never summarize individual steps or use generic headings like 'Preparation'.",
+                            },
                             instruction = new { type = "string", minLength = 1 },
                         },
                         required = new[] { "sectionName", "instruction" },
@@ -1948,7 +1954,11 @@ Household Cookbook Catalog:
                         additionalProperties = false,
                         properties = new
                         {
-                            sectionName = new { type = new[] { "string", "null" } },
+                            sectionName = new
+                            {
+                                type = new[] { "string", "null" },
+                                description = "Explicit subheading name (e.g. 'Dressing', 'Crust') ONLY if the source explicitly groups ingredients under that subheading. Otherwise null. Never use ingredient names or generic headings like 'Ingredients'.",
+                            },
                             quantity = new
                             {
                                 type = new[] { "number", "null" },

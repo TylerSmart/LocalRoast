@@ -1419,7 +1419,9 @@ public sealed partial class RecipeService(
             {
                 RecipeId = recipe.Id,
                 SortOrder = i,
-                SectionName = input.SectionName?.Trim(),
+                SectionName = RecipeDraftNormalizer.IsGenericTopLevelSection(input.SectionName)
+                    ? null
+                    : input.SectionName?.Trim(),
                 Quantity = quantity,
                 MaxQuantity = input.MaxQuantity,
                 Unit = unit,
@@ -1477,7 +1479,9 @@ public sealed partial class RecipeService(
             {
                 RecipeId = recipe.Id,
                 StepNumber = s + 1,
-                SectionName = sInput.SectionName?.Trim(),
+                SectionName = RecipeDraftNormalizer.IsGenericTopLevelSection(sInput.SectionName)
+                    ? null
+                    : sInput.SectionName?.Trim(),
                 Instruction = sInput.Instruction.Trim(),
                 ImagePath = ValidateAndNormalizeMediaPath(sInput.ImagePath),
             };

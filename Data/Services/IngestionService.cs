@@ -362,6 +362,30 @@ public sealed class IngestionService(
             draft = draft with { Ingredients = updatedIngredients };
         }
 
+        if (draft != null)
+        {
+            if (draft.Ingredients is { Count: > 0 })
+            {
+                var cleanedIngs = RecipeDraftNormalizer.CleanIngredientSections(draft.Ingredients);
+                if (cleanedIngs != draft.Ingredients)
+                {
+                    draft = draft with { Ingredients = cleanedIngs };
+                }
+            }
+
+            if (draft.Steps is { Count: > 0 })
+            {
+                var cleanedSteps = RecipeDraftNormalizer.CleanStepSections(
+                    draft.Steps,
+                    job.NormalizedSourceText ?? job.RawText
+                );
+                if (cleanedSteps != draft.Steps)
+                {
+                    draft = draft with { Steps = cleanedSteps };
+                }
+            }
+        }
+
         string? username = null;
 
         if (Guid.TryParse(job.CreatedBy, out var uid))

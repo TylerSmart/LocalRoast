@@ -1275,6 +1275,9 @@ public static class RecipeDraftNormalizer
             }
         }
 
+        normalizedIngredients = CleanIngredientSections(normalizedIngredients);
+        normalizedSteps = CleanStepSections(normalizedSteps, rawSourceText);
+
         return new IngestionExtractedDraftDto(
             Title: title,
             Description: normalizedDescription,
@@ -1303,6 +1306,277 @@ public static class RecipeDraftNormalizer
             ProposedTagNames: proposedTagNames,
             MeasurementWarnings: measurementWarnings
         );
+    }
+
+    private static readonly HashSet<string> GenericTopLevelSectionNames = new(
+        StringComparer.OrdinalIgnoreCase
+    )
+    {
+        "ingredients",
+        "ingredient",
+        "ingredient list",
+        "ingredients list",
+        "base ingredients",
+        "main ingredients",
+        "all ingredients",
+        "recipe ingredients",
+        "instructions",
+        "instruction",
+        "directions",
+        "direction",
+        "method",
+        "methods",
+        "preparation",
+        "prep",
+        "steps",
+        "step",
+        "recipe",
+        "main",
+        "general",
+    };
+
+    public static bool IsGenericTopLevelSection(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return false;
+        }
+
+        var trimmed = name.Trim().TrimEnd(':');
+        return GenericTopLevelSectionNames.Contains(trimmed);
+    }
+
+    public static List<IngestionDraftIngredientDto> CleanIngredientSections(
+        IReadOnlyList<IngestionDraftIngredientDto> ingredients
+    )
+    {
+        if (ingredients == null || ingredients.Count == 0)
+        {
+            return [];
+        }
+
+        // 1. Strip generic top-level headings ("Ingredients", "Base Ingredients", "Main", etc.)
+        var cleaned = ingredients
+            .Select(i =>
+            {
+                if (IsGenericTopLevelSection(i.SectionName))
+                {
+                    return i with { SectionName = null };
+                }
+                return i;
+            })
+            .ToList();
+
+        var withSection = cleaned.Where(x => !string.IsNullOrWhiteSpace(x.SectionName)).ToList();
+
+        if (withSection.Count == 0)
+        {
+            return cleaned;
+        }
+
+        // Group by section name (case-insensitive)
+        var groups = withSection
+            .GroupBy(x => x.SectionName!.Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        // If all ingredients with a section belong to the exact same single section,
+        // and there are no other ingredients or sections:
+        if (groups.Count == 1 && withSection.Count == cleaned.Count)
+        {
+            return cleaned.Select(i => i with { SectionName = null }).ToList();
+        }
+
+        // Check if all non-null sections are singletons (each section has only 1 ingredient)
+        var allSingletons = groups.All(g => g.Count() == 1);
+        var anySelfReferential = groups.Any(g =>
+            g.Count() == 1 && IsIngredientSelfReferential(g.Key, g.First())
+        );
+
+        // If every section has only 1 ingredient and (multiple sections exist with self-reference, or >= 3 singletons):
+        if (allSingletons && ((groups.Count >= 2 && anySelfReferential) || groups.Count >= 3))
+        {
+            return cleaned.Select(i => i with { SectionName = null }).ToList();
+        }
+
+        // Strip individual self-referential singletons
+        var result = new List<IngestionDraftIngredientDto>(cleaned.Count);
+        foreach (var ing in cleaned)
+        {
+            if (!string.IsNullOrWhiteSpace(ing.SectionName))
+            {
+                var groupCount =
+                    groups
+                        .FirstOrDefault(g =>
+                            string.Equals(
+                                g.Key,
+                                ing.SectionName.Trim(),
+                                StringComparison.OrdinalIgnoreCase
+                            )
+                        )
+                        ?.Count()
+                    ?? 0;
+
+                if (groupCount == 1 && IsIngredientSelfReferential(ing.SectionName, ing))
+                {
+                    result.Add(ing with { SectionName = null });
+                    continue;
+                }
+            }
+            result.Add(ing);
+        }
+
+        return result;
+    }
+
+    public static bool IsIngredientSelfReferential(
+        string sectionName,
+        IngestionDraftIngredientDto ing
+    )
+    {
+        if (string.IsNullOrWhiteSpace(sectionName))
+        {
+            return false;
+        }
+
+        var secClean = CleanForComparison(sectionName);
+        if (string.IsNullOrWhiteSpace(secClean))
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(ing.DisplayName))
+        {
+            var dispClean = CleanForComparison(ing.DisplayName);
+            if (
+                dispClean == secClean
+                || dispClean.Contains(secClean)
+                || secClean.Contains(dispClean)
+            )
+            {
+                return true;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(ing.ProposedFoodItemName))
+        {
+            var foodClean = CleanForComparison(ing.ProposedFoodItemName);
+            if (
+                foodClean == secClean
+                || foodClean.Contains(secClean)
+                || secClean.Contains(foodClean)
+            )
+            {
+                return true;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(ing.MatchedFoodItemName))
+        {
+            var matchClean = CleanForComparison(ing.MatchedFoodItemName);
+            if (
+                matchClean == secClean
+                || matchClean.Contains(secClean)
+                || secClean.Contains(matchClean)
+            )
+            {
+                return true;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(ing.OriginalRawText))
+        {
+            var rawClean = CleanForComparison(ing.OriginalRawText);
+            if (rawClean.Contains(secClean))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static string CleanForComparison(string text)
+    {
+        var cleaned = Regex.Replace(text.ToLowerInvariant(), @"[^\w\s]", " ").Trim();
+        var words = cleaned.Split(' ', StringSplitOptions.RemoveEmptyEntries).Select(Singularize);
+        return string.Join(" ", words);
+    }
+
+    public static List<IngestionDraftStepDto> CleanStepSections(
+        IReadOnlyList<IngestionDraftStepDto> steps,
+        string? rawSourceText
+    )
+    {
+        if (steps == null || steps.Count == 0)
+        {
+            return [];
+        }
+
+        // 1. Strip generic top-level headings ("Instructions", "Preparation", "Directions", "Method", "Steps", etc.)
+        var cleaned = steps
+            .Select(s =>
+            {
+                if (IsGenericTopLevelSection(s.SectionName))
+                {
+                    return s with { SectionName = null };
+                }
+                return s;
+            })
+            .ToList();
+
+        var withSection = cleaned.Where(x => !string.IsNullOrWhiteSpace(x.SectionName)).ToList();
+
+        if (withSection.Count == 0)
+        {
+            return cleaned;
+        }
+
+        var groups = withSection
+            .GroupBy(x => x.SectionName!.Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        // If all steps with a section share the exact same section name, clear it
+        if (groups.Count == 1 && withSection.Count == cleaned.Count)
+        {
+            return cleaned.Select(s => s with { SectionName = null }).ToList();
+        }
+
+        // Check if all non-null sections are singletons (each section has only 1 step)
+        var allSingletons = groups.All(g => g.Count() == 1);
+        if (allSingletons && groups.Count >= 2)
+        {
+            var hasGerund = groups.Any(g => IsGerundOrActionPhrase(g.Key));
+            var inSourceHeadings =
+                rawSourceText != null
+                && groups.All(g => IsSectionHeadingInSource(g.Key, rawSourceText));
+
+            if (hasGerund || !inSourceHeadings)
+            {
+                return cleaned.Select(s => s with { SectionName = null }).ToList();
+            }
+        }
+
+        return cleaned;
+    }
+
+    private static bool IsGerundOrActionPhrase(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+        var firstWord = text.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries)[0];
+        return firstWord.EndsWith("ing", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsSectionHeadingInSource(string sectionName, string rawSourceText)
+    {
+        if (string.IsNullOrWhiteSpace(rawSourceText) || string.IsNullOrWhiteSpace(sectionName))
+        {
+            return false;
+        }
+        var pattern = $@"(?m)^\s*{Regex.Escape(sectionName.Trim())}\s*:?\s*$";
+        return Regex.IsMatch(rawSourceText, pattern, RegexOptions.IgnoreCase);
     }
 
     private static bool IsSourceExcerpt(string? excerpt, string source) =>

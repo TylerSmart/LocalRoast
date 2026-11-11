@@ -1741,4 +1741,221 @@ public sealed class RecipeDraftNormalizerTests
         Assert.AreEqual(2.3333m, sage.Quantity.Value);
         Assert.AreEqual(MeasurementUnit.Tbsp, sage.Unit);
     }
+
+    [TestMethod]
+    public void Normalize_CleansGenericTopLevelSectionNames_OnIngredientsAndSteps()
+    {
+        var rawPayload = new LlmExtractedRecipePayload(
+            Title: "Guacamole",
+            Ingredients:
+            [
+                new(
+                    SectionName: "Ingredients",
+                    Quantity: 3,
+                    MaxQuantity: null,
+                    Unit: "whole",
+                    DisplayName: "avocados",
+                    CanonicalFoodName: "avocado"
+                ),
+                new(
+                    SectionName: "Base Ingredients",
+                    Quantity: 1,
+                    MaxQuantity: null,
+                    Unit: "whole",
+                    DisplayName: "lime",
+                    CanonicalFoodName: "lime"
+                ),
+            ],
+            Steps:
+            [
+                new(SectionName: "Preparation", Instruction: "Mash the avocados."),
+                new(SectionName: "Instructions", Instruction: "Stir in lime juice."),
+            ]
+        );
+
+        var draft = RecipeDraftNormalizer.Normalize(
+            raw: rawPayload,
+            catalogFoods: [],
+            tags: [],
+            sourceUrl: null,
+            fallbackSourceName: null,
+            fallbackSourceAuthor: null,
+            coverImagePath: null,
+            thumbnailImagePath: null
+        );
+
+        Assert.IsTrue(draft.Ingredients!.All(i => i.SectionName == null));
+        Assert.IsTrue(draft.Steps!.All(s => s.SectionName == null));
+    }
+
+    [TestMethod]
+    public void Normalize_CleansDegenerateSelfReferentialIngredientSections_WhenEachIngredientHasUniqueSection()
+    {
+        var rawPayload = new LlmExtractedRecipePayload(
+            Title: "Ultracreamy Hummus",
+            Ingredients:
+            [
+                new(
+                    SectionName: "Chickpeas",
+                    Quantity: 2,
+                    MaxQuantity: null,
+                    Unit: "can",
+                    DisplayName: "chickpeas",
+                    CanonicalFoodName: "chickpeas"
+                ),
+                new(
+                    SectionName: "Baking Soda",
+                    Quantity: 0.5m,
+                    MaxQuantity: null,
+                    Unit: "tsp",
+                    DisplayName: "baking soda",
+                    CanonicalFoodName: "baking soda"
+                ),
+                new(
+                    SectionName: "Garlic",
+                    Quantity: 4,
+                    MaxQuantity: null,
+                    Unit: "clove",
+                    DisplayName: "garlic cloves",
+                    CanonicalFoodName: "garlic"
+                ),
+                new(
+                    SectionName: "Tahini",
+                    Quantity: 0.5m,
+                    MaxQuantity: null,
+                    Unit: "cup",
+                    DisplayName: "tahini",
+                    CanonicalFoodName: "tahini"
+                ),
+                new(
+                    SectionName: "Salt",
+                    Quantity: 1,
+                    MaxQuantity: null,
+                    Unit: "tsp",
+                    DisplayName: "table salt",
+                    CanonicalFoodName: "salt"
+                ),
+            ]
+        );
+
+        var draft = RecipeDraftNormalizer.Normalize(
+            raw: rawPayload,
+            catalogFoods: [],
+            tags: [],
+            sourceUrl: null,
+            fallbackSourceName: null,
+            fallbackSourceAuthor: null,
+            coverImagePath: null,
+            thumbnailImagePath: null
+        );
+
+        Assert.IsTrue(
+            draft.Ingredients!.All(i => i.SectionName == null),
+            "All degenerate self-referential ingredient sections should be cleared to null."
+        );
+    }
+
+    [TestMethod]
+    public void Normalize_CleansDegenerateStepSections_WhenEachStepHasUniqueGerundSection()
+    {
+        var rawPayload = new LlmExtractedRecipePayload(
+            Title: "Ultracreamy Hummus",
+            Steps:
+            [
+                new(SectionName: "Cooking Chickpeas", Instruction: "Boil chickpeas in water."),
+                new(SectionName: "Marinating Garlic", Instruction: "Whisk garlic and lemon juice."),
+                new(SectionName: "Removing Skins", Instruction: "Swish chickpeas to remove skins."),
+                new(SectionName: "Blending Hummus", Instruction: "Process until creamy."),
+                new(SectionName: "Serving", Instruction: "Drizzle with oil."),
+            ]
+        );
+
+        var draft = RecipeDraftNormalizer.Normalize(
+            raw: rawPayload,
+            catalogFoods: [],
+            tags: [],
+            sourceUrl: null,
+            fallbackSourceName: null,
+            fallbackSourceAuthor: null,
+            coverImagePath: null,
+            thumbnailImagePath: null,
+            rawSourceText: "Title: Ultracreamy Hummus\nInstructions:\n1. Boil chickpeas.\n2. Whisk garlic.\n3. Swish.\n4. Process.\n5. Drizzle."
+        );
+
+        Assert.IsTrue(
+            draft.Steps!.All(s => s.SectionName == null),
+            "All step action gerund sections should be cleared to null."
+        );
+    }
+
+    [TestMethod]
+    public void Normalize_PreservesLegitimateMultiIngredientAndMultiStepSections()
+    {
+        var rawPayload = new LlmExtractedRecipePayload(
+            Title: "Apple Pie",
+            Ingredients:
+            [
+                new(
+                    SectionName: "Crust",
+                    Quantity: 2,
+                    MaxQuantity: null,
+                    Unit: "cup",
+                    DisplayName: "all-purpose flour",
+                    CanonicalFoodName: "flour"
+                ),
+                new(
+                    SectionName: "Crust",
+                    Quantity: 1,
+                    MaxQuantity: null,
+                    Unit: "cup",
+                    DisplayName: "unsalted butter",
+                    CanonicalFoodName: "butter"
+                ),
+                new(
+                    SectionName: "Filling",
+                    Quantity: 4,
+                    MaxQuantity: null,
+                    Unit: "cup",
+                    DisplayName: "sliced apples",
+                    CanonicalFoodName: "apple"
+                ),
+                new(
+                    SectionName: "Filling",
+                    Quantity: 0.5m,
+                    MaxQuantity: null,
+                    Unit: "cup",
+                    DisplayName: "granulated sugar",
+                    CanonicalFoodName: "sugar"
+                ),
+            ],
+            Steps:
+            [
+                new(SectionName: "Crust", Instruction: "Cut butter into flour."),
+                new(SectionName: "Crust", Instruction: "Roll out dough into pie pan."),
+                new(SectionName: "Filling", Instruction: "Toss apples with sugar."),
+                new(SectionName: "Filling", Instruction: "Pour into crust and bake."),
+            ]
+        );
+
+        var draft = RecipeDraftNormalizer.Normalize(
+            raw: rawPayload,
+            catalogFoods: [],
+            tags: [],
+            sourceUrl: null,
+            fallbackSourceName: null,
+            fallbackSourceAuthor: null,
+            coverImagePath: null,
+            thumbnailImagePath: null
+        );
+
+        Assert.AreEqual("Crust", draft.Ingredients![0].SectionName);
+        Assert.AreEqual("Crust", draft.Ingredients![1].SectionName);
+        Assert.AreEqual("Filling", draft.Ingredients![2].SectionName);
+        Assert.AreEqual("Filling", draft.Ingredients![3].SectionName);
+
+        Assert.AreEqual("Crust", draft.Steps![0].SectionName);
+        Assert.AreEqual("Crust", draft.Steps![1].SectionName);
+        Assert.AreEqual("Filling", draft.Steps![2].SectionName);
+        Assert.AreEqual("Filling", draft.Steps![3].SectionName);
+    }
 }
