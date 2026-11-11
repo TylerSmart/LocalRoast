@@ -370,6 +370,7 @@ Example output:
                 4. isOptional follows source; suggestedIsPantryStaple is true only for basic shelf-stable staples.
                 5. suggestedCategory: Produce, MeatAndSeafood, DairyAndEggs, Refrigerated, Bakery, PantryDryGoods, CannedAndJarred, CondimentsAndSauces, SpicesAndSeasonings, Baking, Snacks, Beverages, Frozen, Other.
                 6. sectionName: ONLY use when the source text explicitly groups ingredients under subheadings (e.g. 'Dressing', 'Crust', 'Filling', 'Sauce'). If the recipe has a single list of ingredients without subheadings, set sectionName to null. NEVER use the ingredient's own name as its sectionName, and NEVER use generic names like 'Ingredients' or 'Main'.
+                7. isRecipeReference: Set to true ONLY if the ingredient is a prepared sub-recipe or component made from another recipe (e.g. '1 recipe Pizza Dough', '1 batch Enchilada Sauce', 'Quick Pickled Onions'). For standard groceries, raw produce, meats, spices, oils, and pantry items, isRecipeReference MUST be false and referencedRecipeTitle MUST be null.
                 """
             + foodCatalogSnippet
             + """
@@ -497,6 +498,7 @@ Example output:
                - CRITICAL: Every ingredient token MUST include the "ingredient" property with the ingredient name (e.g. ||{"ingredient": "bacon", "amount": 2, "unit": "slice"}||). NEVER output anonymous tokens with only "amount" or "unit" like ||{"amount": 1, "unit": "tbsp"}||. If referencing an ingredient, include "ingredient": "<name>". If an amount is an unlinked measurement, rendered fat byproduct, or not tied to a master ingredient row, write it as plain text without ||{...}|| delimiters (e.g. "Reserve 1 tablespoon fat").
                - Ensure step tokens reference the correct ingredient row when multiple rows exist (e.g. in different sections).
                - sectionName: ONLY use when the source explicitly groups multiple items under distinct subheadings. NEVER invent sections or section individual items.
+               - isRecipeReference: Set to true ONLY if the ingredient is a prepared sub-recipe or component made from another recipe (e.g. '1 recipe Pizza Dough'). For groceries, produce, spices, oils, and pantry items, isRecipeReference MUST be false and referencedRecipeTitle MUST be null.
             4. Timers and Temperatures:
                - Timers: ||{"type": "timer", "seconds": 300, "label": "Simmer sauce"}||. Total duration in seconds (e.g. 5 minutes = 300, 30 seconds = 30, 1 hour = 3600).
                - CRITICAL: Timers MUST be enclosed in ||{...}|| delimiters (e.g. ||{"type": "timer", "seconds": 1500, "label": "Broil"}||). NEVER output bare JSON like {"type": "timer"...} without the || delimiters.

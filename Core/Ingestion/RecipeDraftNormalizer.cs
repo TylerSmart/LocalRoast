@@ -1024,9 +1024,20 @@ public static class RecipeDraftNormalizer
             var isRecipeReference =
                 !isTechniqueReference
                 && (
-                    rawIng.IsRecipeReference
-                    || recipeReferenceMatch.Success
-                    || rawRecipeReferenceTitle is not null
+                    recipeReferenceMatch.Success
+                    || (
+                        !string.IsNullOrWhiteSpace(rawRecipeReferenceTitle)
+                        && !string.Equals(
+                            rawRecipeReferenceTitle,
+                            displayName,
+                            StringComparison.OrdinalIgnoreCase
+                        )
+                        && !string.Equals(
+                            rawRecipeReferenceTitle,
+                            rawIng.CanonicalFoodName,
+                            StringComparison.OrdinalIgnoreCase
+                        )
+                    )
                 );
             var recipeReferenceTitle =
                 rawRecipeReferenceTitle
@@ -1034,8 +1045,7 @@ public static class RecipeDraftNormalizer
                     recipeReferenceMatch.Success
                         ? NormalizeRecipeReferenceTitle(recipeReferenceMatch.Groups["title"].Value)
                         : null
-                )
-                ?? (rawIng.IsRecipeReference ? NormalizeRecipeReferenceTitle(displayName) : null);
+                );
 
             var prepNote = NormalizePreparationNote(rawIng, rawIngredients);
 
