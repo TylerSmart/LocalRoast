@@ -228,4 +228,49 @@ public sealed class RecipeStepTokensIntegrationTests
         var tokens = StepInstructionParser.ExtractTokens(step.Instruction);
         Assert.AreEqual(3, tokens.Count);
     }
+
+    [TestMethod]
+    public async Task CreateRecipe_StepWithInlineTimerTokenAndExplicitTimers_DeduplicatesTimers()
+    {
+        const string stepWithTimer =
+            "Simmer for ||{\"type\": \"timer\", \"seconds\": 300, \"label\": \"Simmer roux\"}||.";
+        var recipeRequest = new UpsertRecipeRequest(
+            Title: "Deduplicated Timers Recipe",
+            Ingredients:
+            [
+                new RecipeIngredientInput(
+                    DisplayName: "butter",
+                    Quantity: 1,
+                    Unit: MeasurementUnit.Cup
+                ),
+            ],
+            Steps:
+            [
+                new RecipeStepInput(
+                    Instruction: stepWithTimer,
+                    IngredientIndices: [0],
+                    Timers:
+                    [
+                        new RecipeStepTimerInput(DurationSeconds: 300, Label: "Simmer roux"),
+                        new RecipeStepTimerInput(DurationSeconds: 300, Label: "Simmer roux"),
+                        new RecipeStepTimerInput(DurationSeconds: 60, Label: "Rest roux"),
+                    ]
+                ),
+            ]
+        );
+
+        var created = await CreateAsync(recipeRequest);
+        var step = created.Steps.Single();
+
+        Assert.AreEqual(2, step.Timers.Count);
+        var simmerTimer = step.Timers.Single(t => t.DurationSeconds == 300);
+        Assert.AreEqual("Simmer roux", simmerTimer.Label);
+        var restTimer = step.Timers.Single(t => t.DurationSeconds == 60);
+        Assert.AreEqual("Rest roux", restTimer.Label);
+
+        var fetched = await _client.GetFromJsonAsync<RecipeDetailDto>($"/api/recipes/{created.Id}");
+        Assert.IsNotNull(fetched);
+        var fetchedStep = fetched.Steps.Single();
+        Assert.AreEqual(2, fetchedStep.Timers.Count);
+    }
 }

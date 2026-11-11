@@ -1520,10 +1520,18 @@ public sealed partial class RecipeService(
                 }
                 else if (token is StepTimerToken timerToken && timerToken.Seconds >= 1)
                 {
+                    var timerLabel = !string.IsNullOrWhiteSpace(timerToken.Label)
+                        ? timerToken.Label.Trim()
+                        : "Timer";
+
                     if (
                         !stepEntity.Timers.Any(t =>
                             t.DurationSeconds == timerToken.Seconds
-                            && t.Label == (timerToken.Label ?? "Timer")
+                            && string.Equals(
+                                t.Label,
+                                timerLabel,
+                                StringComparison.OrdinalIgnoreCase
+                            )
                         )
                     )
                     {
@@ -1533,7 +1541,7 @@ public sealed partial class RecipeService(
                                 RecipeStep = stepEntity,
                                 SortOrder = stepEntity.Timers.Count,
                                 DurationSeconds = timerToken.Seconds,
-                                Label = timerToken.Label ?? "Timer",
+                                Label = timerLabel,
                             }
                         );
                     }
@@ -1563,15 +1571,36 @@ public sealed partial class RecipeService(
                 for (var t = 0; t < sInput.Timers.Count; t++)
                 {
                     var timerInput = sInput.Timers[t];
-                    stepEntity.Timers.Add(
-                        new RecipeStepTimer
-                        {
-                            RecipeStep = stepEntity,
-                            SortOrder = t,
-                            DurationSeconds = timerInput.DurationSeconds,
-                            Label = timerInput.Label.Trim(),
-                        }
-                    );
+                    if (timerInput.DurationSeconds < 1)
+                    {
+                        continue;
+                    }
+
+                    var label = !string.IsNullOrWhiteSpace(timerInput.Label)
+                        ? timerInput.Label.Trim()
+                        : "Timer";
+
+                    if (
+                        !stepEntity.Timers.Any(existing =>
+                            existing.DurationSeconds == timerInput.DurationSeconds
+                            && string.Equals(
+                                existing.Label,
+                                label,
+                                StringComparison.OrdinalIgnoreCase
+                            )
+                        )
+                    )
+                    {
+                        stepEntity.Timers.Add(
+                            new RecipeStepTimer
+                            {
+                                RecipeStep = stepEntity,
+                                SortOrder = stepEntity.Timers.Count,
+                                DurationSeconds = timerInput.DurationSeconds,
+                                Label = label,
+                            }
+                        );
+                    }
                 }
             }
 

@@ -1414,6 +1414,46 @@ public sealed class RecipeDraftNormalizerTests
     }
 
     [TestMethod]
+    public void Normalize_DeduplicatesIdenticalTimersFromRawStepAndInlineTokens()
+    {
+        var rawPayload = new LlmExtractedRecipePayload(
+            Title: "Test Stew",
+            Description: "Hearty stew.",
+            BaseServings: 4,
+            ConfidenceScore: 0.95m,
+            Ingredients: [],
+            Steps:
+            [
+                new(
+                    SectionName: null,
+                    Instruction: "Simmer for ||{\"type\": \"timer\", \"seconds\": 600, \"label\": \"Simmer\"}||.",
+                    IngredientIndices: [],
+                    Timers: [new(600, "Simmer"), new(600, "Simmer")]
+                ),
+            ]
+        );
+
+        var draft = RecipeDraftNormalizer.Normalize(
+            raw: rawPayload,
+            catalogFoods: [],
+            tags: [],
+            sourceUrl: null,
+            fallbackSourceName: null,
+            fallbackSourceAuthor: null,
+            coverImagePath: null,
+            thumbnailImagePath: null
+        );
+
+        Assert.IsNotNull(draft.Steps);
+        Assert.AreEqual(1, draft.Steps.Count);
+        var timers = draft.Steps[0].Timers;
+        Assert.IsNotNull(timers);
+        Assert.AreEqual(1, timers.Count);
+        Assert.AreEqual("Simmer", timers[0].Label);
+        Assert.AreEqual(600, timers[0].DurationSeconds);
+    }
+
+    [TestMethod]
     public void Normalize_HyphenatedAndSizeWordParentheticals_DoNotEmitMeasurementWarnings()
     {
         var rawPayload = new LlmExtractedRecipePayload(

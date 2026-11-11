@@ -385,14 +385,19 @@ export class RecipeEditorComponent implements OnInit {
         .filter((idx): idx is number => idx !== undefined);
 
       const timersArray = this.fb.array<FormGroup>([]);
+      const seenTimers = new Set<string>();
       step.timers.forEach((t) => {
-        timersArray.push(
-          this.fb.group({
-            minutes: [Math.floor(t.durationSeconds / 60)],
-            seconds: [t.durationSeconds % 60],
-            label: [t.label, [Validators.required, Validators.maxLength(150)]],
-          }),
-        );
+        const key = `${t.durationSeconds}_${(t.label || '').trim().toLowerCase()}`;
+        if (!seenTimers.has(key)) {
+          seenTimers.add(key);
+          timersArray.push(
+            this.fb.group({
+              minutes: [Math.floor(t.durationSeconds / 60)],
+              seconds: [t.durationSeconds % 60],
+              label: [t.label, [Validators.required, Validators.maxLength(150)]],
+            }),
+          );
+        }
       });
 
       const stepGroup = this.fb.group({

@@ -1031,15 +1031,24 @@ public static class RecipeDraftNormalizer
                 {
                     if (t.DurationSeconds >= 1 && !string.IsNullOrWhiteSpace(t.Label))
                     {
-                        timers.Add(
-                            new RecipeStepTimerInput(
-                                StepTimerExtractor.UseRangeLowerBound(
-                                    t.DurationSeconds,
-                                    instruction
-                                ),
-                                t.Label.Trim()
-                            )
+                        var normSec = StepTimerExtractor.UseRangeLowerBound(
+                            t.DurationSeconds,
+                            instruction
                         );
+                        var normLabel = t.Label.Trim();
+                        if (
+                            !timers.Any(existing =>
+                                existing.DurationSeconds == normSec
+                                && string.Equals(
+                                    existing.Label,
+                                    normLabel,
+                                    StringComparison.OrdinalIgnoreCase
+                                )
+                            )
+                        )
+                        {
+                            timers.Add(new RecipeStepTimerInput(normSec, normLabel));
+                        }
                     }
                 }
             }
@@ -1072,9 +1081,23 @@ public static class RecipeDraftNormalizer
                 }
                 else if (token is StepTimerToken timerToken && timerToken.Seconds >= 1)
                 {
-                    timers.Add(
-                        new RecipeStepTimerInput(timerToken.Seconds, timerToken.Label ?? "Timer")
-                    );
+                    var timerLabel = !string.IsNullOrWhiteSpace(timerToken.Label)
+                        ? timerToken.Label.Trim()
+                        : "Timer";
+
+                    if (
+                        !timers.Any(existing =>
+                            existing.DurationSeconds == timerToken.Seconds
+                            && string.Equals(
+                                existing.Label,
+                                timerLabel,
+                                StringComparison.OrdinalIgnoreCase
+                            )
+                        )
+                    )
+                    {
+                        timers.Add(new RecipeStepTimerInput(timerToken.Seconds, timerLabel));
+                    }
                 }
             }
             validIndices.Sort();
