@@ -7,13 +7,20 @@ namespace App.Core.Ingestion;
 /// <summary>
 /// Checks the inline tokens in each step: validates JSON syntax and references against ingredient rows.
 /// </summary>
-public static class TaggedStepDiagnostics
+public static partial class TaggedStepDiagnostics
 {
     private static readonly Regex OpenEndedPlusRegex = new(
         @"\bplus\s+(?:more|extra|[\w\s]+for)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled,
         TimeSpan.FromSeconds(1)
     );
+
+    [GeneratedRegex(
+        @"\{\s*""(?:type|ingredient|amount|displayAmount|displayText|unit|seconds|fahrenheit|celsius)""\s*:[^}\r\n]*?\}",
+        RegexOptions.Singleline,
+        matchTimeoutMilliseconds: 1000
+    )]
+    private static partial Regex BareJsonDiagnosticRegex();
 
     public static IReadOnlyList<string> GetIssues(LlmExtractedRecipePayload recipe)
     {
@@ -25,6 +32,9 @@ public static class TaggedStepDiagnostics
         {
             var instruction = steps[i].Instruction ?? "";
             var segments = StepInstructionParser.ParseSegments(instruction);
+            var stepIngredientCounts = new Dictionary<string, int>(
+                StringComparer.OrdinalIgnoreCase
+            );
 
             foreach (var segment in segments)
             {
@@ -34,6 +44,16 @@ public static class TaggedStepDiagnostics
                     if (segment.Text.StartsWith("||{") && segment.Text.EndsWith("}||"))
                     {
                         issues.Add($"Step {i + 1}: unparseable inline token \"{segment.Text}\".");
+                    }
+                    else
+                    {
+                        var bareMatch = BareJsonDiagnosticRegex().Match(segment.Text);
+                        if (bareMatch.Success)
+                        {
+                            issues.Add(
+                                $"Step {i + 1}: unbracketed JSON token \"{bareMatch.Value}\" is missing \"||\" delimiters."
+                            );
+                        }
                     }
                     continue;
                 }
@@ -46,11 +66,18 @@ public static class TaggedStepDiagnostics
                             $"Step {i + 1}: inline ingredient token {segment.Text} has no ingredient name. Every ingredient token must include \"ingredient\": \"<name>\" or be written in plain text."
                         );
                     }
-                    else if (ing.Amount.HasValue && ing.Amount.Value <= 0)
+                    else
                     {
-                        issues.Add(
-                            $"Step {i + 1}: ingredient \"{ing.Ingredient}\" has a non-positive amount ({ing.Amount.Value})."
-                        );
+                        var ingKey = ing.Ingredient.Trim();
+                        stepIngredientCounts[ingKey] =
+                            stepIngredientCounts.GetValueOrDefault(ingKey, 0) + 1;
+
+                        if (ing.Amount.HasValue && ing.Amount.Value <= 0)
+                        {
+                            issues.Add(
+                                $"Step {i + 1}: ingredient \"{ing.Ingredient}\" has a non-positive amount ({ing.Amount.Value})."
+                            );
+                        }
                     }
                 }
                 else if (segment.Token is StepTimerToken timer)
@@ -61,6 +88,16 @@ public static class TaggedStepDiagnostics
                             $"Step {i + 1}: timer token has an invalid duration ({timer.Seconds} seconds)."
                         );
                     }
+                }
+            }
+
+            foreach (var (ingName, count) in stepIngredientCounts)
+            {
+                if (count >= 3)
+                {
+                    issues.Add(
+                        $"Step {i + 1}: ingredient \"{ingName}\" is tagged {count} times in the same step. Only tag ingredients where introduced, added, or measured; subsequent narrative mentions (e.g. \"flipping\", \"until softened\", \"let cool\") should be plain prose."
+                    );
                 }
             }
         }
@@ -79,6 +116,7 @@ public static class TaggedStepDiagnostics
                 decimal sumLow = 0;
                 var hasComparableAmounts = false;
                 var stepAmounts = new List<decimal>();
+                var unmeasuredMentionsCount = 0;
 
                 for (var sIdx = 0; sIdx < steps.Count; sIdx++)
                 {
@@ -103,6 +141,11 @@ public static class TaggedStepDiagnostics
                             if (bestIdx == i)
                             {
                                 stepUses = true;
+                                if (!ingToken.Amount.HasValue && !ingToken.DisplayAmount.HasValue)
+                                {
+                                    unmeasuredMentionsCount++;
+                                }
+
                                 if (ingToken.Amount.HasValue && ingredient.Quantity is > 0)
                                 {
                                     if (
@@ -160,6 +203,13 @@ public static class TaggedStepDiagnostics
                 {
                     issues.Add($"{name}: not used in any step.");
                     continue;
+                }
+
+                if (unmeasuredMentionsCount >= 4)
+                {
+                    issues.Add(
+                        $"{name}: tagged without amounts {unmeasuredMentionsCount} times across steps. Only tag ingredients where introduced, added, or measured; subsequent narrative mentions (e.g. \"flipping\", \"let cool\", doneness checks) should be plain prose."
+                    );
                 }
 
                 if (hasComparableAmounts && rowHigh > 0)

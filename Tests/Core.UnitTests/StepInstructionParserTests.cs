@@ -202,4 +202,55 @@ public sealed class StepInstructionParserTests
         var plain = StepInstructionParser.ToPlainText(cleaned);
         Assert.AreEqual("Simmer for Simmer sauce.", plain);
     }
+
+    [TestMethod]
+    public void NormalizeBareTokens_WrapsBareTimerToken()
+    {
+        const string text =
+            "Broil until softened, about {\"type\": \"timer\", \"seconds\": 1500, \"label\": \"Broil\"}.";
+        var normalized = StepInstructionParser.NormalizeBareTokens(text);
+
+        Assert.AreEqual(
+            "Broil until softened, about ||{\"type\": \"timer\", \"seconds\": 1500, \"label\": \"Broil\"}||.",
+            normalized
+        );
+    }
+
+    [TestMethod]
+    public void NormalizeBareTokens_DoesNotTouchAlreadyWrappedTokens()
+    {
+        const string text =
+            "Bake for ||{\"type\": \"timer\", \"seconds\": 1200}|| at ||{\"type\": \"temperature\", \"fahrenheit\": 400}||.";
+        var normalized = StepInstructionParser.NormalizeBareTokens(text);
+
+        Assert.AreEqual(text, normalized);
+    }
+
+    [TestMethod]
+    public void ParseSegments_WithBareTimerToken_AutoHealsAndParses()
+    {
+        const string text =
+            "Broil until softened, about {\"type\": \"timer\", \"seconds\": 1500, \"label\": \"Broil\"}.";
+        var segments = StepInstructionParser.ParseSegments(text);
+
+        Assert.AreEqual(3, segments.Count);
+        Assert.IsTrue(segments[1].IsToken);
+        var timer = segments[1].Token as StepTimerToken;
+        Assert.IsNotNull(timer);
+        Assert.AreEqual(1500, timer.Seconds);
+        Assert.AreEqual("Broil", timer.Label);
+    }
+
+    [TestMethod]
+    public void CleanStepInstruction_WithBareTimerToken_NormalizesWithDelimiters()
+    {
+        const string text =
+            "Broil until softened, about {\"type\": \"timer\", \"seconds\": 1500, \"label\": \"Broil\"}.";
+        var cleaned = StepInstructionParser.CleanStepInstruction(text);
+
+        Assert.AreEqual(
+            "Broil until softened, about ||{\"type\": \"timer\", \"seconds\": 1500, \"label\": \"Broil\"}||.",
+            cleaned
+        );
+    }
 }

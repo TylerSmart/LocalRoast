@@ -25,6 +25,13 @@ public static partial class StepInstructionParser
     )]
     private static partial Regex TrailingMeasurementRegex();
 
+    [GeneratedRegex(
+        @"(?<!\|)(\{\s*""(?:type|ingredient|amount|displayAmount|displayText|unit|seconds|fahrenheit|celsius)""\s*:[^}\r\n]*?\})(?!\|)",
+        RegexOptions.Singleline,
+        matchTimeoutMilliseconds: 1000
+    )]
+    private static partial Regex BareJsonTokenRegex();
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -32,12 +39,24 @@ public static partial class StepInstructionParser
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 
+    public static string NormalizeBareTokens(string? instruction)
+    {
+        if (string.IsNullOrEmpty(instruction))
+        {
+            return string.Empty;
+        }
+
+        return BareJsonTokenRegex().Replace(instruction, "||$1||");
+    }
+
     public static IReadOnlyList<StepInstructionSegment> ParseSegments(string? instruction)
     {
         if (string.IsNullOrEmpty(instruction))
         {
             return Array.Empty<StepInstructionSegment>();
         }
+
+        instruction = NormalizeBareTokens(instruction);
 
         var segments = new List<StepInstructionSegment>();
         var matches = TokenRegex().Matches(instruction);

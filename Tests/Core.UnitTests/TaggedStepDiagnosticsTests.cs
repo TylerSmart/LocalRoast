@@ -197,4 +197,112 @@ public sealed class TaggedStepDiagnosticsTests
         var issues = TaggedStepDiagnostics.GetIssues(recipe);
         Assert.AreEqual(0, issues.Count);
     }
+
+    [TestMethod]
+    public void GetIssues_FlagsOverTaggedIngredientInSingleStep()
+    {
+        var recipe = new LlmExtractedRecipePayload(
+            Ingredients:
+            [
+                new LlmExtractedIngredientItem(
+                    SectionName: null,
+                    Quantity: 2m,
+                    MaxQuantity: null,
+                    Unit: "lb",
+                    CanonicalFoodName: "eggplant",
+                    DisplayName: "eggplant"
+                ),
+            ],
+            Steps:
+            [
+                new LlmExtractedStepItem(
+                    null,
+                    "Turn ||{\"ingredient\": \"eggplant\"}|| until ||{\"ingredient\": \"eggplant\"}|| is soft and ||{\"ingredient\": \"eggplant\"}|| collapses."
+                ),
+            ]
+        );
+
+        var issues = TaggedStepDiagnostics.GetIssues(recipe);
+        Assert.IsTrue(
+            issues.Any(i => i.Contains("is tagged 3 times in the same step")),
+            $"Expected over-tagging warning, got: {string.Join(", ", issues)}"
+        );
+    }
+
+    [TestMethod]
+    public void GetIssues_FlagsOverTaggedIngredientAcrossSteps()
+    {
+        var recipe = new LlmExtractedRecipePayload(
+            Ingredients:
+            [
+                new LlmExtractedIngredientItem(
+                    SectionName: null,
+                    Quantity: 2m,
+                    MaxQuantity: null,
+                    Unit: "lb",
+                    CanonicalFoodName: "eggplant",
+                    DisplayName: "eggplant"
+                ),
+            ],
+            Steps:
+            [
+                new LlmExtractedStepItem(
+                    null,
+                    "Prick ||{\"ingredient\": \"eggplant\", \"amount\": 2, \"unit\": \"lb\"}|| with fork."
+                ),
+                new LlmExtractedStepItem(
+                    null,
+                    "Turn ||{\"ingredient\": \"eggplant\"}|| occasionally."
+                ),
+                new LlmExtractedStepItem(null, "Steam ||{\"ingredient\": \"eggplant\"}|| in bowl."),
+                new LlmExtractedStepItem(null, "Peel ||{\"ingredient\": \"eggplant\"}|| flesh."),
+                new LlmExtractedStepItem(
+                    null,
+                    "Chop ||{\"ingredient\": \"eggplant\"}|| into cubes."
+                ),
+            ]
+        );
+
+        var issues = TaggedStepDiagnostics.GetIssues(recipe);
+        Assert.IsTrue(
+            issues.Any(i => i.Contains("tagged without amounts 4 times across steps")),
+            $"Expected cross-step over-tagging warning, got: {string.Join(", ", issues)}"
+        );
+    }
+
+    [TestMethod]
+    public void GetIssues_FlagsUnbracketedJsonToken_WhenDelimitersMalformed()
+    {
+        var recipe = new LlmExtractedRecipePayload(
+            Steps:
+            [
+                new LlmExtractedStepItem(
+                    null,
+                    "Broil for |{\"type\": \"timer\", \"seconds\": 300}|."
+                ),
+            ]
+        );
+
+        var issues = TaggedStepDiagnostics.GetIssues(recipe);
+        Assert.IsTrue(
+            issues.Any(i =>
+                i.Contains("unbracketed JSON token") && i.Contains("missing \"||\" delimiters")
+            ),
+            $"Expected unbracketed JSON issue, got: {string.Join(", ", issues)}"
+        );
+    }
+
+    [TestMethod]
+    public void GetIssues_FlagsBareJsonToken_WhenMalformedJsonAutoWrapped()
+    {
+        var recipe = new LlmExtractedRecipePayload(
+            Steps: [new LlmExtractedStepItem(null, "Broil for {\"type\": \"timer\", broken}.")]
+        );
+
+        var issues = TaggedStepDiagnostics.GetIssues(recipe);
+        Assert.IsTrue(
+            issues.Any(i => i.Contains("unparseable inline token")),
+            $"Expected unparseable token issue, got: {string.Join(", ", issues)}"
+        );
+    }
 }
