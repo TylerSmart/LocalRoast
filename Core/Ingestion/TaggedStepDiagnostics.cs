@@ -71,6 +71,7 @@ public static class TaggedStepDiagnostics
                 var isUsed = false;
                 decimal sumLow = 0;
                 var hasComparableAmounts = false;
+                var stepAmounts = new List<decimal>();
 
                 for (var sIdx = 0; sIdx < steps.Count; sIdx++)
                 {
@@ -100,6 +101,7 @@ public static class TaggedStepDiagnostics
                                 )
                                 {
                                     sumLow += inRowUnit;
+                                    stepAmounts.Add(inRowUnit);
                                     hasComparableAmounts = true;
                                 }
                             }
@@ -150,9 +152,18 @@ public static class TaggedStepDiagnostics
                     var tolerance = Math.Max(0.0005m, rowHigh * 0.01m);
                     if (sumLow > rowHigh + tolerance)
                     {
-                        issues.Add(
-                            $"{name}: step amounts ({FormatNumber(sumLow)} {ingredient.Unit}) exceed the ingredient list ({FormatNumber(rowHigh)} {ingredient.Unit})."
-                        );
+                        // If all step mentions each specify the full batch amount (e.g. "cook 6 eggs", then "peel 6 eggs"),
+                        // this is a repeat mention of the full batch rather than an overflow.
+                        var isRepeatMentionOfFullAmount =
+                            stepAmounts.Count > 1
+                            && stepAmounts.All(a => Math.Abs(a - rowHigh) <= tolerance);
+
+                        if (!isRepeatMentionOfFullAmount)
+                        {
+                            issues.Add(
+                                $"{name}: step amounts ({FormatNumber(sumLow)} {ingredient.Unit}) exceed the ingredient list ({FormatNumber(rowHigh)} {ingredient.Unit})."
+                            );
+                        }
                     }
                 }
             }

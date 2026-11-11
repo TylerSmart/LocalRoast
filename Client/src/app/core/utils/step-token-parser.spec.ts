@@ -1,4 +1,5 @@
 import {
+  cleanStepInstruction,
   formatSeconds,
   formatTokenDisplay,
   normalizeMeasurementUnit,
@@ -105,5 +106,30 @@ describe('step-token-parser', () => {
     expect(normalizeMeasurementUnit('tablespoons')).toBe('Tbsp');
     expect(normalizeMeasurementUnit('cups')).toBe('Cup');
     expect(normalizeMeasurementUnit('whole')).toBe('Whole');
+  });
+
+  it('parses tokens with trailing punctuation inside delimiters', () => {
+    const raw = 'Process until combined, ||{"type":"timer","seconds":10}!!.|| and rest.';
+    const segments = parseStepInstruction(raw);
+    expect(segments.some((s) => s.token?.type === 'timer')).toBe(true);
+    expect(segments.some((s) => s.text === '!!.')).toBe(true);
+  });
+
+  it('parses ingredient tokens missing the ingredient property', () => {
+    const raw = 'Reserve ||{"amount":1,"unit":"tbsp"}|| fat.';
+    const segments = parseStepInstruction(raw);
+    expect(segments[1].token?.type).toBe('ingredient');
+    const token = segments[1].token as StepIngredientToken;
+    expect(token.amount).toBe(1);
+    expect(token.unit).toBe('tbsp');
+  });
+
+  it('cleans duplicate preceding measurements in step text', () => {
+    const raw =
+      'Transfer to bowl and stir in 1 1/2 tablespoons ||{"ingredient":"lime juice","amount":1.5,"unit":"tbsp"}||.';
+    const cleaned = cleanStepInstruction(raw);
+    expect(cleaned).toBe(
+      'Transfer to bowl and stir in ||{"ingredient":"lime juice","amount":1.5,"unit":"tbsp"}||.',
+    );
   });
 });

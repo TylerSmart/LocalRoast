@@ -11,11 +11,17 @@ public static partial class StepInstructionParser
     private static readonly TimeSpan RegexTimeout = TimeSpan.FromSeconds(1);
 
     [GeneratedRegex(
-        @"\|\|(?<json>\{.*?\})\|\|",
+        @"\|\|(?<json>\{.*?\})(?<punct>[\.,:;!\?]*)\|\|",
         RegexOptions.Singleline,
         matchTimeoutMilliseconds: 1000
     )]
     private static partial Regex TokenRegex();
+
+    [GeneratedRegex(
+        @"(?<full>(?<qty>(?:\d+(?:[\s-]+\d+/\d+|/\d+|\.\d+)?|[½¼¾⅓⅔⅛⅜⅝⅞]))?\s*(?<unit>teaspoons?|tsp|tablespoons?|tbsp|cups?|fl(?:uid)?\.?\s*oz\.?|pints?|pt|quarts?|qt|gallons?|gal|ounces?|oz|pounds?|lbs?|grams?|g|kilograms?|kg|milliliters?|ml|liters?|l|pinches?|dashes?|cloves?|slices?|cans?|bunches?|head|heads)?)\s*$",
+        RegexOptions.IgnoreCase
+    )]
+    private static partial Regex TrailingMeasurementRegex();
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -43,11 +49,19 @@ public static partial class StepInstructionParser
             }
 
             var jsonContent = match.Groups["json"].Value;
+            var punct = match.Groups["punct"].Value;
             var token = TryParseToken(jsonContent);
 
             if (token != null)
             {
-                segments.Add(new StepInstructionSegment(match.Value, token));
+                var cleanTokenText = string.IsNullOrEmpty(punct)
+                    ? match.Value
+                    : $"||{jsonContent}||";
+                segments.Add(new StepInstructionSegment(cleanTokenText, token));
+                if (!string.IsNullOrEmpty(punct))
+                {
+                    segments.Add(new StepInstructionSegment(punct));
+                }
             }
             else
             {
@@ -108,11 +122,19 @@ public static partial class StepInstructionParser
 
                         if (amt.HasValue && !string.IsNullOrEmpty(unitStr))
                         {
-                            builder.Append($"{amt} {unitStr} {ing.Ingredient}");
+                            builder.Append(
+                                string.IsNullOrWhiteSpace(ing.Ingredient)
+                                    ? $"{amt} {unitStr}"
+                                    : $"{amt} {unitStr} {ing.Ingredient}"
+                            );
                         }
                         else if (amt.HasValue)
                         {
-                            builder.Append($"{amt} {ing.Ingredient}");
+                            builder.Append(
+                                string.IsNullOrWhiteSpace(ing.Ingredient)
+                                    ? $"{amt}"
+                                    : $"{amt} {ing.Ingredient}"
+                            );
                         }
                         else
                         {
@@ -215,11 +237,97 @@ public static partial class StepInstructionParser
                 return JsonSerializer.Deserialize<StepIngredientToken>(json, JsonOptions);
             }
 
+            // Fallback for ingredient token without explicit "ingredient" property (e.g. {"amount": 1, "unit": "tbsp"})
+            if (
+                root.TryGetProperty("amount", out _)
+                || root.TryGetProperty("unit", out _)
+                || root.TryGetProperty("displayAmount", out _)
+                || root.TryGetProperty("displayUnit", out _)
+            )
+            {
+                var partial = JsonSerializer.Deserialize<StepIngredientToken>(json, JsonOptions);
+                return partial is not null
+                    ? partial with
+                    {
+                        Ingredient = partial.Ingredient ?? string.Empty,
+                    }
+                    : null;
+            }
+
             return null;
         }
         catch
         {
             return null;
         }
+    }
+
+    public static string CleanStepInstruction(string? instruction)
+    {
+        if (string.IsNullOrWhiteSpace(instruction))
+        {
+            return string.Empty;
+        }
+
+        var segments = ParseSegments(instruction);
+        if (segments.Count == 0)
+        {
+            return instruction;
+        }
+
+        var builder = new StringBuilder();
+        for (var i = 0; i < segments.Count; i++)
+        {
+            var segment = segments[i];
+            if (segment.Token is null)
+            {
+                var text = segment.Text;
+                if (i + 1 < segments.Count && segments[i + 1].Token is StepIngredientToken ing)
+                {
+                    text = StripTrailingMeasurement(text, ing);
+                }
+                builder.Append(text);
+            }
+            else
+            {
+                builder.Append(segment.Text);
+            }
+        }
+
+        return builder.ToString();
+    }
+
+    private static string StripTrailingMeasurement(string text, StepIngredientToken token)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return text;
+        }
+
+        var match = TrailingMeasurementRegex().Match(text);
+        if (!match.Success || match.Length == 0)
+        {
+            return text;
+        }
+
+        var hasQty = match.Groups["qty"].Success;
+        var hasUnit = match.Groups["unit"].Success;
+
+        if (!hasQty && !hasUnit)
+        {
+            return text;
+        }
+
+        if (
+            token.Amount.HasValue
+            || token.DisplayAmount.HasValue
+            || token.Unit.HasValue
+            || token.DisplayUnit.HasValue
+        )
+        {
+            return text[..match.Index];
+        }
+
+        return text;
     }
 }

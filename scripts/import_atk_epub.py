@@ -446,7 +446,8 @@ def format_recipe_as_llm_raw_text(r):
 
     if r.get("parent_recipe_title"):
         lines.append("")
-        lines.append(f"Base Ingredients (from {r['parent_recipe_title']}):")
+        lines.append(f"Master Recipe: {r['parent_recipe_title']}")
+        lines.append("Base Ingredients:")
     else:
         lines.append("")
         lines.append("Ingredients:")
@@ -729,6 +730,26 @@ def upload_source_text_attachment(api_base, token, recipe_id, recipe_dict):
         return None
 
 
+
+def sort_recipes_topologically(recipes):
+    """Sort recipes so independent/master recipes and standalone component recipes come before variations."""
+    def score(r):
+        is_variation = bool(r.get("parent_recipe_title"))
+        has_recipe_ref = any(
+            re.search(r"\b(?:recipe|batch)\b", ing.get("text", ""), re.IGNORECASE)
+            for ing in r.get("ingredients", [])
+        )
+        is_parent = len(r.get("variations", [])) > 0
+        if is_parent:
+            return 0  # Master/parent recipes first
+        if not is_variation and not has_recipe_ref:
+            return 1  # Independent standalone recipes second
+        if not is_variation and has_recipe_ref:
+            return 2  # Recipes referencing other components third
+        return 3      # Variations last
+    return sorted(recipes, key=score)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Extract and enqueue America's Test Kitchen EPUB into LocalRoast's LLM ingestion queue."
@@ -807,6 +828,7 @@ def main():
 
     # 1. Parse EPUB
     recipes = parse_atk_epub(args.epub)
+    recipes = sort_recipes_topologically(recipes)
 
     # Filter chapter if requested
     if args.chapter:

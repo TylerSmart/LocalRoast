@@ -936,7 +936,7 @@ public static class RecipeDraftNormalizer
         {
             var rawStep = rawSteps[i];
             var rawInstruction = rawStep.Instruction ?? "";
-            var instruction = rawInstruction.Trim();
+            var instruction = StepInstructionParser.CleanStepInstruction(rawInstruction.Trim());
             instruction = SubStepPrefix.Replace(instruction, "");
             if (string.IsNullOrWhiteSpace(instruction))
             {

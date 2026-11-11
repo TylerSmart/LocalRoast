@@ -94,4 +94,65 @@ public sealed class TaggedStepDiagnosticsTests
         var issues = TaggedStepDiagnostics.GetIssues(recipe);
         Assert.IsTrue(issues.Any(i => i.Contains("invalid duration")));
     }
+
+    [TestMethod]
+    public void GetQualityWarnings_DoesNotFlagIngredient_WhenPresentAsInlineToken()
+    {
+        var recipe = new LlmExtractedRecipePayload(
+            Ingredients:
+            [
+                new LlmExtractedIngredientItem(null, 2, null, "tbsp", null, DisplayName: "onion"),
+                new LlmExtractedIngredientItem(
+                    null,
+                    1,
+                    null,
+                    "tsp",
+                    null,
+                    DisplayName: "kosher salt"
+                ),
+            ],
+            Steps:
+            [
+                new LlmExtractedStepItem(
+                    null,
+                    "Place ||{\"ingredient\": \"onion\", \"amount\": 2, \"unit\": \"tbsp\"}|| and ||{\"ingredient\": \"kosher salt\", \"amount\": 1, \"unit\": \"tsp\"}|| on cutting board."
+                ),
+            ]
+        );
+
+        var warnings = RecipeExtractionDiagnostics.GetQualityWarnings(recipe);
+        Assert.AreEqual(0, warnings.Count);
+    }
+
+    [TestMethod]
+    public void GetIssues_DoesNotFlagRepeatMentionOfFullRowAmount()
+    {
+        var recipe = new LlmExtractedRecipePayload(
+            Ingredients:
+            [
+                new LlmExtractedIngredientItem(
+                    null,
+                    6,
+                    null,
+                    "whole",
+                    null,
+                    DisplayName: "large eggs"
+                ),
+            ],
+            Steps:
+            [
+                new LlmExtractedStepItem(
+                    null,
+                    "Steam ||{\"ingredient\": \"large eggs\", \"amount\": 6, \"unit\": \"whole\"}|| in basket."
+                ),
+                new LlmExtractedStepItem(
+                    null,
+                    "Peel ||{\"ingredient\": \"large eggs\", \"amount\": 6, \"unit\": \"whole\"}|| under cold water."
+                ),
+            ]
+        );
+
+        var issues = TaggedStepDiagnostics.GetIssues(recipe);
+        Assert.AreEqual(0, issues.Count);
+    }
 }

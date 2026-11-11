@@ -857,6 +857,13 @@ public sealed class IngestionProcessor(
             {
                 var createdRecipe = await PublishDraftInternalAsync(job, draft, jobCt);
 
+                await IngestionCatalogMaterializer.BacklinkUnresolvedRecipeReferencesAsync(
+                    dbContext,
+                    createdRecipe.Id,
+                    createdRecipe.Title,
+                    jobCt
+                );
+
                 job.Status = IngestionJobStatus.Published;
 
                 job.ResultingRecipeId = createdRecipe.Id;

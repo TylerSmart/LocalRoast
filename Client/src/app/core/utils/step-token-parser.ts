@@ -8,7 +8,7 @@ import {
 } from '../models/step-token.models';
 import { scaleAndConvert } from './culinary-math';
 
-const TOKEN_REGEX = /\|\|(\{.*?\})\|\|/g;
+const TOKEN_REGEX = /\|\|(\{.*?\})([.,:;!?]*)\|\|/g;
 
 export function normalizeMeasurementUnit(
   unit: string | MeasurementUnit | null | undefined,
@@ -111,8 +111,9 @@ export function parseStepInstruction(instruction: string | null | undefined): St
       segments.push({ text: instruction.slice(lastIndex, start) });
     }
 
-    const rawToken = match[0];
     const jsonStr = match[1];
+    const punct = match[2];
+    const rawToken = `||${jsonStr}||`;
 
     try {
       const parsed = JSON.parse(jsonStr) as Record<string, unknown>;
@@ -130,7 +131,14 @@ export function parseStepInstruction(instruction: string | null | undefined): St
           fahrenheit: parsed['fahrenheit'] != null ? Number(parsed['fahrenheit']) : null,
           celsius: parsed['celsius'] != null ? Number(parsed['celsius']) : null,
         } as StepTemperatureToken;
-      } else if ('ingredient' in parsed || parsed['type'] === 'ingredient') {
+      } else if (
+        'ingredient' in parsed ||
+        parsed['type'] === 'ingredient' ||
+        'amount' in parsed ||
+        'unit' in parsed ||
+        'displayAmount' in parsed ||
+        'displayUnit' in parsed
+      ) {
         token = {
           type: 'ingredient',
           ingredient: String(parsed['ingredient'] ?? '').trim(),
@@ -148,6 +156,9 @@ export function parseStepInstruction(instruction: string | null | undefined): St
         token: token ?? null,
         rawToken,
       });
+      if (punct) {
+        segments.push({ text: punct });
+      }
     } catch {
       // Failed JSON: preserve as unparsed segment
       segments.push({
@@ -203,7 +214,11 @@ export function formatTokenDisplay(
   const formatted = scaleAndConvert(qty, null, normalizedUnit, customUnitName, factor, system);
   const measurementStr = formatted.formattedMeasurement.trim();
 
-  return measurementStr ? `${measurementStr} ${token.ingredient}` : token.ingredient;
+  return measurementStr
+    ? token.ingredient
+      ? `${measurementStr} ${token.ingredient}`
+      : measurementStr
+    : token.ingredient;
 }
 
 export function stepInstructionToPlainText(instruction: string | null | undefined): string {
@@ -241,4 +256,39 @@ export function stepInstructionToPlainText(instruction: string | null | undefine
       return formatTokenDisplay(seg.token as StepIngredientToken, 1, 'Original');
     })
     .join('');
+}
+
+const TRAILING_MEASUREMENT_REGEX =
+  /((?:\d+(?:[\s-]+\d+\/\d+|\/\d+|\.\d+)?|[½¼¾⅓⅔⅛⅜⅝⅞]))?\s*(teaspoons?|tsp|tablespoons?|tbsp|cups?|fl(?:uid)?\.?\s*oz\.?|pints?|pt|quarts?|qt|gallons?|gal|ounces?|oz|pounds?|lbs?|grams?|g|kilograms?|kg|milliliters?|ml|liters?|l|pinches?|dashes?|cloves?|slices?|cans?|bunches?|head|heads)?\s*$/i;
+
+export function cleanStepInstruction(instruction: string | null | undefined): string {
+  if (!instruction) return '';
+  const segments = parseStepInstruction(instruction);
+  if (!segments.length) return instruction;
+
+  let out = '';
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
+    if (!seg.token) {
+      let text = seg.text;
+      if (i + 1 < segments.length && segments[i + 1].token?.type === 'ingredient') {
+        const nextToken = segments[i + 1].token as StepIngredientToken;
+        if (
+          nextToken.amount != null ||
+          nextToken.displayAmount != null ||
+          nextToken.unit != null ||
+          nextToken.displayUnit != null
+        ) {
+          const match = TRAILING_MEASUREMENT_REGEX.exec(text);
+          if (match && (match[1] || match[2])) {
+            text = text.slice(0, match.index);
+          }
+        }
+      }
+      out += text;
+    } else {
+      out += seg.rawToken || seg.text;
+    }
+  }
+  return out;
 }

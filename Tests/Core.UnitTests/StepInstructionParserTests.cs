@@ -108,4 +108,46 @@ public sealed class StepInstructionParserTests
         Assert.IsTrue(formatted.Contains("\"amount\":4"));
         Assert.IsTrue(formatted.Contains("\"displayAmount\":1"));
     }
+
+    [TestMethod]
+    public void ParseSegments_WithTrailingPunctuationInsideDelimiters_ExtractsPunctuationAsText()
+    {
+        const string text =
+            "Process until combined, ||{\"type\": \"timer\", \"seconds\": 10}!!.|| and rest.";
+        var segments = StepInstructionParser.ParseSegments(text);
+
+        Assert.IsTrue(segments.Any(s => s.Token is StepTimerToken));
+        var timer = segments.First(s => s.Token is StepTimerToken).Token as StepTimerToken;
+        Assert.AreEqual(10, timer!.Seconds);
+
+        // Punctuation "!!." must be preserved as trailing text segment
+        Assert.IsTrue(segments.Any(s => s.Text == "!!." && s.Token == null));
+    }
+
+    [TestMethod]
+    public void ParseSegments_WithMissingIngredientProperty_FallsBackToIngredientToken()
+    {
+        const string text =
+            "Reserve ||{\"amount\": 1, \"unit\": \"tbsp\", \"displayAmount\": 1, \"displayUnit\": \"tbsp\"}|| fat.";
+        var segments = StepInstructionParser.ParseSegments(text);
+
+        Assert.IsTrue(segments.Any(s => s.Token is StepIngredientToken));
+        var ing = segments.First(s => s.Token is StepIngredientToken).Token as StepIngredientToken;
+        Assert.IsNotNull(ing);
+        Assert.AreEqual(1m, ing.Amount);
+        Assert.AreEqual(MeasurementUnit.Tbsp, ing.Unit);
+    }
+
+    [TestMethod]
+    public void CleanStepInstruction_StripsPrecedingDuplicateMeasurement()
+    {
+        const string text =
+            "Transfer onion mixture to bowl and stir in 1 1/2 tablespoons ||{\"ingredient\": \"lime juice\", \"amount\": 1.5, \"unit\": \"tbsp\"}||.";
+        var cleaned = StepInstructionParser.CleanStepInstruction(text);
+
+        Assert.AreEqual(
+            "Transfer onion mixture to bowl and stir in ||{\"ingredient\": \"lime juice\", \"amount\": 1.5, \"unit\": \"tbsp\"}||.",
+            cleaned
+        );
+    }
 }

@@ -96,17 +96,22 @@ public static class RecipeExtractionDiagnostics
                     continue;
                 }
 
-                var linked = (step.IngredientIndices ?? [])
-                    .Concat(
-                        (step.IngredientAmounts ?? [])
-                            .Where(amount => amount.IngredientIndex.HasValue)
-                            .Select(amount => amount.IngredientIndex!.Value)
-                    )
-                    .Any(index =>
-                        index >= 0
-                        && index < ingredients.Count
-                        && SameFood(ingredient, ingredients[index])
-                    );
+                var linked =
+                    (step.IngredientIndices ?? [])
+                        .Concat(
+                            (step.IngredientAmounts ?? [])
+                                .Where(amount => amount.IngredientIndex.HasValue)
+                                .Select(amount => amount.IngredientIndex!.Value)
+                        )
+                        .Any(index =>
+                            index >= 0
+                            && index < ingredients.Count
+                            && SameFood(ingredient, ingredients[index])
+                        )
+                    || StepInstructionParser
+                        .ExtractTokens(instruction)
+                        .OfType<StepIngredientToken>()
+                        .Any(t => TokenMatchesIngredient(t, ingredient));
                 if (!linked)
                 {
                     var linkedInEarlierStep = steps
@@ -123,6 +128,10 @@ public static class RecipeExtractionDiagnostics
                                     && idx < ingredients.Count
                                     && SameFood(ingredient, ingredients[idx])
                                 )
+                            || StepInstructionParser
+                                .ExtractTokens(prevStep.Instruction)
+                                .OfType<StepIngredientToken>()
+                                .Any(t => TokenMatchesIngredient(t, ingredient))
                         );
                     if (!linkedInEarlierStep)
                     {
@@ -338,4 +347,23 @@ public static class RecipeExtractionDiagnostics
 
     private static string NormalizeLine(string? line) =>
         Whitespace.Replace((line ?? "").Trim().TrimStart('-', ' '), " ");
+
+    private static bool TokenMatchesIngredient(
+        StepIngredientToken token,
+        LlmExtractedIngredientItem ingredient
+    )
+    {
+        if (string.IsNullOrWhiteSpace(token.Ingredient))
+        {
+            return false;
+        }
+
+        var names = IngredientNames(ingredient);
+        var tokenIng = token.Ingredient.Trim();
+        return names.Any(name =>
+            string.Equals(tokenIng, name.Trim(), StringComparison.OrdinalIgnoreCase)
+            || tokenIng.Contains(name, StringComparison.OrdinalIgnoreCase)
+            || name.Contains(tokenIng, StringComparison.OrdinalIgnoreCase)
+        );
+    }
 }

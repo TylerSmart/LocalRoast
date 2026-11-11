@@ -368,10 +368,14 @@ Example output:
                 Steps (ordered instructions):
                 In the step instructions, embed all ingredient references, timers, and temperatures as inline JSON tokens enclosed in ||{...}||.
                 - Ingredients: ||{"ingredient": "name", "amount": total_number, "unit": "unit_name", "displayAmount": portion_number, "displayUnit": "unit_name"}||
+                  * Replace the ingredient mention AND its preceding quantity and unit in the prose with the token. Never leave the quantity or unit in plain text in front of the token (e.g. write "stir in ||{\"ingredient\": \"lime juice\", \"amount\": 1.5, \"unit\": \"tbsp\"}||", NEVER "stir in 1 1/2 tablespoons ||{\"ingredient\": \"lime juice\"...}||").
                   * If the step uses a portion (e.g. "Top each of 4 pancakes with 1 tsp butter"), set amount to the total used across the step (4) and displayAmount to the per-item amount (1).
-                  * If an ingredient is referenced without an amount (e.g. "fold in egg whites"), set amount to null: ||{"ingredient": "egg whites"}||
+                  * If an ingredient was already added in an earlier step and is only being referred to or handled again (e.g. "peel the steamed eggs", "garnish with reserved bacon"), do NOT repeat the amount—set amount to null (e.g. ||{"ingredient": "eggs"}||) so the quantity is not counted twice.
+                  * If an ingredient is referenced without an amount, set amount to null: ||{"ingredient": "egg whites"}||.
+                  * ALWAYS include "ingredient" with the ingredient name.
                 - Timers: ||{"type": "timer", "seconds": 300, "label": "Simmer sauce"}||
                 - Temperatures: ||{"type": "temperature", "fahrenheit": 350}||
+                - All punctuation (periods, commas, etc.) must go OUTSIDE the || delimiters (e.g. ||{...}||., NEVER ||{...}.|| or ||{...}!!.||).
                 """;
 
         var userPrompt = context.SourceContent;
