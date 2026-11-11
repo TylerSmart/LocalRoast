@@ -110,6 +110,7 @@ public static class BuiltInTags
         new("Whole30", TagCategory.Dietary, 170),
         new("Halal", TagCategory.Dietary, 180),
         new("Kosher", TagCategory.Dietary, 190),
+        new("Alcohol", TagCategory.Dietary, 195),
         // Health & Nutritional Focus
         new("High-Protein", TagCategory.Dietary, 200),
         new("Low-Sodium", TagCategory.Dietary, 210),
@@ -466,6 +467,12 @@ public static class BuiltInTags
         ["Gut Friendly"] = "Gut-Friendly",
         ["Heart Healthy"] = "Heart-Healthy",
         ["High Fiber"] = "High-Fiber",
+        ["Alocohol"] = "Alcohol",
+        ["Alcoholic"] = "Alcohol",
+        ["Contains Alcohol"] = "Alcohol",
+        ["With Alcohol"] = "Alcohol",
+        ["Booze"] = "Alcohol",
+        ["Liquor"] = "Alcohol",
 
         // Protein / Base aliases
         ["Chicken Breasts"] = "Chicken Breast",

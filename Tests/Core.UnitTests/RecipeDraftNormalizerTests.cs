@@ -899,6 +899,8 @@ public sealed class RecipeDraftNormalizerTests
         Assert.AreEqual(TagCategory.Cuisine, RecipeDraftNormalizer.InferTagCategory("Mexican"));
         Assert.AreEqual(TagCategory.Dietary, RecipeDraftNormalizer.InferTagCategory("Gluten-Free"));
         Assert.AreEqual(TagCategory.Dietary, RecipeDraftNormalizer.InferTagCategory("Vegetarian"));
+        Assert.AreEqual(TagCategory.Dietary, RecipeDraftNormalizer.InferTagCategory("Alcohol"));
+        Assert.AreEqual(TagCategory.Dietary, RecipeDraftNormalizer.InferTagCategory("Alocohol"));
         Assert.AreEqual(TagCategory.Equipment, RecipeDraftNormalizer.InferTagCategory("Sheet Pan"));
         Assert.AreEqual(TagCategory.Equipment, RecipeDraftNormalizer.InferTagCategory("Cast Iron"));
         Assert.AreEqual(

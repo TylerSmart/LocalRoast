@@ -8,5 +8,6 @@ public sealed record ResetAppDataResultDto(
     int DeletedFoodItemsCount,
     int DeletedTagsCount,
     int DeletedCollectionsCount,
-    DateTimeOffset ResetAt
+    DateTimeOffset ResetAt,
+    int RestoredDefaultTagsCount = 0
 );

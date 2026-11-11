@@ -1543,7 +1543,11 @@ public static class RecipeDraftNormalizer
             or "heart healthy"
             or "high-fiber"
             or "high fiber"
-            or "healthy" => TagCategory.Dietary,
+            or "healthy"
+            or "alcohol"
+            or "alocohol"
+            or "alcoholic"
+            or "contains alcohol" => TagCategory.Dietary,
 
             // Equipment
             "slow cooker"

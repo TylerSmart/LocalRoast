@@ -366,6 +366,13 @@ public sealed class AccountIntegrationTests
         );
         Assert.AreEqual(HttpStatusCode.Created, listRes.StatusCode);
 
+        // 3b. Seed a custom tag
+        var customTagRes = await _client.PostAsJsonAsync(
+            "/api/tags",
+            new UpsertTagRequest("Special Custom Tag", TagCategory.Dietary, 99)
+        );
+        Assert.AreEqual(HttpStatusCode.Created, customTagRes.StatusCode);
+
         // 4. Call nuclear reset endpoint
         var resetRes = await _client.PostAsync("/api/account/reset-data", null);
         Assert.AreEqual(HttpStatusCode.OK, resetRes.StatusCode);
@@ -390,6 +397,14 @@ public sealed class AccountIntegrationTests
         );
         Assert.IsNotNull(getLists);
         Assert.AreEqual(0, getLists.Count);
+
+        // Verify built-in default tags were restored and custom tags were removed
+        var getTags = await _client.GetFromJsonAsync<List<TagDto>>("/api/tags");
+        Assert.IsNotNull(getTags);
+        Assert.AreEqual(BuiltInTags.All.Count, getTags.Count);
+        Assert.IsFalse(getTags.Any(t => t.Name == "Special Custom Tag"));
+        Assert.IsTrue(getTags.All(t => t.IsSystemSeeded));
+        Assert.AreEqual(BuiltInTags.All.Count, result.RestoredDefaultTagsCount);
 
         // 6. User account is still valid and fully functional
         var account = await _client.GetFromJsonAsync<AccountDto>("/api/account");

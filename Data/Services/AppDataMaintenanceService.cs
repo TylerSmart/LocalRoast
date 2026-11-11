@@ -1,5 +1,6 @@
 using App.Core.Maintenance;
 using App.Core.Media;
+using App.Core.Recipes;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -125,13 +126,16 @@ public sealed class AppDataMaintenanceService(
 
             await dbContext.SaveChangesAsync(cancellationToken);
 
+            // Reseed standard built-in default tags so standard taxonomy is restored
+            await TagSeeder.EnsureBuiltInTagsSeededAsync(dbContext, cancellationToken);
+
             if (tx is not null)
             {
                 await tx.CommitAsync(cancellationToken);
             }
 
             logger.LogWarning(
-                "Nuclear app data reset completed: {RecipeCount} recipes, {FoodItemCount} food items, {JobCount} ingestion jobs wiped.",
+                "Nuclear app data reset completed: {RecipeCount} recipes, {FoodItemCount} food items, {JobCount} ingestion jobs wiped. Built-in default tags restored.",
                 recipes.Count,
                 foodItems.Count,
                 ingestionJobs.Count
@@ -145,7 +149,8 @@ public sealed class AppDataMaintenanceService(
                 DeletedFoodItemsCount: foodItems.Count,
                 DeletedTagsCount: tags.Count,
                 DeletedCollectionsCount: collections.Count,
-                ResetAt: DateTimeOffset.UtcNow
+                ResetAt: DateTimeOffset.UtcNow,
+                RestoredDefaultTagsCount: BuiltInTags.All.Count
             );
         });
 

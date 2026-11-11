@@ -33,4 +33,5 @@ export interface ResetAppDataResultDto {
   deletedTagsCount: number;
   deletedCollectionsCount: number;
   resetAt: string;
+  restoredDefaultTagsCount?: number;
 }

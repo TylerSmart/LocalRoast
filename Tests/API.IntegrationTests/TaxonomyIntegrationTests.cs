@@ -266,6 +266,7 @@ public sealed class TaxonomyIntegrationTests
         Assert.IsTrue(
             db.Tags.Any(t => t.Category == TagCategory.Dietary && t.Name == "Gluten-Free")
         );
+        Assert.IsTrue(db.Tags.Any(t => t.Category == TagCategory.Dietary && t.Name == "Alcohol"));
         Assert.IsTrue(db.Tags.Any(t => t.Category == TagCategory.Cuisine && t.Name == "Italian"));
 
         // Idempotency: second run does not duplicate tags
