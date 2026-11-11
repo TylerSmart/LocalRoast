@@ -384,7 +384,7 @@ Example output:
                   * Only use different displayAmount vs amount when the step explicitly uses a per-item multiplier (e.g. "Top each of 4 pancakes with 1 tsp butter" -> amount: 4, displayAmount: 1). Otherwise, amount and displayAmount should be identical or displayAmount null.
                   * If an ingredient was already added in an earlier step and is only being referred to or handled again (e.g. "peel the steamed eggs", "garnish with reserved bacon"), do NOT repeat the amount—set amount to null (e.g. ||{"ingredient": "eggs"}||) so the quantity is not counted twice.
                   * If an ingredient is referenced without an amount, set amount to null: ||{"ingredient": "egg whites"}||.
-                  * ALWAYS include "ingredient" with the ingredient name.
+                  * CRITICAL: Every ingredient token MUST include the "ingredient" property with the ingredient name (e.g. ||{"ingredient": "bacon", "amount": 2, "unit": "slice"}||). NEVER output anonymous tokens with only "amount" or "unit" like ||{"amount": 1, "unit": "tbsp"}||. If referencing an ingredient, include "ingredient": "<name>". If an amount is an unlinked measurement, rendered fat byproduct, or not tied to a master ingredient row, write it as plain text without ||{...}|| delimiters (e.g. "Reserve 1 tablespoon fat").
                 - Timers: ||{"type": "timer", "seconds": 300, "label": "Simmer sauce"}||
                   * "seconds": Total duration in seconds (e.g. 5 minutes = 300, 30 seconds = 30, 1 hour = 3600).
                   * "label": The specific action or purpose being timed (e.g. "Simmer sauce", "Rest", "Cook onion", "Bake"). NEVER put the time duration itself in label (e.g. do NOT write "5 minutes", "30 seconds", "3 to 4 minutes", or "1 hour"). If there is no specific action name, omit label or set it to null.
@@ -478,6 +478,7 @@ Example output:
             2. Ingredient References & Inline Tagging:
                - Every ingredient in the master list should be referenced in at least one step instruction with an inline token ||{"ingredient": "name", "amount": ..., "unit": "..."}||.
                - Replace the ingredient mention AND its preceding quantity and unit in the prose with the token. Never leave the quantity or unit in plain text in front of the token.
+               - CRITICAL: Every ingredient token MUST include the "ingredient" property with the ingredient name (e.g. ||{"ingredient": "bacon", "amount": 2, "unit": "slice"}||). NEVER output anonymous tokens with only "amount" or "unit" like ||{"amount": 1, "unit": "tbsp"}||. If referencing an ingredient, include "ingredient": "<name>". If an amount is an unlinked measurement, rendered fat byproduct, or not tied to a master ingredient row, write it as plain text without ||{...}|| delimiters (e.g. "Reserve 1 tablespoon fat").
                - Ensure step tokens reference the correct ingredient row when multiple rows exist (e.g. in different sections).
                - sectionName: ONLY use when the source explicitly groups multiple items under distinct subheadings. NEVER invent sections or section individual items.
             3. Timers and Temperatures:

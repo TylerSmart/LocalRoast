@@ -43,7 +43,7 @@ public static class TaggedStepDiagnostics
                     if (string.IsNullOrWhiteSpace(ing.Ingredient))
                     {
                         issues.Add(
-                            $"Step {i + 1}: inline ingredient token has no ingredient name."
+                            $"Step {i + 1}: inline ingredient token {segment.Text} has no ingredient name. Every ingredient token must include \"ingredient\": \"<name>\" or be written in plain text."
                         );
                     }
                     else if (ing.Amount.HasValue && ing.Amount.Value <= 0)
