@@ -49,6 +49,7 @@ import {
   stepIngredientCallouts,
 } from '../../../core/utils/step-instruction';
 import { StepInstructionComponent } from '../../../shared/components/step-instruction/step-instruction.component';
+import { shouldShowTimerLabel } from '../../../core/utils/step-token-parser';
 import {
   CookLogDialogComponent,
   CookLogDialogData,
@@ -127,6 +128,7 @@ export class CookModeComponent implements OnInit, OnDestroy {
 
   protected readonly formatCountdown = formatCountdown;
   protected readonly formatDuration = formatDuration;
+  protected readonly shouldShowTimerLabel = shouldShowTimerLabel;
 
   protected readonly scaleFactor = computed(() => {
     const r = this.recipe();

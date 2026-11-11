@@ -4,10 +4,13 @@ import {
   fahrenheitToCelsius,
   formatSeconds,
   formatTemperatureDisplay,
+  formatTimerToken,
   formatTokenDisplay,
+  isDurationLabel,
   normalizeMeasurementUnit,
   parseStepInstruction,
   serializeStepToken,
+  shouldShowTimerLabel,
   stepInstructionToPlainText,
 } from './step-token-parser';
 import {
@@ -218,5 +221,64 @@ describe('step-token-parser', () => {
     const raw = 'Preheat oven to ||{"type":"temperature","fahrenheit":425}||.';
     expect(stepInstructionToPlainText(raw, 'Original')).toBe('Preheat oven to 425°F.');
     expect(stepInstructionToPlainText(raw, 'Metric')).toBe('Preheat oven to 218°C.');
+  });
+
+  it('correctly identifies duration labels and suppresses redundant timer labels', () => {
+    expect(isDurationLabel('5 minutes')).toBe(true);
+    expect(isDurationLabel('3 to 4 minutes')).toBe(true);
+    expect(isDurationLabel('30 seconds')).toBe(true);
+    expect(isDurationLabel('1 to 2 minutes')).toBe(true);
+    expect(isDurationLabel('about 5 minutes')).toBe(true);
+    expect(isDurationLabel('approx. 10 mins')).toBe(true);
+    expect(isDurationLabel('1 hour')).toBe(true);
+    expect(isDurationLabel('5m')).toBe(true);
+    expect(isDurationLabel('30s')).toBe(true);
+
+    expect(isDurationLabel('Simmer')).toBe(false);
+    expect(isDurationLabel('Simmer sauce')).toBe(false);
+    expect(isDurationLabel('Cook onion')).toBe(false);
+    expect(isDurationLabel('Rest')).toBe(false);
+    expect(isDurationLabel('')).toBe(false);
+    expect(isDurationLabel(null)).toBe(false);
+    expect(isDurationLabel(undefined)).toBe(false);
+
+    expect(shouldShowTimerLabel('5 minutes')).toBe(false);
+    expect(shouldShowTimerLabel('Timer')).toBe(false);
+    expect(shouldShowTimerLabel('Step 1 timer')).toBe(false);
+    expect(shouldShowTimerLabel('Step 2 timer')).toBe(false);
+    expect(shouldShowTimerLabel('Simmer')).toBe(true);
+    expect(shouldShowTimerLabel('Cook (4m)')).toBe(true);
+  });
+
+  it('formats timer tokens cleanly without redundant duration labels', () => {
+    const redundantTimer: StepTimerToken = {
+      type: 'timer',
+      seconds: 300,
+      label: '5 minutes',
+    };
+    expect(formatTimerToken(redundantTimer)).toBe('5m');
+
+    const actionTimer: StepTimerToken = {
+      type: 'timer',
+      seconds: 300,
+      label: 'Simmer sauce',
+    };
+    expect(formatTimerToken(actionTimer)).toBe('5m (Simmer sauce)');
+
+    const nullLabelTimer: StepTimerToken = {
+      type: 'timer',
+      seconds: 30,
+      label: null,
+    };
+    expect(formatTimerToken(nullLabelTimer)).toBe('30s');
+  });
+
+  it('cleans redundant duration labels from timer tokens in step instructions', () => {
+    const raw = 'Let sit for ||{"type":"timer","seconds":300,"label":"5 minutes"}||.';
+    const cleaned = cleanStepInstruction(raw);
+    expect(cleaned).toBe('Let sit for ||{"type":"timer","seconds":300}||.');
+
+    const plain = stepInstructionToPlainText(raw);
+    expect(plain).toBe('Let sit for 5m.');
   });
 });

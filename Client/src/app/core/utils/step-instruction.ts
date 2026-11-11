@@ -1,10 +1,11 @@
 import { RecipeMeasurement, UnitSystem } from '../models/recipe.models';
 import { formatStepIngredient, IngredientMeasurements } from './culinary-math';
 import {
-  formatSeconds,
   formatTemperatureDisplay,
+  formatTimerToken,
   formatTokenDisplay,
   parseStepInstruction,
+  shouldShowTimerLabel,
 } from './step-token-parser';
 import {
   StepIngredientToken,
@@ -61,12 +62,13 @@ export function buildInstructionSegments(
 
     if (seg.token.type === 'timer') {
       const timer = seg.token as StepTimerToken;
+      const showLabel = shouldShowTimerLabel(timer.label);
       segments.push({
-        text: `${formatSeconds(timer.seconds)}${timer.label ? ' (' + timer.label + ')' : ''}`,
+        text: formatTimerToken(timer),
         amount: {
           kind: 'Timer',
           ingredientId: null,
-          ingredientName: timer.label ?? null,
+          ingredientName: showLabel ? (timer.label ?? null) : null,
           scaled: false,
         },
       });

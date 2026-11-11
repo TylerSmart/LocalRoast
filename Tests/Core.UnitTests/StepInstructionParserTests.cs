@@ -176,4 +176,30 @@ public sealed class StepInstructionParserTests
             cleaned
         );
     }
+
+    [TestMethod]
+    public void CleanStepInstruction_WithRedundantDurationTimerLabel_StripsLabel()
+    {
+        const string text =
+            "Let sit for ||{\"type\": \"timer\", \"seconds\": 300, \"label\": \"5 minutes\"}||.";
+        var cleaned = StepInstructionParser.CleanStepInstruction(text);
+
+        Assert.AreEqual("Let sit for ||{\"seconds\":300,\"type\":\"Timer\"}||.", cleaned);
+
+        var plain = StepInstructionParser.ToPlainText(cleaned);
+        Assert.AreEqual("Let sit for 5 minutes.", plain);
+    }
+
+    [TestMethod]
+    public void CleanStepInstruction_WithActionTimerLabel_PreservesLabel()
+    {
+        const string text =
+            "Simmer for ||{\"type\": \"timer\", \"seconds\": 300, \"label\": \"Simmer sauce\"}||.";
+        var cleaned = StepInstructionParser.CleanStepInstruction(text);
+
+        Assert.AreEqual(text, cleaned);
+
+        var plain = StepInstructionParser.ToPlainText(cleaned);
+        Assert.AreEqual("Simmer for Simmer sauce.", plain);
+    }
 }

@@ -35,6 +35,7 @@ import {
   isIngredientDivided,
   stepIngredientCallouts,
 } from '../../../core/utils/step-instruction';
+import { shouldShowTimerLabel } from '../../../core/utils/step-token-parser';
 import { StepInstructionComponent } from '../../../shared/components/step-instruction/step-instruction.component';
 
 export interface ScaledPreviewIngredientItem {
@@ -247,6 +248,8 @@ export class RecipeDetailPreviewComponent {
     if (secs === 0) return `${mins} min${mins === 1 ? '' : 's'}`;
     return `${mins}m ${secs}s`;
   }
+
+  protected readonly shouldShowTimerLabel = shouldShowTimerLabel;
 
   onPublish(): void {
     this.publishRequested.emit();

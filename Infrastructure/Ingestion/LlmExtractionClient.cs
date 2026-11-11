@@ -378,6 +378,8 @@ Example output:
                   * If an ingredient is referenced without an amount, set amount to null: ||{"ingredient": "egg whites"}||.
                   * ALWAYS include "ingredient" with the ingredient name.
                 - Timers: ||{"type": "timer", "seconds": 300, "label": "Simmer sauce"}||
+                  * "seconds": Total duration in seconds (e.g. 5 minutes = 300, 30 seconds = 30, 1 hour = 3600).
+                  * "label": The specific action or purpose being timed (e.g. "Simmer sauce", "Rest", "Cook onion", "Bake"). NEVER put the time duration itself in label (e.g. do NOT write "5 minutes", "30 seconds", "3 to 4 minutes", or "1 hour"). If there is no specific action name, omit label or set it to null.
                 - Temperatures: ||{"type": "temperature", "fahrenheit": 350}||
                 - All punctuation (periods, commas, etc.) must go OUTSIDE the || delimiters (e.g. ||{...}||., NEVER ||{...}.|| or ||{...}!!.||).
                 """;

@@ -119,13 +119,16 @@ export function parseStepInstruction(instruction: string | null | undefined): St
       const parsed = JSON.parse(jsonStr) as Record<string, unknown>;
       let token: StepToken | null = null;
 
-      if (parsed['type'] === 'timer') {
+      const typeStr =
+        typeof parsed['type'] === 'string' ? (parsed['type'] as string).toLowerCase() : '';
+
+      if (typeStr === 'timer' || 'seconds' in parsed) {
         token = {
           type: 'timer',
           seconds: Number(parsed['seconds']) || 0,
           label: (parsed['label'] as string) ?? null,
         } as StepTimerToken;
-      } else if (parsed['type'] === 'temperature') {
+      } else if (typeStr === 'temperature' || 'fahrenheit' in parsed || 'celsius' in parsed) {
         const tempToken: StepTemperatureToken = {
           type: 'temperature',
         };
@@ -277,6 +280,37 @@ export function formatTemperatureDisplay(
   return { text: '', scaled: false };
 }
 
+const DURATION_LABEL_REGEX =
+  /^\s*(?:about|approx\.?|approximately)?\s*(?:\d+(?:\.\d+)?|\d+\s*(?:to|[-\u2013\u2014])\s*\d+)\s*(?:seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h)\s*$/i;
+
+export function isDurationLabel(label: string | null | undefined): boolean {
+  if (!label || !label.trim()) {
+    return false;
+  }
+  return DURATION_LABEL_REGEX.test(label.trim());
+}
+
+export function shouldShowTimerLabel(label: string | null | undefined): boolean {
+  if (!label || !label.trim()) {
+    return false;
+  }
+  const trimmed = label.trim();
+  if (trimmed.toLowerCase() === 'timer') {
+    return false;
+  }
+  if (/^step\s+\d+\s+timer$/i.test(trimmed)) {
+    return false;
+  }
+  return !isDurationLabel(trimmed);
+}
+
+export function formatTimerToken(timer: StepTimerToken): string {
+  const showLabel = shouldShowTimerLabel(timer.label);
+  return showLabel
+    ? `${formatSeconds(timer.seconds)} (${timer.label})`
+    : formatSeconds(timer.seconds);
+}
+
 export function formatTemperatureToken(
   temp: StepTemperatureToken,
   system: UnitSystem = 'Original',
@@ -300,8 +334,7 @@ export function stepInstructionToPlainText(
       }
 
       if (seg.token.type === 'timer') {
-        const timer = seg.token as StepTimerToken;
-        return `${formatSeconds(timer.seconds)}${timer.label ? ' (' + timer.label + ')' : ''}`;
+        return formatTimerToken(seg.token as StepTimerToken);
       }
 
       if (seg.token.type === 'temperature') {
@@ -342,6 +375,13 @@ export function cleanStepInstruction(instruction: string | null | undefined): st
         }
       }
       out += text;
+    } else if (seg.token.type === 'timer') {
+      const timer = seg.token as StepTimerToken;
+      if (isDurationLabel(timer.label)) {
+        out += `||${JSON.stringify({ type: 'timer', seconds: timer.seconds })}||`;
+      } else {
+        out += seg.rawToken || seg.text;
+      }
     } else {
       out += seg.rawToken || seg.text;
     }

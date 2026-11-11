@@ -43,6 +43,7 @@ import {
 } from '../../../core/utils/step-instruction';
 import { StepInstructionComponent } from '../../../shared/components/step-instruction/step-instruction.component';
 import { getTodayIsoLocal } from '../../../core/utils/meal-plan-date';
+import { shouldShowTimerLabel } from '../../../core/utils/step-token-parser';
 import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialog/confirm-dialog.component';
 import {
   MealPlanEntryDialogComponent,
@@ -492,6 +493,8 @@ export class RecipeDetailComponent implements OnInit {
   formatTimerDuration(seconds: number): string {
     return formatDuration(seconds);
   }
+
+  protected readonly shouldShowTimerLabel = shouldShowTimerLabel;
 
   getSubRecipe(subRecipeId: string | null): SubRecipePreviewDto | undefined {
     if (!subRecipeId) {

@@ -106,4 +106,64 @@ public sealed class StepTimerExtractorTests
         Assert.IsTrue(result.Any(t => t.DurationSeconds == 540));
         Assert.IsTrue(result.Any(t => t.DurationSeconds == 120));
     }
+
+    [TestMethod]
+    public void IsDurationLabel_DetectsPureDurations()
+    {
+        Assert.IsTrue(StepTimerExtractor.IsDurationLabel("5 minutes"));
+        Assert.IsTrue(StepTimerExtractor.IsDurationLabel("3 to 4 minutes"));
+        Assert.IsTrue(StepTimerExtractor.IsDurationLabel("3-4 minutes"));
+        Assert.IsTrue(StepTimerExtractor.IsDurationLabel("30 seconds"));
+        Assert.IsTrue(StepTimerExtractor.IsDurationLabel("1 to 2 minutes"));
+        Assert.IsTrue(StepTimerExtractor.IsDurationLabel("about 5 minutes"));
+        Assert.IsTrue(StepTimerExtractor.IsDurationLabel("approx. 10 mins"));
+        Assert.IsTrue(StepTimerExtractor.IsDurationLabel("1 hour"));
+        Assert.IsTrue(StepTimerExtractor.IsDurationLabel("5m"));
+        Assert.IsTrue(StepTimerExtractor.IsDurationLabel("30s"));
+
+        Assert.IsFalse(StepTimerExtractor.IsDurationLabel("Simmer sauce"));
+        Assert.IsFalse(StepTimerExtractor.IsDurationLabel("Cook onion"));
+        Assert.IsFalse(StepTimerExtractor.IsDurationLabel("Rest"));
+        Assert.IsFalse(StepTimerExtractor.IsDurationLabel("Bake"));
+        Assert.IsFalse(StepTimerExtractor.IsDurationLabel(null));
+        Assert.IsFalse(StepTimerExtractor.IsDurationLabel(string.Empty));
+    }
+
+    [TestMethod]
+    public void CleanTimerLabel_ResolvesActionVerbsAndStripsDurations()
+    {
+        // 1. Redundant duration label replaced with contextual verb ("sit" -> "Rest")
+        var label1 = StepTimerExtractor.CleanTimerLabel(
+            "5 minutes",
+            "Add ground beef and toss to combine. Let sit for 5 minutes.",
+            stepNumber: 1,
+            timerSeconds: 300
+        );
+        Assert.AreEqual("Rest", label1);
+
+        // 2. Redundant duration label replaced with contextual verb ("cook" -> "Cook")
+        var label2 = StepTimerExtractor.CleanTimerLabel(
+            "3 to 4 minutes",
+            "Add onion and garlic and cook, stirring occasionally, until onion is softened, 3 to 4 minutes.",
+            stepNumber: 2,
+            timerSeconds: 240
+        );
+        Assert.AreEqual("Cook", label2);
+
+        // 3. Verb with trailing duration cleaned to just verb
+        var label3 = StepTimerExtractor.CleanTimerLabel("Simmer for 10 minutes", null, 1);
+        Assert.AreEqual("Simmer", label3);
+
+        // 4. Legitimate action label preserved
+        var label4 = StepTimerExtractor.CleanTimerLabel("Simmer sauce", null, 1);
+        Assert.AreEqual("Simmer sauce", label4);
+
+        // 5. Pure duration with no contextual verb falls back to step timer
+        var label5 = StepTimerExtractor.CleanTimerLabel(
+            "10 minutes",
+            "Leave mixture at room temperature for 10 minutes.",
+            stepNumber: 3
+        );
+        Assert.AreEqual("Step 3 timer", label5);
+    }
 }

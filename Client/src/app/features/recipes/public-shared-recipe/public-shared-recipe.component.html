@@ -448,7 +448,9 @@
                             <span class="timer-duration">{{
                               formatTimerDuration(timer.durationSeconds)
                             }}</span>
-                            <span class="timer-label">· {{ timer.label }}</span>
+                            @if (shouldShowTimerLabel(timer.label)) {
+                              <span class="timer-label">· {{ timer.label }}</span>
+                            }
                           </div>
                         }
                       </div>

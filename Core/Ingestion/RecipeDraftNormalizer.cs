@@ -1035,13 +1035,18 @@ public static class RecipeDraftNormalizer
                             t.DurationSeconds,
                             instruction
                         );
-                        var normLabel = t.Label.Trim();
+                        var normLabel = StepTimerExtractor.CleanTimerLabel(
+                            t.Label,
+                            instruction,
+                            i + 1,
+                            normSec
+                        );
                         if (
                             !timers.Any(existing =>
                                 existing.DurationSeconds == t.DurationSeconds
                                 && string.Equals(
                                     existing.Label,
-                                    normLabel,
+                                    t.Label.Trim(),
                                     StringComparison.OrdinalIgnoreCase
                                 )
                             )
@@ -1081,22 +1086,38 @@ public static class RecipeDraftNormalizer
                 }
                 else if (token is StepTimerToken timerToken && timerToken.Seconds >= 1)
                 {
-                    var timerLabel = !string.IsNullOrWhiteSpace(timerToken.Label)
-                        ? timerToken.Label.Trim()
-                        : "Timer";
+                    var timerLabel = StepTimerExtractor.CleanTimerLabel(
+                        timerToken.Label,
+                        instruction,
+                        i + 1,
+                        timerToken.Seconds
+                    );
 
-                    if (
-                        !timers.Any(existing =>
-                            existing.DurationSeconds == timerToken.Seconds
-                            && string.Equals(
-                                existing.Label,
-                                timerLabel,
+                    var existingIdx = timers.FindIndex(existing =>
+                        existing.DurationSeconds == timerToken.Seconds
+                    );
+
+                    if (existingIdx < 0)
+                    {
+                        timers.Add(new RecipeStepTimerInput(timerToken.Seconds, timerLabel));
+                    }
+                    else if (
+                        timers[existingIdx]
+                            .Label.StartsWith(
+                                $"Step {i + 1} timer",
                                 StringComparison.OrdinalIgnoreCase
                             )
+                        && !timerLabel.StartsWith(
+                            $"Step {i + 1} timer",
+                            StringComparison.OrdinalIgnoreCase
                         )
                     )
                     {
-                        timers.Add(new RecipeStepTimerInput(timerToken.Seconds, timerLabel));
+                        // Upgrade generic label with more specific action label
+                        timers[existingIdx] = timers[existingIdx] with
+                        {
+                            Label = timerLabel,
+                        };
                     }
                 }
             }

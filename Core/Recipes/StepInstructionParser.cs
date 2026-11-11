@@ -3,6 +3,7 @@ using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using App.Core.Ingestion;
 
 namespace App.Core.Recipes;
 
@@ -145,7 +146,10 @@ public static partial class StepInstructionParser
                     break;
 
                 case StepTimerToken timer:
-                    if (!string.IsNullOrWhiteSpace(timer.Label))
+                    if (
+                        !string.IsNullOrWhiteSpace(timer.Label)
+                        && !StepTimerExtractor.IsDurationLabel(timer.Label)
+                    )
                     {
                         builder.Append(timer.Label);
                     }
@@ -288,6 +292,13 @@ public static partial class StepInstructionParser
                     text = StripTrailingMeasurement(text, ing);
                 }
                 builder.Append(text);
+            }
+            else if (
+                segment.Token is StepTimerToken timer
+                && StepTimerExtractor.IsDurationLabel(timer.Label)
+            )
+            {
+                builder.Append(FormatToken(timer with { Label = null }));
             }
             else
             {

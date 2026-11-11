@@ -544,8 +544,11 @@
                     >
                       <mat-icon>timer</mat-icon>
                       <span
-                        >Start {{ formatDuration(timer.durationSeconds) }} · {{ timer.label }}</span
-                      >
+                        >Start {{ formatDuration(timer.durationSeconds) }}
+                        @if (shouldShowTimerLabel(timer.label)) {
+                          · {{ timer.label }}
+                        }
+                      </span>
                     </button>
                   }
                 </div>

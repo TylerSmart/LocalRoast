@@ -33,6 +33,7 @@ import {
   stepIngredientCallouts,
 } from '../../../core/utils/step-instruction';
 import { StepInstructionComponent } from '../../../shared/components/step-instruction/step-instruction.component';
+import { shouldShowTimerLabel } from '../../../core/utils/step-token-parser';
 
 export interface PublicScaledIngredientItem {
   ingredient: PublicRecipeIngredientDto;
@@ -285,6 +286,8 @@ export class PublicSharedRecipeComponent implements OnInit {
   formatTimerDuration(seconds: number): string {
     return formatDuration(seconds);
   }
+
+  protected readonly shouldShowTimerLabel = shouldShowTimerLabel;
 
   getSubRecipe(subRecipeId: string | null): PublicSubRecipeDto | undefined {
     if (!subRecipeId) {

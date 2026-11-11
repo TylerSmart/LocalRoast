@@ -60,8 +60,8 @@ import {
   StepToken,
 } from '../../../core/models/step-token.models';
 import {
-  formatSeconds,
   formatTemperatureToken,
+  formatTimerToken,
   parseStepInstruction,
 } from '../../../core/utils/step-token-parser';
 import {
@@ -841,7 +841,7 @@ export class IngestionReviewComponent implements OnInit {
   }
 
   formatTimerSegment(token: StepTimerToken): string {
-    return `${formatSeconds(token.seconds)}${token.label ? ' (' + token.label + ')' : ''}`;
+    return formatTimerToken(token);
   }
 
   formatTemperatureSegment(token: StepTemperatureToken): string {
