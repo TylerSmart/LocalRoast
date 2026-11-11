@@ -974,10 +974,16 @@ public static class RecipeDraftNormalizer
                     RegexOptions.IgnoreCase
                 );
 
-            if (compoundLeading is not null || isAutoHealedDivided)
+            var isRepairedMeasurement =
+                raw.IsRepaired
+                && cleanQuantity.HasValue
+                && sourceAmount is { } sAmount
+                && cleanQuantity.Value != sAmount.Quantity;
+
+            if (compoundLeading is not null || isAutoHealedDivided || isRepairedMeasurement)
             {
-                // Compound leading measurement (e.g. "2 tablespoons plus 4 teaspoons") or auto-healed
-                // divided amount already established cleanQuantity/cleanMaxQuantity; preserve it.
+                // Compound leading measurement (e.g. "2 tablespoons plus 4 teaspoons"), auto-healed
+                // divided amount, or deliberate AI repair established cleanQuantity/cleanMaxQuantity; preserve it.
             }
             else if (!isSplitSourceLine && sourceAmount is { } parsedAmount)
             {

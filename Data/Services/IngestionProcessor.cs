@@ -659,9 +659,14 @@ public sealed class IngestionProcessor(
             var qualityWarnings = RecipeExtractionDiagnostics.GetQualityWarnings(rawExtracted);
             var unresolvedIssues = new List<string>(extractionIssues);
 
-            if (extractionIssues.Count > 0)
+            const int maxRepairIterations = 2;
+            var currentIteration = 0;
+
+            while (unresolvedIssues.Count > 0 && currentIteration < maxRepairIterations)
             {
-                job.StatusDetail = "Auto-repairing recipe issues via local LLM...";
+                currentIteration++;
+                job.StatusDetail =
+                    $"Auto-repairing recipe issues via local LLM (pass {currentIteration}/{maxRepairIterations})...";
                 await dbContext.SaveChangesAsync(jobCt);
                 try
                 {
@@ -670,7 +675,7 @@ public sealed class IngestionProcessor(
                         new LlmAutoRepairAndTriageContext(
                             SourceContent: diagnosticsSource,
                             Draft: rawExtracted,
-                            ValidationIssues: extractionIssues,
+                            ValidationIssues: unresolvedIssues,
                             QualityWarnings: qualityWarnings,
                             AvailableTagNames: tagNames,
                             AvailableFoodNames: availableFoodNames
@@ -703,28 +708,42 @@ public sealed class IngestionProcessor(
                         })
                         .ToList();
 
-                    if (remainingHumanReviewIssues.Count < extractionIssues.Count)
+                    if (remainingHumanReviewIssues.Count < unresolvedIssues.Count)
                     {
+                        var initialCount = unresolvedIssues.Count;
                         rawExtracted = repairResult.Draft;
                         unresolvedIssues = remainingHumanReviewIssues;
                         qualityWarnings = RecipeExtractionDiagnostics.GetQualityWarnings(
                             rawExtracted
                         );
                         logger.LogInformation(
-                            "Auto-repair improved job {JobId}: issues reduced from {Initial} to {Remaining}",
+                            "Auto-repair pass {Pass} improved job {JobId}: issues reduced from {Initial} to {Remaining}",
+                            currentIteration,
                             job.Id,
-                            extractionIssues.Count,
+                            initialCount,
                             unresolvedIssues.Count
                         );
+                    }
+                    else
+                    {
+                        logger.LogInformation(
+                            "Auto-repair pass {Pass} for job {JobId} did not reduce issues ({Count}); ending repair loop.",
+                            currentIteration,
+                            job.Id,
+                            unresolvedIssues.Count
+                        );
+                        break;
                     }
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     logger.LogWarning(
                         ex,
-                        "Auto-repair pass failed for job {JobId}; continuing with initial extraction.",
+                        "Auto-repair pass {Pass} failed for job {JobId}; continuing with current draft.",
+                        currentIteration,
                         job.Id
                     );
+                    break;
                 }
             }
 

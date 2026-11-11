@@ -102,6 +102,10 @@ public record LlmExtractedRecipePayload(
     /// <summary>Reconciliation issues found by the tagged pipeline; never part of a JSON schema.</summary>
     [JsonIgnore]
     public IReadOnlyList<string>? TaggerIssues { get; init; }
+
+    /// <summary>Indicates whether this draft was produced by an automated repair pass.</summary>
+    [JsonIgnore]
+    public bool IsRepaired { get; init; }
 }
 
 // Normalized structured draft stored in IngestionJob.ExtractedDraftJson & edited in Review Inbox
