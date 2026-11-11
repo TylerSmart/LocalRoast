@@ -1524,6 +1524,74 @@ public sealed class RecipeDraftNormalizerTests
     }
 
     [TestMethod]
+    public void Normalize_SanitizesSecondsMistakeAndOvenTemperatureInTimes()
+    {
+        // 1. Seconds mistake: model extracts 3600 (seconds) instead of 6 minutes
+        var fricoRaw = new LlmExtractedRecipePayload(
+            Title: "Frico",
+            PrepTimeMinutes: 0,
+            CookTimeMinutes: 6,
+            TotalTimeMinutes: 3600,
+            Ingredients:
+            [
+                new(
+                    null,
+                    1,
+                    null,
+                    "lb",
+                    "Montasio cheese",
+                    "Montasio cheese",
+                    OriginalRawText: "1 lb Montasio cheese"
+                ),
+            ],
+            Steps: [new(null, "Cook cheese for 6 minutes. Serve within 1 hour.")]
+        );
+
+        var fricoDraft = RecipeDraftNormalizer.Normalize(
+            fricoRaw,
+            [],
+            [],
+            null,
+            null,
+            null,
+            null,
+            null,
+            rawSourceText: "Cook cheese for 6 minutes. Serve within 1 hour."
+        );
+
+        Assert.AreEqual(6, fricoDraft.CookTimeMinutes);
+        Assert.AreEqual(6, fricoDraft.TotalTimeMinutes);
+
+        // 2. Oven temperature mistake: model extracts 400 (degrees) as total time
+        var pieRaw = new LlmExtractedRecipePayload(
+            Title: "Erbazzone",
+            PrepTimeMinutes: null,
+            CookTimeMinutes: 35,
+            TotalTimeMinutes: 400,
+            Ingredients:
+            [
+                new(null, 1, null, "bunch", "chard", "chard", OriginalRawText: "1 bunch chard"),
+            ],
+            Steps: [new(null, "Heat oven to 400 degrees. Bake pie for 35 minutes.")]
+        );
+
+        var pieDraft = RecipeDraftNormalizer.Normalize(
+            pieRaw,
+            [],
+            [],
+            null,
+            null,
+            null,
+            null,
+            null,
+            rawSourceText: "Heat oven to 400 degrees. Bake pie for 35 minutes."
+        );
+
+        Assert.AreEqual(35, pieDraft.CookTimeMinutes);
+        Assert.AreEqual(35, pieDraft.TotalTimeMinutes);
+    }
+
+    [TestMethod]
     public void Normalize_SubRecipeDetectionAndUnitNormalization()
     {
         var rawPayload = new LlmExtractedRecipePayload(

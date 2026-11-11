@@ -890,7 +890,40 @@ public static class RecipeDraftNormalizer
         var prepTime = raw.PrepTimeMinutes is >= 0 and <= 10080 ? raw.PrepTimeMinutes : null;
         var cookTime = raw.CookTimeMinutes is >= 0 and <= 10080 ? raw.CookTimeMinutes : null;
         var totalTime = raw.TotalTimeMinutes is >= 0 and <= 10080 ? raw.TotalTimeMinutes : null;
-        if (totalTime == null && (prepTime.HasValue || cookTime.HasValue))
+
+        if (
+            cookTime >= 180
+            && !string.IsNullOrWhiteSpace(rawSourceText)
+            && !IsTimeDurationInSource(rawSourceText, cookTime.Value)
+        )
+        {
+            cookTime = null;
+        }
+
+        if (
+            prepTime >= 180
+            && !string.IsNullOrWhiteSpace(rawSourceText)
+            && !IsTimeDurationInSource(rawSourceText, prepTime.Value)
+        )
+        {
+            prepTime = null;
+        }
+
+        if (
+            totalTime >= 180
+            && (
+                (
+                    !string.IsNullOrWhiteSpace(rawSourceText)
+                    && !IsTimeDurationInSource(rawSourceText, totalTime.Value)
+                )
+                || totalTime >= 3600
+            )
+        )
+        {
+            totalTime =
+                (prepTime.HasValue || cookTime.HasValue) ? (prepTime ?? 0) + (cookTime ?? 0) : null;
+        }
+        else if (totalTime == null && (prepTime.HasValue || cookTime.HasValue))
         {
             totalTime = (prepTime ?? 0) + (cookTime ?? 0);
         }
@@ -2613,6 +2646,64 @@ public static class RecipeDraftNormalizer
         )
         {
             return Math.Abs(converted - b.Quantity.Value) <= 0.05m;
+        }
+
+        return false;
+    }
+
+    private static bool IsTimeDurationInSource(string? sourceText, int minutes)
+    {
+        if (string.IsNullOrWhiteSpace(sourceText) || minutes <= 0)
+        {
+            return false;
+        }
+
+        // Direct minutes mention, e.g. "180 minutes", "200 min", "400 mins"
+        if (
+            Regex.IsMatch(
+                sourceText,
+                $@"\b{minutes}\s*(?:minutes?|mins?)\b",
+                RegexOptions.IgnoreCase
+            )
+        )
+        {
+            return true;
+        }
+
+        // Hours mention, e.g. "3 hours", "4 hrs", "8 hours"
+        if (minutes % 60 == 0)
+        {
+            var hours = minutes / 60;
+            if (
+                Regex.IsMatch(
+                    sourceText,
+                    $@"\b{hours}\s*(?:hours?|hrs?)\b",
+                    RegexOptions.IgnoreCase
+                )
+            )
+            {
+                return true;
+            }
+        }
+        else if (minutes % 30 == 0)
+        {
+            var whole = minutes / 60;
+            var decimalHours = minutes / 60.0;
+            if (
+                Regex.IsMatch(
+                    sourceText,
+                    $@"\b{whole}\s*1/2\s*(?:hours?|hrs?)\b",
+                    RegexOptions.IgnoreCase
+                )
+                || Regex.IsMatch(
+                    sourceText,
+                    $@"\b{decimalHours:F1}\s*(?:hours?|hrs?)\b",
+                    RegexOptions.IgnoreCase
+                )
+            )
+            {
+                return true;
+            }
         }
 
         return false;
