@@ -30,7 +30,6 @@ import {
   RecipeDifficulty,
   RecipeMeasurement,
   RecipeStepIngredientAmountInput,
-  RecipeStepInlineAmountInput,
   RecipeStepTimerInput,
 } from './recipe.models';
 
@@ -237,7 +236,6 @@ export interface IngestionDraftStepDto {
   timers: RecipeStepTimerInput[];
   imagePath: string | null;
   ingredientAmounts?: RecipeStepIngredientAmountInput[] | null;
-  inlineAmounts?: RecipeStepInlineAmountInput[] | null;
 }
 
 export interface IngestionExtractedDraftDto {

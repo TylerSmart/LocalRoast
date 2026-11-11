@@ -562,7 +562,10 @@ public sealed class IngestionProcessor(
                         // surface as one instead of as a missing Instructions section.
                         if (
                             ex is LlmHostUnavailableException
-                            && InstructionAmountTagger.ParseMethod(sourceText).Count == 0
+                            && !sourceText.Contains(
+                                "Instructions:",
+                                StringComparison.OrdinalIgnoreCase
+                            )
                         )
                         {
                             throw;
@@ -1358,8 +1361,7 @@ public sealed class IngestionProcessor(
                         IngredientIndices: s.IngredientIndices,
                         Timers: s.Timers,
                         ImagePath: s.ImagePath,
-                        IngredientAmounts: s.IngredientAmounts,
-                        InlineAmounts: s.InlineAmounts
+                        IngredientAmounts: s.IngredientAmounts
                     )
                 );
             }

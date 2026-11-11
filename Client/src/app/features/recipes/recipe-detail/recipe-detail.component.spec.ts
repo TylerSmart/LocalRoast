@@ -323,16 +323,8 @@ describe('RecipeDetailComponent', () => {
     );
   });
 
-  it('renders tagged inline amounts as scaled chips with a divided breakdown', () => {
+  it('renders inline step tokens as scaled chips with a divided breakdown', () => {
     const ingredient = sampleRecipe.ingredients[0];
-    const span = (start: number, kind: 'Ingredient' | 'Fixed') => ({
-      start,
-      length: 5,
-      kind,
-      ingredientId: kind === 'Ingredient' ? ingredient.id : null,
-      measurement: { quantity: 1, unit: 'Cup' as const },
-      alternativeMeasurement: null,
-    });
     component['recipe'].set({
       ...sampleRecipe,
       steps: [
@@ -340,19 +332,19 @@ describe('RecipeDetailComponent', () => {
           ...sampleRecipe.steps[0],
           id: 's-a',
           stepNumber: 1,
-          instruction: 'Whisk 1 cup noodles, then reduce to 1 cup.',
+          instruction:
+            'Whisk ||{"ingredient":"Egg Noodles","amount":1,"unit":"cup"}||, then reduce to 1 cup.',
           ingredientIds: [ingredient.id],
           ingredientAmounts: [],
-          inlineAmounts: [span(6, 'Ingredient'), span(36, 'Fixed')],
         },
         {
           ...sampleRecipe.steps[0],
           id: 's-b',
           stepNumber: 2,
-          instruction: 'Stir in the remaining 1 cup noodles.',
+          instruction:
+            'Stir in the remaining ||{"ingredient":"Egg Noodles","amount":1,"unit":"cup"}||.',
           ingredientIds: [ingredient.id],
           ingredientAmounts: [],
-          inlineAmounts: [span(22, 'Ingredient')],
         },
       ],
     });
@@ -361,8 +353,8 @@ describe('RecipeDetailComponent', () => {
     const instructions = () =>
       Array.from(el.querySelectorAll('.step-instruction-text')).map((p) => p.textContent?.trim());
     expect(instructions()).toEqual([
-      'Whisk 1 cup noodles, then reduce to 1 cup.',
-      'Stir in the remaining 1 cup noodles.',
+      'Whisk 1 cup Egg Noodles, then reduce to 1 cup.',
+      'Stir in the remaining 1 cup Egg Noodles.',
     ]);
     expect(component['groupedSteps']()[0].items[0].ingredientCallouts).toEqual([
       { id: ingredient.id, label: '1 cup Egg Noodles' },
@@ -371,12 +363,12 @@ describe('RecipeDetailComponent', () => {
     component.setMultiplier(2);
     fixture.detectChanges();
     expect(instructions()).toEqual([
-      'Whisk 2 cups noodles, then reduce to 1 cup.',
-      'Stir in the remaining 2 cups noodles.',
+      'Whisk 2 cups Egg Noodles, then reduce to 1 cup.',
+      'Stir in the remaining 2 cups Egg Noodles.',
     ]);
     expect(el.querySelectorAll('.inline-amount.is-scaled').length).toBe(2);
     expect(el.querySelector('.ingredient-uses')?.textContent).toBe(
-      'Divided: 2 cups (step 1) · 2 cups (step 2)',
+      'Divided: 2 cups Egg Noodles (step 1) · 2 cups Egg Noodles (step 2)',
     );
   });
 

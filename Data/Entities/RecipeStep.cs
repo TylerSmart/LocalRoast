@@ -28,7 +28,4 @@ public sealed class RecipeStep : IAuditable
         new List<RecipeStepIngredient>();
 
     public ICollection<RecipeStepTimer> Timers { get; set; } = new List<RecipeStepTimer>();
-
-    public ICollection<RecipeStepInlineAmount> InlineAmounts { get; set; } =
-        new List<RecipeStepInlineAmount>();
 }

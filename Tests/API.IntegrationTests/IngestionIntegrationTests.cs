@@ -288,13 +288,12 @@ public sealed class IngestionIntegrationTests
     }
 
     [TestMethod]
-    public async Task DraftApprove_PublishesInlineAmountsWithIngredientIds()
+    public async Task DraftApprove_PublishesStepTokensWithIngredientIds()
     {
         await AuthenticateAsync(_client);
         var job = await EnqueueRawTextJobAsync(_client, "Inline Roux");
-        const string instruction = "Melt 2 tbsp butter, then whisk in 1/4 cup flour to a paste.";
-        var butterStart = instruction.IndexOf("2 tbsp", StringComparison.Ordinal);
-        var flourStart = instruction.IndexOf("1/4 cup", StringComparison.Ordinal);
+        const string instruction =
+            "Melt ||{\"ingredient\": \"butter\", \"amount\": 2, \"unit\": \"tbsp\"}||, then whisk in ||{\"ingredient\": \"flour\", \"amount\": 0.25, \"unit\": \"cup\"}|| to a paste.";
         var draft = new IngestionExtractedDraftDto(
             Title: "Inline Roux",
             Ingredients:
@@ -314,29 +313,7 @@ public sealed class IngestionIntegrationTests
                     OriginalRawText: "2 tablespoons butter"
                 ),
             ],
-            Steps:
-            [
-                new IngestionDraftStepDto(
-                    Instruction: instruction,
-                    InlineAmounts:
-                    [
-                        new(
-                            butterStart,
-                            "2 tbsp".Length,
-                            InlineStepAmountKind.Ingredient,
-                            1,
-                            new(2, MeasurementUnit.Tbsp)
-                        ),
-                        new(
-                            flourStart,
-                            "1/4 cup".Length,
-                            InlineStepAmountKind.Ingredient,
-                            0,
-                            new(0.25m, MeasurementUnit.Cup)
-                        ),
-                    ]
-                ),
-            ]
+            Steps: [new IngestionDraftStepDto(Instruction: instruction, IngredientIndices: [0, 1])]
         );
 
         var approveResp = await _client.PostAsJsonAsync(
@@ -359,12 +336,10 @@ public sealed class IngestionIntegrationTests
         var butter = recipe.Ingredients.Single(i => i.DisplayName == "butter");
         var step = recipe.Steps.Single();
         Assert.AreEqual(instruction, step.Instruction);
-        var spans = step.InlineAmounts!;
-        Assert.HasCount(2, spans);
-        Assert.AreEqual(butter.Id, spans[0].IngredientId);
-        Assert.AreEqual(butterStart, spans[0].Start);
-        Assert.AreEqual(flour.Id, spans[1].IngredientId);
-        Assert.AreEqual(0.25m, spans[1].Measurement.Quantity);
+        var tokens = StepInstructionParser.ExtractTokens(step.Instruction);
+        Assert.AreEqual(2, tokens.Count);
+        Assert.AreEqual(2m, ((StepIngredientToken)tokens[0]).Amount);
+        Assert.AreEqual(0.25m, ((StepIngredientToken)tokens[1]).Amount);
         CollectionAssert.AreEquivalent(new[] { flour.Id, butter.Id }, step.IngredientIds.ToArray());
     }
 
@@ -1100,8 +1075,9 @@ public sealed class IngestionIntegrationTests
     )
     {
         var cups = invalidAmount ? 6 : 1;
-        var mixStep = $"Mix {cups} cup{(cups == 1 ? "" : "s")} bread flour.";
-        var amountLength = mixStep.IndexOf(" bread", StringComparison.Ordinal) - 4;
+        var mixStep = $"Mix {cups} cup bread flour.";
+        var stepInstruction =
+            $"Mix ||{{\"ingredient\": \"bread flour\", \"amount\": {cups}, \"unit\": \"cup\"}}||.";
         var fakeLlm = new FakeSequentialLlmExtractionClient(_ => new LlmExtractedRecipePayload(
             Title: "Synthetic Starter",
             ConfidenceScore: 0.99m,
@@ -1120,23 +1096,7 @@ public sealed class IngestionIntegrationTests
             ],
             Steps:
             [
-                new(
-                    null,
-                    mixStep,
-                    [0],
-                    IngredientAmounts: [new(0, new(cups, "cup"))],
-                    InlineAmounts:
-                    [
-                        new(
-                            4,
-                            amountLength,
-                            mixStep.Substring(4, amountLength),
-                            InlineStepAmountKind.Ingredient,
-                            0,
-                            new(cups, MeasurementUnit.Cup)
-                        ),
-                    ]
-                ),
+                new(null, stepInstruction, [0], IngredientAmounts: [new(0, new(cups, "cup"))]),
                 new(null, "Knead in the remaining flour.", [0]),
             ]
         ));
@@ -1191,12 +1151,11 @@ public sealed class IngestionIntegrationTests
             var flour = recipe.Ingredients[0];
             Assert.AreEqual(25m, flour.AlternativeMeasurement!.Quantity);
             Assert.AreEqual(1m, recipe.Steps[0].IngredientAmounts![0].Measurement.Quantity);
-            Assert.AreEqual(mixStep, recipe.Steps[0].Instruction);
-            var inline = recipe.Steps[0].InlineAmounts!.Single();
-            Assert.AreEqual(4, inline.Start);
-            Assert.AreEqual("1 cup", mixStep.Substring(inline.Start, inline.Length));
-            Assert.AreEqual(InlineStepAmountKind.Ingredient, inline.Kind);
-            Assert.AreEqual(flour.Id, inline.IngredientId);
+            Assert.AreEqual(stepInstruction, recipe.Steps[0].Instruction);
+            var tokens = StepInstructionParser.ExtractTokens(recipe.Steps[0].Instruction);
+            var inline = (StepIngredientToken)tokens.Single();
+            Assert.AreEqual("bread flour", inline.Ingredient);
+            Assert.AreEqual(1m, inline.Amount);
         }
     }
 

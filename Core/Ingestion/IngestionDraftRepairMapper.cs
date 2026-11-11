@@ -17,9 +17,6 @@ public static class IngestionDraftRepairMapper
                 || (step.IngredientAmounts ?? []).Any(amount =>
                     amount is null || amount.Measurement is null
                 )
-                || (step.InlineAmounts ?? []).Any(amount =>
-                    amount is null || amount.Measurement is null
-                )
             )
         )
         {
@@ -76,8 +73,7 @@ public static class IngestionDraftRepairMapper
                             amount.IngredientIndex,
                             ToPayloadMeasurement(amount.Measurement)!
                         ))
-                        .ToList(),
-                    InlineAmounts: ToPayloadInlineAmounts(step)
+                        .ToList()
                 ))
                 .ToList(),
             SourceBookTitle: draft.SourceBookTitle,
@@ -307,19 +303,20 @@ public static class IngestionDraftRepairMapper
                 .Select(timer => new RecipeStepTimerInput(timer.DurationSeconds, timer.Label ?? ""))
                 .ToList();
             var instruction = raw.Instruction!.Trim();
-            var inlineAmounts = RecipeDraftNormalizer.NormalizeInlineAmounts(
-                raw.InlineAmounts,
-                raw.Instruction.Length - raw.Instruction.TrimStart().Length,
-                instruction,
-                newIngredients.Count,
-                measurementWarnings,
-                $"Step {index + 1}"
-            );
-            foreach (var amount in inlineAmounts.Where(a => a.IngredientIndex is not null))
+            var tokens = StepInstructionParser.ExtractTokens(instruction);
+            foreach (var token in tokens)
             {
-                if (!indices.Contains(amount.IngredientIndex!.Value))
+                if (token is StepIngredientToken ingToken)
                 {
-                    indices.Add(amount.IngredientIndex.Value);
+                    var matchIdx = newIngredients.FindIndex(i =>
+                        string.Equals(
+                            i.DisplayName,
+                            ingToken.Ingredient,
+                            StringComparison.OrdinalIgnoreCase
+                        )
+                    );
+                    if (matchIdx >= 0 && !indices.Contains(matchIdx))
+                        indices.Add(matchIdx);
                 }
             }
             var step = new IngestionDraftStepDto(
@@ -328,8 +325,7 @@ public static class IngestionDraftRepairMapper
                 IngredientIndices: indices,
                 Timers: timers,
                 ImagePath: images[index],
-                IngredientAmounts: amounts,
-                InlineAmounts: inlineAmounts
+                IngredientAmounts: amounts
             );
             Validate(step);
             foreach (var timer in timers)
@@ -372,43 +368,6 @@ public static class IngestionDraftRepairMapper
         };
         Validate(result);
         return result;
-    }
-
-    /// <summary>Draft offsets index the trimmed instruction; payload offsets index it verbatim.</summary>
-    private static List<InlineStepAmount>? ToPayloadInlineAmounts(IngestionDraftStepDto step)
-    {
-        if (step.InlineAmounts is null)
-        {
-            return null;
-        }
-        var instruction = step.Instruction ?? "";
-        var lead = instruction.Length - instruction.TrimStart().Length;
-        return step
-            .InlineAmounts.Select(amount =>
-            {
-                var start = amount.Start + lead;
-                var text =
-                    amount.Start >= 0
-                    && amount.Length > 0
-                    && start + amount.Length <= instruction.Length
-                        ? instruction.Substring(start, amount.Length)
-                        : "";
-                var ingStart = amount.IngredientSpanStart.HasValue
-                    ? amount.IngredientSpanStart.Value + lead
-                    : (int?)null;
-                return new InlineStepAmount(
-                    start,
-                    amount.Length,
-                    text,
-                    amount.Kind,
-                    amount.IngredientIndex,
-                    amount.Measurement,
-                    amount.AlternativeMeasurement,
-                    ingStart,
-                    amount.IngredientSpanLength
-                );
-            })
-            .ToList();
     }
 
     private static LlmExtractedMeasurementItem? ToPayloadMeasurement(

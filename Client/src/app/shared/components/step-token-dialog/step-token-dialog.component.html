@@ -1,0 +1,130 @@
+<h2 mat-dialog-title>
+  @if (mode() === 'ingredient') {
+    <span class="dialog-title-content">
+      <mat-icon>nutrition</mat-icon>
+      <span>{{ data?.token ? 'Edit Ingredient Token' : 'Insert Ingredient Token' }}</span>
+    </span>
+  } @else {
+    <span class="dialog-title-content">
+      <mat-icon>timer</mat-icon>
+      <span>{{ data?.token ? 'Edit Timer Token' : 'Insert Timer Token' }}</span>
+    </span>
+  }
+</h2>
+
+<mat-dialog-content>
+  @if (mode() === 'ingredient') {
+    <form [formGroup]="ingredientForm" class="dialog-form">
+      @if (availableIngredients.length > 0) {
+        <div class="quick-ingredients">
+          <span class="quick-label">Draft ingredients:</span>
+          <div class="quick-chips">
+            @for (ing of availableIngredients; track ing) {
+              <button
+                type="button"
+                class="quick-chip-btn"
+                (click)="onSelectIngredient(ing)"
+                [class.active]="ingredientForm.get('ingredient')?.value === ing"
+              >
+                {{ ing }}
+              </button>
+            }
+          </div>
+        </div>
+      }
+
+      <mat-form-field appearance="outline" class="full-width">
+        <mat-label>Ingredient Name</mat-label>
+        <input matInput formControlName="ingredient" placeholder="e.g. eggs, butter, flour" />
+        @if (ingredientForm.get('ingredient')?.hasError('required')) {
+          <mat-error>Ingredient name is required</mat-error>
+        }
+      </mat-form-field>
+
+      <div class="form-row">
+        <mat-form-field appearance="outline" class="flex-1">
+          <mat-label>Recipe Amount (Total)</mat-label>
+          <input matInput type="number" step="any" formControlName="amount" placeholder="e.g. 4" />
+        </mat-form-field>
+
+        <mat-form-field appearance="outline" class="flex-1">
+          <mat-label>Unit</mat-label>
+          <input matInput formControlName="unit" placeholder="e.g. cup, tsp, whole" />
+        </mat-form-field>
+      </div>
+
+      <div class="display-amount-toggle">
+        <mat-checkbox
+          formControlName="useDisplayAmount"
+          (change)="onToggleDisplayAmount($event.checked)"
+        >
+          Show different amount in step (e.g. per-pancake portion)
+        </mat-checkbox>
+      </div>
+
+      @if (showDisplayAmount()) {
+        <div class="form-row secondary-box">
+          <mat-form-field appearance="outline" class="flex-1">
+            <mat-label>Step Display Amount</mat-label>
+            <input
+              matInput
+              type="number"
+              step="any"
+              formControlName="displayAmount"
+              placeholder="e.g. 1"
+            />
+          </mat-form-field>
+
+          <mat-form-field appearance="outline" class="flex-1">
+            <mat-label>Step Display Unit</mat-label>
+            <input matInput formControlName="displayUnit" placeholder="e.g. tsp" />
+          </mat-form-field>
+        </div>
+      }
+
+      <mat-form-field appearance="outline" class="full-width">
+        <mat-label>Notes (optional)</mat-label>
+        <input matInput formControlName="notes" placeholder="e.g. room temperature, softened" />
+      </mat-form-field>
+    </form>
+  } @else {
+    <form [formGroup]="timerForm" class="dialog-form">
+      <div class="form-row">
+        <mat-form-field appearance="outline" class="flex-1">
+          <mat-label>Minutes</mat-label>
+          <input matInput type="number" min="0" formControlName="minutes" placeholder="0" />
+        </mat-form-field>
+
+        <mat-form-field appearance="outline" class="flex-1">
+          <mat-label>Seconds</mat-label>
+          <input
+            matInput
+            type="number"
+            min="0"
+            max="59"
+            formControlName="seconds"
+            placeholder="0"
+          />
+        </mat-form-field>
+      </div>
+
+      <mat-form-field appearance="outline" class="full-width">
+        <mat-label>Timer Label (optional)</mat-label>
+        <input matInput formControlName="label" placeholder="e.g. Simmer sauce, Bake crust" />
+      </mat-form-field>
+    </form>
+  }
+</mat-dialog-content>
+
+<mat-dialog-actions align="end">
+  @if (data?.token) {
+    <button mat-button color="warn" type="button" (click)="onDelete()">
+      <mat-icon>delete</mat-icon>
+      <span>Remove Token</span>
+    </button>
+  }
+  <button mat-button type="button" (click)="onCancel()">Cancel</button>
+  <button mat-flat-button color="primary" type="button" (click)="onSave()">
+    {{ data?.token ? 'Update Token' : 'Insert Token' }}
+  </button>
+</mat-dialog-actions>

@@ -1,5 +1,4 @@
 import { FormArray, FormControl, FormGroup } from '@angular/forms';
-import { RecipeStepInlineAmountInput } from '../models/recipe.models';
 import {
   buildStepAmounts,
   createStepAmounts,
@@ -42,26 +41,5 @@ describe('recipe measurement forms', () => {
     form.controls.ingredientIndices.setValue([0]);
     syncStepAmounts(form);
     expect(getStepAmounts(form).length).toBe(1);
-  });
-  it('remaps tagged inline amounts and downgrades spans of removed ingredients to Fixed', () => {
-    const measurement = { quantity: 1, unit: 'Cup' as const };
-    const form = new FormGroup({
-      ingredientIndices: new FormControl([0, 2], { nonNullable: true }),
-      ingredientAmounts: createStepAmounts([0, 2]),
-      inlineAmounts: new FormControl<RecipeStepInlineAmountInput[]>(
-        [
-          { start: 0, length: 5, kind: 'Ingredient', ingredientIndex: 0, measurement },
-          { start: 10, length: 5, kind: 'Ingredient', ingredientIndex: 2, measurement },
-          { start: 20, length: 5, kind: 'Mixture', ingredientIndex: null, measurement },
-        ],
-        { nonNullable: true },
-      ),
-    });
-    remapStepIngredients(new FormArray<FormGroup>([form]), (i) => (i === 0 ? null : i - 1));
-    expect(form.controls.inlineAmounts.value).toEqual([
-      { start: 0, length: 5, kind: 'Fixed', ingredientIndex: null, measurement },
-      { start: 10, length: 5, kind: 'Ingredient', ingredientIndex: 1, measurement },
-      { start: 20, length: 5, kind: 'Mixture', ingredientIndex: null, measurement },
-    ]);
   });
 });

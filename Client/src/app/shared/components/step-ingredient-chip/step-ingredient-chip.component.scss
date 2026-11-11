@@ -1,0 +1,54 @@
+.step-ingredient-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background-color: var(--mat-sys-secondary-container);
+  color: var(--mat-sys-on-secondary-container);
+  border: 1px solid var(--mat-sys-outline-variant);
+  border-radius: 16px;
+  padding: 2px 10px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.5;
+  cursor: default;
+  vertical-align: middle;
+  margin: 0 2px;
+  min-height: 32px;
+  box-sizing: border-box;
+
+  .chip-icon {
+    font-size: 16px;
+    width: 16px;
+    height: 16px;
+    color: var(--mat-sys-primary);
+  }
+
+  .chip-label {
+    white-space: nowrap;
+  }
+
+  .edit-hint-icon {
+    font-size: 14px;
+    width: 14px;
+    height: 14px;
+    opacity: 0.7;
+    margin-left: 2px;
+  }
+
+  &.editable {
+    cursor: pointer;
+    transition: all 0.15s ease-in-out;
+
+    &:hover {
+      background-color: var(--mat-sys-primary-container);
+      color: var(--mat-sys-on-primary-container);
+      border-color: var(--mat-sys-primary);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+    }
+  }
+
+  &.is-scaled {
+    border-color: var(--mat-sys-primary);
+    font-weight: 600;
+  }
+}

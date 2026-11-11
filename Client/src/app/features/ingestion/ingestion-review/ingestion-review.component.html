@@ -968,7 +968,7 @@
               </div>
 
               <mat-card-content class="editor-card-content" formArrayName="steps">
-                @for (stepGroup of stepsArray.controls; track $index) {
+                @for (stepGroup of stepsArray.controls; track $index; let stepIndex = $index) {
                   <div
                     [formGroupName]="$index"
                     class="step-row-card"
@@ -1004,6 +1004,28 @@
                       </div>
                     }
 
+                    <!-- Quick Token Action Buttons -->
+                    <div class="step-token-toolbar">
+                      <button
+                        mat-stroked-button
+                        type="button"
+                        class="token-btn add-ingredient-btn"
+                        (click)="openTokenDialog(stepIndex, 'ingredient')"
+                      >
+                        <mat-icon>nutrition</mat-icon>
+                        <span>+ Ingredient</span>
+                      </button>
+                      <button
+                        mat-stroked-button
+                        type="button"
+                        class="token-btn add-timer-btn"
+                        (click)="openTokenDialog(stepIndex, 'timer')"
+                      >
+                        <mat-icon>timer</mat-icon>
+                        <span>+ Timer</span>
+                      </button>
+                    </div>
+
                     <mat-form-field appearance="outline" class="form-field full-width">
                       <mat-label>Step Instruction</mat-label>
                       <textarea
@@ -1011,16 +1033,51 @@
                         formControlName="instruction"
                         rows="3"
                         placeholder="Detailed culinary action..."
+                        [attr.data-step-index]="stepIndex"
                         required
                       ></textarea>
                     </mat-form-field>
 
-                    <app-inline-amount-editor
-                      [instruction]="stepGroup.get('instruction')?.value"
-                      [amounts]="stepGroup.get('inlineAmounts')?.value"
-                      [ingredientOptions]="availableIngredientLabels()"
-                      (amountsChange)="setStepInlineAmounts($index, $event)"
-                    ></app-inline-amount-editor>
+                    <!-- Live Step Preview -->
+                    @if (getStepSegments(stepGroup.get('instruction')?.value).length > 0) {
+                      <div class="step-token-preview">
+                        <span class="preview-header">Live Step Preview:</span>
+                        <div class="preview-chips-row">
+                          @for (
+                            seg of getStepSegments(stepGroup.get('instruction')?.value);
+                            track $index
+                          ) {
+                            @if (
+                              seg.token &&
+                              seg.token.type !== 'timer' &&
+                              seg.token.type !== 'temperature'
+                            ) {
+                              <app-step-ingredient-chip
+                                [token]="$any(seg.token)"
+                                [editable]="true"
+                                (edit)="
+                                  editTokenInStep(stepIndex, seg.rawToken ?? '', $any(seg.token))
+                                "
+                              ></app-step-ingredient-chip>
+                            } @else if (seg.token && seg.token.type === 'timer') {
+                              <button
+                                type="button"
+                                class="step-timer-badge"
+                                (click)="
+                                  editTokenInStep(stepIndex, seg.rawToken ?? '', $any(seg.token))
+                                "
+                                title="Click to edit timer"
+                              >
+                                <mat-icon class="timer-badge-icon">timer</mat-icon>
+                                <span>{{ formatTimerSegment($any(seg.token)) }}</span>
+                              </button>
+                            } @else {
+                              <span class="step-plain-text">{{ seg.text }}</span>
+                            }
+                          }
+                        </div>
+                      </div>
+                    }
 
                     <!-- Step Ingredient Callouts Selection -->
                     <mat-form-field appearance="outline" class="form-field full-width">

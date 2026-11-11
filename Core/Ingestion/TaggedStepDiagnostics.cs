@@ -1,12 +1,10 @@
-using System.Text.RegularExpressions;
+using System.Globalization;
 using App.Core.Recipes;
 
 namespace App.Core.Ingestion;
 
 /// <summary>
-/// Checks the tagged inline amounts of a (possibly edited) draft: each span must cover a
-/// distinct, still-parseable amount of its step and reference a valid row, and the step
-/// amounts must reconcile with the ingredient rows.
+/// Checks the inline tokens in each step: validates JSON syntax and references against ingredient rows.
 /// </summary>
 public static class TaggedStepDiagnostics
 {
@@ -15,98 +13,229 @@ public static class TaggedStepDiagnostics
         var issues = new List<string>();
         var ingredients = recipe.Ingredients ?? [];
         var steps = recipe.Steps ?? [];
+
         for (var i = 0; i < steps.Count; i++)
         {
             var instruction = steps[i].Instruction ?? "";
-            var previousEnd = 0;
-            foreach (var amount in steps[i].InlineAmounts ?? [])
+            var segments = StepInstructionParser.ParseSegments(instruction);
+
+            foreach (var segment in segments)
             {
-                var inRange =
-                    amount.Start >= 0
-                    && amount.Length > 0
-                    && amount.Start + amount.Length <= instruction.Length;
-                var text = inRange
-                    ? instruction.Substring(amount.Start, amount.Length)
-                    : amount.Text;
-                var prefix = $"Step {i + 1}: inline amount \"{text}\"";
-                if (!inRange)
+                if (segment.Token is null)
                 {
-                    issues.Add($"{prefix} is outside the step text.");
+                    // If segment looks like a broken token, report it
+                    if (segment.Text.StartsWith("||{") && segment.Text.EndsWith("}||"))
+                    {
+                        issues.Add($"Step {i + 1}: unparseable inline token \"{segment.Text}\".");
+                    }
                     continue;
                 }
-                if (amount.Start < previousEnd)
-                    issues.Add($"{prefix} overlaps or is out of order with another amount.");
-                previousEnd = Math.Max(previousEnd, amount.Start + amount.Length);
-                var validIndex =
-                    amount.IngredientIndex is { } index && index >= 0 && index < ingredients.Count;
-                if (amount.Kind == InlineStepAmountKind.Ingredient && !validIndex)
-                    issues.Add($"{prefix} is tagged as an ingredient without a valid ingredient.");
-                else if (
-                    amount.Kind != InlineStepAmountKind.Ingredient
-                    && amount.IngredientIndex is not null
-                )
-                    issues.Add($"{prefix} references an ingredient but is not tagged as one.");
-                if (
-                    SourceMeasurementParser.FindSpans(text).Count == 0
-                    && !IsCountAmount(text, amount.Measurement)
-                )
-                    issues.Add($"{prefix} is no longer a measured amount.");
 
-                if (amount.IngredientSpanStart.HasValue && amount.IngredientSpanLength.HasValue)
+                if (segment.Token is StepIngredientToken ing)
                 {
-                    var ingStart = amount.IngredientSpanStart.Value;
-                    var ingLen = amount.IngredientSpanLength.Value;
-                    if (
-                        ingStart < amount.Start + amount.Length
-                        || ingStart + ingLen > instruction.Length
-                        || ingLen < 1
-                    )
+                    if (string.IsNullOrWhiteSpace(ing.Ingredient))
                     {
                         issues.Add(
-                            $"{prefix} ingredient name span is invalid or outside the step text."
+                            $"Step {i + 1}: inline ingredient token has no ingredient name."
                         );
                     }
-                    else
+                    else if (ing.Amount.HasValue && ing.Amount.Value <= 0)
                     {
-                        previousEnd = Math.Max(previousEnd, ingStart + ingLen);
+                        issues.Add(
+                            $"Step {i + 1}: ingredient \"{ing.Ingredient}\" has a non-positive amount ({ing.Amount.Value})."
+                        );
                     }
                 }
-                else if (
-                    amount.IngredientSpanStart.HasValue != amount.IngredientSpanLength.HasValue
-                )
+                else if (segment.Token is StepTimerToken timer)
                 {
-                    issues.Add($"{prefix} ingredient name span is incomplete.");
+                    if (timer.Seconds <= 0)
+                    {
+                        issues.Add(
+                            $"Step {i + 1}: timer token has an invalid duration ({timer.Seconds} seconds)."
+                        );
+                    }
                 }
             }
         }
-        issues.AddRange(InstructionAmountTagger.Reconcile(ingredients, steps));
+
+        if (steps.Count > 0)
+        {
+            for (var i = 0; i < ingredients.Count; i++)
+            {
+                var ingredient = ingredients[i];
+                var name =
+                    ingredient.DisplayName ?? ingredient.CanonicalFoodName ?? $"Ingredient {i + 1}";
+                var rowLow = ingredient.Quantity ?? 0;
+                var rowHigh = ingredient.MaxQuantity ?? rowLow;
+
+                var isUsed = false;
+                decimal sumLow = 0;
+                var hasComparableAmounts = false;
+
+                for (var sIdx = 0; sIdx < steps.Count; sIdx++)
+                {
+                    var s = steps[sIdx];
+                    var stepUses =
+                        (s.IngredientIndices?.Contains(i) == true)
+                        || (s.IngredientAmounts?.Any(a => a.IngredientIndex == i) == true);
+
+                    var tokens = StepInstructionParser.ExtractTokens(s.Instruction ?? "");
+                    foreach (var token in tokens)
+                    {
+                        if (
+                            token is StepIngredientToken ingToken
+                            && MatchesIngredient(ingToken.Ingredient, ingredient)
+                        )
+                        {
+                            stepUses = true;
+                            if (ingToken.Amount.HasValue && ingredient.Quantity is > 0)
+                            {
+                                if (
+                                    TryToRowUnit(
+                                        ingToken.Amount.Value,
+                                        ingToken.Unit,
+                                        ingredient,
+                                        out var inRowUnit
+                                    )
+                                )
+                                {
+                                    sumLow += inRowUnit;
+                                    hasComparableAmounts = true;
+                                }
+                            }
+                        }
+                    }
+
+                    if (s.IngredientAmounts is not null)
+                    {
+                        foreach (
+                            var a in s.IngredientAmounts.Where(a =>
+                                a.IngredientIndex == i && a.Measurement?.Quantity is not null
+                            )
+                        )
+                        {
+                            stepUses = true;
+                            var (aUnit, _) = RecipeDraftNormalizer.NormalizeUnit(
+                                a.Measurement.Unit
+                            );
+                            if (
+                                TryToRowUnit(
+                                    a.Measurement.Quantity!.Value,
+                                    aUnit,
+                                    ingredient,
+                                    out var inRowUnit
+                                )
+                            )
+                            {
+                                sumLow += inRowUnit;
+                                hasComparableAmounts = true;
+                            }
+                        }
+                    }
+
+                    if (stepUses)
+                    {
+                        isUsed = true;
+                    }
+                }
+
+                if (rowLow > 0 && !isUsed)
+                {
+                    issues.Add($"{name}: not used in any step.");
+                    continue;
+                }
+
+                if (hasComparableAmounts && rowHigh > 0)
+                {
+                    var tolerance = Math.Max(0.0005m, rowHigh * 0.01m);
+                    if (sumLow > rowHigh + tolerance)
+                    {
+                        issues.Add(
+                            $"{name}: step amounts ({FormatNumber(sumLow)} {ingredient.Unit}) exceed the ingredient list ({FormatNumber(rowHigh)} {ingredient.Unit})."
+                        );
+                    }
+                }
+            }
+        }
+
         return issues;
     }
 
-    private static readonly Regex CountAmountRegex = new(
-        @"^(?:\d+(?:\s+\d+/\d+)?|\d+/\d+|\d*[½¼¾⅓⅔⅛]|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)(?:\s+(?<unit>[a-z]+))?$",
-        RegexOptions.IgnoreCase,
-        TimeSpan.FromSeconds(1)
-    );
-
-    /// <summary>
-    /// A bare count ("2" in "2 apples") or a count of a custom unit ("1 piece") is a valid
-    /// amount for a whole-item or custom-unit row even though it has no standard unit.
-    /// </summary>
-    private static bool IsCountAmount(string text, RecipeMeasurement measurement)
+    private static bool MatchesIngredient(
+        string? tokenIngredient,
+        LlmExtractedIngredientItem ingredient
+    )
     {
-        var match = CountAmountRegex.Match(text.Trim());
-        if (!match.Success)
+        if (string.IsNullOrWhiteSpace(tokenIngredient))
+        {
             return false;
-        var unit = match.Groups["unit"];
-        if (!unit.Success)
-            return measurement.Unit is null or MeasurementUnit.Whole;
-        return measurement.Unit == MeasurementUnit.Custom
-            && measurement.CustomUnitName is { } custom
-            && string.Equals(
-                custom.Trim().TrimEnd('s'),
-                unit.Value.TrimEnd('s'),
-                StringComparison.OrdinalIgnoreCase
-            );
+        }
+
+        var tokenName = tokenIngredient.Trim();
+        var displayName = ingredient.DisplayName?.Trim();
+        var canonicalName = ingredient.CanonicalFoodName?.Trim();
+
+        if (
+            !string.IsNullOrWhiteSpace(displayName)
+            && (
+                string.Equals(tokenName, displayName, StringComparison.OrdinalIgnoreCase)
+                || displayName.Contains(tokenName, StringComparison.OrdinalIgnoreCase)
+                || tokenName.Contains(displayName, StringComparison.OrdinalIgnoreCase)
+            )
+        )
+        {
+            return true;
+        }
+
+        if (
+            !string.IsNullOrWhiteSpace(canonicalName)
+            && (
+                string.Equals(tokenName, canonicalName, StringComparison.OrdinalIgnoreCase)
+                || canonicalName.Contains(tokenName, StringComparison.OrdinalIgnoreCase)
+                || tokenName.Contains(canonicalName, StringComparison.OrdinalIgnoreCase)
+            )
+        )
+        {
+            return true;
+        }
+
+        return false;
     }
+
+    private static bool TryToRowUnit(
+        decimal quantity,
+        MeasurementUnit? from,
+        LlmExtractedIngredientItem ingredient,
+        out decimal result
+    )
+    {
+        result = 0;
+        var (rowUnit, _) = RecipeDraftNormalizer.NormalizeUnit(
+            ingredient.Unit,
+            ingredient.CustomUnitName
+        );
+        if (from is not { } fromUnit || rowUnit is not { } toUnit)
+        {
+            return false;
+        }
+        if (CulinaryMath.TryConvertQuantity(quantity, fromUnit, toUnit, out result))
+        {
+            return true;
+        }
+        var alternative = ingredient.AlternativeMeasurement;
+        var (alternativeUnit, _) = RecipeDraftNormalizer.NormalizeUnit(alternative?.Unit);
+        if (
+            alternative?.Quantity is > 0
+            && alternativeUnit is { } altUnit
+            && CulinaryMath.TryConvertQuantity(quantity, fromUnit, altUnit, out var inAlternative)
+        )
+        {
+            result = inAlternative * ingredient.Quantity!.Value / alternative.Quantity.Value;
+            return true;
+        }
+        return false;
+    }
+
+    private static string FormatNumber(decimal value) =>
+        Math.Round(value, 4).ToString("0.####", CultureInfo.InvariantCulture);
 }

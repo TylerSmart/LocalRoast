@@ -377,31 +377,24 @@ describe('IngestionReviewComponent', () => {
     };
   }
 
-  it('edits, relocates, previews and remaps tagged inline amounts', () => {
-    const measurement = { quantity: 10, unit: 'Custom' as const, customUnitName: 'minutes' };
-    component.setStepInlineAmounts(0, [
-      { start: 7, length: 4, kind: 'Ingredient', ingredientIndex: 1, measurement },
-      { start: 25, length: 10, kind: 'Fixed', ingredientIndex: null, measurement },
-    ]);
+  it('inserts, previews and builds payload with inline step tokens', () => {
+    component.stepsArray.at(0).patchValue({
+      instruction:
+        'Simmer ||{"ingredient":"tofu","amount":200,"unit":"g"}|| for ||{"type":"timer","seconds":600,"label":"Simmer"}||.',
+    });
     fixture.detectChanges();
-    expect(fixture.nativeElement.querySelectorAll('[data-testid="inline-amount-row"]').length).toBe(
-      2,
-    );
-    expect(fixture.nativeElement.textContent).toContain('Re-extract with AI');
 
-    component.stepsArray.at(0).patchValue({ instruction: ' Simmer tofu in sauce for 10 minutes.' });
-    fixture.detectChanges();
+    const chip = fixture.nativeElement.querySelector('app-step-ingredient-chip');
+    expect(chip?.textContent).toContain('200 g tofu');
+    expect(fixture.nativeElement.textContent).toContain('10m (Simmer)');
+
     const payload = component.buildDraftPayload();
-    expect(payload.steps[0].instruction).toBe('Simmer tofu in sauce for 10 minutes.');
-    expect(payload.steps[0].inlineAmounts?.map((a) => a.start)).toEqual([7, 25]);
+    expect(payload.steps[0].instruction).toBe(
+      'Simmer ||{"ingredient":"tofu","amount":200,"unit":"g"}|| for ||{"type":"timer","seconds":600,"label":"Simmer"}||.',
+    );
 
     component['refreshPreviewData']();
-    expect(component.previewData()?.steps[0].inlineAmounts?.length).toBe(2);
-
-    component.removeIngredient(1);
-    expect(component.buildDraftPayload().steps[0].inlineAmounts?.[0]).toEqual(
-      expect.objectContaining({ kind: 'Fixed', ingredientIndex: null }),
-    );
+    expect(component.previewData()?.steps[0].instruction).toContain('tofu');
   });
 
   it('passes the current edits and hint to AI and leaves a cancelled preview unsaved', () => {

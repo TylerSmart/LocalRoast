@@ -50,10 +50,10 @@ public sealed class LlmExtractionClientTests
                         .GetProperty("properties")
                         .TryGetProperty("alternativeMeasurement", out _)
                 );
-                Assert.IsFalse(schema.TryGetProperty("steps", out _));
+                Assert.IsTrue(schema.TryGetProperty("steps", out _));
             }
             calls++;
-            return OllamaReply(calls == 2 ? "{}" : ButterIngredientsJson);
+            return OllamaReply(ButterIngredientsJson);
         });
         var client = new LlmExtractionClient(new HttpClient(handler));
         var config = new EffectiveLlmConnectionConfig(
@@ -76,7 +76,7 @@ public sealed class LlmExtractionClientTests
                 []
             )
         );
-        Assert.AreEqual(3, calls);
+        Assert.AreEqual(2, calls);
     }
 
     [TestMethod]
@@ -106,11 +106,10 @@ public sealed class LlmExtractionClientTests
             );
             var content = sampling.Count switch
             {
-                2 => "{}",
-                3 => TranscriptionJson,
-                4 =>
+                2 => TranscriptionJson,
+                3 =>
                     """{"substitutions":[{"label":"Greek Yogurt","ratioAndAmount":"1 cup","culinaryNotes":"Stir.","flavorOrTextureImpact":"Tangy."}]}""",
-                5 => """{"answer":"Cut into thin matchsticks."}""",
+                4 => """{"answer":"Cut into thin matchsticks."}""",
                 _ => ButterIngredientsJson,
             };
             var message = new { role = "assistant", content };
@@ -175,7 +174,7 @@ public sealed class LlmExtractionClientTests
             )
         );
 
-        double[] expectedTemperatures = overridden ? [1, 1, 1, 1, 1] : [0, 0, 0, 0.2, 0.2];
+        double[] expectedTemperatures = overridden ? [1, 1, 1, 1] : [0, 0, 0.2, 0.2];
         CollectionAssert.AreEqual(
             expectedTemperatures,
             sampling.Select(s => s.Temperature).ToArray()
@@ -471,7 +470,7 @@ public sealed class LlmExtractionClientTests
         );
         CollectionAssert.AreEqual(new[] { 0 }, result.Steps[0].IngredientIndices!.ToArray());
         Assert.AreEqual(480, result.Steps[0].Timers![0].DurationSeconds);
-        Assert.AreEqual("Sear chicken", result.Steps[0].Timers![0].Label);
+        Assert.AreEqual("Sear", result.Steps[0].Timers![0].Label);
     }
 
     [TestMethod]
@@ -554,7 +553,11 @@ public sealed class LlmExtractionClientTests
             "Grandma's Blueberry Scones\n\nA family favorite.\n\nFreeze up to 1 month.\n\nIngredients:\n- 2 cups flour\n- 1 cup blueberries\n\nInstructions:\n1. Whisk flour and sugar.\n2. Fold in 1 cup blueberries.",
             result
         );
-        Assert.AreEqual(2, InstructionAmountTagger.ParseMethod(result).Count);
+        Assert.IsTrue(
+            result.Contains(
+                "Instructions:\n1. Whisk flour and sugar.\n2. Fold in 1 cup blueberries."
+            )
+        );
     }
 
     [TestMethod]
@@ -668,7 +671,9 @@ public sealed class LlmExtractionClientTests
                         "unit": "recipe"
                     }
                 ],
-                "steps": []
+                "steps": [
+                    { "instruction": "Brown ||{\"ingredient\": \"ground beef\", \"amount\": 1, \"unit\": \"lb\"}|| in a skillet." }
+                ]
             }
             """;
 
@@ -688,11 +693,6 @@ public sealed class LlmExtractionClientTests
             var body = req.Content!.ReadAsStringAsync().Result;
             StringAssert.Contains(body, "\"json_schema\"");
             Assert.IsFalse(body.Contains("\"num_gpu\"", StringComparison.Ordinal));
-            if (IsMethodTagRequest(body))
-            {
-                StringAssert.Contains(body, "\"recipe_method_tags\"");
-                return OpenAiReply("""{"steps":{"1":["0 ground beef"]}}""");
-            }
             StringAssert.Contains(body, "\"recipe_extraction\"");
             StringAssert.Contains(body, "\"isRecipeReference\"");
             StringAssert.Contains(body, "\"referencedRecipeTitle\"");
@@ -727,7 +727,10 @@ public sealed class LlmExtractionClientTests
         Assert.AreEqual(2, result.Ingredients?.Count);
         Assert.IsTrue(result.Ingredients![1].IsRecipeReference);
         Assert.AreEqual("Foolproof All-Butter Dough", result.Ingredients[1].ReferencedRecipeTitle);
-        Assert.AreEqual("Brown 1 lb beef in a skillet.", result.Steps![0].Instruction);
+        Assert.AreEqual(
+            "Brown ||{\"ingredient\": \"ground beef\", \"amount\": 1, \"unit\": \"lb\"}|| in a skillet.",
+            result.Steps![0].Instruction
+        );
     }
 
     [TestMethod]
@@ -1403,6 +1406,9 @@ public sealed class LlmExtractionClientTests
                 "title": "Herb Roasted Chicken",
                 "ingredients": [
                     { "displayName": "1 whole chicken", "quantity": "1", "unit": "whole" }
+                ],
+                "steps": [
+                    { "instruction": "Melt 2 tablespoons butter in skillet for 2 minutes." }
                 ]
             }
             ```

@@ -589,7 +589,7 @@
         </div>
 
         <div formArrayName="steps" class="builder-list">
-          @for (stepGroup of stepsArray.controls; track $index) {
+          @for (stepGroup of stepsArray.controls; track $index; let stepIndex = $index) {
             <div [formGroupName]="$index" class="builder-item-card">
               <!-- Step Header & Controls -->
               <div class="builder-item-top">
@@ -632,6 +632,28 @@
                 <input matInput formControlName="sectionName" placeholder="e.g. Prep, Baking" />
               </mat-form-field>
 
+              <!-- Quick Token Action Buttons -->
+              <div class="step-token-toolbar">
+                <button
+                  mat-stroked-button
+                  type="button"
+                  class="token-btn add-ingredient-btn"
+                  (click)="openTokenDialog(stepIndex, 'ingredient')"
+                >
+                  <mat-icon>nutrition</mat-icon>
+                  <span>+ Ingredient</span>
+                </button>
+                <button
+                  mat-stroked-button
+                  type="button"
+                  class="token-btn add-timer-btn"
+                  (click)="openTokenDialog(stepIndex, 'timer')"
+                >
+                  <mat-icon>timer</mat-icon>
+                  <span>+ Timer</span>
+                </button>
+              </div>
+
               <!-- Instruction Textarea -->
               <mat-form-field appearance="outline" class="full-width">
                 <mat-label>Instruction</mat-label>
@@ -640,16 +662,45 @@
                   rows="3"
                   formControlName="instruction"
                   placeholder="Describe this preparation or cooking step in detail..."
+                  [attr.data-step-index]="stepIndex"
                   required
                 ></textarea>
               </mat-form-field>
 
-              <app-inline-amount-editor
-                [instruction]="stepGroup.get('instruction')?.value"
-                [amounts]="stepGroup.get('inlineAmounts')?.value"
-                [ingredientOptions]="inlineIngredientOptions()"
-                (amountsChange)="setStepInlineAmounts($index, $event)"
-              ></app-inline-amount-editor>
+              <!-- Live Step Preview -->
+              @if (getStepSegments(stepGroup.get('instruction')?.value).length > 0) {
+                <div class="step-token-preview">
+                  <span class="preview-header">Live Step Preview:</span>
+                  <div class="preview-chips-row">
+                    @for (
+                      seg of getStepSegments(stepGroup.get('instruction')?.value);
+                      track $index
+                    ) {
+                      @if (
+                        seg.token && seg.token.type !== 'timer' && seg.token.type !== 'temperature'
+                      ) {
+                        <app-step-ingredient-chip
+                          [token]="$any(seg.token)"
+                          [editable]="true"
+                          (edit)="editTokenInStep(stepIndex, seg.rawToken ?? '', $any(seg.token))"
+                        ></app-step-ingredient-chip>
+                      } @else if (seg.token && seg.token.type === 'timer') {
+                        <button
+                          type="button"
+                          class="step-timer-badge"
+                          (click)="editTokenInStep(stepIndex, seg.rawToken ?? '', $any(seg.token))"
+                          title="Click to edit timer"
+                        >
+                          <mat-icon class="timer-badge-icon">timer</mat-icon>
+                          <span>{{ formatTimerSegment($any(seg.token)) }}</span>
+                        </button>
+                      } @else {
+                        <span class="step-plain-text">{{ seg.text }}</span>
+                      }
+                    }
+                  </div>
+                </div>
+              }
 
               <!-- Step Photo Controls -->
               <div class="step-photo-section">

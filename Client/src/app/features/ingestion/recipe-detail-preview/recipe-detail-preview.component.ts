@@ -32,7 +32,6 @@ import {
   NumberedInstructionStep,
   formatIngredientUses,
   ingredientUses,
-  inlineAmountInputsToDtos,
   isIngredientDivided,
   stepIngredientCallouts,
 } from '../../../core/utils/step-instruction';
@@ -150,10 +149,6 @@ export class RecipeDetailPreviewComponent {
     return this.recipe().steps.map((step) => ({
       stepNumber: step.stepNumber,
       instruction: step.instruction,
-      inlineAmounts: inlineAmountInputsToDtos(
-        step.inlineAmounts ?? [],
-        (index) => map.get(index)?.ingredient.id,
-      ),
       ingredientIds: (step.ingredientIndices ?? []).flatMap((idx) => {
         const item = map.get(idx);
         return item ? [item.ingredient.id] : [];

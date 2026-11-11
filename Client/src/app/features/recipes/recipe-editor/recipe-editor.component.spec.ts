@@ -192,7 +192,7 @@ describe('RecipeEditorComponent', () => {
     expect(component.ingredientsArray.at(0).get('unresolvedRecipeTitle')?.value).toBeNull();
   });
 
-  it('loads, relocates, remaps and saves tagged inline amounts', () => {
+  it('loads and saves inline step tokens', () => {
     const ingredient = (id: string, displayName: string) => ({
       id,
       sortOrder: 0,
@@ -212,7 +212,6 @@ describe('RecipeEditorComponent', () => {
       isOptional: false,
       originalRawText: null,
     });
-    const measurement = { quantity: 3, unit: 'Tbsp' as const };
     const detail: RecipeDetailDto = {
       id: 'r-1',
       title: 'Pancakes',
@@ -241,20 +240,10 @@ describe('RecipeEditorComponent', () => {
           id: 's-1',
           stepNumber: 1,
           sectionName: null,
-          instruction: 'Add 3 tbsp milk.',
+          instruction: 'Add ||{"ingredient":"milk","amount":3,"unit":"tbsp"}||.',
           imagePath: null,
           ingredientIds: ['milk'],
           ingredientAmounts: [],
-          inlineAmounts: [
-            {
-              start: 4,
-              length: 6,
-              kind: 'Ingredient',
-              ingredientId: 'milk',
-              measurement,
-              alternativeMeasurement: null,
-            },
-          ],
           timers: [],
         },
       ],
@@ -268,27 +257,9 @@ describe('RecipeEditorComponent', () => {
     };
     component.populateForm(detail);
     fixture.detectChanges();
-    const inline = () => component.stepsArray.at(0).get('inlineAmounts')?.value;
-    expect(inline()).toEqual([
-      {
-        start: 4,
-        length: 6,
-        kind: 'Ingredient',
-        ingredientIndex: 1,
-        measurement,
-        alternativeMeasurement: null,
-      },
-    ]);
-    expect(
-      fixture.nativeElement.querySelector('app-inline-amount-editor .tagged-span')?.textContent,
-    ).toBe('3 tbsp');
 
-    component.stepsArray.at(0).patchValue({ instruction: '  Add 3 tbsp milk.' });
-    fixture.detectChanges();
-    expect(inline()[0].start).toBe(6);
-
-    component.moveIngredientUp(1);
-    expect(inline()[0].ingredientIndex).toBe(0);
+    const previewChip = fixture.nativeElement.querySelector('app-step-ingredient-chip');
+    expect(previewChip?.textContent).toContain('3 tbsp milk');
 
     mockRecipeService.createRecipe.mockReturnValue(of(detail));
     component.onSave();
@@ -296,15 +267,11 @@ describe('RecipeEditorComponent', () => {
       expect.objectContaining({
         steps: [
           expect.objectContaining({
-            instruction: 'Add 3 tbsp milk.',
-            inlineAmounts: [expect.objectContaining({ start: 4, length: 6, ingredientIndex: 0 })],
+            instruction: 'Add ||{"ingredient":"milk","amount":3,"unit":"tbsp"}||.',
           }),
         ],
       }),
     );
-
-    component.removeIngredient(0);
-    expect(inline()[0]).toEqual(expect.objectContaining({ kind: 'Fixed', ingredientIndex: null }));
   });
 
   it('submits valid recipe creation', () => {

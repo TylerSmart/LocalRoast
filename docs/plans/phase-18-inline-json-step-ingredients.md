@@ -1,7 +1,7 @@
 # Phase 18: Inline JSON Step Tokens & Simplified Ingestion
 
 > **Branch:** `feature/phase-18-inline-json-step-ingredients`
-> **Status:** Planned (`[ ]` Not Started | `[~]` In Progress | `[x]` Completed)
+> **Status:** Completed (`[ ]` Not Started | `[~]` In Progress | `[x]` Completed)
 > **PRD Reference:** `docs/prd.md` — Section 4.1.4 (Ordered Steps, Inline Ingredient References & Timers) & Section 4.3.1 (LLM Ingestion)
 > **Target Execution:** Run `/execute-phase` to execute this plan step-by-step.
 
@@ -285,7 +285,7 @@ Create `Tests/Client.E2ETests/StepTokensE2ETests.cs` inheriting `E2ETestBase`:
 
 ## 6. Step-by-Step Execution Checklist (For Implementation Agent)
 
-- [ ] **Task 1: Backend Core & Data Layer**
+- [x] **Task 1: Backend Core & Data Layer**
   - Create `Core/Recipes/StepTokenModels.cs` and `Core/Recipes/StepInstructionParser.cs`.
   - Update `Core/Recipes/RecipeModels.cs` and `Core/Ingestion/IngestionModels.cs` to remove `RecipeStepInlineAmount` contracts.
   - Delete `Data/Entities/RecipeStepInlineAmount.cs` and `Data/Configurations/RecipeStepInlineAmountConfiguration.cs`.
@@ -303,7 +303,7 @@ Create `Tests/Client.E2ETests/StepTokensE2ETests.cs` inheriting `E2ETestBase`:
     dotnet test --project Tests/Core.UnitTests/App.Core.UnitTests.csproj
     ```
 
-- [ ] **Task 2: Ingestion Prompts & API Integration Tests**
+- [x] **Task 2: Ingestion Prompts & API Integration Tests**
   - Update `Infrastructure/Ingestion/LlmExtractionClient.cs` prompts to emit `||{...}||` tokens for steps.
   - Update API controllers and request mappers.
   - Update and run integration tests in `Tests/API.IntegrationTests/`:
@@ -311,7 +311,7 @@ Create `Tests/Client.E2ETests/StepTokensE2ETests.cs` inheriting `E2ETestBase`:
     dotnet test --project Tests/API.IntegrationTests/App.API.IntegrationTests.csproj
     ```
 
-- [ ] **Task 3: Angular Models, Token Parser, Dialog, and Feature Components**
+- [x] **Task 3: Angular Models, Token Parser, Dialog, and Feature Components**
   - Create `Client/src/app/core/models/step-token.models.ts` and `Client/src/app/core/utils/step-token-parser.ts`.
   - Clean up `Client/src/app/core/utils/step-instruction.ts` (delete fuzzy alias and regex offset logic).
   - Create `Client/src/app/shared/components/step-token-dialog/` (`.ts`, `.html`, `.scss`, `.spec.ts`).
@@ -328,7 +328,7 @@ Create `Tests/Client.E2ETests/StepTokensE2ETests.cs` inheriting `E2ETestBase`:
     cd ..
     ```
 
-- [ ] **Task 4: Playwright E2E Verification & Final Formatting**
+- [x] **Task 4: Playwright E2E Verification & Final Formatting**
   - Implement `Tests/Client.E2ETests/StepTokensE2ETests.cs` with the scenarios from Section 5.
   - Run Playwright E2E tests:
     ```powershell

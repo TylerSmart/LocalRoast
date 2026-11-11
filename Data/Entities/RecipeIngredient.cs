@@ -74,7 +74,4 @@ public sealed class RecipeIngredient : IAuditable
 
     public ICollection<RecipeStepIngredient> StepReferences { get; set; } =
         new List<RecipeStepIngredient>();
-
-    public ICollection<RecipeStepInlineAmount> InlineAmountReferences { get; set; } =
-        new List<RecipeStepInlineAmount>();
 }

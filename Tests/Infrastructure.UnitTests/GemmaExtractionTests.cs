@@ -40,12 +40,15 @@ public sealed class GemmaExtractionTests
     [DataRow(LlmProvider.Ollama, "gemma4:e4b")]
     [DataRow(LlmProvider.OpenAiCompatible, "gemma4:e2b")]
     [DataRow(LlmProvider.OpenAiCompatible, "gemma4:e4b")]
-    public async Task Extract_SendsIngredientsThenMethodTagsWithIngredientLabels(
+    public async Task Extract_SendsSingleExtractionWithStepsAndInlineTokens(
         LlmProvider provider,
         string model
     )
     {
         var calls = 0;
+        const string extractedWithTokens = """
+            {"title":"Butter sauce","confidenceScore":0.95,"ingredients":[{"quantity":2,"unit":"tbsp","canonicalFoodName":"butter","displayName":"butter","originalRawText":"2 tbsp butter"}],"steps":[{"stepNumber":1,"instruction":"Melt ||{\"ingredient\": \"butter\", \"amount\": 2, \"unit\": \"tbsp\"}|| in a pan."}]}
+            """;
         using var handler = new Handler(request =>
         {
             calls++;
@@ -61,61 +64,48 @@ public sealed class GemmaExtractionTests
             var schema = GetSchema(body, provider);
             AssertStrictSchema(schema);
             var properties = schema.GetProperty("properties");
-            if (calls == 1)
-            {
-                Assert.IsTrue(properties.TryGetProperty("ingredients", out var ingredients));
-                Assert.IsFalse(properties.TryGetProperty("steps", out _));
-                var fields = ingredients.GetProperty("items").GetProperty("properties");
-                CollectionAssert.Contains(
-                    fields
-                        .GetProperty("unit")
-                        .GetProperty("enum")
-                        .EnumerateArray()
-                        .Select(value => value.GetString())
-                        .ToArray(),
-                    "custom"
-                );
-                foreach (var name in new[] { "quantity", "maxQuantity", "unit", "preparationNote" })
-                {
-                    Assert.IsTrue(
-                        fields
-                            .GetProperty(name)
-                            .GetProperty("type")
-                            .EnumerateArray()
-                            .Any(t => t.GetString() == "null")
-                    );
-                }
-                return Response(provider, IngredientsJson);
-            }
-            Assert.AreEqual(2, calls);
-            Assert.IsFalse(properties.TryGetProperty("amounts", out _));
-            CollectionAssert.AreEqual(
-                new[] { "0 butter" },
-                properties
-                    .GetProperty("steps")
-                    .GetProperty("properties")
-                    .GetProperty("1")
-                    .GetProperty("items")
+            Assert.IsTrue(properties.TryGetProperty("ingredients", out var ingredients));
+            Assert.IsTrue(properties.TryGetProperty("steps", out var stepsProp));
+            var fields = ingredients.GetProperty("items").GetProperty("properties");
+            CollectionAssert.Contains(
+                fields
+                    .GetProperty("unit")
                     .GetProperty("enum")
                     .EnumerateArray()
                     .Select(value => value.GetString())
-                    .ToArray()
+                    .ToArray(),
+                "custom"
             );
-            var prompt = UserText(body);
-            StringAssert.Contains(prompt, "0 butter");
-            StringAssert.Contains(prompt, "Melt the butter.");
-            return Response(provider, ButterTags);
+            foreach (var name in new[] { "quantity", "maxQuantity", "unit", "preparationNote" })
+            {
+                Assert.IsTrue(
+                    fields
+                        .GetProperty(name)
+                        .GetProperty("type")
+                        .EnumerateArray()
+                        .Any(t => t.GetString() == "null")
+                );
+            }
+            return Response(provider, extractedWithTokens);
         });
         using var http = new HttpClient(handler);
         var result = await new LlmExtractionClient(http).ExtractRecipeFromTextAsync(
             Config(provider, model),
             new LlmExtractionContext(Source, [])
         );
-        Assert.AreEqual(2, calls);
+        Assert.AreEqual(1, calls);
         Assert.AreEqual("Butter sauce", result.Title);
         Assert.AreEqual(2, result.Ingredients![0].Quantity);
-        Assert.AreEqual("Melt the 2 tbsp butter.", result.Steps![0].Instruction);
-        CollectionAssert.AreEqual(new[] { 0 }, result.Steps[0].IngredientIndices!.ToArray());
+        Assert.AreEqual(
+            "Melt ||{\"ingredient\": \"butter\", \"amount\": 2, \"unit\": \"tbsp\"}|| in a pan.",
+            result.Steps![0].Instruction
+        );
+        var tokens = StepInstructionParser.ExtractTokens(result.Steps[0].Instruction);
+        var token = tokens.Single() as StepIngredientToken;
+        Assert.IsNotNull(token);
+        Assert.AreEqual("butter", token.Ingredient);
+        Assert.AreEqual(2m, token.Amount);
+        Assert.AreEqual(MeasurementUnit.Tbsp, token.Unit);
         Assert.IsEmpty(result.TaggerIssues ?? []);
     }
 
@@ -204,6 +194,17 @@ Add 2 tablespoons remaining oil and the dough.
                     IsRecipeReference: true,
                     ReferencedRecipeTitle: "Dough"
                 ),
+            ],
+            Steps:
+            [
+                new(
+                    null,
+                    "Heat ||{\"ingredient\": \"oil\", \"amount\": 2, \"unit\": \"tbsp\"}|| oil."
+                ),
+                new(
+                    null,
+                    "Add ||{\"ingredient\": \"oil\", \"amount\": 2, \"unit\": \"tbsp\"}|| remaining oil and the ||{\"ingredient\": \"Dough\", \"amount\": 1, \"unit\": \"whole\"}||."
+                ),
             ]
         );
         var calls = 0;
@@ -227,23 +228,15 @@ Add 2 tablespoons remaining oil and the dough.
                     Assert.AreEqual(0, options.GetProperty("temperature").GetDouble());
                     Assert.AreEqual(1, options.GetProperty("repeat_penalty").GetDouble());
                 }
-                if (calls == 1)
-                {
-                    StringAssert.Contains(systemPrompt, "alternativeMeasurement");
-                    StringAssert.Contains(systemPrompt, "referencedRecipeTitle");
-                    StringAssert.Contains(systemPrompt, "suggestedCategory");
-                    return Response(
-                        provider,
-                        JsonSerializer.Serialize(
-                            recipe,
-                            new JsonSerializerOptions(JsonSerializerDefaults.Web)
-                        )
-                    );
-                }
-                StringAssert.Contains(UserText(body), "[A1: 2 tablespoons]");
+                StringAssert.Contains(systemPrompt, "alternativeMeasurement");
+                StringAssert.Contains(systemPrompt, "referencedRecipeTitle");
+                StringAssert.Contains(systemPrompt, "suggestedCategory");
                 return Response(
                     provider,
-                    """{"amounts":{"A1":"0 oil","A2":"0 oil"},"steps":{"1":["0 oil"],"2":["0 oil","1 Dough"]}}"""
+                    JsonSerializer.Serialize(
+                        recipe,
+                        new JsonSerializerOptions(JsonSerializerDefaults.Web)
+                    )
                 );
             })
         );
@@ -255,19 +248,17 @@ Add 2 tablespoons remaining oil and the dough.
             },
             new LlmExtractionContext(source, [])
         );
-        Assert.AreEqual(2, calls);
+        Assert.AreEqual(1, calls);
         Assert.IsEmpty(extracted.TaggerIssues ?? []);
-        Assert.AreEqual("Heat 2 tablespoons oil.", extracted.Steps![0].Instruction);
-        var inline = extracted.Steps[0].InlineAmounts!.Single();
-        Assert.AreEqual(5, inline.Start);
-        Assert.AreEqual("2 tablespoons", inline.Text);
-        Assert.AreEqual(InlineStepAmountKind.Ingredient, inline.Kind);
-        Assert.AreEqual(0, inline.IngredientIndex);
-        Assert.AreEqual(2m, inline.Measurement.Quantity);
-        CollectionAssert.AreEqual(
-            new[] { 0, 1 },
-            extracted.Steps[1].IngredientIndices!.Order().ToArray()
+        Assert.AreEqual(
+            "Heat ||{\"ingredient\": \"oil\", \"amount\": 2, \"unit\": \"tbsp\"}|| oil.",
+            extracted.Steps![0].Instruction
         );
+        var tokens = StepInstructionParser.ExtractTokens(extracted.Steps[0].Instruction);
+        var inline = (StepIngredientToken)tokens.Single();
+        Assert.AreEqual("oil", inline.Ingredient);
+        Assert.AreEqual(2m, inline.Amount);
+        Assert.AreEqual(MeasurementUnit.Tbsp, inline.Unit);
 
         var draft = RecipeDraftNormalizer.Normalize(
             extracted,
@@ -282,31 +273,33 @@ Add 2 tablespoons remaining oil and the dough.
         );
         Assert.AreEqual(2m, draft.Ingredients![0].AlternativeMeasurement!.Quantity);
         Assert.AreEqual("Dough", draft.Ingredients[1].ReferencedRecipeTitle);
-        var draftInline = draft.Steps![1].InlineAmounts!.First(a => a.IngredientIndex == 0);
-        Assert.AreEqual(InlineStepAmountKind.Ingredient, draftInline.Kind);
-        Assert.AreEqual(0, draftInline.IngredientIndex);
-        Assert.AreEqual(2m, draftInline.Measurement.Quantity);
+        Assert.AreEqual(
+            "Add ||{\"ingredient\": \"oil\", \"amount\": 2, \"unit\": \"tbsp\"}|| remaining oil and the ||{\"ingredient\": \"Dough\", \"amount\": 1, \"unit\": \"whole\"}||.",
+            draft.Steps![1].Instruction
+        );
+        CollectionAssert.AreEqual(
+            new[] { 0, 1 },
+            draft.Steps[1].IngredientIndices!.Order().ToArray()
+        );
     }
 
     [TestMethod]
     public async Task Extract_UnclassifiedAmountIsReturnedAsTaggerIssue()
     {
+        var malformedRecipe = """
+            {"title":"Butter sauce","confidenceScore":0.95,"ingredients":[{"quantity":2,"unit":"tbsp","canonicalFoodName":"butter","displayName":"butter","originalRawText":"2 tbsp butter"}],"steps":[{"stepNumber":1,"instruction":"Melt ||{bad json}|| butter."}]}
+            """;
         using var http = new HttpClient(
-            new Handler(request =>
-                Response(
-                    LlmProvider.Ollama,
-                    IsMethodTagRequest(request.Content!.ReadAsStringAsync().Result)
-                        ? "{}"
-                        : IngredientsJson
-                )
-            )
+            new Handler(_ => Response(LlmProvider.Ollama, malformedRecipe))
         );
         var result = await new LlmExtractionClient(http).ExtractRecipeFromTextAsync(
             Config(LlmProvider.Ollama, "gemma4:e4b"),
             new LlmExtractionContext(MeasuredSource, [])
         );
-        Assert.AreEqual("Melt 2 tbsp butter.", result.Steps![0].Instruction);
-        Assert.IsTrue(result.TaggerIssues!.Any(issue => issue.Contains("not classified")));
+        Assert.AreEqual("Melt ||{bad json}|| butter.", result.Steps![0].Instruction);
+        Assert.IsTrue(
+            result.TaggerIssues!.Any(issue => issue.Contains("unparseable inline token"))
+        );
     }
 
     [TestMethod]
@@ -330,18 +323,14 @@ Add 2 tablespoons remaining oil and the dough.
                     text,
                     "Reviewer feedback (apply it): Keep the user's unsalted butter."
                 );
-                if (calls == 1)
-                {
-                    StringAssert.Contains(text, "Butter sauce");
-                    StringAssert.Contains(text, "Previous ingredient rows");
-                    StringAssert.Contains(text, "2 tbsp butter");
-                    StringAssert.Contains(
-                        body.GetProperty("messages")[0].GetProperty("content").GetString()!,
-                        "Sauce"
-                    );
-                    return Response(provider, IngredientsJson);
-                }
-                return Response(provider, ButterTags);
+                StringAssert.Contains(text, "Butter sauce");
+                StringAssert.Contains(text, "Previous ingredient rows");
+                StringAssert.Contains(text, "2 tbsp butter");
+                StringAssert.Contains(
+                    body.GetProperty("messages")[0].GetProperty("content").GetString()!,
+                    "Tags (suggestedTagNames)"
+                );
+                return Response(provider, CleanRecipe);
             })
         );
         var original = JsonSerializer.Deserialize<LlmExtractedRecipePayload>(
@@ -353,8 +342,8 @@ Add 2 tablespoons remaining oil and the dough.
             new LlmRecipeRepairContext(Source, original, "Keep the user's unsalted butter.")
         );
 
-        Assert.AreEqual(2, calls);
-        Assert.AreEqual("Melt the 2 tbsp butter.", result.Draft.Steps![0].Instruction);
+        Assert.AreEqual(1, calls);
+        Assert.AreEqual("Melt the butter.", result.Draft.Steps![0].Instruction);
         Assert.IsEmpty(result.Notices);
     }
 
@@ -380,15 +369,11 @@ Add 2 tablespoons remaining oil and the dough.
     [TestMethod]
     public async Task ManualRepair_ReportsRemainingTaggerIssuesAsNotices()
     {
+        var recipeWithIssue = """
+            {"title":"Butter sauce","suggestedTagNames":["Sauce"],"ingredients":[{"quantity":2,"unit":"tbsp","canonicalFoodName":"butter","displayName":"butter","originalRawText":"2 tbsp butter"}],"steps":[{"instruction":"Melt ||{broken}||."}]}
+            """;
         using var http = new HttpClient(
-            new Handler(request =>
-                Response(
-                    LlmProvider.Ollama,
-                    IsMethodTagRequest(request.Content!.ReadAsStringAsync().Result)
-                        ? "{}"
-                        : IngredientsJson
-                )
-            )
+            new Handler(_ => Response(LlmProvider.Ollama, recipeWithIssue))
         );
         var original = JsonSerializer.Deserialize<LlmExtractedRecipePayload>(
             CleanRecipe,

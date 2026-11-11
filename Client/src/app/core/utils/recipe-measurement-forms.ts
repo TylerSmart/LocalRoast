@@ -5,11 +5,7 @@ import {
   FormGroup,
   ValidationErrors,
 } from '@angular/forms';
-import {
-  RecipeMeasurement,
-  RecipeStepIngredientAmountInput,
-  RecipeStepInlineAmountInput,
-} from '../models/recipe.models';
+import { RecipeMeasurement, RecipeStepIngredientAmountInput } from '../models/recipe.models';
 
 interface StepAmountControls {
   ingredientIndex: FormControl<number>;
@@ -109,19 +105,6 @@ export function remapStepIngredients(
       const mapped = mapIndex(row.controls.ingredientIndex.value);
       if (mapped === null) amounts.removeAt(i);
       else row.controls.ingredientIndex.setValue(mapped);
-    }
-    const inline = step.get('inlineAmounts');
-    const spans: RecipeStepInlineAmountInput[] | null = inline?.value ?? null;
-    if (inline && spans?.length) {
-      inline.setValue(
-        spans.map((span) => {
-          if (span.kind !== 'Ingredient' || span.ingredientIndex === null) return span;
-          const mapped = mapIndex(span.ingredientIndex);
-          return mapped === null
-            ? { ...span, kind: 'Fixed' as const, ingredientIndex: null }
-            : { ...span, ingredientIndex: mapped };
-        }),
-      );
     }
   }
 }

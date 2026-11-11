@@ -73,24 +73,7 @@ public record LlmExtractedStepItem(
     IReadOnlyList<int>? IngredientIndices = null,
     IReadOnlyList<LlmExtractedTimerItem>? Timers = null,
     IReadOnlyList<LlmExtractedStepIngredientAmountItem>? IngredientAmounts = null,
-    string? OriginalRawText = null,
-    IReadOnlyList<InlineStepAmount>? InlineAmounts = null
-);
-
-/// <summary>
-/// An amount kept verbatim in step text, located by code. Start/Length index the step's
-/// instruction so the UI can render it as a scalable chip.
-/// </summary>
-public record InlineStepAmount(
-    int Start,
-    int Length,
-    string Text,
-    InlineStepAmountKind Kind,
-    int? IngredientIndex,
-    RecipeMeasurement Measurement,
-    RecipeMeasurement? AlternativeMeasurement = null,
-    int? IngredientSpanStart = null,
-    int? IngredientSpanLength = null
+    string? OriginalRawText = null
 );
 
 public record LlmExtractedRecipePayload(
@@ -154,8 +137,7 @@ public record IngestionDraftStepDto(
     IReadOnlyList<int>? IngredientIndices = null,
     IReadOnlyList<RecipeStepTimerInput>? Timers = null,
     [MaxLength(500)] string? ImagePath = null,
-    IReadOnlyList<RecipeStepIngredientAmountInput>? IngredientAmounts = null,
-    IReadOnlyList<RecipeStepInlineAmountInput>? InlineAmounts = null
+    IReadOnlyList<RecipeStepIngredientAmountInput>? IngredientAmounts = null
 );
 
 public record IngestionExtractedDraftDto(

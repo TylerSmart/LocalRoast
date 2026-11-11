@@ -50,10 +50,17 @@ import {
   MEASUREMENT_UNITS,
   RecipeDifficulty,
   RecipeMeasurement,
-  RecipeStepInlineAmountInput,
   RecipePreviewData,
   RecipeStepTimerInput,
 } from '../../../core/models/recipe.models';
+import { StepSegment, StepTimerToken, StepToken } from '../../../core/models/step-token.models';
+import { formatSeconds, parseStepInstruction } from '../../../core/utils/step-token-parser';
+import {
+  StepTokenDialogComponent,
+  StepTokenDialogData,
+  StepTokenDialogResult,
+} from '../../../shared/components/step-token-dialog/step-token-dialog.component';
+import { StepIngredientChipComponent } from '../../../shared/components/step-ingredient-chip/step-ingredient-chip.component';
 import { CollectionDto, TagDto } from '../../../core/models/taxonomy.models';
 import { FoodCatalogService } from '../../../core/services/food-catalog/food-catalog.service';
 import { IngestionService } from '../../../core/services/ingestion/ingestion.service';
@@ -61,8 +68,6 @@ import { LlmSettingsService } from '../../../core/services/llm-settings/llm-sett
 import { TaxonomyService } from '../../../core/services/taxonomy/taxonomy.service';
 import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialog/confirm-dialog.component';
 import { MeasurementEditorComponent } from '../../../shared/components/measurement-editor/measurement-editor.component';
-import { InlineAmountEditorComponent } from '../../../shared/components/inline-amount-editor/inline-amount-editor.component';
-import { trimInstructionWithAmounts } from '../../../core/utils/step-instruction';
 import {
   buildStepAmounts,
   createStepAmounts,
@@ -108,7 +113,7 @@ export interface DiagnosticJumpTarget {
     SourceViewerComponent,
     RecipeDetailPreviewComponent,
     MeasurementEditorComponent,
-    InlineAmountEditorComponent,
+    StepIngredientChipComponent,
   ],
   templateUrl: './ingestion-review.component.html',
   styleUrl: './ingestion-review.component.scss',
@@ -811,9 +816,6 @@ export class IngestionReviewComponent implements OnInit {
         step?.ingredientIndices ?? [],
         step?.ingredientAmounts ?? [],
       ),
-      inlineAmounts: new FormControl<RecipeStepInlineAmountInput[]>(step?.inlineAmounts ?? [], {
-        nonNullable: true,
-      }),
       timers: timersArray,
       imagePath: [step?.imagePath ?? null],
     });
@@ -825,8 +827,97 @@ export class IngestionReviewComponent implements OnInit {
     this.stepsArray.removeAt(index);
   }
 
-  setStepInlineAmounts(stepIndex: number, amounts: RecipeStepInlineAmountInput[]): void {
-    this.stepsArray.at(stepIndex).get('inlineAmounts')?.setValue(amounts);
+  getStepSegments(instruction: string | null | undefined): StepSegment[] {
+    return parseStepInstruction(instruction ?? '');
+  }
+
+  formatTimerSegment(token: StepTimerToken): string {
+    return `${formatSeconds(token.seconds)}${token.label ? ' (' + token.label + ')' : ''}`;
+  }
+
+  insertTokenAtCursor(stepIndex: number, rawToken: string): void {
+    const stepCtrl = this.stepsArray.at(stepIndex).get('instruction');
+    const current = stepCtrl?.value ?? '';
+    const activeEl = document.activeElement as HTMLTextAreaElement | null;
+    if (
+      activeEl &&
+      activeEl.tagName === 'TEXTAREA' &&
+      activeEl.dataset['stepIndex'] === String(stepIndex)
+    ) {
+      const start = activeEl.selectionStart ?? current.length;
+      const end = activeEl.selectionEnd ?? current.length;
+      const spaceBefore = start > 0 && current[start - 1] !== ' ' ? ' ' : '';
+      const spaceAfter = end < current.length && current[end] !== ' ' ? ' ' : ' ';
+      const next =
+        current.slice(0, start) + spaceBefore + rawToken + spaceAfter + current.slice(end);
+      stepCtrl?.setValue(next);
+      stepCtrl?.markAsDirty();
+    } else {
+      const spaceBefore = current.length > 0 && !current.endsWith(' ') ? ' ' : '';
+      stepCtrl?.setValue(current + spaceBefore + rawToken + ' ');
+      stepCtrl?.markAsDirty();
+    }
+  }
+
+  openTokenDialog(stepIndex: number, mode: 'ingredient' | 'timer'): void {
+    const availableIngredients = this.ingredientsArray.controls
+      .map((c) => c.get('displayName')?.value?.trim())
+      .filter((name): name is string => !!name);
+
+    const dialogRef = this.dialog.open<
+      StepTokenDialogComponent,
+      StepTokenDialogData,
+      StepTokenDialogResult
+    >(StepTokenDialogComponent, {
+      data: {
+        mode,
+        availableIngredients,
+      },
+      width: '540px',
+    });
+
+    dialogRef.afterClosed().subscribe((result) => {
+      if (result?.rawToken) {
+        this.insertTokenAtCursor(stepIndex, result.rawToken);
+      }
+    });
+  }
+
+  editTokenInStep(stepIndex: number, oldRawToken: string, token: StepToken): void {
+    const stepCtrl = this.stepsArray.at(stepIndex).get('instruction');
+    const current = stepCtrl?.value ?? '';
+    const availableIngredients = this.ingredientsArray.controls
+      .map((c) => c.get('displayName')?.value?.trim())
+      .filter((name): name is string => !!name);
+
+    const dialogRef = this.dialog.open<
+      StepTokenDialogComponent,
+      StepTokenDialogData,
+      StepTokenDialogResult
+    >(StepTokenDialogComponent, {
+      data: {
+        mode: token.type === 'timer' ? 'timer' : 'ingredient',
+        token,
+        availableIngredients,
+      },
+      width: '540px',
+    });
+
+    dialogRef.afterClosed().subscribe((result) => {
+      if (!result) return;
+      if (result.delete) {
+        const next = current
+          .replace(oldRawToken, '')
+          .replace(/\s{2,}/g, ' ')
+          .trim();
+        stepCtrl?.setValue(next);
+        stepCtrl?.markAsDirty();
+      } else if (result.rawToken) {
+        const next = current.replace(oldRawToken, result.rawToken);
+        stepCtrl?.setValue(next);
+        stepCtrl?.markAsDirty();
+      }
+    });
   }
 
   getStepAmountsArray(stepIndex: number) {
@@ -990,7 +1081,6 @@ export class IngestionReviewComponent implements OnInit {
         imagePath: st.imagePath,
         ingredientIndices: st.ingredientIndices,
         ingredientAmounts: st.ingredientAmounts,
-        inlineAmounts: st.inlineAmounts ?? [],
         timers: st.timers,
       })),
     };
@@ -1079,17 +1169,12 @@ export class IngestionReviewComponent implements OnInit {
         };
       });
 
-      const trimmed = trimInstructionWithAmounts(
-        val.instruction ?? '',
-        (val.inlineAmounts ?? []) as RecipeStepInlineAmountInput[],
-      );
       return {
         stepNumber: i + 1,
         sectionName: val.sectionName?.trim() || null,
-        instruction: trimmed.instruction,
+        instruction: (val.instruction || '').trim(),
         ingredientIndices: val.ingredientIndices || [],
         ingredientAmounts: buildStepAmounts(ctrl),
-        inlineAmounts: trimmed.amounts,
         timers,
         imagePath: val.imagePath || null,
       };

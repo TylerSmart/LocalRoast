@@ -1,0 +1,14 @@
+<button
+  type="button"
+  class="step-ingredient-chip"
+  [class.editable]="editable()"
+  [class.is-scaled]="isScaled()"
+  [matTooltip]="tooltipText()"
+  (click)="onClick()"
+>
+  <mat-icon class="chip-icon">nutrition</mat-icon>
+  <span class="chip-label">{{ displayText() }}</span>
+  @if (editable()) {
+    <mat-icon class="edit-hint-icon">edit</mat-icon>
+  }
+</button>

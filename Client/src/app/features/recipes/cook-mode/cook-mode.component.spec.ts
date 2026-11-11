@@ -188,27 +188,10 @@ describe('CookModeComponent', () => {
     const ingredient = { ...mockRecipe.ingredients[0], quantity: 2, unit: 'Cup' as const };
     const step = {
       ...mockRecipe.steps[0],
-      instruction: 'Whisk 1 cup in, then reduce to 1 cup.',
+      instruction:
+        'Whisk ||{"ingredient":"Ground Beef","amount":1,"unit":"cup"}|| in, then reduce to 1 cup.',
       ingredientIds: [ingredient.id],
       ingredientAmounts: [],
-      inlineAmounts: [
-        {
-          start: 6,
-          length: 5,
-          kind: 'Ingredient' as const,
-          ingredientId: ingredient.id,
-          measurement: { quantity: 1, unit: 'Cup' as const },
-          alternativeMeasurement: null,
-        },
-        {
-          start: 31,
-          length: 5,
-          kind: 'Fixed' as const,
-          ingredientId: null,
-          measurement: { quantity: 1, unit: 'Cup' as const },
-          alternativeMeasurement: null,
-        },
-      ],
     };
     component['recipe'].set({ ...mockRecipe, ingredients: [ingredient], steps: [step] });
     component['activeStepIndex'].set(0);
@@ -216,16 +199,16 @@ describe('CookModeComponent', () => {
     fixture.detectChanges();
     const el: HTMLElement = fixture.nativeElement;
     expect(el.querySelector('.instruction-text')?.textContent?.trim()).toBe(
-      'Whisk 2 cups in, then reduce to 1 cup.',
+      'Whisk 2 cups Ground Beef in, then reduce to 1 cup.',
     );
-    expect(el.querySelector('.inline-amount')?.textContent).toBe('2 cups');
+    expect(el.querySelector('.inline-amount')?.textContent).toBe('2 cups Ground Beef');
     expect(component['flattenedSteps']()[0].ingredientCallouts).toEqual([
       { id: ingredient.id, label: '2 cups Ground Beef' },
     ]);
     component['narrateCurrentStep']();
     expect(mockSpeechNarrationService.speakStep).toHaveBeenLastCalledWith(
       step.stepNumber,
-      'Whisk 2 cups in, then reduce to 1 cup.',
+      'Whisk 2 cups Ground Beef in, then reduce to 1 cup.',
       step.sectionName,
     );
   });
