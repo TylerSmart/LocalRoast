@@ -155,4 +155,46 @@ public sealed class TaggedStepDiagnosticsTests
         var issues = TaggedStepDiagnostics.GetIssues(recipe);
         Assert.AreEqual(0, issues.Count);
     }
+
+    [TestMethod]
+    public void GetIssues_DuplicateIngredientAcrossSections_DoesNotCrossContaminateAmounts()
+    {
+        var recipe = new LlmExtractedRecipePayload(
+            Ingredients:
+            [
+                new LlmExtractedIngredientItem(
+                    SectionName: "BUFFALO SAUCE",
+                    Quantity: 0.5m,
+                    MaxQuantity: null,
+                    Unit: "Cup",
+                    CanonicalFoodName: "Hot Sauce",
+                    DisplayName: "hot sauce"
+                ),
+                new LlmExtractedIngredientItem(
+                    SectionName: "CAULIFLOWER",
+                    Quantity: 1m,
+                    MaxQuantity: null,
+                    Unit: "Tbsp",
+                    CanonicalFoodName: "Hot Sauce",
+                    DisplayName: "hot sauce"
+                ),
+            ],
+            Steps:
+            [
+                new LlmExtractedStepItem(
+                    SectionName: "FOR THE BUFFALO SAUCE",
+                    Instruction: "Whisk in ||{\"ingredient\": \"hot sauce\", \"amount\": 0.5, \"unit\": \"cup\"}||.",
+                    IngredientIndices: [0]
+                ),
+                new LlmExtractedStepItem(
+                    SectionName: "FOR THE CAULIFLOWER",
+                    Instruction: "Whisk in ||{\"ingredient\": \"hot sauce\", \"amount\": 1, \"unit\": \"tbsp\"}||.",
+                    IngredientIndices: [1]
+                ),
+            ]
+        );
+
+        var issues = TaggedStepDiagnostics.GetIssues(recipe);
+        Assert.AreEqual(0, issues.Count);
+    }
 }

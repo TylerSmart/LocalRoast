@@ -83,26 +83,34 @@ public static class TaggedStepDiagnostics
                     var tokens = StepInstructionParser.ExtractTokens(s.Instruction ?? "");
                     foreach (var token in tokens)
                     {
-                        if (
-                            token is StepIngredientToken ingToken
-                            && MatchesIngredient(ingToken.Ingredient, ingredient)
-                        )
+                        if (token is StepIngredientToken ingToken)
                         {
-                            stepUses = true;
-                            if (ingToken.Amount.HasValue && ingredient.Quantity is > 0)
+                            var bestIdx = RecipeDraftNormalizer.FindBestMatchingIngredientIndex(
+                                ingToken,
+                                s.SectionName,
+                                ingredients,
+                                s.IngredientIndices,
+                                s.Instruction
+                            );
+
+                            if (bestIdx == i)
                             {
-                                if (
-                                    TryToRowUnit(
-                                        ingToken.Amount.Value,
-                                        ingToken.Unit,
-                                        ingredient,
-                                        out var inRowUnit
-                                    )
-                                )
+                                stepUses = true;
+                                if (ingToken.Amount.HasValue && ingredient.Quantity is > 0)
                                 {
-                                    sumLow += inRowUnit;
-                                    stepAmounts.Add(inRowUnit);
-                                    hasComparableAmounts = true;
+                                    if (
+                                        TryToRowUnit(
+                                            ingToken.Amount.Value,
+                                            ingToken.Unit,
+                                            ingredient,
+                                            out var inRowUnit
+                                        )
+                                    )
+                                    {
+                                        sumLow += inRowUnit;
+                                        stepAmounts.Add(inRowUnit);
+                                        hasComparableAmounts = true;
+                                    }
                                 }
                             }
                         }

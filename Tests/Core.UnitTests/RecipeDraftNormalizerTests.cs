@@ -1958,4 +1958,107 @@ public sealed class RecipeDraftNormalizerTests
         Assert.AreEqual("Filling", draft.Steps![2].SectionName);
         Assert.AreEqual("Filling", draft.Steps![3].SectionName);
     }
+
+    [TestMethod]
+    public void FindBestMatchingIngredientIndex_DisambiguatesDuplicateIngredientsBySectionAndAmount()
+    {
+        IReadOnlyList<IngredientCandidateInfo> candidates =
+        [
+            new IngredientCandidateInfo(
+                Index: 0,
+                SectionName: "BUFFALO SAUCE",
+                DisplayName: "hot sauce",
+                CanonicalOrMatchedName: "Hot Sauce",
+                Quantity: 0.5m,
+                MaxQuantity: null,
+                Unit: MeasurementUnit.Cup,
+                CustomUnitName: null
+            ),
+            new IngredientCandidateInfo(
+                Index: 1,
+                SectionName: "CAULIFLOWER",
+                DisplayName: "hot sauce",
+                CanonicalOrMatchedName: "Hot Sauce",
+                Quantity: 1m,
+                MaxQuantity: null,
+                Unit: MeasurementUnit.Tbsp,
+                CustomUnitName: null
+            ),
+        ];
+
+        var token1 = new StepIngredientToken("hot sauce", Amount: 0.5m, Unit: MeasurementUnit.Cup);
+        var idx1 = RecipeDraftNormalizer.FindBestMatchingIngredientIndex(
+            token1,
+            "FOR THE BUFFALO SAUCE",
+            candidates
+        );
+        Assert.AreEqual(0, idx1);
+
+        var token2 = new StepIngredientToken("hot sauce", Amount: 1m, Unit: MeasurementUnit.Tbsp);
+        var idx2 = RecipeDraftNormalizer.FindBestMatchingIngredientIndex(
+            token2,
+            "FOR THE CAULIFLOWER",
+            candidates
+        );
+        Assert.AreEqual(1, idx2);
+    }
+
+    [TestMethod]
+    public void Normalize_ResolvesStepIngredientIndices_ToCorrectSectionAndCleansMismatches()
+    {
+        var rawPayload = new LlmExtractedRecipePayload(
+            Title: "Buffalo Cauliflower Bites",
+            Ingredients:
+            [
+                new(
+                    SectionName: "BUFFALO SAUCE",
+                    Quantity: 0.5m,
+                    MaxQuantity: null,
+                    Unit: "Cup",
+                    DisplayName: "hot sauce",
+                    CanonicalFoodName: "Hot Sauce"
+                ),
+                new(
+                    SectionName: "CAULIFLOWER",
+                    Quantity: 1m,
+                    MaxQuantity: null,
+                    Unit: "Tbsp",
+                    DisplayName: "hot sauce",
+                    CanonicalFoodName: "Hot Sauce"
+                ),
+            ],
+            Steps:
+            [
+                new(
+                    SectionName: "FOR THE BUFFALO SAUCE",
+                    Instruction: "Whisk in ||{\"ingredient\": \"hot sauce\", \"amount\": 0.5, \"unit\": \"cup\"}||.",
+                    IngredientIndices: [0]
+                ),
+                new(
+                    SectionName: "FOR THE CAULIFLOWER",
+                    Instruction: "Whisk in ||{\"ingredient\": \"hot sauce\", \"amount\": 1, \"unit\": \"tbsp\"}||.",
+                    // LLM accidentally put index 0 (the Buffalo sauce one)
+                    IngredientIndices: [0]
+                ),
+            ]
+        );
+
+        var draft = RecipeDraftNormalizer.Normalize(
+            raw: rawPayload,
+            catalogFoods: [],
+            tags: [],
+            sourceUrl: null,
+            fallbackSourceName: null,
+            fallbackSourceAuthor: null,
+            coverImagePath: null,
+            thumbnailImagePath: null
+        );
+
+        Assert.AreEqual(1, draft.Steps![0].IngredientIndices!.Count);
+        Assert.AreEqual(0, draft.Steps![0].IngredientIndices![0]);
+
+        // Step 2 should have resolved to Index 1 (CAULIFLOWER) and replaced the faulty index 0
+        Assert.AreEqual(1, draft.Steps![1].IngredientIndices!.Count);
+        Assert.AreEqual(1, draft.Steps![1].IngredientIndices![0]);
+    }
 }

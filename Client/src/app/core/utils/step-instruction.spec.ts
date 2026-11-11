@@ -1,7 +1,10 @@
 import {
   InstructionIngredient,
   buildInstructionSegments,
+  ingredientUses,
+  matchIngredient,
   renderScaledInstruction,
+  stepIngredientCallouts,
 } from './step-instruction';
 
 const flour: InstructionIngredient = {
@@ -95,5 +98,61 @@ describe('step-instruction utils', () => {
 
     // Plain scaled instruction renders the converted temperature
     expect(renderScaledInstruction(step, ingredients, 1, 'Metric')).toBe('Preheat oven to 163°C.');
+  });
+
+  it('disambiguates duplicate ingredients by stepIngredientIds', () => {
+    const hotSauce1: InstructionIngredient = {
+      id: 'sauce-1',
+      displayName: 'hot sauce',
+      quantity: 0.5,
+      unit: 'Cup',
+    };
+    const hotSauce2: InstructionIngredient = {
+      id: 'sauce-2',
+      displayName: 'hot sauce',
+      quantity: 1,
+      unit: 'Tbsp',
+    };
+    const multiIngs = [hotSauce1, hotSauce2];
+
+    const token = {
+      ingredient: 'hot sauce',
+      amount: 1,
+      unit: 'Tbsp',
+    };
+
+    // When step links to sauce-2, matchIngredient chooses sauce-2
+    const match = matchIngredient(token, multiIngs, ['sauce-2']);
+    expect(match?.id).toBe('sauce-2');
+
+    // When step links to sauce-1, matchIngredient chooses sauce-1
+    const match1 = matchIngredient(token, multiIngs, ['sauce-1']);
+    expect(match1?.id).toBe('sauce-1');
+
+    // ingredientUses attributes each step to its linked ingredient
+    const steps = [
+      {
+        stepNumber: 1,
+        instruction: 'Whisk ||{"ingredient":"hot sauce","amount":0.5,"unit":"cup"}||.',
+        ingredientIds: ['sauce-1'],
+      },
+      {
+        stepNumber: 2,
+        instruction: 'Whisk ||{"ingredient":"hot sauce","amount":1,"unit":"tbsp"}||.',
+        ingredientIds: ['sauce-2'],
+      },
+    ];
+
+    const uses1 = ingredientUses(steps, 'sauce-1', multiIngs);
+    expect(uses1.length).toBe(1);
+    expect(uses1[0].stepNumber).toBe(1);
+
+    const uses2 = ingredientUses(steps, 'sauce-2', multiIngs);
+    expect(uses2.length).toBe(1);
+    expect(uses2[0].stepNumber).toBe(2);
+
+    // Callouts link to the correct ingredient ID
+    const callouts = stepIngredientCallouts(steps[1], multiIngs);
+    expect(callouts).toEqual([{ id: 'sauce-2', label: '1 tbsp hot sauce' }]);
   });
 });

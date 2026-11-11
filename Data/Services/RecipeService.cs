@@ -1493,22 +1493,67 @@ public sealed partial class RecipeService(
             var indices = (sInput.IngredientIndices ?? []).Concat(amounts.Keys).ToList();
 
             var tokens = StepInstructionParser.ExtractTokens(sInput.Instruction);
+            var ingredientCandidates = createdIngredients
+                .Select(
+                    (ci, idx) =>
+                        new IngredientCandidateInfo(
+                            idx,
+                            ci.SectionName,
+                            ci.DisplayName,
+                            ci.FoodItem?.Name,
+                            ci.Quantity,
+                            ci.MaxQuantity,
+                            ci.Unit,
+                            ci.CustomUnitName,
+                            ci.Id
+                        )
+                )
+                .ToArray();
+
             foreach (var token in tokens)
             {
                 if (token is StepIngredientToken ingToken)
                 {
-                    var match = createdIngredients.FirstOrDefault(ci =>
-                        (ingToken.IngredientId.HasValue && ci.Id == ingToken.IngredientId.Value)
-                        || string.Equals(
-                            ci.DisplayName,
-                            ingToken.Ingredient,
-                            StringComparison.OrdinalIgnoreCase
-                        )
+                    var matchIdx = RecipeDraftNormalizer.FindBestMatchingIngredientIndex(
+                        ingToken,
+                        sInput.SectionName,
+                        ingredientCandidates,
+                        indices,
+                        sInput.Instruction
                     );
 
-                    if (match is not null)
+                    if (matchIdx >= 0)
                     {
-                        var matchIdx = createdIngredients.IndexOf(match);
+                        var candidate = ingredientCandidates[matchIdx];
+                        var otherMismatched = indices
+                            .Where(idx =>
+                                idx != matchIdx
+                                && idx >= 0
+                                && idx < ingredientCandidates.Length
+                                && (
+                                    string.Equals(
+                                        ingredientCandidates[idx].DisplayName,
+                                        candidate.DisplayName,
+                                        StringComparison.OrdinalIgnoreCase
+                                    )
+                                    || (
+                                        !string.IsNullOrEmpty(candidate.CanonicalOrMatchedName)
+                                        && string.Equals(
+                                            ingredientCandidates[idx].CanonicalOrMatchedName,
+                                            candidate.CanonicalOrMatchedName,
+                                            StringComparison.OrdinalIgnoreCase
+                                        )
+                                    )
+                                )
+                            )
+                            .ToList();
+
+                        foreach (var oldIdx in otherMismatched)
+                        {
+                            indices.Remove(oldIdx);
+                            amounts.Remove(oldIdx);
+                        }
+
                         if (!indices.Contains(matchIdx))
                             indices.Add(matchIdx);
                         if (ingToken.Amount.HasValue && !amounts.ContainsKey(matchIdx))

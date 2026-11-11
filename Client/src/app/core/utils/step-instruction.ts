@@ -86,6 +86,8 @@ export function buildInstructionSegments(
       });
     } else {
       const ing = seg.token as StepIngredientToken;
+      const matched = matchIngredient(ing, _ingredients, step.ingredientIds);
+      const matchedId = matched?.id ?? ing.ingredientId ?? null;
       const displayText = formatTokenDisplay(ing, factor, system);
       const totalText =
         ing.displayAmount != null && ing.amount != null
@@ -99,7 +101,7 @@ export function buildInstructionSegments(
         text: displayText,
         amount: {
           kind: 'Ingredient',
-          ingredientId: ing.ingredientId ?? null,
+          ingredientId: matchedId,
           ingredientName: totalText ?? ing.ingredient,
           scaled: isScaled,
         },
@@ -121,19 +123,44 @@ export function renderScaledInstruction(
     .join('');
 }
 
-function matchIngredient(
+export function matchIngredient(
   token: StepIngredientToken,
   ingredients: readonly InstructionIngredient[],
+  stepIngredientIds?: readonly string[] | null,
 ): InstructionIngredient | undefined {
   if (token.ingredientId) {
     const found = ingredients.find((i) => i.id === token.ingredientId);
     if (found) return found;
   }
   const clean = token.ingredient.trim().toLowerCase();
-  return ingredients.find((i) => {
+  const nameMatches = ingredients.filter((i) => {
     const name = i.displayName.trim().toLowerCase();
     return name === clean || name.includes(clean) || clean.includes(name);
   });
+
+  if (nameMatches.length === 0) {
+    return undefined;
+  }
+
+  if (nameMatches.length === 1) {
+    return nameMatches[0];
+  }
+
+  // If multiple ingredients match by name, prioritize candidate linked to this step via stepIngredientIds
+  if (stepIngredientIds && stepIngredientIds.length > 0) {
+    const inStep = nameMatches.find((i) => stepIngredientIds.includes(i.id));
+    if (inStep) {
+      return inStep;
+    }
+  }
+
+  // Exact display name match
+  const exact = nameMatches.find((i) => i.displayName.trim().toLowerCase() === clean);
+  if (exact) {
+    return exact;
+  }
+
+  return nameMatches[0];
 }
 
 export function stepIngredientCallouts(
@@ -155,7 +182,7 @@ export function stepIngredientCallouts(
   for (const seg of segments) {
     if (seg.token && (seg.token.type === 'ingredient' || 'ingredient' in seg.token)) {
       const ingToken = seg.token as StepIngredientToken;
-      const matched = matchIngredient(ingToken, ingredients);
+      const matched = matchIngredient(ingToken, ingredients, step.ingredientIds);
       const id = matched?.id ?? ingToken.ingredientId ?? ingToken.ingredient;
       if (!seenIds.has(id)) {
         seenIds.add(id);
@@ -214,7 +241,7 @@ export function ingredientUses(
     for (const seg of segments) {
       if (seg.token && (seg.token.type === 'ingredient' || 'ingredient' in seg.token)) {
         const ingToken = seg.token as StepIngredientToken;
-        const matched = matchIngredient(ingToken, ingredients);
+        const matched = matchIngredient(ingToken, ingredients, step.ingredientIds);
         if (matched?.id === ingredientId) {
           uses.push({
             stepNumber: step.stepNumber,

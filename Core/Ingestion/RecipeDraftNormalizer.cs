@@ -17,12 +17,343 @@ public record CatalogFoodLookupItem(
 
 public record CatalogTagLookupItem(Guid Id, string Name, string NormalizedName, string Slug);
 
+public readonly record struct IngredientCandidateInfo(
+    int Index,
+    string? SectionName,
+    string? DisplayName,
+    string? CanonicalOrMatchedName,
+    decimal? Quantity,
+    decimal? MaxQuantity,
+    MeasurementUnit? Unit,
+    string? CustomUnitName,
+    Guid? Id = null
+);
+
 public static class RecipeDraftNormalizer
 {
     private static readonly Regex SubStepPrefix = new(
         @"^\s*(?:step\s+)?\d+[A-Za-z][.):]\s+",
         RegexOptions.IgnoreCase | RegexOptions.Compiled
     );
+
+    public static string NormalizeSectionName(string? section)
+    {
+        if (string.IsNullOrWhiteSpace(section))
+            return string.Empty;
+
+        var s = section.Trim().ToLowerInvariant();
+        string[] prefixes =
+        [
+            "for the ",
+            "to make the ",
+            "to assemble the ",
+            "for assembling the ",
+            "to make ",
+            "for ",
+            "the ",
+            "make the ",
+            "prepare the ",
+        ];
+
+        bool changed;
+        do
+        {
+            changed = false;
+            foreach (var p in prefixes)
+            {
+                if (s.StartsWith(p, StringComparison.Ordinal))
+                {
+                    s = s[p.Length..].Trim();
+                    changed = true;
+                }
+            }
+        } while (changed);
+
+        return s.TrimEnd(':', '-', ' ', ';');
+    }
+
+    public static int FindBestMatchingIngredientIndex(
+        StepIngredientToken token,
+        string? stepSectionName,
+        IReadOnlyList<IngredientCandidateInfo> candidates,
+        IReadOnlyCollection<int>? currentStepIndices = null,
+        string? stepInstruction = null
+    )
+    {
+        if (candidates is null || candidates.Count == 0)
+        {
+            return -1;
+        }
+
+        if (token.IngredientId.HasValue)
+        {
+            var idMatch = candidates.FirstOrDefault(c => c.Id == token.IngredientId.Value);
+            if (idMatch.Index >= 0)
+            {
+                return idMatch.Index;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(token.Ingredient))
+        {
+            return -1;
+        }
+
+        var tokenName = token.Ingredient.Trim();
+        var matching = new List<(IngredientCandidateInfo Candidate, int NameScore)>();
+
+        foreach (var c in candidates)
+        {
+            var disp = c.DisplayName?.Trim();
+            var alt = c.CanonicalOrMatchedName?.Trim();
+            var nameScore = 0;
+
+            if (!string.IsNullOrWhiteSpace(disp))
+            {
+                if (string.Equals(tokenName, disp, StringComparison.OrdinalIgnoreCase))
+                {
+                    nameScore = 100;
+                }
+                else if (
+                    disp.Contains(tokenName, StringComparison.OrdinalIgnoreCase)
+                    || tokenName.Contains(disp, StringComparison.OrdinalIgnoreCase)
+                )
+                {
+                    nameScore = 50;
+                }
+            }
+
+            if (nameScore < 90 && !string.IsNullOrWhiteSpace(alt))
+            {
+                if (string.Equals(tokenName, alt, StringComparison.OrdinalIgnoreCase))
+                {
+                    nameScore = Math.Max(nameScore, 90);
+                }
+                else if (
+                    alt.Contains(tokenName, StringComparison.OrdinalIgnoreCase)
+                    || tokenName.Contains(alt, StringComparison.OrdinalIgnoreCase)
+                )
+                {
+                    nameScore = Math.Max(nameScore, 40);
+                }
+            }
+
+            if (nameScore > 0)
+            {
+                matching.Add((c, nameScore));
+            }
+        }
+
+        if (matching.Count == 0)
+        {
+            return -1;
+        }
+
+        if (matching.Count == 1)
+        {
+            return matching[0].Candidate.Index;
+        }
+
+        var stepSectionNorm = NormalizeSectionName(stepSectionName);
+        var bestScore = int.MinValue;
+        var bestIdx = matching[0].Candidate.Index;
+
+        foreach (var (cand, nameScore) in matching)
+        {
+            var score = nameScore;
+            var candSectionNorm = NormalizeSectionName(cand.SectionName);
+
+            // 1. Section matching
+            if (!string.IsNullOrEmpty(stepSectionNorm) && !string.IsNullOrEmpty(candSectionNorm))
+            {
+                if (
+                    string.Equals(
+                        stepSectionNorm,
+                        candSectionNorm,
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                )
+                {
+                    score += 250;
+                }
+                else if (
+                    candSectionNorm.Contains(stepSectionNorm, StringComparison.OrdinalIgnoreCase)
+                    || stepSectionNorm.Contains(candSectionNorm, StringComparison.OrdinalIgnoreCase)
+                )
+                {
+                    score += 180;
+                }
+                else
+                {
+                    score -= 100;
+                }
+            }
+            else if (
+                string.IsNullOrEmpty(stepSectionNorm) && !string.IsNullOrEmpty(candSectionNorm)
+            )
+            {
+                if (
+                    !string.IsNullOrWhiteSpace(stepInstruction)
+                    && stepInstruction.Contains(candSectionNorm, StringComparison.OrdinalIgnoreCase)
+                )
+                {
+                    score += 80;
+                }
+            }
+
+            // 2. Amount matching
+            if (token.Amount.HasValue && cand.Quantity.HasValue && cand.Quantity.Value > 0)
+            {
+                var tokenAmt = token.Amount.Value;
+                var candQty = cand.Quantity.Value;
+                var candMax = cand.MaxQuantity ?? candQty;
+
+                decimal? convertedAmt = null;
+                if (token.Unit == cand.Unit)
+                {
+                    convertedAmt = tokenAmt;
+                }
+                else if (token.Unit.HasValue && cand.Unit.HasValue)
+                {
+                    if (
+                        CulinaryMath.TryConvertQuantity(
+                            tokenAmt,
+                            token.Unit.Value,
+                            cand.Unit.Value,
+                            out var cAmt
+                        )
+                    )
+                    {
+                        convertedAmt = cAmt;
+                    }
+                }
+
+                if (convertedAmt.HasValue)
+                {
+                    var val = convertedAmt.Value;
+                    var tolerance = Math.Max(0.001m, candQty * 0.01m);
+
+                    if (Math.Abs(val - candQty) <= tolerance)
+                    {
+                        score += 150;
+                    }
+                    else if (
+                        cand.MaxQuantity.HasValue
+                        && val >= candQty - tolerance
+                        && val <= candMax + tolerance
+                    )
+                    {
+                        score += 120;
+                    }
+                    else if (val < candQty - tolerance)
+                    {
+                        score += 60;
+                    }
+                    else if (val > candMax + tolerance)
+                    {
+                        score -= 120;
+                    }
+                }
+            }
+
+            // 3. Direct Unit match
+            if (token.Unit.HasValue && cand.Unit.HasValue && token.Unit == cand.Unit)
+            {
+                score += 40;
+            }
+
+            // 4. In current step indices
+            if (currentStepIndices?.Contains(cand.Index) == true)
+            {
+                score += 30;
+            }
+
+            if (score > bestScore)
+            {
+                bestScore = score;
+                bestIdx = cand.Index;
+            }
+        }
+
+        return bestIdx;
+    }
+
+    public static int FindBestMatchingIngredientIndex(
+        StepIngredientToken token,
+        string? stepSectionName,
+        IReadOnlyList<IngestionDraftIngredientDto> ingredients,
+        IReadOnlyCollection<int>? currentStepIndices = null,
+        string? stepInstruction = null
+    )
+    {
+        if (ingredients is null || ingredients.Count == 0)
+        {
+            return -1;
+        }
+
+        var candidates = new IngredientCandidateInfo[ingredients.Count];
+        for (var i = 0; i < ingredients.Count; i++)
+        {
+            var ing = ingredients[i];
+            candidates[i] = new IngredientCandidateInfo(
+                i,
+                ing.SectionName,
+                ing.DisplayName,
+                ing.MatchedFoodItemName,
+                ing.Quantity,
+                ing.MaxQuantity,
+                ing.Unit,
+                ing.CustomUnitName
+            );
+        }
+
+        return FindBestMatchingIngredientIndex(
+            token,
+            stepSectionName,
+            candidates,
+            currentStepIndices,
+            stepInstruction
+        );
+    }
+
+    public static int FindBestMatchingIngredientIndex(
+        StepIngredientToken token,
+        string? stepSectionName,
+        IReadOnlyList<LlmExtractedIngredientItem> ingredients,
+        IReadOnlyCollection<int>? currentStepIndices = null,
+        string? stepInstruction = null
+    )
+    {
+        if (ingredients is null || ingredients.Count == 0)
+        {
+            return -1;
+        }
+
+        var candidates = new IngredientCandidateInfo[ingredients.Count];
+        for (var i = 0; i < ingredients.Count; i++)
+        {
+            var ing = ingredients[i];
+            var (normUnit, custom) = NormalizeUnit(ing.Unit, ing.CustomUnitName);
+            candidates[i] = new IngredientCandidateInfo(
+                i,
+                ing.SectionName,
+                ing.DisplayName,
+                ing.CanonicalFoodName,
+                ing.Quantity,
+                ing.MaxQuantity,
+                normUnit,
+                custom
+            );
+        }
+
+        return FindBestMatchingIngredientIndex(
+            token,
+            stepSectionName,
+            candidates,
+            currentStepIndices,
+            stepInstruction
+        );
+    }
 
     private static bool IsValidMeasurement(RecipeMeasurement? measurement)
     {
@@ -1063,25 +1394,49 @@ public static class RecipeDraftNormalizer
             {
                 if (token is StepIngredientToken ingToken)
                 {
-                    var matchIdx = normalizedIngredients.FindIndex(i =>
-                        string.Equals(
-                            i.DisplayName,
-                            ingToken.Ingredient,
-                            StringComparison.OrdinalIgnoreCase
-                        )
-                        || (
-                            !string.IsNullOrEmpty(i.MatchedFoodItemName)
-                            && string.Equals(
-                                i.MatchedFoodItemName,
-                                ingToken.Ingredient,
-                                StringComparison.OrdinalIgnoreCase
-                            )
-                        )
+                    var matchIdx = FindBestMatchingIngredientIndex(
+                        ingToken,
+                        rawStep.SectionName,
+                        normalizedIngredients,
+                        validIndices,
+                        instruction
                     );
 
-                    if (matchIdx >= 0 && !validIndices.Contains(matchIdx))
+                    if (matchIdx >= 0)
                     {
-                        validIndices.Add(matchIdx);
+                        var candidate = normalizedIngredients[matchIdx];
+                        var otherMismatched = validIndices
+                            .Where(idx =>
+                                idx != matchIdx
+                                && idx >= 0
+                                && idx < normalizedIngredients.Count
+                                && (
+                                    string.Equals(
+                                        normalizedIngredients[idx].DisplayName,
+                                        candidate.DisplayName,
+                                        StringComparison.OrdinalIgnoreCase
+                                    )
+                                    || (
+                                        !string.IsNullOrEmpty(candidate.MatchedFoodItemName)
+                                        && string.Equals(
+                                            normalizedIngredients[idx].MatchedFoodItemName,
+                                            candidate.MatchedFoodItemName,
+                                            StringComparison.OrdinalIgnoreCase
+                                        )
+                                    )
+                                )
+                            )
+                            .ToList();
+
+                        foreach (var oldIdx in otherMismatched)
+                        {
+                            validIndices.Remove(oldIdx);
+                        }
+
+                        if (!validIndices.Contains(matchIdx))
+                        {
+                            validIndices.Add(matchIdx);
+                        }
                     }
                 }
                 else if (token is StepTimerToken timerToken && timerToken.Seconds >= 1)
@@ -1166,7 +1521,7 @@ public static class RecipeDraftNormalizer
                         ? null
                         : rawStep.SectionName.Trim(),
                     Instruction: instruction,
-                    IngredientIndices: validIndices,
+                    IngredientIndices: validIndices.OrderBy(idx => idx).ToList(),
                     Timers: timers,
                     ImagePath: null,
                     IngredientAmounts: amounts
