@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.RegularExpressions;
 using App.Core.Recipes;
 
 namespace App.Core.Ingestion;
@@ -8,6 +9,12 @@ namespace App.Core.Ingestion;
 /// </summary>
 public static class TaggedStepDiagnostics
 {
+    private static readonly Regex OpenEndedPlusRegex = new(
+        @"\bplus\s+(?:more|extra|[\w\s]+for)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled,
+        TimeSpan.FromSeconds(1)
+    );
+
     public static IReadOnlyList<string> GetIssues(LlmExtractedRecipePayload recipe)
     {
         var issues = new List<string>();
@@ -166,7 +173,11 @@ public static class TaggedStepDiagnostics
                             stepAmounts.Count > 1
                             && stepAmounts.All(a => Math.Abs(a - rowHigh) <= tolerance);
 
-                        if (!isRepeatMentionOfFullAmount)
+                        var hasOpenEndedPlusQualifier =
+                            OpenEndedPlusRegex.IsMatch(ingredient.OriginalRawText ?? "")
+                            || OpenEndedPlusRegex.IsMatch(ingredient.PreparationNote ?? "");
+
+                        if (!isRepeatMentionOfFullAmount && !hasOpenEndedPlusQualifier)
                         {
                             issues.Add(
                                 $"{name}: step amounts ({FormatNumber(sumLow)} {ingredient.Unit}) exceed the ingredient list ({FormatNumber(rowHigh)} {ingredient.Unit})."

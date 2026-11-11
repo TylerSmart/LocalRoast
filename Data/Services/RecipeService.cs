@@ -1505,7 +1505,8 @@ public sealed partial class RecipeService(
                             ci.MaxQuantity,
                             ci.Unit,
                             ci.CustomUnitName,
-                            ci.Id
+                            ci.Id,
+                            ci.PreparationNote
                         )
                 )
                 .ToArray();

@@ -26,7 +26,8 @@ public readonly record struct IngredientCandidateInfo(
     decimal? MaxQuantity,
     MeasurementUnit? Unit,
     string? CustomUnitName,
-    Guid? Id = null
+    Guid? Id = null,
+    string? PreparationNote = null
 );
 
 public static class RecipeDraftNormalizer
@@ -268,6 +269,30 @@ public static class RecipeDraftNormalizer
                 score += 30;
             }
 
+            // 5. Divided / remaining matching
+            var hasRemaining =
+                !string.IsNullOrWhiteSpace(stepInstruction)
+                && Regex.IsMatch(stepInstruction, @"\bremaining\b", RegexOptions.IgnoreCase);
+            var candIsDivided =
+                !string.IsNullOrWhiteSpace(cand.PreparationNote)
+                && cand.PreparationNote.Contains("divided", StringComparison.OrdinalIgnoreCase);
+
+            if (hasRemaining)
+            {
+                if (candIsDivided)
+                {
+                    score += 150;
+                }
+                else
+                {
+                    score -= 80;
+                }
+            }
+            else if (candIsDivided)
+            {
+                score += 20;
+            }
+
             if (score > bestScore)
             {
                 bestScore = score;
@@ -299,11 +324,12 @@ public static class RecipeDraftNormalizer
                 i,
                 ing.SectionName,
                 ing.DisplayName,
-                ing.MatchedFoodItemName,
+                ing.MatchedFoodItemName ?? ing.ProposedFoodItemName,
                 ing.Quantity,
                 ing.MaxQuantity,
                 ing.Unit,
-                ing.CustomUnitName
+                ing.CustomUnitName,
+                PreparationNote: ing.PreparationNote
             );
         }
 
@@ -342,7 +368,8 @@ public static class RecipeDraftNormalizer
                 ing.Quantity,
                 ing.MaxQuantity,
                 normUnit,
-                custom
+                custom,
+                PreparationNote: ing.PreparationNote
             );
         }
 
@@ -943,7 +970,7 @@ public static class RecipeDraftNormalizer
                 && cleanQuantity.Value > sa.Quantity
                 && Regex.IsMatch(
                     rawIng.OriginalRawText ?? "",
-                    @"\bdivided\b",
+                    @"\b(?:divided|plus\s+(?:more|extra|[\w\s]+for))\b",
                     RegexOptions.IgnoreCase
                 );
 
