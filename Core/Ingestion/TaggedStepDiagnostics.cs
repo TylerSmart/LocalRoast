@@ -28,6 +28,25 @@ public static partial class TaggedStepDiagnostics
         var ingredients = recipe.Ingredients ?? [];
         var steps = recipe.Steps ?? [];
 
+        if (!string.IsNullOrWhiteSpace(recipe.Title))
+        {
+            var titleNorm = recipe.Title.Trim();
+            for (var i = 0; i < ingredients.Count; i++)
+            {
+                var ing = ingredients[i];
+                var name = ing.DisplayName ?? ing.CanonicalFoodName;
+                if (
+                    !string.IsNullOrWhiteSpace(name)
+                    && string.Equals(name.Trim(), titleNorm, StringComparison.OrdinalIgnoreCase)
+                )
+                {
+                    issues.Add(
+                        $"Ingredient \"{name}\" is named after the recipe title \"{recipe.Title}\". Use the specific food name from the source ingredient line (e.g. \"{ing.OriginalRawText}\") instead of the recipe title."
+                    );
+                }
+            }
+        }
+
         for (var i = 0; i < steps.Count; i++)
         {
             var instruction = steps[i].Instruction ?? "";

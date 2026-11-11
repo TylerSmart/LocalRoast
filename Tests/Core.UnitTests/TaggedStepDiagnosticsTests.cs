@@ -305,4 +305,37 @@ public sealed class TaggedStepDiagnosticsTests
             $"Expected unparseable token issue, got: {string.Join(", ", issues)}"
         );
     }
+
+    [TestMethod]
+    public void GetIssues_FlagsIngredientNamedAfterRecipeTitle()
+    {
+        var recipe = new LlmExtractedRecipePayload(
+            Title: "Frico",
+            Ingredients:
+            [
+                new LlmExtractedIngredientItem(
+                    SectionName: null,
+                    Quantity: 1m,
+                    MaxQuantity: null,
+                    Unit: "lb",
+                    CanonicalFoodName: "Frico",
+                    DisplayName: "Frico",
+                    OriginalRawText: "1 pound Montasio or aged Asiago cheese, grated fine"
+                ),
+            ],
+            Steps:
+            [
+                new LlmExtractedStepItem(
+                    null,
+                    "Sprinkle ||{\"ingredient\": \"Frico\", \"amount\": 2, \"unit\": \"oz\"}|| over bottom of skillet."
+                ),
+            ]
+        );
+
+        var issues = TaggedStepDiagnostics.GetIssues(recipe);
+        Assert.IsTrue(
+            issues.Any(i => i.Contains("is named after the recipe title \"Frico\"")),
+            $"Expected ingredient named after recipe title warning, got: {string.Join(", ", issues)}"
+        );
+    }
 }
