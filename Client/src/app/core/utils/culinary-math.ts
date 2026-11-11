@@ -194,6 +194,7 @@ function practicalVolume(
 }
 
 const KNOWN_FRACTIONS: { target: number; fraction: string }[] = [
+  { target: 0.0625, fraction: '1/16' },
   { target: 0.125, fraction: '1/8' },
   { target: 0.25, fraction: '1/4' },
   { target: 0.3333333, fraction: '1/3' },

@@ -9,6 +9,7 @@ public sealed class CulinaryMathTests
     [TestMethod]
     public void FormatNumber_SnapsToKitchenFractions()
     {
+        Assert.AreEqual("1/16", CulinaryMath.FormatNumber(0.0625m, false));
         Assert.AreEqual("1/8", CulinaryMath.FormatNumber(0.125m, false));
         Assert.AreEqual("1/4", CulinaryMath.FormatNumber(0.25m, false));
         Assert.AreEqual("1/3", CulinaryMath.FormatNumber(0.333m, false));

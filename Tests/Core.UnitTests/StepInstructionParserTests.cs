@@ -150,4 +150,30 @@ public sealed class StepInstructionParserTests
             cleaned
         );
     }
+
+    [TestMethod]
+    public void CleanStepInstruction_PreservesWordsEndingInUnitLetters()
+    {
+        const string text =
+            "While onion cooks, whisk eggs, remaining ||{\"ingredient\": \"pepper\", \"amount\": 0.25, \"unit\": \"tsp\"}||, and cook in oil ||{\"ingredient\": \"oil\", \"amount\": 1, \"unit\": \"tbsp\"}||.";
+        var cleaned = StepInstructionParser.CleanStepInstruction(text);
+
+        Assert.AreEqual(
+            "While onion cooks, whisk eggs, remaining ||{\"ingredient\": \"pepper\", \"amount\": 0.25, \"unit\": \"tsp\"}||, and cook in oil ||{\"ingredient\": \"oil\", \"amount\": 1, \"unit\": \"tbsp\"}||.",
+            cleaned
+        );
+    }
+
+    [TestMethod]
+    public void CleanStepInstruction_StripsPrecedingDuplicateMeasurement_WithRemaining()
+    {
+        const string text =
+            "While onion cooks, whisk eggs, remaining 1/8 teaspoon ||{\"ingredient\": \"salt\", \"amount\": 0.125, \"unit\": \"tsp\"}||.";
+        var cleaned = StepInstructionParser.CleanStepInstruction(text);
+
+        Assert.AreEqual(
+            "While onion cooks, whisk eggs, remaining ||{\"ingredient\": \"salt\", \"amount\": 0.125, \"unit\": \"tsp\"}||.",
+            cleaned
+        );
+    }
 }

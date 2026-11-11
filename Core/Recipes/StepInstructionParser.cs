@@ -18,8 +18,9 @@ public static partial class StepInstructionParser
     private static partial Regex TokenRegex();
 
     [GeneratedRegex(
-        @"(?<full>(?<qty>(?:\d+(?:[\s-]+\d+/\d+|/\d+|\.\d+)?|[½¼¾⅓⅔⅛⅜⅝⅞]))?\s*(?<unit>teaspoons?|tsp|tablespoons?|tbsp|cups?|fl(?:uid)?\.?\s*oz\.?|pints?|pt|quarts?|qt|gallons?|gal|ounces?|oz|pounds?|lbs?|grams?|g|kilograms?|kg|milliliters?|ml|liters?|l|pinches?|dashes?|cloves?|slices?|cans?|bunches?|head|heads)?)\s*$",
-        RegexOptions.IgnoreCase
+        @"(?:(?:\b(?<qty>\d+(?:[\s-]+\d+/\d+|/\d+|\.\d+)?|[½¼¾⅓⅔⅛⅜⅝⅞])\s*(?<unit>teaspoons?|tsp\.?|tablespoons?|tbsp\.?|cups?|fl(?:uid)?\.?\s*oz\.?|pints?|pt\.?|quarts?|qt\.?|gallons?|gal\.?|ounces?|oz\.?|pounds?|lbs?\.?|grams?|g|kilograms?|kg|milliliters?|ml|liters?|l|pinches?|dashes?|cloves?|slices?|cans?|bunches?|heads?)?(?:\s+of)?)|(?:(?:\ba\s+)?\b(?<unit>pinch(?:es)?|dash(?:es)?|clove(?:s)?|slice(?:s)?|can(?:s)?|bunch(?:es)?|head(?:s)?)\s+of))\s*$",
+        RegexOptions.IgnoreCase,
+        matchTimeoutMilliseconds: 1000
     )]
     private static partial Regex TrailingMeasurementRegex();
 

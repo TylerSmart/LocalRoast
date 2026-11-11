@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
   formatAmount,
   formatCountdown,
@@ -86,6 +86,7 @@ describe('culinary-math', () => {
     });
 
     it('should snap near-fractions to standard culinary fractions', () => {
+      expect(formatNumber(0.0625, false)).toBe('1/16');
       expect(formatNumber(0.5, false)).toBe('1/2');
       expect(formatNumber(0.24, false)).toBe('1/4');
       expect(formatNumber(0.33, false)).toBe('1/3');

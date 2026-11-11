@@ -1038,7 +1038,7 @@ public static class RecipeDraftNormalizer
                         var normLabel = t.Label.Trim();
                         if (
                             !timers.Any(existing =>
-                                existing.DurationSeconds == normSec
+                                existing.DurationSeconds == t.DurationSeconds
                                 && string.Equals(
                                     existing.Label,
                                     normLabel,

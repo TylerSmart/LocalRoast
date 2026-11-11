@@ -196,6 +196,7 @@ public static class CulinaryMath
 
     private static readonly (decimal Target, string Fraction)[] KnownFractions =
     [
+        (0.0625m, "1/16"),
         (0.125m, "1/8"),
         (0.25m, "1/4"),
         (0.3333333m, "1/3"),

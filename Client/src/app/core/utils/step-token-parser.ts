@@ -259,7 +259,7 @@ export function stepInstructionToPlainText(instruction: string | null | undefine
 }
 
 const TRAILING_MEASUREMENT_REGEX =
-  /((?:\d+(?:[\s-]+\d+\/\d+|\/\d+|\.\d+)?|[½¼¾⅓⅔⅛⅜⅝⅞]))?\s*(teaspoons?|tsp|tablespoons?|tbsp|cups?|fl(?:uid)?\.?\s*oz\.?|pints?|pt|quarts?|qt|gallons?|gal|ounces?|oz|pounds?|lbs?|grams?|g|kilograms?|kg|milliliters?|ml|liters?|l|pinches?|dashes?|cloves?|slices?|cans?|bunches?|head|heads)?\s*$/i;
+  /(?:(?:\b(?:\d+(?:[\s-]+\d+\/\d+|\/\d+|\.\d+)?|[½¼¾⅓⅔⅛⅜⅝⅞])\s*(?:teaspoons?|tsp\.?|tablespoons?|tbsp\.?|cups?|fl(?:uid)?\.?\s*oz\.?|pints?|pt\.?|quarts?|qt\.?|gallons?|gal\.?|ounces?|oz\.?|pounds?|lbs?\.?|grams?|g|kilograms?|kg|milliliters?|ml|liters?|l|pinches?|dashes?|cloves?|slices?|cans?|bunches?|heads?)?(?:\s+of)?)|(?:(?:\ba\s+)?\b(?:pinch(?:es)?|dash(?:es)?|clove(?:s)?|slice(?:s)?|can(?:s)?|bunch(?:es)?|head(?:s)?)\s+of))\s*$/i;
 
 export function cleanStepInstruction(instruction: string | null | undefined): string {
   if (!instruction) return '';
@@ -280,7 +280,7 @@ export function cleanStepInstruction(instruction: string | null | undefined): st
           nextToken.displayUnit != null
         ) {
           const match = TRAILING_MEASUREMENT_REGEX.exec(text);
-          if (match && (match[1] || match[2])) {
+          if (match) {
             text = text.slice(0, match.index);
           }
         }

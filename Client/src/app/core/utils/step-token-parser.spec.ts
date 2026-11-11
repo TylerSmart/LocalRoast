@@ -132,4 +132,22 @@ describe('step-token-parser', () => {
       'Transfer to bowl and stir in ||{"ingredient":"lime juice","amount":1.5,"unit":"tbsp"}||.',
     );
   });
+
+  it('cleans duplicate preceding measurements in step text while preserving words ending in unit characters', () => {
+    const raw =
+      'While onion cooks, whisk eggs, remaining ||{"ingredient":"pepper","amount":0.25,"unit":"tsp"}||, and cook in oil ||{"ingredient":"oil","amount":1,"unit":"tbsp"}||.';
+    const cleaned = cleanStepInstruction(raw);
+    expect(cleaned).toBe(
+      'While onion cooks, whisk eggs, remaining ||{"ingredient":"pepper","amount":0.25,"unit":"tsp"}||, and cook in oil ||{"ingredient":"oil","amount":1,"unit":"tbsp"}||.',
+    );
+  });
+
+  it('strips preceding measurements when remaining is present', () => {
+    const raw =
+      'While onion cooks, whisk eggs, remaining 1/8 teaspoon ||{"ingredient":"salt","amount":0.125,"unit":"tsp"}||.';
+    const cleaned = cleanStepInstruction(raw);
+    expect(cleaned).toBe(
+      'While onion cooks, whisk eggs, remaining ||{"ingredient":"salt","amount":0.125,"unit":"tsp"}||.',
+    );
+  });
 });
