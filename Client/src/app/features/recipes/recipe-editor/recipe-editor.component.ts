@@ -36,7 +36,13 @@ import {
   RecipeSummaryDto,
   UpsertRecipeRequest,
 } from '../../../core/models/recipe.models';
-import { CollectionDto, TagCategory, TagDto } from '../../../core/models/taxonomy.models';
+import {
+  AllTagCategories,
+  CollectionDto,
+  TagCategory,
+  TagCategoryLabels,
+  TagDto,
+} from '../../../core/models/taxonomy.models';
 import { FoodCatalogService } from '../../../core/services/food-catalog/food-catalog.service';
 import { MediaService } from '../../../core/services/media/media.service';
 import { RecipeService } from '../../../core/services/recipe/recipe.service';
@@ -216,13 +222,11 @@ export class RecipeEditorComponent implements OnInit {
   protected readonly selectedCollectionIds = signal<Set<string>>(new Set());
   protected readonly selectedTagIds = signal<Set<string>>(new Set());
 
-  protected readonly tagCategories: TagCategory[] = [
-    'Course',
-    'Cuisine',
-    'Dietary',
-    'Equipment',
-    'Custom',
-  ];
+  protected readonly tagCategories: TagCategory[] = AllTagCategories;
+
+  protected categoryLabel(cat: TagCategory): string {
+    return TagCategoryLabels[cat] ?? cat;
+  }
 
   // Main Form
   protected readonly form = this.fb.group({
@@ -530,6 +534,9 @@ export class RecipeEditorComponent implements OnInit {
       Cuisine: [],
       Dietary: [],
       Equipment: [],
+      Protein: [],
+      Occasion: [],
+      MealPrep: [],
       Custom: [],
     };
     for (const t of this.tags()) {

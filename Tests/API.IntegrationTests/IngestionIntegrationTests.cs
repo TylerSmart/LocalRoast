@@ -915,7 +915,7 @@ public sealed class IngestionIntegrationTests
             TagCategory.Cuisine,
             allTags.Single(t => t.Name == "Mediterranean").Category
         );
-        Assert.AreEqual(TagCategory.Custom, allTags.Single(t => t.Name == "Weeknight").Category);
+        Assert.AreEqual(TagCategory.Occasion, allTags.Single(t => t.Name == "Weeknight").Category);
 
         // Verify Recipe #1 preserved book metadata, cover image, chapter collection, and auto-created tags/foods
         var job1Detail = await client.GetFromJsonAsync<IngestionJobDetailDto>(

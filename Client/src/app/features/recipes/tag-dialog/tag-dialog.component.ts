@@ -14,7 +14,13 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSelectModule } from '@angular/material/select';
-import { TagCategory, TagDto, UpsertTagRequest } from '../../../core/models/taxonomy.models';
+import {
+  AllTagCategories,
+  TagCategory,
+  TagCategoryLabels,
+  TagDto,
+  UpsertTagRequest,
+} from '../../../core/models/taxonomy.models';
 import { TaxonomyService } from '../../../core/services/taxonomy/taxonomy.service';
 import {
   SearchableSelectComponent,
@@ -56,21 +62,14 @@ export class TagDialogComponent {
   protected readonly isSubmitting = signal<boolean>(false);
   protected readonly errorMessage = signal<string | null>(null);
 
-  protected readonly categoryOptions: SearchableSelectOption<TagCategory>[] = [
-    'Course',
-    'Cuisine',
-    'Dietary',
-    'Equipment',
-    'Custom',
-  ].map((c) => ({ value: c as TagCategory, label: c }));
+  protected readonly categories: TagCategory[] = AllTagCategories;
 
-  protected readonly categories: TagCategory[] = [
-    'Course',
-    'Cuisine',
-    'Dietary',
-    'Equipment',
-    'Custom',
-  ];
+  protected readonly categoryOptions: SearchableSelectOption<TagCategory>[] = AllTagCategories.map(
+    (c) => ({
+      value: c,
+      label: TagCategoryLabels[c] ?? c,
+    }),
+  );
 
   protected readonly form = this.fb.nonNullable.group({
     name: [

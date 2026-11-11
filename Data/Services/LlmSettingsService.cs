@@ -687,6 +687,11 @@ public sealed class LlmSettingsService(
         CancellationToken cancellationToken
     )
     {
+        if (settings.ModelProfilesSeeded)
+        {
+            return;
+        }
+
         var existingSlugs = await dbContext
             .LlmModelProfiles.Select(p => p.Slug.ToLower())
             .ToListAsync(cancellationToken);

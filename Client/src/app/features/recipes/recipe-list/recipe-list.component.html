@@ -182,7 +182,7 @@
             @for (cat of tagCategories; track cat) {
               @if (tagsByCategory(cat).length > 0) {
                 <div class="tag-cat-group">
-                  <span class="tag-cat-label">{{ cat }}</span>
+                  <span class="tag-cat-label">{{ categoryLabel(cat) }}</span>
                   <div class="tag-pills-wrap">
                     @for (t of tagsByCategory(cat); track t.id) {
                       <div class="tag-pill-group">

@@ -1,4 +1,27 @@
-export type TagCategory = 'Course' | 'Cuisine' | 'Dietary' | 'Equipment' | 'Custom';
+export type TagCategory =
+  'Course' | 'Cuisine' | 'Dietary' | 'Equipment' | 'Protein' | 'Occasion' | 'MealPrep' | 'Custom';
+
+export const TagCategoryLabels: Record<TagCategory, string> = {
+  Course: 'Meal & Course',
+  Cuisine: 'Cuisine',
+  Dietary: 'Dietary',
+  Equipment: 'Method & Equipment',
+  Protein: 'Protein & Base',
+  Occasion: 'Occasion & Season',
+  MealPrep: 'Meal Prep',
+  Custom: 'Custom',
+};
+
+export const AllTagCategories: TagCategory[] = [
+  'Course',
+  'Cuisine',
+  'Dietary',
+  'Equipment',
+  'Protein',
+  'Occasion',
+  'MealPrep',
+  'Custom',
+];
 
 export interface CollectionDto {
   id: string;

@@ -26,6 +26,9 @@ public enum TagCategory
     Dietary = 2,
     Equipment = 3,
     Custom = 4,
+    Protein = 5,
+    Occasion = 6,
+    MealPrep = 7,
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter))]

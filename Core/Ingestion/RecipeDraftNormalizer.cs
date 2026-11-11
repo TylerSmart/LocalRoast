@@ -1213,12 +1213,48 @@ public static class RecipeDraftNormalizer
                 var normTagName = cleanedTag.ToLowerInvariant();
                 var singularTag = Singularize(normTagName);
 
+                // 1. Direct match against existing tags
                 var matchedTag = tags.FirstOrDefault(t =>
                     t.NormalizedName == normTagName
                     || Singularize(t.NormalizedName) == singularTag
                     || t.Slug.Equals(normTagName, StringComparison.OrdinalIgnoreCase)
                     || t.Slug.EndsWith($"-{normTagName}", StringComparison.OrdinalIgnoreCase)
                 );
+
+                // 2. If no direct match, check alias mapping or PascalCase deconcatenation
+                if (matchedTag is null)
+                {
+                    string? aliasedName = null;
+                    if (BuiltInTags.CanonicalAliases.TryGetValue(cleanedTag, out var directAlias))
+                    {
+                        aliasedName = directAlias;
+                    }
+                    else
+                    {
+                        var splitTag = SplitPascalCase(cleanedTag);
+                        if (BuiltInTags.CanonicalAliases.TryGetValue(splitTag, out var splitAlias))
+                        {
+                            aliasedName = splitAlias;
+                        }
+                    }
+
+                    if (aliasedName is not null)
+                    {
+                        cleanedTag = aliasedName;
+                        normTagName = cleanedTag.ToLowerInvariant();
+                        singularTag = Singularize(normTagName);
+
+                        matchedTag = tags.FirstOrDefault(t =>
+                            t.NormalizedName == normTagName
+                            || Singularize(t.NormalizedName) == singularTag
+                            || t.Slug.Equals(normTagName, StringComparison.OrdinalIgnoreCase)
+                            || t.Slug.EndsWith(
+                                $"-{normTagName}",
+                                StringComparison.OrdinalIgnoreCase
+                            )
+                        );
+                    }
+                }
 
                 if (matchedTag is not null)
                 {
@@ -1227,12 +1263,24 @@ public static class RecipeDraftNormalizer
                         suggestedTagIds.Add(matchedTag.Id);
                     }
                 }
-                else if (seenProposedTagKeys.Add(singularTag))
+                else
                 {
-                    var displayTag = ToTagDisplayCase(cleanedTag);
-                    if (!string.IsNullOrWhiteSpace(displayTag))
+                    // Filter disallowed grocery sections and raw pantry staples
+                    if (
+                        BuiltInTags.DisallowedGrocerySectionNames.Contains(cleanedTag)
+                        || BuiltInTags.DisallowedGenericStaples.Contains(cleanedTag)
+                    )
                     {
-                        proposedTagNames.Add(displayTag);
+                        continue;
+                    }
+
+                    if (seenProposedTagKeys.Add(singularTag))
+                    {
+                        var displayTag = ToTagDisplayCase(cleanedTag);
+                        if (!string.IsNullOrWhiteSpace(displayTag))
+                        {
+                            proposedTagNames.Add(displayTag);
+                        }
                     }
                 }
             }
@@ -1370,6 +1418,25 @@ public static class RecipeDraftNormalizer
         return word;
     }
 
+    public static string SplitPascalCase(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return "";
+        }
+
+        // If the string already contains whitespace or hyphens, return trimmed
+        if (text.Contains(' ') || text.Contains('-') || text.Contains('_'))
+        {
+            return text.Trim();
+        }
+
+        // Match lower-to-upper transition e.g. "OnePot" -> "One Pot", "BBQSauce" -> "BBQ Sauce"
+        var result = Regex.Replace(text, @"(?<=[a-z0-9])([A-Z])", " $1");
+        result = Regex.Replace(result, @"(?<=[A-Z])([A-Z][a-z])", " $1");
+        return result.Trim();
+    }
+
     public static string ToTagDisplayCase(string text)
     {
         if (string.IsNullOrWhiteSpace(text))
@@ -1377,14 +1444,23 @@ public static class RecipeDraftNormalizer
             return "";
         }
 
-        var words = text.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var split = SplitPascalCase(text.Trim());
+        var words = split.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         for (var i = 0; i < words.Length; i++)
         {
             var segments = words[i].Split('-', StringSplitOptions.RemoveEmptyEntries);
             for (var j = 0; j < segments.Length; j++)
             {
-                var s = segments[j].ToLowerInvariant();
-                segments[j] = char.ToUpperInvariant(s[0]) + s[1..];
+                var s = segments[j];
+                if (s.Equals("bbq", StringComparison.OrdinalIgnoreCase))
+                {
+                    segments[j] = "BBQ";
+                }
+                else
+                {
+                    var lower = s.ToLowerInvariant();
+                    segments[j] = char.ToUpperInvariant(lower[0]) + lower[1..];
+                }
             }
             words[i] = string.Join('-', segments);
         }
@@ -1398,94 +1474,303 @@ public static class RecipeDraftNormalizer
 
         return norm switch
         {
+            // Course
             "breakfast"
             or "brunch"
             or "lunch"
             or "dinner"
             or "main"
             or "main dish"
+            or "main course"
             or "entree"
             or "side"
             or "side dish"
             or "appetizer"
             or "starter"
             or "snack"
+            or "midnight snack"
             or "dessert"
             or "beverage"
             or "drink"
             or "cocktail"
+            or "mocktail"
             or "soup"
             or "stew"
             or "salad"
             or "sandwich"
             or "bread"
+            or "baked good"
+            or "baked goods"
             or "sauce"
             or "condiment"
             or "dip"
-            or "dressing" => TagCategory.Course,
+            or "dressing"
+            or "spread"
+            or "marinade" => TagCategory.Course,
 
+            // Cuisine
             "american"
             or "southern"
-            or "cajun"
-            or "creole"
+            or "bbq"
             or "tex-mex"
             or "mexican"
-            or "latin"
+            or "cajun"
+            or "creole"
             or "caribbean"
+            or "south american"
+            or "cuban"
+            or "brazilian"
+            or "hawaiian"
             or "italian"
             or "french"
             or "spanish"
+            or "tapas"
             or "greek"
-            or "mediterranean"
-            or "middle eastern"
-            or "moroccan"
-            or "indian"
-            or "thai"
-            or "vietnamese"
+            or "german"
+            or "eastern european"
+            or "british"
+            or "irish"
+            or "scandinavian"
+            or "nordic"
+            or "east asian"
             or "chinese"
             or "japanese"
             or "korean"
+            or "southeast asian"
+            or "thai"
+            or "vietnamese"
+            or "indonesian"
+            or "filipino"
+            or "south asian"
+            or "indian"
+            or "pakistani"
+            or "mediterranean"
+            or "middle eastern"
+            or "lebanese"
+            or "turkish"
+            or "persian"
+            or "north african"
+            or "moroccan"
             or "asian"
-            or "german"
-            or "british"
-            or "irish" => TagCategory.Cuisine,
+            or "latin" => TagCategory.Cuisine,
 
+            // Dietary
             "vegetarian"
             or "vegan"
+            or "pescatarian"
             or "gluten-free"
             or "gluten free"
             or "dairy-free"
             or "dairy free"
             or "nut-free"
             or "nut free"
+            or "peanut-free"
+            or "peanut free"
+            or "tree-nut-free"
+            or "tree nut free"
             or "egg-free"
+            or "egg free"
+            or "soy-free"
+            or "soy free"
+            or "shellfish-free"
+            or "shellfish free"
+            or "fish-free"
+            or "fish free"
+            or "sesame-free"
+            or "sesame free"
             or "low-carb"
             or "low carb"
             or "keto"
             or "paleo"
             or "whole30"
+            or "halal"
+            or "kosher"
             or "high-protein"
+            or "high protein"
+            or "low-sodium"
+            or "low sodium"
+            or "low-fat"
+            or "low fat"
+            or "low-sugar"
+            or "low sugar"
+            or "sugar-free"
+            or "sugar free"
+            or "diabetic-friendly"
+            or "diabetic friendly"
+            or "gut-friendly"
+            or "gut friendly"
+            or "heart-healthy"
+            or "heart healthy"
+            or "high-fiber"
+            or "high fiber"
             or "healthy" => TagCategory.Dietary,
 
+            // Equipment
             "slow cooker"
             or "instant pot"
             or "pressure cooker"
             or "air fryer"
             or "grill"
             or "grilling"
+            or "charcoal grill"
+            or "gas grill"
             or "smoker"
+            or "smoking"
+            or "campfire"
             or "dutch oven"
             or "sheet pan"
             or "one-pot"
             or "one pot"
+            or "one-pan"
+            or "one pan"
+            or "no-cook"
+            or "no cook"
+            or "minimal dish"
+            or "minimal dishes"
             or "skillet"
             or "cast iron"
+            or "carbon steel"
+            or "stainless steel"
             or "wok"
             or "sous vide"
             or "stand mixer"
             or "food processor"
             or "blender"
-            or "no-cook" => TagCategory.Equipment,
+            or "toaster oven"
+            or "microwave"
+            or "waffle maker"
+            or "sauté"
+            or "saute"
+            or "braise"
+            or "deep-fry"
+            or "deep fry"
+            or "shallow-fry"
+            or "shallow fry"
+            or "pan-sear"
+            or "pan sear"
+            or "stir-fry"
+            or "stir fry"
+            or "boil & simmer"
+            or "boil"
+            or "simmer"
+            or "steamed"
+            or "steam"
+            or "baking"
+            or "bake"
+            or "roasting"
+            or "roast"
+            or "broiling"
+            or "broil" => TagCategory.Equipment,
+
+            // Protein & Base
+            "chicken breast"
+            or "chicken thigh"
+            or "chicken"
+            or "turkey"
+            or "duck"
+            or "poultry"
+            or "beef"
+            or "steak"
+            or "ground beef"
+            or "pork"
+            or "pork chop"
+            or "pork tenderloin"
+            or "pork shoulder"
+            or "pulled pork"
+            or "lamb"
+            or "sausage"
+            or "bacon"
+            or "ham"
+            or "veal"
+            or "salmon"
+            or "white fish"
+            or "cod"
+            or "halibut"
+            or "tilapia"
+            or "shrimp"
+            or "prawn"
+            or "scallop"
+            or "tuna"
+            or "crab"
+            or "lobster"
+            or "mussel"
+            or "clam"
+            or "seafood"
+            or "fish"
+            or "tofu"
+            or "tempeh"
+            or "lentil"
+            or "bean"
+            or "black bean"
+            or "chickpea"
+            or "edamame"
+            or "pasta"
+            or "noodle"
+            or "rice"
+            or "potato"
+            or "sweet potato"
+            or "grain"
+            or "quinoa"
+            or "farro"
+            or "couscous"
+            or "pizza"
+            or "polenta" => TagCategory.Protein,
+
+            // Occasion & Season
+            "spring"
+            or "summer"
+            or "autumn"
+            or "fall"
+            or "winter"
+            or "comfort food"
+            or "light & refreshing"
+            or "cozy & warming"
+            or "cozy"
+            or "warming"
+            or "rainy day"
+            or "crowd-pleaser"
+            or "crowd pleaser"
+            or "feeding a crowd"
+            or "potluck"
+            or "date night"
+            or "dinner party"
+            or "holiday"
+            or "thanksgiving"
+            or "christmas"
+            or "4th of july"
+            or "game day"
+            or "finger food"
+            or "weeknight"
+            or "weeknight dinner"
+            or "camping"
+            or "picnic"
+            or "road trip"
+            or "packed lunch"
+            or "bento" => TagCategory.Occasion,
+
+            // Meal Prep & Preservation
+            "freezer-friendly"
+            or "freezer friendly"
+            or "meal prep"
+            or "batch cooking"
+            or "batch cook"
+            or "leftover-friendly"
+            or "leftover friendly"
+            or "reheats well"
+            or "make-ahead"
+            or "make ahead"
+            or "overnight marinate"
+            or "quick prep"
+            or "slow-cooked"
+            or "slow cook"
+            or "30-minute meal"
+            or "30 minute meal"
+            or "canning & pickling"
+            or "canning"
+            or "pickling"
+            or "dehydrating"
+            or "fermented"
+            or "fermentation" => TagCategory.MealPrep,
 
             _ => TagCategory.Custom,
         };

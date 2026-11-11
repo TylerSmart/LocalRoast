@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using App.Core.Authentication;
 using App.Core.Recipes;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace App.API.IntegrationTests;
@@ -179,5 +180,97 @@ public sealed class TaxonomyIntegrationTests
         // 3. Delete
         var deleteRes = await _client.DeleteAsync($"/api/tags/{created.Id}");
         Assert.AreEqual(HttpStatusCode.NoContent, deleteRes.StatusCode);
+    }
+
+    [TestMethod]
+    public async Task NewTagCategories_ProteinOccasionMealPrep_SupportCrudAndFiltering()
+    {
+        await RegisterAndAuthenticateAsync(_client, "tax_newcats@example.com", "tax_newcats");
+
+        // 1. Create tags in new categories
+        var proteinRes = await _client.PostAsJsonAsync(
+            "/api/tags",
+            new UpsertTagRequest("Grass-Fed Beef", TagCategory.Protein, 15)
+        );
+        Assert.AreEqual(HttpStatusCode.Created, proteinRes.StatusCode);
+        var proteinTag = await proteinRes.Content.ReadFromJsonAsync<TagDto>();
+        Assert.IsNotNull(proteinTag);
+        Assert.AreEqual(TagCategory.Protein, proteinTag.Category);
+        Assert.AreEqual("protein-grass-fed-beef", proteinTag.Slug);
+
+        var occasionRes = await _client.PostAsJsonAsync(
+            "/api/tags",
+            new UpsertTagRequest("Date Night Special", TagCategory.Occasion, 25)
+        );
+        Assert.AreEqual(HttpStatusCode.Created, occasionRes.StatusCode);
+        var occasionTag = await occasionRes.Content.ReadFromJsonAsync<TagDto>();
+        Assert.IsNotNull(occasionTag);
+        Assert.AreEqual(TagCategory.Occasion, occasionTag.Category);
+        Assert.AreEqual("occasion-date-night-special", occasionTag.Slug);
+
+        var mealPrepRes = await _client.PostAsJsonAsync(
+            "/api/tags",
+            new UpsertTagRequest("Freezer Batch", TagCategory.MealPrep, 35)
+        );
+        Assert.AreEqual(HttpStatusCode.Created, mealPrepRes.StatusCode);
+        var mealPrepTag = await mealPrepRes.Content.ReadFromJsonAsync<TagDto>();
+        Assert.IsNotNull(mealPrepTag);
+        Assert.AreEqual(TagCategory.MealPrep, mealPrepTag.Category);
+        Assert.AreEqual("mealprep-freezer-batch", mealPrepTag.Slug);
+
+        // 2. Filter by category
+        var getProtein = await _client.GetAsync("/api/tags?category=Protein");
+        Assert.AreEqual(HttpStatusCode.OK, getProtein.StatusCode);
+        var proteinTags = await getProtein.Content.ReadFromJsonAsync<IReadOnlyList<TagDto>>();
+        Assert.IsNotNull(proteinTags);
+        Assert.IsTrue(proteinTags.Any(t => t.Name == "Grass-Fed Beef"));
+
+        var getOccasion = await _client.GetAsync("/api/tags?category=Occasion");
+        Assert.AreEqual(HttpStatusCode.OK, getOccasion.StatusCode);
+        var occasionTags = await getOccasion.Content.ReadFromJsonAsync<IReadOnlyList<TagDto>>();
+        Assert.IsNotNull(occasionTags);
+        Assert.IsTrue(occasionTags.Any(t => t.Name == "Date Night Special"));
+
+        var getMealPrep = await _client.GetAsync("/api/tags?category=MealPrep");
+        Assert.AreEqual(HttpStatusCode.OK, getMealPrep.StatusCode);
+        var mealPrepTags = await getMealPrep.Content.ReadFromJsonAsync<IReadOnlyList<TagDto>>();
+        Assert.IsNotNull(mealPrepTags);
+        Assert.IsTrue(mealPrepTags.Any(t => t.Name == "Freezer Batch"));
+    }
+
+    [TestMethod]
+    public async Task TagSeeder_SeedsAllBuiltInTagsIdempotently()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<App.Data.AppDbContext>();
+
+        await App.Data.Services.TagSeeder.EnsureBuiltInTagsSeededAsync(db);
+
+        var countAfterFirstSeed = db.Tags.Count(t => t.IsSystemSeeded);
+        Assert.AreEqual(BuiltInTags.All.Count, countAfterFirstSeed);
+
+        // Verify categories are populated
+        Assert.IsTrue(
+            db.Tags.Any(t => t.Category == TagCategory.Protein && t.Name == "Chicken Breast")
+        );
+        Assert.IsTrue(
+            db.Tags.Any(t => t.Category == TagCategory.Occasion && t.Name == "Comfort Food")
+        );
+        Assert.IsTrue(
+            db.Tags.Any(t => t.Category == TagCategory.MealPrep && t.Name == "Freezer-Friendly")
+        );
+        Assert.IsTrue(db.Tags.Any(t => t.Category == TagCategory.Course && t.Name == "Dinner"));
+        Assert.IsTrue(
+            db.Tags.Any(t => t.Category == TagCategory.Equipment && t.Name == "Cast Iron")
+        );
+        Assert.IsTrue(
+            db.Tags.Any(t => t.Category == TagCategory.Dietary && t.Name == "Gluten-Free")
+        );
+        Assert.IsTrue(db.Tags.Any(t => t.Category == TagCategory.Cuisine && t.Name == "Italian"));
+
+        // Idempotency: second run does not duplicate tags
+        await App.Data.Services.TagSeeder.EnsureBuiltInTagsSeededAsync(db);
+        var countAfterSecondSeed = db.Tags.Count(t => t.IsSystemSeeded);
+        Assert.AreEqual(countAfterFirstSeed, countAfterSecondSeed);
     }
 }

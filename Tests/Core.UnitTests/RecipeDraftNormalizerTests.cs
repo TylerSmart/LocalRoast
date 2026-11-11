@@ -893,10 +893,152 @@ public sealed class RecipeDraftNormalizerTests
     public void InferTagCategory_MapsCommonCategoriesCorrectly()
     {
         Assert.AreEqual(TagCategory.Course, RecipeDraftNormalizer.InferTagCategory("Dinner"));
+        Assert.AreEqual(TagCategory.Course, RecipeDraftNormalizer.InferTagCategory("Breakfast"));
+        Assert.AreEqual(TagCategory.Course, RecipeDraftNormalizer.InferTagCategory("Dessert"));
         Assert.AreEqual(TagCategory.Cuisine, RecipeDraftNormalizer.InferTagCategory("Italian"));
+        Assert.AreEqual(TagCategory.Cuisine, RecipeDraftNormalizer.InferTagCategory("Mexican"));
         Assert.AreEqual(TagCategory.Dietary, RecipeDraftNormalizer.InferTagCategory("Gluten-Free"));
+        Assert.AreEqual(TagCategory.Dietary, RecipeDraftNormalizer.InferTagCategory("Vegetarian"));
         Assert.AreEqual(TagCategory.Equipment, RecipeDraftNormalizer.InferTagCategory("Sheet Pan"));
-        Assert.AreEqual(TagCategory.Custom, RecipeDraftNormalizer.InferTagCategory("Weeknight"));
+        Assert.AreEqual(TagCategory.Equipment, RecipeDraftNormalizer.InferTagCategory("Cast Iron"));
+        Assert.AreEqual(
+            TagCategory.Protein,
+            RecipeDraftNormalizer.InferTagCategory("Chicken Breast")
+        );
+        Assert.AreEqual(TagCategory.Protein, RecipeDraftNormalizer.InferTagCategory("Salmon"));
+        Assert.AreEqual(TagCategory.Protein, RecipeDraftNormalizer.InferTagCategory("Tofu"));
+        Assert.AreEqual(TagCategory.Protein, RecipeDraftNormalizer.InferTagCategory("Pasta"));
+        Assert.AreEqual(TagCategory.Occasion, RecipeDraftNormalizer.InferTagCategory("Weeknight"));
+        Assert.AreEqual(
+            TagCategory.Occasion,
+            RecipeDraftNormalizer.InferTagCategory("Comfort Food")
+        );
+        Assert.AreEqual(TagCategory.Occasion, RecipeDraftNormalizer.InferTagCategory("Summer"));
+        Assert.AreEqual(
+            TagCategory.MealPrep,
+            RecipeDraftNormalizer.InferTagCategory("Freezer-Friendly")
+        );
+        Assert.AreEqual(TagCategory.MealPrep, RecipeDraftNormalizer.InferTagCategory("Make-Ahead"));
+        Assert.AreEqual(
+            TagCategory.Custom,
+            RecipeDraftNormalizer.InferTagCategory("Chef Elena Special")
+        );
+    }
+
+    [TestMethod]
+    public void SplitPascalCase_UnconcatenatesPascalAndCamelCase()
+    {
+        Assert.AreEqual("One Pot", RecipeDraftNormalizer.SplitPascalCase("OnePot"));
+        Assert.AreEqual("Gluten Free", RecipeDraftNormalizer.SplitPascalCase("GlutenFree"));
+        Assert.AreEqual("Sheet Pan", RecipeDraftNormalizer.SplitPascalCase("SheetPan"));
+        Assert.AreEqual("Cast Iron", RecipeDraftNormalizer.SplitPascalCase("CastIron"));
+        Assert.AreEqual("Air Fryer", RecipeDraftNormalizer.SplitPascalCase("AirFryer"));
+        Assert.AreEqual("Instant Pot", RecipeDraftNormalizer.SplitPascalCase("InstantPot"));
+        Assert.AreEqual(
+            "Condiments And Sauces",
+            RecipeDraftNormalizer.SplitPascalCase("CondimentsAndSauces")
+        );
+        Assert.AreEqual("Comfort Food", RecipeDraftNormalizer.SplitPascalCase("ComfortFood"));
+        Assert.AreEqual(
+            "Freezer Friendly",
+            RecipeDraftNormalizer.SplitPascalCase("FreezerFriendly")
+        );
+        // Already spaced or hyphenated
+        Assert.AreEqual("One-Pot", RecipeDraftNormalizer.SplitPascalCase("One-Pot"));
+        Assert.AreEqual("Sheet Pan", RecipeDraftNormalizer.SplitPascalCase("Sheet Pan"));
+    }
+
+    [TestMethod]
+    public void ToTagDisplayCase_FormatsCleanTitleCaseAndPreservesHyphens()
+    {
+        Assert.AreEqual("One-Pot", RecipeDraftNormalizer.ToTagDisplayCase("one-pot"));
+        Assert.AreEqual("Sheet Pan", RecipeDraftNormalizer.ToTagDisplayCase("sheet pan"));
+        Assert.AreEqual("Gluten-Free", RecipeDraftNormalizer.ToTagDisplayCase("gluten-free"));
+        Assert.AreEqual("BBQ Sauce", RecipeDraftNormalizer.ToTagDisplayCase("bbq sauce"));
+        Assert.AreEqual("Comfort Food", RecipeDraftNormalizer.ToTagDisplayCase("comfort food"));
+    }
+
+    [TestMethod]
+    public void NormalizeRecipeDraft_FiltersDisallowedGrocerySectionsAndRawStaples()
+    {
+        var raw = new LlmExtractedRecipePayload(
+            Title: "Herb Roast Chicken",
+            Description: "Savory roast chicken with herbs.",
+            BaseServings: 4,
+            YieldDisplay: "4 servings",
+            PrepTimeMinutes: 15,
+            CookTimeMinutes: 60,
+            TotalTimeMinutes: 75,
+            Difficulty: "Easy",
+            SourceName: "Home Kitchen",
+            SourceAuthor: "Chef",
+            ConfidenceScore: 0.95m,
+            SuggestedTagNames:
+            [
+                "Produce", // Disallowed grocery category
+                "CondimentsAndSauces", // Remaps to Sauce
+                "Salt", // Disallowed raw pantry staple
+                "Black Pepper", // Disallowed raw staple
+                "Olive Oil", // Disallowed raw staple
+                "Garlic", // Disallowed raw staple
+                "Dinner", // Valid course
+                "OnePot", // Valid alias -> One-Pot
+                "GlutenFree", // Valid alias -> Gluten-Free
+                "Chicken Breast", // Valid protein
+            ],
+            Ingredients:
+            [
+                new(
+                    SectionName: null,
+                    Quantity: 4,
+                    MaxQuantity: null,
+                    Unit: "whole",
+                    CanonicalFoodName: "chicken breast",
+                    DisplayName: "chicken breasts",
+                    PreparationNote: null,
+                    IsOptional: false,
+                    OriginalRawText: "4 chicken breasts"
+                ),
+            ],
+            Steps:
+            [
+                new(
+                    SectionName: null,
+                    Instruction: "Roast at 400F.",
+                    IngredientIndices: [0],
+                    Timers: null
+                ),
+            ]
+        );
+
+        var existingTags = new List<CatalogTagLookupItem>
+        {
+            new(Guid.NewGuid(), "Dinner", "dinner", "course-dinner"),
+            new(Guid.NewGuid(), "One-Pot", "one-pot", "equipment-one-pot"),
+            new(Guid.NewGuid(), "Gluten-Free", "gluten-free", "dietary-gluten-free"),
+            new(Guid.NewGuid(), "Sauce", "sauce", "course-sauce"),
+            new(Guid.NewGuid(), "Chicken Breast", "chicken breast", "protein-chicken-breast"),
+        };
+
+        var draft = RecipeDraftNormalizer.Normalize(
+            raw,
+            [],
+            existingTags,
+            sourceUrl: null,
+            fallbackSourceName: null,
+            fallbackSourceAuthor: null,
+            coverImagePath: null,
+            thumbnailImagePath: null
+        );
+
+        // Should NOT have proposed Salt, Produce, Olive Oil, etc.
+        Assert.IsFalse(draft.ProposedTagNames?.Contains("Produce") ?? false);
+        Assert.IsFalse(draft.ProposedTagNames?.Contains("Salt") ?? false);
+        Assert.IsFalse(draft.ProposedTagNames?.Contains("Olive Oil") ?? false);
+        Assert.IsFalse(draft.ProposedTagNames?.Contains("Garlic") ?? false);
+
+        // Should have matched the 5 canonical tags: Dinner, One-Pot, Gluten-Free, Sauce, Chicken Breast
+        Assert.AreEqual(5, draft.SuggestedTagIds?.Count);
     }
 
     [TestMethod]

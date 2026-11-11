@@ -222,6 +222,7 @@ using (var scope = app.Services.CreateScope())
             .RepairAllUnresolvedRecipeReferencesAsync(db)
             .GetAwaiter()
             .GetResult();
+        TagSeeder.EnsureBuiltInTagsSeededAsync(db).GetAwaiter().GetResult();
     }
 }
 

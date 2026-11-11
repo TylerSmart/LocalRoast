@@ -327,7 +327,7 @@
             @for (cat of tagCategories; track cat) {
               @if (tagsByCategory()[cat]?.length) {
                 <div class="tag-category-row">
-                  <span class="tag-cat-name">{{ cat }}</span>
+                  <span class="tag-cat-name">{{ categoryLabel(cat) }}</span>
                   <div class="chip-container">
                     @for (tag of tagsByCategory()[cat]; track tag.id) {
                       <div

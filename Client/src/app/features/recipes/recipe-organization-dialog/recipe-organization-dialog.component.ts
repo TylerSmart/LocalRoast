@@ -14,7 +14,13 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { RecipeDetailDto } from '../../../core/models/recipe.models';
-import { CollectionDto, TagCategory, TagDto } from '../../../core/models/taxonomy.models';
+import {
+  AllTagCategories,
+  CollectionDto,
+  TagCategory,
+  TagCategoryLabels,
+  TagDto,
+} from '../../../core/models/taxonomy.models';
 import { RecipeService } from '../../../core/services/recipe/recipe.service';
 import { TaxonomyService } from '../../../core/services/taxonomy/taxonomy.service';
 import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialog/confirm-dialog.component';
@@ -66,13 +72,11 @@ export class RecipeOrganizationDialogComponent implements OnInit {
   );
   protected readonly selectedTagIds = signal<Set<string>>(new Set(this.data?.initialTagIds ?? []));
 
-  protected readonly tagCategories: TagCategory[] = [
-    'Course',
-    'Cuisine',
-    'Dietary',
-    'Equipment',
-    'Custom',
-  ];
+  protected readonly tagCategories: TagCategory[] = AllTagCategories;
+
+  protected categoryLabel(cat: TagCategory): string {
+    return TagCategoryLabels[cat] ?? cat;
+  }
 
   protected readonly tagsByCategory = computed(() => {
     const map: Record<TagCategory, TagDto[]> = {
@@ -80,6 +84,9 @@ export class RecipeOrganizationDialogComponent implements OnInit {
       Cuisine: [],
       Dietary: [],
       Equipment: [],
+      Protein: [],
+      Occasion: [],
+      MealPrep: [],
       Custom: [],
     };
     for (const t of this.tags()) {

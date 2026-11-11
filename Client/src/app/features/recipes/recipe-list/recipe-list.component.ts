@@ -29,7 +29,13 @@ import {
   RecipeStatus,
   RecipeSummaryDto,
 } from '../../../core/models/recipe.models';
-import { CollectionDto, TagCategory, TagDto } from '../../../core/models/taxonomy.models';
+import {
+  AllTagCategories,
+  CollectionDto,
+  TagCategory,
+  TagCategoryLabels,
+  TagDto,
+} from '../../../core/models/taxonomy.models';
 import { RecipeService } from '../../../core/services/recipe/recipe.service';
 import { TaxonomyService } from '../../../core/services/taxonomy/taxonomy.service';
 import { formatMinutes } from '../../../core/utils/culinary-math';
@@ -144,13 +150,11 @@ export class RecipeListComponent implements OnInit {
   protected readonly errorMessage = signal<string | null>(null);
   protected readonly formatMinutes = formatMinutes;
 
-  protected readonly tagCategories: TagCategory[] = [
-    'Course',
-    'Cuisine',
-    'Dietary',
-    'Equipment',
-    'Custom',
-  ];
+  protected readonly tagCategories: TagCategory[] = AllTagCategories;
+
+  protected categoryLabel(cat: TagCategory): string {
+    return TagCategoryLabels[cat] ?? cat;
+  }
 
   protected readonly activeDrawerFilterCount = computed(() => {
     let count = 0;

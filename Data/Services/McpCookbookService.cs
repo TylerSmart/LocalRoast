@@ -678,7 +678,10 @@ public sealed class McpCookbookService(
                     else if (clean.Length <= 80)
                     {
                         var createdTag = await taxonomyService.CreateTagAsync(
-                            new UpsertTagRequest(clean, TagCategory.Custom),
+                            new UpsertTagRequest(
+                                clean,
+                                RecipeDraftNormalizer.InferTagCategory(clean)
+                            ),
                             cancellationToken
                         );
                         existingTags.Add(

@@ -695,6 +695,21 @@
     color: var(--mat-sys-on-secondary-container, #1d192b);
     font-weight: 500;
   }
+  &.cat-protein {
+    background-color: var(--mat-sys-tertiary-container, #ffd8e4);
+    color: var(--mat-sys-on-tertiary-container, #31111d);
+    font-weight: 500;
+  }
+  &.cat-occasion {
+    background-color: var(--mat-sys-primary-container, #eaddff);
+    color: var(--mat-sys-on-primary-container, #21005d);
+    font-weight: 500;
+  }
+  &.cat-mealprep {
+    background-color: var(--mat-sys-surface-container-highest, #e6e0e9);
+    color: var(--mat-sys-on-surface, #1d1b20);
+    font-weight: 500;
+  }
 }
 
 /* Step Reference Photo */
