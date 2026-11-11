@@ -656,11 +656,10 @@ public static class RecipeDraftNormalizer
                 rawIng.Quantity,
                 rawIng.MaxQuantity
             );
-            if (
-                !isSplitSourceLine
-                && SourceMeasurementParser.TrySumCompoundLeadingMeasurement(rawIng.OriginalRawText)
-                    is { } compoundLeading
-            )
+            var compoundLeading = !isSplitSourceLine
+                ? SourceMeasurementParser.TrySumCompoundLeadingMeasurement(rawIng.OriginalRawText)
+                : null;
+            if (compoundLeading is not null)
             {
                 cleanQuantity = compoundLeading.Quantity;
                 cleanMaxQuantity = compoundLeading.MaxQuantity;
@@ -693,7 +692,12 @@ public static class RecipeDraftNormalizer
                     RegexOptions.IgnoreCase
                 );
 
-            if (!isSplitSourceLine && sourceAmount is { } parsedAmount && !isAutoHealedDivided)
+            if (compoundLeading is not null || isAutoHealedDivided)
+            {
+                // Compound leading measurement (e.g. "2 tablespoons plus 4 teaspoons") or auto-healed
+                // divided amount already established cleanQuantity/cleanMaxQuantity; preserve it.
+            }
+            else if (!isSplitSourceLine && sourceAmount is { } parsedAmount)
             {
                 cleanQuantity = parsedAmount.Quantity;
                 cleanMaxQuantity = parsedAmount.MaxQuantity;

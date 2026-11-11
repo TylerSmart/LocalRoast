@@ -1624,4 +1624,79 @@ public sealed class RecipeDraftNormalizerTests
             )
         );
     }
+
+    [TestMethod]
+    public void Normalize_CompoundLeadingMeasurementWithDivided_PreservesCompoundedQuantity()
+    {
+        var rawPayload = new LlmExtractedRecipePayload(
+            Title: "Cachapas",
+            Ingredients:
+            [
+                new(
+                    SectionName: null,
+                    Quantity: null,
+                    MaxQuantity: null,
+                    Unit: "tbsp",
+                    DisplayName: "unsalted butter",
+                    CanonicalFoodName: "unsalted butter",
+                    OriginalRawText: "2 tablespoons plus 4 teaspoons unsalted butter, divided"
+                ),
+            ]
+        );
+
+        var draft = RecipeDraftNormalizer.Normalize(
+            raw: rawPayload,
+            catalogFoods: [],
+            tags: [],
+            sourceUrl: null,
+            fallbackSourceName: null,
+            fallbackSourceAuthor: null,
+            coverImagePath: null,
+            thumbnailImagePath: null
+        );
+
+        var butter = draft.Ingredients!.Single();
+        Assert.IsNotNull(
+            butter.Quantity,
+            "Quantity should not be null for compound divided measurement"
+        );
+        Assert.AreEqual(3.3333m, butter.Quantity.Value);
+        Assert.AreEqual(MeasurementUnit.Tbsp, butter.Unit);
+    }
+
+    [TestMethod]
+    public void Normalize_CompoundLeadingMeasurementWithoutDivided_PreservesCompoundedQuantity()
+    {
+        var rawPayload = new LlmExtractedRecipePayload(
+            Title: "Sage Sauce",
+            Ingredients:
+            [
+                new(
+                    SectionName: null,
+                    Quantity: null,
+                    MaxQuantity: null,
+                    Unit: "tbsp",
+                    DisplayName: "fresh sage",
+                    CanonicalFoodName: "sage",
+                    OriginalRawText: "1 teaspoon plus 2 tablespoons minced fresh sage"
+                ),
+            ]
+        );
+
+        var draft = RecipeDraftNormalizer.Normalize(
+            raw: rawPayload,
+            catalogFoods: [],
+            tags: [],
+            sourceUrl: null,
+            fallbackSourceName: null,
+            fallbackSourceAuthor: null,
+            coverImagePath: null,
+            thumbnailImagePath: null
+        );
+
+        var sage = draft.Ingredients!.Single();
+        Assert.IsNotNull(sage.Quantity, "Quantity should not be null for compound measurement");
+        Assert.AreEqual(2.3333m, sage.Quantity.Value);
+        Assert.AreEqual(MeasurementUnit.Tbsp, sage.Unit);
+    }
 }
