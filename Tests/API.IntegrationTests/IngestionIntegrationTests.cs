@@ -2303,6 +2303,140 @@ public sealed class IngestionIntegrationTests
         Assert.AreEqual("error", stepDiag.Severity);
     }
 
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task TextIngestion_RecipeReference_AutoPublishesOnlyWhenReferencedRecipeExists(
+        bool prerequisiteRecipeExists
+    )
+    {
+        const string componentRecipeTitle = "Easy-Peel Hard-Cooked Eggs";
+        const string compositeRecipeTitle = "Curry Deviled Eggs";
+
+        var fakeLlm = new FakeSequentialLlmExtractionClient(_ => new LlmExtractedRecipePayload(
+            Title: compositeRecipeTitle,
+            ConfidenceScore: 0.99m,
+            Ingredients:
+            [
+                new(
+                    null,
+                    1,
+                    null,
+                    "recipe",
+                    componentRecipeTitle,
+                    DisplayName: componentRecipeTitle,
+                    OriginalRawText: $"1 recipe {componentRecipeTitle}",
+                    IsRecipeReference: true,
+                    ReferencedRecipeTitle: componentRecipeTitle
+                ),
+                new(
+                    null,
+                    2,
+                    null,
+                    "tablespoon",
+                    "mayonnaise",
+                    DisplayName: "mayonnaise",
+                    OriginalRawText: "2 tablespoons mayonnaise"
+                ),
+            ],
+            Steps: [new(null, "Halve eggs and mash yolks with mayonnaise.", [0, 1])]
+        ));
+
+        await using var customFactory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Llm:TextModel", "test-text");
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ILlmExtractionClient>();
+                services.AddSingleton<ILlmExtractionClient>(fakeLlm);
+            });
+        });
+
+        using var client = customFactory.CreateClient();
+        await AuthenticateAsync(client);
+
+        Guid? prerequisiteId = null;
+        if (prerequisiteRecipeExists)
+        {
+            var createPrereqRes = await client.PostAsJsonAsync(
+                "/api/recipes",
+                new UpsertRecipeRequest(
+                    Title: componentRecipeTitle,
+                    Description: "Base hard-cooked eggs",
+                    Status: RecipeStatus.Published,
+                    BaseServings: 6,
+                    Ingredients:
+                    [
+                        new RecipeIngredientInput(
+                            DisplayName: "eggs",
+                            Quantity: 6,
+                            Unit: MeasurementUnit.Whole
+                        ),
+                    ],
+                    Steps: [new RecipeStepInput(Instruction: "Steam eggs for 13 minutes and peel.")]
+                )
+            );
+            createPrereqRes.EnsureSuccessStatusCode();
+            var prereqRecipe = await createPrereqRes.Content.ReadFromJsonAsync<RecipeDetailDto>();
+            Assert.IsNotNull(prereqRecipe);
+            prerequisiteId = prereqRecipe.Id;
+        }
+
+        var queuedResponse = await client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest(
+                $"{compositeRecipeTitle}\nIngredients:\n- 1 recipe {componentRecipeTitle}\n- 2 tablespoons mayonnaise\nInstructions:\n1. Halve eggs and mash yolks with mayonnaise.",
+                AutoPublish: true
+            )
+        );
+        queuedResponse.EnsureSuccessStatusCode();
+        var queued = await queuedResponse.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
+        Assert.IsNotNull(queued);
+
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            var processed = await scope
+                .ServiceProvider.GetRequiredService<IIngestionProcessor>()
+                .ProcessNextQueuedJobAsync();
+            Assert.IsTrue(processed);
+        }
+
+        var job = await client.GetFromJsonAsync<IngestionJobDetailDto>(
+            $"/api/ingestion/jobs/{queued.Id}"
+        );
+        Assert.IsNotNull(job);
+
+        if (prerequisiteRecipeExists)
+        {
+            Assert.AreEqual(IngestionJobStatus.Published, job.Status);
+            Assert.IsNotNull(job.ResultingRecipeId);
+
+            var published = await client.GetFromJsonAsync<RecipeDetailDto>(
+                $"/api/recipes/{job.ResultingRecipeId}"
+            );
+            Assert.IsNotNull(published);
+            var eggRef = published.Ingredients.FirstOrDefault(i =>
+                i.DisplayName == componentRecipeTitle
+            );
+            Assert.IsNotNull(eggRef);
+            Assert.AreEqual(prerequisiteId, eggRef.LinkedRecipeId);
+            Assert.IsNull(eggRef.UnresolvedRecipeTitle);
+        }
+        else
+        {
+            Assert.AreEqual(IngestionJobStatus.ReadyForReview, job.Status);
+            Assert.IsNull(job.ResultingRecipeId);
+            StringAssert.Contains(job.StatusDetail, "could not be linked");
+
+            var draftEggRef = job.ExtractedDraft?.Ingredients?.FirstOrDefault(i =>
+                i.DisplayName == componentRecipeTitle
+            );
+            Assert.IsNotNull(draftEggRef);
+            Assert.IsTrue(draftEggRef.IsRecipeReference);
+            Assert.IsNull(draftEggRef.MatchedRecipeId);
+        }
+    }
+
     private sealed class FakeSequentialLlmExtractionClient(
         Func<LlmExtractionContext, LlmExtractedRecipePayload> handler,
         Func<string, string?>? structureSource = null,

@@ -34,6 +34,8 @@ Usage:
 """
 
 import argparse
+from collections import defaultdict
+import heapq
 import io
 import json
 import os
@@ -384,7 +386,18 @@ def parse_atk_epub(epub_path):
     for r in recipes:
         if r["type"] == "sub" and len(r["ingredients"]) == 0:
             parent = r.get("parent_recipe")
-            if parent and (len(r["steps"]) > 0 or r.get("description")):
+            # If parent recipe actually references this sub-recipe as a component ingredient
+            # (e.g. "Toasted Mung Beans (recipe follows)"), this sub-recipe is NOT a variation
+            # inheriting parent's ingredients; it is an independent component technique!
+            is_referenced_by_parent = bool(
+                parent
+                and any(
+                    r["title"].lower() in ing.get("text", "").lower()
+                    for ing in parent.get("ingredients", [])
+                )
+            )
+
+            if parent and not is_referenced_by_parent and (len(r["steps"]) > 0 or r.get("description")):
                 variation_count += 1
                 if not r["yield"] and parent.get("yield"):
                     r["yield"] = parent["yield"]
@@ -408,6 +421,11 @@ def parse_atk_epub(epub_path):
                 if not r["description"]:
                     r["description"] = f"Variation of {parent['title']}."
 
+                final_recipes.append(r)
+            elif len(r["steps"]) > 0 or r.get("description"):
+                # Standalone component technique that was parsed as sub without separate ingredients
+                r["parent_recipe"] = None
+                r["parent_recipe_title"] = None
                 final_recipes.append(r)
             else:
                 empty_pruned_count += 1
@@ -732,22 +750,97 @@ def upload_source_text_attachment(api_base, token, recipe_id, recipe_dict):
 
 
 def sort_recipes_topologically(recipes):
-    """Sort recipes so independent/master recipes and standalone component recipes come before variations."""
-    def score(r):
-        is_variation = bool(r.get("parent_recipe_title"))
-        has_recipe_ref = any(
-            re.search(r"\b(?:recipe|batch)\b", ing.get("text", ""), re.IGNORECASE)
-            for ing in r.get("ingredients", [])
+    """Sort recipes so component/prerequisite recipes come before composite recipes, and parent recipes come before variations."""
+    norm_to_idx = {}
+    for i, r in enumerate(recipes):
+        norm = re.sub(r"[^a-z0-9]", "", r["title"].lower())
+        norm_to_idx[norm] = i
+
+    def find_referenced_recipes(text):
+        matched_indices = set()
+        candidates = []
+
+        m = re.search(
+            r"([A-Za-z0-9\s\'-]+?)\s*\((?:optional;\s*)?(?:this page|recipe follows|recipe on page|\bsee page)\b",
+            text,
+            re.IGNORECASE,
         )
-        is_parent = len(r.get("variations", [])) > 0
-        if is_parent:
-            return 0  # Master/parent recipes first
-        if not is_variation and not has_recipe_ref:
-            return 1  # Independent standalone recipes second
-        if not is_variation and has_recipe_ref:
-            return 2  # Recipes referencing other components third
-        return 3      # Variations last
-    return sorted(recipes, key=score)
+        if m:
+            candidates.append(m.group(1).strip())
+
+        m2 = re.search(r"\b(?:recipe|batch)\s+([^,(;]+)", text, re.IGNORECASE)
+        if m2:
+            candidates.append(m2.group(1).strip())
+
+        for cand in list(candidates):
+            if " or " in cand:
+                candidates.append(cand.split(" or ")[-1].strip())
+
+        for cand in candidates:
+            cand_clean = re.sub(
+                r"^(?:(?:\d+[\d\s\/\.]*|\b(?:one|two|three|four|five|six|seven|eight|nine|ten)\b)\s*)?(?:cups?|teaspoons?|tsps?|tablespoons?|tbsps?|ounces?|oz|pounds?|lbs?|packages?|cans?|bottles?|pinches?|cloves?|slices?|stalks?|sprigs?|heads?|pieces?)\s+(?:of\s+)?",
+                "",
+                cand,
+                flags=re.IGNORECASE,
+            ).strip()
+            cand_norm = re.sub(r"[^a-z0-9]", "", cand_clean.lower())
+            if not cand_norm or len(cand_norm) < 3:
+                continue
+            if cand_norm in norm_to_idx:
+                matched_indices.add(norm_to_idx[cand_norm])
+                continue
+            for norm, idx in norm_to_idx.items():
+                if norm == cand_norm:
+                    matched_indices.add(idx)
+                    break
+                if len(cand_norm) >= 6 and (norm.startswith(cand_norm) or cand_norm.startswith(norm)):
+                    matched_indices.add(idx)
+                    break
+
+        return matched_indices
+
+    in_degree = [0] * len(recipes)
+    dependents = defaultdict(list)
+
+    for i, r in enumerate(recipes):
+        deps_for_i = set()
+        if r.get("parent_recipe_title"):
+            parent_norm = re.sub(r"[^a-z0-9]", "", r["parent_recipe_title"].lower())
+            if parent_norm in norm_to_idx and norm_to_idx[parent_norm] != i:
+                deps_for_i.add(norm_to_idx[parent_norm])
+
+        for ing in r.get("ingredients", []):
+            ref_indices = find_referenced_recipes(ing.get("text", ""))
+            for ref_idx in ref_indices:
+                if ref_idx != i:
+                    deps_for_i.add(ref_idx)
+
+        in_degree[i] = len(deps_for_i)
+        for u in deps_for_i:
+            dependents[u].append(i)
+
+    # Min-heap ordered by original reading index ensures recipes without dependencies
+    # maintain their natural chapter/reading order
+    heap = [i for i in range(len(recipes)) if in_degree[i] == 0]
+    heapq.heapify(heap)
+
+    sorted_indices = []
+    while heap:
+        u = heapq.heappop(heap)
+        sorted_indices.append(u)
+        for v in dependents[u]:
+            in_degree[v] -= 1
+            if in_degree[v] == 0:
+                heapq.heappush(heap, v)
+
+    # If any unexpected dependency cycle prevented visiting all recipes, append remaining in original order
+    if len(sorted_indices) < len(recipes):
+        seen = set(sorted_indices)
+        for i in range(len(recipes)):
+            if i not in seen:
+                sorted_indices.append(i)
+
+    return [recipes[idx] for idx in sorted_indices]
 
 
 def main():

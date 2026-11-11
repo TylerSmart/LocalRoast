@@ -807,12 +807,43 @@ public sealed class IngestionProcessor(
                             );
                             continue;
                         }
+
+                        var unlinkedTitle = !string.IsNullOrWhiteSpace(cleanTitle)
+                            ? cleanTitle
+                            : (
+                                !string.IsNullOrWhiteSpace(ing.DisplayName)
+                                    ? ing.DisplayName
+                                    : "sub-recipe"
+                            );
+                        unresolvedIssues.Add(
+                            $"Referenced recipe '{unlinkedTitle}' is not published yet and could not be linked."
+                        );
+                    }
+                    else if (ing.IsRecipeReference && !ing.MatchedRecipeId.HasValue)
+                    {
+                        var unlinkedTitle = !string.IsNullOrWhiteSpace(ing.DisplayName)
+                            ? ing.DisplayName
+                            : "sub-recipe";
+                        unresolvedIssues.Add(
+                            $"Referenced recipe '{unlinkedTitle}' is missing a referenced recipe title."
+                        );
                     }
 
                     updatedIngredients.Add(ing);
                 }
 
-                draft = draft with { Ingredients = updatedIngredients };
+                draft = draft with
+                {
+                    Ingredients = updatedIngredients,
+                    ConfidenceScore = RecipeDraftNormalizer.CalculateConfidenceScore(
+                        rawExtracted.ConfidenceScore,
+                        updatedIngredients.Count,
+                        draft.Steps?.Count ?? 0,
+                        validationIssueCount: unresolvedIssues.Count,
+                        measurementWarningCount: draft.MeasurementWarnings?.Count ?? 0,
+                        qualityWarningCount: qualityWarnings.Count
+                    ),
+                };
             }
 
             if (unresolvedIssues.Count > 0)
@@ -841,8 +872,13 @@ public sealed class IngestionProcessor(
 
             // Auto-Publish check
 
+            var hasUnresolvedRecipeReferences =
+                draft.Ingredients?.Any(i => i.IsRecipeReference && !i.MatchedRecipeId.HasValue)
+                == true;
+
             var canAutoPublish =
                 unresolvedIssues.Count == 0
+                && !hasUnresolvedRecipeReferences
                 && (config.AutoPublishHighConfidenceText || job.AutoPublish)
                 && (
                     job.Channel == IngestionChannel.WebUrl
