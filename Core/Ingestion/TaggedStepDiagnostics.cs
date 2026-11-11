@@ -38,6 +38,9 @@ public static partial class TaggedStepDiagnostics
                 if (
                     !string.IsNullOrWhiteSpace(name)
                     && string.Equals(name.Trim(), titleNorm, StringComparison.OrdinalIgnoreCase)
+                    && !RecipeDraftNormalizer.RecipeReferenceRegex.IsMatch(
+                        ing.OriginalRawText ?? ""
+                    )
                 )
                 {
                     issues.Add(

@@ -371,7 +371,8 @@ Example output:
                 5. suggestedCategory: Produce, MeatAndSeafood, DairyAndEggs, Refrigerated, Bakery, PantryDryGoods, CannedAndJarred, CondimentsAndSauces, SpicesAndSeasonings, Baking, Snacks, Beverages, Frozen, Other.
                 6. sectionName: ONLY use when the source text explicitly groups ingredients under subheadings (e.g. 'Dressing', 'Crust', 'Filling', 'Sauce'). If the recipe has a single list of ingredients without subheadings, set sectionName to null. NEVER use the ingredient's own name as its sectionName, and NEVER use generic names like 'Ingredients' or 'Main'.
                 7. isRecipeReference: Set to true ONLY if the ingredient is a prepared sub-recipe or component made from another recipe (e.g. '1 recipe Pizza Dough', '1 batch Enchilada Sauce', 'Quick Pickled Onions'). For standard groceries, raw produce, meats, spices, oils, and pantry items, isRecipeReference MUST be false and referencedRecipeTitle MUST be null.
-                8. NEVER name an ingredient after the recipe title itself (e.g. if the recipe is titled 'Frico' and the source ingredient is '1 pound Montasio or aged Asiago cheese', the ingredient name must be 'Montasio or aged Asiago cheese', NEVER 'Frico').
+                8. NEVER name an ingredient after the recipe title itself (e.g. if the recipe is titled 'Frico' and the source ingredient is '1 pound Montasio or aged Asiago cheese', the ingredient name must be 'Montasio cheese', NEVER 'Frico').
+                9. Alternative Ingredients: When an ingredient line lists alternatives (e.g. '1 pound Montasio or aged Asiago cheese'), choose the primary food for displayName (e.g. 'Montasio cheese') and put the alternative in preparationNote (e.g. 'or aged Asiago cheese, grated fine'). NEVER include 'or' in displayName or canonicalFoodName.
                 """
             + foodCatalogSnippet
             + """
@@ -501,6 +502,7 @@ Example output:
                - sectionName: ONLY use when the source explicitly groups multiple items under distinct subheadings. NEVER invent sections or section individual items.
                - isRecipeReference: Set to true ONLY if the ingredient is a prepared sub-recipe or component made from another recipe (e.g. '1 recipe Pizza Dough'). For groceries, produce, spices, oils, and pantry items, isRecipeReference MUST be false and referencedRecipeTitle MUST be null.
                - NEVER name an ingredient after the recipe title itself (e.g. if the recipe is titled 'Frico', do NOT name the cheese ingredient 'Frico'; use the specific cheese name).
+               - Alternative Ingredients in Food Names: NEVER include 'or' in displayName or canonicalFoodName. If an issue mentions 'move preparation actions and alternative foods out of food names into preparationNote', choose the primary food (e.g. 'Montasio cheese') and move 'or aged Asiago cheese' into preparationNote.
             4. Timers and Temperatures:
                - Timers: ||{"type": "timer", "seconds": 300, "label": "Simmer sauce"}||. Total duration in seconds (e.g. 5 minutes = 300, 30 seconds = 30, 1 hour = 3600).
                - CRITICAL: Timers MUST be enclosed in ||{...}|| delimiters (e.g. ||{"type": "timer", "seconds": 1500, "label": "Broil"}||). NEVER output bare JSON like {"type": "timer"...} without the || delimiters.
