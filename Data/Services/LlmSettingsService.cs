@@ -52,7 +52,16 @@ public sealed class LlmSettingsService(
                 RefineTemperature: entity.RefineTemperature,
                 RefineTopP: entity.RefineTopP,
                 RefineTopK: entity.RefineTopK,
-                RefineRequestTimeoutSeconds: entity.RefineRequestTimeoutSeconds
+                RefineRequestTimeoutSeconds: entity.RefineRequestTimeoutSeconds,
+                EnableRateLimitSafeguards: entity.EnableRateLimitSafeguards,
+                MaxConcurrentRequests: entity.MaxConcurrentRequests,
+                RequestsPerMinute: entity.RequestsPerMinute,
+                DailyRequestQuota: entity.DailyRequestQuota,
+                DailyQuotaResetTimezone: entity.DailyQuotaResetTimezone ?? "UTC",
+                DailyQuotaResetTime: entity.DailyQuotaResetTime ?? "00:00",
+                AutoResumeQueue: entity.AutoResumeQueue,
+                PausedUntilUtc: entity.PausedUntilUtc,
+                PauseReason: entity.PauseReason
             );
         }
 
@@ -81,7 +90,16 @@ public sealed class LlmSettingsService(
             RefineTemperature: opt.RefineTemperature,
             RefineTopP: opt.RefineTopP,
             RefineTopK: opt.RefineTopK,
-            RefineRequestTimeoutSeconds: opt.RefineRequestTimeoutSeconds
+            RefineRequestTimeoutSeconds: opt.RefineRequestTimeoutSeconds,
+            EnableRateLimitSafeguards: opt.EnableRateLimitSafeguards,
+            MaxConcurrentRequests: opt.MaxConcurrentRequests,
+            RequestsPerMinute: opt.RequestsPerMinute,
+            DailyRequestQuota: opt.DailyRequestQuota,
+            DailyQuotaResetTimezone: opt.DailyQuotaResetTimezone ?? "UTC",
+            DailyQuotaResetTime: opt.DailyQuotaResetTime ?? "00:00",
+            AutoResumeQueue: opt.AutoResumeQueue,
+            PausedUntilUtc: opt.PausedUntilUtc,
+            PauseReason: opt.PauseReason
         );
     }
 
@@ -120,7 +138,16 @@ public sealed class LlmSettingsService(
                 RefineTemperature: entity.RefineTemperature,
                 RefineTopP: entity.RefineTopP,
                 RefineTopK: entity.RefineTopK,
-                RefineRequestTimeoutSeconds: entity.RefineRequestTimeoutSeconds
+                RefineRequestTimeoutSeconds: entity.RefineRequestTimeoutSeconds,
+                EnableRateLimitSafeguards: entity.EnableRateLimitSafeguards,
+                MaxConcurrentRequests: entity.MaxConcurrentRequests,
+                RequestsPerMinute: entity.RequestsPerMinute,
+                DailyRequestQuota: entity.DailyRequestQuota,
+                DailyQuotaResetTimezone: entity.DailyQuotaResetTimezone ?? "UTC",
+                DailyQuotaResetTime: entity.DailyQuotaResetTime ?? "00:00",
+                AutoResumeQueue: entity.AutoResumeQueue,
+                PausedUntilUtc: entity.PausedUntilUtc,
+                PauseReason: entity.PauseReason
             );
         }
 
@@ -147,7 +174,16 @@ public sealed class LlmSettingsService(
             RefineTemperature: opt.RefineTemperature,
             RefineTopP: opt.RefineTopP,
             RefineTopK: opt.RefineTopK,
-            RefineRequestTimeoutSeconds: opt.RefineRequestTimeoutSeconds
+            RefineRequestTimeoutSeconds: opt.RefineRequestTimeoutSeconds,
+            EnableRateLimitSafeguards: opt.EnableRateLimitSafeguards,
+            MaxConcurrentRequests: opt.MaxConcurrentRequests,
+            RequestsPerMinute: opt.RequestsPerMinute,
+            DailyRequestQuota: opt.DailyRequestQuota,
+            DailyQuotaResetTimezone: opt.DailyQuotaResetTimezone ?? "UTC",
+            DailyQuotaResetTime: opt.DailyQuotaResetTime ?? "00:00",
+            AutoResumeQueue: opt.AutoResumeQueue,
+            PausedUntilUtc: opt.PausedUntilUtc,
+            PauseReason: opt.PauseReason
         );
     }
 
@@ -212,6 +248,22 @@ public sealed class LlmSettingsService(
         entity.RefineTopP = request.RefineTopP;
         entity.RefineTopK = request.RefineTopK;
         entity.RefineRequestTimeoutSeconds = request.RefineRequestTimeoutSeconds;
+        entity.EnableRateLimitSafeguards = request.EnableRateLimitSafeguards;
+        entity.MaxConcurrentRequests = request.MaxConcurrentRequests;
+        entity.RequestsPerMinute = request.RequestsPerMinute;
+        entity.DailyRequestQuota = request.DailyRequestQuota;
+        entity.DailyQuotaResetTimezone = string.IsNullOrWhiteSpace(request.DailyQuotaResetTimezone)
+            ? "UTC"
+            : request.DailyQuotaResetTimezone.Trim();
+        entity.DailyQuotaResetTime = string.IsNullOrWhiteSpace(request.DailyQuotaResetTime)
+            ? "00:00"
+            : request.DailyQuotaResetTime.Trim();
+        entity.AutoResumeQueue = request.AutoResumeQueue;
+        if (request.EnableIngestion)
+        {
+            entity.PausedUntilUtc = null;
+            entity.PauseReason = null;
+        }
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
@@ -308,8 +360,15 @@ public sealed class LlmSettingsService(
         return await llmClient.ProbeAndListModelsAsync(testConfig, timeout, cancellationToken);
     }
 
+    public Task<LlmSettingsDto> SetIngestionEnabledAsync(
+        bool enabled,
+        CancellationToken cancellationToken = default
+    ) => SetIngestionEnabledAsync(enabled, null, null, cancellationToken);
+
     public async Task<LlmSettingsDto> SetIngestionEnabledAsync(
         bool enabled,
+        DateTimeOffset? autoResumeAt,
+        string? pauseReason,
         CancellationToken cancellationToken = default
     )
     {
@@ -326,6 +385,16 @@ public sealed class LlmSettingsService(
 
         var wasEnabled = entity.EnableIngestion;
         entity.EnableIngestion = enabled;
+        if (enabled)
+        {
+            entity.PausedUntilUtc = null;
+            entity.PauseReason = null;
+        }
+        else
+        {
+            entity.PausedUntilUtc = autoResumeAt;
+            entity.PauseReason = pauseReason;
+        }
         await dbContext.SaveChangesAsync(cancellationToken);
 
         if (!enabled)
@@ -390,6 +459,13 @@ public sealed class LlmSettingsService(
             RefineTopP = opt.RefineTopP,
             RefineTopK = opt.RefineTopK,
             RefineRequestTimeoutSeconds = opt.RefineRequestTimeoutSeconds,
+            EnableRateLimitSafeguards = opt.EnableRateLimitSafeguards,
+            MaxConcurrentRequests = opt.MaxConcurrentRequests,
+            RequestsPerMinute = opt.RequestsPerMinute,
+            DailyRequestQuota = opt.DailyRequestQuota,
+            AutoResumeQueue = opt.AutoResumeQueue,
+            PausedUntilUtc = opt.PausedUntilUtc,
+            PauseReason = opt.PauseReason,
         };
     }
 
@@ -603,40 +679,57 @@ public sealed class LlmSettingsService(
             dbContext.HouseholdLlmSettings.Add(settings);
         }
 
-        if (!settings.ModelProfilesSeeded)
-        {
-            var anyProfiles = await dbContext.LlmModelProfiles.AnyAsync(cancellationToken);
-            if (!anyProfiles)
-            {
-                for (var i = 0; i < LlmModelProfiles.All.Count; i++)
-                {
-                    var p = LlmModelProfiles.All[i];
-                    dbContext.LlmModelProfiles.Add(
-                        new LlmModelProfile
-                        {
-                            Id = Guid.NewGuid(),
-                            Slug = p.Id,
-                            DisplayName = p.DisplayName,
-                            ModelTag = p.ModelTag,
-                            MatchPrefixesJson = JsonSerializer.Serialize(p.MatchPrefixes),
-                            Summary = p.Summary,
-                            EnableThinking = p.EnableThinking,
-                            Temperature = p.Temperature,
-                            TopP = p.TopP,
-                            TopK = p.TopK,
-                            ContextWindowTokens = p.ContextWindowTokens,
-                            RequestTimeoutSeconds = p.RequestTimeoutSeconds,
-                            RecommendedAsRefineModel = p.RecommendedAsRefineModel,
-                            NotesJson = JsonSerializer.Serialize(p.Notes),
-                            SortOrder = i,
-                            IsBuiltInDefault = true,
-                            CreatedBy = "System",
-                            ModifiedBy = "System",
-                        }
-                    );
-                }
-            }
+        await SeedBuiltInProfilesAsync(settings, cancellationToken);
+    }
 
+    private async Task SeedBuiltInProfilesAsync(
+        HouseholdLlmSettings settings,
+        CancellationToken cancellationToken
+    )
+    {
+        var existingSlugs = await dbContext
+            .LlmModelProfiles.Select(p => p.Slug.ToLower())
+            .ToListAsync(cancellationToken);
+
+        var addedAny = false;
+        var maxSortOrder =
+            await dbContext.LlmModelProfiles.MaxAsync(p => (int?)p.SortOrder, cancellationToken)
+            ?? -1;
+
+        for (var i = 0; i < LlmModelProfiles.All.Count; i++)
+        {
+            var p = LlmModelProfiles.All[i];
+            if (!existingSlugs.Contains(p.Id.ToLower()))
+            {
+                dbContext.LlmModelProfiles.Add(
+                    new LlmModelProfile
+                    {
+                        Id = Guid.NewGuid(),
+                        Slug = p.Id,
+                        DisplayName = p.DisplayName,
+                        ModelTag = p.ModelTag,
+                        MatchPrefixesJson = JsonSerializer.Serialize(p.MatchPrefixes),
+                        Summary = p.Summary,
+                        EnableThinking = p.EnableThinking,
+                        Temperature = p.Temperature,
+                        TopP = p.TopP,
+                        TopK = p.TopK,
+                        ContextWindowTokens = p.ContextWindowTokens,
+                        RequestTimeoutSeconds = p.RequestTimeoutSeconds,
+                        RecommendedAsRefineModel = p.RecommendedAsRefineModel,
+                        NotesJson = JsonSerializer.Serialize(p.Notes),
+                        SortOrder = maxSortOrder + 1 + i,
+                        IsBuiltInDefault = true,
+                        CreatedBy = "System",
+                        ModifiedBy = "System",
+                    }
+                );
+                addedAny = true;
+            }
+        }
+
+        if (!settings.ModelProfilesSeeded || addedAny)
+        {
             settings.ModelProfilesSeeded = true;
             await dbContext.SaveChangesAsync(cancellationToken);
         }
@@ -755,6 +848,8 @@ public sealed class LlmSettingsService(
             notes = [];
         }
 
+        var builtIn = LlmModelProfiles.All.FirstOrDefault(b => b.Id == p.Slug);
+
         return new LlmModelProfileDto(
             Id: p.Slug,
             DisplayName: p.DisplayName,
@@ -769,7 +864,9 @@ public sealed class LlmSettingsService(
             RequestTimeoutSeconds: p.RequestTimeoutSeconds,
             RecommendedAsRefineModel: p.RecommendedAsRefineModel,
             Notes: notes,
-            IsBuiltInDefault: p.IsBuiltInDefault
+            IsBuiltInDefault: p.IsBuiltInDefault,
+            DailyQuotaResetTimezone: builtIn?.DailyQuotaResetTimezone,
+            DailyQuotaResetTime: builtIn?.DailyQuotaResetTime
         );
     }
 }

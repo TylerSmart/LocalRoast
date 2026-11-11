@@ -29,6 +29,9 @@ Results come from the [ATK ingestion evaluator](contributing.md#evaluating-atk-i
 | `gemma4:12b` | Works, but less accurate than E4B | **Off** | Blank | Blank | Blank | 32,768 | 300 |
 | `gemma4:12b` with thinking | Experimental | On | **1** | **0.95** | **64** | 32,768 | 900 |
 | `gemma4:26b-a4b` | Not recommended on 16 GB; needs a derived model with `num_gpu 24` | On | **1** | **0.95** | **64** | 32,768 | 1,200 |
+| `gemini-2.5-flash-lite` | Ultra-fast hosted draft extraction | **Off** | Blank | Blank | Blank | 32,768 | 120 |
+| `gemini-2.5-flash` | Balanced hosted extraction & refinement | **Off** | Blank | Blank | Blank | 32,768 | 180 |
+| `gemini-4-argon` | Deep-reasoning hosted extraction & refinement | **On** | Blank | Blank | Blank | 32,768 | 300 |
 
 *Blank* means leave the field empty so LocalRoast uses its defaults (see [Sampling Settings](#sampling-settings)). For every model, keep **Auto-publish** off and keep-alive at `5m`.
 
@@ -258,6 +261,26 @@ LocalRoast's **OpenAI-Compatible (/v1)** provider works with hosted services suc
 - **Settings that only apply to Ollama:** Context window, Keep alive, Run Ollama on CPU only and the thinking toggles are not sent. Each request may generate up to 16,384 tokens.
 - **Sampling:** Temperature is always sent. Top P and Top K are sent when set; leave Top K blank if the provider rejects it. The built-in profiles were measured on local Gemma models through Ollama, so treat their values only as a starting point.
 - **Refine Model:** it uses the same provider, Base URL and API key as the Text Model, so it cannot mix a local Ollama model with a hosted one.
+- **Hosted Gemini Profiles:** LocalRoast provides built-in profiles for Google's Gemini models via OpenAI-compatible gateways:
+  - `gemini-2.5-flash-lite`: 120s timeout, thinking off. Designed for ultra-fast, economical bulk ingestion.
+  - `gemini-2.5-flash`: 180s timeout, thinking off. Balanced speed and extraction fidelity; recommended for primary extraction or refinement.
+  - `gemini-4-argon`: 300s timeout, thinking on. High-reasoning model for complex, multi-component recipes and background refinement.
+- **Rate Limit & Quota Safeguards:** Under **Refinement & Queue**, the **Enable rate limit and quota safeguards** toggle (default: on) protects both your local pipeline and remote provider quotas:
+  - **In-place backoff & jitter:** On transient `HTTP 429` / `Too Many Requests` errors, requests retry in-place up to 3 times, honoring provider `Retry-After` headers and retry delays up to 60 seconds.
+  - **Automatic quota exhaustion pause:** If the provider responds with hard daily quota exhaustion (`RESOURCE_EXHAUSTED`, `daily quota exceeded`, or zero remaining quota), LocalRoast detects that retrying immediately is futile, updates the job with an explicit explanatory message, and auto-pauses background ingestion (`EnableIngestion: false`) to avoid endlessly hammering the API.
+  - **Canary job promotion:** When checking whether an external provider has recovered, the background worker promotes only a single waiting job back to the queue to verify connectivity before allowing other jobs to process.
+  - When disabled, rate limit errors immediately transition jobs to `Failed` without in-place retries or auto-pausing.
+- **Concurrency & Rate Pacing:**
+  - **Max Concurrent Requests (Slider 1–5, default: 1):** Configures how many background ingestion jobs can execute against the LLM concurrently.
+    - *Local Ollama / 16 GB GPUs (e.g. RTX 2000 Ada with Gemma 4 E4B):* Keep at **1** (or at most **2** if using E2B with multiple Ollama parallel slots). Running multiple parallel requests on a single 16 GB GPU with a 32,768 context window can cause context KV cache VRAM spikes or serial queue contention inside Ollama.
+    - *Cloud / Hosted Providers (e.g. Gemini Flash Lite, Gemini Flash):* Can safely be raised to **2–5** for much faster throughput when processing batches of recipes.
+  - **Requests Per Minute (RPM):** Proactive client-side rate limiter using a 60-second sliding window. For instance, setting this to `15` matches Google Gemini Free Tier's 15 RPM rate limit, smoothly pacing requests so they never trigger `429 Too Many Requests`.
+  - **Daily Request Quota (RPD):** Tracks outbound requests across the configured provider quota day. If the count reaches this limit (e.g., `1500` for Gemini Free Tier), the queue auto-pauses with an informative message.
+  - **Daily Quota Reset Schedule (Timezone & Time):**
+    - **Timezone:** Select your provider's quota rollover timezone. Google AI Studio quotas reset daily at **midnight Pacific Time (`America/Los_Angeles`)**, whereas OpenAI and OpenRouter reset at **midnight UTC (`UTC`)**. Built-in Gemini profiles automatically set this to `America/Los_Angeles`.
+    - **Reset Time of Day:** Time in `HH:mm` format when the provider rolls over (default `00:00` / midnight).
+    - LocalRoast automatically handles Daylight Saving Time transitions (e.g. PST vs PDT) when calculating the exact UTC timestamp for the next quota rollover.
+  - **Auto-Resume Queue:** When enabled (default: on), an ingestion queue that was paused due to daily quota exhaustion will automatically resume at the start of the next quota cycle (e.g., `00:00 PT` / `08:00 UTC` for Google AI Studio), without requiring manual intervention.
 - **Privacy and cost:** the source text, photos and drafts are sent to the hosted provider, and usage is billed by that provider. LocalRoast still sends one request at a time.
 
 ---

@@ -424,6 +424,16 @@
                 </span>
               </div>
 
+              <div class="toggle-section">
+                <mat-slide-toggle formControlName="enableRateLimitSafeguards" color="primary">
+                  Enable rate limit & quota safeguards
+                </mat-slide-toggle>
+                <span class="toggle-hint">
+                  Automatically backs off and retries transient HTTP 429 rate limits, and pauses
+                  background processing when daily API quotas are exhausted.
+                </span>
+              </div>
+
               <div class="form-row">
                 <mat-form-field appearance="outline" class="form-field">
                   <mat-label>Auto-Retries on Failure</mat-label>
@@ -436,6 +446,139 @@
                   />
                   <mat-hint>Retries before marking failed (0 to disable)</mat-hint>
                 </mat-form-field>
+              </div>
+
+              <!-- Concurrency & Rate Limits Section -->
+              <div
+                class="profile-section concurrency-section"
+                role="group"
+                aria-labelledby="concurrencyHeading"
+              >
+                <div id="concurrencyHeading" class="sampling-heading">
+                  Concurrency & Rate Limits
+                </div>
+                <p class="sampling-hint">
+                  Configure simultaneous request capacity and provider rate-limit pacing (RPM/RPD).
+                </p>
+
+                <!-- Max Concurrent Requests Slider -->
+                <div class="slider-field-container">
+                  <div class="slider-field-header">
+                    <label
+                      for="maxConcurrentSliderInput"
+                      id="maxConcurrentLabel"
+                      class="slider-field-label"
+                      >Max concurrent LLM requests</label
+                    >
+                    <span class="slider-field-value">{{
+                      form.controls.maxConcurrentRequests.value
+                    }}</span>
+                  </div>
+                  <mat-slider
+                    min="1"
+                    max="5"
+                    step="1"
+                    discrete
+                    showTickMarks
+                    class="full-width-slider"
+                  >
+                    <input
+                      matSliderThumb
+                      id="maxConcurrentSliderInput"
+                      formControlName="maxConcurrentRequests"
+                      aria-labelledby="maxConcurrentLabel"
+                      data-testid="max-concurrent-slider"
+                    />
+                  </mat-slider>
+                  <span class="slider-field-hint">
+                    Simultaneous LLM requests allowed at once. Recommended: 1–2 for local 16GB GPUs,
+                    up to 5 for hosted cloud APIs.
+                  </span>
+                </div>
+
+                <!-- Rate Limits (RPM & RPD) -->
+                <div class="form-row two-cols">
+                  <mat-form-field appearance="outline" class="form-field">
+                    <mat-label>Requests Per Minute (RPM)</mat-label>
+                    <input
+                      matInput
+                      type="number"
+                      formControlName="requestsPerMinute"
+                      min="1"
+                      max="1000"
+                      step="1"
+                      placeholder="No limit"
+                      data-testid="rpm-input"
+                    />
+                    <mat-hint>Paces requests in rolling window (e.g. 15 for Gemini Free)</mat-hint>
+                    @if (form.controls.requestsPerMinute.invalid) {
+                      <mat-error>1 to 1000 whole number</mat-error>
+                    }
+                  </mat-form-field>
+
+                  <mat-form-field appearance="outline" class="form-field">
+                    <mat-label>Daily Request Quota (RPD)</mat-label>
+                    <input
+                      matInput
+                      type="number"
+                      formControlName="dailyRequestQuota"
+                      min="1"
+                      max="100000"
+                      step="1"
+                      placeholder="No limit"
+                      data-testid="rpd-input"
+                    />
+                    <mat-hint>Pauses queue when reached (e.g. 1500 for Gemini Free)</mat-hint>
+                    @if (form.controls.dailyRequestQuota.invalid) {
+                      <mat-error>1 to 100000 whole number</mat-error>
+                    }
+                  </mat-form-field>
+                </div>
+
+                <!-- Daily Quota Reset Schedule -->
+                <div class="form-row two-cols">
+                  <mat-form-field appearance="outline" class="form-field">
+                    <mat-label>Daily Quota Reset Timezone</mat-label>
+                    <mat-select
+                      formControlName="dailyQuotaResetTimezone"
+                      data-testid="quota-reset-timezone-select"
+                    >
+                      @for (tz of timezoneOptions; track tz.value) {
+                        <mat-option [value]="tz.value">{{ tz.label }}</mat-option>
+                      }
+                    </mat-select>
+                    <mat-hint>Schedule timezone (Google AI Studio resets at Midnight PT)</mat-hint>
+                  </mat-form-field>
+
+                  <mat-form-field appearance="outline" class="form-field">
+                    <mat-label>Reset Time of Day (HH:mm)</mat-label>
+                    <input
+                      matInput
+                      type="text"
+                      formControlName="dailyQuotaResetTime"
+                      placeholder="00:00"
+                      data-testid="quota-reset-time-input"
+                    />
+                    <mat-hint>Time when quota resets (default: 00:00 midnight)</mat-hint>
+                    @if (form.controls.dailyQuotaResetTime.invalid) {
+                      <mat-error>24-hour time in HH:mm format (e.g. 00:00)</mat-error>
+                    }
+                  </mat-form-field>
+                </div>
+
+                <div class="toggle-section auto-resume-toggle">
+                  <mat-slide-toggle
+                    formControlName="autoResumeQueue"
+                    color="primary"
+                    data-testid="auto-resume-toggle"
+                  >
+                    Auto-resume queue after quota reset / cooldown
+                  </mat-slide-toggle>
+                  <span class="toggle-hint">
+                    Automatically resumes processing when transient rate limit backoffs expire or
+                    daily quotas reset at the configured reset time.
+                  </span>
+                </div>
               </div>
 
               <!-- Refine Section -->

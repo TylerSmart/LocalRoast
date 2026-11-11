@@ -45,10 +45,18 @@
         <mat-icon>pause_circle</mat-icon>
         <div class="banner-content">
           <strong>LLM Ingestion is Paused</strong>
-          <span>
-            Background processing of queue items is held. Use Run now on a queued job to process
-            just that one, or click Resume to continue extracting recipes.
-          </span>
+          @if (pausedUntilUtc(); as resumeTime) {
+            <span class="auto-resume-notice">
+              {{ pauseReason() ?? 'Rate limit or quota reached' }}. Background queue is held and
+              will automatically resume at {{ resumeTime | date: 'short' }}. Use Run now on a queued
+              job to process just that one, or click Resume to continue immediately.
+            </span>
+          } @else {
+            <span>
+              Background processing of queue items is held. Use Run now on a queued job to process
+              just that one, or click Resume to continue extracting recipes.
+            </span>
+          }
         </div>
       </div>
       <button

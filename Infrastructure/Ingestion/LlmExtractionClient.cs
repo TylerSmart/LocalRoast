@@ -1,10 +1,12 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using App.Core.Exceptions;
 using App.Core.FoodCatalog;
 using App.Core.Ingestion;
@@ -960,18 +962,19 @@ Field example for "2 cups finely chopped red onion":
                 };
 
                 var requestJson = JsonSerializer.Serialize(payload);
-                using var request = new HttpRequestMessage(
-                    HttpMethod.Post,
-                    $"{normalizedBase}/api/chat"
-                )
-                {
-                    Content = new StringContent(requestJson, Encoding.UTF8, "application/json"),
-                };
-
-                using var requestLease = requestGate is null
-                    ? null
-                    : await requestGate.AcquireAsync(linkedCts.Token);
-                using var response = await httpClient.SendAsync(request, linkedCts.Token);
+                using var response = await SendWithRateLimitRetryAsync(
+                    () =>
+                        new HttpRequestMessage(HttpMethod.Post, $"{normalizedBase}/api/chat")
+                        {
+                            Content = new StringContent(
+                                requestJson,
+                                Encoding.UTF8,
+                                "application/json"
+                            ),
+                        },
+                    config,
+                    linkedCts.Token
+                );
                 await EnsureSuccessfulLlmResponseAsync(response, linkedCts.Token);
 
                 var rawResponse = await response.Content.ReadAsStringAsync(linkedCts.Token);
@@ -1009,26 +1012,32 @@ Field example for "2 cups finely chopped red onion":
                 };
 
                 var requestJson = JsonSerializer.Serialize(payload, OpenAiRequestJsonOptions);
-                using var request = new HttpRequestMessage(
-                    HttpMethod.Post,
-                    $"{normalizedBase}/chat/completions"
-                )
-                {
-                    Content = new StringContent(requestJson, Encoding.UTF8, "application/json"),
-                };
-
-                if (!string.IsNullOrWhiteSpace(config.ApiKey))
-                {
-                    request.Headers.Authorization = new AuthenticationHeaderValue(
-                        "Bearer",
-                        config.ApiKey.Trim()
-                    );
-                }
-
-                using var requestLease = requestGate is null
-                    ? null
-                    : await requestGate.AcquireAsync(linkedCts.Token);
-                using var response = await httpClient.SendAsync(request, linkedCts.Token);
+                using var response = await SendWithRateLimitRetryAsync(
+                    () =>
+                    {
+                        var req = new HttpRequestMessage(
+                            HttpMethod.Post,
+                            $"{normalizedBase}/chat/completions"
+                        )
+                        {
+                            Content = new StringContent(
+                                requestJson,
+                                Encoding.UTF8,
+                                "application/json"
+                            ),
+                        };
+                        if (!string.IsNullOrWhiteSpace(config.ApiKey))
+                        {
+                            req.Headers.Authorization = new AuthenticationHeaderValue(
+                                "Bearer",
+                                config.ApiKey.Trim()
+                            );
+                        }
+                        return req;
+                    },
+                    config,
+                    linkedCts.Token
+                );
                 await EnsureSuccessfulLlmResponseAsync(response, linkedCts.Token);
 
                 var rawResponse = await response.Content.ReadAsStringAsync(linkedCts.Token);
@@ -1242,18 +1251,19 @@ Transcribe the recipe printed in these page images. Copy text verbatim: never re
                 };
 
                 var requestJson = JsonSerializer.Serialize(payload);
-                using var request = new HttpRequestMessage(
-                    HttpMethod.Post,
-                    $"{normalizedBase}/api/chat"
-                )
-                {
-                    Content = new StringContent(requestJson, Encoding.UTF8, "application/json"),
-                };
-
-                using var requestLease = requestGate is null
-                    ? null
-                    : await requestGate.AcquireAsync(linkedCts.Token);
-                using var response = await httpClient.SendAsync(request, linkedCts.Token);
+                using var response = await SendWithRateLimitRetryAsync(
+                    () =>
+                        new HttpRequestMessage(HttpMethod.Post, $"{normalizedBase}/api/chat")
+                        {
+                            Content = new StringContent(
+                                requestJson,
+                                Encoding.UTF8,
+                                "application/json"
+                            ),
+                        },
+                    config,
+                    linkedCts.Token
+                );
                 await EnsureSuccessfulLlmResponseAsync(response, linkedCts.Token);
 
                 var rawResponse = await response.Content.ReadAsStringAsync(linkedCts.Token);
@@ -1307,26 +1317,32 @@ Transcribe the recipe printed in these page images. Copy text verbatim: never re
                 };
 
                 var requestJson = JsonSerializer.Serialize(payload, OpenAiRequestJsonOptions);
-                using var request = new HttpRequestMessage(
-                    HttpMethod.Post,
-                    $"{normalizedBase}/chat/completions"
-                )
-                {
-                    Content = new StringContent(requestJson, Encoding.UTF8, "application/json"),
-                };
-
-                if (!string.IsNullOrWhiteSpace(config.ApiKey))
-                {
-                    request.Headers.Authorization = new AuthenticationHeaderValue(
-                        "Bearer",
-                        config.ApiKey.Trim()
-                    );
-                }
-
-                using var requestLease = requestGate is null
-                    ? null
-                    : await requestGate.AcquireAsync(linkedCts.Token);
-                using var response = await httpClient.SendAsync(request, linkedCts.Token);
+                using var response = await SendWithRateLimitRetryAsync(
+                    () =>
+                    {
+                        var req = new HttpRequestMessage(
+                            HttpMethod.Post,
+                            $"{normalizedBase}/chat/completions"
+                        )
+                        {
+                            Content = new StringContent(
+                                requestJson,
+                                Encoding.UTF8,
+                                "application/json"
+                            ),
+                        };
+                        if (!string.IsNullOrWhiteSpace(config.ApiKey))
+                        {
+                            req.Headers.Authorization = new AuthenticationHeaderValue(
+                                "Bearer",
+                                config.ApiKey.Trim()
+                            );
+                        }
+                        return req;
+                    },
+                    config,
+                    linkedCts.Token
+                );
                 await EnsureSuccessfulLlmResponseAsync(response, linkedCts.Token);
 
                 var rawResponse = await response.Content.ReadAsStringAsync(linkedCts.Token);
@@ -1382,6 +1398,227 @@ Transcribe the recipe printed in these page images. Copy text verbatim: never re
         return options;
     }
 
+    private async Task<HttpResponseMessage> SendWithRateLimitRetryAsync(
+        Func<HttpRequestMessage> requestFactory,
+        EffectiveLlmConnectionConfig config,
+        CancellationToken cancellationToken
+    )
+    {
+        var attempt = 0;
+        while (true)
+        {
+            using var request = requestFactory();
+            using var requestLease = requestGate is null
+                ? null
+                : await requestGate.AcquireAsync(config, cancellationToken);
+
+            var response = await httpClient.SendAsync(request, cancellationToken);
+
+            if (
+                config.EnableRateLimitSafeguards
+                && response.StatusCode == HttpStatusCode.TooManyRequests
+                && attempt < 3
+            )
+            {
+                var (isQuota, waitSeconds, errorDetail) = await EvaluateRateLimitAsync(
+                    response,
+                    attempt,
+                    cancellationToken
+                );
+                response.Dispose();
+
+                if (isQuota)
+                {
+                    throw new LlmHostUnavailableException(
+                        $"LLM provider quota exhausted (HTTP 429): {errorDetail}",
+                        isQuotaExhausted: true
+                    );
+                }
+
+                logger?.LogWarning(
+                    "LLM provider rate limit (HTTP 429) encountered. Rate limit safeguard waiting {WaitSeconds}s before retry attempt {Attempt}/3 (detail: {Detail})...",
+                    waitSeconds,
+                    attempt + 1,
+                    errorDetail
+                );
+
+                await Task.Delay(TimeSpan.FromSeconds(waitSeconds), cancellationToken);
+                attempt++;
+                continue;
+            }
+
+            return response;
+        }
+    }
+
+    private static async Task<(
+        bool IsQuota,
+        int WaitSeconds,
+        string Detail
+    )> EvaluateRateLimitAsync(
+        HttpResponseMessage response,
+        int attempt,
+        CancellationToken cancellationToken
+    )
+    {
+        string rawError = string.Empty;
+        try
+        {
+            rawError = await response.Content.ReadAsStringAsync(cancellationToken);
+        }
+        catch
+        {
+            // ignore
+        }
+
+        var detail = ExtractErrorDetail(rawError, response.ReasonPhrase ?? "Too Many Requests");
+        var isQuota = IsHardQuotaExhaustion(detail);
+        if (isQuota)
+        {
+            return (true, 0, detail);
+        }
+
+        var waitSeconds = ParseRetryAfterSeconds(response, rawError, attempt);
+        return (false, waitSeconds, detail);
+    }
+
+    private static bool IsHardQuotaExhaustion(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        var lower = text.ToLowerInvariant();
+        return (
+                lower.Contains("quota")
+                && (
+                    lower.Contains("exceeded")
+                    || lower.Contains("exhausted")
+                    || lower.Contains("check your plan")
+                    || lower.Contains("billing")
+                    || lower.Contains("limit: 0")
+                )
+            )
+            || (
+                lower.Contains("resource_exhausted")
+                && (lower.Contains("day") || lower.Contains("daily") || lower.Contains("quota"))
+            )
+            || lower.Contains("insufficient_quota");
+    }
+
+    private static int ParseRetryAfterSeconds(
+        HttpResponseMessage response,
+        string rawError,
+        int attempt
+    )
+    {
+        if (response.Headers.RetryAfter is { } retryAfter)
+        {
+            if (retryAfter.Delta.HasValue)
+            {
+                var seconds = (int)Math.Ceiling(retryAfter.Delta.Value.TotalSeconds);
+                if (seconds > 0)
+                {
+                    return Math.Clamp(seconds, 1, 60);
+                }
+            }
+            if (retryAfter.Date.HasValue)
+            {
+                var diff = (int)
+                    Math.Ceiling((retryAfter.Date.Value - DateTimeOffset.UtcNow).TotalSeconds);
+                if (diff > 0)
+                {
+                    return Math.Clamp(diff, 1, 60);
+                }
+            }
+        }
+
+        var match = Regex.Match(
+            rawError,
+            @"(?:retry|wait)(?:\s+(?:in|after))?\s+(\d+(?:\.\d+)?)\s*(?:s|sec|seconds)?",
+            RegexOptions.IgnoreCase
+        );
+        if (
+            match.Success
+            && double.TryParse(
+                match.Groups[1].Value,
+                NumberStyles.Float,
+                CultureInfo.InvariantCulture,
+                out var parsedSec
+            )
+        )
+        {
+            return Math.Clamp((int)Math.Ceiling(parsedSec), 1, 60);
+        }
+
+        return attempt switch
+        {
+            0 => 5,
+            1 => 15,
+            _ => 30,
+        };
+    }
+
+    private static string ExtractErrorDetail(string rawError, string fallback)
+    {
+        if (string.IsNullOrWhiteSpace(rawError))
+        {
+            return fallback;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(rawError);
+            if (doc.RootElement.TryGetProperty("error", out var errorProp))
+            {
+                if (
+                    errorProp.ValueKind == JsonValueKind.Object
+                    && errorProp.TryGetProperty("message", out var msgProp)
+                    && msgProp.ValueKind == JsonValueKind.String
+                )
+                {
+                    var msg = msgProp.GetString();
+                    if (!string.IsNullOrWhiteSpace(msg))
+                    {
+                        return msg.Trim();
+                    }
+                }
+                else if (errorProp.ValueKind == JsonValueKind.String)
+                {
+                    var msg = errorProp.GetString();
+                    if (!string.IsNullOrWhiteSpace(msg))
+                    {
+                        return msg.Trim();
+                    }
+                }
+            }
+
+            if (
+                doc.RootElement.TryGetProperty("message", out var directMsg)
+                && directMsg.ValueKind == JsonValueKind.String
+            )
+            {
+                var msg = directMsg.GetString();
+                if (!string.IsNullOrWhiteSpace(msg))
+                {
+                    return msg.Trim();
+                }
+            }
+        }
+        catch
+        {
+            // not valid JSON, treat as string
+        }
+
+        var cleaned = rawError.Trim();
+        if (cleaned.Length > 250)
+        {
+            cleaned = cleaned[..250] + "...";
+        }
+        return cleaned;
+    }
+
     private static async Task EnsureSuccessfulLlmResponseAsync(
         HttpResponseMessage response,
         CancellationToken cancellationToken
@@ -1400,7 +1637,7 @@ Transcribe the recipe printed in these page images. Copy text verbatim: never re
                     $"The model runner could not allocate enough memory. For Ollama, try CPU-only inference or a smaller model. A Gemma4Assistant ctx_other warning during memory fitting is not a missing application setting. Server detail: {errorBody}"
                 );
             }
-            CheckTransientStatus(response);
+            CheckTransientStatus(response, errorBody);
             var detail = !string.IsNullOrWhiteSpace(errorBody) ? $": {errorBody}" : "";
             throw new HttpRequestException(
                 $"Response status code does not indicate success: {(int)response.StatusCode} ({response.ReasonPhrase}){detail}"
@@ -1408,13 +1645,19 @@ Transcribe the recipe printed in these page images. Copy text verbatim: never re
         }
     }
 
-    private static void CheckTransientStatus(HttpResponseMessage response)
+    private static void CheckTransientStatus(HttpResponseMessage response, string? errorBody = null)
     {
         var code = (int)response.StatusCode;
         if (code is 408 or 429 or 502 or 503 or 504)
         {
+            var detail = !string.IsNullOrWhiteSpace(errorBody)
+                ? ExtractErrorDetail(errorBody, response.ReasonPhrase ?? $"HTTP {code}")
+                : response.ReasonPhrase ?? $"HTTP {code}";
+
+            var isQuota = code == 429 && IsHardQuotaExhaustion(detail);
             throw new LlmHostUnavailableException(
-                $"LLM host returned temporary error HTTP {code} ({response.ReasonPhrase})."
+                $"LLM host returned temporary error HTTP {code} ({response.ReasonPhrase}): {detail}",
+                isQuotaExhausted: isQuota
             );
         }
     }

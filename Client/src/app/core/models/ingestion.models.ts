@@ -63,6 +63,8 @@ export interface LlmModelProfile {
   recommendedAsRefineModel: boolean;
   notes: string[];
   isBuiltInDefault?: boolean;
+  dailyQuotaResetTimezone?: string;
+  dailyQuotaResetTime?: string;
 }
 
 export interface UpsertLlmModelProfileRequest {
@@ -121,6 +123,15 @@ export interface LlmSettingsDto {
   refineTopP?: number | null;
   refineTopK?: number | null;
   refineRequestTimeoutSeconds?: number;
+  enableRateLimitSafeguards?: boolean;
+  maxConcurrentRequests?: number;
+  requestsPerMinute?: number | null;
+  dailyRequestQuota?: number | null;
+  dailyQuotaResetTimezone?: string;
+  dailyQuotaResetTime?: string;
+  autoResumeQueue?: boolean;
+  pausedUntilUtc?: string | null;
+  pauseReason?: string | null;
 }
 
 export interface UpdateLlmSettingsRequest {
@@ -147,6 +158,15 @@ export interface UpdateLlmSettingsRequest {
   refineTopP?: number | null;
   refineTopK?: number | null;
   refineRequestTimeoutSeconds?: number;
+  enableRateLimitSafeguards?: boolean;
+  maxConcurrentRequests?: number;
+  requestsPerMinute?: number | null;
+  dailyRequestQuota?: number | null;
+  dailyQuotaResetTimezone?: string;
+  dailyQuotaResetTime?: string;
+  autoResumeQueue?: boolean;
+  pausedUntilUtc?: string | null;
+  pauseReason?: string | null;
 }
 
 export interface TestLlmConnectionRequest {

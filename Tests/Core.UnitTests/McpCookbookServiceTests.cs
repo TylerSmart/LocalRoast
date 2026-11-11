@@ -171,7 +171,16 @@ public sealed class McpCookbookServiceTests
             CancellationToken cancellationToken = default
         ) => Task.FromResult<IDisposable>(new DummyDisposable());
 
-        public void CancelActiveExecution() { }
+        public Task<IDisposable> AcquireJobExecutionAsync(
+            int maxConcurrency,
+            CancellationToken cancellationToken = default
+        ) => Task.FromResult<IDisposable>(new DummyDisposable());
+
+        public void CancelActiveExecution(Guid? jobId = null) { }
+
+        public IReadOnlyCollection<Guid> ActiveJobIds => Array.Empty<Guid>();
+
+        public bool IsJobActive(Guid jobId) => false;
 
         public Guid? ActiveJobId => null;
 

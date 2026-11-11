@@ -44,6 +44,13 @@ public sealed class AiKitchenHelperServiceTests
 
         public Task<LlmSettingsDto> SetIngestionEnabledAsync(
             bool enabled,
+            DateTimeOffset? autoResumeAt,
+            string? pauseReason,
+            CancellationToken cancellationToken = default
+        ) => throw new NotImplementedException();
+
+        public Task<LlmSettingsDto> SetIngestionEnabledAsync(
+            bool enabled,
             CancellationToken cancellationToken = default
         ) => throw new NotImplementedException();
 

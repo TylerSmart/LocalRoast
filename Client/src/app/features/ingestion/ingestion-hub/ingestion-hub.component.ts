@@ -1,3 +1,4 @@
+import { DatePipe } from '@angular/common';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -53,6 +54,7 @@ export const REFRESH_OPTIONS: RefreshOption[] = [
   selector: 'app-ingestion-hub',
   imports: [
     ReactiveFormsModule,
+    DatePipe,
     RouterLink,
     MatButtonModule,
     MatButtonToggleModule,
@@ -98,6 +100,8 @@ export class IngestionHubComponent implements OnInit {
   readonly isSubmitting = signal<boolean>(false);
   readonly isRetryingAll = signal<boolean>(false);
   readonly isIngestionEnabled = signal<boolean>(true);
+  readonly pausedUntilUtc = signal<string | null>(null);
+  readonly pauseReason = signal<string | null>(null);
   readonly isTogglingIngestion = signal<boolean>(false);
   readonly feedbackMessage = signal<string | null>(null);
   readonly errorMessage = signal<string | null>(null);
@@ -378,6 +382,8 @@ export class IngestionHubComponent implements OnInit {
       .subscribe({
         next: (settings) => {
           this.isIngestionEnabled.set(settings.enableIngestion ?? true);
+          this.pausedUntilUtc.set(settings.pausedUntilUtc ?? null);
+          this.pauseReason.set(settings.pauseReason ?? null);
         },
         error: () => {
           // Fallback or leave default true
@@ -399,6 +405,8 @@ export class IngestionHubComponent implements OnInit {
       .subscribe({
         next: (settings) => {
           this.isIngestionEnabled.set(settings.enableIngestion ?? nextState);
+          this.pausedUntilUtc.set(settings.pausedUntilUtc ?? null);
+          this.pauseReason.set(settings.pauseReason ?? null);
           this.isTogglingIngestion.set(false);
           this.feedbackMessage.set(
             nextState

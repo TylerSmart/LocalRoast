@@ -54,6 +54,24 @@ public sealed class LlmDefaultsOptions
 
     public bool EnableIngestion { get; set; } = true;
 
+    public bool EnableRateLimitSafeguards { get; set; } = true;
+
+    public int MaxConcurrentRequests { get; set; } = 1;
+
+    public int? RequestsPerMinute { get; set; }
+
+    public int? DailyRequestQuota { get; set; }
+
+    public string DailyQuotaResetTimezone { get; set; } = "UTC";
+
+    public string DailyQuotaResetTime { get; set; } = "00:00";
+
+    public bool AutoResumeQueue { get; set; } = true;
+
+    public DateTimeOffset? PausedUntilUtc { get; set; }
+
+    public string? PauseReason { get; set; }
+
     public bool EnableBackgroundWorker { get; set; } = true;
 
     public int WorkerPollIntervalSeconds { get; set; } = 3;
@@ -85,7 +103,16 @@ public record LlmSettingsDto(
     double? RefineTemperature = null,
     double? RefineTopP = null,
     int? RefineTopK = null,
-    int RefineRequestTimeoutSeconds = 1200
+    int RefineRequestTimeoutSeconds = 1200,
+    bool EnableRateLimitSafeguards = true,
+    int MaxConcurrentRequests = 1,
+    int? RequestsPerMinute = null,
+    int? DailyRequestQuota = null,
+    string DailyQuotaResetTimezone = "UTC",
+    string DailyQuotaResetTime = "00:00",
+    bool AutoResumeQueue = true,
+    DateTimeOffset? PausedUntilUtc = null,
+    string? PauseReason = null
 );
 
 public record EffectiveLlmConnectionConfig(
@@ -110,7 +137,16 @@ public record EffectiveLlmConnectionConfig(
     double? RefineTemperature = null,
     double? RefineTopP = null,
     int? RefineTopK = null,
-    int RefineRequestTimeoutSeconds = 1200
+    int RefineRequestTimeoutSeconds = 1200,
+    bool EnableRateLimitSafeguards = true,
+    int MaxConcurrentRequests = 1,
+    int? RequestsPerMinute = null,
+    int? DailyRequestQuota = null,
+    string DailyQuotaResetTimezone = "UTC",
+    string DailyQuotaResetTime = "00:00",
+    bool AutoResumeQueue = true,
+    DateTimeOffset? PausedUntilUtc = null,
+    string? PauseReason = null
 )
 {
     /// <summary>The connection settings for refine requests: the Refine Model with its own thinking, sampling and timeout.</summary>
@@ -150,7 +186,14 @@ public record UpdateLlmSettingsRequest(
     [Range(0.0, 2.0)] double? RefineTemperature = null,
     [Range(0.0, 1.0)] double? RefineTopP = null,
     [Range(1, 1000)] int? RefineTopK = null,
-    [Range(5, 1800)] int RefineRequestTimeoutSeconds = 1200
+    [Range(5, 1800)] int RefineRequestTimeoutSeconds = 1200,
+    bool EnableRateLimitSafeguards = true,
+    [Range(1, 5)] int MaxConcurrentRequests = 1,
+    [Range(1, 1000)] int? RequestsPerMinute = null,
+    [Range(1, 100000)] int? DailyRequestQuota = null,
+    [MaxLength(64)] string DailyQuotaResetTimezone = "UTC",
+    [MaxLength(10)] string DailyQuotaResetTime = "00:00",
+    bool AutoResumeQueue = true
 );
 
 public record TestLlmConnectionRequest(

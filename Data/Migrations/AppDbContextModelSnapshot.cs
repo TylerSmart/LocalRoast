@@ -252,6 +252,11 @@ namespace App.Data.Migrations
                     b.Property<bool>("AutoPublishHighConfidenceText")
                         .HasColumnType("bit");
 
+                    b.Property<bool>("AutoResumeQueue")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
                     b.Property<string>("BaseUrl")
                         .IsRequired()
                         .HasMaxLength(500)
@@ -270,11 +275,38 @@ namespace App.Data.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("nvarchar(256)");
 
+                    b.Property<string>("DailyQuotaResetTime")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)")
+                        .HasDefaultValue("00:00");
+
+                    b.Property<string>("DailyQuotaResetTimezone")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)")
+                        .HasDefaultValue("UTC");
+
+                    b.Property<int?>("DailyRequestQuota")
+                        .HasColumnType("int");
+
                     b.Property<bool>("EnableIngestion")
                         .HasColumnType("bit");
 
+                    b.Property<bool>("EnableRateLimitSafeguards")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
                     b.Property<bool>("EnableThinking")
                         .HasColumnType("bit");
+
+                    b.Property<int>("MaxConcurrentRequests")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(1);
 
                     b.Property<int>("MaxIngestionRetries")
                         .HasColumnType("int");
@@ -299,6 +331,13 @@ namespace App.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(32)
                         .HasColumnType("nvarchar(32)");
+
+                    b.Property<string>("PauseReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTimeOffset?>("PausedUntilUtc")
+                        .HasColumnType("datetimeoffset");
 
                     b.Property<string>("Provider")
                         .IsRequired()
@@ -325,6 +364,9 @@ namespace App.Data.Migrations
                         .HasColumnType("float");
 
                     b.Property<int>("RequestTimeoutSeconds")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("RequestsPerMinute")
                         .HasColumnType("int");
 
                     b.Property<string>("SingletonKey")

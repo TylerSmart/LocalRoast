@@ -441,6 +441,48 @@
   margin-right: 0.35rem;
 }
 
+.slider-field-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.5rem 0;
+
+  .slider-field-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+
+    .slider-field-label {
+      font-size: 0.9rem;
+      font-weight: 500;
+      color: var(--mat-sys-on-surface, #1d1b20);
+    }
+
+    .slider-field-value {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: var(--mat-sys-primary, #6b5e43);
+      background-color: var(--mat-sys-surface-variant, #f4efe6);
+      padding: 0.15rem 0.5rem;
+      border-radius: 4px;
+    }
+  }
+
+  .full-width-slider {
+    width: 100%;
+  }
+
+  .slider-field-hint {
+    font-size: 0.75rem;
+    color: var(--mat-sys-on-surface-variant, #49454f);
+    line-height: 1.35;
+  }
+}
+
+.auto-resume-toggle {
+  margin-top: 0.5rem;
+}
+
 /* Mobile Responsiveness (360px and smaller screens) */
 @media (max-width: 600px) {
   .form-row.two-cols,

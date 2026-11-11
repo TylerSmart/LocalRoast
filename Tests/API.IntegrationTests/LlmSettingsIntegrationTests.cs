@@ -492,7 +492,7 @@ public sealed class LlmSettingsIntegrationTests
 
         var profiles = await response.Content.ReadFromJsonAsync<List<LlmModelProfileDto>>();
         Assert.IsNotNull(profiles);
-        Assert.AreEqual(5, profiles.Count);
+        Assert.AreEqual(LlmModelProfiles.All.Count, profiles.Count);
         Assert.IsTrue(profiles.Any(p => p.Id == "gemma4-e4b" && p.IsBuiltInDefault));
         Assert.IsTrue(profiles.Any(p => p.Id == "gemma4-e2b" && p.IsBuiltInDefault));
         Assert.IsTrue(profiles.Any(p => p.Id == "gemma4-12b" && p.IsBuiltInDefault));
@@ -538,7 +538,7 @@ public sealed class LlmSettingsIntegrationTests
         var getResponse = await _client.GetAsync("/api/llm-settings/model-profiles");
         var list = await getResponse.Content.ReadFromJsonAsync<List<LlmModelProfileDto>>();
         Assert.IsNotNull(list);
-        Assert.AreEqual(6, list.Count);
+        Assert.AreEqual(LlmModelProfiles.All.Count + 1, list.Count);
         Assert.IsTrue(list.Any(p => p.Id == created.Id));
     }
 
@@ -703,5 +703,84 @@ public sealed class LlmSettingsIntegrationTests
         );
         var resp2 = await _client.PostAsJsonAsync("/api/llm-settings/model-profiles", invalidTemp);
         Assert.AreEqual(HttpStatusCode.BadRequest, resp2.StatusCode);
+    }
+
+    [TestMethod]
+    public async Task RateLimitSafeguards_CanBeToggled()
+    {
+        await AuthenticateAsync(_client);
+
+        var updateResponse = await _client.PutAsJsonAsync(
+            "/api/llm-settings",
+            new UpdateLlmSettingsRequest(EnableRateLimitSafeguards: false)
+        );
+        Assert.AreEqual(HttpStatusCode.OK, updateResponse.StatusCode);
+
+        var settings = await _client.GetFromJsonAsync<LlmSettingsDto>("/api/llm-settings");
+        Assert.IsNotNull(settings);
+        Assert.IsFalse(settings.EnableRateLimitSafeguards);
+
+        using var scope = _factory.Services.CreateScope();
+        var effective = await scope
+            .ServiceProvider.GetRequiredService<ILlmSettingsService>()
+            .GetEffectiveConfigAsync();
+        Assert.IsFalse(effective.EnableRateLimitSafeguards);
+    }
+
+    [TestMethod]
+    public async Task GetModelProfiles_IncludesGeminiProfiles()
+    {
+        await AuthenticateAsync(_client);
+
+        var response = await _client.GetAsync("/api/llm-settings/model-profiles");
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+
+        var profiles = await response.Content.ReadFromJsonAsync<List<LlmModelProfileDto>>();
+        Assert.IsNotNull(profiles);
+        Assert.IsTrue(
+            profiles.Any(p => p.Id == "gemini-flash-lite"),
+            "Expected gemini-flash-lite profile"
+        );
+        Assert.IsTrue(profiles.Any(p => p.Id == "gemini-flash"), "Expected gemini-flash profile");
+        Assert.IsTrue(profiles.Any(p => p.Id == "gemini-argon"), "Expected gemini-argon profile");
+    }
+
+    [TestMethod]
+    public async Task RateLimitPacingAndConcurrency_CanBeConfiguredAndPersisted()
+    {
+        await AuthenticateAsync(_client);
+
+        var request = new UpdateLlmSettingsRequest(
+            Provider: LlmProvider.OpenAiCompatible,
+            BaseUrl: "http://localhost:1234/v1",
+            MaxConcurrentRequests: 3,
+            RequestsPerMinute: 15,
+            DailyRequestQuota: 1500,
+            DailyQuotaResetTimezone: "America/Los_Angeles",
+            DailyQuotaResetTime: "00:00",
+            AutoResumeQueue: true
+        );
+
+        var response = await _client.PutAsJsonAsync("/api/llm-settings", request);
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+
+        var updated = await response.Content.ReadFromJsonAsync<LlmSettingsDto>();
+        Assert.IsNotNull(updated);
+        Assert.AreEqual(3, updated.MaxConcurrentRequests);
+        Assert.AreEqual(15, updated.RequestsPerMinute);
+        Assert.AreEqual(1500, updated.DailyRequestQuota);
+        Assert.AreEqual("America/Los_Angeles", updated.DailyQuotaResetTimezone);
+        Assert.AreEqual("00:00", updated.DailyQuotaResetTime);
+        Assert.IsTrue(updated.AutoResumeQueue);
+
+        var getResponse = await _client.GetAsync("/api/llm-settings");
+        var fetched = await getResponse.Content.ReadFromJsonAsync<LlmSettingsDto>();
+        Assert.IsNotNull(fetched);
+        Assert.AreEqual(3, fetched.MaxConcurrentRequests);
+        Assert.AreEqual(15, fetched.RequestsPerMinute);
+        Assert.AreEqual(1500, fetched.DailyRequestQuota);
+        Assert.AreEqual("America/Los_Angeles", fetched.DailyQuotaResetTimezone);
+        Assert.AreEqual("00:00", fetched.DailyQuotaResetTime);
+        Assert.IsTrue(fetched.AutoResumeQueue);
     }
 }

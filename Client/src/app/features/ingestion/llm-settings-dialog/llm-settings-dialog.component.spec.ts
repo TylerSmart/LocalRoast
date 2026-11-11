@@ -81,6 +81,11 @@ describe('LlmSettingsDialogComponent', () => {
     enableThinking: true,
     enableIngestion: true,
     maxIngestionRetries: 5,
+    enableRateLimitSafeguards: true,
+    maxConcurrentRequests: 2,
+    requestsPerMinute: 15,
+    dailyRequestQuota: 1500,
+    autoResumeQueue: true,
     modifiedAt: null,
   };
 
@@ -134,6 +139,11 @@ describe('LlmSettingsDialogComponent', () => {
     expect(component.form.controls.contextWindowTokens.value).toBe(8192);
     expect(component.form.controls.enableThinking.value).toBe(true);
     expect(component.form.controls.enableIngestion.value).toBe(true);
+    expect(component.form.controls.enableRateLimitSafeguards.value).toBe(true);
+    expect(component.form.controls.maxConcurrentRequests.value).toBe(2);
+    expect(component.form.controls.requestsPerMinute.value).toBe(15);
+    expect(component.form.controls.dailyRequestQuota.value).toBe(1500);
+    expect(component.form.controls.autoResumeQueue.value).toBe(true);
     expect(component.form.controls.maxIngestionRetries.value).toBe(5);
     expect(component.form.controls.ollamaCpuOnly.value).toBe(false);
     expect(component.form.controls.temperature.value).toBeNull();
@@ -259,6 +269,36 @@ describe('LlmSettingsDialogComponent', () => {
     );
   });
 
+  it('saves enableRateLimitSafeguards setting', () => {
+    component.form.controls.enableRateLimitSafeguards.setValue(false);
+    component.onSave();
+
+    expect(mockLlmSettingsService.updateSettings).toHaveBeenLastCalledWith(
+      expect.objectContaining({ enableRateLimitSafeguards: false }),
+    );
+  });
+
+  it('saves concurrency and rate limit settings', () => {
+    component.form.controls.maxConcurrentRequests.setValue(3);
+    component.form.controls.requestsPerMinute.setValue(30);
+    component.form.controls.dailyRequestQuota.setValue(2000);
+    component.form.controls.dailyQuotaResetTimezone.setValue('America/Los_Angeles');
+    component.form.controls.dailyQuotaResetTime.setValue('00:00');
+    component.form.controls.autoResumeQueue.setValue(false);
+    component.onSave();
+
+    expect(mockLlmSettingsService.updateSettings).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        maxConcurrentRequests: 3,
+        requestsPerMinute: 30,
+        dailyRequestQuota: 2000,
+        dailyQuotaResetTimezone: 'America/Los_Angeles',
+        dailyQuotaResetTime: '00:00',
+        autoResumeQueue: false,
+      }),
+    );
+  });
+
   it.each([
     ['temperature', 2.5],
     ['temperature', -0.1],
@@ -267,6 +307,12 @@ describe('LlmSettingsDialogComponent', () => {
     ['topK', 12.5],
     ['topK', 1001],
     ['requestTimeoutSeconds', 1801],
+    ['maxConcurrentRequests', 0],
+    ['maxConcurrentRequests', 6],
+    ['requestsPerMinute', 0],
+    ['requestsPerMinute', 1001],
+    ['dailyRequestQuota', 0],
+    ['dailyRequestQuota', 100001],
   ] as const)('blocks saving when %s is %s', (control, value) => {
     component.form.controls[control].setValue(value);
 

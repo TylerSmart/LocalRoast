@@ -1563,4 +1563,156 @@ public sealed class LlmExtractionClientTests
             result.TriageDecisions[0].Resolution
         );
     }
+
+    [TestMethod]
+    public async Task ExtractRecipe_TransientRateLimit_RetriesAndSucceeds()
+    {
+        var attempt = 0;
+        var handler = new MockHttpMessageHandler(req =>
+        {
+            attempt++;
+            if (attempt == 1)
+            {
+                var response = new HttpResponseMessage(System.Net.HttpStatusCode.TooManyRequests)
+                {
+                    Content = new StringContent(
+                        """{"error":{"message":"Rate limit exceeded. Try again in 1 second."}}"""
+                    ),
+                };
+                response.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(
+                    TimeSpan.FromSeconds(1)
+                );
+                return response;
+            }
+
+            var body = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            if (IsMethodTagRequest(body))
+            {
+                return OpenAiReply(
+                    """{"amounts":{"A1":"0 carrots"},"timers":{},"steps":{"1":["0 carrots"]}}"""
+                );
+            }
+
+            return OpenAiReply(
+                """{"title":"Carrot Soup","ingredients":[{"displayName":"carrots","quantity":2,"unit":"whole","originalRawText":"2 carrots"}]}"""
+            );
+        });
+
+        var client = new LlmExtractionClient(new HttpClient(handler));
+        var config = new EffectiveLlmConnectionConfig(
+            Provider: LlmProvider.OpenAiCompatible,
+            BaseUrl: "https://api.example.com/v1",
+            ApiKey: "test-key",
+            TextModel: "gemini-2.5-flash",
+            VisionModel: null,
+            OllamaKeepAlive: "5m",
+            RequestTimeoutSeconds: 30,
+            AutoPublishHighConfidenceText: false,
+            EnableThinking: false,
+            EnableRateLimitSafeguards: true
+        );
+
+        var result = await client.ExtractRecipeFromTextAsync(
+            config,
+            new LlmExtractionContext(
+                "Ingredients:\n- 2 carrots\nInstructions:\nStep 1: Chop [A1: 2] carrots.",
+                []
+            )
+        );
+
+        Assert.IsNotNull(result);
+        Assert.AreEqual("Carrot Soup", result.Title);
+        Assert.IsTrue(attempt >= 2, $"Expected at least 2 attempts, but got {attempt}");
+    }
+
+    [TestMethod]
+    public async Task ExtractRecipe_DailyQuotaExhaustion_ThrowsWithIsQuotaExhaustedTrue_WithoutRetrying()
+    {
+        var attempt = 0;
+        var handler = new MockHttpMessageHandler(req =>
+        {
+            attempt++;
+            return new HttpResponseMessage(System.Net.HttpStatusCode.TooManyRequests)
+            {
+                Content = new StringContent(
+                    """{"error":{"message":"Resource has been exhausted (e.g. check quota): GenerateContent requests per day quota exceeded."}}"""
+                ),
+            };
+        });
+
+        var client = new LlmExtractionClient(new HttpClient(handler));
+        var config = new EffectiveLlmConnectionConfig(
+            Provider: LlmProvider.OpenAiCompatible,
+            BaseUrl: "https://api.example.com/v1",
+            ApiKey: "test-key",
+            TextModel: "gemini-2.5-flash",
+            VisionModel: null,
+            OllamaKeepAlive: "5m",
+            RequestTimeoutSeconds: 30,
+            AutoPublishHighConfidenceText: false,
+            EnableThinking: false,
+            EnableRateLimitSafeguards: true
+        );
+
+        var ex = await Assert.ThrowsAsync<LlmHostUnavailableException>(() =>
+            client.ExtractRecipeFromTextAsync(
+                config,
+                new LlmExtractionContext(
+                    "Ingredients:\n- 2 carrots\nInstructions:\nStep 1: Chop [A1: 2] carrots.",
+                    []
+                )
+            )
+        );
+
+        Assert.IsTrue(ex.IsQuotaExhausted);
+        Assert.AreEqual(1, attempt, "Hard quota exhaustion should not retry repeatedly.");
+    }
+
+    [TestMethod]
+    public async Task ExtractRecipe_RateLimitSafeguardsDisabled_ThrowsImmediatelyOn429()
+    {
+        var attempt = 0;
+        var handler = new MockHttpMessageHandler(req =>
+        {
+            attempt++;
+            var response = new HttpResponseMessage(System.Net.HttpStatusCode.TooManyRequests)
+            {
+                Content = new StringContent("""{"error":{"message":"Rate limit exceeded."}}"""),
+            };
+            response.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(
+                TimeSpan.FromSeconds(1)
+            );
+            return response;
+        });
+
+        var client = new LlmExtractionClient(new HttpClient(handler));
+        var config = new EffectiveLlmConnectionConfig(
+            Provider: LlmProvider.OpenAiCompatible,
+            BaseUrl: "https://api.example.com/v1",
+            ApiKey: "test-key",
+            TextModel: "gemini-2.5-flash",
+            VisionModel: null,
+            OllamaKeepAlive: "5m",
+            RequestTimeoutSeconds: 30,
+            AutoPublishHighConfidenceText: false,
+            EnableThinking: false,
+            EnableRateLimitSafeguards: false
+        );
+
+        await Assert.ThrowsAsync<LlmHostUnavailableException>(() =>
+            client.ExtractRecipeFromTextAsync(
+                config,
+                new LlmExtractionContext(
+                    "Ingredients:\n- 2 carrots\nInstructions:\nStep 1: Chop [A1: 2] carrots.",
+                    []
+                )
+            )
+        );
+
+        Assert.AreEqual(
+            1,
+            attempt,
+            "When safeguards are disabled, 429 should not trigger in-place retries."
+        );
+    }
 }

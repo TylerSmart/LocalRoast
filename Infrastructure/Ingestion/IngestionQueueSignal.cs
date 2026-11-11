@@ -15,10 +15,12 @@ public sealed class IngestionQueueSignal : IIngestionQueueSignal
     );
 
     private readonly object _lock = new();
-    private readonly SemaphoreSlim _jobExecutionLock = new(1, 1);
-    private Guid? _activeJobId;
-    private CancellationTokenSource? _activeCts;
-    private bool _activeIsPreemptible;
+    private readonly Dictionary<Guid, (CancellationTokenSource Cts, bool Preemptible)> _activeJobs =
+        new();
+
+    private int _activeExecutionCount;
+    private readonly Queue<(TaskCompletionSource<IDisposable> Tcs, int MaxConcurrency)> _waiters =
+        new();
 
     public Guid? ActiveJobId
     {
@@ -26,8 +28,27 @@ public sealed class IngestionQueueSignal : IIngestionQueueSignal
         {
             lock (_lock)
             {
-                return _activeJobId;
+                return _activeJobs.Count > 0 ? _activeJobs.Keys.First() : null;
             }
+        }
+    }
+
+    public IReadOnlyCollection<Guid> ActiveJobIds
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _activeJobs.Keys.ToArray();
+            }
+        }
+    }
+
+    public bool IsJobActive(Guid jobId)
+    {
+        lock (_lock)
+        {
+            return _activeJobs.ContainsKey(jobId);
         }
     }
 
@@ -39,19 +60,25 @@ public sealed class IngestionQueueSignal : IIngestionQueueSignal
 
     public void PreemptBackgroundWork()
     {
-        CancellationTokenSource? preemptibleCts;
+        List<CancellationTokenSource> toCancel = [];
         lock (_lock)
         {
-            preemptibleCts = _activeIsPreemptible ? _activeCts : null;
+            foreach (var (_, (cts, preemptible)) in _activeJobs)
+            {
+                if (preemptible)
+                {
+                    toCancel.Add(cts);
+                }
+            }
         }
 
-        try
+        foreach (var cts in toCancel)
         {
-            preemptibleCts?.Cancel();
-        }
-        catch (ObjectDisposedException)
-        {
-            // ignore
+            try
+            {
+                cts.Cancel();
+            }
+            catch (ObjectDisposedException) { }
         }
     }
 
@@ -83,7 +110,6 @@ public sealed class IngestionQueueSignal : IIngestionQueueSignal
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            // timeout reached
             return false;
         }
     }
@@ -98,37 +124,111 @@ public sealed class IngestionQueueSignal : IIngestionQueueSignal
     {
         lock (_lock)
         {
-            _activeJobId = jobId;
-            _activeCts = cts;
-            _activeIsPreemptible = preemptible;
+            _activeJobs[jobId] = (cts, preemptible);
         }
 
         return new ActiveJobScope(this, jobId, cts);
     }
 
-    public async Task<IDisposable> AcquireJobExecutionAsync(
+    public Task<IDisposable> AcquireJobExecutionAsync(
+        CancellationToken cancellationToken = default
+    ) => AcquireJobExecutionAsync(1, cancellationToken);
+
+    public Task<IDisposable> AcquireJobExecutionAsync(
+        int maxConcurrency,
         CancellationToken cancellationToken = default
     )
     {
-        await _jobExecutionLock.WaitAsync(cancellationToken);
-        return new JobExecutionScope(_jobExecutionLock);
-    }
+        var limit = Math.Max(1, maxConcurrency);
 
-    public void CancelActiveExecution()
-    {
-        CancellationTokenSource? ctsToCancel;
         lock (_lock)
         {
-            ctsToCancel = _activeCts;
+            if (_activeExecutionCount < limit)
+            {
+                _activeExecutionCount++;
+                return Task.FromResult<IDisposable>(new JobExecutionScope(this));
+            }
+
+            var tcs = new TaskCompletionSource<IDisposable>(
+                TaskCreationOptions.RunContinuationsAsynchronously
+            );
+
+            if (cancellationToken.CanBeCanceled)
+            {
+                var reg = cancellationToken.Register(() =>
+                {
+                    lock (_lock)
+                    {
+                        tcs.TrySetCanceled(cancellationToken);
+                    }
+                });
+
+                tcs.Task.ContinueWith(_ => reg.Dispose(), TaskScheduler.Default);
+            }
+
+            _waiters.Enqueue((tcs, limit));
+            return tcs.Task;
+        }
+    }
+
+    public void CancelActiveExecution(Guid? jobId = null)
+    {
+        List<CancellationTokenSource> toCancel = [];
+        lock (_lock)
+        {
+            if (jobId.HasValue)
+            {
+                if (_activeJobs.TryGetValue(jobId.Value, out var entry))
+                {
+                    toCancel.Add(entry.Cts);
+                }
+            }
+            else
+            {
+                foreach (var (_, (cts, _)) in _activeJobs)
+                {
+                    toCancel.Add(cts);
+                }
+            }
         }
 
-        try
+        foreach (var cts in toCancel)
         {
-            ctsToCancel?.Cancel();
+            try
+            {
+                cts.Cancel();
+            }
+            catch (ObjectDisposedException) { }
         }
-        catch (ObjectDisposedException)
+    }
+
+    private void ReleaseExecution()
+    {
+        lock (_lock)
         {
-            // ignore
+            _activeExecutionCount--;
+
+            while (_waiters.Count > 0)
+            {
+                var (waiter, limit) = _waiters.Dequeue();
+                if (waiter.Task.IsCompleted)
+                {
+                    continue;
+                }
+
+                if (_activeExecutionCount < limit)
+                {
+                    _activeExecutionCount++;
+                    waiter.TrySetResult(new JobExecutionScope(this));
+                    return;
+                }
+                else
+                {
+                    // Re-enqueue if cannot satisfy
+                    _waiters.Enqueue((waiter, limit));
+                    break;
+                }
+            }
         }
     }
 
@@ -136,11 +236,9 @@ public sealed class IngestionQueueSignal : IIngestionQueueSignal
     {
         lock (_lock)
         {
-            if (_activeJobId == jobId && ReferenceEquals(_activeCts, cts))
+            if (_activeJobs.TryGetValue(jobId, out var entry) && ReferenceEquals(entry.Cts, cts))
             {
-                _activeJobId = null;
-                _activeCts = null;
-                _activeIsPreemptible = false;
+                _activeJobs.Remove(jobId);
             }
         }
     }
@@ -162,7 +260,7 @@ public sealed class IngestionQueueSignal : IIngestionQueueSignal
         }
     }
 
-    private sealed class JobExecutionScope(SemaphoreSlim semaphore) : IDisposable
+    private sealed class JobExecutionScope(IngestionQueueSignal signal) : IDisposable
     {
         private int _disposed;
 
@@ -170,7 +268,7 @@ public sealed class IngestionQueueSignal : IIngestionQueueSignal
         {
             if (Interlocked.Exchange(ref _disposed, 1) == 0)
             {
-                semaphore.Release();
+                signal.ReleaseExecution();
             }
         }
     }

@@ -19,6 +19,7 @@ import { MatInputModule } from '@angular/material/input';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSelectModule } from '@angular/material/select';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
+import { MatSliderModule } from '@angular/material/slider';
 import { MatTabsModule } from '@angular/material/tabs';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import type {
@@ -84,6 +85,7 @@ export function filterModels(
     MatSelectModule,
     MatAutocompleteModule,
     MatSlideToggleModule,
+    MatSliderModule,
     MatCheckboxModule,
     MatIconModule,
     MatProgressSpinnerModule,
@@ -126,6 +128,18 @@ export class LlmSettingsDialogComponent implements OnInit {
   readonly profileMessage = signal<string | null>(null);
   readonly refineProfileMessage = signal<string | null>(null);
 
+  readonly timezoneOptions = [
+    { value: 'America/Los_Angeles', label: 'Pacific Time (PT) - Google AI Studio (Midnight PT)' },
+    { value: 'UTC', label: 'Coordinated Universal Time (UTC) - Standard / OpenRouter' },
+    { value: 'America/New_York', label: 'Eastern Time (ET)' },
+    { value: 'America/Chicago', label: 'Central Time (CT)' },
+    { value: 'America/Denver', label: 'Mountain Time (MT)' },
+    { value: 'Europe/London', label: 'London / GMT' },
+    { value: 'Europe/Paris', label: 'Central European Time (CET)' },
+    { value: 'Asia/Tokyo', label: 'Tokyo / JST' },
+    { value: 'Local', label: 'Local Server Time' },
+  ];
+
   readonly selectedTabIndex = signal<number>(0);
   readonly isEditingProfile = signal<boolean>(false);
   readonly editingProfileId = signal<string | null>(null);
@@ -157,6 +171,27 @@ export class LlmSettingsDialogComponent implements OnInit {
     autoPublishHighConfidenceText: this.fb.nonNullable.control<boolean>(false),
     enableThinking: this.fb.nonNullable.control<boolean>(false),
     enableIngestion: this.fb.nonNullable.control<boolean>(true),
+    enableRateLimitSafeguards: this.fb.nonNullable.control<boolean>(true),
+    maxConcurrentRequests: this.fb.nonNullable.control<number>(1, [
+      Validators.required,
+      Validators.min(1),
+      Validators.max(5),
+    ]),
+    requestsPerMinute: this.fb.control<number | null>(null, [
+      Validators.min(1),
+      Validators.max(1000),
+      Validators.pattern(/^\d+$/),
+    ]),
+    dailyRequestQuota: this.fb.control<number | null>(null, [
+      Validators.min(1),
+      Validators.max(100000),
+      Validators.pattern(/^\d+$/),
+    ]),
+    dailyQuotaResetTimezone: this.fb.nonNullable.control<string>('UTC', [Validators.maxLength(64)]),
+    dailyQuotaResetTime: this.fb.nonNullable.control<string>('00:00', [
+      Validators.pattern(/^([01]\d|2[0-3]):[0-5]\d$/),
+    ]),
+    autoResumeQueue: this.fb.nonNullable.control<boolean>(true),
     maxIngestionRetries: this.fb.nonNullable.control<number>(3, [
       Validators.required,
       Validators.min(0),
@@ -278,6 +313,13 @@ export class LlmSettingsDialogComponent implements OnInit {
             autoPublishHighConfidenceText: settings.autoPublishHighConfidenceText,
             enableThinking: settings.enableThinking ?? false,
             enableIngestion: settings.enableIngestion ?? true,
+            enableRateLimitSafeguards: settings.enableRateLimitSafeguards ?? true,
+            maxConcurrentRequests: settings.maxConcurrentRequests ?? 1,
+            requestsPerMinute: settings.requestsPerMinute ?? null,
+            dailyRequestQuota: settings.dailyRequestQuota ?? null,
+            dailyQuotaResetTimezone: settings.dailyQuotaResetTimezone ?? 'UTC',
+            dailyQuotaResetTime: settings.dailyQuotaResetTime ?? '00:00',
+            autoResumeQueue: settings.autoResumeQueue ?? true,
             maxIngestionRetries: settings.maxIngestionRetries ?? 3,
             temperature: settings.temperature ?? null,
             topP: settings.topP ?? null,
@@ -371,6 +413,13 @@ export class LlmSettingsDialogComponent implements OnInit {
         autoPublishHighConfidenceText: values.autoPublishHighConfidenceText,
         enableThinking: values.enableThinking,
         enableIngestion: values.enableIngestion,
+        enableRateLimitSafeguards: values.enableRateLimitSafeguards,
+        maxConcurrentRequests: values.maxConcurrentRequests,
+        requestsPerMinute: values.requestsPerMinute,
+        dailyRequestQuota: values.dailyRequestQuota,
+        dailyQuotaResetTimezone: values.dailyQuotaResetTimezone.trim() || 'UTC',
+        dailyQuotaResetTime: values.dailyQuotaResetTime.trim() || '00:00',
+        autoResumeQueue: values.autoResumeQueue,
         maxIngestionRetries: values.maxIngestionRetries,
         temperature: values.temperature,
         topP: values.topP,
@@ -434,6 +483,10 @@ export class LlmSettingsDialogComponent implements OnInit {
       topK: profile.topK,
       contextWindowTokens: profile.contextWindowTokens,
       requestTimeoutSeconds: profile.requestTimeoutSeconds,
+      ...(profile.dailyQuotaResetTimezone
+        ? { dailyQuotaResetTimezone: profile.dailyQuotaResetTimezone }
+        : {}),
+      ...(profile.dailyQuotaResetTime ? { dailyQuotaResetTime: profile.dailyQuotaResetTime } : {}),
     });
     this.form.markAsDirty();
     this.profileMessage.set(
@@ -660,6 +713,10 @@ export class LlmSettingsDialogComponent implements OnInit {
       topK: profile.topK,
       contextWindowTokens: profile.contextWindowTokens,
       requestTimeoutSeconds: profile.requestTimeoutSeconds,
+      ...(profile.dailyQuotaResetTimezone
+        ? { dailyQuotaResetTimezone: profile.dailyQuotaResetTimezone }
+        : {}),
+      ...(profile.dailyQuotaResetTime ? { dailyQuotaResetTime: profile.dailyQuotaResetTime } : {}),
     });
     this.form.markAsDirty();
     this.selectedProfileId.set(profile.id);

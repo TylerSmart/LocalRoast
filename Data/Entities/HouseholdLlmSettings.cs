@@ -54,6 +54,24 @@ public sealed class HouseholdLlmSettings : IAuditable
 
     public bool EnableIngestion { get; set; } = true;
 
+    public bool EnableRateLimitSafeguards { get; set; } = true;
+
+    public int MaxConcurrentRequests { get; set; } = 1;
+
+    public int? RequestsPerMinute { get; set; }
+
+    public int? DailyRequestQuota { get; set; }
+
+    public string DailyQuotaResetTimezone { get; set; } = "UTC";
+
+    public string DailyQuotaResetTime { get; set; } = "00:00";
+
+    public bool AutoResumeQueue { get; set; } = true;
+
+    public DateTimeOffset? PausedUntilUtc { get; set; }
+
+    public string? PauseReason { get; set; }
+
     public bool ModelProfilesSeeded { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; }

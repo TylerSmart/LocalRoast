@@ -25,12 +25,9 @@ public sealed class IngestionBackgroundWorker(
 
         try
         {
-            using (var startupScope = scopeFactory.CreateScope())
-            {
-                var processor =
-                    startupScope.ServiceProvider.GetRequiredService<IIngestionProcessor>();
-                await processor.RecoverInterruptedJobsAsync(stoppingToken);
-            }
+            using var startupScope = scopeFactory.CreateScope();
+            var processor = startupScope.ServiceProvider.GetRequiredService<IIngestionProcessor>();
+            await processor.RecoverInterruptedJobsAsync(stoppingToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -45,14 +42,30 @@ public sealed class IngestionBackgroundWorker(
                     Math.Max(1, options.Value.WorkerPollIntervalSeconds)
                 );
 
-                bool ingestionEnabled;
+                EffectiveLlmConnectionConfig config;
                 using (var checkScope = scopeFactory.CreateScope())
                 {
                     var settingsService =
                         checkScope.ServiceProvider.GetRequiredService<ILlmSettingsService>();
-                    var config = await settingsService.GetEffectiveConfigAsync(stoppingToken);
-                    ingestionEnabled = config.EnableIngestion;
+                    config = await settingsService.GetEffectiveConfigAsync(stoppingToken);
+
+                    // Auto-resume check if scheduled pause window has elapsed
+                    if (
+                        !config.EnableIngestion
+                        && config.AutoResumeQueue
+                        && config.PausedUntilUtc.HasValue
+                        && DateTimeOffset.UtcNow >= config.PausedUntilUtc.Value
+                    )
+                    {
+                        await settingsService.SetIngestionEnabledAsync(true, stoppingToken);
+                        config = await settingsService.GetEffectiveConfigAsync(stoppingToken);
+                        logger.LogInformation(
+                            "Automatically resumed ingestion queue after scheduled pause window elapsed ({Reason}).",
+                            config.PauseReason ?? "Scheduled auto-resume"
+                        );
+                    }
                 }
+                var ingestionEnabled = config.EnableIngestion;
 
                 // 1. Recover any orphaned/interrupted jobs if no active execution is running
                 if (queueSignal.ActiveJobId == null)
@@ -63,16 +76,67 @@ public sealed class IngestionBackgroundWorker(
                     await processor.RecoverInterruptedJobsAsync(stoppingToken);
                 }
 
-                // 2. Drain all pending queued jobs (only run-now requests while paused)
-                bool processedAny;
-                do
+                // 2. Drain all pending queued jobs (supporting configurable max concurrency)
+                var maxConcurrency = Math.Clamp(config.MaxConcurrentRequests, 1, 5);
+                if (maxConcurrency <= 1)
                 {
-                    using var scope = scopeFactory.CreateScope();
-                    var processor = scope.ServiceProvider.GetRequiredService<IIngestionProcessor>();
-                    processedAny = await processor.ProcessNextQueuedJobAsync(stoppingToken);
-                } while (processedAny && !stoppingToken.IsCancellationRequested);
+                    bool processedAny;
+                    do
+                    {
+                        using var scope = scopeFactory.CreateScope();
+                        var processor =
+                            scope.ServiceProvider.GetRequiredService<IIngestionProcessor>();
+                        processedAny = await processor.ProcessNextQueuedJobAsync(stoppingToken);
+                    } while (processedAny && !stoppingToken.IsCancellationRequested);
+                }
+                else
+                {
+                    var runningTasks = new List<Task<bool>>();
+                    while (!stoppingToken.IsCancellationRequested)
+                    {
+                        runningTasks.RemoveAll(t => t.IsCompleted);
 
-                // 2. Probe offline waiting jobs (only when ingestion is enabled)
+                        while (
+                            runningTasks.Count < maxConcurrency
+                            && !stoppingToken.IsCancellationRequested
+                        )
+                        {
+                            var scope = scopeFactory.CreateScope();
+                            var processor =
+                                scope.ServiceProvider.GetRequiredService<IIngestionProcessor>();
+                            var task = processor.ProcessNextQueuedJobAsync(stoppingToken);
+                            var scopedTask = task.ContinueWith(
+                                t =>
+                                {
+                                    scope.Dispose();
+                                    return t.GetAwaiter().GetResult();
+                                },
+                                TaskScheduler.Default
+                            );
+
+                            if (scopedTask.IsCompleted && !scopedTask.Result)
+                            {
+                                break;
+                            }
+
+                            runningTasks.Add(scopedTask);
+                        }
+
+                        if (runningTasks.Count == 0)
+                        {
+                            break;
+                        }
+
+                        var finished = await Task.WhenAny(runningTasks);
+                        runningTasks.Remove(finished);
+                        if (!finished.Result && runningTasks.Count == 0)
+                        {
+                            break;
+                        }
+                    }
+                }
+
+                // 3. Probe offline waiting jobs (only when ingestion is enabled)
                 if (ingestionEnabled)
                 {
                     using var probeScope = scopeFactory.CreateScope();
@@ -81,7 +145,7 @@ public sealed class IngestionBackgroundWorker(
                     await processor.ProbeAndPromoteWaitingJobsAsync(stoppingToken);
                 }
 
-                // 3. Refine one review draft with the larger model while nothing is queued
+                // 4. Refine one review draft with the larger model while nothing is queued
                 bool refined;
                 using (var refineScope = scopeFactory.CreateScope())
                 {
@@ -94,7 +158,7 @@ public sealed class IngestionBackgroundWorker(
                     continue;
                 }
 
-                // 4. Await signal or poll interval
+                // 5. Await signal or poll interval
                 pollInterval = TimeSpan.FromSeconds(
                     Math.Max(1, options.Value.WorkerPollIntervalSeconds)
                 );

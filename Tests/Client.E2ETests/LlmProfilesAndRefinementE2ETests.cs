@@ -254,4 +254,78 @@ public sealed class LlmProfilesAndRefinementE2ETests : E2ETestBase
             Assert.AreEqual(204, status, "The refinement journey must remove its own job.");
         }
     }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task LlmSettingsDialog_GeminiProfilesAndRateLimitSafeguardsTogglePersist()
+    {
+        await using var mockServer = await MockLanLlmAndBlogServer.StartAsync();
+        await RegisterAndLoginAsync();
+        await Page.GotoAsync($"{ServerUrl}/ingest");
+        await Page.Locator(".llm-settings-btn").ClickAsync();
+
+        var dialog = Page.Locator("app-llm-settings-dialog");
+        var textModel = dialog.Locator("input[formcontrolname='textModel']");
+        await textModel.FillAsync("");
+
+        await dialog.Locator("[data-testid='llm-profile-select']").ClickAsync();
+        await Page.Locator("mat-option", new() { HasText = "Gemini Flash Lite" }).ClickAsync();
+        await dialog.Locator("[data-testid='llm-apply-profile']").ClickAsync();
+
+        await Expect(dialog.Locator(".profile-message").First)
+            .ToContainTextAsync("Applied Gemini Flash Lite");
+        await Expect(textModel).ToHaveValueAsync("gemini-2.5-flash-lite");
+
+        await dialog.Locator(".mdc-tab", new() { HasText = "Refinement & Queue" }).ClickAsync();
+        var safeguardsToggle = dialog.Locator(
+            "mat-slide-toggle[formcontrolname='enableRateLimitSafeguards']"
+        );
+        await Expect(safeguardsToggle).ToBeVisibleAsync();
+        await Expect(safeguardsToggle)
+            .ToHaveClassAsync(
+                new System.Text.RegularExpressions.Regex("mat-mdc-slide-toggle-checked")
+            );
+
+        // Adjust concurrency slider
+        var sliderThumb = dialog.Locator("[data-testid='max-concurrent-slider']");
+        await Expect(sliderThumb).ToBeVisibleAsync();
+        await sliderThumb.EvaluateAsync(
+            "el => { el.value = '3'; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); }"
+        );
+        await Expect(dialog.Locator(".slider-field-value")).ToHaveTextAsync("3");
+
+        // Set RPM and RPD
+        var rpmInput = dialog.Locator("[data-testid='rpm-input']");
+        await rpmInput.FillAsync("15");
+        var rpdInput = dialog.Locator("[data-testid='rpd-input']");
+        await rpdInput.FillAsync("1500");
+
+        // Verify Quota Reset Schedule (applied from Gemini Flash Lite profile)
+        var tzSelect = dialog.Locator("[data-testid='quota-reset-timezone-select']");
+        await Expect(tzSelect).ToContainTextAsync("Pacific Time");
+        var resetTimeInput = dialog.Locator("[data-testid='quota-reset-time-input']");
+        await Expect(resetTimeInput).ToHaveValueAsync("00:00");
+
+        // Verify Auto-Resume Toggle
+        var autoResumeToggle = dialog.Locator("[data-testid='auto-resume-toggle']");
+        await Expect(autoResumeToggle).ToBeVisibleAsync();
+
+        // Save
+        await dialog.Locator("button", new() { HasText = "Save Settings" }).ClickAsync();
+        await Expect(dialog).Not.ToBeVisibleAsync();
+
+        // Reopen dialog and verify persisted settings
+        await Page.Locator(".llm-settings-btn").ClickAsync();
+        await Expect(textModel).ToHaveValueAsync("gemini-2.5-flash-lite");
+
+        await dialog.Locator(".mdc-tab", new() { HasText = "Refinement & Queue" }).ClickAsync();
+        await Expect(dialog.Locator(".slider-field-value")).ToHaveTextAsync("3");
+        await Expect(rpmInput).ToHaveValueAsync("15");
+        await Expect(rpdInput).ToHaveValueAsync("1500");
+        await Expect(tzSelect).ToContainTextAsync("Pacific Time");
+        await Expect(resetTimeInput).ToHaveValueAsync("00:00");
+
+        await dialog.Locator("button", new() { HasText = "Cancel" }).ClickAsync();
+        await Expect(dialog).Not.ToBeVisibleAsync();
+    }
 }

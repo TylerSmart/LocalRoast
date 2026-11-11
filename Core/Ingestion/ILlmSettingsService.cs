@@ -43,4 +43,11 @@ public interface ILlmSettingsService
         bool enabled,
         CancellationToken cancellationToken = default
     );
+
+    Task<LlmSettingsDto> SetIngestionEnabledAsync(
+        bool enabled,
+        DateTimeOffset? autoResumeAt,
+        string? pauseReason,
+        CancellationToken cancellationToken = default
+    );
 }

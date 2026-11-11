@@ -24,6 +24,12 @@ public sealed class HouseholdLlmSettingsConfiguration
         builder.Property(s => s.OllamaKeepAlive).IsRequired().HasMaxLength(32);
         builder.Property(s => s.ContextWindowTokens).HasDefaultValue(8192);
         builder.Property(s => s.RefineModel).HasMaxLength(200);
+        builder.Property(s => s.EnableRateLimitSafeguards).HasDefaultValue(true);
+        builder.Property(s => s.MaxConcurrentRequests).HasDefaultValue(1);
+        builder.Property(s => s.DailyQuotaResetTimezone).HasMaxLength(64).HasDefaultValue("UTC");
+        builder.Property(s => s.DailyQuotaResetTime).HasMaxLength(10).HasDefaultValue("00:00");
+        builder.Property(s => s.AutoResumeQueue).HasDefaultValue(true);
+        builder.Property(s => s.PauseReason).HasMaxLength(500);
         builder.Property(s => s.ModelProfilesSeeded).HasDefaultValue(false);
 
         builder.Property(s => s.CreatedBy).IsRequired().HasMaxLength(256);

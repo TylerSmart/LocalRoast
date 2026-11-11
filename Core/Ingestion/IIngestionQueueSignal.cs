@@ -28,7 +28,16 @@ public interface IIngestionQueueSignal
 
     Task<IDisposable> AcquireJobExecutionAsync(CancellationToken cancellationToken = default);
 
-    void CancelActiveExecution();
+    Task<IDisposable> AcquireJobExecutionAsync(
+        int maxConcurrency,
+        CancellationToken cancellationToken = default
+    );
+
+    void CancelActiveExecution(Guid? jobId = null);
 
     Guid? ActiveJobId { get; }
+
+    IReadOnlyCollection<Guid> ActiveJobIds { get; }
+
+    bool IsJobActive(Guid jobId);
 }
