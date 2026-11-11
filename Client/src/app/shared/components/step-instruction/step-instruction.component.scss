@@ -12,9 +12,24 @@
   font-weight: 500;
 }
 
+.fixed-amount {
+  background: var(--mat-sys-secondary-container, #e8def8);
+  color: var(--mat-sys-on-secondary-container, #1d192b);
+  border-radius: 6px;
+  padding: 0 4px;
+  box-decoration-break: clone;
+  font-weight: 500;
+
+  &.is-timer {
+    background: var(--mat-sys-tertiary-container, #cce8ed);
+    color: var(--mat-sys-on-tertiary-container, #051f23);
+  }
+}
+
 @media print {
   .inline-amount,
-  .inline-mention {
+  .inline-mention,
+  .fixed-amount {
     background: none;
     color: inherit;
     padding: 0;

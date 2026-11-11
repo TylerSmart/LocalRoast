@@ -16,13 +16,18 @@ import { MatInputModule } from '@angular/material/input';
 import { MatSelectModule } from '@angular/material/select';
 import {
   StepIngredientToken,
+  StepTemperatureToken,
   StepTimerToken,
   StepToken,
 } from '../../../core/models/step-token.models';
-import { serializeStepToken } from '../../../core/utils/step-token-parser';
+import {
+  celsiusToFahrenheit,
+  fahrenheitToCelsius,
+  serializeStepToken,
+} from '../../../core/utils/step-token-parser';
 
 export interface StepTokenDialogData {
-  mode: 'ingredient' | 'timer';
+  mode: 'ingredient' | 'timer' | 'temperature';
   token?: StepToken | null;
   availableIngredients?: string[];
 }
@@ -79,12 +84,15 @@ export class StepTokenDialogComponent implements OnInit {
   protected readonly dialogRef = inject(MatDialogRef<StepTokenDialogComponent>);
   private readonly fb = inject(FormBuilder);
 
-  protected readonly mode = signal<'ingredient' | 'timer'>(this.data?.mode ?? 'ingredient');
+  protected readonly mode = signal<'ingredient' | 'timer' | 'temperature'>(
+    this.data?.mode ?? 'ingredient',
+  );
   protected readonly commonUnits = COMMON_UNITS;
   protected readonly availableIngredients = this.data?.availableIngredients ?? [];
 
   protected ingredientForm!: FormGroup;
   protected timerForm!: FormGroup;
+  protected temperatureForm!: FormGroup;
   protected readonly showDisplayAmount = signal<boolean>(false);
 
   ngOnInit(): void {
@@ -104,7 +112,7 @@ export class StepTokenDialogComponent implements OnInit {
         displayUnit: [ingToken?.displayUnit ?? ''],
         notes: [ingToken?.notes ?? ''],
       });
-    } else {
+    } else if (this.mode() === 'timer') {
       const timerToken = existing as StepTimerToken | undefined;
       const totalSecs = timerToken?.seconds ?? 60;
       const mins = Math.floor(totalSecs / 60);
@@ -115,6 +123,50 @@ export class StepTokenDialogComponent implements OnInit {
         seconds: [secs, [Validators.min(0), Validators.max(59)]],
         label: [timerToken?.label ?? ''],
       });
+    } else {
+      const tempToken = existing as StepTemperatureToken | undefined;
+      let f = tempToken?.fahrenheit ?? null;
+      let c = tempToken?.celsius ?? null;
+      if (f != null && c == null) {
+        c = fahrenheitToCelsius(f);
+      } else if (c != null && f == null) {
+        f = celsiusToFahrenheit(c);
+      }
+      this.temperatureForm = this.fb.group({
+        fahrenheit: [f],
+        celsius: [c],
+      });
+    }
+  }
+
+  protected onFahrenheitInput(event?: Event): void {
+    const rawVal = event
+      ? (event.target as HTMLInputElement).value
+      : this.temperatureForm.get('fahrenheit')?.value;
+    if (rawVal !== '' && rawVal != null) {
+      const f = Number(rawVal);
+      if (!isNaN(f)) {
+        this.temperatureForm.patchValue({ celsius: fahrenheitToCelsius(f) }, { emitEvent: false });
+      }
+    } else {
+      this.temperatureForm.patchValue({ celsius: null }, { emitEvent: false });
+    }
+  }
+
+  protected onCelsiusInput(event?: Event): void {
+    const rawVal = event
+      ? (event.target as HTMLInputElement).value
+      : this.temperatureForm.get('celsius')?.value;
+    if (rawVal !== '' && rawVal != null) {
+      const c = Number(rawVal);
+      if (!isNaN(c)) {
+        this.temperatureForm.patchValue(
+          { fahrenheit: celsiusToFahrenheit(c) },
+          { emitEvent: false },
+        );
+      }
+    } else {
+      this.temperatureForm.patchValue({ fahrenheit: null }, { emitEvent: false });
     }
   }
 
@@ -161,7 +213,7 @@ export class StepTokenDialogComponent implements OnInit {
         rawToken: serializeStepToken(token),
       };
       this.dialogRef.close(result);
-    } else {
+    } else if (this.mode() === 'timer') {
       if (this.timerForm.invalid) {
         return;
       }
@@ -171,6 +223,28 @@ export class StepTokenDialogComponent implements OnInit {
         type: 'timer',
         seconds: totalSeconds > 0 ? totalSeconds : 60,
         label: val.label?.trim() ? String(val.label).trim() : null,
+      };
+
+      const result: StepTokenDialogResult = {
+        token,
+        rawToken: serializeStepToken(token),
+      };
+      this.dialogRef.close(result);
+    } else {
+      if (this.temperatureForm.invalid) {
+        return;
+      }
+      const val = this.temperatureForm.value;
+      const f = val.fahrenheit != null && val.fahrenheit !== '' ? Number(val.fahrenheit) : null;
+      const c = val.celsius != null && val.celsius !== '' ? Number(val.celsius) : null;
+
+      if (f == null && c == null) {
+        return;
+      }
+
+      const token: StepTemperatureToken = {
+        type: 'temperature',
+        ...(f != null ? { fahrenheit: f } : { celsius: c! }),
       };
 
       const result: StepTokenDialogResult = {

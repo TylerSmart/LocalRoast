@@ -1,6 +1,17 @@
 @for (segment of segments(); track $index) {
-  @if (segment.amount?.kind === 'Fixed') {
-    <span class="fixed-amount" data-kind="Fixed">{{ segment.text }}</span>
+  @if (
+    segment.amount?.kind === 'Fixed' ||
+    segment.amount?.kind === 'Temperature' ||
+    segment.amount?.kind === 'Timer'
+  ) {
+    <span
+      class="fixed-amount"
+      [class.is-temperature]="segment.amount?.kind === 'Temperature'"
+      [class.is-timer]="segment.amount?.kind === 'Timer'"
+      [class.is-scaled]="segment.amount?.scaled"
+      [attr.data-kind]="segment.amount?.kind"
+      >{{ segment.text }}</span
+    >
   } @else if (segment.amount; as amount) {
     <span
       class="inline-amount"

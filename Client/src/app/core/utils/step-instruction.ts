@@ -1,6 +1,11 @@
 import { RecipeMeasurement, UnitSystem } from '../models/recipe.models';
 import { formatStepIngredient, IngredientMeasurements } from './culinary-math';
-import { formatSeconds, formatTokenDisplay, parseStepInstruction } from './step-token-parser';
+import {
+  formatSeconds,
+  formatTemperatureDisplay,
+  formatTokenDisplay,
+  parseStepInstruction,
+} from './step-token-parser';
 import {
   StepIngredientToken,
   StepTemperatureToken,
@@ -59,7 +64,7 @@ export function buildInstructionSegments(
       segments.push({
         text: `${formatSeconds(timer.seconds)}${timer.label ? ' (' + timer.label + ')' : ''}`,
         amount: {
-          kind: 'Fixed',
+          kind: 'Timer',
           ingredientId: null,
           ingredientName: timer.label ?? null,
           scaled: false,
@@ -67,21 +72,14 @@ export function buildInstructionSegments(
       });
     } else if (seg.token.type === 'temperature') {
       const temp = seg.token as StepTemperatureToken;
-      const tempText =
-        temp.fahrenheit != null && temp.celsius != null
-          ? `${temp.fahrenheit}°F (${temp.celsius}°C)`
-          : temp.fahrenheit != null
-            ? `${temp.fahrenheit}°F`
-            : temp.celsius != null
-              ? `${temp.celsius}°C`
-              : '';
+      const { text: tempText, scaled: isScaled } = formatTemperatureDisplay(temp, system);
       segments.push({
         text: tempText,
         amount: {
-          kind: 'Fixed',
+          kind: 'Temperature',
           ingredientId: null,
           ingredientName: null,
-          scaled: false,
+          scaled: isScaled,
         },
       });
     } else {

@@ -126,11 +126,16 @@ export function parseStepInstruction(instruction: string | null | undefined): St
           label: (parsed['label'] as string) ?? null,
         } as StepTimerToken;
       } else if (parsed['type'] === 'temperature') {
-        token = {
+        const tempToken: StepTemperatureToken = {
           type: 'temperature',
-          fahrenheit: parsed['fahrenheit'] != null ? Number(parsed['fahrenheit']) : null,
-          celsius: parsed['celsius'] != null ? Number(parsed['celsius']) : null,
-        } as StepTemperatureToken;
+        };
+        if (parsed['fahrenheit'] != null) {
+          tempToken.fahrenheit = Number(parsed['fahrenheit']);
+        }
+        if (parsed['celsius'] != null) {
+          tempToken.celsius = Number(parsed['celsius']);
+        }
+        token = tempToken;
       } else if (
         'ingredient' in parsed ||
         parsed['type'] === 'ingredient' ||
@@ -221,7 +226,68 @@ export function formatTokenDisplay(
     : token.ingredient;
 }
 
-export function stepInstructionToPlainText(instruction: string | null | undefined): string {
+export function fahrenheitToCelsius(f: number): number {
+  return Math.round((f - 32) * (5 / 9));
+}
+
+export function celsiusToFahrenheit(c: number): number {
+  return Math.round(c * (9 / 5) + 32);
+}
+
+export function formatTemperatureDisplay(
+  temp: StepTemperatureToken,
+  system: UnitSystem = 'Original',
+): { text: string; scaled: boolean } {
+  const f = temp.fahrenheit != null && !isNaN(temp.fahrenheit) ? temp.fahrenheit : null;
+  const c = temp.celsius != null && !isNaN(temp.celsius) ? temp.celsius : null;
+
+  if (f == null && c == null) {
+    return { text: '', scaled: false };
+  }
+
+  if (system === 'Metric') {
+    if (c != null) {
+      return { text: `${c}°C`, scaled: false };
+    }
+    if (f != null) {
+      return { text: `${fahrenheitToCelsius(f)}°C`, scaled: true };
+    }
+  }
+
+  if (system === 'UsCustomary') {
+    if (f != null) {
+      return { text: `${f}°F`, scaled: false };
+    }
+    if (c != null) {
+      return { text: `${celsiusToFahrenheit(c)}°F`, scaled: true };
+    }
+  }
+
+  // Original
+  if (f != null && c != null) {
+    return { text: `${f}°F (${c}°C)`, scaled: false };
+  }
+  if (f != null) {
+    return { text: `${f}°F`, scaled: false };
+  }
+  if (c != null) {
+    return { text: `${c}°C`, scaled: false };
+  }
+
+  return { text: '', scaled: false };
+}
+
+export function formatTemperatureToken(
+  temp: StepTemperatureToken,
+  system: UnitSystem = 'Original',
+): string {
+  return formatTemperatureDisplay(temp, system).text;
+}
+
+export function stepInstructionToPlainText(
+  instruction: string | null | undefined,
+  system: UnitSystem = 'Original',
+): string {
   if (!instruction) {
     return '';
   }
@@ -239,17 +305,7 @@ export function stepInstructionToPlainText(instruction: string | null | undefine
       }
 
       if (seg.token.type === 'temperature') {
-        const temp = seg.token as StepTemperatureToken;
-        if (temp.fahrenheit != null && temp.celsius != null) {
-          return `${temp.fahrenheit}°F (${temp.celsius}°C)`;
-        }
-        if (temp.fahrenheit != null) {
-          return `${temp.fahrenheit}°F`;
-        }
-        if (temp.celsius != null) {
-          return `${temp.celsius}°C`;
-        }
-        return '';
+        return formatTemperatureToken(seg.token as StepTemperatureToken, system);
       }
 
       // Ingredient

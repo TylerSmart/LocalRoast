@@ -66,6 +66,34 @@ describe('step-instruction utils', () => {
     };
     const segments = buildInstructionSegments(step, ingredients, 1, 'Original');
     expect(segments[1].text).toBe('10m (Simmer sauce)');
-    expect(segments[1].amount?.kind).toBe('Fixed');
+    expect(segments[1].amount?.kind).toBe('Timer');
+  });
+
+  it('renders temperature tokens with unit conversion', () => {
+    const step = {
+      instruction: 'Preheat oven to ||{"type":"temperature","fahrenheit":325}||.',
+    };
+
+    // Original: renders °F
+    const originalSegments = buildInstructionSegments(step, ingredients, 1, 'Original');
+    expect(originalSegments.length).toBe(3);
+    expect(originalSegments[1].text).toBe('325°F');
+    expect(originalSegments[1].amount?.kind).toBe('Temperature');
+    expect(originalSegments[1].amount?.scaled).toBe(false);
+
+    // UsCustomary: renders °F
+    const usSegments = buildInstructionSegments(step, ingredients, 1, 'UsCustomary');
+    expect(usSegments[1].text).toBe('325°F');
+    expect(usSegments[1].amount?.kind).toBe('Temperature');
+    expect(usSegments[1].amount?.scaled).toBe(false);
+
+    // Metric: converts 325°F to 163°C and marks scaled true
+    const metricSegments = buildInstructionSegments(step, ingredients, 1, 'Metric');
+    expect(metricSegments[1].text).toBe('163°C');
+    expect(metricSegments[1].amount?.kind).toBe('Temperature');
+    expect(metricSegments[1].amount?.scaled).toBe(true);
+
+    // Plain scaled instruction renders the converted temperature
+    expect(renderScaledInstruction(step, ingredients, 1, 'Metric')).toBe('Preheat oven to 163°C.');
   });
 });

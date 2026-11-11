@@ -53,8 +53,17 @@ import {
   RecipePreviewData,
   RecipeStepTimerInput,
 } from '../../../core/models/recipe.models';
-import { StepSegment, StepTimerToken, StepToken } from '../../../core/models/step-token.models';
-import { formatSeconds, parseStepInstruction } from '../../../core/utils/step-token-parser';
+import {
+  StepSegment,
+  StepTemperatureToken,
+  StepTimerToken,
+  StepToken,
+} from '../../../core/models/step-token.models';
+import {
+  formatSeconds,
+  formatTemperatureToken,
+  parseStepInstruction,
+} from '../../../core/utils/step-token-parser';
 import {
   StepTokenDialogComponent,
   StepTokenDialogData,
@@ -835,6 +844,10 @@ export class IngestionReviewComponent implements OnInit {
     return `${formatSeconds(token.seconds)}${token.label ? ' (' + token.label + ')' : ''}`;
   }
 
+  formatTemperatureSegment(token: StepTemperatureToken): string {
+    return formatTemperatureToken(token, 'Original');
+  }
+
   insertTokenAtCursor(stepIndex: number, rawToken: string): void {
     const stepCtrl = this.stepsArray.at(stepIndex).get('instruction');
     const current = stepCtrl?.value ?? '';
@@ -859,7 +872,7 @@ export class IngestionReviewComponent implements OnInit {
     }
   }
 
-  openTokenDialog(stepIndex: number, mode: 'ingredient' | 'timer'): void {
+  openTokenDialog(stepIndex: number, mode: 'ingredient' | 'timer' | 'temperature'): void {
     const availableIngredients = this.ingredientsArray.controls
       .map((c) => c.get('displayName')?.value?.trim())
       .filter((name): name is string => !!name);
@@ -896,7 +909,12 @@ export class IngestionReviewComponent implements OnInit {
       StepTokenDialogResult
     >(StepTokenDialogComponent, {
       data: {
-        mode: token.type === 'timer' ? 'timer' : 'ingredient',
+        mode:
+          token.type === 'timer'
+            ? 'timer'
+            : token.type === 'temperature'
+              ? 'temperature'
+              : 'ingredient',
         token,
         availableIngredients,
       },

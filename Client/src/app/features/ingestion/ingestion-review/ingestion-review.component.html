@@ -1024,6 +1024,15 @@
                         <mat-icon>timer</mat-icon>
                         <span>+ Timer</span>
                       </button>
+                      <button
+                        mat-stroked-button
+                        type="button"
+                        class="token-btn add-temp-btn"
+                        (click)="openTokenDialog(stepIndex, 'temperature')"
+                      >
+                        <mat-icon>device_thermostat</mat-icon>
+                        <span>+ Temp</span>
+                      </button>
                     </div>
 
                     <mat-form-field appearance="outline" class="form-field full-width">
@@ -1070,6 +1079,20 @@
                               >
                                 <mat-icon class="timer-badge-icon">timer</mat-icon>
                                 <span>{{ formatTimerSegment($any(seg.token)) }}</span>
+                              </button>
+                            } @else if (seg.token && seg.token.type === 'temperature') {
+                              <button
+                                type="button"
+                                class="step-temperature-badge"
+                                (click)="
+                                  editTokenInStep(stepIndex, seg.rawToken ?? '', $any(seg.token))
+                                "
+                                title="Click to edit temperature"
+                              >
+                                <mat-icon class="temperature-badge-icon"
+                                  >device_thermostat</mat-icon
+                                >
+                                <span>{{ formatTemperatureSegment($any(seg.token)) }}</span>
                               </button>
                             } @else {
                               <span class="step-plain-text">{{ seg.text }}</span>

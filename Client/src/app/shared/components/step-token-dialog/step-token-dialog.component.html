@@ -4,10 +4,15 @@
       <mat-icon>nutrition</mat-icon>
       <span>{{ data?.token ? 'Edit Ingredient Token' : 'Insert Ingredient Token' }}</span>
     </span>
-  } @else {
+  } @else if (mode() === 'timer') {
     <span class="dialog-title-content">
       <mat-icon>timer</mat-icon>
       <span>{{ data?.token ? 'Edit Timer Token' : 'Insert Timer Token' }}</span>
+    </span>
+  } @else {
+    <span class="dialog-title-content">
+      <mat-icon>device_thermostat</mat-icon>
+      <span>{{ data?.token ? 'Edit Temperature Token' : 'Insert Temperature Token' }}</span>
     </span>
   }
 </h2>
@@ -87,7 +92,7 @@
         <input matInput formControlName="notes" placeholder="e.g. room temperature, softened" />
       </mat-form-field>
     </form>
-  } @else {
+  } @else if (mode() === 'timer') {
     <form [formGroup]="timerForm" class="dialog-form">
       <div class="form-row">
         <mat-form-field appearance="outline" class="flex-1">
@@ -112,6 +117,36 @@
         <mat-label>Timer Label (optional)</mat-label>
         <input matInput formControlName="label" placeholder="e.g. Simmer sauce, Bake crust" />
       </mat-form-field>
+    </form>
+  } @else {
+    <form [formGroup]="temperatureForm" class="dialog-form">
+      <div class="form-row">
+        <mat-form-field appearance="outline" class="flex-1">
+          <mat-label>Fahrenheit (°F)</mat-label>
+          <input
+            matInput
+            type="number"
+            min="0"
+            max="1000"
+            formControlName="fahrenheit"
+            placeholder="e.g. 350"
+            (input)="onFahrenheitInput($event)"
+          />
+        </mat-form-field>
+
+        <mat-form-field appearance="outline" class="flex-1">
+          <mat-label>Celsius (°C)</mat-label>
+          <input
+            matInput
+            type="number"
+            min="0"
+            max="600"
+            formControlName="celsius"
+            placeholder="e.g. 175"
+            (input)="onCelsiusInput($event)"
+          />
+        </mat-form-field>
+      </div>
     </form>
   }
 </mat-dialog-content>

@@ -1,13 +1,20 @@
 import {
+  celsiusToFahrenheit,
   cleanStepInstruction,
+  fahrenheitToCelsius,
   formatSeconds,
+  formatTemperatureDisplay,
   formatTokenDisplay,
   normalizeMeasurementUnit,
   parseStepInstruction,
   serializeStepToken,
   stepInstructionToPlainText,
 } from './step-token-parser';
-import { StepIngredientToken, StepTimerToken } from '../models/step-token.models';
+import {
+  StepIngredientToken,
+  StepTemperatureToken,
+  StepTimerToken,
+} from '../models/step-token.models';
 
 describe('step-token-parser', () => {
   it('parses empty or null instruction into empty list', () => {
@@ -149,5 +156,67 @@ describe('step-token-parser', () => {
     expect(cleaned).toBe(
       'While onion cooks, whisk eggs, remaining ||{"ingredient":"salt","amount":0.125,"unit":"tsp"}||.',
     );
+  });
+
+  it('parses and serializes temperature tokens', () => {
+    const raw = 'Roast chicken until ||{"type":"temperature","fahrenheit":165}||.';
+    const segments = parseStepInstruction(raw);
+    expect(segments.length).toBe(3);
+    expect(segments[1].token).toBeDefined();
+
+    const token = segments[1].token as StepTemperatureToken;
+    expect(token.type).toBe('temperature');
+    expect(token.fahrenheit).toBe(165);
+
+    const serialized = serializeStepToken(token);
+    expect(serialized).toBe('||{"type":"temperature","fahrenheit":165}||');
+  });
+
+  it('converts between Fahrenheit and Celsius correctly', () => {
+    expect(fahrenheitToCelsius(32)).toBe(0);
+    expect(fahrenheitToCelsius(212)).toBe(100);
+    expect(fahrenheitToCelsius(325)).toBe(163);
+    expect(fahrenheitToCelsius(400)).toBe(204);
+
+    expect(celsiusToFahrenheit(0)).toBe(32);
+    expect(celsiusToFahrenheit(100)).toBe(212);
+    expect(celsiusToFahrenheit(163)).toBe(325);
+    expect(celsiusToFahrenheit(204)).toBe(399); // (204 * 9/5 + 32 = 399.2 -> 399)
+  });
+
+  it('formats temperature display respecting unit system', () => {
+    const tokenF: StepTemperatureToken = { type: 'temperature', fahrenheit: 350 };
+    expect(formatTemperatureDisplay(tokenF, 'Original')).toEqual({
+      text: '350°F',
+      scaled: false,
+    });
+    expect(formatTemperatureDisplay(tokenF, 'UsCustomary')).toEqual({
+      text: '350°F',
+      scaled: false,
+    });
+    expect(formatTemperatureDisplay(tokenF, 'Metric')).toEqual({
+      text: '177°C',
+      scaled: true,
+    });
+
+    const tokenC: StepTemperatureToken = { type: 'temperature', celsius: 180 };
+    expect(formatTemperatureDisplay(tokenC, 'Original')).toEqual({
+      text: '180°C',
+      scaled: false,
+    });
+    expect(formatTemperatureDisplay(tokenC, 'Metric')).toEqual({
+      text: '180°C',
+      scaled: false,
+    });
+    expect(formatTemperatureDisplay(tokenC, 'UsCustomary')).toEqual({
+      text: '356°F',
+      scaled: true,
+    });
+  });
+
+  it('formats temperature token in plain text conversion', () => {
+    const raw = 'Preheat oven to ||{"type":"temperature","fahrenheit":425}||.';
+    expect(stepInstructionToPlainText(raw, 'Original')).toBe('Preheat oven to 425°F.');
+    expect(stepInstructionToPlainText(raw, 'Metric')).toBe('Preheat oven to 218°C.');
   });
 });
