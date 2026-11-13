@@ -1220,6 +1220,7 @@ Transcribe the recipe printed in these page images. Copy text verbatim: never re
         CancellationToken cancellationToken
     )
     {
+        config = config.ForVision();
         if (string.IsNullOrWhiteSpace(config.VisionModel))
         {
             throw new LlmHostUnavailableException(
@@ -1423,6 +1424,10 @@ Transcribe the recipe printed in these page images. Copy text verbatim: never re
         if (config.OllamaCpuOnly)
         {
             options["num_gpu"] = 0;
+        }
+        else if (config.OllamaGpuLayers is { } gpuLayers)
+        {
+            options["num_gpu"] = gpuLayers;
         }
         return options;
     }
@@ -1663,7 +1668,7 @@ Transcribe the recipe printed in these page images. Copy text verbatim: never re
             )
             {
                 throw new DomainValidationException(
-                    $"The model runner could not allocate enough memory. For Ollama, try CPU-only inference or a smaller model. A Gemma4Assistant ctx_other warning during memory fitting is not a missing application setting. Server detail: {errorBody}"
+                    $"The model runner could not allocate enough memory. For Ollama, set a lower GPU layers value in the model configuration for partial CPU/RAM offload, try CPU-only inference, or use a smaller model. A Gemma4Assistant ctx_other warning during memory fitting is not a missing application setting. Server detail: {errorBody}"
                 );
             }
             CheckTransientStatus(response, errorBody);

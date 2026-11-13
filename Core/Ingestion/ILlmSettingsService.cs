@@ -13,6 +13,12 @@ public interface ILlmSettingsService
         CancellationToken cancellationToken = default
     );
 
+    /// <summary>Assigns saved model configurations to the text, vision and refinement workflows.</summary>
+    Task<LlmSettingsDto> UpdateWorkflowsAsync(
+        UpdateLlmWorkflowsRequest request,
+        CancellationToken cancellationToken = default
+    );
+
     Task<LlmConnectionTestResultDto> TestConnectionAsync(
         TestLlmConnectionRequest request,
         CancellationToken cancellationToken = default

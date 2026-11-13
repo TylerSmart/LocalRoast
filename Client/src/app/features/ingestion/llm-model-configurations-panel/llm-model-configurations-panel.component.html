@@ -1,0 +1,449 @@
+<div class="tab-body">
+  <div class="profiles-header-bar">
+    <div class="profiles-header-title">
+      <h3>Models</h3>
+      <p class="tab-description">
+        Pick a connection, choose one of its models and tune it (or apply a profile). Saved
+        configurations become choices for the text, vision and refinement workflows.
+      </p>
+    </div>
+    <div class="profiles-header-actions">
+      <button
+        mat-flat-button
+        type="button"
+        (click)="startAdd()"
+        [disabled]="isSaving() || connections().length === 0"
+        data-testid="add-model-config-btn"
+      >
+        <mat-icon>add</mat-icon>
+        <span>Add Model</span>
+      </button>
+    </div>
+  </div>
+
+  @if (errorMessage(); as message) {
+    <div class="error-banner" role="alert">
+      <mat-icon>error_outline</mat-icon>
+      <span>{{ message }}</span>
+    </div>
+  }
+
+  @if (connections().length === 0) {
+    <div class="empty-profiles-state">
+      <mat-icon>dns</mat-icon>
+      <p>Add a connection first, then save the models you want to use from it.</p>
+      <button
+        mat-stroked-button
+        type="button"
+        (click)="addConnectionRequested.emit()"
+        data-testid="go-to-connections-btn"
+      >
+        <mat-icon>add_link</mat-icon>
+        <span>Add a Connection</span>
+      </button>
+    </div>
+  }
+
+  @if (isEditing()) {
+    <div class="profile-editor-card" data-testid="model-config-editor-form">
+      <div class="editor-header">
+        <h4>
+          {{
+            editingConfiguration()
+              ? 'Edit ' + editingConfiguration()!.name
+              : 'Add Model Configuration'
+          }}
+        </h4>
+      </div>
+      <form [formGroup]="form" class="editor-form" (ngSubmit)="save()">
+        <div class="model-picker-row">
+          <mat-form-field appearance="outline" class="form-field">
+            <mat-label>Connection</mat-label>
+            <mat-select formControlName="connectionId" data-testid="model-config-connection">
+              @for (connection of connections(); track connection.id) {
+                <mat-option [value]="connection.id">
+                  {{ connection.name }} ({{ providerLabel(connection.provider) }})
+                </mat-option>
+              }
+            </mat-select>
+            @if (selectedConnection(); as connection) {
+              <mat-hint>{{ connection.baseUrl }}</mat-hint>
+            }
+          </mat-form-field>
+          <button
+            mat-stroked-button
+            type="button"
+            class="refresh-models-btn"
+            (click)="refreshModels()"
+            [disabled]="!selectedConnection() || isLoadingModels()"
+            aria-label="Refresh the model list from this connection"
+            data-testid="refresh-models-btn"
+          >
+            @if (isLoadingModels()) {
+              <mat-spinner diameter="18" class="inline-spinner"></mat-spinner>
+            } @else {
+              <mat-icon>refresh</mat-icon>
+            }
+            <span>Refresh Models</span>
+          </button>
+        </div>
+
+        @if (modelsError(); as message) {
+          <div class="error-banner" role="status">
+            <mat-icon>warning</mat-icon>
+            <span>{{ message }} You can still type a model name.</span>
+          </div>
+        }
+
+        <mat-form-field appearance="outline" class="form-field full-width">
+          <mat-label>Model</mat-label>
+          <input
+            matInput
+            formControlName="model"
+            [matAutocomplete]="modelAuto"
+            placeholder="e.g. qwen2.5:14b, google/gemini-3.8-flash"
+            required
+            data-testid="model-config-model"
+          />
+          <mat-autocomplete
+            #modelAuto="matAutocomplete"
+            (optionSelected)="onModelSelected($event.option.value)"
+          >
+            @for (m of filteredModels(); track m) {
+              <mat-option [value]="m">{{ m }}</mat-option>
+            } @empty {
+              @if (availableModels().length > 0) {
+                <mat-option disabled>No models match</mat-option>
+              }
+            }
+          </mat-autocomplete>
+          @if (form.controls.model.invalid && form.controls.model.touched) {
+            <mat-error>Model is required</mat-error>
+          } @else {
+            <mat-hint>
+              {{ availableModels().length }} model(s) found on this connection. Type to filter.
+            </mat-hint>
+          }
+        </mat-form-field>
+
+        @if (profiles().length > 0) {
+          <div class="profile-section" role="group" aria-labelledby="modelConfigProfileHeading">
+            <div id="modelConfigProfileHeading" class="sampling-heading">Profile</div>
+            <div class="profile-row">
+              <mat-form-field appearance="outline" class="form-field" subscriptSizing="dynamic">
+                <mat-label>Model profile</mat-label>
+                <mat-select
+                  [value]="selectedProfileId()"
+                  (selectionChange)="onProfileSelected($event.value)"
+                  data-testid="llm-profile-select"
+                >
+                  @for (profile of profiles(); track profile.id) {
+                    <mat-option [value]="profile.id">{{ profile.displayName }}</mat-option>
+                  }
+                </mat-select>
+                @if (selectedProfile(); as profile) {
+                  <mat-hint>{{ profile.summary }}</mat-hint>
+                }
+              </mat-form-field>
+              <button
+                mat-stroked-button
+                type="button"
+                class="apply-profile-btn"
+                (click)="applySelectedProfile()"
+                [disabled]="!selectedProfile()"
+                data-testid="llm-apply-profile"
+              >
+                <mat-icon>auto_fix_high</mat-icon>
+                <span>Apply</span>
+              </button>
+            </div>
+            @if (profileMessage(); as message) {
+              <p class="profile-message" role="status">{{ message }}</p>
+            }
+          </div>
+        }
+
+        @if (selectedConnection()?.provider === 'Ollama') {
+          <mat-form-field
+            appearance="outline"
+            class="form-field full-width"
+            subscriptSizing="dynamic"
+          >
+            <mat-label>GPU layers (optional)</mat-label>
+            <input
+              matInput
+              type="number"
+              formControlName="ollamaGpuLayers"
+              min="0"
+              max="2147483647"
+              step="1"
+              placeholder="Automatic"
+              data-testid="model-config-gpu-layers"
+            />
+            @if (form.controls.ollamaGpuLayers.invalid) {
+              <mat-error>Enter a non-negative whole number</mat-error>
+            } @else if (selectedConnection()?.ollamaCpuOnly) {
+              <mat-hint
+                >Connection CPU-only mode overrides this setting and sends 0 GPU layers.</mat-hint
+              >
+            } @else {
+              <mat-hint>
+                Blank uses Ollama's placement defaults. Sends num_gpu per request: 0 uses CPU only;
+                positive values offload that many layers to the GPU, with the rest in system RAM. If
+                memory allocation fails, lower this value (try 24 for Gemma 4 26B on 16 GB).
+              </mat-hint>
+            }
+          </mat-form-field>
+          <div class="context-window-section">
+            <div class="context-window-heading">
+              <label for="modelConfigContextSlider">Context window</label>
+              <span>{{ form.controls.contextWindowTokens.value }} tokens</span>
+            </div>
+            <input
+              id="modelConfigContextSlider"
+              class="context-window-slider"
+              type="range"
+              min="2048"
+              max="65536"
+              step="2048"
+              [value]="form.controls.contextWindowTokens.value"
+              (input)="onContextWindowSliderInput($event)"
+              aria-describedby="modelConfigContextHint"
+            />
+            <mat-form-field appearance="outline" class="form-field context-window-number">
+              <mat-label>Context window (tokens)</mat-label>
+              <input
+                matInput
+                type="number"
+                formControlName="contextWindowTokens"
+                min="2048"
+                max="65536"
+                step="1"
+                aria-describedby="modelConfigContextHint"
+                data-testid="model-config-context"
+              />
+            </mat-form-field>
+            <p id="modelConfigContextHint" class="context-window-hint">
+              Larger windows fit more source text but use more memory.
+            </p>
+          </div>
+        }
+
+        <div class="toggle-section">
+          <mat-slide-toggle formControlName="enableThinking" data-testid="model-config-thinking">
+            Enable thinking / internal reasoning
+          </mat-slide-toggle>
+          <span class="toggle-hint">
+            Lets reasoning models think before answering. Slower, but often more accurate.
+          </span>
+        </div>
+
+        <div class="sampling-section" role="group" aria-labelledby="modelConfigSamplingHeading">
+          <div id="modelConfigSamplingHeading" class="sampling-heading">Sampling (optional)</div>
+          <div class="form-row three-cols">
+            <mat-form-field appearance="outline" class="form-field">
+              <mat-label>Temperature</mat-label>
+              <input
+                matInput
+                type="number"
+                formControlName="temperature"
+                min="0"
+                max="2"
+                step="0.05"
+                placeholder="Default"
+                data-testid="model-config-temperature"
+              />
+              @if (form.controls.temperature.invalid) {
+                <mat-error>0 to 2</mat-error>
+              }
+            </mat-form-field>
+            <mat-form-field appearance="outline" class="form-field">
+              <mat-label>Top P</mat-label>
+              <input
+                matInput
+                type="number"
+                formControlName="topP"
+                min="0"
+                max="1"
+                step="0.05"
+                placeholder="Default"
+                data-testid="model-config-top-p"
+              />
+              @if (form.controls.topP.invalid) {
+                <mat-error>0 to 1</mat-error>
+              }
+            </mat-form-field>
+            <mat-form-field appearance="outline" class="form-field">
+              <mat-label>Top K</mat-label>
+              <input
+                matInput
+                type="number"
+                formControlName="topK"
+                min="1"
+                max="1000"
+                step="1"
+                placeholder="Default"
+                data-testid="model-config-top-k"
+              />
+              @if (form.controls.topK.invalid) {
+                <mat-error>Whole number 1 to 1000</mat-error>
+              }
+            </mat-form-field>
+          </div>
+          <p class="sampling-hint">
+            Leave blank for LocalRoast defaults (temperature 0 for extraction) and the model's own
+            Top P/Top K.
+          </p>
+        </div>
+
+        <div class="form-row two-cols">
+          <mat-form-field appearance="outline" class="form-field">
+            <mat-label>Timeout (seconds)</mat-label>
+            <input
+              matInput
+              type="number"
+              formControlName="requestTimeoutSeconds"
+              min="5"
+              max="1800"
+              data-testid="model-config-timeout"
+            />
+            @if (form.controls.requestTimeoutSeconds.invalid) {
+              <mat-error>5 to 1800</mat-error>
+            }
+          </mat-form-field>
+          <mat-form-field appearance="outline" class="form-field">
+            <mat-label>Configuration name</mat-label>
+            <input
+              matInput
+              formControlName="name"
+              [placeholder]="defaultName() || 'e.g. Qwen on Gaming PC'"
+              data-testid="model-config-name"
+            />
+            <mat-hint>Shown in the workflow dropdowns</mat-hint>
+          </mat-form-field>
+        </div>
+
+        <div class="editor-actions">
+          <button
+            mat-button
+            type="button"
+            (click)="cancelEdit()"
+            [disabled]="isSaving()"
+            data-testid="cancel-model-config-btn"
+          >
+            Cancel
+          </button>
+          <button
+            mat-flat-button
+            type="submit"
+            [disabled]="form.invalid || !effectiveName() || isSaving()"
+            data-testid="save-model-config-btn"
+          >
+            @if (isSaving()) {
+              <mat-spinner diameter="18" class="inline-spinner"></mat-spinner>
+            }
+            <span>Save Model</span>
+          </button>
+        </div>
+      </form>
+    </div>
+  }
+
+  <div class="profiles-list" data-testid="model-config-cards-list">
+    @for (config of configurations(); track config.id) {
+      <div
+        class="profile-card model-config-card"
+        [attr.data-testid]="'model-config-card-' + config.id"
+      >
+        <div class="profile-card-header">
+          <div class="profile-card-ident">
+            <h4 class="profile-card-title">{{ config.name }}</h4>
+            <span class="profile-card-tag">{{ config.model }}</span>
+          </div>
+          @if (config.assignedWorkflows.length > 0) {
+            <div class="card-badges">
+              @for (workflow of config.assignedWorkflows; track workflow) {
+                <span class="workflow-badge">{{ workflow }}</span>
+              }
+            </div>
+          }
+        </div>
+
+        <div class="profile-chips">
+          <span class="profile-chip">On: {{ config.connectionName }}</span>
+          @if (config.provider === 'Ollama') {
+            <span class="profile-chip">Context: {{ config.contextWindowTokens }}</span>
+            @if (config.ollamaGpuLayers !== null) {
+              <span class="profile-chip">GPU layers: {{ config.ollamaGpuLayers }}</span>
+            }
+          }
+          <span class="profile-chip">Timeout: {{ config.requestTimeoutSeconds }}s</span>
+          <span class="profile-chip">Thinking: {{ config.enableThinking ? 'On' : 'Off' }}</span>
+          @if (config.temperature !== null) {
+            <span class="profile-chip">Temp: {{ config.temperature }}</span>
+          }
+          @if (config.topP !== null) {
+            <span class="profile-chip">Top P: {{ config.topP }}</span>
+          }
+          @if (config.topK !== null) {
+            <span class="profile-chip">Top K: {{ config.topK }}</span>
+          }
+          @if (profileName(config.profileId); as profile) {
+            <span class="profile-chip">Profile: {{ profile }}</span>
+          }
+        </div>
+
+        <div class="profile-card-actions">
+          <button
+            mat-button
+            type="button"
+            (click)="startEdit(config)"
+            [attr.aria-label]="'Edit model configuration ' + config.name"
+            data-testid="edit-model-config-btn"
+          >
+            <mat-icon>edit</mat-icon>
+            <span>Edit</span>
+          </button>
+          <button
+            mat-button
+            type="button"
+            (click)="duplicate(config)"
+            [attr.aria-label]="'Duplicate model configuration ' + config.name"
+            data-testid="duplicate-model-config-btn"
+          >
+            <mat-icon>content_copy</mat-icon>
+            <span>Duplicate</span>
+          </button>
+          <button
+            mat-button
+            type="button"
+            (click)="saveAsProfileRequested.emit(config)"
+            [attr.aria-label]="'Save ' + config.name + ' as a profile'"
+            data-testid="save-as-profile-btn"
+          >
+            <mat-icon>bookmark_add</mat-icon>
+            <span>Save as Profile</span>
+          </button>
+          <button
+            mat-button
+            type="button"
+            (click)="delete(config)"
+            [disabled]="isSaving()"
+            [attr.aria-label]="'Delete model configuration ' + config.name"
+            data-testid="delete-model-config-btn"
+          >
+            <mat-icon>delete</mat-icon>
+            <span>Delete</span>
+          </button>
+        </div>
+      </div>
+    } @empty {
+      @if (!isEditing() && connections().length > 0) {
+        <div class="empty-profiles-state">
+          <mat-icon>memory</mat-icon>
+          <p>No saved models yet. Add one to use it in a workflow.</p>
+        </div>
+      }
+    }
+  </div>
+</div>

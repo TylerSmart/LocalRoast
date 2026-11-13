@@ -589,8 +589,215 @@ public abstract class E2ETestBase : PageTest
 
         await registerForm.Locator("button[type='submit']").ClickAsync();
         await Expect(Page).ToHaveURLAsync(new Regex(".*/recipes.*"), new() { Timeout = 15000 });
+        await ResetLlmSettingsViaApiAsync();
 
         return (username, email);
+    }
+
+    /// <summary>
+    /// LLM settings are household-wide and the E2E server is shared by every test, so clear the
+    /// saved connections, model configurations and workflow choices left by earlier tests.
+    /// </summary>
+    private async Task ResetLlmSettingsViaApiAsync()
+    {
+        var failures = await Page.EvaluateAsync<string>(
+            """
+            async () => {
+                const tokenKey = Object.keys(localStorage).find(key => key.endsWith('-token'));
+                const headers = {
+                    Authorization: `Bearer ${tokenKey ? localStorage.getItem(tokenKey) : ''}`,
+                    'Content-Type': 'application/json'
+                };
+                const failures = [];
+                const send = async (method, url, body) => {
+                    const response = await fetch(url, {
+                        method, headers, body: body ? JSON.stringify(body) : undefined
+                    });
+                    if (!response.ok) failures.push(`${method} ${url}: ${response.status}`);
+                    return response;
+                };
+                await send('PUT', '/api/llm-settings/workflows', {
+                    textModelConfigurationId: null,
+                    visionModelConfigurationId: null,
+                    refineModelConfigurationId: null,
+                    autoPublishHighConfidenceText: false,
+                    maxIngestionRetries: 3,
+                    enableIngestion: true,
+                    autoResumeQueue: true
+                });
+                const configs = await (await send('GET', '/api/llm-settings/model-configurations')).json();
+                for (const config of configs) {
+                    await send('DELETE', `/api/llm-settings/model-configurations/${config.id}`);
+                }
+                const connections = await (await send('GET', '/api/llm-settings/connections')).json();
+                for (const connection of connections) {
+                    await send('DELETE', `/api/llm-settings/connections/${connection.id}`);
+                }
+                return failures.join('; ');
+            }
+            """
+        );
+        Assert.AreEqual("", failures, "Resetting shared LLM settings failed.");
+    }
+
+    protected const string E2ELlmConnectionName = "Test LLM";
+
+    /// <summary>
+    /// Saves a connection to <paramref name="baseUrl"/> and one model configuration per distinct
+    /// model in the open LLM settings dialog, assigns them to the workflows and saves.
+    /// </summary>
+    protected async Task ConfigureLlmInDialogAsync(
+        ILocator dialog,
+        string baseUrl,
+        string textModel,
+        string? visionModel = null,
+        string? refineModel = null,
+        bool save = true
+    )
+    {
+        await AddLlmConnectionInDialogAsync(dialog, baseUrl);
+        foreach (
+            var model in new[] { textModel, visionModel, refineModel }.OfType<string>().Distinct()
+        )
+        {
+            await AddLlmModelInDialogAsync(dialog, model);
+        }
+
+        await AssignLlmWorkflowAsync(dialog, "text", textModel);
+        if (visionModel is not null)
+        {
+            await AssignLlmWorkflowAsync(dialog, "vision", visionModel);
+        }
+        if (refineModel is not null)
+        {
+            await AssignLlmWorkflowAsync(dialog, "refine", refineModel);
+        }
+        if (save)
+        {
+            await SaveLlmWorkflowsAsync(dialog);
+        }
+    }
+
+    protected async Task OpenLlmSettingsTabAsync(ILocator dialog, string tabName)
+    {
+        var tab = dialog.Locator(".mdc-tab", new() { HasText = tabName });
+        // A DOM click works even when a narrow, paginated tab header has scrolled the tab away.
+        await tab.EvaluateAsync("el => el.click()");
+        await Expect(tab).ToHaveAttributeAsync("aria-selected", "true");
+    }
+
+    protected async Task AddLlmConnectionInDialogAsync(
+        ILocator dialog,
+        string baseUrl,
+        string name = E2ELlmConnectionName,
+        Func<ILocator, Task>? tune = null
+    )
+    {
+        await OpenLlmSettingsTabAsync(dialog, "Connections");
+        await dialog.GetByTestId("add-connection-btn").ClickAsync();
+        var editor = dialog.GetByTestId("connection-editor-form");
+        await editor.GetByTestId("connection-form-name").FillAsync(name);
+        await editor.GetByTestId("connection-form-base-url").FillAsync(baseUrl);
+        if (tune is not null)
+        {
+            await tune(editor);
+        }
+        await Page.RunAndWaitForResponseAsync(
+            () => editor.GetByTestId("save-connection-btn").ClickAsync(),
+            resp =>
+                resp.Url.EndsWith("/api/llm-settings/connections")
+                && resp.Request.Method == "POST"
+                && resp.Ok
+        );
+        await Expect(editor).Not.ToBeVisibleAsync();
+        await Expect(dialog.Locator(".connection-card", new() { HasText = name }))
+            .ToBeVisibleAsync();
+    }
+
+    /// <summary>
+    /// Adds a model configuration on the given connection, optionally tuning it before saving.
+    /// The configuration gets the default "{model} @ {connection}" name.
+    /// </summary>
+    protected async Task AddLlmModelInDialogAsync(
+        ILocator dialog,
+        string model,
+        string connectionName = E2ELlmConnectionName,
+        Func<ILocator, Task>? tune = null
+    )
+    {
+        await OpenLlmSettingsTabAsync(dialog, "Models");
+        await dialog.GetByTestId("add-model-config-btn").ClickAsync();
+        var editor = dialog.GetByTestId("model-config-editor-form");
+        var connectionSelect = editor.GetByTestId("model-config-connection");
+        if (!(await connectionSelect.InnerTextAsync()).Contains(connectionName))
+        {
+            await connectionSelect.ClickAsync();
+            await Page.Locator("mat-option", new() { HasText = connectionName }).ClickAsync();
+        }
+        await editor.GetByTestId("model-config-model").FillAsync(model);
+        // Tab closes the autocomplete panel; Escape would close the dialog instead.
+        await Page.Keyboard.PressAsync("Tab");
+        if (tune is not null)
+        {
+            await tune(editor);
+        }
+        await Page.RunAndWaitForResponseAsync(
+            () => editor.GetByTestId("save-model-config-btn").ClickAsync(),
+            resp =>
+                resp.Url.EndsWith("/api/llm-settings/model-configurations")
+                && resp.Request.Method == "POST"
+                && resp.Ok
+        );
+        await Expect(editor).Not.ToBeVisibleAsync();
+        await Expect(
+                dialog.Locator(
+                    ".profile-card",
+                    new() { HasText = LlmConfigName(model, connectionName) }
+                )
+            )
+            .ToBeVisibleAsync();
+    }
+
+    protected static string LlmConfigName(
+        string model,
+        string connectionName = E2ELlmConnectionName
+    ) => $"{model} @ {connectionName}";
+
+    /// <summary>Picks a saved model configuration for the "text", "vision" or "refine" workflow.</summary>
+    protected async Task AssignLlmWorkflowAsync(
+        ILocator dialog,
+        string workflow,
+        string? model,
+        string connectionName = E2ELlmConnectionName
+    )
+    {
+        await OpenLlmSettingsTabAsync(dialog, "Workflows");
+        await dialog.GetByTestId($"workflow-{workflow}-select").ClickAsync();
+        var option = model is null
+            ? Page.Locator("mat-option", new() { HasText = "Not assigned" })
+            : Page.Locator(
+                "mat-option",
+                new()
+                {
+                    HasTextRegex = new Regex(
+                        $"^\\s*{Regex.Escape(LlmConfigName(model, connectionName))}\\s*$"
+                    ),
+                }
+            );
+        await option.ClickAsync();
+        await Expect(Page.Locator(".cdk-overlay-pane mat-option")).ToHaveCountAsync(0);
+    }
+
+    protected async Task SaveLlmWorkflowsAsync(ILocator dialog)
+    {
+        await Page.RunAndWaitForResponseAsync(
+            () => dialog.GetByTestId("save-workflows-btn").ClickAsync(),
+            resp =>
+                resp.Url.EndsWith("/api/llm-settings/workflows")
+                && resp.Request.Method == "PUT"
+                && resp.Ok
+        );
+        await Expect(dialog).Not.ToBeVisibleAsync();
     }
 
     protected async Task EnsureFoodItemExistsViaApiAsync(

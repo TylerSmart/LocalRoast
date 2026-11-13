@@ -240,24 +240,13 @@ public sealed class VisionAndPdfIngestionE2ETests : E2ETestBase
         var dialog = Page.Locator("app-llm-settings-dialog");
         await Expect(dialog).ToBeVisibleAsync();
 
-        var baseUrlInput = dialog.Locator("input[formcontrolname='baseUrl']");
-        await baseUrlInput.FillAsync(baseUrl);
-
-        await dialog
-            .Locator("button[aria-label='Test LLM connection and refresh models']")
-            .ClickAsync();
-
-        var statusBanner = dialog.Locator(".connection-status-banner.status-success");
-        await Expect(statusBanner).ToBeVisibleAsync();
-
-        var textModelInput = dialog.Locator("input[formcontrolname='textModel']");
-        await textModelInput.FillAsync("qwen2.5:14b");
-
-        var visionModelInput = dialog.Locator("input[formcontrolname='visionModel']");
-        await visionModelInput.FillAsync("qwen2.5vl:7b");
-
-        await Page.Keyboard.PressAsync("Escape");
-        await dialog.Locator(".mdc-tab", new() { HasText = "Refinement & Queue" }).ClickAsync();
+        await ConfigureLlmInDialogAsync(
+            dialog,
+            baseUrl,
+            "qwen2.5:14b",
+            "qwen2.5vl:7b",
+            save: false
+        );
 
         var ingestionToggle = dialog.Locator(
             "mat-slide-toggle[formcontrolname='enableIngestion'] button"
@@ -267,10 +256,7 @@ public sealed class VisionAndPdfIngestionE2ETests : E2ETestBase
             await ingestionToggle.ClickAsync();
         }
 
-        await dialog
-            .Locator("button", new() { HasText = "Save Settings" })
-            .ClickAsync(new() { Force = true });
-        await Expect(dialog).Not.ToBeVisibleAsync();
+        await SaveLlmWorkflowsAsync(dialog);
     }
 
     [TestMethod]

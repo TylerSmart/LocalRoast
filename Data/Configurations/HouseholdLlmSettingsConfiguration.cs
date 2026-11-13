@@ -32,6 +32,24 @@ public sealed class HouseholdLlmSettingsConfiguration
         builder.Property(s => s.PauseReason).HasMaxLength(500);
         builder.Property(s => s.ModelProfilesSeeded).HasDefaultValue(false);
 
+        // Restrict: SQL Server rejects multiple SET NULL paths to one table; the service
+        // refuses to delete assigned configurations instead.
+        builder
+            .HasOne(s => s.TextModelConfiguration)
+            .WithMany()
+            .HasForeignKey(s => s.TextModelConfigurationId)
+            .OnDelete(DeleteBehavior.Restrict);
+        builder
+            .HasOne(s => s.VisionModelConfiguration)
+            .WithMany()
+            .HasForeignKey(s => s.VisionModelConfigurationId)
+            .OnDelete(DeleteBehavior.Restrict);
+        builder
+            .HasOne(s => s.RefineModelConfiguration)
+            .WithMany()
+            .HasForeignKey(s => s.RefineModelConfigurationId)
+            .OnDelete(DeleteBehavior.Restrict);
+
         builder.Property(s => s.CreatedBy).IsRequired().HasMaxLength(256);
         builder.Property(s => s.ModifiedBy).IsRequired().HasMaxLength(256);
     }

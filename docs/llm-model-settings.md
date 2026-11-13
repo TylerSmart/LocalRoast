@@ -28,18 +28,21 @@ Results come from the [ATK ingestion evaluator](contributing.md#evaluating-atk-i
 | `gemma4:e2b` | Fast drafts; review every recipe | On | Blank | Blank | Blank | 32,768 | 300 |
 | `gemma4:12b` | Works, but less accurate than E4B | **Off** | Blank | Blank | Blank | 32,768 | 300 |
 | `gemma4:12b` with thinking | Experimental | On | **1** | **0.95** | **64** | 32,768 | 900 |
-| `gemma4:26b-a4b` | Not recommended on 16 GB; needs a derived model with `num_gpu 24` | On | **1** | **0.95** | **64** | 32,768 | 1,200 |
+| `gemma4:26b-a4b` | Not recommended on 16 GB; try **GPU layers: 24** for partial offload | On | **1** | **0.95** | **64** | 32,768 | 1,200 |
 | `gemini-2.5-flash-lite` | Ultra-fast hosted draft extraction | **Off** | Blank | Blank | Blank | 32,768 | 120 |
 | `gemini-2.5-flash` | Balanced hosted extraction & refinement | **Off** | Blank | Blank | Blank | 32,768 | 180 |
 | `gemini-4-argon` | Deep-reasoning hosted extraction & refinement | **On** | Blank | Blank | Blank | 32,768 | 300 |
 
 *Blank* means leave the field empty so LocalRoast uses its defaults (see [Sampling Settings](#sampling-settings)). For every model, keep **Auto-publish** off and keep-alive at `5m`.
 
-**One-click profiles:** LLM Settings has a **Recommended settings** picker with one profile per row of this table. Choose a profile and select **Apply** to fill Thinking, Sampling, Context window and Timeout, then **Save Settings**. Applying a profile never renames your Text Model; it only fills the field when it is blank, so a derived model (for example one with `num_gpu 24`) can use a profile. The picker preselects the profile that matches the Text Model tag. The same data is available from `GET /api/llm-settings/model-profiles`.
+**Connections, models and workflows:** LLM Settings has four tabs. **Connections** saves each machine or provider (endpoint, API key, concurrency and rate limits, CPU-only). **Models** saves named model configurations: pick a connection, choose a discovered model, then set Thinking, Sampling, Context window and Timeout. **Workflows** chooses which saved configuration the Text, Vision and Refinement workflows use, so switching machines or models is a dropdown change. **Profiles** manages the recommended profiles. Concurrency and rate limits apply per connection, so workflows on different machines run at the same time.
+
+**One-click profiles:** the model editor on the **Models** tab has a **Recommended settings** picker with one profile per row of this table. Choose a profile and select **Apply** to fill Thinking, Sampling, Context window and Timeout, then save the configuration. Applying a profile never renames your model; it only fills the model when it is blank, so a derived model (for example one with `num_gpu 24`) can use a profile. The same data is available from `GET /api/llm-settings/model-profiles`.
 
 **Extraction pipeline ("tag, don't rewrite"):** every Text Model uses the same two requests per recipe. The first extracts metadata and the shopping ingredient list. LocalRoast then keeps each method paragraph verbatim as a step, finds every amount and duration in it, and the second request only classifies those spans (which ingredient row an amount measures, or *mixture* / *other*, which rows each step uses, and a timer label). LocalRoast assembles the steps and reconciles the tagged amounts with the ingredient rows; remaining issues route the draft to review. There is no extraction strategy setting and no automatic repair loop. See [Tagged pipeline](#tagged-pipeline-current-code) for the measured comparison with the previous pipeline.
 
 - **Context window:** LocalRoast sends the **Context window** from LLM Settings (default 8,192) with every Ollama request. Use 32,768 for these models. At 16,384, E2B, E4B and 12B with thinking all failed the long multi-day stress recipe because the prompt plus the model's output filled the window. At 32,768 they finished it, and generated just as fast as at 16,384 (they still fit entirely on the 16 GB GPU). On Ollama, each request may generate up to the larger of 16,384 tokens and the context window, so a 32,768 window also lifts the output cap that made `gemma4:26b-a4b` with thinking fail the stress recipe (it now finishes, using 31,530 of the 32,768 tokens). OpenAI-compatible servers keep a 16,384-token cap, because some reject `max_tokens` larger than the remaining context.
+- **GPU layers (Ollama only):** on the **Models** tab, edit the model configuration and set **GPU layers** to send `options.num_gpu` on every native Ollama text or vision request, including refinement. Blank omits the option, preserving Ollama/Modelfile placement defaults; `0` uses CPU only; a positive whole number offloads that many layers to the GPU with the remainder in system RAM. Connection-level **Run Ollama on CPU only** always overrides it with `0`. Profiles do not change this hardware-specific value. OpenAI-compatible requests never send it. This is a manual placement override, not automatic maximum-VRAM tuning or an automatic retry.
 - **Source sectioning:** pasted text, digital PDFs and web pages without complete recipe data first get one extra request that labels every source line, so extraction and validation see a clean `Ingredients:` / `Instructions:` layout. It follows the **Thinking** toggle and took 7–41 seconds per recipe for E4B with thinking. See [Source sectioning](#source-sectioning).
 - **Timeout:** applies to each request, not the whole job, and accepts up to 1,800 seconds.
 - **Keep-alive:** the default `5m` keeps the model loaded for the back-to-back requests of a single job and for consecutive queued jobs. Raise it (for example `30m`) only if the queue has long gaps. Models loaded in about 9–16 seconds on the test server.
@@ -225,7 +228,7 @@ Temperature 0 does not make extraction repeatable on the test server. Two identi
 
 ### `gemma4:26b-a4b`
 
-- **Memory:** the 17.4 GB mixture-of-experts model does not fit in 16 GB of VRAM. On the test server it failed to load with a GPU out-of-memory error. A derived model with `num_gpu` 24 (see [Ollama Server Configuration](#ollama-server-configuration)) keeps 24 layers on the GPU and runs the rest from system RAM; it loaded in 16 seconds. All 26B measurements passed `num_gpu` 24 through the evaluator. CPU-only mode also loads the model, but runs entirely from system RAM and was not benchmarked for extraction.
+- **Memory:** the 17.4 GB mixture-of-experts model does not fit in 16 GB of VRAM. On the test server it failed to load with a GPU out-of-memory error. Setting **GPU layers** to `24` (see [Ollama Server Configuration](#ollama-server-configuration)) keeps 24 layers on the GPU and runs the rest from system RAM; it loaded in 16 seconds. All 26B measurements passed `num_gpu` 24 through the evaluator. CPU-only mode also loads the model, but runs entirely from system RAM and was not benchmarked for extraction.
 - **Speed:** only about 4 billion of its parameters are active for each token, so even partly offloaded it generated 39–49 tokens per second, faster than 12B.
 - **Previous pipeline:** like 12B, its measurements below used a single request per recipe; amounts left in step text were 10 of its 19 findings with thinking and 9 of 32 without.
 - **With thinking (Temperature 1, Top P 0.95, Top K 64):** the most accurate configuration after E4B, with 19 findings and 9 on the three hardest cases (E4B: 6). However:
@@ -234,18 +237,18 @@ Temperature 0 does not make extraction repeatable on the test server. Two identi
   - It split the shrimp risotto into 5 steps and the mashed potatoes into 3; the other models produced 12–16 and 6–9. On the stress recipe, 10 of its 17 steps were over 300 characters.
   - Use a 1,200-second timeout (the longest request took 695 seconds). Thinking at temperature 0 was not tested; expect the same looping as 12B.
 - **Without thinking (Sampling blank):** 75 seconds per recipe and no failures, but 32 findings, and it mostly copied the source's method paragraphs as steps: 51 steps in total, 23 of them over 300 characters. The pancakes became 3 steps where E2B, E4B and 12B without thinking produced 15–18.
-- **Not recommended on a 16 GB GPU:** it needs a derived model, and with thinking it is two to three times slower than E4B, less accurate and writes long steps. Revisit it with more VRAM, or as a [Refine Model](#refine-model-background-second-pass) for drafts that still have issues.
+- **Not recommended on a 16 GB GPU:** it needs partial GPU offload, and with thinking it is two to three times slower than E4B, less accurate and writes long steps. Revisit it with more VRAM, or as a [Refine Model](#refine-model-background-second-pass) for drafts that still have issues.
 
 ---
 
 ## Refine Model (background second pass)
 
-The optional **Refine Model** section in LLM Settings names a second, usually larger and slower model — for example `gemma4:12b` with thinking, or a derived `gemma4:26b-a4b` — that re-checks drafts which still have problems after the Text Model's extraction. The **Refine profile** picker offers the profiles recommended for this role and fills the refine thinking, sampling and timeout fields; the Refine Model name is filled only when blank. Leave the Refine Model blank to turn the feature off.
+The optional **Refinement** workflow in LLM Settings uses a second, usually larger and slower model configuration — for example `gemma4:12b` with thinking, or a derived `gemma4:26b-a4b`, possibly on another machine — that re-checks drafts which still have problems after the Text Model's extraction. Create the configuration on the **Models** tab (the **Recommended settings** picker fills its thinking, sampling, context window and timeout), then select it for **Refinement** on the **Workflows** tab. Leave Refinement unassigned to turn the feature off.
 
 - **When it runs automatically:** after a text job (web, pasted text or digital PDF) reaches review, LocalRoast queues a refinement if a Refine Model is set, it differs from the Text Model, and the normalized draft still has validation issues or quality warnings. Photo and scanned-PDF jobs are not queued automatically.
 - **Manual request:** the review screen offers **Refine with _model_** for any draft ready for review, including photo jobs (their original images are sent to the Refine Model, so it must support images).
 - **Never blocks imports or other AI features:** refinement runs only while no imports are queued. A newly queued import, a "Re-extract with AI" preview, or a kitchen-helper request (substitutions, questions, meal plans) pauses the running refinement. It goes back to waiting and starts again from the beginning later. Interrupted refinements also resume after a server restart. Changing LLM Settings can pause it the same way.
-- **What it sends:** one repair request using the Refine Model with its own thinking, sampling and timeout (default 1,200 seconds) and the household's context window. It runs the same tagged extraction with the current ingredient rows as context.
+- **What it sends:** one repair request using the Refinement configuration's model, thinking, sampling, context window and timeout. It runs the same tagged extraction with the current ingredient rows as context.
 - **What counts as an improvement:** the proposal is kept only when it has fewer validation issues, or the same number and fewer quality warnings. Otherwise the review screen reports that the refine model found nothing to improve.
 - **Reviewing it:** the review screen shows the status and the before → after count of issues plus warnings. **Compare refined draft** opens the same comparison as **Re-extract with AI**; applying it replaces the editor contents (your food links, collections and tags are kept) and does not save. If the saved draft changed after the refinement started, a warning asks you to compare carefully. **Dismiss** (or **Cancel refinement** while it waits or runs) removes it. Re-running a job's import discards any refinement.
 - **Memory:** with `OLLAMA_MAX_LOADED_MODELS=1`, switching between the Text Model and the Refine Model reloads each model. Expect the load time (about 10–60 seconds, longer for partly offloaded models) on top of the refinement itself.
@@ -290,7 +293,9 @@ LocalRoast's **OpenAI-Compatible (/v1)** provider works with hosted services suc
 - **One request and one model at a time:** set `OLLAMA_NUM_PARALLEL=1` and `OLLAMA_MAX_LOADED_MODELS=1` on smaller GPUs so ingestion requests never compete for VRAM.
 - **Context:** set it in LocalRoast's LLM Settings. The `num_ctx` LocalRoast sends with each request overrides `OLLAMA_CONTEXT_LENGTH` and any Modelfile `num_ctx`.
 - **Sampling:** set Temperature in LocalRoast's LLM Settings; LocalRoast always sends one, so a Modelfile `PARAMETER temperature` has no effect. Modelfile `top_p` and `top_k` apply only while those LLM Settings fields are blank (see [Sampling Settings](#sampling-settings)).
-- **Partial GPU offload for `gemma4:26b-a4b`:** create a derived model and select it as the Text Model, leaving **Run Ollama on CPU only** off (when on, LocalRoast's `num_gpu` 0 overrides the Modelfile):
+- **Partial GPU offload for `gemma4:26b-a4b`:** no server-side derived model is needed. Edit its configuration on LocalRoast's **Models** tab, set **GPU layers** to `24` as a starting point for a 16 GB GPU, and leave the connection's **Run Ollama on CPU only** off. Select that configuration for the desired workflow. The measured evaluator runs passed `options.num_gpu=24`; the setting now sends the same override. Lower it if allocations still fail, or cautiously increase it to use more VRAM. Available VRAM, context length, concurrent requests and backend affect what fits; system RAM must also fit the CPU portion. GPU allocation failures can occur even when automatic fitting is enabled. The A4B active-parameter count does not mean only 4B weights need memory.
+
+  A server-side Modelfile remains an alternative for clients that do not send `num_gpu`:
 
   ```text
   # Modelfile
@@ -302,7 +307,7 @@ LocalRoast's **OpenAI-Compatible (/v1)** provider works with hosted services suc
   ollama create gemma4-26b-recipes -f Modelfile
   ```
 
-  This was verified only through the API's `options`, not through a derived model inside LocalRoast.
+  A nonblank LocalRoast **GPU layers** setting overrides this Modelfile value.
 - **Check GPU placement:** run `ollama ps`. `100% GPU` means the model is fully on the GPU; a CPU/GPU split means part of it runs from system RAM and is slower. On the Vulkan test server `ollama ps` reported implausibly small sizes, so a drop in tokens per second after changing the context window was the more reliable sign.
 
 ---
@@ -311,7 +316,7 @@ LocalRoast's **OpenAI-Compatible (/v1)** provider works with hosted services suc
 
 - These are small, single-run samples from one cookbook format. Re-run the evaluator on your own hardware before changing household defaults, and keep reviewing recipes with separated eggs, prepared mixtures, alternatives and repeated batches.
 - Vision models (cookbook photos and scanned PDFs) were not benchmarked.
-- The evaluator's `--temperature`, `--top-p`, `--top-k` and `--context-window` flags mirror the LLM Settings fields. For options LocalRoast cannot express, such as `num_gpu` for `gemma4:26b-a4b`, add `--ollama-options`. Both are recorded with every result and never change LocalRoast or server defaults:
+- The evaluator's `--temperature`, `--top-p`, `--top-k` and `--context-window` flags mirror the LLM Settings fields. To mirror **GPU layers**, add `--ollama-options '{"num_gpu":24}'`. Options are recorded with every result and never change LocalRoast or server defaults:
 
   ```powershell
   python scripts\evaluate_atk_ingestion.py --base-url http://localhost:11434 --thinking `
@@ -321,5 +326,5 @@ LocalRoast's **OpenAI-Compatible (/v1)** provider works with hosted services suc
   ```
 
 - Planned improvements are tracked in the [ingestion improvements plan](plans/ingestion-improvements.md). The ones that affect these settings:
-  - Profiles fill the household-wide settings, so helpers and the Vision Model still inherit the text model's sampling and thinking. Profiles do not set GPU layers; use a derived model for that.
+  - Profiles do not set GPU layers; configure this hardware-specific value on each saved model configuration.
   - Find the cause of E2B's regression since `8eb9ac3`.

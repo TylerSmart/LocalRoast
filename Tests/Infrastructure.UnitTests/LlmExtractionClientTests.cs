@@ -25,9 +25,15 @@ public sealed class LlmExtractionClientTests
     }
 
     [TestMethod]
-    [DataRow(false)]
-    [DataRow(true)]
-    public async Task OllamaCpuOnly_TextAndVision_UseGpuZeroOnlyWhenEnabled(bool cpuOnly)
+    [DataRow(false, null)]
+    [DataRow(true, null)]
+    [DataRow(false, 24)]
+    [DataRow(false, 0)]
+    [DataRow(true, 24)]
+    public async Task OllamaGpuLayers_TextAndVision_RespectOverridesAndCpuOnly(
+        bool cpuOnly,
+        int? gpuLayers
+    )
     {
         var calls = 0;
         var handler = new MockHttpMessageHandler(request =>
@@ -36,9 +42,12 @@ public sealed class LlmExtractionClientTests
                 request.Content!.ReadAsStringAsync().GetAwaiter().GetResult()
             );
             var options = body.RootElement.GetProperty("options");
-            Assert.AreEqual(cpuOnly, options.TryGetProperty("num_gpu", out var gpu));
-            if (cpuOnly)
-                Assert.AreEqual(0, gpu.GetInt32());
+            Assert.AreEqual(
+                cpuOnly || gpuLayers.HasValue,
+                options.TryGetProperty("num_gpu", out var gpu)
+            );
+            if (cpuOnly || gpuLayers.HasValue)
+                Assert.AreEqual(cpuOnly ? 0 : gpuLayers!.Value, gpu.GetInt32());
             Assert.AreEqual(16384, options.GetProperty("num_predict").GetInt32());
             var schema = body.RootElement.GetProperty("format").GetProperty("properties");
             if (calls == 0)
@@ -65,7 +74,8 @@ public sealed class LlmExtractionClientTests
             "0",
             30,
             false,
-            OllamaCpuOnly: cpuOnly
+            OllamaCpuOnly: cpuOnly,
+            OllamaGpuLayers: gpuLayers
         );
         await client.ExtractRecipeFromTextAsync(config, new LlmExtractionContext(TaggedSource, []));
         await client.TranscribeRecipeImagesAsync(
@@ -712,7 +722,8 @@ public sealed class LlmExtractionClientTests
             OllamaKeepAlive: "5m",
             RequestTimeoutSeconds: 30,
             AutoPublishHighConfidenceText: false,
-            OllamaCpuOnly: true
+            OllamaCpuOnly: true,
+            OllamaGpuLayers: 24
         );
 
         var context = new LlmExtractionContext(

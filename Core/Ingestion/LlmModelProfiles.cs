@@ -105,7 +105,7 @@ public static class LlmModelProfiles
             RecommendedAsRefineModel: true,
             Notes:
             [
-                "Does not fit in 16 GB of VRAM; create a derived model with PARAMETER num_gpu 24.",
+                "Does not fit in 16 GB of VRAM; set GPU layers to 24 as a starting point for partial offload, then tune for your server.",
                 "About 5 minutes per recipe with thinking, and up to 20 minutes for very long recipes.",
             ]
         ),

@@ -166,86 +166,46 @@ describe('LlmSettingsService', () => {
     expect(result).toEqual(mockResult);
   });
 
-  it('creates model profile via POST /api/llm-settings/model-profiles', async () => {
+  it('saves workflow assignments via PUT /api/llm-settings/workflows and rechecks AI status', async () => {
     const request = {
-      displayName: 'Qwen Custom',
-      modelTag: 'qwen:14b',
-    };
-    const mockCreated = {
-      id: 'qwen-custom',
-      displayName: 'Qwen Custom',
-      modelTag: 'qwen:14b',
-      matchPrefixes: [],
-      summary: '',
-      enableThinking: false,
-      temperature: null,
-      topP: null,
-      topK: null,
-      contextWindowTokens: 32768,
-      requestTimeoutSeconds: 600,
-      recommendedAsRefineModel: false,
-      notes: [],
+      textModelConfigurationId: 'cfg-text',
+      visionModelConfigurationId: null,
+      refineModelConfigurationId: null,
+      autoPublishHighConfidenceText: false,
+      maxIngestionRetries: 3,
+      enableIngestion: true,
+      autoResumeQueue: true,
     };
 
-    const promise = firstValueFrom(service.createModelProfile(request));
-    const req = httpMock.expectOne('/api/llm-settings/model-profiles');
-    expect(req.request.method).toBe('POST');
-    expect(req.request.body).toEqual(request);
-    req.flush(mockCreated);
-
-    const result = await promise;
-    expect(result.id).toBe('qwen-custom');
-  });
-
-  it('updates model profile via PUT /api/llm-settings/model-profiles/:id', async () => {
-    const request = {
-      displayName: 'Updated Profile',
-      modelTag: 'updated:tag',
-    };
-    const mockUpdated = {
-      id: 'existing-profile',
-      displayName: 'Updated Profile',
-      modelTag: 'updated:tag',
-      matchPrefixes: [],
-      summary: '',
-      enableThinking: false,
-      temperature: null,
-      topP: null,
-      topK: null,
-      contextWindowTokens: 32768,
-      requestTimeoutSeconds: 600,
-      recommendedAsRefineModel: false,
-      notes: [],
-    };
-
-    const promise = firstValueFrom(service.updateModelProfile('existing-profile', request));
-    const req = httpMock.expectOne('/api/llm-settings/model-profiles/existing-profile');
+    const promise = firstValueFrom(service.updateWorkflows(request));
+    const req = httpMock.expectOne('/api/llm-settings/workflows');
     expect(req.request.method).toBe('PUT');
-    req.flush(mockUpdated);
-
-    const result = await promise;
-    expect(result.displayName).toBe('Updated Profile');
-  });
-
-  it('deletes model profile via DELETE /api/llm-settings/model-profiles/:id', async () => {
-    const promise = firstValueFrom(service.deleteModelProfile('to-delete'));
-    const req = httpMock.expectOne('/api/llm-settings/model-profiles/to-delete');
-    expect(req.request.method).toBe('DELETE');
-    req.flush(null);
-
+    expect(req.request.body).toEqual(request);
+    req.flush({});
     await promise;
+
+    expect(mockAiHelperService.checkStatus).toHaveBeenCalledWith(true);
   });
 
-  it('restores default model profiles via POST /api/llm-settings/model-profiles/restore-defaults', async () => {
-    const mockList = [{ id: 'gemma4-e4b', displayName: 'Gemma 4 E4B' }];
-    const promise = firstValueFrom(service.restoreDefaultModelProfiles());
-    const req = httpMock.expectOne('/api/llm-settings/model-profiles/restore-defaults');
-    expect(req.request.method).toBe('POST');
-    req.flush(mockList);
+  it('calls the connection and model configuration endpoints', () => {
+    service.getConnections().subscribe();
+    httpMock.expectOne({ method: 'GET', url: '/api/llm-settings/connections' }).flush([]);
 
-    const result = await promise;
-    expect(result.length).toBe(1);
-    expect(result[0].id).toBe('gemma4-e4b');
+    service.testSavedConnection('desk').subscribe();
+    httpMock
+      .expectOne({ method: 'POST', url: '/api/llm-settings/connections/desk/test' })
+      .flush({});
+
+    service.deleteConnection('desk').subscribe();
+    httpMock.expectOne({ method: 'DELETE', url: '/api/llm-settings/connections/desk' }).flush(null);
+
+    service.getModelConfigurations().subscribe();
+    httpMock.expectOne({ method: 'GET', url: '/api/llm-settings/model-configurations' }).flush([]);
+
+    service.deleteModelConfiguration('cfg-1').subscribe();
+    httpMock
+      .expectOne({ method: 'DELETE', url: '/api/llm-settings/model-configurations/cfg-1' })
+      .flush(null);
   });
 
   it('creates model profile via POST /api/llm-settings/model-profiles', async () => {

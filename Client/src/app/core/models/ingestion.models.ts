@@ -131,6 +131,91 @@ export interface LlmSettingsDto {
   autoResumeQueue?: boolean;
   pausedUntilUtc?: string | null;
   pauseReason?: string | null;
+  textModelConfigurationId?: string | null;
+  visionModelConfigurationId?: string | null;
+  refineModelConfigurationId?: string | null;
+}
+
+export type LlmWorkflow = 'Text' | 'Vision' | 'Refinement';
+
+/** A saved machine or provider: where requests go, how to authenticate and its limits. */
+export interface LlmConnectionDto {
+  id: string;
+  name: string;
+  provider: LlmProvider;
+  baseUrl: string;
+  hasApiKey: boolean;
+  apiKeyMasked: string | null;
+  ollamaKeepAlive: string;
+  ollamaCpuOnly: boolean;
+  enableRateLimitSafeguards: boolean;
+  maxConcurrentRequests: number;
+  requestsPerMinute: number | null;
+  dailyRequestQuota: number | null;
+  dailyQuotaResetTimezone: string;
+  dailyQuotaResetTime: string;
+  modelConfigurationCount: number;
+  modifiedAt: string;
+}
+
+export interface UpsertLlmConnectionRequest {
+  name: string;
+  provider: LlmProvider;
+  baseUrl: string;
+  apiKey?: string | null;
+  clearApiKey?: boolean;
+  ollamaKeepAlive: string;
+  ollamaCpuOnly: boolean;
+  enableRateLimitSafeguards: boolean;
+  maxConcurrentRequests: number;
+  requestsPerMinute: number | null;
+  dailyRequestQuota: number | null;
+  dailyQuotaResetTimezone: string;
+  dailyQuotaResetTime: string;
+}
+
+/** A model on a saved connection together with its tuning. */
+export interface LlmModelConfigurationDto {
+  id: string;
+  name: string;
+  connectionId: string;
+  connectionName: string;
+  provider: LlmProvider;
+  model: string;
+  profileId: string | null;
+  enableThinking: boolean;
+  temperature: number | null;
+  topP: number | null;
+  topK: number | null;
+  contextWindowTokens: number;
+  requestTimeoutSeconds: number;
+  ollamaGpuLayers: number | null;
+  assignedWorkflows: LlmWorkflow[];
+  modifiedAt: string;
+}
+
+export interface UpsertLlmModelConfigurationRequest {
+  name: string;
+  connectionId: string;
+  model: string;
+  profileId: string | null;
+  enableThinking: boolean;
+  temperature: number | null;
+  topP: number | null;
+  topK: number | null;
+  contextWindowTokens: number;
+  requestTimeoutSeconds: number;
+  ollamaGpuLayers: number | null;
+}
+
+export interface UpdateLlmWorkflowsRequest {
+  textModelConfigurationId: string | null;
+  visionModelConfigurationId: string | null;
+  refineModelConfigurationId: string | null;
+  autoPublishHighConfidenceText: boolean;
+  maxIngestionRetries: number;
+  enableIngestion: boolean;
+  autoResumeQueue: boolean;
 }
 
 export interface UpdateLlmSettingsRequest {
@@ -174,6 +259,7 @@ export interface TestLlmConnectionRequest {
   apiKey?: string | null;
   clearApiKey?: boolean;
   timeoutSeconds?: number | null;
+  connectionId?: string | null;
 }
 
 export interface LlmConnectionTestResultDto {

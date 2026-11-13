@@ -19,8 +19,8 @@ public sealed class LlmSettingsService(
         CancellationToken cancellationToken = default
     )
     {
-        var entity = await dbContext
-            .HouseholdLlmSettings.AsNoTracking()
+        var entity = await QuerySettingsWithAssignments()
+            .AsNoTracking()
             .FirstOrDefaultAsync(
                 s => s.SingletonKey == HouseholdLlmSettings.DefaultSingletonKey,
                 cancellationToken
@@ -28,40 +28,46 @@ public sealed class LlmSettingsService(
 
         if (entity is not null)
         {
+            // Connection and model fields report what each workflow actually uses.
+            var effective = ApplyWorkflowAssignments(BuildLegacyConfig(entity), entity);
+            var refine = effective.ForRefinement();
             return new LlmSettingsDto(
-                Provider: entity.Provider,
-                BaseUrl: entity.BaseUrl,
-                HasApiKey: !string.IsNullOrWhiteSpace(entity.ApiKey),
-                ApiKeyMasked: MaskApiKey(entity.ApiKey),
-                TextModel: entity.TextModel,
-                VisionModel: entity.VisionModel,
-                OllamaKeepAlive: entity.OllamaKeepAlive,
-                RequestTimeoutSeconds: entity.RequestTimeoutSeconds,
+                Provider: effective.Provider,
+                BaseUrl: effective.BaseUrl,
+                HasApiKey: !string.IsNullOrWhiteSpace(effective.ApiKey),
+                ApiKeyMasked: MaskApiKey(effective.ApiKey),
+                TextModel: effective.TextModel,
+                VisionModel: effective.VisionModel,
+                OllamaKeepAlive: effective.OllamaKeepAlive,
+                RequestTimeoutSeconds: effective.RequestTimeoutSeconds,
                 AutoPublishHighConfidenceText: entity.AutoPublishHighConfidenceText,
-                EnableThinking: entity.EnableThinking,
+                EnableThinking: effective.EnableThinking,
                 MaxIngestionRetries: entity.MaxIngestionRetries,
                 EnableIngestion: entity.EnableIngestion,
-                ContextWindowTokens: entity.ContextWindowTokens,
+                ContextWindowTokens: effective.ContextWindowTokens,
                 ModifiedAt: entity.ModifiedAt,
-                OllamaCpuOnly: entity.OllamaCpuOnly,
-                Temperature: entity.Temperature,
-                TopP: entity.TopP,
-                TopK: entity.TopK,
-                RefineModel: entity.RefineModel,
-                RefineEnableThinking: entity.RefineEnableThinking,
-                RefineTemperature: entity.RefineTemperature,
-                RefineTopP: entity.RefineTopP,
-                RefineTopK: entity.RefineTopK,
-                RefineRequestTimeoutSeconds: entity.RefineRequestTimeoutSeconds,
-                EnableRateLimitSafeguards: entity.EnableRateLimitSafeguards,
-                MaxConcurrentRequests: entity.MaxConcurrentRequests,
-                RequestsPerMinute: entity.RequestsPerMinute,
-                DailyRequestQuota: entity.DailyRequestQuota,
-                DailyQuotaResetTimezone: entity.DailyQuotaResetTimezone ?? "UTC",
-                DailyQuotaResetTime: entity.DailyQuotaResetTime ?? "00:00",
+                OllamaCpuOnly: effective.OllamaCpuOnly,
+                Temperature: effective.Temperature,
+                TopP: effective.TopP,
+                TopK: effective.TopK,
+                RefineModel: effective.RefineModel,
+                RefineEnableThinking: refine.EnableThinking,
+                RefineTemperature: refine.Temperature,
+                RefineTopP: refine.TopP,
+                RefineTopK: refine.TopK,
+                RefineRequestTimeoutSeconds: refine.RequestTimeoutSeconds,
+                EnableRateLimitSafeguards: effective.EnableRateLimitSafeguards,
+                MaxConcurrentRequests: effective.MaxConcurrentRequests,
+                RequestsPerMinute: effective.RequestsPerMinute,
+                DailyRequestQuota: effective.DailyRequestQuota,
+                DailyQuotaResetTimezone: effective.DailyQuotaResetTimezone,
+                DailyQuotaResetTime: effective.DailyQuotaResetTime,
                 AutoResumeQueue: entity.AutoResumeQueue,
                 PausedUntilUtc: entity.PausedUntilUtc,
-                PauseReason: entity.PauseReason
+                PauseReason: entity.PauseReason,
+                TextModelConfigurationId: entity.TextModelConfigurationId,
+                VisionModelConfigurationId: entity.VisionModelConfigurationId,
+                RefineModelConfigurationId: entity.RefineModelConfigurationId
             );
         }
 
@@ -107,8 +113,8 @@ public sealed class LlmSettingsService(
         CancellationToken cancellationToken = default
     )
     {
-        var entity = await dbContext
-            .HouseholdLlmSettings.AsNoTracking()
+        var entity = await QuerySettingsWithAssignments()
+            .AsNoTracking()
             .FirstOrDefaultAsync(
                 s => s.SingletonKey == HouseholdLlmSettings.DefaultSingletonKey,
                 cancellationToken
@@ -116,39 +122,7 @@ public sealed class LlmSettingsService(
 
         if (entity is not null)
         {
-            return new EffectiveLlmConnectionConfig(
-                Provider: entity.Provider,
-                BaseUrl: entity.BaseUrl,
-                ApiKey: entity.ApiKey,
-                TextModel: entity.TextModel,
-                VisionModel: entity.VisionModel,
-                OllamaKeepAlive: entity.OllamaKeepAlive,
-                RequestTimeoutSeconds: entity.RequestTimeoutSeconds,
-                AutoPublishHighConfidenceText: entity.AutoPublishHighConfidenceText,
-                EnableThinking: entity.EnableThinking,
-                MaxIngestionRetries: entity.MaxIngestionRetries,
-                EnableIngestion: entity.EnableIngestion,
-                ContextWindowTokens: entity.ContextWindowTokens,
-                OllamaCpuOnly: entity.OllamaCpuOnly,
-                Temperature: entity.Temperature,
-                TopP: entity.TopP,
-                TopK: entity.TopK,
-                RefineModel: entity.RefineModel,
-                RefineEnableThinking: entity.RefineEnableThinking,
-                RefineTemperature: entity.RefineTemperature,
-                RefineTopP: entity.RefineTopP,
-                RefineTopK: entity.RefineTopK,
-                RefineRequestTimeoutSeconds: entity.RefineRequestTimeoutSeconds,
-                EnableRateLimitSafeguards: entity.EnableRateLimitSafeguards,
-                MaxConcurrentRequests: entity.MaxConcurrentRequests,
-                RequestsPerMinute: entity.RequestsPerMinute,
-                DailyRequestQuota: entity.DailyRequestQuota,
-                DailyQuotaResetTimezone: entity.DailyQuotaResetTimezone ?? "UTC",
-                DailyQuotaResetTime: entity.DailyQuotaResetTime ?? "00:00",
-                AutoResumeQueue: entity.AutoResumeQueue,
-                PausedUntilUtc: entity.PausedUntilUtc,
-                PauseReason: entity.PauseReason
-            );
+            return ApplyWorkflowAssignments(BuildLegacyConfig(entity), entity);
         }
 
         var opt = defaultOptions.Value;
@@ -267,7 +241,102 @@ public sealed class LlmSettingsService(
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        if (!request.EnableIngestion && wasIngestionEnabled)
+        await ApplyQueueSideEffectsAsync(
+            wasIngestionEnabled,
+            request.EnableIngestion,
+            wakeWaitingJobs: !string.IsNullOrWhiteSpace(entity.TextModel)
+                || entity.TextModelConfigurationId is not null,
+            cancellationToken
+        );
+
+        return await GetSettingsAsync(cancellationToken);
+    }
+
+    public async Task<LlmSettingsDto> UpdateWorkflowsAsync(
+        UpdateLlmWorkflowsRequest request,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var requestedIds = new[]
+        {
+            request.TextModelConfigurationId,
+            request.VisionModelConfigurationId,
+            request.RefineModelConfigurationId,
+        }
+            .OfType<Guid>()
+            .Distinct()
+            .ToList();
+        var existingIds = await dbContext
+            .LlmModelConfigurations.Where(c => requestedIds.Contains(c.Id))
+            .Select(c => c.Id)
+            .ToListAsync(cancellationToken);
+        var missing = requestedIds.Except(existingIds).ToList();
+        if (missing.Count > 0)
+        {
+            throw new DomainValidationException(
+                $"Model configuration '{missing[0]}' does not exist."
+            );
+        }
+
+        var entity = await dbContext.HouseholdLlmSettings.FirstOrDefaultAsync(
+            s => s.SingletonKey == HouseholdLlmSettings.DefaultSingletonKey,
+            cancellationToken
+        );
+        if (entity is null)
+        {
+            entity = CreateFromDefaults();
+            dbContext.HouseholdLlmSettings.Add(entity);
+        }
+
+        entity.TextModelConfigurationId = request.TextModelConfigurationId;
+        entity.VisionModelConfigurationId = request.VisionModelConfigurationId;
+        entity.RefineModelConfigurationId = request.RefineModelConfigurationId;
+
+        // An unassigned workflow is off; never fall back to the old single-host models.
+        if (request.TextModelConfigurationId is null)
+        {
+            entity.TextModel = null;
+        }
+        if (request.VisionModelConfigurationId is null)
+        {
+            entity.VisionModel = null;
+        }
+        if (request.RefineModelConfigurationId is null)
+        {
+            entity.RefineModel = null;
+        }
+
+        var wasIngestionEnabled = entity.EnableIngestion;
+        entity.AutoPublishHighConfidenceText = request.AutoPublishHighConfidenceText;
+        entity.MaxIngestionRetries = request.MaxIngestionRetries;
+        entity.EnableIngestion = request.EnableIngestion;
+        entity.AutoResumeQueue = request.AutoResumeQueue;
+        if (request.EnableIngestion)
+        {
+            entity.PausedUntilUtc = null;
+            entity.PauseReason = null;
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        await ApplyQueueSideEffectsAsync(
+            wasIngestionEnabled,
+            request.EnableIngestion,
+            wakeWaitingJobs: request.TextModelConfigurationId is not null,
+            cancellationToken
+        );
+
+        return await GetSettingsAsync(cancellationToken);
+    }
+
+    private async Task ApplyQueueSideEffectsAsync(
+        bool wasIngestionEnabled,
+        bool enableIngestion,
+        bool wakeWaitingJobs,
+        CancellationToken cancellationToken
+    )
+    {
+        if (!enableIngestion && wasIngestionEnabled)
         {
             queueSignal.CancelActiveExecution();
             var workingJobs = await dbContext
@@ -291,32 +360,162 @@ public sealed class LlmSettingsService(
                 await dbContext.SaveChangesAsync(cancellationToken);
             }
         }
-        else if (request.EnableIngestion && !wasIngestionEnabled)
+        else if (enableIngestion && !wasIngestionEnabled)
         {
             queueSignal.NotifyWorkAvailable();
         }
 
-        // If a model is configured, wake any waiting jobs
-        if (!string.IsNullOrWhiteSpace(entity.TextModel))
+        if (wakeWaitingJobs)
         {
-            var waitingJobs = await dbContext
-                .IngestionJobs.Where(j => j.Status == IngestionJobStatus.WaitingForLlmHost)
-                .ToListAsync(cancellationToken);
-
-            if (waitingJobs.Count > 0)
-            {
-                var now = DateTimeOffset.UtcNow;
-                foreach (var job in waitingJobs)
-                {
-                    job.NextRetryAt = now;
-                }
-                await dbContext.SaveChangesAsync(cancellationToken);
-                queueSignal.NotifyWorkAvailable();
-            }
+            await WakeWaitingJobsAsync(dbContext, queueSignal, cancellationToken);
         }
-
-        return await GetSettingsAsync(cancellationToken);
     }
+
+    /// <summary>Retries jobs parked while the LLM host was offline after the LLM setup changes.</summary>
+    internal static async Task WakeWaitingJobsAsync(
+        AppDbContext dbContext,
+        IIngestionQueueSignal queueSignal,
+        CancellationToken cancellationToken
+    )
+    {
+        var waitingJobs = await dbContext
+            .IngestionJobs.Where(j => j.Status == IngestionJobStatus.WaitingForLlmHost)
+            .ToListAsync(cancellationToken);
+
+        if (waitingJobs.Count > 0)
+        {
+            var now = DateTimeOffset.UtcNow;
+            foreach (var job in waitingJobs)
+            {
+                job.NextRetryAt = now;
+            }
+            await dbContext.SaveChangesAsync(cancellationToken);
+            queueSignal.NotifyWorkAvailable();
+        }
+    }
+
+    private IQueryable<HouseholdLlmSettings> QuerySettingsWithAssignments() =>
+        dbContext
+            .HouseholdLlmSettings.Include(s => s.TextModelConfiguration)
+                .ThenInclude(c => c!.Connection)
+            .Include(s => s.VisionModelConfiguration)
+                .ThenInclude(c => c!.Connection)
+            .Include(s => s.RefineModelConfiguration)
+                .ThenInclude(c => c!.Connection);
+
+    private static EffectiveLlmConnectionConfig BuildLegacyConfig(HouseholdLlmSettings entity) =>
+        new(
+            Provider: entity.Provider,
+            BaseUrl: entity.BaseUrl,
+            ApiKey: entity.ApiKey,
+            TextModel: entity.TextModel,
+            VisionModel: entity.VisionModel,
+            OllamaKeepAlive: entity.OllamaKeepAlive,
+            RequestTimeoutSeconds: entity.RequestTimeoutSeconds,
+            AutoPublishHighConfidenceText: entity.AutoPublishHighConfidenceText,
+            EnableThinking: entity.EnableThinking,
+            MaxIngestionRetries: entity.MaxIngestionRetries,
+            EnableIngestion: entity.EnableIngestion,
+            ContextWindowTokens: entity.ContextWindowTokens,
+            OllamaCpuOnly: entity.OllamaCpuOnly,
+            Temperature: entity.Temperature,
+            TopP: entity.TopP,
+            TopK: entity.TopK,
+            RefineModel: entity.RefineModel,
+            RefineEnableThinking: entity.RefineEnableThinking,
+            RefineTemperature: entity.RefineTemperature,
+            RefineTopP: entity.RefineTopP,
+            RefineTopK: entity.RefineTopK,
+            RefineRequestTimeoutSeconds: entity.RefineRequestTimeoutSeconds,
+            EnableRateLimitSafeguards: entity.EnableRateLimitSafeguards,
+            MaxConcurrentRequests: entity.MaxConcurrentRequests,
+            RequestsPerMinute: entity.RequestsPerMinute,
+            DailyRequestQuota: entity.DailyRequestQuota,
+            DailyQuotaResetTimezone: entity.DailyQuotaResetTimezone ?? "UTC",
+            DailyQuotaResetTime: entity.DailyQuotaResetTime ?? "00:00",
+            AutoResumeQueue: entity.AutoResumeQueue,
+            PausedUntilUtc: entity.PausedUntilUtc,
+            PauseReason: entity.PauseReason
+        );
+
+    /// <summary>
+    /// Replaces the old single-host values with each workflow's assigned model configuration so
+    /// text, vision and refinement can run on different machines or providers.
+    /// </summary>
+    private static EffectiveLlmConnectionConfig ApplyWorkflowAssignments(
+        EffectiveLlmConnectionConfig legacy,
+        HouseholdLlmSettings entity
+    )
+    {
+        var text = entity.TextModelConfiguration is { Connection: not null } textConfiguration
+            ? WithModelConfiguration(legacy, textConfiguration)
+            : legacy;
+
+        var vision = entity.VisionModelConfiguration is { Connection: not null } visionConfiguration
+            ? WithModelConfiguration(legacy, visionConfiguration) with
+            {
+                TextModel = visionConfiguration.Model,
+                VisionModel = visionConfiguration.Model,
+                RefineModel = null,
+            }
+            : null;
+
+        var refine = entity.RefineModelConfiguration is { Connection: not null } refineConfiguration
+            ? WithModelConfiguration(legacy, refineConfiguration) with
+            {
+                TextModel = refineConfiguration.Model,
+                VisionModel = refineConfiguration.Model,
+                RefineModel = refineConfiguration.Model,
+            }
+            : null;
+
+        return text with
+        {
+            TextModel = entity.TextModelConfiguration?.Model ?? legacy.TextModel,
+            VisionModel = vision?.VisionModel ?? legacy.VisionModel,
+            RefineModel = refine?.RefineModel ?? legacy.RefineModel,
+            VisionConfig = vision,
+            RefineConfig = refine,
+        };
+    }
+
+    internal static EffectiveLlmConnectionConfig WithConnection(
+        EffectiveLlmConnectionConfig baseConfig,
+        LlmConnection connection
+    ) =>
+        baseConfig with
+        {
+            Provider = connection.Provider,
+            BaseUrl = connection.BaseUrl,
+            ApiKey = connection.ApiKey,
+            OllamaKeepAlive = connection.OllamaKeepAlive,
+            OllamaCpuOnly = connection.OllamaCpuOnly,
+            EnableRateLimitSafeguards = connection.EnableRateLimitSafeguards,
+            MaxConcurrentRequests = connection.MaxConcurrentRequests,
+            RequestsPerMinute = connection.RequestsPerMinute,
+            DailyRequestQuota = connection.DailyRequestQuota,
+            DailyQuotaResetTimezone = connection.DailyQuotaResetTimezone,
+            DailyQuotaResetTime = connection.DailyQuotaResetTime,
+            ConnectionKey = connection.Id.ToString(),
+        };
+
+    private static EffectiveLlmConnectionConfig WithModelConfiguration(
+        EffectiveLlmConnectionConfig baseConfig,
+        LlmModelConfiguration configuration
+    ) =>
+        WithConnection(baseConfig, configuration.Connection!) with
+        {
+            TextModel = configuration.Model,
+            EnableThinking = configuration.EnableThinking,
+            Temperature = configuration.Temperature,
+            TopP = configuration.TopP,
+            TopK = configuration.TopK,
+            ContextWindowTokens = configuration.ContextWindowTokens,
+            RequestTimeoutSeconds = configuration.RequestTimeoutSeconds,
+            OllamaGpuLayers = configuration.OllamaGpuLayers,
+            VisionConfig = null,
+            RefineConfig = null,
+        };
 
     public async Task<LlmConnectionTestResultDto> TestConnectionAsync(
         TestLlmConnectionRequest request,
@@ -329,6 +528,15 @@ public sealed class LlmSettingsService(
         }
 
         var effective = await GetEffectiveConfigAsync(cancellationToken);
+        if (request.ConnectionId is { } connectionId)
+        {
+            var connection =
+                await dbContext
+                    .LlmConnections.AsNoTracking()
+                    .FirstOrDefaultAsync(c => c.Id == connectionId, cancellationToken)
+                ?? throw new NotFoundException($"LLM connection '{connectionId}' not found.");
+            effective = WithConnection(effective, connection);
+        }
 
         var provider = request.Provider ?? effective.Provider;
         var baseUrl = !string.IsNullOrWhiteSpace(request.BaseUrl)
@@ -469,7 +677,7 @@ public sealed class LlmSettingsService(
         };
     }
 
-    private static void ValidateUrl(string? url)
+    internal static void ValidateUrl(string? url)
     {
         if (
             string.IsNullOrWhiteSpace(url)
@@ -481,7 +689,7 @@ public sealed class LlmSettingsService(
         }
     }
 
-    private static string? MaskApiKey(string? apiKey)
+    internal static string? MaskApiKey(string? apiKey)
     {
         if (string.IsNullOrWhiteSpace(apiKey))
         {

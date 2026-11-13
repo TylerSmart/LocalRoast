@@ -157,9 +157,36 @@ public sealed class LlmSettingsController(ILlmSettingsService settingsService) :
         }
     }
 
+    [HttpPut("workflows")]
+    [ProducesResponseType(typeof(LlmSettingsDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> UpdateWorkflows(
+        [FromBody] UpdateLlmWorkflowsRequest request,
+        CancellationToken cancellationToken
+    )
+    {
+        try
+        {
+            var updated = await settingsService.UpdateWorkflowsAsync(request, cancellationToken);
+            return Ok(updated);
+        }
+        catch (DomainValidationException ex)
+        {
+            return BadRequest(
+                new ProblemDetails
+                {
+                    Status = StatusCodes.Status400BadRequest,
+                    Title = ex.Title,
+                    Detail = ex.Message,
+                }
+            );
+        }
+    }
+
     [HttpPost("test")]
     [ProducesResponseType(typeof(LlmConnectionTestResultDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> TestConnection(
         [FromBody] TestLlmConnectionRequest request,
         CancellationToken cancellationToken
@@ -177,6 +204,17 @@ public sealed class LlmSettingsController(ILlmSettingsService settingsService) :
                 {
                     Status = StatusCodes.Status400BadRequest,
                     Title = ex.Title,
+                    Detail = ex.Message,
+                }
+            );
+        }
+        catch (NotFoundException ex)
+        {
+            return NotFound(
+                new ProblemDetails
+                {
+                    Status = StatusCodes.Status404NotFound,
+                    Title = "Not Found",
                     Detail = ex.Message,
                 }
             );

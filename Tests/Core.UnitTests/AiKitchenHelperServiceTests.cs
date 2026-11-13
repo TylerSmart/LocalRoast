@@ -37,6 +37,11 @@ public sealed class AiKitchenHelperServiceTests
             CancellationToken cancellationToken = default
         ) => throw new NotImplementedException();
 
+        public Task<LlmSettingsDto> UpdateWorkflowsAsync(
+            UpdateLlmWorkflowsRequest request,
+            CancellationToken cancellationToken = default
+        ) => throw new NotImplementedException();
+
         public Task<LlmConnectionTestResultDto> TestConnectionAsync(
             TestLlmConnectionRequest request,
             CancellationToken cancellationToken = default

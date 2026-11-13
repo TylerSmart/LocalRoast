@@ -15,17 +15,13 @@ public interface ILlmRequestGate
 
 public sealed class LlmRequestGate : ILlmRequestGate
 {
+    private const string DefaultConnectionKey = "default";
+
     private readonly object _lock = new();
-    private int _activeCount;
-    private readonly Queue<(TaskCompletionSource<IDisposable> Tcs, int MaxConcurrency)> _waiters =
-        new();
 
-    // RPM sliding window tracking
-    private readonly Queue<DateTimeOffset> _recentRequestTimestamps = new();
-
-    // RPD tracking
-    private DateOnly _currentQuotaDay = DateOnly.FromDateTime(DateTime.UtcNow);
-    private int _requestsToday;
+    // Each saved connection (machine/provider) gets its own concurrency, pacing and quota state
+    // so a busy or rate-limited host never blocks requests bound for another one.
+    private readonly Dictionary<string, ConnectionState> _states = new(StringComparer.Ordinal);
 
     public Task<IDisposable> AcquireAsync(CancellationToken cancellationToken = default) =>
         AcquireAsync(null, cancellationToken);
@@ -35,6 +31,19 @@ public sealed class LlmRequestGate : ILlmRequestGate
         CancellationToken cancellationToken = default
     )
     {
+        ConnectionState state;
+        lock (_lock)
+        {
+            var key = config?.ConnectionKey is { Length: > 0 } connectionKey
+                ? connectionKey
+                : DefaultConnectionKey;
+            if (!_states.TryGetValue(key, out state!))
+            {
+                state = new ConnectionState();
+                _states[key] = state;
+            }
+        }
+
         // 1. Daily Quota Check (RPD)
         if (config?.DailyRequestQuota is int rpd && rpd > 0)
         {
@@ -46,21 +55,21 @@ public sealed class LlmRequestGate : ILlmRequestGate
                     config.DailyQuotaResetTime
                 );
 
-                if (today != _currentQuotaDay)
+                if (today != state.CurrentQuotaDay)
                 {
-                    _currentQuotaDay = today;
-                    _requestsToday = 0;
+                    state.CurrentQuotaDay = today;
+                    state.RequestsToday = 0;
                 }
 
-                if (_requestsToday >= rpd)
+                if (state.RequestsToday >= rpd)
                 {
                     throw new LlmHostUnavailableException(
-                        $"Daily request limit reached ({_requestsToday} / {rpd} requests today).",
+                        $"Daily request limit reached ({state.RequestsToday} / {rpd} requests today).",
                         isQuotaExhausted: true
                     );
                 }
 
-                _requestsToday++;
+                state.RequestsToday++;
             }
         }
 
@@ -74,16 +83,16 @@ public sealed class LlmRequestGate : ILlmRequestGate
                 var windowStart = now.AddSeconds(-60);
 
                 while (
-                    _recentRequestTimestamps.Count > 0
-                    && _recentRequestTimestamps.Peek() < windowStart
+                    state.RecentRequestTimestamps.Count > 0
+                    && state.RecentRequestTimestamps.Peek() < windowStart
                 )
                 {
-                    _recentRequestTimestamps.Dequeue();
+                    state.RecentRequestTimestamps.Dequeue();
                 }
 
-                if (_recentRequestTimestamps.Count >= rpm)
+                if (state.RecentRequestTimestamps.Count >= rpm)
                 {
-                    var oldest = _recentRequestTimestamps.Peek();
+                    var oldest = state.RecentRequestTimestamps.Peek();
                     var requiredTime = oldest.AddSeconds(60);
                     if (requiredTime > now)
                     {
@@ -99,7 +108,7 @@ public sealed class LlmRequestGate : ILlmRequestGate
 
             lock (_lock)
             {
-                _recentRequestTimestamps.Enqueue(DateTimeOffset.UtcNow);
+                state.RecentRequestTimestamps.Enqueue(DateTimeOffset.UtcNow);
             }
         }
 
@@ -109,10 +118,10 @@ public sealed class LlmRequestGate : ILlmRequestGate
         Task<IDisposable> waitTask;
         lock (_lock)
         {
-            if (_activeCount < limit)
+            if (state.ActiveCount < limit)
             {
-                _activeCount++;
-                return new GateReleaser(this);
+                state.ActiveCount++;
+                return new GateReleaser(this, state);
             }
 
             var tcs = new TaskCompletionSource<IDisposable>(
@@ -132,43 +141,57 @@ public sealed class LlmRequestGate : ILlmRequestGate
                 tcs.Task.ContinueWith(_ => reg.Dispose(), TaskScheduler.Default);
             }
 
-            _waiters.Enqueue((tcs, limit));
+            state.Waiters.Enqueue((tcs, limit));
             waitTask = tcs.Task;
         }
 
         return await waitTask;
     }
 
-    private void Release()
+    private void Release(ConnectionState state)
     {
         lock (_lock)
         {
-            _activeCount--;
+            state.ActiveCount--;
 
-            while (_waiters.Count > 0)
+            while (state.Waiters.Count > 0)
             {
-                var (waiter, limit) = _waiters.Dequeue();
+                var (waiter, limit) = state.Waiters.Dequeue();
                 if (waiter.Task.IsCompleted)
                 {
                     continue;
                 }
 
-                if (_activeCount < limit)
+                if (state.ActiveCount < limit)
                 {
-                    _activeCount++;
-                    waiter.TrySetResult(new GateReleaser(this));
+                    state.ActiveCount++;
+                    waiter.TrySetResult(new GateReleaser(this, state));
                     return;
                 }
                 else
                 {
-                    _waiters.Enqueue((waiter, limit));
+                    state.Waiters.Enqueue((waiter, limit));
                     break;
                 }
             }
         }
     }
 
-    private sealed class GateReleaser(LlmRequestGate gate) : IDisposable
+    private sealed class ConnectionState
+    {
+        public int ActiveCount;
+        public readonly Queue<(TaskCompletionSource<IDisposable> Tcs, int MaxConcurrency)> Waiters =
+            new();
+
+        // RPM sliding window tracking
+        public readonly Queue<DateTimeOffset> RecentRequestTimestamps = new();
+
+        // RPD tracking
+        public DateOnly CurrentQuotaDay = DateOnly.FromDateTime(DateTime.UtcNow);
+        public int RequestsToday;
+    }
+
+    private sealed class GateReleaser(LlmRequestGate gate, ConnectionState state) : IDisposable
     {
         private int _disposed;
 
@@ -176,7 +199,7 @@ public sealed class LlmRequestGate : ILlmRequestGate
         {
             if (Interlocked.Exchange(ref _disposed, 1) == 0)
             {
-                gate.Release();
+                gate.Release(state);
             }
         }
     }

@@ -36,6 +36,7 @@ public static class DataServiceCollectionExtensions
         services.AddScoped<ITaxonomyService, TaxonomyService>();
         services.AddScoped<IShareLinkService, ShareLinkService>();
         services.AddScoped<ILlmSettingsService, LlmSettingsService>();
+        services.AddScoped<ILlmConnectionService, LlmConnectionService>();
         services.AddScoped<IIngestionProcessor, IngestionProcessor>();
         services.AddScoped<IIngestionService, IngestionService>();
         services.AddScoped<IIngestionReviewService, IngestionReviewService>();

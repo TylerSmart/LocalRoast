@@ -74,6 +74,18 @@ public sealed class HouseholdLlmSettings : IAuditable
 
     public bool ModelProfilesSeeded { get; set; }
 
+    public Guid? TextModelConfigurationId { get; set; }
+
+    public LlmModelConfiguration? TextModelConfiguration { get; set; }
+
+    public Guid? VisionModelConfigurationId { get; set; }
+
+    public LlmModelConfiguration? VisionModelConfiguration { get; set; }
+
+    public Guid? RefineModelConfigurationId { get; set; }
+
+    public LlmModelConfiguration? RefineModelConfiguration { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
 
     public string CreatedBy { get; set; } = "System";

@@ -6,12 +6,11 @@ import {
   computed,
   inject,
   signal,
+  viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
-import { MatAutocompleteModule } from '@angular/material/autocomplete';
 import { MatButtonModule } from '@angular/material/button';
-import { MatCheckboxModule } from '@angular/material/checkbox';
 import { MatDialogModule, MatDialogRef } from '@angular/material/dialog';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
@@ -19,59 +18,31 @@ import { MatInputModule } from '@angular/material/input';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSelectModule } from '@angular/material/select';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
-import { MatSliderModule } from '@angular/material/slider';
 import { MatTabsModule } from '@angular/material/tabs';
-import { MatTooltipModule } from '@angular/material/tooltip';
+import { catchError, forkJoin, of } from 'rxjs';
 import type {
-  LlmConnectionTestResultDto,
+  LlmConnectionDto,
+  LlmModelConfigurationDto,
   LlmModelProfile,
-  LlmProvider,
-  LlmSettingsDto,
   UpsertLlmModelProfileRequest,
 } from '../../../core/models/ingestion.models';
 import { IngestionService } from '../../../core/services/ingestion/ingestion.service';
 import { LlmSettingsService } from '../../../core/services/llm-settings/llm-settings.service';
+import { LlmConnectionsPanelComponent } from '../llm-connections-panel/llm-connections-panel.component';
+import { LlmModelConfigurationsPanelComponent } from '../llm-model-configurations-panel/llm-model-configurations-panel.component';
 
-/** Returns the profile with the longest match prefix that starts the model tag. */
-export function matchModelProfile(
-  profiles: readonly LlmModelProfile[],
-  model: string | null | undefined,
-): LlmModelProfile | null {
-  const tag = model?.trim().toLowerCase() ?? '';
-  if (!tag) {
-    return null;
-  }
-  let best: LlmModelProfile | null = null;
-  let bestLength = 0;
-  for (const profile of profiles) {
-    for (const prefix of profile.matchPrefixes) {
-      if (tag.startsWith(prefix.toLowerCase()) && prefix.length > bestLength) {
-        best = profile;
-        bestLength = prefix.length;
-      }
-    }
-  }
-  return best;
-}
+export { filterModels, matchModelProfile } from './llm-settings.utils';
 
-/**
- * Filters discovered model names by every whitespace-separated word in the query (case-insensitive),
- * so "gemini flash" matches "google/gemini-3.8-flash". A blank query or one that exactly names a
- * model returns the full list so the user can still switch models after picking one.
- */
-export function filterModels(
-  models: readonly string[],
-  query: string | null | undefined,
-): string[] {
-  const normalized = query?.trim().toLowerCase() ?? '';
-  if (!normalized || models.some((model) => model.toLowerCase() === normalized)) {
-    return [...models];
-  }
-  const terms = normalized.split(/\s+/);
-  return models.filter((model) => {
-    const name = model.toLowerCase();
-    return terms.every((term) => name.includes(term));
-  });
+export const LLM_SETTINGS_TABS = {
+  workflows: 0,
+  connections: 1,
+  models: 2,
+  profiles: 3,
+} as const;
+
+interface ConnectionGroup {
+  connection: LlmConnectionDto;
+  configurations: LlmModelConfigurationDto[];
 }
 
 @Component({
@@ -83,14 +54,12 @@ export function filterModels(
     MatFormFieldModule,
     MatInputModule,
     MatSelectModule,
-    MatAutocompleteModule,
     MatSlideToggleModule,
-    MatSliderModule,
-    MatCheckboxModule,
     MatIconModule,
     MatProgressSpinnerModule,
     MatTabsModule,
-    MatTooltipModule,
+    LlmConnectionsPanelComponent,
+    LlmModelConfigurationsPanelComponent,
   ],
   templateUrl: './llm-settings-dialog.component.html',
   styleUrl: './llm-settings-dialog.component.scss',
@@ -102,121 +71,33 @@ export class LlmSettingsDialogComponent implements OnInit {
   private readonly llmSettingsService = inject(LlmSettingsService);
   private readonly ingestionService = inject(IngestionService);
   private readonly dialogRef = inject(MatDialogRef<LlmSettingsDialogComponent>);
+  private readonly modelsPanel = viewChild(LlmModelConfigurationsPanelComponent);
 
-  readonly isLoading = signal<boolean>(true);
-  readonly isTesting = signal<boolean>(false);
-  readonly isSaving = signal<boolean>(false);
+  readonly tabs = LLM_SETTINGS_TABS;
+  readonly isLoading = signal(true);
+  readonly isSaving = signal(false);
   readonly errorMessage = signal<string | null>(null);
-  readonly testResult = signal<LlmConnectionTestResultDto | null>(null);
-  readonly discoveredModels = signal<string[]>([]);
-  readonly hasSavedApiKey = signal<boolean>(false);
-  readonly apiKeyMasked = signal<string | null>(null);
+  readonly selectedTabIndex = signal<number>(LLM_SETTINGS_TABS.workflows);
+  readonly connections = signal<LlmConnectionDto[]>([]);
+  readonly configurations = signal<LlmModelConfigurationDto[]>([]);
   readonly profiles = signal<LlmModelProfile[]>([]);
-  readonly refineProfiles = computed(() =>
-    this.profiles().filter((profile) => profile.recommendedAsRefineModel),
-  );
-  readonly selectedProfileId = signal<string>('');
-  readonly selectedRefineProfileId = signal<string>('');
-  readonly selectedProfile = computed(
-    () => this.profiles().find((profile) => profile.id === this.selectedProfileId()) ?? null,
-  );
-  readonly selectedRefineProfile = computed(
-    () =>
-      this.refineProfiles().find((profile) => profile.id === this.selectedRefineProfileId()) ??
-      null,
-  );
-  readonly profileMessage = signal<string | null>(null);
-  readonly refineProfileMessage = signal<string | null>(null);
 
-  readonly timezoneOptions = [
-    { value: 'America/Los_Angeles', label: 'Pacific Time (PT) - Google AI Studio (Midnight PT)' },
-    { value: 'UTC', label: 'Coordinated Universal Time (UTC) - Standard / OpenRouter' },
-    { value: 'America/New_York', label: 'Eastern Time (ET)' },
-    { value: 'America/Chicago', label: 'Central Time (CT)' },
-    { value: 'America/Denver', label: 'Mountain Time (MT)' },
-    { value: 'Europe/London', label: 'London / GMT' },
-    { value: 'Europe/Paris', label: 'Central European Time (CET)' },
-    { value: 'Asia/Tokyo', label: 'Tokyo / JST' },
-    { value: 'Local', label: 'Local Server Time' },
-  ];
-
-  readonly selectedTabIndex = signal<number>(0);
-  readonly isEditingProfile = signal<boolean>(false);
+  readonly isEditingProfile = signal(false);
   readonly editingProfileId = signal<string | null>(null);
-  readonly isSavingProfile = signal<boolean>(false);
+  readonly isSavingProfile = signal(false);
   readonly profileCrudError = signal<string | null>(null);
 
-  readonly form = this.fb.nonNullable.group({
-    provider: this.fb.nonNullable.control<LlmProvider>('Ollama', [Validators.required]),
-    baseUrl: this.fb.nonNullable.control<string>('http://localhost:11434', [
-      Validators.required,
-      Validators.maxLength(500),
-    ]),
-    apiKey: this.fb.nonNullable.control<string>(''),
-    clearApiKey: this.fb.nonNullable.control<boolean>(false),
-    textModel: this.fb.nonNullable.control<string>(''),
-    visionModel: this.fb.nonNullable.control<string>(''),
-    ollamaKeepAlive: this.fb.nonNullable.control<string>('5m'),
-    contextWindowTokens: this.fb.nonNullable.control<number>(8192, [
-      Validators.required,
-      Validators.min(2048),
-      Validators.max(65536),
-    ]),
-    ollamaCpuOnly: this.fb.nonNullable.control<boolean>(false),
-    requestTimeoutSeconds: this.fb.nonNullable.control<number>(120, [
-      Validators.required,
-      Validators.min(5),
-      Validators.max(1800),
-    ]),
-    autoPublishHighConfidenceText: this.fb.nonNullable.control<boolean>(false),
-    enableThinking: this.fb.nonNullable.control<boolean>(false),
-    enableIngestion: this.fb.nonNullable.control<boolean>(true),
-    enableRateLimitSafeguards: this.fb.nonNullable.control<boolean>(true),
-    maxConcurrentRequests: this.fb.nonNullable.control<number>(1, [
-      Validators.required,
-      Validators.min(1),
-      Validators.max(5),
-    ]),
-    requestsPerMinute: this.fb.control<number | null>(null, [
-      Validators.min(1),
-      Validators.max(1000),
-      Validators.pattern(/^\d+$/),
-    ]),
-    dailyRequestQuota: this.fb.control<number | null>(null, [
-      Validators.min(1),
-      Validators.max(100000),
-      Validators.pattern(/^\d+$/),
-    ]),
-    dailyQuotaResetTimezone: this.fb.nonNullable.control<string>('UTC', [Validators.maxLength(64)]),
-    dailyQuotaResetTime: this.fb.nonNullable.control<string>('00:00', [
-      Validators.pattern(/^([01]\d|2[0-3]):[0-5]\d$/),
-    ]),
-    autoResumeQueue: this.fb.nonNullable.control<boolean>(true),
-    maxIngestionRetries: this.fb.nonNullable.control<number>(3, [
+  readonly workflowForm = this.fb.nonNullable.group({
+    textModelConfigurationId: this.fb.nonNullable.control(''),
+    visionModelConfigurationId: this.fb.nonNullable.control(''),
+    refineModelConfigurationId: this.fb.nonNullable.control(''),
+    enableIngestion: this.fb.nonNullable.control(true),
+    autoPublishHighConfidenceText: this.fb.nonNullable.control(false),
+    autoResumeQueue: this.fb.nonNullable.control(true),
+    maxIngestionRetries: this.fb.nonNullable.control(3, [
       Validators.required,
       Validators.min(0),
       Validators.max(10),
-    ]),
-    temperature: this.fb.control<number | null>(null, [Validators.min(0), Validators.max(2)]),
-    topP: this.fb.control<number | null>(null, [Validators.min(0), Validators.max(1)]),
-    topK: this.fb.control<number | null>(null, [
-      Validators.min(1),
-      Validators.max(1000),
-      Validators.pattern(/^\d+$/),
-    ]),
-    refineModel: this.fb.nonNullable.control<string>('', [Validators.maxLength(200)]),
-    refineEnableThinking: this.fb.nonNullable.control<boolean>(true),
-    refineTemperature: this.fb.control<number | null>(null, [Validators.min(0), Validators.max(2)]),
-    refineTopP: this.fb.control<number | null>(null, [Validators.min(0), Validators.max(1)]),
-    refineTopK: this.fb.control<number | null>(null, [
-      Validators.min(1),
-      Validators.max(1000),
-      Validators.pattern(/^\d+$/),
-    ]),
-    refineRequestTimeoutSeconds: this.fb.nonNullable.control<number>(1200, [
-      Validators.required,
-      Validators.min(5),
-      Validators.max(1800),
     ]),
   });
 
@@ -249,95 +130,70 @@ export class LlmSettingsDialogComponent implements OnInit {
     notes: this.fb.nonNullable.control<string>(''),
   });
 
-  private readonly textModelQuery = toSignal(this.form.controls.textModel.valueChanges, {
-    initialValue: this.form.controls.textModel.value,
+  private readonly workflowValues = toSignal(this.workflowForm.valueChanges, {
+    initialValue: this.workflowForm.getRawValue(),
   });
-  private readonly visionModelQuery = toSignal(this.form.controls.visionModel.valueChanges, {
-    initialValue: this.form.controls.visionModel.value,
+
+  /** Saved configurations grouped by connection for the workflow dropdowns. */
+  readonly configurationGroups = computed<ConnectionGroup[]>(() =>
+    this.connections()
+      .map((connection) => ({
+        connection,
+        configurations: this.configurations().filter((c) => c.connectionId === connection.id),
+      }))
+      .filter((group) => group.configurations.length > 0),
+  );
+  readonly textConfiguration = computed(() =>
+    this.findConfiguration(this.workflowValues().textModelConfigurationId),
+  );
+  readonly visionConfiguration = computed(() =>
+    this.findConfiguration(this.workflowValues().visionModelConfigurationId),
+  );
+  readonly refineConfiguration = computed(() =>
+    this.findConfiguration(this.workflowValues().refineModelConfigurationId),
+  );
+  readonly refineMatchesText = computed(() => {
+    const text = this.textConfiguration();
+    const refine = this.refineConfiguration();
+    return (
+      !!text && !!refine && text.connectionId === refine.connectionId && text.model === refine.model
+    );
   });
-  private readonly refineModelQuery = toSignal(this.form.controls.refineModel.valueChanges, {
-    initialValue: this.form.controls.refineModel.value,
-  });
-  readonly filteredTextModels = computed(() =>
-    filterModels(this.discoveredModels(), this.textModelQuery()),
-  );
-  readonly filteredVisionModels = computed(() =>
-    filterModels(this.discoveredModels(), this.visionModelQuery()),
-  );
-  readonly filteredRefineModels = computed(() =>
-    filterModels(this.discoveredModels(), this.refineModelQuery()),
-  );
 
   ngOnInit(): void {
-    this.loadSettings();
-    this.loadProfiles();
-
-    this.form.controls.provider.valueChanges
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe((provider) => {
-        const currentUrl = this.form.controls.baseUrl.value.trim();
-        if (provider === 'Ollama' && (currentUrl === '' || currentUrl.includes(':1234'))) {
-          this.form.controls.baseUrl.setValue('http://localhost:11434');
-        } else if (
-          provider === 'OpenAiCompatible' &&
-          (currentUrl === '' || currentUrl === 'http://localhost:11434')
-        ) {
-          this.form.controls.baseUrl.setValue('http://localhost:1234/v1');
-        }
-      });
+    this.loadAll();
   }
 
-  loadSettings(): void {
+  loadAll(): void {
     this.isLoading.set(true);
     this.errorMessage.set(null);
-
-    this.llmSettingsService
-      .getSettings()
+    forkJoin({
+      settings: this.llmSettingsService.getSettings(),
+      connections: this.llmSettingsService.getConnections(),
+      configurations: this.llmSettingsService.getModelConfigurations(),
+      profiles: this.llmSettingsService
+        .getModelProfiles()
+        .pipe(catchError(() => of([] as LlmModelProfile[]))),
+    })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (settings: LlmSettingsDto) => {
-          this.hasSavedApiKey.set(settings.hasApiKey);
-          this.apiKeyMasked.set(settings.apiKeyMasked);
-
-          this.form.patchValue({
-            provider: settings.provider,
-            baseUrl: settings.baseUrl,
-            apiKey: '',
-            clearApiKey: false,
-            textModel: settings.textModel ?? '',
-            visionModel: settings.visionModel ?? '',
-            ollamaKeepAlive: settings.ollamaKeepAlive,
-            contextWindowTokens: settings.contextWindowTokens ?? 8192,
-            ollamaCpuOnly: settings.ollamaCpuOnly ?? false,
-            requestTimeoutSeconds: settings.requestTimeoutSeconds,
-            autoPublishHighConfidenceText: settings.autoPublishHighConfidenceText,
-            enableThinking: settings.enableThinking ?? false,
+        next: ({ settings, connections, configurations, profiles }) => {
+          this.connections.set(connections);
+          this.configurations.set(configurations);
+          this.profiles.set(profiles);
+          this.workflowForm.reset({
+            textModelConfigurationId: settings.textModelConfigurationId ?? '',
+            visionModelConfigurationId: settings.visionModelConfigurationId ?? '',
+            refineModelConfigurationId: settings.refineModelConfigurationId ?? '',
             enableIngestion: settings.enableIngestion ?? true,
-            enableRateLimitSafeguards: settings.enableRateLimitSafeguards ?? true,
-            maxConcurrentRequests: settings.maxConcurrentRequests ?? 1,
-            requestsPerMinute: settings.requestsPerMinute ?? null,
-            dailyRequestQuota: settings.dailyRequestQuota ?? null,
-            dailyQuotaResetTimezone: settings.dailyQuotaResetTimezone ?? 'UTC',
-            dailyQuotaResetTime: settings.dailyQuotaResetTime ?? '00:00',
+            autoPublishHighConfidenceText: settings.autoPublishHighConfidenceText,
             autoResumeQueue: settings.autoResumeQueue ?? true,
             maxIngestionRetries: settings.maxIngestionRetries ?? 3,
-            temperature: settings.temperature ?? null,
-            topP: settings.topP ?? null,
-            topK: settings.topK ?? null,
-            refineModel: settings.refineModel ?? '',
-            refineEnableThinking: settings.refineEnableThinking ?? true,
-            refineTemperature: settings.refineTemperature ?? null,
-            refineTopP: settings.refineTopP ?? null,
-            refineTopK: settings.refineTopK ?? null,
-            refineRequestTimeoutSeconds: settings.refineRequestTimeoutSeconds ?? 1200,
           });
-
-          this.isLoading.set(false);
-          this.selectDefaultProfiles();
-
-          if (settings.baseUrl && settings.baseUrl.trim().length > 0) {
-            this.testConnection();
+          if (connections.length === 0) {
+            this.selectedTabIndex.set(LLM_SETTINGS_TABS.connections);
           }
+          this.isLoading.set(false);
         },
         error: (err) => {
           this.errorMessage.set(err?.error?.detail || 'Failed to load LLM settings.');
@@ -346,90 +202,41 @@ export class LlmSettingsDialogComponent implements OnInit {
       });
   }
 
-  testConnection(): void {
-    if (this.isTesting()) {
-      return;
-    }
-
-    this.isTesting.set(true);
-    this.testResult.set(null);
-    this.errorMessage.set(null);
-
-    const values = this.form.getRawValue();
-    this.llmSettingsService
-      .testConnection({
-        provider: values.provider,
-        baseUrl: values.baseUrl.trim(),
-        apiKey: values.apiKey.trim() || undefined,
-        clearApiKey: values.clearApiKey,
-      })
+  /** Reloads connections and configurations after a panel saves or deletes one. */
+  reloadCatalog(): void {
+    forkJoin({
+      connections: this.llmSettingsService.getConnections(),
+      configurations: this.llmSettingsService.getModelConfigurations(),
+    })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (result) => {
-          this.testResult.set(result);
-          if (result.isReachable && result.models.length > 0) {
-            this.discoveredModels.set(result.models);
-            if (!this.form.controls.textModel.value.trim() && result.models.length > 0) {
-              this.form.controls.textModel.setValue(result.models[0]);
-            }
-          }
-          this.isTesting.set(false);
+        next: ({ connections, configurations }) => {
+          this.connections.set(connections);
+          this.configurations.set(configurations);
+          this.dropMissingAssignments(configurations);
         },
-        error: (err) => {
-          this.testResult.set({
-            isReachable: false,
-            provider: values.provider,
-            normalizedBaseUrl: values.baseUrl.trim(),
-            latencyMs: 0,
-            models: [],
-            errorMessage: err?.error?.detail || err?.message || 'Connection test failed.',
-          });
-          this.isTesting.set(false);
-        },
+        error: (err) =>
+          this.errorMessage.set(err?.error?.detail || 'Failed to reload LLM connections.'),
       });
   }
 
   onSave(): void {
-    if (this.form.invalid || this.isSaving()) {
+    if (this.workflowForm.invalid || this.isSaving()) {
       return;
     }
-
     this.isSaving.set(true);
     this.errorMessage.set(null);
 
-    const values = this.form.getRawValue();
+    const values = this.workflowForm.getRawValue();
     this.llmSettingsService
-      .updateSettings({
-        provider: values.provider,
-        baseUrl: values.baseUrl.trim(),
-        apiKey: values.apiKey.trim() || undefined,
-        clearApiKey: values.clearApiKey,
-        textModel: values.textModel.trim() || null,
-        visionModel: values.visionModel.trim() || null,
-        ollamaKeepAlive: values.ollamaKeepAlive.trim() || '5m',
-        contextWindowTokens: values.contextWindowTokens,
-        ollamaCpuOnly: values.ollamaCpuOnly,
-        requestTimeoutSeconds: values.requestTimeoutSeconds,
+      .updateWorkflows({
+        textModelConfigurationId: values.textModelConfigurationId || null,
+        visionModelConfigurationId: values.visionModelConfigurationId || null,
+        refineModelConfigurationId: values.refineModelConfigurationId || null,
         autoPublishHighConfidenceText: values.autoPublishHighConfidenceText,
-        enableThinking: values.enableThinking,
-        enableIngestion: values.enableIngestion,
-        enableRateLimitSafeguards: values.enableRateLimitSafeguards,
-        maxConcurrentRequests: values.maxConcurrentRequests,
-        requestsPerMinute: values.requestsPerMinute,
-        dailyRequestQuota: values.dailyRequestQuota,
-        dailyQuotaResetTimezone: values.dailyQuotaResetTimezone.trim() || 'UTC',
-        dailyQuotaResetTime: values.dailyQuotaResetTime.trim() || '00:00',
-        autoResumeQueue: values.autoResumeQueue,
         maxIngestionRetries: values.maxIngestionRetries,
-        temperature: values.temperature,
-        topP: values.topP,
-        topK: values.topK,
-        refineModel: values.refineModel.trim() || null,
-        refineEnableThinking: values.refineEnableThinking,
-        refineTemperature: values.refineTemperature,
-        refineTopP: values.refineTopP,
-        refineTopK: values.refineTopK,
-        refineRequestTimeoutSeconds: values.refineRequestTimeoutSeconds,
+        enableIngestion: values.enableIngestion,
+        autoResumeQueue: values.autoResumeQueue,
       })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
@@ -441,13 +248,13 @@ export class LlmSettingsDialogComponent implements OnInit {
         error: (err) => {
           this.errorMessage.set(err?.error?.detail || 'Failed to save settings.');
           this.isSaving.set(false);
+          this.selectedTabIndex.set(LLM_SETTINGS_TABS.workflows);
         },
       });
   }
 
-  onContextWindowSliderInput(event: Event): void {
-    const slider = event.target as HTMLInputElement;
-    this.form.controls.contextWindowTokens.setValue(slider.valueAsNumber);
+  onCancel(): void {
+    this.dialogRef.close(false);
   }
 
   loadProfiles(): void {
@@ -455,101 +262,37 @@ export class LlmSettingsDialogComponent implements OnInit {
       .getModelProfiles()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (profiles) => {
-          this.profiles.set(profiles);
-          this.selectDefaultProfiles();
-        },
+        next: (profiles) => this.profiles.set(profiles),
         error: () => this.profiles.set([]),
       });
   }
 
-  /**
-   * Fills the model settings with a profile's measured recommendations. The model name is kept
-   * so derived models (for example with a custom num_gpu) can use a profile.
-   */
-  applyProfile(): void {
-    const profile = this.selectedProfile();
-    if (!profile) {
-      return;
-    }
-    const controls = this.form.controls;
-    if (!controls.textModel.value.trim()) {
-      controls.textModel.setValue(profile.modelTag);
-    }
-    this.form.patchValue({
-      enableThinking: profile.enableThinking,
-      temperature: profile.temperature,
-      topP: profile.topP,
-      topK: profile.topK,
-      contextWindowTokens: profile.contextWindowTokens,
-      requestTimeoutSeconds: profile.requestTimeoutSeconds,
-      ...(profile.dailyQuotaResetTimezone
-        ? { dailyQuotaResetTimezone: profile.dailyQuotaResetTimezone }
-        : {}),
-      ...(profile.dailyQuotaResetTime ? { dailyQuotaResetTime: profile.dailyQuotaResetTime } : {}),
-    });
-    this.form.markAsDirty();
-    this.profileMessage.set(
-      `Applied ${profile.displayName} recommendations. Save to keep them. ${profile.notes.join(' ')}`.trim(),
-    );
+  /** Opens the Models tab with the profile's recommendations in the configuration editor. */
+  applyProfileToModel(profile: LlmModelProfile): void {
+    this.selectedTabIndex.set(LLM_SETTINGS_TABS.models);
+    this.modelsPanel()?.applyProfile(profile);
   }
 
-  applyRefineProfile(): void {
-    const profile = this.selectedRefineProfile();
-    if (!profile) {
-      return;
-    }
-    const controls = this.form.controls;
-    if (!controls.refineModel.value.trim()) {
-      controls.refineModel.setValue(profile.modelTag);
-    }
-    this.form.patchValue({
-      refineEnableThinking: profile.enableThinking,
-      refineTemperature: profile.temperature,
-      refineTopP: profile.topP,
-      refineTopK: profile.topK,
-      refineRequestTimeoutSeconds: profile.requestTimeoutSeconds,
-    });
-    this.form.markAsDirty();
-    this.refineProfileMessage.set(
-      `Applied ${profile.displayName} recommendations. Save to keep them. ${profile.notes.join(' ')}`.trim(),
-    );
-  }
-
-  onProfileSelected(id: string): void {
-    this.selectedProfileId.set(id);
-    this.profileMessage.set(null);
-  }
-
-  onRefineProfileSelected(id: string): void {
-    this.selectedRefineProfileId.set(id);
-    this.refineProfileMessage.set(null);
-  }
-
-  saveCurrentSettingsAsProfile(): void {
-    const values = this.form.getRawValue();
-    const modelTag = values.textModel.trim() || 'custom:model';
-    const displayName = values.textModel.trim()
-      ? `${values.textModel.trim()} Profile`
-      : 'New Custom Profile';
+  /** Starts a new profile pre-filled from a saved model configuration. */
+  saveConfigurationAsProfile(configuration: LlmModelConfigurationDto): void {
     this.profileForm.reset({
-      displayName,
-      modelTag,
-      matchPrefixes: values.textModel.trim() || '',
-      summary: 'Custom profile saved from current settings.',
-      contextWindowTokens: values.contextWindowTokens || 32768,
-      requestTimeoutSeconds: values.requestTimeoutSeconds || 600,
-      enableThinking: values.enableThinking,
+      displayName: `${configuration.model} Profile`,
+      modelTag: configuration.model,
+      matchPrefixes: configuration.model,
+      summary: `Saved from ${configuration.name}.`,
+      contextWindowTokens: configuration.contextWindowTokens,
+      requestTimeoutSeconds: configuration.requestTimeoutSeconds,
+      enableThinking: configuration.enableThinking,
       recommendedAsRefineModel: false,
-      temperature: values.temperature,
-      topP: values.topP,
-      topK: values.topK,
+      temperature: configuration.temperature,
+      topP: configuration.topP,
+      topK: configuration.topK,
       notes: '',
     });
     this.editingProfileId.set(null);
     this.isEditingProfile.set(true);
     this.profileCrudError.set(null);
-    this.selectedTabIndex.set(3);
+    this.selectedTabIndex.set(LLM_SETTINGS_TABS.profiles);
   }
 
   startAddProfile(): void {
@@ -634,12 +377,11 @@ export class LlmSettingsDialogComponent implements OnInit {
       : this.llmSettingsService.createModelProfile(req);
 
     request$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-      next: (saved) => {
+      next: () => {
         this.isSavingProfile.set(false);
         this.isEditingProfile.set(false);
         this.editingProfileId.set(null);
         this.loadProfiles();
-        this.selectedProfileId.set(saved.id);
       },
       error: (err) => {
         this.profileCrudError.set(err?.error?.detail || err?.message || 'Failed to save profile.');
@@ -689,7 +431,6 @@ export class LlmSettingsDialogComponent implements OnInit {
         next: (restored) => {
           this.isSavingProfile.set(false);
           this.profiles.set(restored);
-          this.selectDefaultProfiles();
           if (this.editingProfileId()) {
             this.cancelProfileEdit();
           }
@@ -703,47 +444,29 @@ export class LlmSettingsDialogComponent implements OnInit {
       });
   }
 
-  applyProfileToPrimary(profile: LlmModelProfile): void {
-    const controls = this.form.controls;
-    controls.textModel.setValue(profile.modelTag);
-    this.form.patchValue({
-      enableThinking: profile.enableThinking,
-      temperature: profile.temperature,
-      topP: profile.topP,
-      topK: profile.topK,
-      contextWindowTokens: profile.contextWindowTokens,
-      requestTimeoutSeconds: profile.requestTimeoutSeconds,
-      ...(profile.dailyQuotaResetTimezone
-        ? { dailyQuotaResetTimezone: profile.dailyQuotaResetTimezone }
-        : {}),
-      ...(profile.dailyQuotaResetTime ? { dailyQuotaResetTime: profile.dailyQuotaResetTime } : {}),
-    });
-    this.form.markAsDirty();
-    this.selectedProfileId.set(profile.id);
-    this.profileMessage.set(
-      `Applied ${profile.displayName} recommendations. Save to keep them. ${profile.notes.join(' ')}`.trim(),
-    );
-    this.selectedTabIndex.set(0);
+  private findConfiguration(id: string | undefined): LlmModelConfigurationDto | null {
+    return id ? (this.configurations().find((c) => c.id === id) ?? null) : null;
   }
 
-  private selectDefaultProfiles(): void {
-    const profiles = this.profiles();
-    if (profiles.length === 0 || this.isLoading()) {
-      return;
+  /**
+   * Clears selections whose configuration was deleted, and pre-selects the text workflow when the
+   * first configuration is created so a new setup works after a single save.
+   */
+  private dropMissingAssignments(configurations: LlmModelConfigurationDto[]): void {
+    const ids = new Set(configurations.map((c) => c.id));
+    const controls = this.workflowForm.controls;
+    for (const control of [
+      controls.textModelConfigurationId,
+      controls.visionModelConfigurationId,
+      controls.refineModelConfigurationId,
+    ]) {
+      if (control.value && !ids.has(control.value)) {
+        control.setValue('');
+      }
     }
-    const values = this.form.getRawValue();
-    this.selectedProfileId.set(matchModelProfile(profiles, values.textModel)?.id ?? profiles[0].id);
-    const refineProfiles = this.refineProfiles();
-    const refineMatch = matchModelProfile(refineProfiles, values.refineModel);
-    this.selectedRefineProfileId.set(
-      refineMatch?.id ??
-        refineProfiles.find((profile) => profile.modelTag === values.refineModel.trim())?.id ??
-        refineProfiles[0]?.id ??
-        '',
-    );
-  }
-
-  onCancel(): void {
-    this.dialogRef.close(false);
+    if (!controls.textModelConfigurationId.value && configurations.length === 1) {
+      controls.textModelConfigurationId.setValue(configurations[0].id);
+      this.workflowForm.markAsDirty();
+    }
   }
 }

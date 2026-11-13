@@ -351,6 +351,9 @@ namespace App.Data.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
+                    b.Property<Guid?>("RefineModelConfigurationId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<int>("RefineRequestTimeoutSeconds")
                         .HasColumnType("int");
 
@@ -381,6 +384,9 @@ namespace App.Data.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
+                    b.Property<Guid?>("TextModelConfigurationId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<int?>("TopK")
                         .HasColumnType("int");
 
@@ -391,10 +397,19 @@ namespace App.Data.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
+                    b.Property<Guid?>("VisionModelConfigurationId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("RefineModelConfigurationId");
 
                     b.HasIndex("SingletonKey")
                         .IsUnique();
+
+                    b.HasIndex("TextModelConfigurationId");
+
+                    b.HasIndex("VisionModelConfigurationId");
 
                     b.ToTable("HouseholdLlmSettings", (string)null);
                 });
@@ -605,6 +620,167 @@ namespace App.Data.Migrations
                     b.HasIndex("Status", "NextRetryAt");
 
                     b.ToTable("IngestionJobs", (string)null);
+                });
+
+            modelBuilder.Entity("App.Data.Entities.LlmConnection", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ApiKey")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("BaseUrl")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("DailyQuotaResetTime")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)")
+                        .HasDefaultValue("00:00");
+
+                    b.Property<string>("DailyQuotaResetTimezone")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)")
+                        .HasDefaultValue("UTC");
+
+                    b.Property<int?>("DailyRequestQuota")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("EnableRateLimitSafeguards")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
+                    b.Property<int>("MaxConcurrentRequests")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(1);
+
+                    b.Property<DateTimeOffset>("ModifiedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("ModifiedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<bool>("OllamaCpuOnly")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("OllamaKeepAlive")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<int?>("RequestsPerMinute")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("LlmConnections", (string)null);
+                });
+
+            modelBuilder.Entity("App.Data.Entities.LlmModelConfiguration", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ConnectionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("ContextWindowTokens")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(8192);
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<bool>("EnableThinking")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Model")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTimeOffset>("ModifiedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("ModifiedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("nvarchar(150)");
+
+                    b.Property<int?>("OllamaGpuLayers")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ProfileSlug")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<int>("RequestTimeoutSeconds")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(120);
+
+                    b.Property<double?>("Temperature")
+                        .HasColumnType("float");
+
+                    b.Property<int?>("TopK")
+                        .HasColumnType("int");
+
+                    b.Property<double?>("TopP")
+                        .HasColumnType("float");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConnectionId");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("LlmModelConfigurations", (string)null);
                 });
 
             modelBuilder.Entity("App.Data.Entities.LlmModelProfile", b =>
@@ -1858,6 +2034,30 @@ namespace App.Data.Migrations
                     b.Navigation("FoodItem");
                 });
 
+            modelBuilder.Entity("App.Data.Entities.HouseholdLlmSettings", b =>
+                {
+                    b.HasOne("App.Data.Entities.LlmModelConfiguration", "RefineModelConfiguration")
+                        .WithMany()
+                        .HasForeignKey("RefineModelConfigurationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("App.Data.Entities.LlmModelConfiguration", "TextModelConfiguration")
+                        .WithMany()
+                        .HasForeignKey("TextModelConfigurationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("App.Data.Entities.LlmModelConfiguration", "VisionModelConfiguration")
+                        .WithMany()
+                        .HasForeignKey("VisionModelConfigurationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("RefineModelConfiguration");
+
+                    b.Navigation("TextModelConfiguration");
+
+                    b.Navigation("VisionModelConfiguration");
+                });
+
             modelBuilder.Entity("App.Data.Entities.IngestionDraftRefinement", b =>
                 {
                     b.HasOne("App.Data.Entities.IngestionJob", "IngestionJob")
@@ -1877,6 +2077,17 @@ namespace App.Data.Migrations
                         .OnDelete(DeleteBehavior.SetNull);
 
                     b.Navigation("ResultingRecipe");
+                });
+
+            modelBuilder.Entity("App.Data.Entities.LlmModelConfiguration", b =>
+                {
+                    b.HasOne("App.Data.Entities.LlmConnection", "Connection")
+                        .WithMany("ModelConfigurations")
+                        .HasForeignKey("ConnectionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Connection");
                 });
 
             modelBuilder.Entity("App.Data.Entities.MealPlanEntry", b =>
@@ -2092,6 +2303,11 @@ namespace App.Data.Migrations
                     b.Navigation("RecipeIngredients");
 
                     b.Navigation("ShoppingListItems");
+                });
+
+            modelBuilder.Entity("App.Data.Entities.LlmConnection", b =>
+                {
+                    b.Navigation("ModelConfigurations");
                 });
 
             modelBuilder.Entity("App.Data.Entities.MealPlanEntry", b =>

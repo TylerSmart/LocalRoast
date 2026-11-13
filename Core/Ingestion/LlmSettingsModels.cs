@@ -112,7 +112,10 @@ public record LlmSettingsDto(
     string DailyQuotaResetTime = "00:00",
     bool AutoResumeQueue = true,
     DateTimeOffset? PausedUntilUtc = null,
-    string? PauseReason = null
+    string? PauseReason = null,
+    Guid? TextModelConfigurationId = null,
+    Guid? VisionModelConfigurationId = null,
+    Guid? RefineModelConfigurationId = null
 );
 
 public record EffectiveLlmConnectionConfig(
@@ -146,12 +149,23 @@ public record EffectiveLlmConnectionConfig(
     string DailyQuotaResetTime = "00:00",
     bool AutoResumeQueue = true,
     DateTimeOffset? PausedUntilUtc = null,
-    string? PauseReason = null
+    string? PauseReason = null,
+    string? ConnectionKey = null,
+    EffectiveLlmConnectionConfig? VisionConfig = null,
+    EffectiveLlmConnectionConfig? RefineConfig = null,
+    int? OllamaGpuLayers = null
 )
 {
+    /// <summary>
+    /// The connection settings for vision requests. A vision model configuration on its own
+    /// connection supplies its host, credentials, limits and tuning.
+    /// </summary>
+    public EffectiveLlmConnectionConfig ForVision() => VisionConfig ?? this;
+
     /// <summary>The connection settings for refine requests: the Refine Model with its own thinking, sampling and timeout.</summary>
     public EffectiveLlmConnectionConfig ForRefinement() =>
-        this with
+        RefineConfig
+        ?? this with
         {
             TextModel = RefineModel?.Trim(),
             VisionModel = RefineModel?.Trim(),
@@ -161,6 +175,21 @@ public record EffectiveLlmConnectionConfig(
             TopK = RefineTopK,
             RequestTimeoutSeconds = RefineRequestTimeoutSeconds,
         };
+
+    /// <summary>True when a refine model is set that is not the text model on the same host.</summary>
+    public bool HasDistinctRefinement()
+    {
+        var refineModel = RefineModel?.Trim();
+        if (string.IsNullOrWhiteSpace(refineModel))
+        {
+            return false;
+        }
+
+        var refine = ForRefinement();
+        return !string.Equals(refineModel, TextModel?.Trim(), StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(refine.BaseUrl, BaseUrl, StringComparison.OrdinalIgnoreCase)
+            || refine.Provider != Provider;
+    }
 }
 
 public record UpdateLlmSettingsRequest(
@@ -201,7 +230,8 @@ public record TestLlmConnectionRequest(
     [MaxLength(500)] string? BaseUrl = null,
     [MaxLength(500)] string? ApiKey = null,
     bool ClearApiKey = false,
-    [Range(5, 120)] int? TimeoutSeconds = 15
+    [Range(5, 120)] int? TimeoutSeconds = 15,
+    Guid? ConnectionId = null
 );
 
 public record UpsertLlmModelProfileRequest(

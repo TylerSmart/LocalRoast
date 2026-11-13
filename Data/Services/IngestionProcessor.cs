@@ -956,11 +956,7 @@ public sealed class IngestionProcessor(
                 var refineModel = config.RefineModel?.Trim();
                 if (
                     !string.IsNullOrWhiteSpace(refineModel)
-                    && !string.Equals(
-                        refineModel,
-                        config.TextModel?.Trim(),
-                        StringComparison.OrdinalIgnoreCase
-                    )
+                    && config.HasDistinctRefinement()
                     && IngestionReviewService.Diagnose(draft, IngestionReviewService.GetSource(job))
                         is { } savedDiagnostics
                     && (
@@ -1228,6 +1224,9 @@ public sealed class IngestionProcessor(
         if (probeResult.IsReachable)
         {
             var promotedCount = 0;
+            var visionConfig = config.ForVision();
+            bool? visionHostReachable =
+                visionConfig.ConnectionKey == config.ConnectionKey ? true : null;
 
             foreach (var job in waitingJobs)
             {
@@ -1256,8 +1255,17 @@ public sealed class IngestionProcessor(
                     }
                 }
 
+                if (isVisionJob && !string.IsNullOrWhiteSpace(visionConfig.VisionModel))
+                {
+                    // Vision may run on a different machine/provider than text extraction.
+                    visionHostReachable ??= (
+                        await llmClient.ProbeAndListModelsAsync(visionConfig, 10, cancellationToken)
+                    ).IsReachable;
+                }
+
                 var canPromote = isVisionJob
-                    ? !string.IsNullOrWhiteSpace(config.VisionModel)
+                    ? !string.IsNullOrWhiteSpace(visionConfig.VisionModel)
+                        && visionHostReachable == true
                     : !string.IsNullOrWhiteSpace(config.TextModel);
 
                 if (canPromote)

@@ -80,4 +80,22 @@ public sealed class LlmRequestGateTests
         Assert.IsTrue(ex.IsQuotaExhausted);
         Assert.IsTrue(ex.Message.Contains("Daily request limit reached"));
     }
+
+    [TestMethod]
+    public async Task AcquireAsync_SeparateConnections_DoNotShareSlotsOrQuota()
+    {
+        var gate = new LlmRequestGate();
+        var machineA = CreateConfig(maxConcurrent: 1, rpd: 1) with { ConnectionKey = "machine-a" };
+        var machineB = CreateConfig(maxConcurrent: 1, rpd: 1) with { ConnectionKey = "machine-b" };
+
+        using var leaseA = await gate.AcquireAsync(machineA);
+        var leaseBTask = gate.AcquireAsync(machineB);
+
+        Assert.IsTrue(leaseBTask.IsCompleted, "A busy connection must not block another one.");
+        using var leaseB = await leaseBTask;
+        await Assert.ThrowsAsync<LlmHostUnavailableException>(async () =>
+        {
+            using var lease = await gate.AcquireAsync(machineA);
+        });
+    }
 }

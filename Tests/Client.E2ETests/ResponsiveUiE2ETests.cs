@@ -125,7 +125,8 @@ public sealed class ResponsiveUiE2ETests : E2ETestBase
             .ClickAsync();
 
         await OpenAccountMenuAsync("LLM Provider Settings");
-        await Expect(Page.Locator("app-llm-settings-dialog input").First).ToBeVisibleAsync();
+        await Expect(Page.Locator("app-llm-settings-dialog [data-testid='add-connection-btn']"))
+            .ToBeVisibleAsync();
         await AssertDialogAsync("llm-settings");
         await Page.Keyboard.PressAsync("Escape");
 

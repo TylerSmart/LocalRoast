@@ -201,25 +201,7 @@ public sealed class FoodItemMergeAndAiHelpersE2ETests : E2ETestBase
         var dialog = Page.Locator("app-llm-settings-dialog");
         await Expect(dialog).ToBeVisibleAsync();
 
-        var baseUrlInput = dialog.Locator("input[formcontrolname='baseUrl']");
-        await baseUrlInput.FillAsync(baseUrl);
-
-        await dialog
-            .Locator("button[aria-label='Test LLM connection and refresh models']")
-            .ClickAsync();
-        var statusBanner = dialog.Locator(".connection-status-banner.status-success");
-        await Expect(statusBanner).ToBeVisibleAsync();
-
-        var textModelInput = dialog.Locator("input[formcontrolname='textModel']");
-        await textModelInput.FillAsync(modelName);
-
-        // Close autocomplete overlay
-        await Page.Keyboard.PressAsync("Escape");
-
-        await dialog
-            .Locator("button", new() { HasText = "Save Settings" })
-            .ClickAsync(new() { Force = true });
-        await Expect(dialog).Not.ToBeVisibleAsync();
+        await ConfigureLlmInDialogAsync(dialog, baseUrl, modelName);
     }
 
     private async Task<string> CreateRecipeWithIngredientAsync(
