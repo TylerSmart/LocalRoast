@@ -375,11 +375,14 @@ Example output:
                 8. NEVER name an ingredient after the recipe title itself (e.g. if the recipe is titled 'Frico' and the source ingredient is '1 pound Montasio or aged Asiago cheese', the ingredient name must be 'Montasio cheese', NEVER 'Frico').
                 9. Alternative Ingredients: When an ingredient line lists alternatives (e.g. '1 pound Montasio or aged Asiago cheese'), choose the primary food for displayName (e.g. 'Montasio cheese') and put the alternative in preparationNote (e.g. 'or aged Asiago cheese, grated fine'). NEVER include 'or' in displayName or canonicalFoodName.
                 10. alternativeMeasurement: ONLY provide alternativeMeasurement when the source ingredient line explicitly includes a secondary or parenthetical measurement (e.g. '1 1/2 cups (7 1/2 ounces) all-purpose flour' -> alternativeMeasurement: { quantity: 7.5, unit: 'Oz' }). NEVER calculate, convert, or invent metric or imperial measurements that do not appear in the source text (e.g. do NOT convert '2 tablespoons' to 30 ml; leave alternativeMeasurement null).
+                11. Unmeasured Source Lines with Step Amounts: If a source ingredient line has no quantity (e.g. '- Kosher salt' or '- Table salt and pepper'), check the steps in that section. If the steps specify measured amounts for it (e.g. 'Add 1 1/2 teaspoons salt'), set quantity and unit on that SINGLE ingredient row to the total measured amount used in the steps while keeping originalRawText verbatim ('Kosher salt'). NEVER create a second duplicate ingredient row for the same salt/seasoning in the same section.
+                12. Countable Unmeasured Produce (Wedges / Slices / Halves): When a source ingredient lists unnumbered countable whole produce prepared into wedges, slices, or halves (e.g. 'Lemon wedges', 'Lime wedges, for serving'), extract the whole fruit as the food (displayName: 'Lemon', preparationNote: 'wedges', quantity: 1, unit: 'whole') so recipe scaling works properly.
                 """
             + foodCatalogSnippet
             + """
 
                 Steps (ordered instructions):
+                - Extract EVERY primary instruction step completely through its final sentence; never truncate or drop steps.
                 - Cooking Method Variations: When the source recipe provides alternative cooking methods for the same dish (e.g. "Method 1: Oven Broiler" vs "Method 2: Outdoor Grill", or "Stovetop Instructions" vs "Slow Cooker Instructions", or "2A" vs "2B"):
                   * Extract ONLY the primary / first method.
                   * NEVER combine or chain alternative cooking methods into sequential steps (e.g. NEVER make the cook broil the food and then also grill the same food).
@@ -403,8 +406,10 @@ Example output:
                 - Timers: ||{"type": "timer", "seconds": 300, "label": "Simmer sauce"}||
                   * CRITICAL: Timers MUST be enclosed in ||{...}|| delimiters (e.g. ||{"type": "timer", "seconds": 1500, "label": "Broil"}||). NEVER output bare JSON like {"type": "timer"...} without the || delimiters.
                   * "seconds": Total duration in seconds (e.g. 5 minutes = 300, 30 seconds = 30, 1 hour = 3600).
-                  * "label": The specific action or purpose being timed (e.g. "Simmer sauce", "Rest", "Cook onion", "Bake"). NEVER put the time duration itself in label (e.g. do NOT write "5 minutes", "30 seconds", "3 to 4 minutes", or "1 hour"). If there is no specific action name, omit label or set it to null.
+                  * TIME RANGES: When a step states a time range (e.g. "20 to 25 minutes", "30 seconds to 1 minute", "6 to 8 minutes"), replace the ENTIRE range phrase with a SINGLE timer token using the lower bound (e.g. ||{"type": "timer", "seconds": 1200, "label": "Fry potatoes"}||). NEVER emit two timer tokens separated by "to" or "-".
+                  * "label": Always provide a concise 2-4 word "Verb + object" label describing the timed action (e.g. "Mix dough", "Knead dough", "Simmer sauce", "Chill dough", "Bake crust"). NEVER put the time duration itself in label (e.g. do NOT write "5 minutes", "30 seconds", "3 to 4 minutes", or "1 hour").
                 - Temperatures: ||{"type": "temperature", "fahrenheit": 350}||
+                  * DUAL TEMPERATURES: When the source gives both Fahrenheit and Celsius (e.g. "140°F/60°C" or "350°F (175°C)"), replace the ENTIRE dual expression with a SINGLE token using ONLY the Fahrenheit value: ||{"type": "temperature", "fahrenheit": 140}||. NEVER emit two temperature tokens for one temperature and NEVER put a Celsius number in "fahrenheit".
                 - All punctuation (periods, commas, etc.) must go OUTSIDE the || delimiters (e.g. ||{...}||., NEVER ||{...}.|| or ||{...}!!.||).
                 """;
 
@@ -509,8 +514,9 @@ Example output:
             4. Timers and Temperatures:
                - Timers: ||{"type": "timer", "seconds": 300, "label": "Simmer sauce"}||. Total duration in seconds (e.g. 5 minutes = 300, 30 seconds = 30, 1 hour = 3600).
                - CRITICAL: Timers MUST be enclosed in ||{...}|| delimiters (e.g. ||{"type": "timer", "seconds": 1500, "label": "Broil"}||). NEVER output bare JSON like {"type": "timer"...} without the || delimiters.
-               - "label": The specific action or purpose being timed (e.g. "Simmer sauce", "Rest", "Cook onion", "Bake"). NEVER put the time duration itself in label (e.g. do NOT write "5 minutes", "30 seconds", "3 to 4 minutes", or "1 hour"). If there is no specific action name, omit label or set it to null.
-               - Temperatures: ||{"type": "temperature", "fahrenheit": 350}||.
+               - TIME RANGES: Replace an entire time range ("20 to 25 minutes") with a SINGLE timer token using the lower bound (e.g. 1200 seconds). NEVER emit two timer tokens separated by "to" or "-".
+               - "label": Always provide a concise 2-4 word "Verb + object" label (e.g. "Mix dough", "Simmer sauce", "Rest", "Bake"). NEVER put the time duration itself in label.
+               - Temperatures: ||{"type": "temperature", "fahrenheit": 350}||. When the source gives both Fahrenheit and Celsius (e.g. "140°F/60°C"), replace the entire expression with a SINGLE token using ONLY the Fahrenheit value (||{"type": "temperature", "fahrenheit": 140}||). NEVER put a Celsius number in "fahrenheit".
                - All punctuation (periods, commas, etc.) must go OUTSIDE the || delimiters.
             5. Preserving Quality & Metadata:
                - Output the complete corrected recipe JSON conforming to the schema. Preserve all valid, unmodified parts of the draft.
@@ -643,12 +649,31 @@ Example output:
             return new LlmAutoRepairAndTriageResult(repaired, resolvedDecisions);
         }
 
-        var triageDecisions = await TriageRemainingIssuesAsync(
-            config,
-            context.SourceContent,
-            remainingIssues,
-            cancellationToken
-        );
+        var hardIssues = remainingIssues
+            .Where(RecipeExtractionDiagnostics.IsHardStructuralIssue)
+            .Select(i => new LlmIssueTriageItem(
+                i,
+                IngestionIssueTriageResolution.NeedsHumanReview,
+                "Hard structural or completeness issue requires human review or repair."
+            ))
+            .ToList();
+
+        var softIssues = remainingIssues
+            .Where(i => !RecipeExtractionDiagnostics.IsHardStructuralIssue(i))
+            .ToList();
+
+        var softTriageDecisions =
+            softIssues.Count > 0
+                ? await TriageRemainingIssuesAsync(
+                    config,
+                    context.SourceContent,
+                    repaired,
+                    softIssues,
+                    cancellationToken
+                )
+                : [];
+
+        var triageDecisions = hardIssues.Concat(softTriageDecisions).ToList();
 
         var resolvedFromBefore = context
             .ValidationIssues.Where(v =>
@@ -671,6 +696,7 @@ Example output:
     private async Task<IReadOnlyList<LlmIssueTriageItem>> TriageRemainingIssuesAsync(
         EffectiveLlmConnectionConfig config,
         string sourceContent,
+        LlmExtractedRecipePayload repairedDraft,
         IReadOnlyList<string> remainingIssues,
         CancellationToken cancellationToken
     )
@@ -679,14 +705,46 @@ Example output:
         {
             var systemPrompt =
                 "You are an expert culinary editor. You are reviewing diagnostic issues from automated recipe extraction.\n"
+                + "Compare the Original Source Recipe against the Extracted Draft Summary.\n"
                 + "For each issue, decide its resolution:\n"
-                + "- \"Resolved\": The issue is resolved or no longer applies.\n"
+                + "- \"Resolved\": The issue is resolved or no longer applies in the extracted draft.\n"
                 + "- \"IgnoreAsFalsePositive\": The diagnostic is triggered by a harmless culinary quirk, stylistic phrasing in the source recipe, or an unmeasured garnish/seasoning that does not affect the recipe's correctness.\n"
                 + "- \"NeedsHumanReview\": A genuine ambiguity, missing ingredient row, or measurement conflict that requires a human reviewer to inspect.\n"
                 + "Provide a concise reason for your decision.";
 
+            var draftSummary = JsonSerializer.Serialize(
+                new
+                {
+                    title = repairedDraft.Title,
+                    ingredients = (repairedDraft.Ingredients ?? []).Select(
+                        (ing, idx) =>
+                            new
+                            {
+                                index = idx,
+                                ing.SectionName,
+                                ing.Quantity,
+                                ing.MaxQuantity,
+                                ing.Unit,
+                                ing.DisplayName,
+                                ing.OriginalRawText,
+                            }
+                    ),
+                    steps = (repairedDraft.Steps ?? []).Select(
+                        (step, idx) =>
+                            new
+                            {
+                                stepNumber = idx + 1,
+                                step.SectionName,
+                                step.Instruction,
+                            }
+                    ),
+                },
+                DraftSerializerOptions
+            );
+
             var userPrompt =
                 $"Source Recipe:\n{sourceContent}\n\n"
+                + $"Extracted Draft Summary:\n{draftSummary}\n\n"
                 + $"Remaining Diagnostic Issues:\n{string.Join("\n", remainingIssues.Select(i => $"- {i}"))}";
 
             var responseContent = await SendStructuredTextChatAsync(
@@ -2088,25 +2146,6 @@ Household Cookbook Catalog:
                 },
                 suggestedTagNames = new { type = "array", items = new { type = "string" } },
 
-                steps = new
-                {
-                    type = "array",
-                    items = new
-                    {
-                        type = "object",
-                        additionalProperties = false,
-                        properties = new
-                        {
-                            sectionName = new
-                            {
-                                type = new[] { "string", "null" },
-                                description = "Explicit subheading name (e.g. 'Make the Dough', 'Bake the Crust') ONLY if the source explicitly groups multiple steps under that subheading. Otherwise null. Never summarize individual steps or use generic headings like 'Preparation'.",
-                            },
-                            instruction = new { type = "string", minLength = 1 },
-                        },
-                        required = new[] { "sectionName", "instruction" },
-                    },
-                },
                 ingredients = new
                 {
                     type = "array",
@@ -2197,6 +2236,25 @@ Household Cookbook Catalog:
                             "isRecipeReference",
                             "referencedRecipeTitle",
                         },
+                    },
+                },
+                steps = new
+                {
+                    type = "array",
+                    items = new
+                    {
+                        type = "object",
+                        additionalProperties = false,
+                        properties = new
+                        {
+                            sectionName = new
+                            {
+                                type = new[] { "string", "null" },
+                                description = "Explicit subheading name (e.g. 'Make the Dough', 'Bake the Crust') ONLY if the source explicitly groups multiple steps under that subheading. Otherwise null. Never summarize individual steps or use generic headings like 'Preparation'.",
+                            },
+                            instruction = new { type = "string", minLength = 1 },
+                        },
+                        required = new[] { "sectionName", "instruction" },
                     },
                 },
             },

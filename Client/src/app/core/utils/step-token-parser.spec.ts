@@ -246,8 +246,23 @@ describe('step-token-parser', () => {
     expect(shouldShowTimerLabel('Timer')).toBe(false);
     expect(shouldShowTimerLabel('Step 1 timer')).toBe(false);
     expect(shouldShowTimerLabel('Step 2 timer')).toBe(false);
+    expect(shouldShowTimerLabel('Step 2 timer 2')).toBe(false);
     expect(shouldShowTimerLabel('Simmer')).toBe(true);
     expect(shouldShowTimerLabel('Cook (4m)')).toBe(true);
+  });
+
+  it('collapses adjacent range timer tokens and dual F/C temperatures in cleanStepInstruction', () => {
+    const rangeRaw =
+      'Fry for ||{"type":"timer","seconds":1200,"label":"Fry potatoes"}|| to ||{"type":"timer","seconds":1500,"label":"Fry potatoes"}||.';
+    expect(cleanStepInstruction(rangeRaw)).toBe(
+      'Fry for ||{"type":"timer","seconds":1200,"label":"Fry potatoes"}||.',
+    );
+
+    const dualTempRaw =
+      'Heat water to ||{"type":"temperature","fahrenheit":140}||/||{"type":"temperature","fahrenheit":60}||.';
+    expect(cleanStepInstruction(dualTempRaw)).toBe(
+      'Heat water to ||{"type":"temperature","fahrenheit":140}||.',
+    );
   });
 
   it('formats timer tokens cleanly without redundant duration labels', () => {

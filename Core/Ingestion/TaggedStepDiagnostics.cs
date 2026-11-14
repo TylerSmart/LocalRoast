@@ -22,6 +22,13 @@ public static partial class TaggedStepDiagnostics
     )]
     private static partial Regex BareJsonDiagnosticRegex();
 
+    [GeneratedRegex(
+        @"(?:\b(?:with|and|or|to|in|into|of|for|on|over|until|from|at|by|the|a|an)|[,;:\-])$",
+        RegexOptions.IgnoreCase,
+        matchTimeoutMilliseconds: 1000
+    )]
+    private static partial Regex TrailingIncompleteWordRegex();
+
     public static IReadOnlyList<string> GetIssues(LlmExtractedRecipePayload recipe)
     {
         var issues = new List<string>();
@@ -76,6 +83,17 @@ public static partial class TaggedStepDiagnostics
                                 $"Step {i + 1}: unbracketed JSON token \"{bareMatch.Value}\" is missing \"||\" delimiters."
                             );
                         }
+                        else if (segment.Text.IndexOfAny(['{', '}', '|']) >= 0)
+                        {
+                            var snippet = segment.Text.Trim();
+                            if (snippet.Length > 80)
+                            {
+                                snippet = snippet[^80..];
+                            }
+                            issues.Add(
+                                $"Step {i + 1}: contains a broken or unclosed inline token (\"{snippet}\"); complete the inline token in ||{{...}}|| delimiters."
+                            );
+                        }
                     }
                     continue;
                 }
@@ -122,6 +140,21 @@ public static partial class TaggedStepDiagnostics
                     );
                 }
             }
+
+            // Check for truncated step instruction (missing terminal punctuation or ending mid-phrase)
+            var plainText = StepInstructionParser.ToPlainText(instruction).Trim();
+            if (!string.IsNullOrEmpty(plainText))
+            {
+                var endsWithTerminal =
+                    plainText[^1] is '.' or '!' or '?' or '"' or '\'' or ')' or ']';
+                if (!endsWithTerminal || TrailingIncompleteWordRegex().IsMatch(plainText))
+                {
+                    var tail = plainText.Length > 60 ? plainText[^60..] : plainText;
+                    issues.Add(
+                        $"Step {i + 1}: instruction appears truncated at the end (\"{tail}\"); extract the complete step text through the final sentence."
+                    );
+                }
+            }
         }
 
         if (steps.Count > 0)
@@ -138,6 +171,8 @@ public static partial class TaggedStepDiagnostics
                 decimal sumLow = 0;
                 var hasComparableAmounts = false;
                 var stepAmounts = new List<decimal>();
+                var concreteStepUsagesForUnmeasured =
+                    new List<(decimal Amount, MeasurementUnit? Unit)>();
                 var unmeasuredMentionsCount = 0;
 
                 for (var sIdx = 0; sIdx < steps.Count; sIdx++)
@@ -183,6 +218,22 @@ public static partial class TaggedStepDiagnostics
                                         stepAmounts.Add(inRowUnit);
                                         hasComparableAmounts = true;
                                     }
+                                }
+                                else if (
+                                    rowHigh == 0
+                                    && ingToken.Amount is > 0
+                                    && ingToken.Unit.HasValue
+                                    && !(
+                                        ingToken.Unit.Value
+                                            is MeasurementUnit.Pinch
+                                                or MeasurementUnit.Dash
+                                        && ingToken.Amount.Value <= 0.1m
+                                    )
+                                )
+                                {
+                                    concreteStepUsagesForUnmeasured.Add(
+                                        (ingToken.Amount.Value, ingToken.Unit)
+                                    );
                                 }
                             }
                         }
@@ -256,6 +307,13 @@ public static partial class TaggedStepDiagnostics
                             );
                         }
                     }
+                }
+                else if (rowHigh == 0 && concreteStepUsagesForUnmeasured.Count > 0)
+                {
+                    var sample = concreteStepUsagesForUnmeasured[0];
+                    issues.Add(
+                        $"Ingredient {i + 1} \"{name}\" has no quantity in the ingredient list, but steps use concrete measured amounts (e.g. {FormatNumber(sample.Amount)} {sample.Unit?.ToString().ToLowerInvariant()}); set the ingredient quantity and unit to match the total used in the steps (while keeping its verbatim originalRawText)."
+                    );
                 }
             }
         }

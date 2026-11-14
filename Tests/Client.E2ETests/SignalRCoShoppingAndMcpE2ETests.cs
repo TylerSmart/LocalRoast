@@ -227,11 +227,11 @@ public sealed class SignalRCoShoppingAndMcpE2ETests : E2ETestBase
 
         await using var mcpClient = await McpClient.CreateAsync(transport);
 
-        // Assert all 13 tools are advertised (6 Milestone 2 + 7 Milestone 3 tools)
+        // Assert all 16 tools are advertised (6 Milestone 2 + 7 Milestone 3 + 3 Ingestion inspection tools)
         var tools = await mcpClient.ListToolsAsync();
         Assert.IsNotNull(tools);
         var toolNames = tools.Select(t => t.Name).ToHashSet();
-        Assert.HasCount(13, toolNames);
+        Assert.HasCount(16, toolNames);
         Assert.Contains("search_recipes", toolNames);
         Assert.Contains("get_recipe", toolNames);
         Assert.Contains("match_recipes_by_ingredients", toolNames);
@@ -245,6 +245,9 @@ public sealed class SignalRCoShoppingAndMcpE2ETests : E2ETestBase
         Assert.Contains("generate_shopping_list_from_meal_plan", toolNames);
         Assert.Contains("upsert_shopping_list_items", toolNames);
         Assert.Contains("set_shopping_list_item_checked", toolNames);
+        Assert.Contains("get_ingestion_summary", toolNames);
+        Assert.Contains("list_ingestion_jobs", toolNames);
+        Assert.Contains("get_ingestion_job", toolNames);
 
         // 4. Save structured recipe (base 4 servings, Garlic 3 cloves, Kosher Salt 1 tsp)
         var recipeTitle = $"MCP Feast {Guid.NewGuid():N}"[..20];

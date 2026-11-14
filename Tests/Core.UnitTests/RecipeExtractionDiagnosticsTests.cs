@@ -252,6 +252,39 @@ public sealed class RecipeExtractionDiagnosticsTests
         );
     }
 
+    [TestMethod]
+    public void GetIssues_FlagsDroppedPrimarySteps_WhileIgnoringAlternativeSubSteps()
+    {
+        var source = """
+            Ingredients:
+            - 4 tablespoons oil
+            Instructions:
+            1. Heat oil in skillet.
+            2. 2A. FOR A CHARCOAL GRILL: Light coals.
+            3. 2B. FOR A GAS GRILL: Heat burners.
+            4. Cook food until browned.
+            5. Rest and serve.
+            """;
+
+        // 4 primary steps (1, 2A, 4, 5) - 2B is secondary alternative
+        Assert.AreEqual(4, RecipeExtractionDiagnostics.CountPrimarySourceSteps(source));
+
+        var truncated = Recipe([Ingredient(4, "tbsp")], [new(null, "Heat oil in skillet.", [0])]);
+        var issues = RecipeExtractionDiagnostics.GetIssues(truncated, source);
+        Assert.IsTrue(
+            issues.Any(i =>
+                i.Contains(
+                    "Extracted 1 step(s), but the source Instructions section has 4 primary steps"
+                )
+            ),
+            $"Expected step count mismatch issue, got: {string.Join(", ", issues)}"
+        );
+        Assert.IsTrue(RecipeExtractionDiagnostics.IsHardStructuralIssue(issues[^1]));
+        Assert.IsFalse(
+            RecipeExtractionDiagnostics.IsHardStructuralIssue("Oil: not used in any step.")
+        );
+    }
+
     private const string Source = "Ingredients:\n- 4 tablespoons oil\nInstructions:\nCook.";
 
     private static LlmExtractedIngredientItem Ingredient(decimal quantity, string unit) =>

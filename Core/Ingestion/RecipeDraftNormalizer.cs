@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using System.Text.RegularExpressions;
 using App.Core.Exceptions;
 using App.Core.FoodCatalog;
@@ -465,8 +466,21 @@ public static class RecipeDraftNormalizer
         RegexOptions.IgnoreCase | RegexOptions.Compiled
     );
 
+    private const string SourceNumberPattern =
+        @"(?:(?:\d+\s*)?[½¼¾⅓⅔⅛⅜⅝⅞]|\d+(?:\s+\d+/\d+)?|\d+/\d+|\d+(?:\.\d+)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|dozen|half)";
+
     private static readonly Regex LeadingSourceAmountRegex = new(
-        @"^[\s\-*•]*(?<quantity>\d+(?:\s+\d+/\d+)?|\d+/\d+|\d+(?:\.\d+)?)(?:\s*(?:to|through|or|[-–—])\s*(?<maxQuantity>\d+(?:\s+\d+/\d+)?|\d+/\d+|\d+(?:\.\d+)?))?(?=\s|$)",
+        $@"^[\s\-*•]*(?<quantity>{SourceNumberPattern})(?:\s*(?:to|through|or|[-–—])\s*(?<maxQuantity>{SourceNumberPattern}))?(?=\s|$)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled
+    );
+
+    private static readonly Regex CountableProduceCutRegex = new(
+        @"\b(?:wedges?|slices?|halves?|quarters?|rounds?|twists?|peels?)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled
+    );
+
+    private static readonly Regex CountableWholeProduceFoodRegex = new(
+        @"\b(?:lemons?|limes?|oranges?|grapefruits?|apples?|pears?|peaches?|plums?|tomatoes?|avocados?|bananas?|onions?|shallots?|potatoes?|cucumbers?|radishes?|scallions?|green\s+onions?|chiles?|chilies?|jalapeños?|jalapenos?|bell\s+peppers?|tortillas?|pitas?|rolls?|buns?|baguettes?|eggs?)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled
     );
 
@@ -691,6 +705,13 @@ public static class RecipeDraftNormalizer
 
     private static bool TryParseAmount(string token, out decimal amount)
     {
+        var parsed = FlexibleNullableDecimalJsonConverter.ParseNumber(token);
+        if (parsed.HasValue)
+        {
+            amount = parsed.Value;
+            return true;
+        }
+
         var parts = token.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length == 2 && TryParseFraction(parts[1], out var fractionalPart))
         {
@@ -1013,10 +1034,28 @@ public static class RecipeDraftNormalizer
                 && sourceAmount is { } sAmount
                 && cleanQuantity.Value != sAmount.Quantity;
 
-            if (compoundLeading is not null || isAutoHealedDivided || isRepairedMeasurement)
+            var isConfirmedInSourceText =
+                cleanQuantity is > 0
+                && unit.HasValue
+                && !string.IsNullOrWhiteSpace(rawSourceText)
+                && SourceMeasurementParser
+                    .FindAllConfirmableMeasurements(rawSourceText)
+                    .Any(m =>
+                        MatchesMeasurement(
+                            m,
+                            new RecipeMeasurement(cleanQuantity, unit, cleanMaxQuantity, customUnit)
+                        )
+                    );
+
+            if (
+                compoundLeading is not null
+                || isAutoHealedDivided
+                || isRepairedMeasurement
+                || isConfirmedInSourceText
+            )
             {
                 // Compound leading measurement (e.g. "2 tablespoons plus 4 teaspoons"), auto-healed
-                // divided amount, or deliberate AI repair established cleanQuantity/cleanMaxQuantity; preserve it.
+                // divided amount, deliberate AI repair, or step-confirmed measurement; preserve it.
             }
             else if (!isSplitSourceLine && sourceAmount is { } parsedAmount)
             {
@@ -1025,15 +1064,35 @@ public static class RecipeDraftNormalizer
             }
             else if (!isSplitSourceLine && !string.IsNullOrWhiteSpace(rawIng.OriginalRawText))
             {
-                cleanQuantity =
+                if (
                     unit is MeasurementUnit.Pinch or MeasurementUnit.Dash
                     || (
                         unit is MeasurementUnit.Clove
                         && LeadingCloveRegex.IsMatch(rawIng.OriginalRawText)
                     )
-                        ? 1m
-                        : null;
-                cleanMaxQuantity = null;
+                )
+                {
+                    cleanQuantity = 1m;
+                    cleanMaxQuantity = null;
+                }
+                else if (
+                    IsUnmeasuredCountableProduce(
+                        rawIng.OriginalRawText,
+                        rawIng.DisplayName,
+                        rawIng.PreparationNote
+                    )
+                )
+                {
+                    cleanQuantity = 1m;
+                    cleanMaxQuantity = null;
+                    unit = MeasurementUnit.Whole;
+                    customUnit = null;
+                }
+                else
+                {
+                    cleanQuantity = null;
+                    cleanMaxQuantity = null;
+                }
             }
 
             var cleanCanonical = FoodNameSanitizer.SanitizeFoodName(rawIng.CanonicalFoodName);
@@ -1591,6 +1650,12 @@ public static class RecipeDraftNormalizer
                 }
             }
 
+            // Keep inline StepTimerToken labels synchronized with cleaned/disambiguated timers
+            if (timers.Count > 0)
+            {
+                instruction = SyncInlineTimerLabels(instruction, timers);
+            }
+
             normalizedSteps.Add(
                 new IngestionDraftStepDto(
                     SectionName: string.IsNullOrWhiteSpace(rawStep.SectionName)
@@ -1604,6 +1669,12 @@ public static class RecipeDraftNormalizer
                 )
             );
         }
+
+        (normalizedIngredients, normalizedSteps) = ReconcileIngredientsAndSteps(
+            normalizedIngredients,
+            normalizedSteps,
+            rawSourceText
+        );
 
         // Suggested & proposed tags
         var suggestedTagIds = new List<Guid>();
@@ -2029,6 +2100,397 @@ public static class RecipeDraftNormalizer
         }
         var pattern = $@"(?m)^\s*{Regex.Escape(sectionName.Trim())}\s*:?\s*$";
         return Regex.IsMatch(rawSourceText, pattern, RegexOptions.IgnoreCase);
+    }
+
+    private static bool IsUnmeasuredCountableProduce(
+        string? originalRawText,
+        string? displayName,
+        string? preparationNote
+    )
+    {
+        var combined = $"{originalRawText} {displayName} {preparationNote}".Trim();
+        if (string.IsNullOrWhiteSpace(combined))
+        {
+            return false;
+        }
+
+        if (!CountableProduceCutRegex.IsMatch(combined))
+        {
+            return false;
+        }
+
+        return CountableWholeProduceFoodRegex.IsMatch(combined);
+    }
+
+    private static string SyncInlineTimerLabels(
+        string instruction,
+        IReadOnlyList<RecipeStepTimerInput> timers
+    )
+    {
+        var segments = StepInstructionParser.ParseSegments(instruction);
+        if (segments.Count == 0)
+        {
+            return instruction;
+        }
+
+        var usedTimerIndices = new HashSet<int>();
+        var changed = false;
+        var builder = new StringBuilder(instruction.Length);
+
+        foreach (var seg in segments)
+        {
+            if (seg.Token is StepTimerToken timerToken)
+            {
+                var matchIdx = -1;
+                for (var t = 0; t < timers.Count; t++)
+                {
+                    if (
+                        !usedTimerIndices.Contains(t)
+                        && timers[t].DurationSeconds == timerToken.Seconds
+                    )
+                    {
+                        matchIdx = t;
+                        break;
+                    }
+                }
+
+                if (matchIdx >= 0)
+                {
+                    usedTimerIndices.Add(matchIdx);
+                    var targetLabel = timers[matchIdx].Label;
+                    if (!string.Equals(timerToken.Label, targetLabel, StringComparison.Ordinal))
+                    {
+                        builder.Append(
+                            StepInstructionParser.FormatToken(
+                                timerToken with
+                                {
+                                    Label = targetLabel,
+                                }
+                            )
+                        );
+                        changed = true;
+                        continue;
+                    }
+                }
+            }
+            builder.Append(seg.Text);
+        }
+
+        return changed ? builder.ToString() : instruction;
+    }
+
+    private static (
+        List<IngestionDraftIngredientDto> Ingredients,
+        List<IngestionDraftStepDto> Steps
+    ) ReconcileIngredientsAndSteps(
+        List<IngestionDraftIngredientDto> ingredients,
+        List<IngestionDraftStepDto> steps,
+        string? rawSourceText
+    )
+    {
+        if (ingredients.Count == 0)
+        {
+            return (ingredients, steps);
+        }
+
+        var workingIngredients = new List<IngestionDraftIngredientDto>(ingredients);
+        var workingSteps = new List<IngestionDraftStepDto>(steps);
+        var sourceLines = string.IsNullOrWhiteSpace(rawSourceText)
+            ? []
+            : RecipeExtractionDiagnostics
+                .GetSourceIngredientLines(rawSourceText)
+                .Select(l => Regex.Replace(l.Trim().TrimStart('-', ' '), @"\s+", " "))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        // 1. Merge duplicate measured + unmeasured rows for the same food in the same section
+        // (e.g. "Kosher salt" with null qty + "1 1/2 teaspoons salt" with 1.5 tsp in POTATOES)
+        // and collapse duplicate "or" alternative rows sharing the exact same OriginalRawText.
+        var remap = new Dictionary<int, int>();
+        var removed = new HashSet<int>();
+
+        for (var i = 0; i < workingIngredients.Count; i++)
+        {
+            if (removed.Contains(i))
+            {
+                continue;
+            }
+            var first = workingIngredients[i];
+
+            for (var j = i + 1; j < workingIngredients.Count; j++)
+            {
+                if (removed.Contains(j))
+                {
+                    continue;
+                }
+                var second = workingIngredients[j];
+
+                // Case A: Exact same OriginalRawText containing " or " where both are unmeasured
+                var sameRawOr =
+                    !string.IsNullOrWhiteSpace(first.OriginalRawText)
+                    && string.Equals(
+                        first.OriginalRawText.Trim(),
+                        second.OriginalRawText?.Trim(),
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                    && Regex.IsMatch(first.OriginalRawText, @"\bor\b", RegexOptions.IgnoreCase)
+                    && first.Quantity is null
+                    && second.Quantity is null;
+
+                if (sameRawOr)
+                {
+                    var altNote = $"or {second.DisplayName}";
+                    var mergedPrep =
+                        string.IsNullOrWhiteSpace(first.PreparationNote) ? altNote
+                        : first.PreparationNote.Contains(
+                            second.DisplayName,
+                            StringComparison.OrdinalIgnoreCase
+                        )
+                            ? first.PreparationNote
+                        : $"{first.PreparationNote}; {altNote}";
+                    workingIngredients[i] = first with { PreparationNote = mergedPrep };
+                    first = workingIngredients[i];
+                    remap[j] = i;
+                    removed.Add(j);
+                    continue;
+                }
+
+                // Case B: Same food & same section, one is measured and one is unmeasured,
+                // and the measured row's OriginalRawText is not its own distinct source line
+                var sameSection = string.Equals(
+                    NormalizeSectionName(first.SectionName),
+                    NormalizeSectionName(second.SectionName),
+                    StringComparison.OrdinalIgnoreCase
+                );
+                var sameFood =
+                    string.Equals(
+                        first.DisplayName,
+                        second.DisplayName,
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                    || (
+                        first.MatchedFoodItemId.HasValue
+                        && first.MatchedFoodItemId == second.MatchedFoodItemId
+                    )
+                    || (
+                        !string.IsNullOrWhiteSpace(first.ProposedFoodItemName)
+                        && string.Equals(
+                            first.ProposedFoodItemName,
+                            second.ProposedFoodItemName,
+                            StringComparison.OrdinalIgnoreCase
+                        )
+                    );
+
+                if (
+                    sameSection
+                    && sameFood
+                    && (first.Quantity is null) != (second.Quantity is null)
+                )
+                {
+                    var measuredIdx = first.Quantity.HasValue ? i : j;
+                    var unmeasuredIdx = first.Quantity.HasValue ? j : i;
+                    var measured = workingIngredients[measuredIdx];
+                    var unmeasured = workingIngredients[unmeasuredIdx];
+
+                    var unmeasuredIsVerbatim =
+                        !string.IsNullOrWhiteSpace(unmeasured.OriginalRawText)
+                        && (
+                            sourceLines.Count == 0
+                            || sourceLines.Contains(
+                                Regex.Replace(
+                                    unmeasured.OriginalRawText.Trim().TrimStart('-', ' '),
+                                    @"\s+",
+                                    " "
+                                )
+                            )
+                        );
+                    var measuredIsVerbatim =
+                        !string.IsNullOrWhiteSpace(measured.OriginalRawText)
+                        && (
+                            sourceLines.Count == 0
+                            || sourceLines.Contains(
+                                Regex.Replace(
+                                    measured.OriginalRawText.Trim().TrimStart('-', ' '),
+                                    @"\s+",
+                                    " "
+                                )
+                            )
+                        );
+
+                    if (unmeasuredIsVerbatim && !measuredIsVerbatim)
+                    {
+                        workingIngredients[unmeasuredIdx] = unmeasured with
+                        {
+                            Quantity = measured.Quantity,
+                            MaxQuantity = measured.MaxQuantity,
+                            Unit = measured.Unit,
+                            CustomUnitName = measured.CustomUnitName,
+                            AlternativeMeasurement =
+                                unmeasured.AlternativeMeasurement
+                                ?? measured.AlternativeMeasurement,
+                        };
+                        remap[measuredIdx] = unmeasuredIdx;
+                        removed.Add(measuredIdx);
+                        if (measuredIdx == i)
+                        {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (removed.Count > 0)
+        {
+            var indexMap = new Dictionary<int, int>();
+            var compacted = new List<IngestionDraftIngredientDto>(
+                workingIngredients.Count - removed.Count
+            );
+            for (var oldIdx = 0; oldIdx < workingIngredients.Count; oldIdx++)
+            {
+                if (removed.Contains(oldIdx))
+                {
+                    continue;
+                }
+                indexMap[oldIdx] = compacted.Count;
+                compacted.Add(workingIngredients[oldIdx]);
+            }
+
+            foreach (var (fromIdx, toIdx) in remap)
+            {
+                if (indexMap.TryGetValue(toIdx, out var mappedTarget))
+                {
+                    indexMap[fromIdx] = mappedTarget;
+                }
+            }
+
+            for (var s = 0; s < workingSteps.Count; s++)
+            {
+                var step = workingSteps[s];
+                var newIndices = (step.IngredientIndices ?? [])
+                    .Where(idx => indexMap.ContainsKey(idx))
+                    .Select(idx => indexMap[idx])
+                    .Distinct()
+                    .OrderBy(idx => idx)
+                    .ToList();
+
+                var newAmounts = new List<RecipeStepIngredientAmountInput>();
+                var seenAmountIdx = new HashSet<int>();
+                foreach (var amt in step.IngredientAmounts ?? [])
+                {
+                    if (
+                        indexMap.TryGetValue(amt.IngredientIndex, out var mappedIdx)
+                        && seenAmountIdx.Add(mappedIdx)
+                    )
+                    {
+                        newAmounts.Add(amt with { IngredientIndex = mappedIdx });
+                    }
+                }
+
+                workingSteps[s] = step with
+                {
+                    IngredientIndices = newIndices,
+                    IngredientAmounts = newAmounts,
+                };
+            }
+
+            workingIngredients = compacted;
+        }
+
+        // 2. Backfill unmeasured ingredient rows from concrete measured inline step tokens
+        for (var i = 0; i < workingIngredients.Count; i++)
+        {
+            var ing = workingIngredients[i];
+            if (ing.Quantity.HasValue)
+            {
+                continue;
+            }
+
+            var stepMeasurements = new List<(decimal Qty, MeasurementUnit Unit, string? Custom)>();
+            foreach (var step in workingSteps)
+            {
+                var tokens = StepInstructionParser.ExtractTokens(step.Instruction);
+                foreach (var token in tokens)
+                {
+                    if (token is not StepIngredientToken ingToken)
+                    {
+                        continue;
+                    }
+                    if (
+                        !ingToken.Amount.HasValue
+                        || ingToken.Amount.Value <= 0
+                        || !ingToken.Unit.HasValue
+                    )
+                    {
+                        continue;
+                    }
+                    // Ignore LLM "0.01 pinch/dash" to-taste placeholders
+                    if (
+                        ingToken.Unit.Value is MeasurementUnit.Pinch or MeasurementUnit.Dash
+                        && ingToken.Amount.Value <= 0.1m
+                    )
+                    {
+                        continue;
+                    }
+
+                    var matchedIdx = FindBestMatchingIngredientIndex(
+                        ingToken,
+                        step.SectionName,
+                        workingIngredients,
+                        step.IngredientIndices,
+                        step.Instruction
+                    );
+                    if (matchedIdx == i)
+                    {
+                        stepMeasurements.Add(
+                            (ingToken.Amount.Value, ingToken.Unit.Value, ingToken.CustomUnitName)
+                        );
+                    }
+                }
+            }
+
+            if (stepMeasurements.Count > 0)
+            {
+                var targetUnit = stepMeasurements[0].Unit;
+                var customUnit = stepMeasurements[0].Custom;
+                decimal sum = 0m;
+                var allCompatible = true;
+                foreach (var (qty, unit, custom) in stepMeasurements)
+                {
+                    if (
+                        unit == targetUnit
+                        && string.Equals(custom, customUnit, StringComparison.OrdinalIgnoreCase)
+                    )
+                    {
+                        sum += qty;
+                    }
+                    else if (
+                        unit != MeasurementUnit.Custom
+                        && targetUnit != MeasurementUnit.Custom
+                        && CulinaryMath.TryConvertQuantity(qty, unit, targetUnit, out var converted)
+                    )
+                    {
+                        sum += converted;
+                    }
+                    else
+                    {
+                        allCompatible = false;
+                        break;
+                    }
+                }
+
+                if (allCompatible && sum > 0m)
+                {
+                    workingIngredients[i] = ing with
+                    {
+                        Quantity = Math.Round(sum, 4),
+                        Unit = targetUnit,
+                        CustomUnitName = customUnit,
+                    };
+                }
+            }
+        }
+
+        return (workingIngredients, workingSteps);
     }
 
     private static bool IsSourceExcerpt(string? excerpt, string source) =>

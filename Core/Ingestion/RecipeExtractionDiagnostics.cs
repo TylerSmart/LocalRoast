@@ -49,6 +49,98 @@ public static class RecipeExtractionDiagnostics
         return result;
     }
 
+    private static readonly Regex NumberedStepPrefix = new(
+        @"^\s*\d+\.\s+(?<body>.*)$",
+        RegexOptions.Compiled,
+        RegexTimeout
+    );
+    private static readonly Regex SecondaryAlternativeSubStep = new(
+        @"^(?:\d+[B-Z]\.|METHOD\s+[2-9]\b)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled,
+        RegexTimeout
+    );
+
+    public static int CountPrimarySourceSteps(string? source)
+    {
+        if (string.IsNullOrWhiteSpace(source))
+        {
+            return 0;
+        }
+
+        var inInstructions = false;
+        var count = 0;
+        foreach (var rawLine in source.Split('\n'))
+        {
+            var trimmed = rawLine.Trim();
+            if (trimmed.Equals("Instructions:", StringComparison.OrdinalIgnoreCase))
+            {
+                inInstructions = true;
+                continue;
+            }
+
+            if (!inInstructions)
+            {
+                continue;
+            }
+
+            if (
+                trimmed == "---"
+                || trimmed.StartsWith("Source:", StringComparison.OrdinalIgnoreCase)
+            )
+            {
+                break;
+            }
+
+            var stepMatch = NumberedStepPrefix.Match(trimmed);
+            if (stepMatch.Success)
+            {
+                var body = stepMatch.Groups["body"].Value.TrimStart();
+                if (!SecondaryAlternativeSubStep.IsMatch(body))
+                {
+                    count++;
+                }
+            }
+        }
+
+        return count;
+    }
+
+    public static bool IsHardStructuralIssue(string? issue)
+    {
+        if (string.IsNullOrWhiteSpace(issue))
+        {
+            return false;
+        }
+
+        return issue.Contains("appears truncated at the end", StringComparison.OrdinalIgnoreCase)
+            || issue.Contains(
+                "contains a broken or unclosed inline token",
+                StringComparison.OrdinalIgnoreCase
+            )
+            || issue.Contains("unparseable inline token", StringComparison.OrdinalIgnoreCase)
+            || issue.Contains("unbracketed JSON token", StringComparison.OrdinalIgnoreCase)
+            || issue.Contains("has no ingredient name", StringComparison.OrdinalIgnoreCase)
+            || issue.Contains("invalid duration", StringComparison.OrdinalIgnoreCase)
+            || issue.Contains("non-positive", StringComparison.OrdinalIgnoreCase)
+            || issue.Contains(
+                "ingredient index is out of range",
+                StringComparison.OrdinalIgnoreCase
+            )
+            || issue.Contains(
+                "primary steps; extract every step",
+                StringComparison.OrdinalIgnoreCase
+            )
+            || issue.Contains("Source ingredient line", StringComparison.OrdinalIgnoreCase)
+            || issue.Contains("exceed the ingredient list", StringComparison.OrdinalIgnoreCase)
+            || issue.Contains(
+                "has no quantity in the ingredient list, but steps use concrete measured amounts",
+                StringComparison.OrdinalIgnoreCase
+            )
+            || issue.Contains("is named after the recipe title", StringComparison.OrdinalIgnoreCase)
+            || issue.Contains("missing a meaningful food name", StringComparison.OrdinalIgnoreCase)
+            || issue.Contains("custom unit is missing", StringComparison.OrdinalIgnoreCase);
+    }
+
     /// <summary>
     /// Ingredient-row checks plus the structural and reconciliation checks of the tagged steps.
     /// </summary>
@@ -257,6 +349,14 @@ public static class RecipeExtractionDiagnostics
                     $"Source ingredient line {lineIndex + 1}: {Quote(line)} alternatives must be one food choice, not multiple shopping items."
                 );
             }
+        }
+
+        var primarySourceSteps = CountPrimarySourceSteps(source);
+        if (primarySourceSteps >= 2 && steps.Count < primarySourceSteps)
+        {
+            issues.Add(
+                $"Extracted {steps.Count} step(s), but the source Instructions section has {primarySourceSteps} primary steps; extract every step completely without dropping or merging steps."
+            );
         }
 
         return issues;

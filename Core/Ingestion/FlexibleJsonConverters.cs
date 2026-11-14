@@ -174,6 +174,26 @@ public sealed partial class FlexibleNullableDecimalJsonConverter : JsonConverter
         return null;
     }
 
+    private static readonly Dictionary<string, decimal> NumberWords = new(
+        StringComparer.OrdinalIgnoreCase
+    )
+    {
+        ["one"] = 1m,
+        ["two"] = 2m,
+        ["three"] = 3m,
+        ["four"] = 4m,
+        ["five"] = 5m,
+        ["six"] = 6m,
+        ["seven"] = 7m,
+        ["eight"] = 8m,
+        ["nine"] = 9m,
+        ["ten"] = 10m,
+        ["eleven"] = 11m,
+        ["twelve"] = 12m,
+        ["dozen"] = 12m,
+        ["half"] = 0.5m,
+    };
+
     public static decimal? ParseNumber(string? raw)
     {
         if (string.IsNullOrWhiteSpace(raw))
@@ -181,6 +201,10 @@ public sealed partial class FlexibleNullableDecimalJsonConverter : JsonConverter
             return null;
         }
         var trimmed = ReplaceUnicodeFractions(raw.Trim());
+        if (NumberWords.TryGetValue(trimmed, out var wordValue))
+        {
+            return wordValue;
+        }
         if (
             decimal.TryParse(
                 trimmed,

@@ -1,3 +1,4 @@
+using App.Core.Common;
 using App.Core.Ingestion;
 using App.Core.Recipes;
 
@@ -33,6 +34,23 @@ public interface IMcpCookbookService
 
     Task<RecipeDetailDto> SaveStructuredRecipeAsync(
         McpSaveStructuredRecipeRequest request,
+        CancellationToken cancellationToken = default
+    );
+
+    Task<IngestionQueueSummaryDto> GetIngestionSummaryAsync(
+        CancellationToken cancellationToken = default
+    );
+
+    Task<PagedResultDto<IngestionJobSummaryDto>> ListIngestionJobsAsync(
+        IngestionJobStatus? status = null,
+        string? search = null,
+        int page = 1,
+        int pageSize = 25,
+        CancellationToken cancellationToken = default
+    );
+
+    Task<IngestionJobDetailDto?> GetIngestionJobAsync(
+        Guid jobId,
         CancellationToken cancellationToken = default
     );
 }

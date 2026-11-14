@@ -15,9 +15,9 @@ public sealed class TaggedStepDiagnosticsTests
             [
                 new LlmExtractedIngredientItem(
                     null,
+                    2m,
                     null,
-                    null,
-                    null,
+                    "tbsp",
                     null,
                     DisplayName: "unsalted butter"
                 ),
@@ -43,9 +43,9 @@ public sealed class TaggedStepDiagnosticsTests
             [
                 new LlmExtractedIngredientItem(
                     null,
+                    2m,
                     null,
-                    null,
-                    null,
+                    "tbsp",
                     null,
                     DisplayName: "unsalted butter"
                 ),
@@ -336,6 +336,80 @@ public sealed class TaggedStepDiagnosticsTests
         Assert.IsTrue(
             issues.Any(i => i.Contains("is named after the recipe title \"Frico\"")),
             $"Expected ingredient named after recipe title warning, got: {string.Join(", ", issues)}"
+        );
+    }
+
+    [TestMethod]
+    public void GetIssues_FlagsTruncatedStepEndingWithDanglingBrace()
+    {
+        var recipe = new LlmExtractedRecipePayload(
+            Title: "Osso Buco",
+            Ingredients:
+            [
+                new LlmExtractedIngredientItem(
+                    null,
+                    4m,
+                    null,
+                    "whole",
+                    "veal shanks",
+                    "veal shanks",
+                    OriginalRawText: "4 veal shanks"
+                ),
+            ],
+            Steps:
+            [
+                new LlmExtractedStepItem(
+                    null,
+                    "Sprinkle both sides of ||{\"ingredient\": \"veal shanks\", \"amount\": 4, \"unit\": \"whole\"}|| with {"
+                ),
+            ]
+        );
+
+        var issues = TaggedStepDiagnostics.GetIssues(recipe);
+        Assert.IsTrue(
+            issues.Any(i => i.Contains("broken or unclosed inline token")),
+            $"Expected broken token issue, got: {string.Join(", ", issues)}"
+        );
+        Assert.IsTrue(
+            issues.Any(i => i.Contains("appears truncated at the end")),
+            $"Expected truncated step issue, got: {string.Join(", ", issues)}"
+        );
+    }
+
+    [TestMethod]
+    public void GetIssues_FlagsUnmeasuredIngredientWithMeasuredStepAmount()
+    {
+        var recipe = new LlmExtractedRecipePayload(
+            Title: "Patatas Bravas",
+            Ingredients:
+            [
+                new LlmExtractedIngredientItem(
+                    "POTATOES",
+                    null,
+                    null,
+                    null,
+                    "kosher salt",
+                    "Kosher salt",
+                    OriginalRawText: "Kosher salt"
+                ),
+            ],
+            Steps:
+            [
+                new LlmExtractedStepItem(
+                    "POTATOES",
+                    "Add ||{\"ingredient\": \"Kosher salt\", \"amount\": 1.5, \"unit\": \"tsp\"}|| and boil."
+                ),
+            ]
+        );
+
+        var issues = TaggedStepDiagnostics.GetIssues(recipe);
+        Assert.IsTrue(
+            issues.Any(i =>
+                i.Contains(
+                    "has no quantity in the ingredient list, but steps use concrete measured amounts"
+                )
+            ),
+            $"Expected unmeasured-with-step-amount issue, got: {string.Join(", ", issues)}"
         );
     }
 }

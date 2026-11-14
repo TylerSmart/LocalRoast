@@ -253,4 +253,30 @@ public sealed class StepInstructionParserTests
             cleaned
         );
     }
+
+    [TestMethod]
+    public void CleanStepInstruction_CollapsesAdjacentRangeTimerTokens_ToLowerBound()
+    {
+        const string text =
+            "Fry potatoes until golden, ||{\"type\": \"timer\", \"seconds\": 1200, \"label\": \"Fry potatoes\"}|| to ||{\"type\": \"timer\", \"seconds\": 1500, \"label\": \"Fry potatoes\"}||.";
+        var cleaned = StepInstructionParser.CleanStepInstruction(text);
+
+        Assert.AreEqual(
+            "Fry potatoes until golden, ||{\"seconds\":1200,\"label\":\"Fry potatoes\",\"type\":\"Timer\"}||.",
+            cleaned
+        );
+    }
+
+    [TestMethod]
+    public void CleanStepInstruction_CollapsesDualFahrenheitCelsiusTokens_ToSingleFahrenheitToken()
+    {
+        const string text =
+            "Bring water to ||{\"type\": \"temperature\", \"fahrenheit\": 140}||/||{\"type\": \"temperature\", \"fahrenheit\": 60}|| in container.";
+        var cleaned = StepInstructionParser.CleanStepInstruction(text);
+
+        Assert.AreEqual(
+            "Bring water to ||{\"fahrenheit\":140,\"type\":\"Temperature\"}|| in container.",
+            cleaned
+        );
+    }
 }

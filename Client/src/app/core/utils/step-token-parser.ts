@@ -298,7 +298,7 @@ export function shouldShowTimerLabel(label: string | null | undefined): boolean 
   if (trimmed.toLowerCase() === 'timer') {
     return false;
   }
-  if (/^step\s+\d+\s+timer$/i.test(trimmed)) {
+  if (/^step\s+\d+\s+timer(?:\s+\d+)?$/i.test(trimmed)) {
     return false;
   }
   return !isDurationLabel(trimmed);
@@ -350,6 +350,14 @@ export function stepInstructionToPlainText(
 const TRAILING_MEASUREMENT_REGEX =
   /(?:(?:\b(?:\d+(?:[\s-]+\d+\/\d+|\/\d+|\.\d+)?|[½¼¾⅓⅔⅛⅜⅝⅞])\s*(?:teaspoons?|tsp\.?|tablespoons?|tbsp\.?|cups?|fl(?:uid)?\.?\s*oz\.?|pints?|pt\.?|quarts?|qt\.?|gallons?|gal\.?|ounces?|oz\.?|pounds?|lbs?\.?|grams?|g|kilograms?|kg|milliliters?|ml|liters?|l|pinches?|dashes?|cloves?|slices?|cans?|bunches?|heads?)?(?:\s+of)?)|(?:(?:\ba\s+)?\b(?:pinch(?:es)?|dash(?:es)?|clove(?:s)?|slice(?:s)?|can(?:s)?|bunch(?:es)?|head(?:s)?)\s+of))\s*$/i;
 
+const RANGE_CONNECTOR_REGEX = /^\s*(?:to|or|[-\u2013\u2014])\s*$/i;
+const DUAL_TEMP_SEPARATOR_REGEX = /^\s*(?:\/|\()\s*$/;
+
+function isFahrenheitCelsiusMatch(f: number, c: number): boolean {
+  const expectedC = ((f - 32) * 5) / 9;
+  return Math.abs(expectedC - c) <= 3;
+}
+
 export function cleanStepInstruction(instruction: string | null | undefined): string {
   if (!instruction) return '';
   const segments = parseStepInstruction(instruction);
@@ -377,11 +385,64 @@ export function cleanStepInstruction(instruction: string | null | undefined): st
       out += text;
     } else if (seg.token.type === 'timer') {
       const timer = seg.token as StepTimerToken;
+      if (
+        i + 2 < segments.length &&
+        !segments[i + 1].token &&
+        RANGE_CONNECTOR_REGEX.test(segments[i + 1].text) &&
+        segments[i + 2].token?.type === 'timer'
+      ) {
+        const timer2 = segments[i + 2].token as StepTimerToken;
+        const minSeconds =
+          timer.seconds > 0 && timer2.seconds > 0
+            ? Math.min(timer.seconds, timer2.seconds)
+            : Math.max(timer.seconds, timer2.seconds);
+        const chosenLabel =
+          timer.label && !isDurationLabel(timer.label)
+            ? timer.label
+            : timer2.label && !isDurationLabel(timer2.label)
+              ? timer2.label
+              : undefined;
+        const collapsed: StepTimerToken = chosenLabel
+          ? { type: 'timer', seconds: minSeconds, label: chosenLabel }
+          : { type: 'timer', seconds: minSeconds };
+        out += serializeStepToken(collapsed);
+        i += 2;
+        continue;
+      }
+
       if (isDurationLabel(timer.label)) {
         out += `||${JSON.stringify({ type: 'timer', seconds: timer.seconds })}||`;
       } else {
         out += seg.rawToken || seg.text;
       }
+    } else if (seg.token.type === 'temperature') {
+      const temp = seg.token as StepTemperatureToken;
+      if (
+        temp.fahrenheit != null &&
+        i + 2 < segments.length &&
+        !segments[i + 1].token &&
+        DUAL_TEMP_SEPARATOR_REGEX.test(segments[i + 1].text) &&
+        segments[i + 2].token?.type === 'temperature'
+      ) {
+        const temp2 = segments[i + 2].token as StepTemperatureToken;
+        const cCandidate = temp2.celsius ?? temp2.fahrenheit;
+        if (cCandidate != null && isFahrenheitCelsiusMatch(temp.fahrenheit, cCandidate)) {
+          out += serializeStepToken({ type: 'temperature', fahrenheit: temp.fahrenheit });
+          const wasParen = segments[i + 1].text.includes('(');
+          i += 2;
+          if (
+            wasParen &&
+            i + 1 < segments.length &&
+            !segments[i + 1].token &&
+            segments[i + 1].text.startsWith(')')
+          ) {
+            out += segments[i + 1].text.slice(1);
+            i += 1;
+          }
+          continue;
+        }
+      }
+      out += seg.rawToken || seg.text;
     } else {
       out += seg.rawToken || seg.text;
     }

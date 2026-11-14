@@ -92,7 +92,7 @@ public sealed class StepTimerExtractorTests
 
         Assert.AreEqual(1, result.Count);
         Assert.AreEqual(90, result[0].DurationSeconds);
-        Assert.AreEqual("Step 4 timer", result[0].Label);
+        Assert.AreEqual("Sear", result[0].Label);
     }
 
     [TestMethod]
@@ -165,5 +165,22 @@ public sealed class StepTimerExtractorTests
             stepNumber: 3
         );
         Assert.AreEqual("Step 3 timer", label5);
+    }
+
+    [TestMethod]
+    public void DetectTimers_LongClauseWithMixAndKnead_ExtractsActionLabelsInsteadOfGenericStepTimer()
+    {
+        const string instruction =
+            "Turn mixer to medium and mix on medium speed until dough forms satiny, sticky ball that clears sides of bowl, 6 to 8 minutes. Turn dough out onto lightly floured counter and knead briefly until smooth, about 1 minute. Place dough in bowl, cover, and chill for at least 24 hours.";
+
+        var timers = StepTimerExtractor.DetectTimers(instruction, stepNumber: 2);
+
+        Assert.AreEqual(3, timers.Count);
+        Assert.AreEqual(360, timers[0].DurationSeconds);
+        Assert.AreEqual("Mix", timers[0].Label);
+        Assert.AreEqual(60, timers[1].DurationSeconds);
+        Assert.AreEqual("Knead", timers[1].Label);
+        Assert.AreEqual(86400, timers[2].DurationSeconds);
+        Assert.AreEqual("Chill", timers[2].Label);
     }
 }

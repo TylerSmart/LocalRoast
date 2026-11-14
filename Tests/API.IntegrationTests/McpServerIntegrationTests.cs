@@ -113,7 +113,7 @@ public sealed class McpServerIntegrationTests
         Assert.IsNotNull(tools);
         var toolNames = tools.Select(t => t.Name).ToHashSet();
 
-        Assert.AreEqual(13, toolNames.Count, "Expected exactly 13 MCP tools");
+        Assert.AreEqual(16, toolNames.Count, "Expected exactly 16 MCP tools");
 
         // Milestone 2 tools
         Assert.IsTrue(toolNames.Contains("search_recipes"), "Missing search_recipes");
@@ -155,6 +155,11 @@ public sealed class McpServerIntegrationTests
             toolNames.Contains("set_shopping_list_item_checked"),
             "Missing set_shopping_list_item_checked"
         );
+
+        // Ingestion inspection tools
+        Assert.IsTrue(toolNames.Contains("get_ingestion_summary"), "Missing get_ingestion_summary");
+        Assert.IsTrue(toolNames.Contains("list_ingestion_jobs"), "Missing list_ingestion_jobs");
+        Assert.IsTrue(toolNames.Contains("get_ingestion_job"), "Missing get_ingestion_job");
     }
 
     [TestMethod]
@@ -463,6 +468,74 @@ public sealed class McpServerIntegrationTests
         Assert.IsFalse(getListsRes.IsError == true);
         var listsJson = ((TextContentBlock)getListsRes.Content[0]).Text;
         StringAssert.Contains(listsJson, "Paper Towels");
+    }
+
+    [TestMethod]
+    public async Task McpClient_CallIngestionTools_ReturnsSummaryListAndDetail()
+    {
+        await RegisterAndAuthorizeAsync("ingestionmcp@example.com", "ingestionmcp", "Password123!");
+        var pat = await CreatePatAsync("Ingestion Inspector");
+
+        var testClient = _factory.CreateClient();
+        var transport = new HttpClientTransport(
+            new HttpClientTransportOptions
+            {
+                Endpoint = new Uri(testClient.BaseAddress!, "/api/mcp"),
+                TransportMode = HttpTransportMode.StreamableHttp,
+                AdditionalHeaders = new Dictionary<string, string>
+                {
+                    ["Authorization"] = $"Bearer {pat.PlaintextToken}",
+                },
+            },
+            httpClient: testClient,
+            ownsHttpClient: false
+        );
+
+        await using var mcpClient = await McpClient.CreateAsync(transport);
+
+        var enqueueRes = await mcpClient.CallToolAsync(
+            "enqueue_recipe_ingestion",
+            new Dictionary<string, object?>
+            {
+                ["rawText"] =
+                    "MCP Test Toast\nIngredients:\n1 slice bread\nSteps:\n1. Toast bread.",
+                ["suggestedTitle"] = "MCP Test Toast",
+            }
+        );
+        Assert.IsNotNull(enqueueRes);
+        Assert.IsFalse(enqueueRes.IsError == true);
+        var enqueueJson = ((TextContentBlock)enqueueRes.Content[0]).Text;
+        using var enqueueDoc = JsonDocument.Parse(enqueueJson);
+        var jobId = enqueueDoc.RootElement.GetProperty("id").GetGuid();
+
+        var summaryRes = await mcpClient.CallToolAsync("get_ingestion_summary");
+        Assert.IsNotNull(summaryRes);
+        Assert.IsFalse(summaryRes.IsError == true);
+        var summaryJson = ((TextContentBlock)summaryRes.Content[0]).Text;
+        StringAssert.Contains(summaryJson, "allCount");
+
+        var listRes = await mcpClient.CallToolAsync(
+            "list_ingestion_jobs",
+            new Dictionary<string, object?>
+            {
+                ["search"] = "MCP Test Toast",
+                ["page"] = 1,
+                ["pageSize"] = 10,
+            }
+        );
+        Assert.IsNotNull(listRes);
+        Assert.IsFalse(listRes.IsError == true);
+        var listJson = ((TextContentBlock)listRes.Content[0]).Text;
+        StringAssert.Contains(listJson, "MCP Test Toast");
+
+        var detailRes = await mcpClient.CallToolAsync(
+            "get_ingestion_job",
+            new Dictionary<string, object?> { ["jobId"] = jobId }
+        );
+        Assert.IsNotNull(detailRes);
+        Assert.IsFalse(detailRes.IsError == true);
+        var detailJson = ((TextContentBlock)detailRes.Content[0]).Text;
+        StringAssert.Contains(detailJson, "MCP Test Toast");
     }
 
     private async Task<AuthResponse> RegisterAndAuthorizeAsync(

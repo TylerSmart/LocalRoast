@@ -2129,4 +2129,160 @@ public sealed class RecipeDraftNormalizerTests
         Assert.AreEqual(1, draft.Steps![1].IngredientIndices!.Count);
         Assert.AreEqual(1, draft.Steps![1].IngredientIndices![0]);
     }
+
+    [TestMethod]
+    public void Normalize_UnmeasuredKosherSaltWithMeasuredStep_BackfillsAndMergesDuplicates()
+    {
+        const string source = """
+            Ingredients:
+            [POTATOES]
+            - Kosher salt
+            Instructions:
+            1. Add 1 1/2 teaspoons salt and boil.
+            """;
+
+        var rawPayload = new LlmExtractedRecipePayload(
+            Title: "Patatas Bravas",
+            Ingredients:
+            [
+                new(
+                    SectionName: "POTATOES",
+                    Quantity: null,
+                    MaxQuantity: null,
+                    Unit: null,
+                    CanonicalFoodName: "Kosher salt",
+                    DisplayName: "Kosher salt",
+                    OriginalRawText: "Kosher salt"
+                ),
+                new(
+                    SectionName: "POTATOES",
+                    Quantity: 1.5m,
+                    MaxQuantity: null,
+                    Unit: "tsp",
+                    CanonicalFoodName: "Kosher salt",
+                    DisplayName: "Kosher salt",
+                    OriginalRawText: "1 1/2 teaspoons salt"
+                ),
+            ],
+            Steps:
+            [
+                new(
+                    SectionName: "POTATOES",
+                    Instruction: "Add ||{\"ingredient\": \"Kosher salt\", \"amount\": 1.5, \"unit\": \"tsp\"}|| and boil.",
+                    IngredientIndices: [1]
+                ),
+            ]
+        );
+
+        var draft = RecipeDraftNormalizer.Normalize(
+            raw: rawPayload,
+            catalogFoods: [],
+            tags: [],
+            sourceUrl: null,
+            fallbackSourceName: null,
+            fallbackSourceAuthor: null,
+            coverImagePath: null,
+            thumbnailImagePath: null,
+            rawSourceText: source
+        );
+
+        Assert.AreEqual(1, draft.Ingredients!.Count);
+        Assert.AreEqual("Kosher salt", draft.Ingredients[0].OriginalRawText);
+        Assert.AreEqual(1.5m, draft.Ingredients[0].Quantity);
+        Assert.AreEqual(MeasurementUnit.Tsp, draft.Ingredients[0].Unit);
+        Assert.AreEqual(0, draft.Steps![0].IngredientIndices![0]);
+    }
+
+    [TestMethod]
+    public void Normalize_UnmeasuredCountableProduceWedgesAndWordNumbers_AssignsQuantities()
+    {
+        var rawPayload = new LlmExtractedRecipePayload(
+            Title: "Shrimp & Crepes",
+            Ingredients:
+            [
+                new(
+                    SectionName: null,
+                    Quantity: null,
+                    MaxQuantity: null,
+                    Unit: "whole",
+                    CanonicalFoodName: "lemon",
+                    DisplayName: "Lemon",
+                    PreparationNote: "wedges",
+                    OriginalRawText: "Lemon wedges"
+                ),
+                new(
+                    SectionName: null,
+                    Quantity: 8m,
+                    MaxQuantity: 10m,
+                    Unit: "slice",
+                    CanonicalFoodName: "banana",
+                    DisplayName: "Banana",
+                    PreparationNote: "1/4-inch-thick slices",
+                    OriginalRawText: "eight to ten 1/4-inch-thick banana slices"
+                ),
+            ],
+            Steps:
+            [
+                new(
+                    null,
+                    "Serve with ||{\"ingredient\": \"Lemon\"}|| and ||{\"ingredient\": \"Banana\"}||."
+                ),
+            ]
+        );
+
+        var draft = RecipeDraftNormalizer.Normalize(
+            raw: rawPayload,
+            catalogFoods: [],
+            tags: [],
+            sourceUrl: null,
+            fallbackSourceName: null,
+            fallbackSourceAuthor: null,
+            coverImagePath: null,
+            thumbnailImagePath: null
+        );
+
+        Assert.AreEqual(1m, draft.Ingredients![0].Quantity);
+        Assert.AreEqual(MeasurementUnit.Whole, draft.Ingredients[0].Unit);
+
+        Assert.AreEqual(8m, draft.Ingredients[1].Quantity);
+        Assert.AreEqual(10m, draft.Ingredients[1].MaxQuantity);
+        Assert.AreEqual(MeasurementUnit.Slice, draft.Ingredients[1].Unit);
+    }
+
+    [TestMethod]
+    public void Normalize_SyncsDisambiguatedTimerLabelsIntoInlineTokens()
+    {
+        var rawPayload = new LlmExtractedRecipePayload(
+            Title: "Pizza",
+            Ingredients:
+            [
+                new(null, 1m, null, "cup", "flour", "flour", OriginalRawText: "1 cup flour"),
+            ],
+            Steps:
+            [
+                new(
+                    null,
+                    "Bake for ||{\"type\": \"timer\", \"seconds\": 600, \"label\": \"Bake\"}||, then bake again for ||{\"type\": \"timer\", \"seconds\": 900, \"label\": \"Bake\"}||."
+                ),
+            ]
+        );
+
+        var draft = RecipeDraftNormalizer.Normalize(
+            raw: rawPayload,
+            catalogFoods: [],
+            tags: [],
+            sourceUrl: null,
+            fallbackSourceName: null,
+            fallbackSourceAuthor: null,
+            coverImagePath: null,
+            thumbnailImagePath: null
+        );
+
+        var step = draft.Steps![0];
+        Assert.AreEqual(2, step.Timers!.Count);
+        Assert.AreEqual("Bake (10m)", step.Timers[0].Label);
+        Assert.AreEqual("Bake (15m)", step.Timers[1].Label);
+        Assert.IsTrue(step.Instruction.Contains("Bake (10m)"));
+        Assert.IsTrue(step.Instruction.Contains("Bake (15m)"));
+    }
 }

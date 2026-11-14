@@ -691,6 +691,11 @@ public sealed class IngestionProcessor(
                     var remainingHumanReviewIssues = postRepairIssues
                         .Where(issue =>
                         {
+                            if (RecipeExtractionDiagnostics.IsHardStructuralIssue(issue))
+                            {
+                                return true;
+                            }
+
                             var decision = repairResult.TriageDecisions.FirstOrDefault(d =>
                                 string.Equals(
                                     d.Issue?.Trim(),

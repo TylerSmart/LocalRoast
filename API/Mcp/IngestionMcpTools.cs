@@ -1,5 +1,7 @@
 using System.ComponentModel;
 using System.Security.Claims;
+using App.Core.Exceptions;
+using App.Core.Ingestion;
 using App.Core.Mcp;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
@@ -102,6 +104,84 @@ public sealed class IngestionMcpTools(IMcpCookbookService mcpCookbookService)
                 );
                 return recipe;
             }
+        );
+    }
+
+    [McpServerTool(Name = "get_ingestion_summary")]
+    [Description(
+        "Get counts of recipe ingestion jobs by status (Queued, Processing, ReadyForReview, Approved, Failed, etc.)."
+    )]
+    public Task<CallToolResult> GetIngestionSummaryAsync(
+        ClaimsPrincipal? user = null,
+        CancellationToken cancellationToken = default
+    )
+    {
+        return McpToolResultHelper.ExecuteAsync(
+            user,
+            async () =>
+                (object?)await mcpCookbookService.GetIngestionSummaryAsync(cancellationToken)
+        );
+    }
+
+    [McpServerTool(Name = "list_ingestion_jobs")]
+    [Description(
+        "List recipe ingestion jobs with optional status filter (e.g. ReadyForReview, Failed, Approved) and search text."
+    )]
+    public Task<CallToolResult> ListIngestionJobsAsync(
+        [Description(
+            "Optional status filter: Queued, FetchingSource, Extracting, ReadyForReview, Approved, Failed, Discarded"
+        )]
+            string? status = null,
+        [Description("Optional search query matching title, source, or error")]
+            string? search = null,
+        [Description("1-based page number (default 1)")] int page = 1,
+        [Description("Page size (default 25, max 100)")] int pageSize = 25,
+        ClaimsPrincipal? user = null,
+        CancellationToken cancellationToken = default
+    )
+    {
+        return McpToolResultHelper.ExecuteAsync(
+            user,
+            async () =>
+            {
+                IngestionJobStatus? parsedStatus = null;
+                if (!string.IsNullOrWhiteSpace(status))
+                {
+                    if (!Enum.TryParse<IngestionJobStatus>(status.Trim(), true, out var s))
+                    {
+                        throw new DomainValidationException(
+                            $"Unknown ingestion job status '{status}'."
+                        );
+                    }
+                    parsedStatus = s;
+                }
+
+                return await mcpCookbookService.ListIngestionJobsAsync(
+                    parsedStatus,
+                    search,
+                    page,
+                    pageSize,
+                    cancellationToken
+                );
+            }
+        );
+    }
+
+    [McpServerTool(Name = "get_ingestion_job")]
+    [Description(
+        "Get full details of a specific recipe ingestion job including source text, extracted draft, validation issues, and triage decisions."
+    )]
+    public Task<CallToolResult> GetIngestionJobAsync(
+        [Description("Ingestion job ID")] Guid jobId,
+        ClaimsPrincipal? user = null,
+        CancellationToken cancellationToken = default
+    )
+    {
+        return McpToolResultHelper.ExecuteAsync(
+            user,
+            async () =>
+                await mcpCookbookService.GetIngestionJobAsync(jobId, cancellationToken)
+                ?? throw new NotFoundException($"Ingestion job {jobId} was not found.")
         );
     }
 }

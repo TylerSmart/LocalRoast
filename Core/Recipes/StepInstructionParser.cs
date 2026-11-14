@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
@@ -286,6 +287,23 @@ public static partial class StepInstructionParser
         }
     }
 
+    [GeneratedRegex(
+        @"^\s*(?:to|or|[-–—])\s*$",
+        RegexOptions.IgnoreCase,
+        matchTimeoutMilliseconds: 1000
+    )]
+    private static partial Regex RangeConnectorRegex();
+
+    [GeneratedRegex(@"^\s*(?:/|\()\s*$", RegexOptions.IgnoreCase, matchTimeoutMilliseconds: 1000)]
+    private static partial Regex DualTempSeparatorRegex();
+
+    [GeneratedRegex(
+        @"^\s*(?:/|\()\s*(?<celsius>\d+(?:\.\d+)?)\s*°?\s*C(?:elsius)?\s*\)?",
+        RegexOptions.IgnoreCase,
+        matchTimeoutMilliseconds: 1000
+    )]
+    private static partial Regex TrailingCelsiusTextRegex();
+
     public static string CleanStepInstruction(string? instruction)
     {
         if (string.IsNullOrWhiteSpace(instruction))
@@ -312,12 +330,100 @@ public static partial class StepInstructionParser
                 }
                 builder.Append(text);
             }
-            else if (
-                segment.Token is StepTimerToken timer
-                && StepTimerExtractor.IsDurationLabel(timer.Label)
-            )
+            else if (segment.Token is StepTimerToken timer)
             {
-                builder.Append(FormatToken(timer with { Label = null }));
+                // Collapse adjacent range timer tokens: ||timer 1|| to ||timer 2|| -> single timer with lower bound
+                if (
+                    i + 2 < segments.Count
+                    && segments[i + 1].Token is null
+                    && RangeConnectorRegex().IsMatch(segments[i + 1].Text)
+                    && segments[i + 2].Token is StepTimerToken timer2
+                )
+                {
+                    var minSeconds =
+                        timer.Seconds > 0 && timer2.Seconds > 0
+                            ? Math.Min(timer.Seconds, timer2.Seconds)
+                            : Math.Max(timer.Seconds, timer2.Seconds);
+                    var chosenLabel =
+                        !string.IsNullOrWhiteSpace(timer.Label)
+                        && !StepTimerExtractor.IsDurationLabel(timer.Label)
+                            ? timer.Label
+                        : !string.IsNullOrWhiteSpace(timer2.Label)
+                        && !StepTimerExtractor.IsDurationLabel(timer2.Label)
+                            ? timer2.Label
+                        : null;
+                    builder.Append(FormatToken(new StepTimerToken(minSeconds, chosenLabel)));
+                    i += 2;
+                    continue;
+                }
+
+                if (StepTimerExtractor.IsDurationLabel(timer.Label))
+                {
+                    builder.Append(FormatToken(timer with { Label = null }));
+                }
+                else
+                {
+                    builder.Append(segment.Text);
+                }
+            }
+            else if (segment.Token is StepTemperatureToken temp)
+            {
+                // Collapse dual F/C temperature tokens: ||F|| / ||C|| or ||F|| (||C||)
+                if (
+                    i + 2 < segments.Count
+                    && segments[i + 1].Token is null
+                    && DualTempSeparatorRegex().IsMatch(segments[i + 1].Text)
+                    && segments[i + 2].Token is StepTemperatureToken temp2
+                    && IsDualTemperaturePair(temp, temp2, out var primaryTemp)
+                )
+                {
+                    builder.Append(FormatToken(primaryTemp));
+                    var wasParen = segments[i + 1].Text.Contains('(');
+                    i += 2;
+                    if (
+                        wasParen
+                        && i + 1 < segments.Count
+                        && segments[i + 1].Token is null
+                        && segments[i + 1].Text.StartsWith(')')
+                    )
+                    {
+                        var remainingAfterParen = segments[i + 1].Text[1..];
+                        if (!string.IsNullOrEmpty(remainingAfterParen))
+                        {
+                            builder.Append(remainingAfterParen);
+                        }
+                        i += 1;
+                    }
+                    continue;
+                }
+
+                // Also collapse trailing raw "/60°C" or " (60°C)" right after a temperature token
+                if (
+                    temp.Fahrenheit.HasValue
+                    && i + 1 < segments.Count
+                    && segments[i + 1].Token is null
+                )
+                {
+                    var trailingMatch = TrailingCelsiusTextRegex().Match(segments[i + 1].Text);
+                    if (
+                        trailingMatch.Success
+                        && decimal.TryParse(
+                            trailingMatch.Groups["celsius"].Value,
+                            NumberStyles.Number,
+                            CultureInfo.InvariantCulture,
+                            out var cVal
+                        )
+                        && IsFahrenheitCelsiusMatch(temp.Fahrenheit.Value, cVal)
+                    )
+                    {
+                        builder.Append(segment.Text);
+                        builder.Append(segments[i + 1].Text[trailingMatch.Length..]);
+                        i += 1;
+                        continue;
+                    }
+                }
+
+                builder.Append(segment.Text);
             }
             else
             {
@@ -326,6 +432,44 @@ public static partial class StepInstructionParser
         }
 
         return builder.ToString();
+    }
+
+    private static bool IsFahrenheitCelsiusMatch(decimal fahrenheit, decimal celsius)
+    {
+        var expectedC = (fahrenheit - 32m) * 5m / 9m;
+        return Math.Abs(expectedC - celsius) <= 3m;
+    }
+
+    private static bool IsDualTemperaturePair(
+        StepTemperatureToken first,
+        StepTemperatureToken second,
+        out StepTemperatureToken primary
+    )
+    {
+        primary = first;
+        var f = first.Fahrenheit;
+        // Case 1: second token explicitly has Celsius
+        if (
+            f.HasValue
+            && second.Celsius.HasValue
+            && IsFahrenheitCelsiusMatch(f.Value, second.Celsius.Value)
+        )
+        {
+            primary = new StepTemperatureToken(f.Value, null);
+            return true;
+        }
+        // Case 2: model mislabeled Celsius as Fahrenheit in the second token (e.g. 140°F / 60°F)
+        if (
+            f.HasValue
+            && second.Fahrenheit.HasValue
+            && !second.Celsius.HasValue
+            && IsFahrenheitCelsiusMatch(f.Value, second.Fahrenheit.Value)
+        )
+        {
+            primary = new StepTemperatureToken(f.Value, null);
+            return true;
+        }
+        return false;
     }
 
     private static string StripTrailingMeasurement(string text, StepIngredientToken token)

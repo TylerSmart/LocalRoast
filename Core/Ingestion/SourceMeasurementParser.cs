@@ -12,7 +12,8 @@ public sealed record SourceMeasurementSpan(
 
 public static class SourceMeasurementParser
 {
-    private const string Number = @"(?:\d+\s*)?[½¼¾⅓⅔⅛⅜⅝⅞]|\d+(?:[\s-]+\d+/\d+|/\d+|\.\d+)?";
+    private const string Number =
+        @"(?:\d+\s*)?[½¼¾⅓⅔⅛⅜⅝⅞]|\d+(?:[\s-]+\d+/\d+|/\d+|\.\d+)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|dozen|half";
     private const string Unit =
         @"fluid ounces?|fl[._ ]+oz|tablespoons?|tbsp|teaspoons?|tsp|cups?|c\b|pints?|pt|quarts?|qt|gallons?|gal|ounces?|oz|pounds?|lbs?|grams?|g|kilograms?|kg|millilit(?:er|re)s?|ml|lit(?:er|re)s?|l|pinch(?:es)?|dash(?:es)?|cloves?|cans?|bunch(?:es)?|slices?|whole|sticks?|small|medium|large|recipes?|batch(?:es)?";
     private static readonly Regex Measurement = new(

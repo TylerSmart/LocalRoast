@@ -1630,27 +1630,47 @@ public sealed partial class RecipeService(
                         ? timerInput.Label.Trim()
                         : "Timer";
 
-                    if (
-                        !stepEntity.Timers.Any(existing =>
-                            existing.DurationSeconds == timerInput.DurationSeconds
-                            && string.Equals(
-                                existing.Label,
-                                label,
+                    var exactExisting = stepEntity.Timers.FirstOrDefault(existing =>
+                        existing.DurationSeconds == timerInput.DurationSeconds
+                        && string.Equals(existing.Label, label, StringComparison.OrdinalIgnoreCase)
+                    );
+                    if (exactExisting is not null)
+                    {
+                        continue;
+                    }
+
+                    // If an inline timer token already added a timer with the same duration whose label
+                    // is a prefix of the disambiguated label (e.g. "Fry potatoes" vs "Fry potatoes (20m)"),
+                    // update the existing timer's label instead of creating a duplicate row.
+                    var prefixMatch = stepEntity.Timers.FirstOrDefault(existing =>
+                        existing.DurationSeconds == timerInput.DurationSeconds
+                        && (
+                            label.StartsWith(
+                                existing.Label + " ",
+                                StringComparison.OrdinalIgnoreCase
+                            )
+                            || existing.Label.Equals("Timer", StringComparison.OrdinalIgnoreCase)
+                            || existing.Label.StartsWith(
+                                "Step ",
                                 StringComparison.OrdinalIgnoreCase
                             )
                         )
-                    )
+                    );
+                    if (prefixMatch is not null)
                     {
-                        stepEntity.Timers.Add(
-                            new RecipeStepTimer
-                            {
-                                RecipeStep = stepEntity,
-                                SortOrder = stepEntity.Timers.Count,
-                                DurationSeconds = timerInput.DurationSeconds,
-                                Label = label,
-                            }
-                        );
+                        prefixMatch.Label = label;
+                        continue;
                     }
+
+                    stepEntity.Timers.Add(
+                        new RecipeStepTimer
+                        {
+                            RecipeStep = stepEntity,
+                            SortOrder = stepEntity.Timers.Count,
+                            DurationSeconds = timerInput.DurationSeconds,
+                            Label = label,
+                        }
+                    );
                 }
             }
 

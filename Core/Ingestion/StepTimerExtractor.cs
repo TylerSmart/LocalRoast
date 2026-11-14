@@ -9,10 +9,9 @@ public static class StepTimerExtractor
     private static readonly TimeSpan RegexTimeout = TimeSpan.FromSeconds(1);
 
     private const string ExtractionVerbsPattern =
-        @"bake|simmer|cook|boil|roast|fry|chill|rest|marinate|steep|refrigerate|cool";
+        @"bake|simmer|cook|boil|roast|fry|chill|rest|marinate|steep|refrigerate|cool|freeze|broil|grill|sear|saut[eé]|brown|toast|steam|poach|braise|reduce|warm|heat|melt|whisk|beat|whip|mix|knead|process|pulse|blend|stir|stand|sit|rise|proof|bloom|soften|drain|press|unmold|soak|microwave";
 
-    private const string ActionVerbsPattern =
-        @"bake|simmer|cook|boil|roast|fry|chill|rest|marinate|steep|refrigerate|cool|saut[eé]|brown|steam|whisk|beat|knead|rise|proof|toast|microwave|reduce|sear|soak|warm|stand|sit";
+    private const string ActionVerbsPattern = ExtractionVerbsPattern;
 
     private static readonly Regex ActionVerbRegex = new(
         $@"\b({ActionVerbsPattern})\b",
@@ -33,19 +32,19 @@ public static class StepTimerExtractor
     );
 
     private static readonly Regex CompositeHoursMinutesRegex = new(
-        $@"(?:\b({ExtractionVerbsPattern})\b[^\.\n;]{{0,30}}?)?(?:for\s+)?(\d+)\s*(?:hours?|hrs?|h)\s*(?:and\s+)?(\d+)\s*(?:minutes?|mins?|m)\b",
+        $@"(?:\b({ExtractionVerbsPattern})\b[^\.\n;]{{0,120}}?)?(?:for\s+)?(\d+)\s*(?:hours?|hrs?|h)\s*(?:and\s+)?(\d+)\s*(?:minutes?|mins?|m)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled,
         RegexTimeout
     );
 
     private static readonly Regex RangeDurationRegex = new(
-        $@"(?:\b({ExtractionVerbsPattern})\b[^\.\n;]{{0,30}}?)?(?:for\s+)?(\d+(?:\.\d+)?)\s*(?:[-\u2013\u2014]|to)\s*(\d+(?:\.\d+)?)\s*(hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)\b",
+        $@"(?:\b({ExtractionVerbsPattern})\b[^\.\n;]{{0,120}}?)?(?:for\s+)?(\d+(?:\.\d+)?)\s*(?:[-\u2013\u2014]|to)\s*(\d+(?:\.\d+)?)\s*(hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled,
         RegexTimeout
     );
 
     private static readonly Regex SingleDurationRegex = new(
-        $@"(?:\b({ExtractionVerbsPattern})\b[^\.\n;]{{0,30}}?)?(?:for\s+)?(\d+(?:\.\d+)?)\s*(hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)\b",
+        $@"(?:\b({ExtractionVerbsPattern})\b[^\.\n;]{{0,120}}?)?(?:for\s+)?(\d+(?:\.\d+)?)\s*(hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled,
         RegexTimeout
     );
@@ -63,14 +62,15 @@ public static class StepTimerExtractor
         var results = new List<RecipeStepTimerInput>();
         var matchedSpans = new List<(int Start, int End)>();
 
-        void TryAddTimer(int seconds, string? verb)
+        void TryAddTimer(int seconds, string? verb, int matchIndex, int durationIndex)
         {
             if (seconds < 1 || seconds > 864000)
             {
                 return;
             }
 
-            var label = CleanVerbLabel(verb, stepNumber);
+            var nearestVerb = FindNearestClauseActionVerb(instruction, durationIndex) ?? verb;
+            var label = CleanVerbLabel(nearestVerb, stepNumber);
             var baseLabel = label;
             var suffix = 1;
             while (
@@ -102,7 +102,7 @@ public static class StepTimerExtractor
             )
             {
                 var totalSeconds = (hours * 3600) + (minutes * 60);
-                TryAddTimer(totalSeconds, verb);
+                TryAddTimer(totalSeconds, verb, match.Index, match.Groups[2].Index);
                 matchedSpans.Add((match.Index, match.Index + match.Length));
             }
         }
@@ -129,7 +129,7 @@ public static class StepTimerExtractor
                 var totalSeconds = ConvertToSeconds(lowerVal, unitStr);
                 if (totalSeconds.HasValue)
                 {
-                    TryAddTimer(totalSeconds.Value, verb);
+                    TryAddTimer(totalSeconds.Value, verb, match.Index, match.Groups[2].Index);
                     matchedSpans.Add((match.Index, match.Index + match.Length));
                 }
             }
@@ -157,7 +157,7 @@ public static class StepTimerExtractor
                 var totalSeconds = ConvertToSeconds(val, unitStr);
                 if (totalSeconds.HasValue)
                 {
-                    TryAddTimer(totalSeconds.Value, verb);
+                    TryAddTimer(totalSeconds.Value, verb, match.Index, match.Groups[2].Index);
                 }
             }
         }
@@ -250,6 +250,15 @@ public static class StepTimerExtractor
             return null;
         }
 
+        if (nearOffset.HasValue && nearOffset.Value > 0 && nearOffset.Value <= instruction.Length)
+        {
+            var clauseVerb = FindNearestClauseActionVerb(instruction, nearOffset.Value);
+            if (!string.IsNullOrWhiteSpace(clauseVerb))
+            {
+                return clauseVerb;
+            }
+        }
+
         var text =
             nearOffset.HasValue && nearOffset.Value > 0 && nearOffset.Value <= instruction.Length
                 ? instruction[..nearOffset.Value]
@@ -262,6 +271,25 @@ public static class StepTimerExtractor
         }
 
         return null;
+    }
+
+    private static string? FindNearestClauseActionVerb(string instruction, int durationIndex)
+    {
+        if (durationIndex <= 0 || durationIndex > instruction.Length)
+        {
+            return null;
+        }
+
+        var searchStart = Math.Max(0, durationIndex - 160);
+        var window = instruction[searchStart..durationIndex];
+        var lastBoundary = window.LastIndexOfAny(['.', ';', '\n', '\r']);
+        if (lastBoundary >= 0 && lastBoundary + 1 < window.Length)
+        {
+            window = window[(lastBoundary + 1)..];
+        }
+
+        var matches = ActionVerbRegex.Matches(window);
+        return matches.Count > 0 ? matches[^1].Groups[1].Value : null;
     }
 
     public static string CleanTimerLabel(

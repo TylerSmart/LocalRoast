@@ -1,3 +1,4 @@
+using App.Core.Common;
 using App.Core.Exceptions;
 using App.Core.FoodCatalog;
 using App.Core.Ingestion;
@@ -775,6 +776,32 @@ public sealed class McpCookbookService(
 
         return await recipeService.CreateRecipeAsync(createRequest, cancellationToken);
     }
+
+    public Task<IngestionQueueSummaryDto> GetIngestionSummaryAsync(
+        CancellationToken cancellationToken = default
+    ) => ingestionService.GetSummaryAsync(cancellationToken);
+
+    public Task<PagedResultDto<IngestionJobSummaryDto>> ListIngestionJobsAsync(
+        IngestionJobStatus? status = null,
+        string? search = null,
+        int page = 1,
+        int pageSize = 25,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var query = new IngestionJobQueryParameters(
+            PageNumber: Math.Max(1, page),
+            PageSize: Math.Clamp(pageSize, 1, 100),
+            Status: status,
+            Search: search
+        );
+        return ingestionService.GetJobsPagedAsync(query, cancellationToken);
+    }
+
+    public Task<IngestionJobDetailDto?> GetIngestionJobAsync(
+        Guid jobId,
+        CancellationToken cancellationToken = default
+    ) => ingestionService.GetJobByIdAsync(jobId, cancellationToken);
 
     private static FoodItem? FindMatchingFood(string rawName, IEnumerable<FoodItem> items)
     {
