@@ -38,6 +38,7 @@ public static partial class TaggedStepDiagnostics
         if (!string.IsNullOrWhiteSpace(recipe.Title))
         {
             var titleNorm = recipe.Title.Trim();
+
             for (var i = 0; i < ingredients.Count; i++)
             {
                 var ing = ingredients[i];
@@ -159,6 +160,40 @@ public static partial class TaggedStepDiagnostics
 
         if (steps.Count > 0)
         {
+            var statsList = new List<(
+                int Index,
+                LlmExtractedIngredientItem Ingredient,
+                string Name,
+                decimal RowLow,
+                decimal RowHigh,
+                bool IsUsedDirectly,
+                bool IsUsedInProseOrEggPart,
+                decimal SumLow,
+                bool HasComparableAmounts,
+                List<decimal> StepAmounts,
+                List<(decimal Amount, MeasurementUnit? Unit)> ConcreteStepUsagesForUnmeasured,
+                int UnmeasuredMentionsCount
+            )>(ingredients.Count);
+
+            var ingredientNamePairs = ingredients
+                .Select(ing => ((string?)ing.DisplayName, (string?)ing.CanonicalFoodName))
+                .ToList();
+            var hasExplicitEggPart = ingredientNamePairs.Any(pair =>
+                Regex.IsMatch(
+                    $"{pair.Item1} {pair.Item2}",
+                    @"\b(?:egg\s+)?(?:yolks?|egg\s+whites?)\b",
+                    RegexOptions.IgnoreCase,
+                    TimeSpan.FromSeconds(1)
+                )
+            );
+
+            var hasAnyInlineIngredientTokens = steps.Any(s =>
+                StepInstructionParser
+                    .ExtractTokens(s.Instruction ?? "")
+                    .OfType<StepIngredientToken>()
+                    .Any()
+            );
+
             for (var i = 0; i < ingredients.Count; i++)
             {
                 var ingredient = ingredients[i];
@@ -167,13 +202,19 @@ public static partial class TaggedStepDiagnostics
                 var rowLow = ingredient.Quantity ?? 0;
                 var rowHigh = ingredient.MaxQuantity ?? rowLow;
 
-                var isUsed = false;
+                var isUsedDirectly = false;
+                var isUsedInProseOrEggPart = false;
                 decimal sumLow = 0;
                 var hasComparableAmounts = false;
                 var stepAmounts = new List<decimal>();
                 var concreteStepUsagesForUnmeasured =
                     new List<(decimal Amount, MeasurementUnit? Unit)>();
                 var unmeasuredMentionsCount = 0;
+
+                var isWholeEgg = RecipeDraftNormalizer.IsWholeEggIngredient(
+                    ingredient.DisplayName,
+                    ingredient.CanonicalFoodName
+                );
 
                 for (var sIdx = 0; sIdx < steps.Count; sIdx++)
                 {
@@ -261,6 +302,7 @@ public static partial class TaggedStepDiagnostics
                             )
                             {
                                 sumLow += inRowUnit;
+                                stepAmounts.Add(inRowUnit);
                                 hasComparableAmounts = true;
                             }
                         }
@@ -268,8 +310,79 @@ public static partial class TaggedStepDiagnostics
 
                     if (stepUses)
                     {
-                        isUsed = true;
+                        isUsedDirectly = true;
                     }
+                    else if (!isUsedInProseOrEggPart)
+                    {
+                        var plain = StepInstructionParser.ToPlainText(s.Instruction ?? "");
+                        if (
+                            !string.IsNullOrWhiteSpace(plain)
+                            && (
+                                (
+                                    hasAnyInlineIngredientTokens
+                                    && RecipeExtractionDiagnostics.MentionsIngredient(
+                                        plain,
+                                        i,
+                                        ingredients
+                                    )
+                                )
+                                || (
+                                    isWholeEgg
+                                    && !hasExplicitEggPart
+                                    && RecipeDraftNormalizer.IsSeparatedEggPartTerm(plain)
+                                )
+                            )
+                        )
+                        {
+                            isUsedInProseOrEggPart = true;
+                        }
+                    }
+                }
+
+                statsList.Add(
+                    (
+                        i,
+                        ingredient,
+                        name,
+                        rowLow,
+                        rowHigh,
+                        isUsedDirectly,
+                        isUsedInProseOrEggPart,
+                        sumLow,
+                        hasComparableAmounts,
+                        stepAmounts,
+                        concreteStepUsagesForUnmeasured,
+                        unmeasuredMentionsCount
+                    )
+                );
+            }
+
+            foreach (var item in statsList)
+            {
+                var i = item.Index;
+                var ingredient = item.Ingredient;
+                var name = item.Name;
+                var rowLow = item.RowLow;
+                var rowHigh = item.RowHigh;
+
+                var isUsed = item.IsUsedDirectly || item.IsUsedInProseOrEggPart;
+                if (!isUsed && !string.IsNullOrWhiteSpace(ingredient.OriginalRawText))
+                {
+                    var normRaw = RecipeDraftNormalizer.NormalizeLineForSourceMatch(
+                        ingredient.OriginalRawText
+                    );
+                    isUsed = statsList.Any(other =>
+                        other.Index != i
+                        && (other.IsUsedDirectly || other.IsUsedInProseOrEggPart)
+                        && !string.IsNullOrWhiteSpace(other.Ingredient.OriginalRawText)
+                        && string.Equals(
+                            RecipeDraftNormalizer.NormalizeLineForSourceMatch(
+                                other.Ingredient.OriginalRawText
+                            ),
+                            normRaw,
+                            StringComparison.OrdinalIgnoreCase
+                        )
+                    );
                 }
 
                 if (rowLow > 0 && !isUsed)
@@ -278,23 +391,30 @@ public static partial class TaggedStepDiagnostics
                     continue;
                 }
 
-                if (unmeasuredMentionsCount >= 4)
+                if (item.UnmeasuredMentionsCount >= 4)
                 {
                     issues.Add(
-                        $"{name}: tagged without amounts {unmeasuredMentionsCount} times across steps. Only tag ingredients where introduced, added, or measured; subsequent narrative mentions (e.g. \"flipping\", \"let cool\", doneness checks) should be plain prose."
+                        $"{name}: tagged without amounts {item.UnmeasuredMentionsCount} times across steps. Only tag ingredients where introduced, added, or measured; subsequent narrative mentions (e.g. \"flipping\", \"let cool\", doneness checks) should be plain prose."
                     );
                 }
 
-                if (hasComparableAmounts && rowHigh > 0)
+                if (item.HasComparableAmounts && rowHigh > 0)
                 {
                     var tolerance = Math.Max(0.0005m, rowHigh * 0.01m);
-                    if (sumLow > rowHigh + tolerance)
+                    if (item.SumLow > rowHigh + tolerance)
                     {
-                        // If all step mentions each specify the full batch amount (e.g. "cook 6 eggs", then "peel 6 eggs"),
-                        // this is a repeat mention of the full batch rather than an overflow.
                         var isRepeatMentionOfFullAmount =
-                            stepAmounts.Count > 1
-                            && stepAmounts.All(a => Math.Abs(a - rowHigh) <= tolerance);
+                            item.StepAmounts.Count > 1
+                            && (
+                                item.StepAmounts.All(a =>
+                                    a >= rowLow - tolerance && a <= rowHigh + tolerance
+                                )
+                                || (
+                                    item.StepAmounts[0] >= rowLow - tolerance
+                                    && item.StepAmounts[0] <= rowHigh + tolerance
+                                    && item.StepAmounts.Skip(1).Sum() <= rowHigh + tolerance
+                                )
+                            );
 
                         var hasOpenEndedPlusQualifier =
                             OpenEndedPlusRegex.IsMatch(ingredient.OriginalRawText ?? "")
@@ -303,14 +423,14 @@ public static partial class TaggedStepDiagnostics
                         if (!isRepeatMentionOfFullAmount && !hasOpenEndedPlusQualifier)
                         {
                             issues.Add(
-                                $"{name}: step amounts ({FormatNumber(sumLow)} {ingredient.Unit}) exceed the ingredient list ({FormatNumber(rowHigh)} {ingredient.Unit})."
+                                $"{name}: step amounts ({FormatNumber(item.SumLow)} {ingredient.Unit}) exceed the ingredient list ({FormatNumber(rowHigh)} {ingredient.Unit})."
                             );
                         }
                     }
                 }
-                else if (rowHigh == 0 && concreteStepUsagesForUnmeasured.Count > 0)
+                else if (rowHigh == 0 && item.ConcreteStepUsagesForUnmeasured.Count > 0)
                 {
-                    var sample = concreteStepUsagesForUnmeasured[0];
+                    var sample = item.ConcreteStepUsagesForUnmeasured[0];
                     issues.Add(
                         $"Ingredient {i + 1} \"{name}\" has no quantity in the ingredient list, but steps use concrete measured amounts (e.g. {FormatNumber(sample.Amount)} {sample.Unit?.ToString().ToLowerInvariant()}); set the ingredient quantity and unit to match the total used in the steps (while keeping its verbatim originalRawText)."
                     );

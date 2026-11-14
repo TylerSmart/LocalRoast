@@ -14,7 +14,8 @@ public sealed class IngestionService(
     AppDbContext dbContext,
     IRecipeService recipeService,
     IMediaStorageService mediaStorageService,
-    IIngestionQueueSignal queueSignal
+    IIngestionQueueSignal queueSignal,
+    ILlmSettingsService? llmSettingsService = null
 ) : IIngestionService
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -315,51 +316,14 @@ public sealed class IngestionService(
 
         if (draft?.Ingredients is { Count: > 0 } && draft.Ingredients.Any(i => i.IsRecipeReference))
         {
-            var updatedIngredients = new List<IngestionDraftIngredientDto>();
-            foreach (var ing in draft.Ingredients)
-            {
-                if (ing.IsRecipeReference && !string.IsNullOrWhiteSpace(ing.ReferencedRecipeTitle))
-                {
-                    var cleanTitle =
-                        RecipeDraftNormalizer.NormalizeRecipeReferenceTitle(
-                            ing.ReferencedRecipeTitle
-                        ) ?? ing.ReferencedRecipeTitle.Trim();
-                    var normalizedTitle = cleanTitle.ToUpperInvariant();
-                    var matchedRecipe = await dbContext
-                        .Recipes.AsNoTracking()
-                        .Where(r =>
-                            r.Title.ToUpper() == normalizedTitle
-                            && (
-                                !job.ResultingRecipeId.HasValue
-                                || r.Id != job.ResultingRecipeId.Value
-                            )
-                        )
-                        .Select(r => new
-                        {
-                            r.Id,
-                            r.Title,
-                            r.Slug,
-                        })
-                        .FirstOrDefaultAsync(cancellationToken);
-
-                    if (matchedRecipe is not null)
-                    {
-                        updatedIngredients.Add(
-                            ing with
-                            {
-                                MatchedRecipeId = matchedRecipe.Id,
-                                MatchedRecipeTitle = matchedRecipe.Title,
-                                MatchedRecipeSlug = matchedRecipe.Slug,
-                            }
-                        );
-                        continue;
-                    }
-                }
-
-                updatedIngredients.Add(ing);
-            }
-
-            draft = draft with { Ingredients = updatedIngredients };
+            var (resolvedDraft, _) =
+                await IngestionCatalogMaterializer.ResolveDraftRecipeReferencesAsync(
+                    dbContext,
+                    draft,
+                    job.ResultingRecipeId,
+                    cancellationToken
+                );
+            draft = resolvedDraft;
         }
 
         if (draft != null)
@@ -1498,6 +1462,19 @@ public sealed class IngestionService(
         job.DisplayTitle = draft.Title;
 
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        var globalAutoPublish =
+            llmSettingsService is not null
+            && (
+                await llmSettingsService.GetEffectiveConfigAsync(cancellationToken)
+            ).AutoPublishHighConfidenceText;
+        await IngestionCatalogMaterializer.PromoteWaitingRecipeReferenceJobsAsync(
+            dbContext,
+            recipeService,
+            mediaStorageService,
+            globalAutoPublish,
+            cancellationToken
+        );
 
         return (await recipeService.GetRecipeByIdAsync(createdRecipe.Id, cancellationToken))
             ?? createdRecipe;

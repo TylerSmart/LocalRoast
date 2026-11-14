@@ -27,11 +27,53 @@ public static partial class StepInstructionParser
     private static partial Regex TrailingMeasurementRegex();
 
     [GeneratedRegex(
-        @"(?<!\|)(\{\s*""(?:type|ingredient|amount|displayAmount|displayText|unit|seconds|fahrenheit|celsius)""\s*:[^}\r\n]*?\})(?!\|)",
+        @"(?<!\|)(\{\s*""(?:type|ingredient|displayName|canonicalFoodName|name|amount|displayAmount|displayText|unit|seconds|fahrenheit|celsius)""\s*:[^}\r\n]*?\})(?!\|)",
         RegexOptions.Singleline,
         matchTimeoutMilliseconds: 1000
     )]
     private static partial Regex BareJsonTokenRegex();
+
+    [GeneratedRegex(
+        @"\|\|\s*(?<json>\{[^{}|\r\n]*\})\s*__(?:\|\|)?",
+        RegexOptions.Singleline,
+        matchTimeoutMilliseconds: 1000
+    )]
+    private static partial Regex UnderscoreClosedTokenRegex();
+
+    [GeneratedRegex(
+        @"\|\|\s*(?<json>\{[^{}|\r\n]*)\s*__(?:\|\|)?",
+        RegexOptions.Singleline,
+        matchTimeoutMilliseconds: 1000
+    )]
+    private static partial Regex UnbracedUnderscoreTokenRegex();
+
+    [GeneratedRegex(
+        @"\|\|\s*(?<inner>\{[^{}|\r\n]*\}(?:\s*,\s*\{[^{}|\r\n]*\})+)\s*\|\|",
+        RegexOptions.Singleline,
+        matchTimeoutMilliseconds: 1000
+    )]
+    private static partial Regex SplitJsonObjectsTokenRegex();
+
+    [GeneratedRegex(
+        @"\|\|\s*\{(?<body>[^{}|\r\n]+?)(?<closing>\})?(?<punct>[\.,:;!\?]*)\|\|",
+        RegexOptions.Singleline,
+        matchTimeoutMilliseconds: 1000
+    )]
+    private static partial Regex DelimitedBodyRegex();
+
+    [GeneratedRegex(
+        @"(?<prefix>(?:^|,)\s*)""(?<key>type|ingredient|displayName|canonicalFoodName|name|amount|unit|displayAmount|displayUnit|customUnitName|displayCustomUnitName|displayText|notes|ingredientId|seconds|label|fahrenheit|celsius|value|temperature)""\s*(?=[0-9""\-]|true\b|false\b|null\b)",
+        RegexOptions.IgnoreCase,
+        matchTimeoutMilliseconds: 1000
+    )]
+    private static partial Regex MissingJsonColonRegex();
+
+    [GeneratedRegex(
+        @"(?<prefix>(?:^|,)\s*)""(?<key>type|ingredient|displayName|canonicalFoodName|name|unit|displayUnit|customUnitName|displayCustomUnitName|displayText|notes|label)""(?!(?:true|false|null)\s*(?:[,}]|$))(?=[A-Za-z/][^""]*""\s*(?:[,}]|$))",
+        RegexOptions.IgnoreCase,
+        matchTimeoutMilliseconds: 1000
+    )]
+    private static partial Regex MissingJsonColonAndOpeningQuoteRegex();
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -50,6 +92,63 @@ public static partial class StepInstructionParser
         return BareJsonTokenRegex().Replace(instruction, "||$1||");
     }
 
+    public static string NormalizeMalformedTokenSyntax(string? instruction)
+    {
+        if (string.IsNullOrEmpty(instruction))
+        {
+            return string.Empty;
+        }
+
+        // 1. Repair tokens closed with "__" or "__||" instead of "||"
+        var result = UnderscoreClosedTokenRegex().Replace(instruction, "||${json}||");
+        result = UnbracedUnderscoreTokenRegex().Replace(result, "||${json}||");
+
+        // 2. Wrap bare unbracketed JSON tokens before repairing inner JSON syntax
+        result = BareJsonTokenRegex().Replace(result, "||$1||");
+
+        // 3. Merge split JSON objects inside ||{...}, {...}|| into a single JSON object
+        result = SplitJsonObjectsTokenRegex()
+            .Replace(
+                result,
+                match =>
+                {
+                    var inner = Regex.Replace(
+                        match.Groups["inner"].Value,
+                        @"\}\s*,\s*\{",
+                        ", ",
+                        RegexOptions.None,
+                        RegexTimeout
+                    );
+                    return $"||{inner}||";
+                }
+            );
+
+        // 4. Repair missing colons after known keys and missing closing braces inside ||{...||
+        result = DelimitedBodyRegex()
+            .Replace(
+                result,
+                match =>
+                {
+                    var body = match.Groups["body"].Value;
+                    var hasClosing = match.Groups["closing"].Success;
+                    var punct = match.Groups["punct"].Value;
+
+                    var fixedBody = MissingJsonColonAndOpeningQuoteRegex()
+                        .Replace(body, "${prefix}\"${key}\": \"");
+                    fixedBody = MissingJsonColonRegex().Replace(fixedBody, "${prefix}\"${key}\": ");
+
+                    if (string.Equals(fixedBody, body, StringComparison.Ordinal) && hasClosing)
+                    {
+                        return match.Value;
+                    }
+
+                    return $"||{{{fixedBody.TrimEnd()}}}{punct}||";
+                }
+            );
+
+        return result;
+    }
+
     public static IReadOnlyList<StepInstructionSegment> ParseSegments(string? instruction)
     {
         if (string.IsNullOrEmpty(instruction))
@@ -57,7 +156,7 @@ public static partial class StepInstructionParser
             return Array.Empty<StepInstructionSegment>();
         }
 
-        instruction = NormalizeBareTokens(instruction);
+        instruction = NormalizeMalformedTokenSyntax(instruction);
 
         var segments = new List<StepInstructionSegment>();
         var matches = TokenRegex().Matches(instruction);
@@ -242,7 +341,19 @@ public static partial class StepInstructionParser
                 }
                 if (string.Equals(typeStr, "ingredient", StringComparison.OrdinalIgnoreCase))
                 {
-                    return JsonSerializer.Deserialize<StepIngredientToken>(json, JsonOptions);
+                    var typedIng = JsonSerializer.Deserialize<StepIngredientToken>(
+                        json,
+                        JsonOptions
+                    );
+                    if (typedIng is not null && string.IsNullOrWhiteSpace(typedIng.Ingredient))
+                    {
+                        var fallbackName = TryGetFallbackIngredientName(root);
+                        if (fallbackName is not null)
+                        {
+                            return typedIng with { Ingredient = fallbackName };
+                        }
+                    }
+                    return typedIng;
                 }
             }
 
@@ -257,9 +368,18 @@ public static partial class StepInstructionParser
                 return JsonSerializer.Deserialize<StepTemperatureToken>(json, JsonOptions);
             }
 
-            if (root.TryGetProperty("ingredient", out _))
+            var inferredIngredientName = TryGetFallbackIngredientName(root);
+            if (inferredIngredientName is not null)
             {
-                return JsonSerializer.Deserialize<StepIngredientToken>(json, JsonOptions);
+                var ingToken = JsonSerializer.Deserialize<StepIngredientToken>(json, JsonOptions);
+                return ingToken is not null
+                    ? ingToken with
+                    {
+                        Ingredient = string.IsNullOrWhiteSpace(ingToken.Ingredient)
+                            ? inferredIngredientName
+                            : ingToken.Ingredient,
+                    }
+                    : null;
             }
 
             // Fallback for ingredient token without explicit "ingredient" property (e.g. {"amount": 1, "unit": "tbsp"})
@@ -285,6 +405,28 @@ public static partial class StepInstructionParser
         {
             return null;
         }
+    }
+
+    private static string? TryGetFallbackIngredientName(JsonElement root)
+    {
+        foreach (var propName in new[] { "ingredient", "displayName", "canonicalFoodName", "name" })
+        {
+            foreach (var prop in root.EnumerateObject())
+            {
+                if (
+                    string.Equals(prop.Name, propName, StringComparison.OrdinalIgnoreCase)
+                    && prop.Value.ValueKind == JsonValueKind.String
+                )
+                {
+                    var val = prop.Value.GetString()?.Trim();
+                    if (!string.IsNullOrWhiteSpace(val))
+                    {
+                        return val;
+                    }
+                }
+            }
+        }
+        return null;
     }
 
     [GeneratedRegex(
@@ -424,6 +566,13 @@ public static partial class StepInstructionParser
                 }
 
                 builder.Append(segment.Text);
+            }
+            else if (
+                segment.Token is StepIngredientToken ingToken
+                && string.IsNullOrWhiteSpace(ingToken.Ingredient)
+            )
+            {
+                builder.Append(ToPlainText(segment.Text));
             }
             else
             {

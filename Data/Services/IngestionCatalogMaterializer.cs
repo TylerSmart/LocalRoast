@@ -104,7 +104,9 @@ public static class IngestionCatalogMaterializer
         return newFoodItem.Id;
     }
 
-    public static async Task<Guid?> ResolveRecipeReferenceAsync(
+    public sealed record MatchedRecipeReference(Guid Id, string Title, string Slug);
+
+    public static async Task<MatchedRecipeReference?> FindMatchingRecipeAsync(
         AppDbContext dbContext,
         string title,
         Guid? excludedRecipeId,
@@ -112,16 +114,109 @@ public static class IngestionCatalogMaterializer
     )
     {
         var cleanTitle = RecipeDraftNormalizer.NormalizeRecipeReferenceTitle(title) ?? title.Trim();
+        if (string.IsNullOrWhiteSpace(cleanTitle))
+        {
+            return null;
+        }
+
         var normalizedTitle = cleanTitle.ToUpperInvariant();
-        return await dbContext
+        var normalizedStraight = NormalizeTitleComparisonKey(cleanTitle).ToUpperInvariant();
+
+        var exact = await dbContext
             .Recipes.AsNoTracking()
+            .Where(r => !excludedRecipeId.HasValue || r.Id != excludedRecipeId.Value)
             .Where(r =>
                 r.Title.ToUpper() == normalizedTitle
-                && (!excludedRecipeId.HasValue || r.Id != excludedRecipeId.Value)
+                || r.Title.Replace("\u2019", "'").Replace("\u2018", "'").ToUpper()
+                    == normalizedStraight
             )
-            .Select(r => (Guid?)r.Id)
+            .Select(r => new MatchedRecipeReference(r.Id, r.Title, r.Slug))
             .FirstOrDefaultAsync(cancellationToken);
+
+        if (exact is not null)
+        {
+            return exact;
+        }
+
+        var prefixUpper = normalizedStraight + " (";
+        var candidates = await dbContext
+            .Recipes.AsNoTracking()
+            .Where(r => !excludedRecipeId.HasValue || r.Id != excludedRecipeId.Value)
+            .Where(r =>
+                r.Title.Replace("\u2019", "'")
+                    .Replace("\u2018", "'")
+                    .ToUpper()
+                    .StartsWith(prefixUpper)
+                || r.Title.EndsWith(")")
+                || (normalizedStraight.EndsWith("PIE DOUGH") && r.Title.ToUpper().Contains("PIE"))
+            )
+            .Select(r => new MatchedRecipeReference(r.Id, r.Title, r.Slug))
+            .ToListAsync(cancellationToken);
+
+        return candidates.FirstOrDefault(c => IsRecipeReferenceTitleMatch(c.Title, cleanTitle));
     }
+
+    public static bool IsRecipeReferenceTitleMatch(
+        string publishedTitle,
+        string cleanReferenceTitle
+    )
+    {
+        var normPublished = NormalizeTitleComparisonKey(publishedTitle);
+        var normRef = NormalizeTitleComparisonKey(cleanReferenceTitle);
+        if (string.IsNullOrWhiteSpace(normPublished) || string.IsNullOrWhiteSpace(normRef))
+        {
+            return false;
+        }
+
+        if (string.Equals(normPublished, normRef, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (normPublished.StartsWith(normRef + " (", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var strippedPublished = Regex.Replace(normPublished, @"\s*\([^()]+\)\s*$", "").Trim();
+        if (
+            !string.IsNullOrWhiteSpace(strippedPublished)
+            && string.Equals(strippedPublished, normRef, StringComparison.OrdinalIgnoreCase)
+        )
+        {
+            return true;
+        }
+
+        if (normRef.EndsWith("pie dough", StringComparison.OrdinalIgnoreCase))
+        {
+            if (
+                normRef.Contains("single-crust", StringComparison.OrdinalIgnoreCase)
+                && normPublished.Contains("Single-Crust Pie", StringComparison.OrdinalIgnoreCase)
+            )
+            {
+                return true;
+            }
+            if (
+                normRef.Contains("double-crust", StringComparison.OrdinalIgnoreCase)
+                && normPublished.Contains("Double-Crust Pie", StringComparison.OrdinalIgnoreCase)
+            )
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static string NormalizeTitleComparisonKey(string title) =>
+        title.Replace('\u2019', '\'').Replace('\u2018', '\'').Trim();
+
+    public static async Task<Guid?> ResolveRecipeReferenceAsync(
+        AppDbContext dbContext,
+        string title,
+        Guid? excludedRecipeId,
+        CancellationToken cancellationToken
+    ) => (await FindMatchingRecipeAsync(dbContext, title, excludedRecipeId, cancellationToken))?.Id;
 
     public static async Task<int> BacklinkUnresolvedRecipeReferencesAsync(
         AppDbContext dbContext,
@@ -149,7 +244,10 @@ public static class IngestionCatalogMaterializer
             var candidateTitle =
                 RecipeDraftNormalizer.NormalizeRecipeReferenceTitle(ri.UnresolvedRecipeTitle)
                 ?? ri.UnresolvedRecipeTitle!.Trim();
-            if (string.Equals(candidateTitle, cleanTitle, StringComparison.OrdinalIgnoreCase))
+            if (
+                string.Equals(candidateTitle, cleanTitle, StringComparison.OrdinalIgnoreCase)
+                || IsRecipeReferenceTitleMatch(recipeTitle, candidateTitle)
+            )
             {
                 ri.LinkedRecipeId = recipeId;
                 ri.UnresolvedRecipeTitle = null;
@@ -205,17 +303,28 @@ public static class IngestionCatalogMaterializer
             var candidateTitle =
                 RecipeDraftNormalizer.NormalizeRecipeReferenceTitle(ri.UnresolvedRecipeTitle)
                 ?? ri.UnresolvedRecipeTitle!.Trim();
-            if (
-                recipeMap.TryGetValue(candidateTitle, out var matchedId)
-                || recipeMap.TryGetValue(ri.UnresolvedRecipeTitle!.Trim(), out matchedId)
-            )
+            Guid matchedId = Guid.Empty;
+            var found =
+                recipeMap.TryGetValue(candidateTitle, out matchedId)
+                || recipeMap.TryGetValue(ri.UnresolvedRecipeTitle!.Trim(), out matchedId);
+
+            if (!found)
             {
-                if (matchedId != ri.RecipeId)
+                var fuzzy = allRecipes.FirstOrDefault(r =>
+                    r.Id != ri.RecipeId && IsRecipeReferenceTitleMatch(r.Title, candidateTitle)
+                );
+                if (fuzzy is not null)
                 {
-                    ri.LinkedRecipeId = matchedId;
-                    ri.UnresolvedRecipeTitle = null;
-                    updatedCount++;
+                    matchedId = fuzzy.Id;
+                    found = true;
                 }
+            }
+
+            if (found && matchedId != ri.RecipeId)
+            {
+                ri.LinkedRecipeId = matchedId;
+                ri.UnresolvedRecipeTitle = null;
+                updatedCount++;
             }
         }
 
@@ -225,6 +334,444 @@ public static class IngestionCatalogMaterializer
         }
 
         return updatedCount;
+    }
+
+    public static async Task<(
+        IngestionExtractedDraftDto Draft,
+        List<string> UnresolvedReferenceIssues
+    )> ResolveDraftRecipeReferencesAsync(
+        AppDbContext dbContext,
+        IngestionExtractedDraftDto draft,
+        Guid? excludedRecipeId,
+        CancellationToken cancellationToken
+    )
+    {
+        var unresolvedIssues = new List<string>();
+        if (
+            draft.Ingredients is not { Count: > 0 }
+            || !draft.Ingredients.Any(i => i.IsRecipeReference)
+        )
+        {
+            return (draft, unresolvedIssues);
+        }
+
+        var updatedIngredients = new List<IngestionDraftIngredientDto>(draft.Ingredients.Count);
+        foreach (var ing in draft.Ingredients)
+        {
+            if (ing.IsRecipeReference && !string.IsNullOrWhiteSpace(ing.ReferencedRecipeTitle))
+            {
+                var cleanTitle =
+                    RecipeDraftNormalizer.NormalizeRecipeReferenceTitle(ing.ReferencedRecipeTitle)
+                    ?? ing.ReferencedRecipeTitle.Trim();
+
+                var matchedRecipe = await FindMatchingRecipeAsync(
+                    dbContext,
+                    cleanTitle,
+                    excludedRecipeId,
+                    cancellationToken
+                );
+
+                if (matchedRecipe is not null)
+                {
+                    updatedIngredients.Add(
+                        ing with
+                        {
+                            MatchedRecipeId = matchedRecipe.Id,
+                            MatchedRecipeTitle = matchedRecipe.Title,
+                            MatchedRecipeSlug = matchedRecipe.Slug,
+                        }
+                    );
+                    continue;
+                }
+
+                var unlinkedTitle = !string.IsNullOrWhiteSpace(cleanTitle)
+                    ? cleanTitle
+                    : (
+                        !string.IsNullOrWhiteSpace(ing.DisplayName) ? ing.DisplayName : "sub-recipe"
+                    );
+                unresolvedIssues.Add(
+                    $"Referenced recipe '{unlinkedTitle}' is not published yet and could not be linked."
+                );
+            }
+            else if (ing.IsRecipeReference && !ing.MatchedRecipeId.HasValue)
+            {
+                var unlinkedTitle = !string.IsNullOrWhiteSpace(ing.DisplayName)
+                    ? ing.DisplayName
+                    : "sub-recipe";
+                unresolvedIssues.Add(
+                    $"Referenced recipe '{unlinkedTitle}' is missing a referenced recipe title."
+                );
+            }
+
+            updatedIngredients.Add(ing);
+        }
+
+        return (draft with { Ingredients = updatedIngredients }, unresolvedIssues);
+    }
+
+    public static async Task<RecipeDetailDto> PublishDraftAsync(
+        AppDbContext dbContext,
+        IRecipeService recipeService,
+        IMediaStorageService mediaStorageService,
+        IngestionJob job,
+        IngestionExtractedDraftDto draft,
+        CancellationToken cancellationToken
+    )
+    {
+        var ingredientsInput = new List<RecipeIngredientInput>();
+
+        if (draft.Ingredients is not null)
+        {
+            foreach (var ing in draft.Ingredients)
+            {
+                var recipeTitle = ing.IsRecipeReference ? ing.ReferencedRecipeTitle?.Trim() : null;
+                if (ing.IsRecipeReference && string.IsNullOrWhiteSpace(recipeTitle))
+                {
+                    throw new DomainValidationException(
+                        "A title is required for a recipe component reference."
+                    );
+                }
+
+                var foodItemId = ing.IsRecipeReference ? null : ing.MatchedFoodItemId;
+                Guid? linkedRecipeId = null;
+
+                if (!string.IsNullOrWhiteSpace(recipeTitle))
+                {
+                    linkedRecipeId =
+                        ing.MatchedRecipeId
+                        ?? await ResolveRecipeReferenceAsync(
+                            dbContext,
+                            recipeTitle,
+                            job.ResultingRecipeId,
+                            cancellationToken
+                        );
+                }
+
+                if (
+                    foodItemId == null
+                    && !ing.IsRecipeReference
+                    && ing.CreateNewFoodItem
+                    && !string.IsNullOrWhiteSpace(ing.ProposedFoodItemName)
+                )
+                {
+                    foodItemId = await ResolveOrCreateFoodItemAsync(
+                        dbContext,
+                        ing.ProposedFoodItemName,
+                        ing.SuggestedIsPantryStaple,
+                        ing.SuggestedCategory,
+                        cancellationToken
+                    );
+                }
+
+                var (cleanQty, cleanMaxQty) = RecipeDraftNormalizer.NormalizeQuantities(
+                    ing.Quantity,
+                    ing.MaxQuantity
+                );
+
+                var cleanUnit =
+                    ing.Unit == MeasurementUnit.Custom
+                    && (
+                        string.IsNullOrWhiteSpace(ing.CustomUnitName)
+                        || RecipeDraftNormalizer.IsDisallowedUnitPlaceholder(ing.CustomUnitName)
+                    )
+                        ? null
+                        : ing.Unit;
+
+                if (
+                    (cleanUnit is MeasurementUnit.Pinch or MeasurementUnit.Dash)
+                    && (cleanQty is null or <= 0.1m)
+                )
+                {
+                    cleanQty = 1m;
+                }
+
+                ingredientsInput.Add(
+                    new RecipeIngredientInput(
+                        SectionName: ing.SectionName,
+                        Quantity: cleanQty,
+                        MaxQuantity: cleanMaxQty,
+                        Unit: cleanUnit,
+                        CustomUnitName: cleanUnit == MeasurementUnit.Custom
+                            ? ing.CustomUnitName
+                            : null,
+                        FoodItemId: foodItemId,
+                        LinkedRecipeId: linkedRecipeId,
+                        DisplayName: string.IsNullOrWhiteSpace(recipeTitle)
+                            ? ing.DisplayName
+                            : recipeTitle,
+                        PreparationNote: ing.PreparationNote,
+                        IsOptional: ing.IsOptional,
+                        OriginalRawText: ing.OriginalRawText,
+                        AlternativeMeasurement: ing.AlternativeMeasurement,
+                        PreferAlternativeMeasurement: ing.PreferAlternativeMeasurement,
+                        UnresolvedRecipeTitle: linkedRecipeId.HasValue ? null : recipeTitle
+                    )
+                );
+            }
+        }
+
+        var stepsInput = new List<RecipeStepInput>();
+        if (draft.Steps is not null)
+        {
+            foreach (var s in draft.Steps)
+            {
+                stepsInput.Add(
+                    new RecipeStepInput(
+                        SectionName: s.SectionName,
+                        Instruction: s.Instruction,
+                        IngredientIndices: s.IngredientIndices,
+                        Timers: s.Timers,
+                        ImagePath: s.ImagePath,
+                        IngredientAmounts: s.IngredientAmounts
+                    )
+                );
+            }
+        }
+
+        var resolvedTagIds = await ResolveAndMaterializeTagsAsync(
+            dbContext,
+            draft.SuggestedTagIds,
+            draft.ProposedTagNames,
+            cancellationToken
+        );
+
+        var upsertRequest = new UpsertRecipeRequest(
+            Title: draft.Title,
+            Description: draft.Description != null && draft.Description.Length > 2000
+                ? draft.Description[..2000].TrimEnd()
+                : draft.Description,
+            Status: RecipeStatus.Published,
+            BaseServings: draft.BaseServings,
+            YieldDisplay: draft.YieldDisplay,
+            PrepTimeMinutes: draft.PrepTimeMinutes,
+            CookTimeMinutes: draft.CookTimeMinutes,
+            TotalTimeMinutes: draft.TotalTimeMinutes,
+            Difficulty: draft.Difficulty,
+            SourceUrl: draft.SourceUrl,
+            SourceName: draft.SourceName,
+            SourceAuthor: draft.SourceAuthor,
+            SourceBookTitle: draft.SourceBookTitle,
+            SourceBookPage: draft.SourceBookPage,
+            Ingredients: ingredientsInput,
+            Steps: stepsInput,
+            CoverImagePath: draft.CoverImagePath,
+            ThumbnailImagePath: draft.ThumbnailImagePath,
+            CollectionIds: draft.SuggestedCollectionIds,
+            TagIds: resolvedTagIds,
+            ExtractedModel: job.ExtractedModel
+        );
+
+        RecipeDetailDto createdRecipe;
+
+        if (job.ResultingRecipeId.HasValue)
+        {
+            var existingRecipe = await dbContext.Recipes.FirstOrDefaultAsync(
+                r => r.Id == job.ResultingRecipeId.Value,
+                cancellationToken
+            );
+
+            if (existingRecipe is not null)
+            {
+                var updated = await recipeService.UpdateRecipeAsync(
+                    existingRecipe.Id,
+                    upsertRequest,
+                    cancellationToken
+                );
+
+                createdRecipe =
+                    updated
+                    ?? await recipeService.CreateRecipeAsync(upsertRequest, cancellationToken);
+            }
+            else
+            {
+                createdRecipe = await recipeService.CreateRecipeAsync(
+                    upsertRequest,
+                    cancellationToken
+                );
+            }
+        }
+        else
+        {
+            createdRecipe = await recipeService.CreateRecipeAsync(upsertRequest, cancellationToken);
+        }
+
+        await PromoteOrAttachSourceFilesAsync(
+            dbContext,
+            mediaStorageService,
+            job,
+            draft,
+            createdRecipe.Id,
+            cancellationToken
+        );
+
+        return createdRecipe;
+    }
+
+    public static async Task<int> PromoteWaitingRecipeReferenceJobsAsync(
+        AppDbContext dbContext,
+        IRecipeService recipeService,
+        IMediaStorageService mediaStorageService,
+        bool globalAutoPublish,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var totalPromoted = 0;
+        var visitedJobIds = new HashSet<Guid>();
+
+        for (var pass = 0; pass < 3; pass++)
+        {
+            var waitingJobIds = await dbContext
+                .IngestionJobs.AsNoTracking()
+                .Where(j =>
+                    j.Status == IngestionJobStatus.ReadyForReview
+                    && j.StatusDetail != null
+                    && j.StatusDetail.Contains("is not published yet")
+                    && j.ExtractedDraftJson != null
+                )
+                .OrderBy(j => j.CreatedAt)
+                .Select(j => j.Id)
+                .ToListAsync(cancellationToken);
+
+            var candidateIds = waitingJobIds.Where(id => !visitedJobIds.Contains(id)).ToList();
+            if (candidateIds.Count == 0)
+            {
+                break;
+            }
+
+            var promotedInPass = 0;
+            foreach (var jobId in candidateIds)
+            {
+                visitedJobIds.Add(jobId);
+
+                var waitingJob = await dbContext.IngestionJobs.FirstOrDefaultAsync(
+                    j => j.Id == jobId,
+                    cancellationToken
+                );
+                if (
+                    waitingJob is null
+                    || waitingJob.Status != IngestionJobStatus.ReadyForReview
+                    || string.IsNullOrWhiteSpace(waitingJob.ExtractedDraftJson)
+                )
+                {
+                    continue;
+                }
+
+                IngestionExtractedDraftDto? draft;
+                try
+                {
+                    draft = JsonSerializer.Deserialize<IngestionExtractedDraftDto>(
+                        waitingJob.ExtractedDraftJson,
+                        JsonOptions
+                    );
+                }
+                catch
+                {
+                    continue;
+                }
+
+                if (draft is null)
+                {
+                    continue;
+                }
+
+                var (resolvedDraft, refIssues) = await ResolveDraftRecipeReferencesAsync(
+                    dbContext,
+                    draft,
+                    waitingJob.ResultingRecipeId,
+                    cancellationToken
+                );
+
+                var diagSource = !string.IsNullOrWhiteSpace(waitingJob.StructuredSourceText)
+                    ? waitingJob.StructuredSourceText
+                    : waitingJob.NormalizedSourceText ?? waitingJob.RawText;
+                var payload = IngestionDraftRepairMapper.ToPayload(resolvedDraft);
+                var diagIssues = RecipeExtractionDiagnostics.GetReviewIssues(payload, diagSource);
+                var qualityWarnings = RecipeExtractionDiagnostics.GetQualityWarnings(payload);
+
+                var allIssues = diagIssues
+                    .Concat(refIssues)
+                    .Distinct(StringComparer.Ordinal)
+                    .ToList();
+
+                var updatedScore = RecipeDraftNormalizer.CalculateConfidenceScore(
+                    resolvedDraft.ConfidenceScore,
+                    resolvedDraft.Ingredients?.Count ?? 0,
+                    resolvedDraft.Steps?.Count ?? 0,
+                    validationIssueCount: allIssues.Count,
+                    measurementWarningCount: resolvedDraft.MeasurementWarnings?.Count ?? 0,
+                    qualityWarningCount: qualityWarnings.Count
+                );
+
+                resolvedDraft = resolvedDraft with { ConfidenceScore = updatedScore };
+
+                var hasUnresolvedRefs =
+                    resolvedDraft.Ingredients?.Any(i =>
+                        i.IsRecipeReference && !i.MatchedRecipeId.HasValue
+                    ) == true;
+
+                var canAutoPublish =
+                    allIssues.Count == 0
+                    && !hasUnresolvedRefs
+                    && (globalAutoPublish || waitingJob.AutoPublish)
+                    && waitingJob.Channel is IngestionChannel.WebUrl or IngestionChannel.RawText
+                    && !string.IsNullOrWhiteSpace(resolvedDraft.Title)
+                    && (resolvedDraft.Ingredients?.Count ?? 0) >= 1
+                    && (resolvedDraft.Steps?.Count ?? 0) >= 1
+                    && updatedScore >= (waitingJob.AutoPublish ? 0.60m : 0.85m);
+
+                if (canAutoPublish)
+                {
+                    var createdRecipe = await PublishDraftAsync(
+                        dbContext,
+                        recipeService,
+                        mediaStorageService,
+                        waitingJob,
+                        resolvedDraft,
+                        cancellationToken
+                    );
+
+                    waitingJob.Status = IngestionJobStatus.Published;
+                    waitingJob.ResultingRecipeId = createdRecipe.Id;
+                    waitingJob.ExtractedDraftJson = JsonSerializer.Serialize(
+                        resolvedDraft,
+                        JsonOptions
+                    );
+                    waitingJob.ConfidenceScore = updatedScore;
+                    waitingJob.DisplayTitle = resolvedDraft.Title;
+                    waitingJob.ProcessedAt = DateTimeOffset.UtcNow;
+                    waitingJob.StatusDetail =
+                        $"Auto-published after referenced recipe became available ({waitingJob.ExtractedModel ?? "auto-backlink"}).";
+
+                    await dbContext.SaveChangesAsync(cancellationToken);
+
+                    await BacklinkUnresolvedRecipeReferencesAsync(
+                        dbContext,
+                        createdRecipe.Id,
+                        createdRecipe.Title,
+                        cancellationToken
+                    );
+
+                    promotedInPass++;
+                    totalPromoted++;
+                }
+                else if (resolvedDraft != draft)
+                {
+                    waitingJob.ExtractedDraftJson = JsonSerializer.Serialize(
+                        resolvedDraft,
+                        JsonOptions
+                    );
+                    waitingJob.ConfidenceScore = updatedScore;
+                    await dbContext.SaveChangesAsync(cancellationToken);
+                }
+            }
+
+            if (promotedInPass == 0)
+            {
+                break;
+            }
+        }
+
+        return totalPromoted;
     }
 
     public static async Task<IReadOnlyList<Guid>> ResolveAndMaterializeTagsAsync(

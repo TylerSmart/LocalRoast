@@ -279,4 +279,108 @@ public sealed class StepInstructionParserTests
             cleaned
         );
     }
+
+    [TestMethod]
+    public void ParseSegments_RepairsUnderscoreDelimiters_ToCanonicalTokens()
+    {
+        const string text =
+            "Add ||{\"ingredient\": \"vanilla extract\", \"amount\": 2, \"unit\": \"tsp\"}__. Season with ||{\"ingredient\": \"table salt\"}__||.";
+
+        var segments = StepInstructionParser.ParseSegments(text);
+        var tokens = segments.Where(s => s.Token is not null).Select(s => s.Token).ToList();
+
+        Assert.HasCount(2, tokens);
+        var vanilla = tokens[0] as StepIngredientToken;
+        Assert.IsNotNull(vanilla);
+        Assert.AreEqual("vanilla extract", vanilla.Ingredient);
+        Assert.AreEqual(2m, vanilla.Amount);
+        Assert.AreEqual(MeasurementUnit.Tsp, vanilla.Unit);
+
+        var salt = tokens[1] as StepIngredientToken;
+        Assert.IsNotNull(salt);
+        Assert.AreEqual("table salt", salt.Ingredient);
+
+        var cleaned = StepInstructionParser.CleanStepInstruction(text);
+        Assert.DoesNotContain("__", cleaned);
+        Assert.Contains("||{\"ingredient\": \"vanilla extract\"", cleaned);
+        Assert.Contains("||{\"ingredient\": \"table salt\"}||", cleaned);
+    }
+
+    [TestMethod]
+    public void ParseSegments_MergesSplitJsonObjectsInsideDelimiters()
+    {
+        const string text =
+            "Melt ||{\"ingredient\": \"unsalted butter\", \"amount\": 6, \"unit\": \"tbsp\"}, {\"displayAmount\": 6, \"displayUnit\": \"tbsp\"}|| in a skillet.";
+
+        var segments = StepInstructionParser.ParseSegments(text);
+        var token = segments.Select(s => s.Token).OfType<StepIngredientToken>().Single();
+
+        Assert.AreEqual("unsalted butter", token.Ingredient);
+        Assert.AreEqual(6m, token.Amount);
+        Assert.AreEqual(MeasurementUnit.Tbsp, token.Unit);
+        Assert.AreEqual(6m, token.DisplayAmount);
+        Assert.AreEqual(MeasurementUnit.Tbsp, token.DisplayUnit);
+    }
+
+    [TestMethod]
+    public void ParseSegments_RepairsMissingColonsAndClosingBraces()
+    {
+        const string text =
+            "Whisk ||{\"ingredient\"cornstarch\", \"amount\": 2, \"unit\": \"tbsp\"}|| and ||{\"ingredient\"Chicken thighs\"|| with ||{\"ingredient\": \"salt\", \"amount\": 1, \"unit\"tbsp\"}||.";
+
+        var segments = StepInstructionParser.ParseSegments(text);
+        var tokens = segments.Select(s => s.Token).OfType<StepIngredientToken>().ToList();
+
+        Assert.HasCount(3, tokens);
+        Assert.AreEqual("cornstarch", tokens[0].Ingredient);
+        Assert.AreEqual(2m, tokens[0].Amount);
+        Assert.AreEqual(MeasurementUnit.Tbsp, tokens[0].Unit);
+
+        Assert.AreEqual("Chicken thighs", tokens[1].Ingredient);
+
+        Assert.AreEqual("salt", tokens[2].Ingredient);
+        Assert.AreEqual(1m, tokens[2].Amount);
+        Assert.AreEqual(MeasurementUnit.Tbsp, tokens[2].Unit);
+    }
+
+    [TestMethod]
+    public void ParseSegments_SupportsPinchAndDashStringAmounts()
+    {
+        const string text =
+            "Season with ||{\"ingredient\": \"salt\", \"amount\": \"pinch\", \"unit\": \"pinch\"}|| and ||{\"ingredient\": \"cayenne\", \"amount\": \"dash\", \"unit\": \"dash\"}||.";
+
+        var segments = StepInstructionParser.ParseSegments(text);
+        var tokens = segments.Select(s => s.Token).OfType<StepIngredientToken>().ToList();
+
+        Assert.HasCount(2, tokens);
+        Assert.AreEqual(1m, tokens[0].Amount);
+        Assert.AreEqual(MeasurementUnit.Pinch, tokens[0].Unit);
+        Assert.AreEqual(1m, tokens[1].Amount);
+        Assert.AreEqual(MeasurementUnit.Dash, tokens[1].Unit);
+    }
+
+    [TestMethod]
+    public void ParseSegments_FallsBackToCanonicalAndDisplayNameKeys()
+    {
+        const string text =
+            "Boil ||{\"amount\": 4, \"unit\": \"qt\", \"canonicalFoodName\": \"Water\", \"displayName\": \"Water\"}||.";
+
+        var segments = StepInstructionParser.ParseSegments(text);
+        var token = segments.Select(s => s.Token).OfType<StepIngredientToken>().Single();
+
+        Assert.AreEqual("Water", token.Ingredient);
+        Assert.AreEqual(4m, token.Amount);
+        Assert.AreEqual(MeasurementUnit.Qt, token.Unit);
+    }
+
+    [TestMethod]
+    public void CleanStepInstruction_ConvertsNamelessIngredientTokenToPlainText()
+    {
+        const string text =
+            "Pour ||{\"amount\": 1.5, \"unit\": \"cup\", \"displayAmount\": 1.5, \"displayUnit\": \"cup\"}|| into the bowl.";
+
+        var cleaned = StepInstructionParser.CleanStepInstruction(text);
+
+        Assert.AreEqual("Pour 1.5 cup into the bowl.", cleaned);
+    }
 }

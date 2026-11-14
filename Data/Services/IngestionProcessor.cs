@@ -772,6 +772,20 @@ public sealed class IngestionProcessor(
                 rawSourceText: job.NormalizedSourceText ?? job.RawText
             );
 
+            var postNormalizedPayload = IngestionDraftRepairMapper.ToPayload(draft);
+            var postNormalizedIssues = RecipeExtractionDiagnostics.GetReviewIssues(
+                postNormalizedPayload,
+                diagnosticsSource
+            );
+            unresolvedIssues = unresolvedIssues
+                .Where(issue =>
+                    issue.Contains("out of food names", StringComparison.OrdinalIgnoreCase)
+                )
+                .Concat(postNormalizedIssues)
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+            qualityWarnings = RecipeExtractionDiagnostics.GetQualityWarnings(postNormalizedPayload);
+
             draft = draft with
             {
                 ConfidenceScore = RecipeDraftNormalizer.CalculateConfidenceScore(
@@ -789,82 +803,22 @@ public sealed class IngestionProcessor(
                 && draft.Ingredients.Any(i => i.IsRecipeReference)
             )
             {
-                var updatedIngredients = new List<IngestionDraftIngredientDto>();
-                foreach (var ing in draft.Ingredients)
+                var (resolvedDraft, referenceIssues) =
+                    await IngestionCatalogMaterializer.ResolveDraftRecipeReferencesAsync(
+                        dbContext,
+                        draft,
+                        job.ResultingRecipeId,
+                        jobCt
+                    );
+                unresolvedIssues.AddRange(referenceIssues);
+                draft = resolvedDraft with
                 {
-                    if (
-                        ing.IsRecipeReference
-                        && !string.IsNullOrWhiteSpace(ing.ReferencedRecipeTitle)
-                    )
-                    {
-                        var cleanTitle =
-                            RecipeDraftNormalizer.NormalizeRecipeReferenceTitle(
-                                ing.ReferencedRecipeTitle
-                            ) ?? ing.ReferencedRecipeTitle.Trim();
-                        var normalizedTitle = cleanTitle.ToUpperInvariant();
-                        var matchedRecipe = await dbContext
-                            .Recipes.AsNoTracking()
-                            .Where(r =>
-                                r.Title.ToUpper() == normalizedTitle
-                                && (
-                                    !job.ResultingRecipeId.HasValue
-                                    || r.Id != job.ResultingRecipeId.Value
-                                )
-                            )
-                            .Select(r => new
-                            {
-                                r.Id,
-                                r.Title,
-                                r.Slug,
-                            })
-                            .FirstOrDefaultAsync(jobCt);
-
-                        if (matchedRecipe is not null)
-                        {
-                            updatedIngredients.Add(
-                                ing with
-                                {
-                                    MatchedRecipeId = matchedRecipe.Id,
-                                    MatchedRecipeTitle = matchedRecipe.Title,
-                                    MatchedRecipeSlug = matchedRecipe.Slug,
-                                }
-                            );
-                            continue;
-                        }
-
-                        var unlinkedTitle = !string.IsNullOrWhiteSpace(cleanTitle)
-                            ? cleanTitle
-                            : (
-                                !string.IsNullOrWhiteSpace(ing.DisplayName)
-                                    ? ing.DisplayName
-                                    : "sub-recipe"
-                            );
-                        unresolvedIssues.Add(
-                            $"Referenced recipe '{unlinkedTitle}' is not published yet and could not be linked."
-                        );
-                    }
-                    else if (ing.IsRecipeReference && !ing.MatchedRecipeId.HasValue)
-                    {
-                        var unlinkedTitle = !string.IsNullOrWhiteSpace(ing.DisplayName)
-                            ? ing.DisplayName
-                            : "sub-recipe";
-                        unresolvedIssues.Add(
-                            $"Referenced recipe '{unlinkedTitle}' is missing a referenced recipe title."
-                        );
-                    }
-
-                    updatedIngredients.Add(ing);
-                }
-
-                draft = draft with
-                {
-                    Ingredients = updatedIngredients,
                     ConfidenceScore = RecipeDraftNormalizer.CalculateConfidenceScore(
                         rawExtracted.ConfidenceScore,
-                        updatedIngredients.Count,
-                        draft.Steps?.Count ?? 0,
+                        resolvedDraft.Ingredients?.Count ?? 0,
+                        resolvedDraft.Steps?.Count ?? 0,
                         validationIssueCount: unresolvedIssues.Count,
-                        measurementWarningCount: draft.MeasurementWarnings?.Count ?? 0,
+                        measurementWarningCount: resolvedDraft.MeasurementWarnings?.Count ?? 0,
                         qualityWarningCount: qualityWarnings.Count
                     ),
                 };
@@ -977,6 +931,17 @@ public sealed class IngestionProcessor(
             }
 
             await dbContext.SaveChangesAsync(jobCt);
+
+            if (canAutoPublish)
+            {
+                await IngestionCatalogMaterializer.PromoteWaitingRecipeReferenceJobsAsync(
+                    dbContext,
+                    recipeService,
+                    mediaStorageService,
+                    globalAutoPublish: config.AutoPublishHighConfidenceText,
+                    jobCt
+                );
+            }
 
             return true;
         }
@@ -1321,217 +1286,19 @@ public sealed class IngestionProcessor(
         return 0;
     }
 
-    private async Task<RecipeDetailDto> PublishDraftInternalAsync(
+    private Task<RecipeDetailDto> PublishDraftInternalAsync(
         IngestionJob job,
         IngestionExtractedDraftDto draft,
         CancellationToken cancellationToken
-    )
-    {
-        // 1. Create missing food items
-
-        var ingredientsInput = new List<RecipeIngredientInput>();
-
-        if (draft.Ingredients is not null)
-        {
-            foreach (var ing in draft.Ingredients)
-            {
-                var recipeTitle = ing.IsRecipeReference ? ing.ReferencedRecipeTitle?.Trim() : null;
-                if (ing.IsRecipeReference && string.IsNullOrWhiteSpace(recipeTitle))
-                {
-                    throw new DomainValidationException(
-                        "A title is required for a recipe component reference."
-                    );
-                }
-
-                var foodItemId = ing.IsRecipeReference ? null : ing.MatchedFoodItemId;
-                Guid? linkedRecipeId = null;
-
-                if (!string.IsNullOrWhiteSpace(recipeTitle))
-                {
-                    linkedRecipeId =
-                        ing.MatchedRecipeId
-                        ?? await IngestionCatalogMaterializer.ResolveRecipeReferenceAsync(
-                            dbContext,
-                            recipeTitle,
-                            job.ResultingRecipeId,
-                            cancellationToken
-                        );
-                }
-
-                if (
-                    foodItemId == null
-                    && !ing.IsRecipeReference
-                    && ing.CreateNewFoodItem
-                    && !string.IsNullOrWhiteSpace(ing.ProposedFoodItemName)
-                )
-                {
-                    foodItemId = await IngestionCatalogMaterializer.ResolveOrCreateFoodItemAsync(
-                        dbContext,
-                        ing.ProposedFoodItemName,
-                        ing.SuggestedIsPantryStaple,
-                        ing.SuggestedCategory,
-                        cancellationToken
-                    );
-                }
-
-                var (cleanQty, cleanMaxQty) = RecipeDraftNormalizer.NormalizeQuantities(
-                    ing.Quantity,
-                    ing.MaxQuantity
-                );
-
-                var cleanUnit =
-                    ing.Unit == MeasurementUnit.Custom
-                    && (
-                        string.IsNullOrWhiteSpace(ing.CustomUnitName)
-                        || RecipeDraftNormalizer.IsDisallowedUnitPlaceholder(ing.CustomUnitName)
-                    )
-                        ? null
-                        : ing.Unit;
-
-                if (
-                    (cleanUnit is MeasurementUnit.Pinch or MeasurementUnit.Dash)
-                    && (cleanQty is null or <= 0.1m)
-                )
-                {
-                    cleanQty = 1m;
-                }
-
-                ingredientsInput.Add(
-                    new RecipeIngredientInput(
-                        SectionName: ing.SectionName,
-                        Quantity: cleanQty,
-                        MaxQuantity: cleanMaxQty,
-                        Unit: cleanUnit,
-                        CustomUnitName: cleanUnit == MeasurementUnit.Custom
-                            ? ing.CustomUnitName
-                            : null,
-                        FoodItemId: foodItemId,
-                        LinkedRecipeId: linkedRecipeId,
-                        DisplayName: string.IsNullOrWhiteSpace(recipeTitle)
-                            ? ing.DisplayName
-                            : recipeTitle,
-                        PreparationNote: ing.PreparationNote,
-                        IsOptional: ing.IsOptional,
-                        OriginalRawText: ing.OriginalRawText,
-                        AlternativeMeasurement: ing.AlternativeMeasurement,
-                        PreferAlternativeMeasurement: ing.PreferAlternativeMeasurement,
-                        UnresolvedRecipeTitle: linkedRecipeId.HasValue ? null : recipeTitle
-                    )
-                );
-            }
-        }
-
-        // 2. Map steps
-
-        var stepsInput = new List<RecipeStepInput>();
-
-        if (draft.Steps is not null)
-        {
-            foreach (var s in draft.Steps)
-            {
-                stepsInput.Add(
-                    new RecipeStepInput(
-                        SectionName: s.SectionName,
-                        Instruction: s.Instruction,
-                        IngredientIndices: s.IngredientIndices,
-                        Timers: s.Timers,
-                        ImagePath: s.ImagePath,
-                        IngredientAmounts: s.IngredientAmounts
-                    )
-                );
-            }
-        }
-
-        // 3. Resolve & auto-create any proposed tags
-
-        var resolvedTagIds = await IngestionCatalogMaterializer.ResolveAndMaterializeTagsAsync(
+    ) =>
+        IngestionCatalogMaterializer.PublishDraftAsync(
             dbContext,
-            draft.SuggestedTagIds,
-            draft.ProposedTagNames,
-            cancellationToken
-        );
-
-        // 4. Create published recipe
-
-        var upsertRequest = new UpsertRecipeRequest(
-            Title: draft.Title,
-            Description: draft.Description != null && draft.Description.Length > 2000
-                ? draft.Description[..2000].TrimEnd()
-                : draft.Description,
-            Status: RecipeStatus.Published,
-            BaseServings: draft.BaseServings,
-            YieldDisplay: draft.YieldDisplay,
-            PrepTimeMinutes: draft.PrepTimeMinutes,
-            CookTimeMinutes: draft.CookTimeMinutes,
-            TotalTimeMinutes: draft.TotalTimeMinutes,
-            Difficulty: draft.Difficulty,
-            SourceUrl: draft.SourceUrl,
-            SourceName: draft.SourceName,
-            SourceAuthor: draft.SourceAuthor,
-            SourceBookTitle: draft.SourceBookTitle,
-            SourceBookPage: draft.SourceBookPage,
-            Ingredients: ingredientsInput,
-            Steps: stepsInput,
-            CoverImagePath: draft.CoverImagePath,
-            ThumbnailImagePath: draft.ThumbnailImagePath,
-            CollectionIds: draft.SuggestedCollectionIds,
-            TagIds: resolvedTagIds,
-            ExtractedModel: job.ExtractedModel
-        );
-
-        RecipeDetailDto createdRecipe;
-
-        if (job.ResultingRecipeId.HasValue)
-        {
-            var existingRecipe = await dbContext.Recipes.FirstOrDefaultAsync(
-                r => r.Id == job.ResultingRecipeId.Value,
-                cancellationToken
-            );
-
-            if (existingRecipe is not null)
-            {
-                var updated = await recipeService.UpdateRecipeAsync(
-                    existingRecipe.Id,
-                    upsertRequest,
-                    cancellationToken
-                );
-
-                if (updated is not null)
-                {
-                    createdRecipe = updated;
-                }
-                else
-                {
-                    createdRecipe = await recipeService.CreateRecipeAsync(
-                        upsertRequest,
-                        cancellationToken
-                    );
-                }
-            }
-            else
-            {
-                createdRecipe = await recipeService.CreateRecipeAsync(
-                    upsertRequest,
-                    cancellationToken
-                );
-            }
-        }
-        else
-        {
-            createdRecipe = await recipeService.CreateRecipeAsync(upsertRequest, cancellationToken);
-        }
-
-        await IngestionCatalogMaterializer.PromoteOrAttachSourceFilesAsync(
-            dbContext,
+            recipeService,
             mediaStorageService,
             job,
             draft,
-            createdRecipe.Id,
             cancellationToken
         );
-
-        return createdRecipe;
-    }
 
     public static string BuildNormalizedWebText(ScrapedWebRecipePayload payload)
     {

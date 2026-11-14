@@ -140,6 +140,15 @@ public static class RecipeDraftNormalizer
                 }
             }
 
+            if (nameScore == 0 && IsEggPartMatch(tokenName, disp, alt, candidates))
+            {
+                nameScore =
+                    !string.IsNullOrWhiteSpace(c.PreparationNote)
+                    && c.PreparationNote.Contains("separated", StringComparison.OrdinalIgnoreCase)
+                        ? 85
+                        : 75;
+            }
+
             if (nameScore > 0)
             {
                 matching.Add((c, nameScore));
@@ -485,9 +494,194 @@ public static class RecipeDraftNormalizer
     );
 
     public static readonly Regex RecipeReferenceRegex = new(
-        @"^\s*(?:(?:\d+(?:\s+\d+/\d+|/\d+)?|\d+(?:\.\d+)?)\s*(?:recipe|batch(?:\s+of)?)\s+(?<title>.+?)(?:\s*\((?:optional\s*;\s*)?(?:see\s+)?(?:recipes?\s+follows?|this\s+page(?:\s+and\s+this\s+page)?|pages?\s+\d+)\))?|(?<title>.+?)\s*\((?:optional\s*;\s*)?(?:see\s+)?(?:recipes?\s+follows?|this\s+page(?:\s+and\s+this\s+page)?|pages?\s+\d+)\))\s*$",
+        @"^\s*(?:(?:\d+(?:\s+\d+/\d+|/\d+)?|\d+(?:\.\d+)?)\s*(?:recipe|batch(?:\s+of)?)\s+(?<title>.+?)(?:\s*\((?:optional\s*;\s*)?(?:see\s+)?(?:recipes?\s+follows?|this\s+page(?:\s+and\s+this\s+page)?|pages?\s+\d+)\)(?:\s*,\s*[^()]*)?)?|(?<title>.+?)\s*\((?:optional\s*;\s*)?(?:see\s+)?(?:recipes?\s+follows?|this\s+page(?:\s+and\s+this\s+page)?|pages?\s+\d+)\)(?:\s*,\s*[^()]*)?)\s*$",
         RegexOptions.IgnoreCase | RegexOptions.Compiled
     );
+
+    private static readonly HashSet<string> GenericRecipeReferenceCategories = new(
+        StringComparer.OrdinalIgnoreCase
+    )
+    {
+        "glaze",
+        "sauce",
+        "pan sauce",
+        "barbecue sauce",
+        "bbq sauce",
+        "relish",
+        "topping",
+        "marinade",
+        "wet paste marinade",
+        "dry rub",
+        "spice rub",
+        "rub",
+        "flavored butter",
+        "compound butter",
+        "butter",
+        "dressing",
+        "vinaigrette",
+        "filling",
+        "frosting",
+        "icing",
+        "ganache",
+        "syrup",
+        "brine",
+        "salsa",
+        "dip",
+        "crust",
+    };
+
+    private static readonly TimeSpan HelperRegexTimeout = TimeSpan.FromSeconds(1);
+
+    public static bool IsWholeEggIngredient(string? displayName, string? canonicalName)
+    {
+        var combined = $"{displayName} {canonicalName}".Trim();
+        if (string.IsNullOrWhiteSpace(combined))
+        {
+            return false;
+        }
+
+        return Regex.IsMatch(combined, @"\beggs?\b", RegexOptions.IgnoreCase, HelperRegexTimeout)
+            && !Regex.IsMatch(
+                combined,
+                @"\b(?:noodles?|pasta|yolks?|whites?|replacer|substitute|wash|powder)\b",
+                RegexOptions.IgnoreCase,
+                HelperRegexTimeout
+            );
+    }
+
+    public static bool IsSeparatedEggPartTerm(string? text) =>
+        !string.IsNullOrWhiteSpace(text)
+        && Regex.IsMatch(
+            text,
+            @"\b(?:egg\s+yolks?|egg\s+whites?|yolks?|whites)\b",
+            RegexOptions.IgnoreCase,
+            HelperRegexTimeout
+        );
+
+    public static bool IsEggPartMatch(
+        string? tokenName,
+        string? candidateDisplayName,
+        string? candidateCanonicalName,
+        IReadOnlyList<IngredientCandidateInfo> allCandidates
+    ) =>
+        IsEggPartMatch(
+            tokenName,
+            candidateDisplayName,
+            candidateCanonicalName,
+            allCandidates.Select(c => (c.DisplayName, c.CanonicalOrMatchedName))
+        );
+
+    public static bool IsEggPartMatch(
+        string? tokenName,
+        string? candidateDisplayName,
+        string? candidateCanonicalName,
+        IEnumerable<(string? DisplayName, string? CanonicalName)> allIngredients
+    )
+    {
+        if (
+            string.IsNullOrWhiteSpace(tokenName)
+            || !IsSeparatedEggPartTerm(tokenName)
+            || !IsWholeEggIngredient(candidateDisplayName, candidateCanonicalName)
+        )
+        {
+            return false;
+        }
+
+        var wantsYolk = Regex.IsMatch(
+            tokenName,
+            @"\byolks?\b",
+            RegexOptions.IgnoreCase,
+            HelperRegexTimeout
+        );
+        var wantsWhite = Regex.IsMatch(
+            tokenName,
+            @"\b(?:egg\s+)?whites?\b",
+            RegexOptions.IgnoreCase,
+            HelperRegexTimeout
+        );
+
+        foreach (var (disp, canonical) in allIngredients)
+        {
+            var other = $"{disp} {canonical}".Trim();
+            if (string.IsNullOrWhiteSpace(other))
+            {
+                continue;
+            }
+
+            if (
+                wantsYolk
+                && Regex.IsMatch(other, @"\byolks?\b", RegexOptions.IgnoreCase, HelperRegexTimeout)
+            )
+            {
+                return false;
+            }
+
+            if (
+                wantsWhite
+                && Regex.IsMatch(
+                    other,
+                    @"\b(?:egg\s+whites?|whites)\b",
+                    RegexOptions.IgnoreCase,
+                    HelperRegexTimeout
+                )
+            )
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    public static bool IsGenericOrAlternativeRecipeReference(
+        string? referenceTitle,
+        string? sourceIngredientText,
+        string? currentRecipeTitle
+    )
+    {
+        if (string.IsNullOrWhiteSpace(referenceTitle))
+        {
+            return true;
+        }
+
+        var normalizedTitle =
+            NormalizeRecipeReferenceTitle(referenceTitle) ?? referenceTitle.Trim();
+        if (string.IsNullOrWhiteSpace(normalizedTitle))
+        {
+            return true;
+        }
+
+        if (
+            !string.IsNullOrWhiteSpace(currentRecipeTitle)
+            && string.Equals(
+                normalizedTitle,
+                currentRecipeTitle.Trim(),
+                StringComparison.OrdinalIgnoreCase
+            )
+            && !RecipeReferenceRegex.IsMatch(sourceIngredientText ?? string.Empty)
+        )
+        {
+            return true;
+        }
+
+        if (
+            Regex.IsMatch(normalizedTitle, @"\bor\b", RegexOptions.IgnoreCase, HelperRegexTimeout)
+            || (
+                !string.IsNullOrWhiteSpace(sourceIngredientText)
+                && Regex.IsMatch(
+                    sourceIngredientText,
+                    @"(?:\)|recipes?\s+follows?|this\s+page|\b(?:recipe|batch)\b)\s+or\s+\b|\bor\s+(?:\d+(?:\s+\d+/\d+|/\d+|\.\d+)?\s*)?(?:recipe|batch|tbsp|tablespoons?|tsp|teaspoons?|cups?|oz|ounces?|pounds?|lbs?|store-bought)\b|\bwedges?\s+or\b",
+                    RegexOptions.IgnoreCase,
+                    HelperRegexTimeout
+                )
+            )
+        )
+        {
+            return true;
+        }
+
+        return GenericRecipeReferenceCategories.Contains(normalizedTitle);
+    }
 
     private static readonly Regex ParentheticalMeasurementRegex = new(
         @"\((?<measurement>[^()]*\b(?:ounces?|pounds?|grams?|kilograms?|sticks?)\b[^()]*)\)",
@@ -544,36 +738,29 @@ public static class RecipeDraftNormalizer
         }
 
         var normalized = title.Trim();
+        normalized = Regex.Replace(normalized, @"^\s*\([^()]*\d[^()]*\)\s*", "");
         normalized = Regex.Replace(
             normalized,
-            @",\s*(?:warm|room\s+temperature|chilled|divided|optional|melted|cooled|thawed|at\s+room\s+temperature)\s*$",
+            @"\s*\((?:optional\s*;\s*)?(?:see\s+)?(?:recipes?\s+follows?|this\s+page(?:\s+and\s+this\s+page)?|pages?\s+\d+)\)",
             "",
             RegexOptions.IgnoreCase
         );
         normalized = Regex.Replace(
             normalized,
-            @"\s+for\s+serving\s*$",
+            @"\s*\(\s*optional\s*\)\s*$",
             "",
             RegexOptions.IgnoreCase
         );
-        normalized = Regex.Replace(
-            normalized,
-            @"\s*\((?:optional\s*;\s*)?(?:see\s+)?(?:recipes?\s+follows?|this\s+page(?:\s+and\s+this\s+page)?|pages?\s+\d+)\)\s*$",
-            "",
-            RegexOptions.IgnoreCase
-        );
-        normalized = Regex.Replace(
-            normalized,
-            @",\s*(?:warm|room\s+temperature|chilled|divided|optional|melted|cooled|thawed|at\s+room\s+temperature)\s*$",
-            "",
-            RegexOptions.IgnoreCase
-        );
+        const string trailingPrepPattern =
+            @",\s*(?:fitted\s+into\b.*|prebaked\b.*|baked\b.*|unbaked\b.*|rolled\b.*|cut\s+into\b.*|warm|room\s+temperature|chilled|divided|optional|melted|cooled|thawed|at\s+room\s+temperature|for\s+serving|recipes?\s+follows?)\s*$";
+        normalized = Regex.Replace(normalized, trailingPrepPattern, "", RegexOptions.IgnoreCase);
         normalized = Regex.Replace(
             normalized,
             @"^(?:\d+(?:\s+\d+/\d+|/\d+)?|\d+(?:\.\d+)?)?\s*(?:recipe|batch(?:\s+of)?)\s+",
             "",
             RegexOptions.IgnoreCase
         );
+        normalized = Regex.Replace(normalized, trailingPrepPattern, "", RegexOptions.IgnoreCase);
         var spans = SourceMeasurementParser.FindSpans(normalized);
         if (spans.Count > 0 && spans[0].Index == 0)
         {
@@ -965,7 +1152,7 @@ public static class RecipeDraftNormalizer
 
         var normalizedIngredients = new List<IngestionDraftIngredientDto>();
         var measurementWarnings = new List<string>();
-        var rawIngredients = raw.Ingredients ?? [];
+        var rawIngredients = RestoreVerbatimSourceLines(raw.Ingredients ?? [], rawSourceText);
 
         foreach (var rawIng in rawIngredients)
         {
@@ -1138,6 +1325,23 @@ public static class RecipeDraftNormalizer
                         ? NormalizeRecipeReferenceTitle(recipeReferenceMatch.Groups["title"].Value)
                         : null
                 );
+
+            if (
+                isRecipeReference
+                && IsGenericOrAlternativeRecipeReference(
+                    recipeReferenceTitle,
+                    sourceIngredientText,
+                    title
+                )
+            )
+            {
+                isRecipeReference = false;
+                recipeReferenceTitle = null;
+                displayName = CleanAlternativeFoodName(displayName);
+                candidateFoodName = CleanAlternativeFoodName(candidateFoodName ?? displayName);
+                cleanCanonical = candidateFoodName;
+                cleanDisplayName = displayName;
+            }
 
             var prepNote = NormalizePreparationNote(rawIng, rawIngredients);
 
@@ -2396,6 +2600,8 @@ public static class RecipeDraftNormalizer
             workingIngredients = compacted;
         }
 
+        CleanAndReconcileStepTokens(workingIngredients, workingSteps);
+
         // 2. Backfill unmeasured ingredient rows from concrete measured inline step tokens
         for (var i = 0; i < workingIngredients.Count; i++)
         {
@@ -2490,7 +2696,721 @@ public static class RecipeDraftNormalizer
             }
         }
 
+        AutoLinkMissingIngredientUsage(workingIngredients, workingSteps);
+
         return (workingIngredients, workingSteps);
+    }
+
+    public static string NormalizeLineForSourceMatch(string? line) =>
+        Regex.Replace((line ?? "").Trim().TrimStart('-', ' '), @"\s+", " ");
+
+    private static IReadOnlyList<LlmExtractedIngredientItem> RestoreVerbatimSourceLines(
+        IReadOnlyList<LlmExtractedIngredientItem> rawIngredients,
+        string? rawSourceText
+    )
+    {
+        if (rawIngredients.Count == 0 || string.IsNullOrWhiteSpace(rawSourceText))
+        {
+            return rawIngredients;
+        }
+
+        var sourceLines = RecipeExtractionDiagnostics.GetSourceIngredientLines(rawSourceText);
+        if (sourceLines.Count == 0)
+        {
+            return rawIngredients;
+        }
+
+        var sourceByNorm = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var line in sourceLines)
+        {
+            var norm = NormalizeLineForSourceMatch(line);
+            if (!string.IsNullOrWhiteSpace(norm) && !sourceByNorm.ContainsKey(norm))
+            {
+                sourceByNorm[norm] = line;
+            }
+        }
+
+        var matchedSourceNorms = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var ing in rawIngredients)
+        {
+            var norm = NormalizeLineForSourceMatch(ing.OriginalRawText);
+            if (!string.IsNullOrWhiteSpace(norm) && sourceByNorm.ContainsKey(norm))
+            {
+                matchedSourceNorms.Add(norm);
+            }
+        }
+
+        var result = new List<LlmExtractedIngredientItem>(rawIngredients.Count);
+        foreach (var ing in rawIngredients)
+        {
+            var rawText = ing.OriginalRawText?.Trim();
+            if (string.IsNullOrWhiteSpace(rawText))
+            {
+                result.Add(ing);
+                continue;
+            }
+
+            var normRaw = NormalizeLineForSourceMatch(rawText);
+            if (sourceByNorm.ContainsKey(normRaw))
+            {
+                result.Add(ing);
+                continue;
+            }
+
+            // Case 1: Strip trailing LLM parenthetical note e.g. "4 large eggs, separated (used as yolks)"
+            var strippedParen = Regex.Replace(rawText, @"\s*\([^()]+\)\s*$", "").Trim();
+            var normStripped = NormalizeLineForSourceMatch(strippedParen);
+            if (
+                !string.IsNullOrWhiteSpace(normStripped)
+                && sourceByNorm.TryGetValue(normStripped, out var matchedFromParen)
+            )
+            {
+                matchedSourceNorms.Add(normStripped);
+                result.Add(ing with { OriginalRawText = matchedFromParen });
+                continue;
+            }
+
+            // Case 2: Split compound "X and Y" / "X mixed with Y" source line
+            string? matchedCompound = null;
+            if (normRaw.Length >= 3)
+            {
+                var escapedRaw = Regex.Escape(normRaw);
+                foreach (var sourceLine in sourceLines)
+                {
+                    var normSource = NormalizeLineForSourceMatch(sourceLine);
+                    if (
+                        matchedSourceNorms.Contains(normSource)
+                        || (
+                            !normSource.Contains(" and ", StringComparison.OrdinalIgnoreCase)
+                            && !normSource.Contains(" with ", StringComparison.OrdinalIgnoreCase)
+                        )
+                    )
+                    {
+                        continue;
+                    }
+
+                    if (
+                        Regex.IsMatch(
+                            normSource,
+                            $@"(?:^{escapedRaw}\s+(?:and|(?:mixed\s+)?with)\b|\b(?:and|(?:mixed\s+)?with)\s+{escapedRaw}$)",
+                            RegexOptions.IgnoreCase,
+                            HelperRegexTimeout
+                        )
+                    )
+                    {
+                        matchedCompound = sourceLine;
+                        break;
+                    }
+                }
+            }
+
+            result.Add(
+                matchedCompound is not null ? ing with { OriginalRawText = matchedCompound } : ing
+            );
+        }
+
+        return result;
+    }
+
+    private static string CleanAlternativeFoodName(string? rawName)
+    {
+        if (string.IsNullOrWhiteSpace(rawName))
+        {
+            return "Ingredient";
+        }
+
+        var cleaned = rawName.Trim();
+        if (Regex.IsMatch(cleaned, @"\s+\bor\b\s+", RegexOptions.IgnoreCase, HelperRegexTimeout))
+        {
+            var parts = Regex.Split(
+                cleaned,
+                @"\s+\bor\b\s+",
+                RegexOptions.IgnoreCase,
+                HelperRegexTimeout
+            );
+            var chosen =
+                parts.FirstOrDefault(p =>
+                    !string.IsNullOrWhiteSpace(p)
+                    && !Regex.IsMatch(
+                        p,
+                        @"\b(?:recipes?\s+follows?|this\s+page|recipe|batch)\b",
+                        RegexOptions.IgnoreCase,
+                        HelperRegexTimeout
+                    )
+                ) ?? parts.FirstOrDefault(p => !string.IsNullOrWhiteSpace(p));
+            if (!string.IsNullOrWhiteSpace(chosen))
+            {
+                cleaned = chosen.Trim();
+            }
+        }
+
+        cleaned = Regex.Replace(
+            cleaned,
+            @"\s*\((?:optional|recipes?\s+follows?|this\s+page[^()]*)\)\s*",
+            " ",
+            RegexOptions.IgnoreCase,
+            HelperRegexTimeout
+        );
+        var spans = SourceMeasurementParser.FindSpans(cleaned);
+        if (spans.Count > 0 && spans[0].Index == 0)
+        {
+            cleaned = cleaned[spans[0].Length..].TrimStart();
+        }
+        cleaned = Regex.Replace(
+            cleaned,
+            @"^store-bought\s+",
+            "",
+            RegexOptions.IgnoreCase,
+            HelperRegexTimeout
+        );
+        return string.IsNullOrWhiteSpace(cleaned) ? "Ingredient" : cleaned.Trim();
+    }
+
+    private sealed class StepTokenOccurrence(
+        int stepIndex,
+        int segmentIndex,
+        StepIngredientToken token,
+        int matchedIngredientIndex,
+        decimal? convertedAmountInRowUnit
+    )
+    {
+        public int StepIndex { get; } = stepIndex;
+        public int SegmentIndex { get; } = segmentIndex;
+        public StepIngredientToken Token { get; set; } = token;
+        public int MatchedIngredientIndex { get; } = matchedIngredientIndex;
+        public decimal? ConvertedAmountInRowUnit { get; set; } = convertedAmountInRowUnit;
+        public bool IsModified { get; set; }
+        public bool IsDemoted { get; set; }
+    }
+
+    private static bool TryConvertAmountToIngredientRowUnit(
+        decimal amount,
+        MeasurementUnit unit,
+        IngestionDraftIngredientDto ing,
+        out decimal converted
+    )
+    {
+        converted = 0m;
+        if (!ing.Unit.HasValue)
+        {
+            return false;
+        }
+
+        if (unit == ing.Unit.Value)
+        {
+            converted = amount;
+            return true;
+        }
+
+        if (
+            unit != MeasurementUnit.Custom
+            && ing.Unit.Value != MeasurementUnit.Custom
+            && CulinaryMath.TryConvertQuantity(amount, unit, ing.Unit.Value, out converted)
+        )
+        {
+            return true;
+        }
+
+        if (
+            ing.Quantity is > 0
+            && ing.AlternativeMeasurement is { Quantity: > 0, Unit: { } altUnit } alt
+            && CulinaryMath.TryConvertQuantity(amount, unit, altUnit, out var inAlt)
+        )
+        {
+            converted = inAlt * ing.Quantity.Value / alt.Quantity!.Value;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static void CleanAndReconcileStepTokens(
+        List<IngestionDraftIngredientDto> workingIngredients,
+        List<IngestionDraftStepDto> workingSteps
+    )
+    {
+        if (workingSteps.Count == 0 || workingIngredients.Count == 0)
+        {
+            return;
+        }
+
+        var stepSegments = new List<IReadOnlyList<StepInstructionSegment>>(workingSteps.Count);
+        var occurrences = new List<StepTokenOccurrence>();
+
+        for (var sIdx = 0; sIdx < workingSteps.Count; sIdx++)
+        {
+            var step = workingSteps[sIdx];
+            var segments = StepInstructionParser.ParseSegments(step.Instruction);
+            stepSegments.Add(segments);
+
+            for (var segIdx = 0; segIdx < segments.Count; segIdx++)
+            {
+                if (segments[segIdx].Token is not StepIngredientToken ingToken)
+                {
+                    continue;
+                }
+
+                var matchedIdx = FindBestMatchingIngredientIndex(
+                    ingToken,
+                    step.SectionName,
+                    workingIngredients,
+                    step.IngredientIndices,
+                    step.Instruction
+                );
+
+                decimal? convertedAmt = null;
+                if (
+                    matchedIdx >= 0
+                    && ingToken.Amount is > 0
+                    && ingToken.Unit.HasValue
+                    && TryConvertAmountToIngredientRowUnit(
+                        ingToken.Amount.Value,
+                        ingToken.Unit.Value,
+                        workingIngredients[matchedIdx],
+                        out var amtInRow
+                    )
+                )
+                {
+                    convertedAmt = amtInRow;
+                }
+
+                occurrences.Add(
+                    new StepTokenOccurrence(sIdx, segIdx, ingToken, matchedIdx, convertedAmt)
+                );
+            }
+        }
+
+        // 1. Invert Amount <-> DisplayAmount when Amount repeats full ingredient row while DisplayAmount < Amount causing sum > rowHigh
+        foreach (
+            var group in occurrences
+                .Where(o => o.MatchedIngredientIndex >= 0)
+                .GroupBy(o => o.MatchedIngredientIndex)
+        )
+        {
+            var ing = workingIngredients[group.Key];
+            if (ing.Quantity is not > 0 || !ing.Unit.HasValue)
+            {
+                continue;
+            }
+
+            var rowLow = ing.Quantity.Value;
+            var rowHigh = ing.MaxQuantity ?? rowLow;
+            var tol = Math.Max(0.01m, rowHigh * 0.02m);
+            var totalSum = group
+                .Where(o => o.ConvertedAmountInRowUnit.HasValue)
+                .Sum(o => o.ConvertedAmountInRowUnit!.Value);
+
+            if (totalSum <= rowHigh + tol)
+            {
+                continue;
+            }
+
+            foreach (var occ in group)
+            {
+                if (
+                    occ.Token.Amount is > 0
+                    && occ.Token.Unit.HasValue
+                    && occ.Token.DisplayAmount is > 0
+                    && occ.ConvertedAmountInRowUnit is { } fullCandidate
+                    && fullCandidate >= rowLow - tol
+                    && fullCandidate <= rowHigh + tol
+                )
+                {
+                    var dispUnit = occ.Token.DisplayUnit ?? occ.Token.Unit.Value;
+                    if (
+                        TryConvertAmountToIngredientRowUnit(
+                            occ.Token.DisplayAmount.Value,
+                            dispUnit,
+                            ing,
+                            out var dispInRowUnit
+                        )
+                        && dispInRowUnit < fullCandidate - tol
+                    )
+                    {
+                        occ.Token = occ.Token with
+                        {
+                            Amount = occ.Token.DisplayAmount,
+                            Unit = dispUnit,
+                            CustomUnitName =
+                                occ.Token.DisplayCustomUnitName ?? occ.Token.CustomUnitName,
+                        };
+                        occ.ConvertedAmountInRowUnit = dispInRowUnit;
+                        occ.IsModified = true;
+                    }
+                }
+            }
+        }
+
+        // 2. Same-step duplicate tag deduplication
+        foreach (
+            var stepGroup in occurrences
+                .Where(o => !o.IsDemoted && o.MatchedIngredientIndex >= 0)
+                .GroupBy(o => (o.StepIndex, o.MatchedIngredientIndex))
+        )
+        {
+            var items = stepGroup.ToList();
+            if (items.Count < 2)
+            {
+                continue;
+            }
+
+            var ing = workingIngredients[stepGroup.Key.MatchedIngredientIndex];
+            var rowLow = ing.Quantity ?? 0m;
+            var rowHigh = ing.MaxQuantity ?? rowLow;
+            var tol = Math.Max(0.01m, rowHigh * 0.02m);
+
+            var measured = items
+                .Where(o => o.Token.Amount is > 0 && o.Token.Unit.HasValue)
+                .ToList();
+
+            if (measured.Count > 0)
+            {
+                foreach (
+                    var unmeasured in items.Where(o =>
+                        !(o.Token.Amount is > 0 && o.Token.Unit.HasValue)
+                    )
+                )
+                {
+                    unmeasured.IsDemoted = true;
+                }
+
+                if (measured.Count >= 2 && rowHigh > 0)
+                {
+                    var measuredWithConv = measured
+                        .Where(m => m.ConvertedAmountInRowUnit.HasValue)
+                        .ToList();
+                    var stepSum = measuredWithConv.Sum(m => m.ConvertedAmountInRowUnit!.Value);
+                    var allFullBatch =
+                        measuredWithConv.Count == measured.Count
+                        && measuredWithConv.All(m =>
+                            m.ConvertedAmountInRowUnit!.Value >= rowLow - tol
+                            && m.ConvertedAmountInRowUnit!.Value <= rowHigh + tol
+                        );
+                    var hasEqualOverflow =
+                        stepSum > rowHigh + tol
+                        && measured.All(m =>
+                            m.Token.Amount == measured[0].Token.Amount
+                            && m.Token.Unit == measured[0].Token.Unit
+                        );
+
+                    if (allFullBatch || hasEqualOverflow)
+                    {
+                        for (var k = 1; k < measured.Count; k++)
+                        {
+                            measured[k].IsDemoted = true;
+                        }
+                    }
+                }
+            }
+            else
+            {
+                for (var k = 1; k < items.Count; k++)
+                {
+                    items[k].IsDemoted = true;
+                }
+            }
+        }
+
+        // 3. Cross-step repeat full-batch mentions and unmeasured narrative over-tagging cap
+        foreach (
+            var ingGroup in occurrences
+                .Where(o => !o.IsDemoted && o.MatchedIngredientIndex >= 0)
+                .GroupBy(o => o.MatchedIngredientIndex)
+        )
+        {
+            var active = ingGroup.ToList();
+            var ing = workingIngredients[ingGroup.Key];
+            var measured = active
+                .Where(o => o.Token.Amount is > 0 && o.Token.Unit.HasValue)
+                .ToList();
+
+            if (ing.Quantity is > 0 && measured.Count >= 2)
+            {
+                var rowLow = ing.Quantity.Value;
+                var rowHigh = ing.MaxQuantity ?? rowLow;
+                var tol = Math.Max(0.01m, rowHigh * 0.02m);
+                var comparable = measured.Where(m => m.ConvertedAmountInRowUnit.HasValue).ToList();
+                var totalSum = comparable.Sum(m => m.ConvertedAmountInRowUnit!.Value);
+
+                if (comparable.Count == measured.Count && totalSum > rowHigh + tol)
+                {
+                    var allFullBatch = comparable.All(m =>
+                        m.ConvertedAmountInRowUnit!.Value >= rowLow - tol
+                        && m.ConvertedAmountInRowUnit!.Value <= rowHigh + tol
+                    );
+                    var firstBatchThenDivided =
+                        !allFullBatch
+                        && comparable[0].ConvertedAmountInRowUnit!.Value >= rowLow - tol
+                        && comparable[0].ConvertedAmountInRowUnit!.Value <= rowHigh + tol
+                        && comparable.Skip(1).Sum(m => m.ConvertedAmountInRowUnit!.Value)
+                            <= rowHigh + tol;
+
+                    if (allFullBatch)
+                    {
+                        StripTokenMeasurement(comparable[1]);
+                        for (var k = 2; k < comparable.Count; k++)
+                        {
+                            comparable[k].IsDemoted = true;
+                        }
+                    }
+                    else if (firstBatchThenDivided)
+                    {
+                        StripTokenMeasurement(comparable[0]);
+                    }
+                }
+            }
+
+            var remainingUnmeasured = active
+                .Where(o =>
+                    !o.IsDemoted && !o.Token.Amount.HasValue && !o.Token.DisplayAmount.HasValue
+                )
+                .ToList();
+            if (remainingUnmeasured.Count >= 3)
+            {
+                for (var k = 2; k < remainingUnmeasured.Count; k++)
+                {
+                    remainingUnmeasured[k].IsDemoted = true;
+                }
+            }
+        }
+
+        // 4. Rebuild modified instructions and synchronize IngredientIndices
+        var occByStepSeg = occurrences.ToDictionary(o => (o.StepIndex, o.SegmentIndex));
+        for (var sIdx = 0; sIdx < workingSteps.Count; sIdx++)
+        {
+            var segments = stepSegments[sIdx];
+            var stepChanged = occurrences.Any(o =>
+                o.StepIndex == sIdx && (o.IsModified || o.IsDemoted)
+            );
+            if (!stepChanged)
+            {
+                continue;
+            }
+
+            var sb = new StringBuilder();
+            var activeTokenIndices = new HashSet<int>();
+            for (var segIdx = 0; segIdx < segments.Count; segIdx++)
+            {
+                if (occByStepSeg.TryGetValue((sIdx, segIdx), out var occ))
+                {
+                    if (occ.IsDemoted)
+                    {
+                        var plain = !string.IsNullOrWhiteSpace(occ.Token.DisplayText)
+                            ? occ.Token.DisplayText.Trim()
+                            : occ.Token.Ingredient.Trim();
+                        sb.Append(plain);
+                    }
+                    else
+                    {
+                        sb.Append(
+                            occ.IsModified
+                                ? StepInstructionParser.FormatToken(occ.Token)
+                                : segments[segIdx].Text
+                        );
+                        if (occ.MatchedIngredientIndex >= 0)
+                        {
+                            activeTokenIndices.Add(occ.MatchedIngredientIndex);
+                        }
+                    }
+                }
+                else
+                {
+                    sb.Append(segments[segIdx].Text);
+                }
+            }
+
+            var currentStep = workingSteps[sIdx];
+            var mergedIndices = (currentStep.IngredientIndices ?? [])
+                .Concat(activeTokenIndices)
+                .Where(idx => idx >= 0 && idx < workingIngredients.Count)
+                .Distinct()
+                .OrderBy(idx => idx)
+                .ToList();
+
+            workingSteps[sIdx] = currentStep with
+            {
+                Instruction = sb.ToString(),
+                IngredientIndices = mergedIndices,
+            };
+        }
+    }
+
+    private static void StripTokenMeasurement(StepTokenOccurrence occ)
+    {
+        occ.Token = occ.Token with
+        {
+            Amount = null,
+            Unit = null,
+            CustomUnitName = null,
+            DisplayAmount = null,
+            DisplayUnit = null,
+            DisplayCustomUnitName = null,
+        };
+        occ.ConvertedAmountInRowUnit = null;
+        occ.IsModified = true;
+    }
+
+    private static void AutoLinkMissingIngredientUsage(
+        List<IngestionDraftIngredientDto> workingIngredients,
+        List<IngestionDraftStepDto> workingSteps
+    )
+    {
+        if (workingIngredients.Count == 0 || workingSteps.Count == 0)
+        {
+            return;
+        }
+
+        var stepUsedIndices = new HashSet<int>[workingSteps.Count];
+        for (var sIdx = 0; sIdx < workingSteps.Count; sIdx++)
+        {
+            var step = workingSteps[sIdx];
+            var used = new HashSet<int>();
+            foreach (var idx in step.IngredientIndices ?? [])
+            {
+                if (idx >= 0 && idx < workingIngredients.Count)
+                {
+                    used.Add(idx);
+                }
+            }
+            foreach (var amt in step.IngredientAmounts ?? [])
+            {
+                if (amt.IngredientIndex >= 0 && amt.IngredientIndex < workingIngredients.Count)
+                {
+                    used.Add(amt.IngredientIndex);
+                }
+            }
+            foreach (
+                var token in StepInstructionParser
+                    .ExtractTokens(step.Instruction)
+                    .OfType<StepIngredientToken>()
+            )
+            {
+                var matchedIdx = FindBestMatchingIngredientIndex(
+                    token,
+                    step.SectionName,
+                    workingIngredients,
+                    step.IngredientIndices,
+                    step.Instruction
+                );
+                if (matchedIdx >= 0)
+                {
+                    used.Add(matchedIdx);
+                }
+            }
+            stepUsedIndices[sIdx] = used;
+        }
+
+        var allIngredientNames = workingIngredients
+            .Select(i =>
+                ((string?)i.DisplayName, (string?)(i.MatchedFoodItemName ?? i.ProposedFoodItemName))
+            )
+            .ToList();
+
+        for (var i = 0; i < workingIngredients.Count; i++)
+        {
+            var ing = workingIngredients[i];
+            if (ing.Quantity is not > 0 || stepUsedIndices.Any(set => set.Contains(i)))
+            {
+                continue;
+            }
+
+            // Fallback 1: Co-split compound source line sharing OriginalRawText
+            var linked = false;
+            var normRaw = NormalizeLineForSourceMatch(ing.OriginalRawText);
+            if (!string.IsNullOrWhiteSpace(normRaw))
+            {
+                for (var j = 0; j < workingIngredients.Count; j++)
+                {
+                    if (
+                        j != i
+                        && string.Equals(
+                            NormalizeLineForSourceMatch(workingIngredients[j].OriginalRawText),
+                            normRaw,
+                            StringComparison.OrdinalIgnoreCase
+                        )
+                    )
+                    {
+                        for (var sIdx = 0; sIdx < workingSteps.Count; sIdx++)
+                        {
+                            if (stepUsedIndices[sIdx].Contains(j))
+                            {
+                                AddStepIngredientIndex(workingSteps, stepUsedIndices, sIdx, i);
+                                linked = true;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (linked)
+            {
+                continue;
+            }
+
+            // Fallback 2: Separated whole eggs mentioned in step prose as egg yolks / egg whites
+            var isWholeEgg = IsWholeEggIngredient(
+                ing.DisplayName,
+                ing.MatchedFoodItemName ?? ing.ProposedFoodItemName
+            );
+            var hasExplicitPart =
+                isWholeEgg
+                && allIngredientNames.Any(pair =>
+                {
+                    var other = $"{pair.Item1} {pair.Item2}".Trim();
+                    return Regex.IsMatch(
+                        other,
+                        @"\b(?:egg\s+)?(?:yolks?|egg\s+whites?)\b",
+                        RegexOptions.IgnoreCase,
+                        HelperRegexTimeout
+                    );
+                });
+
+            for (var sIdx = 0; sIdx < workingSteps.Count; sIdx++)
+            {
+                var plainText = StepInstructionParser.ToPlainText(workingSteps[sIdx].Instruction);
+                if (string.IsNullOrWhiteSpace(plainText))
+                {
+                    continue;
+                }
+
+                var isEggMatch =
+                    isWholeEgg && !hasExplicitPart && IsSeparatedEggPartTerm(plainText);
+                var isProseMatch =
+                    !string.IsNullOrWhiteSpace(ing.DisplayName)
+                    && ContainsWholeWordTerm(plainText, ing.DisplayName.Trim());
+
+                if (isEggMatch || isProseMatch)
+                {
+                    AddStepIngredientIndex(workingSteps, stepUsedIndices, sIdx, i);
+                }
+            }
+        }
+    }
+
+    private static bool ContainsWholeWordTerm(string text, string term) =>
+        term.Length >= 3
+        && Regex.IsMatch(
+            text,
+            $@"\b{Regex.Escape(term)}(?:e?s)?\b",
+            RegexOptions.IgnoreCase,
+            HelperRegexTimeout
+        );
+
+    private static void AddStepIngredientIndex(
+        List<IngestionDraftStepDto> workingSteps,
+        HashSet<int>[] stepUsedIndices,
+        int stepIndex,
+        int ingredientIndex
+    )
+    {
+        stepUsedIndices[stepIndex].Add(ingredientIndex);
+        var current = workingSteps[stepIndex];
+        var next = (current.IngredientIndices ?? [])
+            .Append(ingredientIndex)
+            .Distinct()
+            .OrderBy(idx => idx)
+            .ToList();
+        workingSteps[stepIndex] = current with { IngredientIndices = next };
     }
 
     private static bool IsSourceExcerpt(string? excerpt, string source) =>

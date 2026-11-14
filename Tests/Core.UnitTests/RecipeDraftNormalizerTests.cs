@@ -2285,4 +2285,324 @@ public sealed class RecipeDraftNormalizerTests
         Assert.IsTrue(step.Instruction.Contains("Bake (10m)"));
         Assert.IsTrue(step.Instruction.Contains("Bake (15m)"));
     }
+
+    [TestMethod]
+    public void Normalize_RepairsInvertedAmountAndDisplayAmount_WithoutBreakingPerItemPortions()
+    {
+        var invertedPayload = new LlmExtractedRecipePayload(
+            Title: "Layered Loaf",
+            Ingredients:
+            [
+                new(
+                    null,
+                    6.25m,
+                    null,
+                    "cup",
+                    "bread flour",
+                    "bread flour",
+                    OriginalRawText: "6 1/4 cups bread flour"
+                ),
+            ],
+            Steps:
+            [
+                new(
+                    null,
+                    "Whisk ||{\"ingredient\":\"bread flour\",\"amount\":6.25,\"unit\":\"cup\",\"displayAmount\":0.5,\"displayUnit\":\"cup\"}|| for starter."
+                ),
+                new(
+                    null,
+                    "Knead in ||{\"ingredient\":\"bread flour\",\"amount\":6.25,\"unit\":\"cup\",\"displayAmount\":3,\"displayUnit\":\"cup\"}||."
+                ),
+            ]
+        );
+
+        var normalizedInverted = RecipeDraftNormalizer.Normalize(
+            invertedPayload,
+            [],
+            [],
+            null,
+            null,
+            null,
+            null,
+            null
+        );
+
+        var s1Tokens = StepInstructionParser
+            .ExtractTokens(normalizedInverted.Steps![0].Instruction)
+            .OfType<StepIngredientToken>()
+            .ToList();
+        var s2Tokens = StepInstructionParser
+            .ExtractTokens(normalizedInverted.Steps[1].Instruction)
+            .OfType<StepIngredientToken>()
+            .ToList();
+        Assert.HasCount(1, s1Tokens);
+        Assert.HasCount(1, s2Tokens);
+        Assert.AreEqual(0.5m, s1Tokens[0].Amount);
+        Assert.AreEqual(3m, s2Tokens[0].Amount);
+
+        var portionPayload = new LlmExtractedRecipePayload(
+            Title: "Pancakes",
+            Ingredients:
+            [
+                new(null, 4m, null, "tsp", "honey", "honey", OriginalRawText: "4 teaspoons honey"),
+            ],
+            Steps:
+            [
+                new(
+                    null,
+                    "Top each of 4 pancakes with ||{\"ingredient\":\"honey\",\"amount\":4,\"unit\":\"tsp\",\"displayAmount\":1,\"displayUnit\":\"tsp\"}||."
+                ),
+            ]
+        );
+
+        var normalizedPortion = RecipeDraftNormalizer.Normalize(
+            portionPayload,
+            [],
+            [],
+            null,
+            null,
+            null,
+            null,
+            null
+        );
+
+        var portionToken = StepInstructionParser
+            .ExtractTokens(normalizedPortion.Steps![0].Instruction)
+            .OfType<StepIngredientToken>()
+            .Single();
+        Assert.AreEqual(4m, portionToken.Amount);
+    }
+
+    [TestMethod]
+    public void Normalize_DemotesSameStepDuplicatesAndExcessUnmeasuredNarrativeTags()
+    {
+        var rawPayload = new LlmExtractedRecipePayload(
+            Title: "Glazed Pork Tenderloin",
+            Ingredients:
+            [
+                new(
+                    null,
+                    1.5m,
+                    null,
+                    "lb",
+                    "pork tenderloin",
+                    "pork tenderloin",
+                    OriginalRawText: "1 1/2 pounds pork tenderloin"
+                ),
+            ],
+            Steps:
+            [
+                new(
+                    null,
+                    "Sear ||{\"ingredient\":\"pork tenderloin\",\"amount\":1.5,\"unit\":\"lb\"}||, flip ||{\"ingredient\":\"pork tenderloin\"}||, then tent ||{\"ingredient\":\"pork tenderloin\"}||."
+                ),
+                new(null, "Slice ||{\"ingredient\":\"pork tenderloin\"}|| thinly."),
+                new(null, "Plate ||{\"ingredient\":\"pork tenderloin\"}|| warm."),
+                new(null, "Serve ||{\"ingredient\":\"pork tenderloin\"}|| immediately."),
+            ]
+        );
+
+        var draft = RecipeDraftNormalizer.Normalize(
+            rawPayload,
+            [],
+            [],
+            null,
+            null,
+            null,
+            null,
+            null
+        );
+
+        var step1Tokens = StepInstructionParser
+            .ExtractTokens(draft.Steps![0].Instruction)
+            .OfType<StepIngredientToken>()
+            .ToList();
+        Assert.HasCount(1, step1Tokens);
+
+        var unmeasuredTokenCount = draft
+            .Steps.SelectMany(s => StepInstructionParser.ExtractTokens(s.Instruction))
+            .OfType<StepIngredientToken>()
+            .Count(t => !t.Amount.HasValue);
+        Assert.IsLessThanOrEqualTo(2, unmeasuredTokenCount);
+    }
+
+    [TestMethod]
+    public void Normalize_RestoresVerbatimOriginalRawTextForTrailingNotesAndCompoundLines()
+    {
+        const string source =
+            "Title: Lemon Curd\nIngredients:\n- 4 large eggs, separated\n- Table salt and ground black pepper\nInstructions:\n1. Whisk eggs with salt and pepper.";
+
+        var rawPayload = new LlmExtractedRecipePayload(
+            Title: "Lemon Curd",
+            Ingredients:
+            [
+                new(
+                    null,
+                    4m,
+                    null,
+                    "whole",
+                    "large eggs",
+                    "large eggs",
+                    OriginalRawText: "4 large eggs, separated (used as yolks)"
+                ),
+                new(
+                    null,
+                    0.5m,
+                    null,
+                    "tsp",
+                    "table salt",
+                    "table salt",
+                    OriginalRawText: "Table salt"
+                ),
+                new(
+                    null,
+                    0.25m,
+                    null,
+                    "tsp",
+                    "ground black pepper",
+                    "ground black pepper",
+                    OriginalRawText: "ground black pepper"
+                ),
+            ],
+            Steps:
+            [
+                new(
+                    null,
+                    "Whisk ||{\"ingredient\":\"large eggs\",\"amount\":4,\"unit\":\"whole\"}|| with ||{\"ingredient\":\"table salt\"}|| and ||{\"ingredient\":\"ground black pepper\"}||."
+                ),
+            ]
+        );
+
+        var draft = RecipeDraftNormalizer.Normalize(
+            rawPayload,
+            [],
+            [],
+            null,
+            null,
+            null,
+            null,
+            null,
+            rawSourceText: source
+        );
+
+        Assert.AreEqual("4 large eggs, separated", draft.Ingredients![0].OriginalRawText);
+        Assert.AreEqual("Table salt and ground black pepper", draft.Ingredients[1].OriginalRawText);
+        Assert.AreEqual("Table salt and ground black pepper", draft.Ingredients[2].OriginalRawText);
+    }
+
+    [TestMethod]
+    public void Normalize_DemotesGenericOrAlternativeRecipeRefs_AndCleansTitleMarkers()
+    {
+        var rawPayload = new LlmExtractedRecipePayload(
+            Title: "Berry Tart",
+            Ingredients:
+            [
+                new(
+                    null,
+                    1m,
+                    null,
+                    "recipe",
+                    "glaze",
+                    "glaze",
+                    OriginalRawText: "1/2 cup glaze",
+                    IsRecipeReference: true,
+                    ReferencedRecipeTitle: "glaze"
+                ),
+                new(
+                    null,
+                    0.5m,
+                    null,
+                    "tsp",
+                    "table salt",
+                    "1/2 teaspoon table salt or 1 recipe topping",
+                    OriginalRawText: "1/2 teaspoon table salt or 1 recipe topping",
+                    IsRecipeReference: true,
+                    ReferencedRecipeTitle: "topping"
+                ),
+                new(
+                    null,
+                    1m,
+                    null,
+                    "whole",
+                    "lemon wedges",
+                    "Lemon wedges or Lemon Browned Butter Sauce",
+                    OriginalRawText: "Lemon wedges or Lemon Browned Butter Sauce",
+                    IsRecipeReference: true,
+                    ReferencedRecipeTitle: "Lemon Browned Butter Sauce"
+                ),
+                new(
+                    null,
+                    1m,
+                    null,
+                    "recipe",
+                    "flour blend",
+                    "Gluten-Free Flour Blend",
+                    OriginalRawText: "(3/4 cup plus 2/3 cup) The America’s Test Kitchen All-Purpose Gluten-Free Flour Blend",
+                    IsRecipeReference: true,
+                    ReferencedRecipeTitle: "(3/4 cup plus 2/3 cup) The America’s Test Kitchen All-Purpose Gluten-Free Flour Blend"
+                ),
+                new(
+                    null,
+                    1m,
+                    null,
+                    "tbsp",
+                    "nam prik pao",
+                    "Nam Prik Pao (optional)",
+                    OriginalRawText: "1 recipe Nam Prik Pao (optional)",
+                    IsRecipeReference: true,
+                    ReferencedRecipeTitle: "Nam Prik Pao (optional)"
+                ),
+                new(
+                    null,
+                    1m,
+                    null,
+                    "recipe",
+                    "pie dough",
+                    "single-crust pie dough",
+                    OriginalRawText: "1 recipe single-crust pie dough (this page and this page), fitted into a 9-inch pie plate and chilled",
+                    IsRecipeReference: true,
+                    ReferencedRecipeTitle: "single-crust pie dough (this page and this page), fitted into a 9-inch pie plate and chilled"
+                ),
+            ],
+            Steps:
+            [
+                new(
+                    null,
+                    "Combine ||{\"ingredient\":\"glaze\"}||, ||{\"ingredient\":\"table salt\"}||, ||{\"ingredient\":\"lemon wedges\"}||, ||{\"ingredient\":\"Gluten-Free Flour Blend\"}||, ||{\"ingredient\":\"Nam Prik Pao\"}||, and ||{\"ingredient\":\"single-crust pie dough\"}||."
+                ),
+            ]
+        );
+
+        var draft = RecipeDraftNormalizer.Normalize(
+            rawPayload,
+            [],
+            [],
+            null,
+            null,
+            null,
+            null,
+            null
+        );
+
+        Assert.IsFalse(draft.Ingredients![0].IsRecipeReference);
+        Assert.IsNull(draft.Ingredients[0].ReferencedRecipeTitle);
+
+        Assert.IsFalse(draft.Ingredients[1].IsRecipeReference);
+        Assert.IsNull(draft.Ingredients[1].ReferencedRecipeTitle);
+
+        Assert.IsFalse(draft.Ingredients[2].IsRecipeReference);
+        Assert.IsNull(draft.Ingredients[2].ReferencedRecipeTitle);
+
+        Assert.IsTrue(draft.Ingredients[3].IsRecipeReference);
+        Assert.AreEqual(
+            "The America’s Test Kitchen All-Purpose Gluten-Free Flour Blend",
+            draft.Ingredients[3].ReferencedRecipeTitle
+        );
+
+        Assert.IsTrue(draft.Ingredients[4].IsRecipeReference);
+        Assert.AreEqual("Nam Prik Pao", draft.Ingredients[4].ReferencedRecipeTitle);
+
+        Assert.IsTrue(draft.Ingredients[5].IsRecipeReference);
+        Assert.AreEqual("single-crust pie dough", draft.Ingredients[5].ReferencedRecipeTitle);
+    }
 }

@@ -412,4 +412,133 @@ public sealed class TaggedStepDiagnosticsTests
             $"Expected unmeasured-with-step-amount issue, got: {string.Join(", ", issues)}"
         );
     }
+
+    [TestMethod]
+    public void GetIssues_RepeatFullBatchRangeMentionAcrossSteps_DoesNotFlagExceeds()
+    {
+        var recipe = new LlmExtractedRecipePayload(
+            Title: "Roast Pork",
+            Ingredients:
+            [
+                new(
+                    null,
+                    4m,
+                    5m,
+                    "lb",
+                    "pork rib roast",
+                    "pork rib roast",
+                    OriginalRawText: "4- to 5-pound pork rib roast"
+                ),
+            ],
+            Steps:
+            [
+                new(
+                    null,
+                    "Season ||{\"ingredient\":\"pork rib roast\",\"amount\":4,\"unit\":\"lb\"}|| generously with salt."
+                ),
+                new(
+                    null,
+                    "Transfer ||{\"ingredient\":\"pork rib roast\",\"amount\":4,\"unit\":\"lb\"}|| to oven and roast."
+                ),
+            ]
+        );
+
+        var issues = TaggedStepDiagnostics.GetIssues(recipe);
+        Assert.IsEmpty(issues);
+    }
+
+    [TestMethod]
+    public void GetIssues_FullBatchFollowedByDividedAdditions_DoesNotFlagExceeds()
+    {
+        var recipe = new LlmExtractedRecipePayload(
+            Title: "Polenta",
+            Ingredients:
+            [
+                new(null, 6m, null, "cup", "water", "water", OriginalRawText: "6 cups water"),
+            ],
+            Steps:
+            [
+                new(
+                    null,
+                    "Bring ||{\"ingredient\":\"water\",\"amount\":6,\"unit\":\"cup\"}|| to a simmer."
+                ),
+                new(
+                    null,
+                    "Stir in ||{\"ingredient\":\"water\",\"amount\":2,\"unit\":\"cup\"}|| first."
+                ),
+                new(null, "Add ||{\"ingredient\":\"water\",\"amount\":2,\"unit\":\"cup\"}|| more."),
+                new(
+                    null,
+                    "Finish with final ||{\"ingredient\":\"water\",\"amount\":2,\"unit\":\"cup\"}||."
+                ),
+            ]
+        );
+
+        var issues = TaggedStepDiagnostics.GetIssues(recipe);
+        Assert.IsEmpty(issues);
+    }
+
+    [TestMethod]
+    public void GetIssues_SeparatedEggsReferencedInProse_DoesNotFlagNotUsed()
+    {
+        var recipe = new LlmExtractedRecipePayload(
+            Title: "Souffle",
+            Ingredients:
+            [
+                new(
+                    null,
+                    4m,
+                    null,
+                    "whole",
+                    "large eggs",
+                    "Large Eggs",
+                    PreparationNote: "separated",
+                    OriginalRawText: "4 large eggs, separated"
+                ),
+            ],
+            Steps: [new(null, "Whisk the egg yolks until pale, then fold in whipped egg whites.")]
+        );
+
+        var issues = TaggedStepDiagnostics.GetIssues(recipe);
+        Assert.IsEmpty(issues);
+    }
+
+    [TestMethod]
+    public void GetIssues_CoSplitOriginalRawTextSiblingReferenced_DoesNotFlagNotUsed()
+    {
+        var recipe = new LlmExtractedRecipePayload(
+            Title: "Mocha Batter",
+            Ingredients:
+            [
+                new(
+                    null,
+                    0.5m,
+                    null,
+                    "tsp",
+                    "instant espresso powder",
+                    "espresso powder",
+                    OriginalRawText: "1/2 teaspoon instant espresso powder mixed with 1 tablespoon water"
+                ),
+                new(
+                    null,
+                    1m,
+                    null,
+                    "tbsp",
+                    "water",
+                    "water",
+                    OriginalRawText: "1/2 teaspoon instant espresso powder mixed with 1 tablespoon water"
+                ),
+            ],
+            Steps:
+            [
+                new(
+                    null,
+                    "Dissolve ||{\"ingredient\":\"espresso powder\",\"amount\":0.5,\"unit\":\"tsp\"}|| in 1 tablespoon water."
+                ),
+            ]
+        );
+
+        var issues = TaggedStepDiagnostics.GetIssues(recipe);
+        Assert.IsEmpty(issues);
+    }
 }

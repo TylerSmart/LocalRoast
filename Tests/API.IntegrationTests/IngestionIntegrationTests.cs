@@ -2437,6 +2437,210 @@ public sealed class IngestionIntegrationTests
         }
     }
 
+    [TestMethod]
+    public async Task TextIngestion_PostNormalizationSelfHealing_AutoPublishesWhenNormalizerResolvesStepIssues()
+    {
+        var fakeLlm = new FakeSequentialLlmExtractionClient(_ => new LlmExtractedRecipePayload(
+            Title: "Skillet Flatbread",
+            ConfidenceScore: 0.99m,
+            Ingredients:
+            [
+                new(
+                    null,
+                    1m,
+                    null,
+                    "cup",
+                    "flour",
+                    DisplayName: "flour",
+                    OriginalRawText: "1 cup flour"
+                ),
+            ],
+            Steps:
+            [
+                new(
+                    null,
+                    "Knead ||{\"ingredient\":\"flour\",\"amount\":1,\"unit\":\"cup\"}||, dust ||{\"ingredient\":\"flour\"}||, and shape ||{\"ingredient\":\"flour\"}||.",
+                    [0]
+                ),
+            ]
+        ));
+
+        await using var customFactory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Llm:TextModel", "test-text");
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ILlmExtractionClient>();
+                services.AddSingleton<ILlmExtractionClient>(fakeLlm);
+            });
+        });
+
+        using var client = customFactory.CreateClient();
+        await AuthenticateAsync(client);
+
+        var queuedResponse = await client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest(
+                "Skillet Flatbread\nIngredients:\n- 1 cup flour\nInstructions:\n1. Knead flour, dust flour, and shape flour.",
+                AutoPublish: true
+            )
+        );
+        queuedResponse.EnsureSuccessStatusCode();
+        var queued = await queuedResponse.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
+        Assert.IsNotNull(queued);
+
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            var processed = await scope
+                .ServiceProvider.GetRequiredService<IIngestionProcessor>()
+                .ProcessNextQueuedJobAsync();
+            Assert.IsTrue(processed);
+        }
+
+        var job = await client.GetFromJsonAsync<IngestionJobDetailDto>(
+            $"/api/ingestion/jobs/{queued.Id}"
+        );
+        Assert.IsNotNull(job);
+        Assert.AreEqual(IngestionJobStatus.Published, job.Status);
+        Assert.IsNotNull(job.ResultingRecipeId);
+    }
+
+    [TestMethod]
+    public async Task TextIngestion_PublishingSubRecipe_PromotesWaitingReadyForReviewCompositeRecipeJob()
+    {
+        const string toppingTitle = "Orange, Cranberry, and Mint Topping";
+        const string compositeTitle = "Holiday Tart";
+
+        var fakeLlm = new FakeSequentialLlmExtractionClient(context =>
+        {
+            if (context.SourceContent.Contains(compositeTitle, StringComparison.Ordinal))
+            {
+                return new LlmExtractedRecipePayload(
+                    Title: compositeTitle,
+                    ConfidenceScore: 0.99m,
+                    Ingredients:
+                    [
+                        new(
+                            null,
+                            1m,
+                            null,
+                            "recipe",
+                            toppingTitle,
+                            DisplayName: toppingTitle,
+                            OriginalRawText: $"1 recipe {toppingTitle}",
+                            IsRecipeReference: true,
+                            ReferencedRecipeTitle: toppingTitle
+                        ),
+                    ],
+                    Steps: [new(null, "Spoon topping over tart.", [0])]
+                );
+            }
+
+            return new LlmExtractedRecipePayload(
+                Title: toppingTitle,
+                ConfidenceScore: 0.99m,
+                Ingredients:
+                [
+                    new(
+                        null,
+                        1m,
+                        null,
+                        "cup",
+                        "cranberries",
+                        DisplayName: "cranberries",
+                        OriginalRawText: "1 cup cranberries"
+                    ),
+                ],
+                Steps: [new(null, "Simmer cranberries with orange and mint.", [0])]
+            );
+        });
+
+        await using var customFactory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Llm:TextModel", "test-text");
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ILlmExtractionClient>();
+                services.AddSingleton<ILlmExtractionClient>(fakeLlm);
+            });
+        });
+
+        using var client = customFactory.CreateClient();
+        await AuthenticateAsync(client);
+
+        var compositeQueuedRes = await client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest(
+                $"{compositeTitle}\nIngredients:\n- 1 recipe {toppingTitle}\nInstructions:\n1. Spoon topping over tart.",
+                AutoPublish: true
+            )
+        );
+        compositeQueuedRes.EnsureSuccessStatusCode();
+        var compositeQueued =
+            await compositeQueuedRes.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
+        Assert.IsNotNull(compositeQueued);
+
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            var processed = await scope
+                .ServiceProvider.GetRequiredService<IIngestionProcessor>()
+                .ProcessNextQueuedJobAsync();
+            Assert.IsTrue(processed);
+        }
+
+        var waitingJob = await client.GetFromJsonAsync<IngestionJobDetailDto>(
+            $"/api/ingestion/jobs/{compositeQueued.Id}"
+        );
+        Assert.IsNotNull(waitingJob);
+        Assert.AreEqual(IngestionJobStatus.ReadyForReview, waitingJob.Status);
+        Assert.IsNotNull(waitingJob.StatusDetail);
+        Assert.Contains("is not published yet", waitingJob.StatusDetail);
+
+        var subQueuedRes = await client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest(
+                $"{toppingTitle}\nIngredients:\n- 1 cup cranberries\nInstructions:\n1. Simmer cranberries with orange and mint.",
+                AutoPublish: true
+            )
+        );
+        subQueuedRes.EnsureSuccessStatusCode();
+        var subQueued = await subQueuedRes.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
+        Assert.IsNotNull(subQueued);
+
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            var processed = await scope
+                .ServiceProvider.GetRequiredService<IIngestionProcessor>()
+                .ProcessNextQueuedJobAsync();
+            Assert.IsTrue(processed);
+        }
+
+        var subJob = await client.GetFromJsonAsync<IngestionJobDetailDto>(
+            $"/api/ingestion/jobs/{subQueued.Id}"
+        );
+        Assert.IsNotNull(subJob);
+        Assert.AreEqual(IngestionJobStatus.Published, subJob.Status);
+        Assert.IsNotNull(subJob.ResultingRecipeId);
+
+        var promotedJob = await client.GetFromJsonAsync<IngestionJobDetailDto>(
+            $"/api/ingestion/jobs/{compositeQueued.Id}"
+        );
+        Assert.IsNotNull(promotedJob);
+        Assert.AreEqual(IngestionJobStatus.Published, promotedJob.Status);
+        Assert.IsNotNull(promotedJob.ResultingRecipeId);
+
+        var publishedComposite = await client.GetFromJsonAsync<RecipeDetailDto>(
+            $"/api/recipes/{promotedJob.ResultingRecipeId}"
+        );
+        Assert.IsNotNull(publishedComposite);
+        var linkedIngredient = publishedComposite.Ingredients.FirstOrDefault(i =>
+            i.DisplayName == toppingTitle
+        );
+        Assert.IsNotNull(linkedIngredient);
+        Assert.AreEqual(subJob.ResultingRecipeId, linkedIngredient.LinkedRecipeId);
+        Assert.IsNull(linkedIngredient.UnresolvedRecipeTitle);
+    }
+
     private sealed class FakeSequentialLlmExtractionClient(
         Func<LlmExtractionContext, LlmExtractedRecipePayload> handler,
         Func<string, string?>? structureSource = null,

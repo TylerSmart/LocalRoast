@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using App.Core.Ingestion;
 
 namespace App.Core.Recipes;
 
@@ -95,14 +96,22 @@ public abstract record StepToken([property: JsonPropertyName("type")] StepTokenT
 public sealed record StepIngredientToken(
     [property: JsonPropertyName("ingredient")] string Ingredient,
     [property: JsonPropertyName("ingredientId")] Guid? IngredientId = null,
-    [property: JsonPropertyName("amount")] decimal? Amount = null,
+    [property:
+        JsonPropertyName("amount"),
+        JsonConverter(typeof(FlexibleNullableDecimalJsonConverter))
+    ]
+        decimal? Amount = null,
     [property:
         JsonPropertyName("unit"),
         JsonConverter(typeof(FlexibleMeasurementUnitJsonConverter))
     ]
         MeasurementUnit? Unit = null,
     [property: JsonPropertyName("customUnitName")] string? CustomUnitName = null,
-    [property: JsonPropertyName("displayAmount")] decimal? DisplayAmount = null,
+    [property:
+        JsonPropertyName("displayAmount"),
+        JsonConverter(typeof(FlexibleNullableDecimalJsonConverter))
+    ]
+        decimal? DisplayAmount = null,
     [property:
         JsonPropertyName("displayUnit"),
         JsonConverter(typeof(FlexibleMeasurementUnitJsonConverter))

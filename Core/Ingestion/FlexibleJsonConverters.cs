@@ -201,6 +201,15 @@ public sealed partial class FlexibleNullableDecimalJsonConverter : JsonConverter
             return null;
         }
         var trimmed = ReplaceUnicodeFractions(raw.Trim());
+        if (
+            trimmed.Equals("pinch", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Equals("a pinch", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Equals("dash", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Equals("a dash", StringComparison.OrdinalIgnoreCase)
+        )
+        {
+            return 1m;
+        }
         if (NumberWords.TryGetValue(trimmed, out var wordValue))
         {
             return wordValue;
