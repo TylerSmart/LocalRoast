@@ -1,7 +1,7 @@
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { MatDialogRef } from '@angular/material/dialog';
+import { MatDialog, MatDialogRef } from '@angular/material/dialog';
 import { of, throwError } from 'rxjs';
 import type {
   LlmConnectionDto,
@@ -11,7 +11,8 @@ import type {
 } from '../../../core/models/ingestion.models';
 import { IngestionService } from '../../../core/services/ingestion/ingestion.service';
 import { LlmSettingsService } from '../../../core/services/llm-settings/llm-settings.service';
-import { LlmModelConfigurationsPanelComponent } from '../llm-model-configurations-panel/llm-model-configurations-panel.component';
+import { LlmModelConfigurationDialogComponent } from '../llm-model-configuration-dialog/llm-model-configuration-dialog.component';
+import { LlmModelProfileDialogComponent } from '../llm-model-profile-dialog/llm-model-profile-dialog.component';
 import {
   LLM_SETTINGS_TABS,
   LlmSettingsDialogComponent,
@@ -83,6 +84,7 @@ describe('LlmSettingsDialogComponent', () => {
   let component: LlmSettingsDialogComponent;
   let fixture: ComponentFixture<LlmSettingsDialogComponent>;
   let mockDialogRef: { close: ReturnType<typeof vi.fn> };
+  let mockDialog: { open: ReturnType<typeof vi.fn> };
   let service: Record<string, ReturnType<typeof vi.fn>>;
   let mockIngestionService: { refreshSummary: ReturnType<typeof vi.fn> };
 
@@ -112,7 +114,9 @@ describe('LlmSettingsDialogComponent', () => {
         { provide: LlmSettingsService, useValue: service },
         { provide: IngestionService, useValue: mockIngestionService },
       ],
-    }).compileComponents();
+    })
+      .overrideProvider(MatDialog, { useValue: mockDialog })
+      .compileComponents();
 
     fixture = TestBed.createComponent(LlmSettingsDialogComponent);
     component = fixture.componentInstance;
@@ -121,6 +125,9 @@ describe('LlmSettingsDialogComponent', () => {
 
   beforeEach(() => {
     mockDialogRef = { close: vi.fn() };
+    mockDialog = {
+      open: vi.fn().mockReturnValue({ afterClosed: () => of(testProfiles[0]) }),
+    };
     mockIngestionService = { refreshSummary: vi.fn() };
     service = {
       getSettings: vi.fn().mockReturnValue(of(settings)),
@@ -260,7 +267,7 @@ describe('LlmSettingsDialogComponent', () => {
     expect(component.workflowForm.controls.textModelConfigurationId.value).toBe('cfg-text');
   });
 
-  it('sends a profile card to the Models tab editor', async () => {
+  it('opens the model configuration dialog from a profile card on the Models tab', async () => {
     await create();
     component.selectedTabIndex.set(LLM_SETTINGS_TABS.profiles);
 
@@ -270,55 +277,49 @@ describe('LlmSettingsDialogComponent', () => {
     fixture.detectChanges();
 
     expect(component.selectedTabIndex()).toBe(LLM_SETTINGS_TABS.models);
-    const panel = (
-      component as unknown as { modelsPanel: () => LlmModelConfigurationsPanelComponent }
-    ).modelsPanel();
-    expect(panel.isEditing()).toBe(true);
-    expect(panel.form.controls.model.value).toBe('gemma4:e4b');
-    expect(panel.appliedProfileId()).toBe('gemma4-e4b');
+    expect(mockDialog.open).toHaveBeenCalledWith(
+      LlmModelConfigurationDialogComponent,
+      expect.objectContaining({
+        data: {
+          initialProfile: testProfiles[0],
+          connections,
+          profiles: testProfiles,
+        },
+      }),
+    );
   });
 
-  it('pre-fills a new profile from a saved model configuration', async () => {
+  it('opens the profile dialog pre-filled from a saved model configuration', async () => {
     await create();
 
     component.saveConfigurationAsProfile(configurations[0]);
 
     expect(component.selectedTabIndex()).toBe(LLM_SETTINGS_TABS.profiles);
-    expect(component.isEditingProfile()).toBe(true);
-    expect(component.editingProfileId()).toBeNull();
-    const values = component.profileForm.getRawValue();
-    expect(values.displayName).toBe('gemma4:12b Profile');
-    expect(values.modelTag).toBe('gemma4:12b');
-    expect(values.enableThinking).toBe(true);
-    expect(values.temperature).toBe(0.7);
-    expect(values.contextWindowTokens).toBe(16384);
-    expect(values.requestTimeoutSeconds).toBe(450);
+    expect(mockDialog.open).toHaveBeenCalledWith(
+      LlmModelProfileDialogComponent,
+      expect.objectContaining({
+        data: { fromConfiguration: configurations[0] },
+      }),
+    );
+    expect(service['getModelProfiles']).toHaveBeenCalledTimes(2);
   });
 
-  it('creates, updates, deletes and restores profiles', async () => {
+  it('opens profile dialog for add/edit, and deletes and restores profiles', async () => {
     await create();
 
     component.startAddProfile();
-    component.profileForm.controls.displayName.setValue('My Profile');
-    component.profileForm.controls.modelTag.setValue('new-model:latest');
-    component.profileForm.controls.matchPrefixes.setValue('new-model, new');
-    component.saveProfile();
-    expect(service['createModelProfile']).toHaveBeenCalledWith(
-      expect.objectContaining({
-        displayName: 'My Profile',
-        modelTag: 'new-model:latest',
-        matchPrefixes: ['new-model', 'new'],
-      }),
+    expect(mockDialog.open).toHaveBeenCalledWith(
+      LlmModelProfileDialogComponent,
+      expect.objectContaining({ data: {} }),
     );
-    expect(component.isEditingProfile()).toBe(false);
+    expect(service['getModelProfiles']).toHaveBeenCalledTimes(2);
 
     component.startEditProfile(testProfiles[0]);
-    component.profileForm.controls.summary.setValue('Updated');
-    component.saveProfile();
-    expect(service['updateModelProfile']).toHaveBeenCalledWith(
-      'gemma4-e4b',
-      expect.objectContaining({ summary: 'Updated' }),
+    expect(mockDialog.open).toHaveBeenCalledWith(
+      LlmModelProfileDialogComponent,
+      expect.objectContaining({ data: { profile: testProfiles[0] } }),
     );
+    expect(service['getModelProfiles']).toHaveBeenCalledTimes(3);
 
     component.deleteProfile(testProfiles[0]);
     expect(service['deleteModelProfile']).toHaveBeenCalledWith('gemma4-e4b');

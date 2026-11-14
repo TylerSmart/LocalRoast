@@ -11,7 +11,7 @@ import {
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
-import { MatDialogModule, MatDialogRef } from '@angular/material/dialog';
+import { MatDialog, MatDialogModule, MatDialogRef } from '@angular/material/dialog';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
@@ -24,12 +24,15 @@ import type {
   LlmConnectionDto,
   LlmModelConfigurationDto,
   LlmModelProfile,
-  UpsertLlmModelProfileRequest,
 } from '../../../core/models/ingestion.models';
 import { IngestionService } from '../../../core/services/ingestion/ingestion.service';
 import { LlmSettingsService } from '../../../core/services/llm-settings/llm-settings.service';
 import { LlmConnectionsPanelComponent } from '../llm-connections-panel/llm-connections-panel.component';
 import { LlmModelConfigurationsPanelComponent } from '../llm-model-configurations-panel/llm-model-configurations-panel.component';
+import {
+  LlmModelProfileDialogComponent,
+  type LlmModelProfileDialogData,
+} from '../llm-model-profile-dialog/llm-model-profile-dialog.component';
 
 export { filterModels, matchModelProfile } from './llm-settings.utils';
 
@@ -68,6 +71,7 @@ interface ConnectionGroup {
 export class LlmSettingsDialogComponent implements OnInit {
   private readonly fb = inject(FormBuilder);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly dialog = inject(MatDialog);
   private readonly llmSettingsService = inject(LlmSettingsService);
   private readonly ingestionService = inject(IngestionService);
   private readonly dialogRef = inject(MatDialogRef<LlmSettingsDialogComponent>);
@@ -82,8 +86,6 @@ export class LlmSettingsDialogComponent implements OnInit {
   readonly configurations = signal<LlmModelConfigurationDto[]>([]);
   readonly profiles = signal<LlmModelProfile[]>([]);
 
-  readonly isEditingProfile = signal(false);
-  readonly editingProfileId = signal<string | null>(null);
   readonly isSavingProfile = signal(false);
   readonly profileCrudError = signal<string | null>(null);
 
@@ -99,35 +101,6 @@ export class LlmSettingsDialogComponent implements OnInit {
       Validators.min(0),
       Validators.max(10),
     ]),
-  });
-
-  readonly profileForm = this.fb.nonNullable.group({
-    displayName: this.fb.nonNullable.control<string>('', [
-      Validators.required,
-      Validators.maxLength(150),
-    ]),
-    modelTag: this.fb.nonNullable.control<string>('', [
-      Validators.required,
-      Validators.maxLength(200),
-    ]),
-    matchPrefixes: this.fb.nonNullable.control<string>(''),
-    summary: this.fb.nonNullable.control<string>('', [Validators.maxLength(500)]),
-    contextWindowTokens: this.fb.nonNullable.control<number>(32768, [
-      Validators.required,
-      Validators.min(2048),
-      Validators.max(65536),
-    ]),
-    requestTimeoutSeconds: this.fb.nonNullable.control<number>(600, [
-      Validators.required,
-      Validators.min(5),
-      Validators.max(1800),
-    ]),
-    enableThinking: this.fb.nonNullable.control<boolean>(false),
-    recommendedAsRefineModel: this.fb.nonNullable.control<boolean>(false),
-    temperature: this.fb.control<number | null>(null, [Validators.min(0), Validators.max(2)]),
-    topP: this.fb.control<number | null>(null, [Validators.min(0), Validators.max(1)]),
-    topK: this.fb.control<number | null>(null, [Validators.min(1), Validators.max(1000)]),
-    notes: this.fb.nonNullable.control<string>(''),
   });
 
   private readonly workflowValues = toSignal(this.workflowForm.valueChanges, {
@@ -273,121 +246,18 @@ export class LlmSettingsDialogComponent implements OnInit {
     this.modelsPanel()?.applyProfile(profile);
   }
 
-  /** Starts a new profile pre-filled from a saved model configuration. */
+  /** Opens a new profile dialog pre-filled from a saved model configuration. */
   saveConfigurationAsProfile(configuration: LlmModelConfigurationDto): void {
-    this.profileForm.reset({
-      displayName: `${configuration.model} Profile`,
-      modelTag: configuration.model,
-      matchPrefixes: configuration.model,
-      summary: `Saved from ${configuration.name}.`,
-      contextWindowTokens: configuration.contextWindowTokens,
-      requestTimeoutSeconds: configuration.requestTimeoutSeconds,
-      enableThinking: configuration.enableThinking,
-      recommendedAsRefineModel: false,
-      temperature: configuration.temperature,
-      topP: configuration.topP,
-      topK: configuration.topK,
-      notes: '',
-    });
-    this.editingProfileId.set(null);
-    this.isEditingProfile.set(true);
-    this.profileCrudError.set(null);
     this.selectedTabIndex.set(LLM_SETTINGS_TABS.profiles);
+    this.openProfileDialog({ fromConfiguration: configuration });
   }
 
   startAddProfile(): void {
-    this.profileForm.reset({
-      displayName: '',
-      modelTag: '',
-      matchPrefixes: '',
-      summary: '',
-      contextWindowTokens: 32768,
-      requestTimeoutSeconds: 600,
-      enableThinking: false,
-      recommendedAsRefineModel: false,
-      temperature: null,
-      topP: null,
-      topK: null,
-      notes: '',
-    });
-    this.editingProfileId.set(null);
-    this.isEditingProfile.set(true);
-    this.profileCrudError.set(null);
+    this.openProfileDialog({});
   }
 
   startEditProfile(profile: LlmModelProfile): void {
-    this.profileForm.reset({
-      displayName: profile.displayName,
-      modelTag: profile.modelTag,
-      matchPrefixes: profile.matchPrefixes?.join(', ') ?? '',
-      summary: profile.summary ?? '',
-      contextWindowTokens: profile.contextWindowTokens ?? 32768,
-      requestTimeoutSeconds: profile.requestTimeoutSeconds ?? 600,
-      enableThinking: profile.enableThinking ?? false,
-      recommendedAsRefineModel: profile.recommendedAsRefineModel ?? false,
-      temperature: profile.temperature ?? null,
-      topP: profile.topP ?? null,
-      topK: profile.topK ?? null,
-      notes: profile.notes?.join('\n') ?? '',
-    });
-    this.editingProfileId.set(profile.id);
-    this.isEditingProfile.set(true);
-    this.profileCrudError.set(null);
-  }
-
-  cancelProfileEdit(): void {
-    this.isEditingProfile.set(false);
-    this.editingProfileId.set(null);
-    this.profileCrudError.set(null);
-  }
-
-  saveProfile(): void {
-    if (this.profileForm.invalid || this.isSavingProfile()) {
-      return;
-    }
-
-    this.isSavingProfile.set(true);
-    this.profileCrudError.set(null);
-
-    const val = this.profileForm.getRawValue();
-    const req: UpsertLlmModelProfileRequest = {
-      displayName: val.displayName.trim(),
-      modelTag: val.modelTag.trim(),
-      matchPrefixes: val.matchPrefixes
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean),
-      summary: val.summary.trim() || null,
-      contextWindowTokens: val.contextWindowTokens,
-      requestTimeoutSeconds: val.requestTimeoutSeconds,
-      enableThinking: val.enableThinking,
-      recommendedAsRefineModel: val.recommendedAsRefineModel,
-      temperature: val.temperature,
-      topP: val.topP,
-      topK: val.topK,
-      notes: val.notes
-        .split('\n')
-        .map((s) => s.trim())
-        .filter(Boolean),
-    };
-
-    const editId = this.editingProfileId();
-    const request$ = editId
-      ? this.llmSettingsService.updateModelProfile(editId, req)
-      : this.llmSettingsService.createModelProfile(req);
-
-    request$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-      next: () => {
-        this.isSavingProfile.set(false);
-        this.isEditingProfile.set(false);
-        this.editingProfileId.set(null);
-        this.loadProfiles();
-      },
-      error: (err) => {
-        this.profileCrudError.set(err?.error?.detail || err?.message || 'Failed to save profile.');
-        this.isSavingProfile.set(false);
-      },
-    });
+    this.openProfileDialog({ profile });
   }
 
   deleteProfile(profile: LlmModelProfile): void {
@@ -403,9 +273,6 @@ export class LlmSettingsDialogComponent implements OnInit {
       .subscribe({
         next: () => {
           this.isSavingProfile.set(false);
-          if (this.editingProfileId() === profile.id) {
-            this.cancelProfileEdit();
-          }
           this.loadProfiles();
         },
         error: (err) => {
@@ -431,9 +298,6 @@ export class LlmSettingsDialogComponent implements OnInit {
         next: (restored) => {
           this.isSavingProfile.set(false);
           this.profiles.set(restored);
-          if (this.editingProfileId()) {
-            this.cancelProfileEdit();
-          }
         },
         error: (err) => {
           this.profileCrudError.set(
@@ -441,6 +305,27 @@ export class LlmSettingsDialogComponent implements OnInit {
           );
           this.isSavingProfile.set(false);
         },
+      });
+  }
+
+  private openProfileDialog(data: LlmModelProfileDialogData): void {
+    this.profileCrudError.set(null);
+    this.dialog
+      .open<LlmModelProfileDialogComponent, LlmModelProfileDialogData, LlmModelProfile | undefined>(
+        LlmModelProfileDialogComponent,
+        {
+          width: '620px',
+          maxWidth: '95vw',
+          autoFocus: false,
+          data,
+        },
+      )
+      .afterClosed()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((saved) => {
+        if (saved) {
+          this.loadProfiles();
+        }
       });
   }
 

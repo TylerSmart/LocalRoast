@@ -127,7 +127,7 @@ public sealed class LlmProfilesAndRefinementE2ETests : E2ETestBase
         await Page.Locator(".llm-settings-btn").ClickAsync();
         await OpenLlmSettingsTabAsync(dialog, "Models");
         await card.GetByTestId("edit-model-config-btn").ClickAsync();
-        var modelEditor = dialog.GetByTestId("model-config-editor-form");
+        var modelEditor = Page.GetByTestId("model-config-editor-form");
         await Expect(modelEditor.GetByTestId("model-config-gpu-layers")).ToHaveValueAsync("24");
         await modelEditor.GetByTestId("model-config-gpu-layers").FillAsync("");
         await Page.RunAndWaitForResponseAsync(
@@ -146,6 +146,8 @@ public sealed class LlmProfilesAndRefinementE2ETests : E2ETestBase
                 "document.documentElement.scrollWidth <= window.innerWidth"
             )
         );
+        await modelEditor.GetByTestId("cancel-model-config-btn").ClickAsync();
+        await Expect(modelEditor).Not.ToBeVisibleAsync();
         await dialog
             .GetByRole(AriaRole.Button, new() { Name = "Close", Exact = true })
             .ClickAsync();
@@ -166,7 +168,7 @@ public sealed class LlmProfilesAndRefinementE2ETests : E2ETestBase
         await AddLlmConnectionInDialogAsync(dialog, mockServer.BaseUrl);
         await OpenLlmSettingsTabAsync(dialog, "Models");
         await dialog.GetByTestId("add-model-config-btn").ClickAsync();
-        var editor = dialog.GetByTestId("model-config-editor-form");
+        var editor = Page.GetByTestId("model-config-editor-form");
         await Expect(editor).ToContainTextAsync("2 model(s) found on this connection");
 
         var options = Page.Locator("mat-option");
@@ -384,7 +386,7 @@ public sealed class LlmProfilesAndRefinementE2ETests : E2ETestBase
             .ToContainTextAsync(LlmConfigName("gemini-2.5-flash-lite", connectionName));
         await OpenLlmSettingsTabAsync(dialog, "Connections");
         await connectionCard.GetByTestId("edit-connection-btn").ClickAsync();
-        var editor = dialog.GetByTestId("connection-editor-form");
+        var editor = Page.GetByTestId("connection-editor-form");
         await Expect(editor.Locator(".slider-field-value")).ToHaveTextAsync("3");
         await Expect(editor.GetByTestId("rpm-input")).ToHaveValueAsync("15");
         await Expect(editor.GetByTestId("rpd-input")).ToHaveValueAsync("1500");
@@ -393,6 +395,8 @@ public sealed class LlmProfilesAndRefinementE2ETests : E2ETestBase
         await Expect(editor.GetByTestId("quota-reset-time-input")).ToHaveValueAsync("00:00");
         await Expect(editor.GetByTestId("connection-form-api-key")).ToHaveValueAsync("");
 
+        await editor.GetByTestId("cancel-connection-btn").ClickAsync();
+        await Expect(editor).Not.ToBeVisibleAsync();
         await dialog
             .GetByRole(AriaRole.Button, new() { Name = "Close", Exact = true })
             .ClickAsync();
@@ -419,7 +423,7 @@ public sealed class LlmProfilesAndRefinementE2ETests : E2ETestBase
     {
         await OpenLlmSettingsTabAsync(dialog, "Models");
         await dialog.GetByTestId("add-model-config-btn").ClickAsync();
-        var editor = dialog.GetByTestId("model-config-editor-form");
+        var editor = Page.GetByTestId("model-config-editor-form");
         var connectionSelect = editor.GetByTestId("model-config-connection");
         if (!(await connectionSelect.InnerTextAsync()).Contains(connectionName))
         {

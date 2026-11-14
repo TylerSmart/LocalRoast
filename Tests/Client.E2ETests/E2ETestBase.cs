@@ -695,7 +695,7 @@ public abstract class E2ETestBase : PageTest
     {
         await OpenLlmSettingsTabAsync(dialog, "Connections");
         await dialog.GetByTestId("add-connection-btn").ClickAsync();
-        var editor = dialog.GetByTestId("connection-editor-form");
+        var editor = Page.GetByTestId("connection-editor-form");
         await editor.GetByTestId("connection-form-name").FillAsync(name);
         await editor.GetByTestId("connection-form-base-url").FillAsync(baseUrl);
         if (tune is not null)
@@ -727,7 +727,7 @@ public abstract class E2ETestBase : PageTest
     {
         await OpenLlmSettingsTabAsync(dialog, "Models");
         await dialog.GetByTestId("add-model-config-btn").ClickAsync();
-        var editor = dialog.GetByTestId("model-config-editor-form");
+        var editor = Page.GetByTestId("model-config-editor-form");
         var connectionSelect = editor.GetByTestId("model-config-connection");
         if (!(await connectionSelect.InnerTextAsync()).Contains(connectionName))
         {

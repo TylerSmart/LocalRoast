@@ -1,7 +1,9 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { MatDialog } from '@angular/material/dialog';
 import { of, throwError } from 'rxjs';
 import type { LlmConnectionDto } from '../../../core/models/ingestion.models';
 import { LlmSettingsService } from '../../../core/services/llm-settings/llm-settings.service';
+import { LlmConnectionDialogComponent } from '../llm-connection-dialog/llm-connection-dialog.component';
 import { LlmConnectionsPanelComponent } from './llm-connections-panel.component';
 
 const savedConnection: LlmConnectionDto = {
@@ -36,20 +38,24 @@ describe('LlmConnectionsPanelComponent', () => {
   let component: LlmConnectionsPanelComponent;
   let fixture: ComponentFixture<LlmConnectionsPanelComponent>;
   let service: Record<string, ReturnType<typeof vi.fn>>;
+  let dialog: { open: ReturnType<typeof vi.fn> };
   let changed: ReturnType<typeof vi.fn<() => void>>;
 
   beforeEach(async () => {
     service = {
-      createConnection: vi.fn().mockReturnValue(of(savedConnection)),
-      updateConnection: vi.fn().mockReturnValue(of(savedConnection)),
       deleteConnection: vi.fn().mockReturnValue(of(undefined)),
-      testConnection: vi.fn().mockReturnValue(of(reachable)),
       testSavedConnection: vi.fn().mockReturnValue(of(reachable)),
+    };
+    dialog = {
+      open: vi.fn().mockReturnValue({ afterClosed: () => of(savedConnection) }),
     };
 
     await TestBed.configureTestingModule({
       imports: [LlmConnectionsPanelComponent],
-      providers: [{ provide: LlmSettingsService, useValue: service }],
+      providers: [
+        { provide: LlmSettingsService, useValue: service },
+        { provide: MatDialog, useValue: dialog },
+      ],
     }).compileComponents();
 
     fixture = TestBed.createComponent(LlmConnectionsPanelComponent);
@@ -60,97 +66,47 @@ describe('LlmConnectionsPanelComponent', () => {
     fixture.detectChanges();
   });
 
-  it('creates a connection from the editor and notifies the dialog', () => {
+  it('opens the connection dialog to add a connection and notifies on save', () => {
     component.startAdd();
-    component.form.patchValue({
-      name: ' GPU box ',
-      baseUrl: 'http://gpu-box:11434 ',
-      ollamaCpuOnly: true,
-      maxConcurrentRequests: 2,
-      requestsPerMinute: 20,
-    });
 
-    component.save();
-
-    expect(service['createConnection']).toHaveBeenCalledWith(
+    expect(dialog.open).toHaveBeenCalledWith(
+      LlmConnectionDialogComponent,
       expect.objectContaining({
-        name: 'GPU box',
-        provider: 'Ollama',
-        baseUrl: 'http://gpu-box:11434',
-        apiKey: null,
-        ollamaCpuOnly: true,
-        maxConcurrentRequests: 2,
-        requestsPerMinute: 20,
-        dailyRequestQuota: null,
+        data: { defaultName: '' },
       }),
     );
     expect(changed).toHaveBeenCalled();
-    expect(component.isEditing()).toBe(false);
   });
 
-  it('edits a saved connection without resending its stored API key', () => {
-    component.startEdit(savedConnection);
-    expect(component.hasSavedApiKey()).toBe(true);
-    expect(component.form.controls.apiKey.value).toBe('');
-    component.form.controls.name.setValue('Desk');
+  it('opens the connection dialog with default name when no connections exist', () => {
+    fixture.componentRef.setInput('connections', []);
+    component.startAdd();
 
-    component.save();
-
-    expect(service['updateConnection']).toHaveBeenCalledWith(
-      'desk',
-      expect.objectContaining({ name: 'Desk', apiKey: null, clearApiKey: false }),
+    expect(dialog.open).toHaveBeenCalledWith(
+      LlmConnectionDialogComponent,
+      expect.objectContaining({
+        data: { defaultName: 'Local Ollama' },
+      }),
     );
   });
 
-  it('switches the default base URL when the provider changes', () => {
-    component.startAdd();
-
-    component.form.controls.provider.setValue('OpenAiCompatible');
-    expect(component.form.controls.baseUrl.value).toBe('http://localhost:1234/v1');
-
-    component.form.controls.provider.setValue('Ollama');
-    expect(component.form.controls.baseUrl.value).toBe('http://localhost:11434');
-  });
-
-  it.each([
-    ['name', ''],
-    ['maxConcurrentRequests', 6],
-    ['requestsPerMinute', 1001],
-    ['dailyRequestQuota', 0],
-    ['dailyQuotaResetTime', '24:00'],
-  ] as const)('blocks saving when %s is %s', (control, value) => {
-    component.startAdd();
-    component.form.controls[control].setValue(value as never);
-
-    component.save();
-
-    expect(service['createConnection']).not.toHaveBeenCalled();
-  });
-
-  it('tests a new connection without borrowing another connection API key', () => {
-    component.startAdd();
-    component.form.controls.baseUrl.setValue('http://gpu-box:11434');
-
-    component.testEditor();
-
-    expect(service['testConnection']).toHaveBeenCalledWith({
-      connectionId: null,
-      provider: 'Ollama',
-      baseUrl: 'http://gpu-box:11434',
-      apiKey: null,
-      clearApiKey: true,
-    });
-    expect(component.editorTestResult()).toEqual(reachable);
-  });
-
-  it('tests an edited connection with its saved API key', () => {
+  it('opens the connection dialog to edit a saved connection', () => {
     component.startEdit(savedConnection);
 
-    component.testEditor();
-
-    expect(service['testConnection']).toHaveBeenCalledWith(
-      expect.objectContaining({ connectionId: 'desk', apiKey: null, clearApiKey: false }),
+    expect(dialog.open).toHaveBeenCalledWith(
+      LlmConnectionDialogComponent,
+      expect.objectContaining({
+        data: { connection: savedConnection },
+      }),
     );
+    expect(changed).toHaveBeenCalled();
+  });
+
+  it('does not emit changed when the connection dialog is cancelled', () => {
+    dialog.open.mockReturnValue({ afterClosed: () => of(undefined) });
+    component.startEdit(savedConnection);
+
+    expect(changed).not.toHaveBeenCalled();
   });
 
   it('records a failed card test with the API error', () => {

@@ -464,8 +464,13 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await Page.Locator(".llm-settings-btn").ClickAsync();
         await OpenLlmSettingsTabAsync(dialog, "Connections");
         await dialog.GetByTestId("edit-connection-btn").ClickAsync();
-        await Expect(dialog.Locator("mat-checkbox[formcontrolname='ollamaCpuOnly'] input"))
+        var connectionEditor = Page.GetByTestId("connection-editor-form");
+        await Expect(
+                connectionEditor.Locator("mat-checkbox[formcontrolname='ollamaCpuOnly'] input")
+            )
             .ToBeCheckedAsync();
+        await connectionEditor.GetByTestId("cancel-connection-btn").ClickAsync();
+        await Expect(connectionEditor).Not.ToBeVisibleAsync();
         await SaveLlmWorkflowsAsync(dialog);
 
         await Page.Locator("button.tab-pill", new() { HasText = "Paste Raw Text" }).ClickAsync();
@@ -601,15 +606,17 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         // Save a model for each workflow, picking the text model from the discovered list.
         await OpenLlmSettingsTabAsync(dialog, "Models");
         await dialog.GetByTestId("add-model-config-btn").ClickAsync();
-        await dialog.GetByTestId("model-config-model").ClickAsync();
+        var modelEditor = Page.GetByTestId("model-config-editor-form");
+        await modelEditor.GetByTestId("model-config-model").ClickAsync();
         await Page.Locator("mat-option", new() { HasText = "qwen2.5:14b" }).ClickAsync();
         await Page.RunAndWaitForResponseAsync(
-            () => dialog.GetByTestId("save-model-config-btn").ClickAsync(),
+            () => modelEditor.GetByTestId("save-model-config-btn").ClickAsync(),
             resp =>
                 resp.Url.EndsWith("/api/llm-settings/model-configurations")
                 && resp.Request.Method == "POST"
                 && resp.Ok
         );
+        await Expect(modelEditor).Not.ToBeVisibleAsync();
         await AddLlmModelInDialogAsync(dialog, "qwen2.5vl:7b");
         await AssignLlmWorkflowAsync(dialog, "text", "qwen2.5:14b");
         await AssignLlmWorkflowAsync(dialog, "vision", "qwen2.5vl:7b");
@@ -1187,8 +1194,11 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
             .ToContainTextAsync(LlmConfigName("qwen2.5:14b"));
         await OpenLlmSettingsTabAsync(dialog, "Models");
         await dialog.GetByTestId("edit-model-config-btn").ClickAsync();
-        await Expect(dialog.Locator("[data-testid='model-config-thinking'] button"))
+        var modelEditor = Page.GetByTestId("model-config-editor-form");
+        await Expect(modelEditor.Locator("[data-testid='model-config-thinking'] button"))
             .ToHaveAttributeAsync("aria-checked", "true");
+        await modelEditor.GetByTestId("cancel-model-config-btn").ClickAsync();
+        await Expect(modelEditor).Not.ToBeVisibleAsync();
         await dialog
             .GetByRole(AriaRole.Button, new() { Name = "Close", Exact = true })
             .ClickAsync();
@@ -1222,8 +1232,11 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await Expect(dialog).ToBeVisibleAsync();
         await OpenLlmSettingsTabAsync(dialog, "Models");
         await dialog.GetByTestId("edit-model-config-btn").ClickAsync();
-        await Expect(dialog.GetByTestId("model-config-context")).ToHaveValueAsync("16384");
-        await Expect(dialog.Locator("#modelConfigContextSlider")).ToHaveValueAsync("16384");
+        var modelEditor = Page.GetByTestId("model-config-editor-form");
+        await Expect(modelEditor.GetByTestId("model-config-context")).ToHaveValueAsync("16384");
+        await Expect(modelEditor.Locator("#modelConfigContextSlider")).ToHaveValueAsync("16384");
+        await modelEditor.GetByTestId("cancel-model-config-btn").ClickAsync();
+        await Expect(modelEditor).Not.ToBeVisibleAsync();
         await dialog
             .GetByRole(AriaRole.Button, new() { Name = "Close", Exact = true })
             .ClickAsync();
@@ -1286,7 +1299,10 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await Page.Locator(".llm-settings-btn").ClickAsync();
         await OpenLlmSettingsTabAsync(dialog, "Models");
         await dialog.GetByTestId("edit-model-config-btn").ClickAsync();
-        await Expect(dialog.GetByTestId("model-config-timeout")).ToHaveValueAsync("1800");
+        var modelEditor = Page.GetByTestId("model-config-editor-form");
+        await Expect(modelEditor.GetByTestId("model-config-timeout")).ToHaveValueAsync("1800");
+        await modelEditor.GetByTestId("cancel-model-config-btn").ClickAsync();
+        await Expect(modelEditor).Not.ToBeVisibleAsync();
         await dialog
             .GetByRole(AriaRole.Button, new() { Name = "Close", Exact = true })
             .ClickAsync();
@@ -1303,9 +1319,10 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await Page.Locator(".llm-settings-btn").ClickAsync();
 
         var dialog = Page.Locator("app-llm-settings-dialog");
-        var temperature = dialog.GetByTestId("model-config-temperature");
-        var topP = dialog.GetByTestId("model-config-top-p");
-        var topK = dialog.GetByTestId("model-config-top-k");
+        var modelEditor = Page.GetByTestId("model-config-editor-form");
+        var temperature = modelEditor.GetByTestId("model-config-temperature");
+        var topP = modelEditor.GetByTestId("model-config-top-p");
+        var topK = modelEditor.GetByTestId("model-config-top-k");
         await AddLlmConnectionInDialogAsync(dialog, mockServer.BaseUrl);
         await AddLlmModelInDialogAsync(
             dialog,
@@ -1354,6 +1371,8 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await Expect(temperature).ToHaveValueAsync("1");
         await Expect(topP).ToHaveValueAsync("0.95");
         await Expect(topK).ToHaveValueAsync("64");
+        await modelEditor.GetByTestId("cancel-model-config-btn").ClickAsync();
+        await Expect(modelEditor).Not.ToBeVisibleAsync();
         await dialog
             .GetByRole(AriaRole.Button, new() { Name = "Close", Exact = true })
             .ClickAsync();
@@ -1375,13 +1394,13 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await topP.FillAsync("");
         await topK.FillAsync("");
         await Page.RunAndWaitForResponseAsync(
-            () => dialog.GetByTestId("save-model-config-btn").ClickAsync(),
+            () => modelEditor.GetByTestId("save-model-config-btn").ClickAsync(),
             resp =>
                 resp.Url.Contains("/api/llm-settings/model-configurations/")
                 && resp.Request.Method == "PUT"
                 && resp.Ok
         );
-        await Expect(dialog.GetByTestId("model-config-editor-form")).Not.ToBeVisibleAsync();
+        await Expect(modelEditor).Not.ToBeVisibleAsync();
         await dialog
             .GetByRole(AriaRole.Button, new() { Name = "Close", Exact = true })
             .ClickAsync();
@@ -1395,6 +1414,8 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await Expect(temperature).ToHaveValueAsync("");
         await Expect(topP).ToHaveValueAsync("");
         await Expect(topK).ToHaveValueAsync("");
+        await modelEditor.GetByTestId("cancel-model-config-btn").ClickAsync();
+        await Expect(modelEditor).Not.ToBeVisibleAsync();
         await dialog
             .GetByRole(AriaRole.Button, new() { Name = "Close", Exact = true })
             .ClickAsync();
@@ -1718,29 +1739,33 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         var addProfileBtn = dialog.Locator("[data-testid='add-profile-btn']");
         await Expect(addProfileBtn).ToBeVisibleAsync();
 
-        // 2. Click Add Profile to open editor form
+        // 2. Click Add Profile to open editor modal
         await addProfileBtn.ClickAsync();
-        var editorForm = dialog.Locator("[data-testid='profile-editor-form']");
+        var editorForm = Page.GetByTestId("profile-editor-form");
         await Expect(editorForm).ToBeVisibleAsync();
 
-        await dialog.Locator("[data-testid='profile-form-name']").FillAsync("Qwen 2.5 14B Custom");
-        await dialog.Locator("[data-testid='profile-form-tag']").FillAsync("qwen2.5:14b");
-        await dialog
+        await editorForm
+            .Locator("[data-testid='profile-form-name']")
+            .FillAsync("Qwen 2.5 14B Custom");
+        await editorForm.Locator("[data-testid='profile-form-tag']").FillAsync("qwen2.5:14b");
+        await editorForm
             .Locator("[data-testid='profile-form-prefixes']")
             .FillAsync("qwen2.5:14b, qwen");
-        await dialog
+        await editorForm
             .Locator("[data-testid='profile-form-summary']")
             .FillAsync("Fast and accurate extraction profile.");
-        await dialog.Locator("[data-testid='profile-form-context']").FillAsync("16384");
-        await dialog.Locator("[data-testid='profile-form-timeout']").FillAsync("450");
-        await dialog.Locator("[data-testid='profile-form-temperature']").FillAsync("0.7");
-        await dialog.Locator("[data-testid='profile-form-top-p']").FillAsync("0.9");
-        await dialog.Locator("[data-testid='profile-form-top-k']").FillAsync("40");
-        await dialog.Locator("[data-testid='profile-form-notes']").FillAsync("Custom profile note");
+        await editorForm.Locator("[data-testid='profile-form-context']").FillAsync("16384");
+        await editorForm.Locator("[data-testid='profile-form-timeout']").FillAsync("450");
+        await editorForm.Locator("[data-testid='profile-form-temperature']").FillAsync("0.7");
+        await editorForm.Locator("[data-testid='profile-form-top-p']").FillAsync("0.9");
+        await editorForm.Locator("[data-testid='profile-form-top-k']").FillAsync("40");
+        await editorForm
+            .Locator("[data-testid='profile-form-notes']")
+            .FillAsync("Custom profile note");
 
         // Save profile
         await Page.RunAndWaitForResponseAsync(
-            () => dialog.Locator("[data-testid='save-profile-btn']").ClickAsync(),
+            () => editorForm.Locator("[data-testid='save-profile-btn']").ClickAsync(),
             resp =>
                 resp.Url.Contains("/api/llm-settings/model-profiles")
                 && resp.Request.Method == "POST"
@@ -1758,7 +1783,8 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await AddLlmConnectionInDialogAsync(dialog, mockServer.BaseUrl);
         await OpenLlmSettingsTabAsync(dialog, "Models");
         await dialog.GetByTestId("add-model-config-btn").ClickAsync();
-        var profileSelect = dialog.Locator("[data-testid='llm-profile-select']");
+        var modelEditor = Page.GetByTestId("model-config-editor-form");
+        var profileSelect = modelEditor.Locator("[data-testid='llm-profile-select']");
         await Expect(profileSelect).ToBeVisibleAsync();
         await profileSelect.ClickAsync();
         var customOption = Page.Locator("mat-option", new() { HasText = "Qwen 2.5 14B Custom" });
@@ -1766,7 +1792,8 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         // Escape closes only the open select panel
         await Page.Keyboard.PressAsync("Escape");
         await Expect(customOption).Not.ToBeVisibleAsync();
-        await dialog.GetByTestId("cancel-model-config-btn").ClickAsync();
+        await modelEditor.GetByTestId("cancel-model-config-btn").ClickAsync();
+        await Expect(modelEditor).Not.ToBeVisibleAsync();
 
         // 4. Switch back to Profiles tab, edit custom profile
         await OpenLlmSettingsTabAsync(dialog, "Profiles");
@@ -1774,11 +1801,11 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await customCard.Locator(".edit-card-btn").ClickAsync();
         await Expect(editorForm).ToBeVisibleAsync();
 
-        await dialog
+        await editorForm
             .Locator("[data-testid='profile-form-summary']")
             .FillAsync("Updated summary for testing.");
         await Page.RunAndWaitForResponseAsync(
-            () => dialog.Locator("[data-testid='save-profile-btn']").ClickAsync(),
+            () => editorForm.Locator("[data-testid='save-profile-btn']").ClickAsync(),
             resp =>
                 resp.Url.Contains("/api/llm-settings/model-profiles")
                 && resp.Request.Method == "PUT"
@@ -1851,8 +1878,11 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
 
         await OpenLlmSettingsTabAsync(dialog, "Connections");
         await dialog.GetByTestId("add-connection-btn").ClickAsync();
-        await Expect(dialog.GetByTestId("connection-editor-form")).ToBeVisibleAsync();
+        var connectionEditor = Page.GetByTestId("connection-editor-form");
+        await Expect(connectionEditor).ToBeVisibleAsync();
         await AssertNoOverflowAsync("the connection editor");
+        await connectionEditor.GetByTestId("cancel-connection-btn").ClickAsync();
+        await Expect(connectionEditor).Not.ToBeVisibleAsync();
 
         await dialog
             .GetByRole(AriaRole.Button, new() { Name = "Close", Exact = true })
