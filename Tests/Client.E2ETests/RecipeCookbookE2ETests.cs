@@ -42,13 +42,17 @@ public sealed class RecipeCookbookE2ETests : E2ETestBase
                 new() { HasNot = Page.Locator("input[formcontrolname='displayName']") }
             )
             .First.FillAsync("Simmering");
-        await Page.Locator("textarea[formcontrolname='instruction']")
+        await Page.Locator("[formcontrolname='instruction'] .step-instruction-editable")
             .First.FillAsync("Combine beans and broth in pot; simmer gently.");
 
         // Step Timer
         await Page.Locator(".add-timer-btn").First.ClickAsync();
-        await Page.Locator("input[formcontrolname='minutes']").First.FillAsync("30");
-        await Page.Locator("input[formcontrolname='label']").First.FillAsync("Low simmer");
+        var timerDialog = Page.Locator("app-step-token-dialog");
+        await Expect(timerDialog).ToBeVisibleAsync();
+        await timerDialog.Locator("input[formcontrolname='minutes']").FillAsync("30");
+        await timerDialog.Locator("input[formcontrolname='label']").FillAsync("Low simmer");
+        await timerDialog.Locator("button", new() { HasText = "Insert Token" }).ClickAsync();
+        await Expect(timerDialog).ToHaveCountAsync(0);
 
         // Save
         await Page.Locator("button[type='submit']", new() { HasText = "Save Recipe" })
@@ -148,7 +152,7 @@ public sealed class RecipeCookbookE2ETests : E2ETestBase
         await Page.Locator("mat-option", new() { HasText = "Draft" }).ClickAsync();
         await Page.Locator("input[formcontrolname='displayName']").First.FillAsync("Beef Shank");
         await Page.Locator("input[formcontrolname='quantity']").First.FillAsync("1");
-        await Page.Locator("textarea[formcontrolname='instruction']")
+        await Page.Locator("[formcontrolname='instruction'] .step-instruction-editable")
             .First.FillAsync("Brown meat in batches.");
         await Page.Locator("button[type='submit']", new() { HasText = "Save Recipe" })
             .First.ClickAsync();
@@ -163,7 +167,7 @@ public sealed class RecipeCookbookE2ETests : E2ETestBase
         await Page.Locator("mat-option", new() { HasText = "Published" }).ClickAsync();
         await Page.Locator("input[formcontrolname='displayName']").First.FillAsync("Arborio Rice");
         await Page.Locator("input[formcontrolname='quantity']").First.FillAsync("2");
-        await Page.Locator("textarea[formcontrolname='instruction']")
+        await Page.Locator("[formcontrolname='instruction'] .step-instruction-editable")
             .First.FillAsync("Stir constantly with hot stock.");
         await Page.Locator("button[type='submit']", new() { HasText = "Save Recipe" })
             .First.ClickAsync();
@@ -233,7 +237,7 @@ public sealed class RecipeCookbookE2ETests : E2ETestBase
         await Page.Locator("mat-option", new() { HasText = "Cup" }).First.ClickAsync();
 
         // First Step
-        await Page.Locator("textarea[formcontrolname='instruction']")
+        await Page.Locator("[formcontrolname='instruction'] .step-instruction-editable")
             .First.FillAsync("Whisk cornmeal with dry ingredients.");
 
         // Save

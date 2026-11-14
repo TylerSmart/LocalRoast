@@ -1,12 +1,19 @@
-import { MeasurementUnit, UnitSystem } from '../models/recipe.models';
 import {
+  MeasurementUnit,
+  RecipeMeasurement,
+  RecipeStepIngredientAmountInput,
+  RecipeStepTimerInput,
+  UnitSystem,
+} from '../models/recipe.models';
+import {
+  StepDialogIngredientOption,
   StepIngredientToken,
   StepSegment,
   StepTemperatureToken,
   StepTimerToken,
   StepToken,
 } from '../models/step-token.models';
-import { scaleAndConvert } from './culinary-math';
+import { IngredientMeasurements, scaleAndConvert, scaleStepIngredient } from './culinary-math';
 
 const TOKEN_REGEX = /\|\|(\{.*?\})([.,:;!?]*)\|\|/g;
 
@@ -208,6 +215,7 @@ export function formatTokenDisplay(
   token: StepIngredientToken,
   factor = 1,
   system: UnitSystem = 'Original',
+  matchedIngredient?: IngredientMeasurements | null,
 ): string {
   const qty = token.displayAmount ?? token.amount;
   const unitStr = token.displayUnit ?? token.unit;
@@ -219,7 +227,14 @@ export function formatTokenDisplay(
 
   const customUnitName =
     normalizedUnit === 'Custom' && typeof unitStr === 'string' ? unitStr : null;
-  const formatted = scaleAndConvert(qty, null, normalizedUnit, customUnitName, factor, system);
+  const formatted = matchedIngredient?.alternativeMeasurement?.quantity
+    ? scaleStepIngredient(
+        matchedIngredient,
+        { quantity: qty, unit: normalizedUnit, customUnitName },
+        factor,
+        system,
+      )
+    : scaleAndConvert(qty, null, normalizedUnit, customUnitName, factor, system);
   const measurementStr = formatted.formattedMeasurement.trim();
 
   return measurementStr
@@ -448,4 +463,247 @@ export function cleanStepInstruction(instruction: string | null | undefined): st
     }
   }
   return out;
+}
+
+export interface DerivedStepMetadata {
+  hasTokens: boolean;
+  hasIngredientTokens: boolean;
+  hasTimerTokens: boolean;
+  ingredientIndices: number[];
+  ingredientAmounts: RecipeStepIngredientAmountInput[];
+  timers: RecipeStepTimerInput[];
+}
+
+export function replaceTokenSegmentAt(
+  instruction: string,
+  segmentIndex: number,
+  replacementRawToken: string | null,
+): string {
+  const segments = parseStepInstruction(instruction);
+  if (segmentIndex < 0 || segmentIndex >= segments.length) {
+    return instruction;
+  }
+
+  const serializeSegment = (seg: StepSegment): string => seg.rawToken || seg.text;
+
+  if (replacementRawToken !== null) {
+    return segments
+      .map((seg, idx) => (idx === segmentIndex ? replacementRawToken : serializeSegment(seg)))
+      .join('');
+  }
+
+  let before = segments.slice(0, segmentIndex).map(serializeSegment).join('');
+  let after = segments
+    .slice(segmentIndex + 1)
+    .map(serializeSegment)
+    .join('');
+
+  if (before.endsWith(' ') && after.startsWith(' ')) {
+    after = after.slice(1);
+  } else if (before.endsWith(' ') && /^[.,:;!?)]/.test(after)) {
+    before = before.slice(0, -1);
+  }
+
+  return `${before}${after}`.trim();
+}
+
+export function insertTokenAtOffset(
+  instruction: string,
+  offset: number,
+  rawToken: string,
+): { nextInstruction: string; nextCaretOffset: number } {
+  let safeOffset = Math.max(0, Math.min(offset, instruction.length));
+  TOKEN_REGEX.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = TOKEN_REGEX.exec(instruction)) !== null) {
+    const matchStart = match.index;
+    const matchEnd = TOKEN_REGEX.lastIndex;
+    if (safeOffset > matchStart && safeOffset < matchEnd) {
+      safeOffset = matchEnd;
+      break;
+    }
+  }
+
+  const before = instruction.slice(0, safeOffset);
+  const after = instruction.slice(safeOffset);
+  const spaceBefore = before.length > 0 && !/[\s(]$/.test(before) ? ' ' : '';
+  const spaceAfter = after.length === 0 ? ' ' : /^[\s.,:;!?)]/.test(after) ? '' : ' ';
+  const nextInstruction = before + spaceBefore + rawToken + spaceAfter + after;
+  const advancePastSpace =
+    spaceAfter.length > 0 ? spaceAfter.length : after.length > 0 && after[0] === ' ' ? 1 : 0;
+  const nextCaretOffset = before.length + spaceBefore.length + rawToken.length + advancePastSpace;
+  return { nextInstruction, nextCaretOffset };
+}
+
+function findBestCandidateIndex(
+  token: StepIngredientToken,
+  ingredients: readonly (Pick<StepDialogIngredientOption, 'id' | 'displayName' | 'sectionName'> & {
+    index?: number;
+  })[],
+  stepSectionName?: string | null,
+  preferredIndices?: readonly number[],
+): number {
+  if (token.ingredientId) {
+    const byIdPos = ingredients.findIndex((c) => c.id && c.id === token.ingredientId);
+    if (byIdPos >= 0) {
+      return ingredients[byIdPos].index ?? byIdPos;
+    }
+  }
+
+  const clean = token.ingredient.trim().toLowerCase();
+  if (!clean) {
+    return -1;
+  }
+
+  const normalizedSection = stepSectionName?.trim().toLowerCase() ?? '';
+  let bestIndex = -1;
+  let bestScore = -1;
+
+  for (let i = 0; i < ingredients.length; i++) {
+    const cand = ingredients[i];
+    const name = cand.displayName.trim().toLowerCase();
+    if (!name) continue;
+    if (name !== clean && !name.includes(clean) && !clean.includes(name)) continue;
+
+    let score = 0;
+    if (name === clean) score += 8;
+    if (normalizedSection && (cand.sectionName?.trim().toLowerCase() ?? '') === normalizedSection) {
+      score += 4;
+    }
+    const candIdx = cand.index ?? i;
+    if (preferredIndices?.includes(candIdx)) {
+      score += 2;
+    }
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndex = candIdx;
+    }
+  }
+
+  return bestIndex;
+}
+
+export function deriveStepMetadataFromInstruction(
+  instruction: string | null | undefined,
+  ingredients: readonly (Pick<StepDialogIngredientOption, 'id' | 'displayName' | 'sectionName'> & {
+    index?: number;
+  })[],
+  stepSectionName?: string | null,
+  preferredIndices?: readonly number[],
+): DerivedStepMetadata {
+  const segments = parseStepInstruction(instruction ?? '');
+  const tokens = segments.map((s) => s.token).filter((t): t is StepToken => !!t);
+
+  const ingredientIndices: number[] = [];
+  const seenIndices = new Set<number>();
+  const amountsMap = new Map<number, RecipeStepIngredientAmountInput>();
+  const timers: RecipeStepTimerInput[] = [];
+  const seenTimers = new Set<string>();
+
+  let hasIngredientTokens = false;
+  let hasTimerTokens = false;
+
+  for (const token of tokens) {
+    if (token.type === 'timer' || 'seconds' in token) {
+      hasTimerTokens = true;
+      const timerToken = token as StepTimerToken;
+      if (timerToken.seconds >= 1) {
+        const label = timerToken.label?.trim() || 'Timer';
+        const dedupeKey = `${timerToken.seconds}|${label.toLowerCase()}`;
+        if (!seenTimers.has(dedupeKey)) {
+          seenTimers.add(dedupeKey);
+          timers.push({
+            durationSeconds: timerToken.seconds,
+            label,
+          });
+        }
+      }
+      continue;
+    }
+
+    if (token.type === 'temperature' || 'fahrenheit' in token || 'celsius' in token) {
+      continue;
+    }
+
+    hasIngredientTokens = true;
+    const ingToken = token as StepIngredientToken;
+    const matchIdx = findBestCandidateIndex(
+      ingToken,
+      ingredients,
+      stepSectionName,
+      preferredIndices,
+    );
+
+    if (matchIdx >= 0) {
+      if (!seenIndices.has(matchIdx)) {
+        seenIndices.add(matchIdx);
+        ingredientIndices.push(matchIdx);
+      }
+
+      if (ingToken.amount != null && !Number.isNaN(ingToken.amount) && !amountsMap.has(matchIdx)) {
+        const normalizedUnit = normalizeMeasurementUnit(ingToken.unit);
+        const rawUnit = typeof ingToken.unit === 'string' ? ingToken.unit.trim() : '';
+        const customUnitName =
+          normalizedUnit === 'Custom' && rawUnit && rawUnit.toLowerCase() !== 'custom'
+            ? rawUnit
+            : null;
+        const measurement: RecipeMeasurement = {
+          quantity: ingToken.amount,
+          maxQuantity: null,
+          unit: normalizedUnit,
+          customUnitName,
+        };
+        amountsMap.set(matchIdx, {
+          ingredientIndex: matchIdx,
+          measurement,
+        });
+      }
+    }
+  }
+
+  return {
+    hasTokens: tokens.length > 0,
+    hasIngredientTokens,
+    hasTimerTokens,
+    ingredientIndices,
+    ingredientAmounts: Array.from(amountsMap.values()),
+    timers,
+  };
+}
+
+export interface StepTokenOriginFlags {
+  hasIngredientTokens: boolean;
+  hasTimerTokens: boolean;
+}
+
+export function resolveStepMetadataForPayload(
+  instruction: string | null | undefined,
+  ingredients: readonly (Pick<StepDialogIngredientOption, 'id' | 'displayName' | 'sectionName'> & {
+    index?: number;
+  })[],
+  sectionName: string | null | undefined,
+  origin: StepTokenOriginFlags | undefined,
+  fallbackIndices: number[],
+  fallbackAmounts: RecipeStepIngredientAmountInput[],
+  fallbackTimers: RecipeStepTimerInput[],
+): {
+  ingredientIndices: number[];
+  ingredientAmounts: RecipeStepIngredientAmountInput[];
+  timers: RecipeStepTimerInput[];
+} {
+  const meta = deriveStepMetadataFromInstruction(
+    instruction,
+    ingredients,
+    sectionName,
+    fallbackIndices,
+  );
+  const useDerivedIngredients = meta.hasIngredientTokens || !!origin?.hasIngredientTokens;
+  const useDerivedTimers = meta.hasTimerTokens || !!origin?.hasTimerTokens;
+
+  return {
+    ingredientIndices: useDerivedIngredients ? meta.ingredientIndices : fallbackIndices,
+    ingredientAmounts: useDerivedIngredients ? meta.ingredientAmounts : fallbackAmounts,
+    timers: useDerivedTimers ? meta.timers : fallbackTimers,
+  };
 }

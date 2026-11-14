@@ -384,7 +384,9 @@ describe('IngestionReviewComponent', () => {
     });
     fixture.detectChanges();
 
-    const chip = fixture.nativeElement.querySelector('app-step-ingredient-chip');
+    const chip = fixture.nativeElement.querySelector(
+      'app-step-instruction-editor .inline-step-chip.is-ingredient',
+    );
     expect(chip?.textContent).toContain('200 g tofu');
     expect(fixture.nativeElement.textContent).toContain('10m (Simmer)');
 
@@ -905,5 +907,33 @@ describe('IngestionReviewComponent', () => {
       expect.any(Object),
     );
     expect(router.navigate).toHaveBeenCalledWith(['/recipes', 'rec-1']);
+  });
+
+  it('derives step callouts, amounts, and timers automatically from inline step tokens in buildDraftPayload', () => {
+    component.ingredientsArray.at(0).patchValue({
+      displayName: 'Sesame Oil',
+      quantity: 2,
+      unit: 'Tbsp',
+    });
+    component.stepsArray.at(0).patchValue({
+      instruction:
+        'Heat ||{"ingredient":"Sesame Oil","amount":1,"unit":"tbsp"}|| and fry for ||{"type":"timer","seconds":180,"label":"Sear"}||.',
+      ingredientIndices: [],
+    });
+
+    const payload = component.buildDraftPayload();
+    expect(payload.steps[0].ingredientIndices).toEqual([0]);
+    expect(payload.steps[0].ingredientAmounts).toEqual([
+      {
+        ingredientIndex: 0,
+        measurement: {
+          quantity: 1,
+          maxQuantity: null,
+          unit: 'Tbsp',
+          customUnitName: null,
+        },
+      },
+    ]);
+    expect(payload.steps[0].timers).toEqual([{ durationSeconds: 180, label: 'Sear' }]);
   });
 });

@@ -84,7 +84,7 @@ public sealed class DiscoveryAndMediaE2ETests : E2ETestBase
         await Expect(Page.Locator("img.step-preview-img")).ToBeVisibleAsync();
 
         // Fill Step Instruction
-        await Page.Locator("textarea[formcontrolname='instruction']")
+        await Page.Locator("[formcontrolname='instruction'] .step-instruction-editable")
             .First.FillAsync(
                 "Cut zucchini into thick rounds, thread onto skewers, and grill 8 minutes."
             );
@@ -192,7 +192,7 @@ public sealed class DiscoveryAndMediaE2ETests : E2ETestBase
         await Page.Locator("input[formcontrolname='quantity']").Nth(3).FillAsync("2");
 
         // Step
-        await Page.Locator("textarea[formcontrolname='instruction']")
+        await Page.Locator("[formcontrolname='instruction'] .step-instruction-editable")
             .First.FillAsync("Sear chicken in olive oil, finish with squeeze of fresh lime juice.");
 
         await Page.Locator("button[type='submit']", new() { HasText = "Save Recipe" })
@@ -228,7 +228,7 @@ public sealed class DiscoveryAndMediaE2ETests : E2ETestBase
         await Page.Locator("mat-option", new() { HasText = "Yellow Onion" }).First.ClickAsync();
 
         // Step
-        await Page.Locator("textarea[formcontrolname='instruction']")
+        await Page.Locator("[formcontrolname='instruction'] .step-instruction-editable")
             .First.FillAsync(
                 "Shred cooked chicken and assemble bowls with fresh onion and cilantro."
             );

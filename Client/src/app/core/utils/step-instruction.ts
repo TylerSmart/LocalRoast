@@ -88,10 +88,10 @@ export function buildInstructionSegments(
       const ing = seg.token as StepIngredientToken;
       const matched = matchIngredient(ing, _ingredients, step.ingredientIds);
       const matchedId = matched?.id ?? ing.ingredientId ?? null;
-      const displayText = formatTokenDisplay(ing, factor, system);
+      const displayText = formatTokenDisplay(ing, factor, system, matched);
       const totalText =
         ing.displayAmount != null && ing.amount != null
-          ? `Total recipe: ${formatTokenDisplay({ ...ing, displayAmount: ing.amount }, factor, system)}`
+          ? `Total recipe: ${formatTokenDisplay({ ...ing, displayAmount: ing.amount }, factor, system, matched)}`
           : ing.notes
             ? `Note: ${ing.notes}`
             : null;
@@ -186,7 +186,7 @@ export function stepIngredientCallouts(
       const id = matched?.id ?? ingToken.ingredientId ?? ingToken.ingredient;
       if (!seenIds.has(id)) {
         seenIds.add(id);
-        const label = formatTokenDisplay(ingToken, factor, system);
+        const label = formatTokenDisplay(ingToken, factor, system, matched);
         result.push({ id, label });
       }
     }
@@ -245,7 +245,7 @@ export function ingredientUses(
         if (matched?.id === ingredientId) {
           uses.push({
             stepNumber: step.stepNumber,
-            label: formatTokenDisplay(ingToken, factor, system),
+            label: formatTokenDisplay(ingToken, factor, system, matched),
           });
         }
       }

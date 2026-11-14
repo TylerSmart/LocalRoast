@@ -226,12 +226,17 @@ public sealed class FoodItemMergeAndAiHelpersE2ETests : E2ETestBase
             await Page.Locator("input[formcontrolname='preparationNote']")
                 .First.FillAsync(preparationNote);
         }
-        await Page.Locator("textarea[formcontrolname='instruction']").First.FillAsync(instruction);
+        await Page.Locator("[formcontrolname='instruction'] .step-instruction-editable")
+            .First.FillAsync(instruction);
 
         // Add a step timer so cook mode has rich step content
         await Page.Locator(".add-timer-btn").First.ClickAsync();
-        await Page.Locator("input[formcontrolname='minutes']").First.FillAsync("5");
-        await Page.Locator("input[formcontrolname='label']").First.FillAsync("Simmer");
+        var timerDialog = Page.Locator("app-step-token-dialog");
+        await Expect(timerDialog).ToBeVisibleAsync();
+        await timerDialog.Locator("input[formcontrolname='minutes']").FillAsync("5");
+        await timerDialog.Locator("input[formcontrolname='label']").FillAsync("Simmer");
+        await timerDialog.Locator("button", new() { HasText = "Insert Token" }).ClickAsync();
+        await Expect(timerDialog).ToHaveCountAsync(0);
 
         await Page.Locator("button[type='submit']", new() { HasText = "Save Recipe" })
             .First.ClickAsync();

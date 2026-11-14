@@ -107,6 +107,10 @@ public sealed class StepTokensE2ETests : E2ETestBase
         await Page.GetByRole(AriaRole.Button, new() { Name = "Add Step", Exact = true })
             .ClickAsync();
         var stepCard = Page.Locator(".builder-list").Last.Locator(".builder-item-card").Last;
+        var editor = stepCard.Locator("[formcontrolname='instruction']");
+        var editable = editor.Locator(".step-instruction-editable");
+        await editable.ClickAsync();
+        await Page.Keyboard.TypeAsync("Whisk ");
 
         // Click + Ingredient
         await stepCard.Locator(".add-ingredient-btn").ClickAsync();
@@ -127,28 +131,54 @@ public sealed class StepTokensE2ETests : E2ETestBase
         await dialog.Locator("button", new() { HasText = "Insert Token" }).ClickAsync();
         await Expect(dialog).ToHaveCountAsync(0);
 
-        // Verify token in textarea
-        var textarea = stepCard.Locator("textarea[formcontrolname='instruction']");
-        var val = await textarea.InputValueAsync();
+        // Verify token serialized without raw JSON rendered visibly
+        var val = await editor.GetAttributeAsync("data-serialized-value");
+        Assert.IsNotNull(val);
         Assert.Contains(
             "||{\"ingredient\":\"Eggs\",\"amount\":4,\"unit\":\"whole\",\"displayAmount\":2,\"displayUnit\":\"whole\"}||",
             val
         );
 
-        // Verify chip in live preview
-        var previewChip = stepCard.Locator(".step-token-preview app-step-ingredient-chip");
-        await Expect(previewChip).ToBeVisibleAsync();
-        await Expect(previewChip).ToContainTextAsync("2 Eggs");
+        var visibleText = await editable.InnerTextAsync();
+        Assert.DoesNotContain(
+            "||{",
+            visibleText,
+            "Raw token JSON must not appear in hybrid editor."
+        );
 
-        // Click chip to edit
-        await previewChip.Locator("button").ClickAsync();
+        // Verify inline chip inside editable surface
+        var inlineChip = editable.Locator(".inline-step-chip.is-ingredient");
+        await Expect(inlineChip).ToBeVisibleAsync();
+        await Expect(inlineChip).ToContainTextAsync("2 Eggs");
+
+        // Continue typing after chip and insert timer & temperature chips dynamically
+        await Page.Keyboard.TypeAsync("and cook ");
+        await stepCard.Locator(".add-timer-btn").ClickAsync();
+        await Expect(dialog).ToBeVisibleAsync();
+        await dialog.Locator("input[formcontrolname='minutes']").FillAsync("3");
+        await dialog.Locator("input[formcontrolname='label']").FillAsync("Scramble");
+        await dialog.Locator("button", new() { HasText = "Insert Token" }).ClickAsync();
+        await Expect(dialog).ToHaveCountAsync(0);
+        await Expect(editable.Locator(".inline-step-chip.is-timer")).ToContainTextAsync("3m");
+
+        await stepCard.Locator(".add-temp-btn").ClickAsync();
+        await Expect(dialog).ToBeVisibleAsync();
+        await dialog.Locator("input[formcontrolname='fahrenheit']").FillAsync("325");
+        await dialog.Locator("button", new() { HasText = "Insert Token" }).ClickAsync();
+        await Expect(dialog).ToHaveCountAsync(0);
+        await Expect(editable.Locator(".inline-step-chip.is-temperature"))
+            .ToContainTextAsync("325°F");
+
+        // Click chip edit button to edit ingredient amount
+        await inlineChip.Locator(".chip-edit-btn").ClickAsync();
         await Expect(dialog).ToBeVisibleAsync();
         await dialog.Locator("input[formcontrolname='amount']").FillAsync("6");
         await dialog.Locator("button", new() { HasText = "Update Token" }).ClickAsync();
         await Expect(dialog).ToHaveCountAsync(0);
 
-        // Verify token updated in textarea
-        val = await textarea.InputValueAsync();
+        // Verify token updated in serialized value
+        val = await editor.GetAttributeAsync("data-serialized-value");
+        Assert.IsNotNull(val);
         Assert.Contains("\"amount\":6", val);
     }
 

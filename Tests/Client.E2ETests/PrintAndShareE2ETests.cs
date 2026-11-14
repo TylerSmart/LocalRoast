@@ -20,7 +20,7 @@ public sealed class PrintAndShareE2ETests : E2ETestBase
         await Page.Locator("input[formcontrolname='title']").FillAsync(subRecipeTitle);
         await Page.Locator("input[formcontrolname='displayName']").First.FillAsync("Red Onion");
         await Page.Locator("input[formcontrolname='quantity']").First.FillAsync("1");
-        await Page.Locator("textarea[formcontrolname='instruction']")
+        await Page.Locator("[formcontrolname='instruction'] .step-instruction-editable")
             .First.FillAsync("Slice thin and cover with vinegar.");
         await Page.Locator("button[type='submit']", new() { HasText = "Save Recipe" })
             .First.ClickAsync();
@@ -57,7 +57,7 @@ public sealed class PrintAndShareE2ETests : E2ETestBase
         await secondIng.Locator("input[formcontrolname='quantity']").FillAsync("1");
 
         // Step
-        await Page.Locator("textarea[formcontrolname='instruction']")
+        await Page.Locator("[formcontrolname='instruction'] .step-instruction-editable")
             .First.FillAsync("Grill fish and assemble tacos with pickled onions.");
 
         await Page.Locator("button[type='submit']", new() { HasText = "Save Recipe" })
@@ -140,7 +140,7 @@ public sealed class PrintAndShareE2ETests : E2ETestBase
         await Page.Locator("input[formcontrolname='quantity']").First.FillAsync("200");
         await Page.Locator("mat-select[formcontrolname='unit']").First.ClickAsync();
         await Page.Locator("mat-option", new() { HasText = "Gram (g)" }).First.ClickAsync();
-        await Page.Locator("textarea[formcontrolname='instruction']")
+        await Page.Locator("[formcontrolname='instruction'] .step-instruction-editable")
             .First.FillAsync("Crisp guanciale over low heat.");
         await Page.Locator("button[type='submit']", new() { HasText = "Save Recipe" })
             .First.ClickAsync();
@@ -221,7 +221,7 @@ public sealed class PrintAndShareE2ETests : E2ETestBase
         await Page.Locator("input[formcontrolname='baseServings']").FillAsync("2");
         await Page.Locator("input[formcontrolname='displayName']").First.FillAsync("Green Lentils");
         await Page.Locator("input[formcontrolname='quantity']").First.FillAsync("1");
-        await Page.Locator("textarea[formcontrolname='instruction']")
+        await Page.Locator("[formcontrolname='instruction'] .step-instruction-editable")
             .First.FillAsync("Simmer lentils until tender.");
         await Page.Locator("button[type='submit']", new() { HasText = "Save Recipe" })
             .First.ClickAsync();

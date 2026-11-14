@@ -1,0 +1,181 @@
+:host {
+  display: block;
+  width: 100%;
+  margin-bottom: 1rem;
+}
+
+.step-instruction-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.step-token-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+
+  .token-btn {
+    border-radius: 8px;
+    font-size: 0.85rem;
+    height: 34px;
+    padding: 0 10px;
+    line-height: 1;
+
+    mat-icon {
+      font-size: 18px;
+      width: 18px;
+      height: 18px;
+      margin-right: 4px;
+    }
+  }
+
+  .add-ingredient-btn {
+    color: var(--mat-sys-primary);
+    border-color: var(--mat-sys-outline-variant);
+  }
+
+  .add-timer-btn {
+    color: var(--mat-sys-tertiary);
+    border-color: var(--mat-sys-outline-variant);
+  }
+
+  .add-temp-btn {
+    color: var(--app-warning);
+    border-color: var(--mat-sys-outline-variant);
+  }
+}
+
+.editor-outline {
+  position: relative;
+  border: 1px solid var(--mat-sys-outline);
+  border-radius: 4px;
+  padding: 0.85rem 0.9rem 0.75rem;
+  background-color: var(--mat-sys-surface);
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+
+  &:hover:not(.disabled):not(.focused) {
+    border-color: var(--mat-sys-on-surface);
+  }
+
+  &.focused {
+    border-color: var(--mat-sys-primary);
+    box-shadow: inset 0 0 0 1px var(--mat-sys-primary);
+
+    .editor-floating-label {
+      color: var(--mat-sys-primary);
+    }
+  }
+
+  &.disabled {
+    opacity: 0.6;
+    background-color: var(--mat-sys-surface-container-low);
+  }
+}
+
+.editor-floating-label {
+  position: absolute;
+  top: -0.6rem;
+  left: 0.65rem;
+  padding: 0 0.35rem;
+  background-color: var(--mat-sys-surface);
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.2;
+  color: var(--mat-sys-on-surface-variant);
+  pointer-events: none;
+}
+
+.step-instruction-editable {
+  min-height: 76px;
+  outline: none;
+  font-family: var(--app-font-family);
+  font-size: 0.95rem;
+  line-height: 1.8;
+  color: var(--mat-sys-on-surface);
+  white-space: pre-wrap;
+  word-break: break-word;
+
+  &[data-empty='true']::before {
+    content: attr(data-placeholder);
+    color: var(--mat-sys-on-surface-variant);
+    opacity: 0.7;
+    pointer-events: none;
+  }
+}
+
+:host ::ng-deep .step-instruction-editable .inline-step-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 14px;
+  padding: 1px 4px 1px 8px;
+  margin: 1px 2px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.35;
+  vertical-align: middle;
+  user-select: none;
+  border: 1px solid var(--mat-sys-outline-variant);
+
+  &.is-ingredient {
+    background-color: var(--mat-sys-primary-container);
+    color: var(--mat-sys-on-primary-container);
+  }
+
+  &.is-timer {
+    background-color: var(--mat-sys-tertiary-container);
+    color: var(--mat-sys-on-tertiary-container);
+  }
+
+  &.is-temperature {
+    background-color: var(--app-warning-container);
+    color: var(--app-on-warning-container);
+  }
+
+  .chip-type-icon {
+    font-size: 16px;
+    width: 16px;
+    height: 16px;
+    line-height: 16px;
+  }
+
+  .chip-label {
+    white-space: nowrap;
+  }
+
+  .chip-edit-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    margin-left: 2px;
+    border: none;
+    border-radius: 50%;
+    background: transparent;
+    color: inherit;
+    opacity: 0.78;
+    cursor: pointer;
+    transition:
+      background-color 0.15s ease,
+      opacity 0.15s ease;
+
+    &:hover,
+    &:focus-visible {
+      opacity: 1;
+      background-color: color-mix(in srgb, currentColor 14%, transparent);
+    }
+
+    .chip-edit-icon {
+      font-size: 14px;
+      width: 14px;
+      height: 14px;
+      line-height: 14px;
+    }
+  }
+}

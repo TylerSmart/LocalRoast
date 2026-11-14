@@ -53,23 +53,13 @@ import {
   RecipePreviewData,
   RecipeStepTimerInput,
 } from '../../../core/models/recipe.models';
+import { StepDialogIngredientOption } from '../../../core/models/step-token.models';
 import {
-  StepSegment,
-  StepTemperatureToken,
-  StepTimerToken,
-  StepToken,
-} from '../../../core/models/step-token.models';
-import {
-  formatTemperatureToken,
-  formatTimerToken,
-  parseStepInstruction,
+  StepTokenOriginFlags,
+  deriveStepMetadataFromInstruction,
+  resolveStepMetadataForPayload,
 } from '../../../core/utils/step-token-parser';
-import {
-  StepTokenDialogComponent,
-  StepTokenDialogData,
-  StepTokenDialogResult,
-} from '../../../shared/components/step-token-dialog/step-token-dialog.component';
-import { StepIngredientChipComponent } from '../../../shared/components/step-ingredient-chip/step-ingredient-chip.component';
+import { StepInstructionEditorComponent } from '../../../shared/components/step-instruction-editor/step-instruction-editor.component';
 import { CollectionDto, TagDto } from '../../../core/models/taxonomy.models';
 import { FoodCatalogService } from '../../../core/services/food-catalog/food-catalog.service';
 import { IngestionService } from '../../../core/services/ingestion/ingestion.service';
@@ -122,7 +112,7 @@ export interface DiagnosticJumpTarget {
     SourceViewerComponent,
     RecipeDetailPreviewComponent,
     MeasurementEditorComponent,
-    StepIngredientChipComponent,
+    StepInstructionEditorComponent,
   ],
   templateUrl: './ingestion-review.component.html',
   styleUrl: './ingestion-review.component.scss',
@@ -139,6 +129,7 @@ export class IngestionReviewComponent implements OnInit {
   private readonly dialog = inject(MatDialog);
   private readonly snackBar = inject(MatSnackBar);
   private readonly llmSettingsService = inject(LlmSettingsService);
+  private readonly loadedStepTokenOrigins = new WeakMap<FormGroup, StepTokenOriginFlags>();
   private refinementPollHandle: ReturnType<typeof setTimeout> | null = null;
   static readonly refinementPollMs = 15000;
 
@@ -829,6 +820,12 @@ export class IngestionReviewComponent implements OnInit {
       imagePath: [step?.imagePath ?? null],
     });
 
+    const originMeta = deriveStepMetadataFromInstruction(step?.instruction ?? '', []);
+    this.loadedStepTokenOrigins.set(fg, {
+      hasIngredientTokens: originMeta.hasIngredientTokens,
+      hasTimerTokens: originMeta.hasTimerTokens,
+    });
+
     this.stepsArray.push(fg);
   }
 
@@ -836,106 +833,24 @@ export class IngestionReviewComponent implements OnInit {
     this.stepsArray.removeAt(index);
   }
 
-  getStepSegments(instruction: string | null | undefined): StepSegment[] {
-    return parseStepInstruction(instruction ?? '');
-  }
-
-  formatTimerSegment(token: StepTimerToken): string {
-    return formatTimerToken(token);
-  }
-
-  formatTemperatureSegment(token: StepTemperatureToken): string {
-    return formatTemperatureToken(token, 'Original');
-  }
-
-  insertTokenAtCursor(stepIndex: number, rawToken: string): void {
-    const stepCtrl = this.stepsArray.at(stepIndex).get('instruction');
-    const current = stepCtrl?.value ?? '';
-    const activeEl = document.activeElement as HTMLTextAreaElement | null;
-    if (
-      activeEl &&
-      activeEl.tagName === 'TEXTAREA' &&
-      activeEl.dataset['stepIndex'] === String(stepIndex)
-    ) {
-      const start = activeEl.selectionStart ?? current.length;
-      const end = activeEl.selectionEnd ?? current.length;
-      const spaceBefore = start > 0 && current[start - 1] !== ' ' ? ' ' : '';
-      const spaceAfter = end < current.length && current[end] !== ' ' ? ' ' : ' ';
-      const next =
-        current.slice(0, start) + spaceBefore + rawToken + spaceAfter + current.slice(end);
-      stepCtrl?.setValue(next);
-      stepCtrl?.markAsDirty();
-    } else {
-      const spaceBefore = current.length > 0 && !current.endsWith(' ') ? ' ' : '';
-      stepCtrl?.setValue(current + spaceBefore + rawToken + ' ');
-      stepCtrl?.markAsDirty();
-    }
-  }
-
-  openTokenDialog(stepIndex: number, mode: 'ingredient' | 'timer' | 'temperature'): void {
-    const availableIngredients = this.ingredientsArray.controls
-      .map((c) => c.get('displayName')?.value?.trim())
-      .filter((name): name is string => !!name);
-
-    const dialogRef = this.dialog.open<
-      StepTokenDialogComponent,
-      StepTokenDialogData,
-      StepTokenDialogResult
-    >(StepTokenDialogComponent, {
-      data: {
-        mode,
-        availableIngredients,
-      },
-      width: '540px',
-    });
-
-    dialogRef.afterClosed().subscribe((result) => {
-      if (result?.rawToken) {
-        this.insertTokenAtCursor(stepIndex, result.rawToken);
-      }
-    });
-  }
-
-  editTokenInStep(stepIndex: number, oldRawToken: string, token: StepToken): void {
-    const stepCtrl = this.stepsArray.at(stepIndex).get('instruction');
-    const current = stepCtrl?.value ?? '';
-    const availableIngredients = this.ingredientsArray.controls
-      .map((c) => c.get('displayName')?.value?.trim())
-      .filter((name): name is string => !!name);
-
-    const dialogRef = this.dialog.open<
-      StepTokenDialogComponent,
-      StepTokenDialogData,
-      StepTokenDialogResult
-    >(StepTokenDialogComponent, {
-      data: {
-        mode:
-          token.type === 'timer'
-            ? 'timer'
-            : token.type === 'temperature'
-              ? 'temperature'
-              : 'ingredient',
-        token,
-        availableIngredients,
-      },
-      width: '540px',
-    });
-
-    dialogRef.afterClosed().subscribe((result) => {
-      if (!result) return;
-      if (result.delete) {
-        const next = current
-          .replace(oldRawToken, '')
-          .replace(/\s{2,}/g, ' ')
-          .trim();
-        stepCtrl?.setValue(next);
-        stepCtrl?.markAsDirty();
-      } else if (result.rawToken) {
-        const next = current.replace(oldRawToken, result.rawToken);
-        stepCtrl?.setValue(next);
-        stepCtrl?.markAsDirty();
-      }
-    });
+  getStepDialogIngredients(): StepDialogIngredientOption[] {
+    return this.ingredientsArray.controls
+      .map((ctrl, index) => {
+        const val = ctrl.getRawValue();
+        const displayName = val.isRecipeReference
+          ? val.referencedRecipeTitle?.trim() || val.displayName?.trim() || ''
+          : val.displayName?.trim() || '';
+        return {
+          index,
+          id: null,
+          displayName,
+          sectionName: val.sectionName?.trim() || null,
+          quantity: val.quantity !== null && val.quantity !== '' ? Number(val.quantity) : null,
+          unit: val.unit || null,
+          customUnitName: val.customUnitName?.trim() || null,
+        };
+      })
+      .filter((item) => !!item.displayName);
   }
 
   getStepAmountsArray(stepIndex: number) {
@@ -1174,10 +1089,17 @@ export class IngestionReviewComponent implements OnInit {
       },
     );
 
+    const ingredientCandidates = ingredients.map((ing, idx) => ({
+      index: idx,
+      id: null,
+      displayName: ing.displayName,
+      sectionName: ing.sectionName,
+    }));
+
     const steps: IngestionDraftStepDto[] = this.stepsArray.controls.map((ctrl, i) => {
       const val = ctrl.getRawValue();
       const timersArray = ctrl.get('timers') as FormArray<FormGroup>;
-      const timers: RecipeStepTimerInput[] = timersArray.controls.map((tCtrl) => {
+      const fallbackTimers: RecipeStepTimerInput[] = timersArray.controls.map((tCtrl) => {
         const tVal = tCtrl.getRawValue();
         const mins = Number(tVal.minutes) || 0;
         const secs = Number(tVal.seconds) || 0;
@@ -1187,13 +1109,23 @@ export class IngestionReviewComponent implements OnInit {
         };
       });
 
+      const resolved = resolveStepMetadataForPayload(
+        val.instruction,
+        ingredientCandidates,
+        val.sectionName,
+        this.loadedStepTokenOrigins.get(ctrl),
+        val.ingredientIndices || [],
+        buildStepAmounts(ctrl),
+        fallbackTimers,
+      );
+
       return {
         stepNumber: i + 1,
         sectionName: val.sectionName?.trim() || null,
         instruction: (val.instruction || '').trim(),
-        ingredientIndices: val.ingredientIndices || [],
-        ingredientAmounts: buildStepAmounts(ctrl),
-        timers,
+        ingredientIndices: resolved.ingredientIndices,
+        ingredientAmounts: resolved.ingredientAmounts,
+        timers: resolved.timers,
         imagePath: val.imagePath || null,
       };
     });

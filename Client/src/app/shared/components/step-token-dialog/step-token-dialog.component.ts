@@ -1,6 +1,6 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
 import { FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
+import { MatAutocompleteModule } from '@angular/material/autocomplete';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCheckboxModule } from '@angular/material/checkbox';
 import {
@@ -13,8 +13,8 @@ import {
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
-import { MatSelectModule } from '@angular/material/select';
 import {
+  StepDialogIngredientOption,
   StepIngredientToken,
   StepTemperatureToken,
   StepTimerToken,
@@ -30,6 +30,7 @@ export interface StepTokenDialogData {
   mode: 'ingredient' | 'timer' | 'temperature';
   token?: StepToken | null;
   availableIngredients?: string[];
+  availableIngredientOptions?: StepDialogIngredientOption[];
 }
 
 export interface StepTokenDialogResult {
@@ -64,16 +65,15 @@ export const COMMON_UNITS = [
 @Component({
   selector: 'app-step-token-dialog',
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     MatDialogTitle,
     MatDialogContent,
     MatDialogActions,
+    MatAutocompleteModule,
     MatButtonModule,
     MatIconModule,
     MatFormFieldModule,
     MatInputModule,
-    MatSelectModule,
     MatCheckboxModule,
   ],
   templateUrl: './step-token-dialog.component.html',
@@ -89,6 +89,14 @@ export class StepTokenDialogComponent implements OnInit {
   );
   protected readonly commonUnits = COMMON_UNITS;
   protected readonly availableIngredients = this.data?.availableIngredients ?? [];
+  protected readonly ingredientOptions: StepDialogIngredientOption[] =
+    this.data?.availableIngredientOptions && this.data.availableIngredientOptions.length > 0
+      ? this.data.availableIngredientOptions
+      : this.availableIngredients.map((displayName, index) => ({
+          index,
+          displayName,
+        }));
+  protected readonly selectedOption = signal<StepDialogIngredientOption | null>(null);
 
   protected ingredientForm!: FormGroup;
   protected timerForm!: FormGroup;
@@ -103,8 +111,18 @@ export class StepTokenDialogComponent implements OnInit {
       const hasDisplay = ingToken?.displayAmount != null;
       this.showDisplayAmount.set(hasDisplay);
 
+      const matchedOption =
+        this.ingredientOptions.find(
+          (o) =>
+            (ingToken?.ingredientId && o.id === ingToken.ingredientId) ||
+            (ingToken?.ingredient &&
+              o.displayName.trim().toLowerCase() === ingToken.ingredient.trim().toLowerCase()),
+        ) ?? null;
+      this.selectedOption.set(matchedOption);
+
       this.ingredientForm = this.fb.group({
         ingredient: [ingToken?.ingredient ?? '', [Validators.required]],
+        ingredientId: [ingToken?.ingredientId ?? null],
         amount: [ingToken?.amount ?? null],
         unit: [ingToken?.unit ?? ''],
         useDisplayAmount: [hasDisplay],
@@ -180,7 +198,63 @@ export class StepTokenDialogComponent implements OnInit {
     }
   }
 
+  protected formatUnitForToken(unit?: string | null, customUnitName?: string | null): string {
+    if (!unit) return '';
+    if (unit === 'Custom') return customUnitName?.trim() ?? '';
+    if (unit === 'FlOz') return 'fl_oz';
+    return unit.toLowerCase();
+  }
+
+  protected formatIngredientOptionLabel(option: StepDialogIngredientOption): string {
+    const qty = option.quantity != null ? String(option.quantity) : '';
+    const unitStr = this.formatUnitForToken(option.unit, option.customUnitName);
+    if (qty && unitStr) return `${qty} ${unitStr}`;
+    if (qty) return qty;
+    if (unitStr) return unitStr;
+    return '';
+  }
+
+  protected getFilteredUnits(query: string | null | undefined): string[] {
+    const q = (query ?? '').trim().toLowerCase();
+    if (!q || this.commonUnits.includes(q)) {
+      return this.commonUnits;
+    }
+    const matches = this.commonUnits.filter((u) => u.includes(q));
+    return matches.length > 0 ? matches : this.commonUnits;
+  }
+
+  protected onSelectIngredientOption(option: StepDialogIngredientOption): void {
+    this.selectedOption.set(option);
+    const patch: Record<string, unknown> = {
+      ingredient: option.displayName,
+      ingredientId: option.id ?? null,
+    };
+
+    const isEditingToken = !!this.data?.token;
+    const amountCtrl = this.ingredientForm.get('amount');
+    const currentAmount = amountCtrl?.value;
+    const hasEmptyAmount =
+      currentAmount === null || currentAmount === undefined || currentAmount === '';
+    if (!amountCtrl?.dirty && (!isEditingToken || hasEmptyAmount)) {
+      patch['amount'] = option.quantity ?? null;
+    }
+
+    const unitCtrl = this.ingredientForm.get('unit');
+    const currentUnit = String(unitCtrl?.value || '').trim();
+    const tokenUnit = this.formatUnitForToken(option.unit, option.customUnitName);
+    if (!unitCtrl?.dirty && (!isEditingToken || !currentUnit)) {
+      patch['unit'] = tokenUnit;
+    }
+
+    this.ingredientForm.patchValue(patch);
+  }
+
   protected onSelectIngredient(name: string): void {
+    const match = this.ingredientOptions.find((o) => o.displayName === name);
+    if (match) {
+      this.onSelectIngredientOption(match);
+      return;
+    }
     this.ingredientForm.patchValue({ ingredient: name });
   }
 
@@ -194,11 +268,14 @@ export class StepTokenDialogComponent implements OnInit {
         ingredient: String(val.ingredient || '').trim(),
       };
 
+      if (val.ingredientId) {
+        token.ingredientId = String(val.ingredientId);
+      }
       if (val.amount != null && val.amount !== '') {
         token.amount = Number(val.amount);
       }
       if (val.unit) {
-        token.unit = val.unit;
+        token.unit = String(val.unit).trim();
       }
       if (this.showDisplayAmount() && val.displayAmount != null && val.displayAmount !== '') {
         token.displayAmount = Number(val.displayAmount);

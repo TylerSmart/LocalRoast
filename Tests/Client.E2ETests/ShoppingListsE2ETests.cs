@@ -37,7 +37,7 @@ public sealed class ShoppingListsE2ETests : E2ETestBase
             await Page.Locator("mat-option", new() { HasText = unit }).First.ClickAsync();
         }
 
-        await Page.Locator("textarea[formcontrolname='instruction']")
+        await Page.Locator("[formcontrolname='instruction'] .step-instruction-editable")
             .First.FillAsync("Cook and prepare thoroughly.");
         await Page.Locator("button[type='submit']", new() { HasText = "Save Recipe" })
             .First.ClickAsync();
