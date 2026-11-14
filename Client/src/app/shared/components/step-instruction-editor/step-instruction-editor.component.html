@@ -1,0 +1,66 @@
+<div class="step-instruction-editor">
+  <div class="step-token-toolbar">
+    <button
+      mat-stroked-button
+      type="button"
+      class="token-btn add-ingredient-btn"
+      [disabled]="disabled()"
+      (mousedown)="captureCaretOffset()"
+      (click)="openInsertTokenDialog('ingredient')"
+    >
+      <mat-icon>nutrition</mat-icon>
+      <span>+ Ingredient</span>
+    </button>
+    <button
+      mat-stroked-button
+      type="button"
+      class="token-btn add-timer-btn"
+      [disabled]="disabled()"
+      (mousedown)="captureCaretOffset()"
+      (click)="openInsertTokenDialog('timer')"
+    >
+      <mat-icon>timer</mat-icon>
+      <span>+ Timer</span>
+    </button>
+    <button
+      mat-stroked-button
+      type="button"
+      class="token-btn add-temp-btn"
+      [disabled]="disabled()"
+      (mousedown)="captureCaretOffset()"
+      (click)="openInsertTokenDialog('temperature')"
+    >
+      <mat-icon>device_thermostat</mat-icon>
+      <span>+ Temp</span>
+    </button>
+  </div>
+
+  <div class="editor-outline" [class.focused]="isFocused()" [class.disabled]="disabled()">
+    <span class="editor-floating-label">
+      {{ label() }}
+      @if (required()) {
+        <span aria-hidden="true"> *</span>
+      }
+    </span>
+    <div
+      #editableSurface
+      class="step-instruction-editable"
+      [attr.contenteditable]="disabled() ? 'false' : 'true'"
+      role="textbox"
+      aria-multiline="true"
+      [attr.tabindex]="disabled() ? -1 : 0"
+      [attr.aria-label]="label()"
+      [attr.aria-required]="required() ? 'true' : null"
+      [attr.data-step-index]="stepIndex()"
+      [attr.data-placeholder]="placeholder()"
+      [attr.data-empty]="isEmpty() ? 'true' : 'false'"
+      (focus)="onEditableFocus()"
+      (blur)="onEditableBlur()"
+      (input)="onEditableInput()"
+      (keyup)="onEditableKeyUp()"
+      (mouseup)="onEditableMouseUp()"
+      (keydown)="onEditableKeyDown($event)"
+      (click)="onEditableClick($event)"
+    ></div>
+  </div>
+</div>

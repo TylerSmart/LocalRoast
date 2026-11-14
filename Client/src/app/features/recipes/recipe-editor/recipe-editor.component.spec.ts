@@ -258,7 +258,9 @@ describe('RecipeEditorComponent', () => {
     component.populateForm(detail);
     fixture.detectChanges();
 
-    const previewChip = fixture.nativeElement.querySelector('app-step-ingredient-chip');
+    const previewChip = fixture.nativeElement.querySelector(
+      'app-step-instruction-editor .inline-step-chip.is-ingredient',
+    );
     expect(previewChip?.textContent).toContain('3 tbsp milk');
 
     mockRecipeService.createRecipe.mockReturnValue(of(detail));
@@ -345,6 +347,81 @@ describe('RecipeEditorComponent', () => {
             ingredientAmounts: [
               { ingredientIndex: 0, measurement: { quantity: 0.5, unit: 'Cup' } },
             ],
+          }),
+        ],
+      }),
+    );
+  });
+
+  it('derives ingredientIndices, ingredientAmounts, and timers from inline step tokens on save', () => {
+    mockRecipeService.createRecipe.mockReturnValue(
+      of({
+        id: 'saved-2',
+        title: 'Tokenized Pasta',
+        slug: 'tokenized-pasta',
+        description: null,
+        status: 'Published',
+        baseServings: 4,
+        yieldDisplay: null,
+        prepTimeMinutes: null,
+        cookTimeMinutes: null,
+        totalTimeMinutes: null,
+        difficulty: null,
+        sourceUrl: null,
+        sourceName: null,
+        sourceAuthor: null,
+        sourceBookTitle: null,
+        sourceBookPage: null,
+        coverImagePath: null,
+        thumbnailImagePath: null,
+        timesCooked: 0,
+        lastCookedAt: null,
+        averageRating: null,
+        ingredients: [],
+        steps: [],
+        linkedSubRecipes: [],
+        collections: [],
+        tags: [],
+        createdAt: '2026-01-01T00:00:00Z',
+        createdBy: 'user',
+        modifiedAt: '2026-01-01T00:00:00Z',
+        modifiedBy: 'user',
+      } as RecipeDetailDto),
+    );
+
+    component['form'].patchValue({
+      title: 'Tokenized Pasta',
+      baseServings: 4,
+    });
+    component.ingredientsArray.at(0).patchValue({
+      displayName: 'Spaghetti',
+      quantity: 1,
+      unit: 'Lb',
+    });
+    component.stepsArray.at(0).patchValue({
+      instruction:
+        'Cook ||{"ingredient":"Spaghetti","amount":0.5,"unit":"lb"}|| for ||{"type":"timer","seconds":480,"label":"Boil"}|| at ||{"type":"temperature","fahrenheit":212}||.',
+    });
+
+    component.onSave();
+
+    expect(mockRecipeService.createRecipe).toHaveBeenCalledWith(
+      expect.objectContaining({
+        steps: [
+          expect.objectContaining({
+            ingredientIndices: [0],
+            ingredientAmounts: [
+              {
+                ingredientIndex: 0,
+                measurement: {
+                  quantity: 0.5,
+                  maxQuantity: null,
+                  unit: 'Lb',
+                  customUnitName: null,
+                },
+              },
+            ],
+            timers: [{ durationSeconds: 480, label: 'Boil' }],
           }),
         ],
       }),

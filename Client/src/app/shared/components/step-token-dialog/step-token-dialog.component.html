@@ -20,18 +20,25 @@
 <mat-dialog-content>
   @if (mode() === 'ingredient') {
     <form [formGroup]="ingredientForm" class="dialog-form">
-      @if (availableIngredients.length > 0) {
+      @if (ingredientOptions.length > 0) {
         <div class="quick-ingredients">
-          <span class="quick-label">Draft ingredients:</span>
+          <span class="quick-label">Recipe ingredients:</span>
           <div class="quick-chips">
-            @for (ing of availableIngredients; track ing) {
+            @for (opt of ingredientOptions; track $index) {
               <button
                 type="button"
                 class="quick-chip-btn"
-                (click)="onSelectIngredient(ing)"
-                [class.active]="ingredientForm.get('ingredient')?.value === ing"
+                (click)="onSelectIngredientOption(opt)"
+                [class.active]="
+                  (opt.id && ingredientForm.get('ingredientId')?.value === opt.id) ||
+                  (!ingredientForm.get('ingredientId')?.value &&
+                    ingredientForm.get('ingredient')?.value === opt.displayName)
+                "
               >
-                {{ ing }}
+                <span>{{ opt.displayName }}</span>
+                @if (formatIngredientOptionLabel(opt); as qtyHint) {
+                  <span class="quick-chip-qty">({{ qtyHint }})</span>
+                }
               </button>
             }
           </div>
@@ -48,13 +55,34 @@
 
       <div class="form-row">
         <mat-form-field appearance="outline" class="flex-1">
-          <mat-label>Recipe Amount (Total)</mat-label>
+          <mat-label>Step Portion Amount</mat-label>
           <input matInput type="number" step="any" formControlName="amount" placeholder="e.g. 4" />
+          <mat-hint>
+            @if (selectedOption(); as sel) {
+              @if (formatIngredientOptionLabel(sel); as totalHint) {
+                Recipe total: {{ totalHint }} · Leave blank for name-only mention
+              } @else {
+                Amount used in this step (blank for name-only mention)
+              }
+            } @else {
+              Amount used in this step (blank for name-only mention)
+            }
+          </mat-hint>
         </mat-form-field>
 
         <mat-form-field appearance="outline" class="flex-1">
           <mat-label>Unit</mat-label>
-          <input matInput formControlName="unit" placeholder="e.g. cup, tsp, whole" />
+          <input
+            matInput
+            formControlName="unit"
+            [matAutocomplete]="unitAuto"
+            placeholder="e.g. cup, tsp, whole"
+          />
+          <mat-autocomplete #unitAuto="matAutocomplete">
+            @for (u of getFilteredUnits(ingredientForm.get('unit')?.value); track u) {
+              <mat-option [value]="u">{{ u }}</mat-option>
+            }
+          </mat-autocomplete>
         </mat-form-field>
       </div>
 
@@ -63,7 +91,7 @@
           formControlName="useDisplayAmount"
           (change)="onToggleDisplayAmount($event.checked)"
         >
-          Show different amount in step (e.g. per-pancake portion)
+          Show different amount in step text (e.g. per-item portion)
         </mat-checkbox>
       </div>
 
@@ -82,7 +110,17 @@
 
           <mat-form-field appearance="outline" class="flex-1">
             <mat-label>Step Display Unit</mat-label>
-            <input matInput formControlName="displayUnit" placeholder="e.g. tsp" />
+            <input
+              matInput
+              formControlName="displayUnit"
+              [matAutocomplete]="displayUnitAuto"
+              placeholder="e.g. tsp"
+            />
+            <mat-autocomplete #displayUnitAuto="matAutocomplete">
+              @for (u of getFilteredUnits(ingredientForm.get('displayUnit')?.value); track u) {
+                <mat-option [value]="u">{{ u }}</mat-option>
+              }
+            </mat-autocomplete>
           </mat-form-field>
         </div>
       }

@@ -18,7 +18,7 @@ public sealed class MealPlanE2ETests : E2ETestBase
         await Page.Locator("input[formcontrolname='displayName']")
             .First.FillAsync("Main Ingredient");
         await Page.Locator("input[formcontrolname='quantity']").First.FillAsync("1");
-        await Page.Locator("textarea[formcontrolname='instruction']")
+        await Page.Locator("[formcontrolname='instruction'] .step-instruction-editable")
             .First.FillAsync("Prepare and cook thoroughly.");
 
         await Page.Locator("button[type='submit']", new() { HasText = "Save Recipe" })

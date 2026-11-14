@@ -32,3 +32,13 @@ export interface StepSegment {
   token?: StepToken | null;
   rawToken?: string | null;
 }
+
+export interface StepDialogIngredientOption {
+  index: number;
+  id?: string | null;
+  displayName: string;
+  sectionName?: string | null;
+  quantity?: number | null;
+  unit?: string | null;
+  customUnitName?: string | null;
+}

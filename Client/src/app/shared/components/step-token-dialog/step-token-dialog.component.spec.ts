@@ -56,6 +56,51 @@ describe('StepTokenDialogComponent', () => {
     });
   });
 
+  describe('rich ingredient options', () => {
+    beforeEach(async () => {
+      await createComponent({
+        mode: 'ingredient',
+        availableIngredientOptions: [
+          {
+            index: 0,
+            id: 'ing-1',
+            displayName: 'Unsalted Butter',
+            quantity: 4,
+            unit: 'Tbsp',
+          },
+          {
+            index: 1,
+            displayName: 'Kosher Salt',
+            quantity: null,
+            unit: 'Custom',
+            customUnitName: 'pinches',
+          },
+        ],
+      });
+    });
+
+    it('pre-fills ingredientId, amount, and unit when selecting a rich option', () => {
+      component['onSelectIngredientOption'](component['ingredientOptions'][0]);
+      expect(component['ingredientForm'].get('ingredient')?.value).toBe('Unsalted Butter');
+      expect(component['ingredientForm'].get('ingredientId')?.value).toBe('ing-1');
+      expect(component['ingredientForm'].get('amount')?.value).toBe(4);
+      expect(component['ingredientForm'].get('unit')?.value).toBe('tbsp');
+
+      component['onSave']();
+      expect(mockDialogRef.close).toHaveBeenCalledWith(
+        expect.objectContaining({
+          rawToken:
+            '||{"ingredient":"Unsalted Butter","ingredientId":"ing-1","amount":4,"unit":"tbsp"}||',
+        }),
+      );
+    });
+
+    it('uses customUnitName when option unit is Custom', () => {
+      component['onSelectIngredientOption'](component['ingredientOptions'][1]);
+      expect(component['ingredientForm'].get('unit')?.value).toBe('pinches');
+    });
+  });
+
   describe('temperature mode', () => {
     beforeEach(async () => {
       await createComponent({

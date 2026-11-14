@@ -1,14 +1,17 @@
 import {
   celsiusToFahrenheit,
   cleanStepInstruction,
+  deriveStepMetadataFromInstruction,
   fahrenheitToCelsius,
   formatSeconds,
   formatTemperatureDisplay,
   formatTimerToken,
   formatTokenDisplay,
+  insertTokenAtOffset,
   isDurationLabel,
   normalizeMeasurementUnit,
   parseStepInstruction,
+  replaceTokenSegmentAt,
   serializeStepToken,
   shouldShowTimerLabel,
   stepInstructionToPlainText,
@@ -295,5 +298,61 @@ describe('step-token-parser', () => {
 
     const plain = stepInstructionToPlainText(raw);
     expect(plain).toBe('Let sit for 5m.');
+  });
+
+  it('replaces and removes tokens by segment index even when duplicates exist', () => {
+    const token = '||{"ingredient":"butter","amount":1,"unit":"tbsp"}||';
+    const updated = '||{"ingredient":"butter","amount":2,"unit":"tbsp"}||';
+    const raw = `Melt ${token}, then swirl in ${token} at the end.`;
+
+    // Segment indices: 0="Melt ", 1=first token, 2=", then swirl in ", 3=second token, 4=" at the end."
+    const replacedSecond = replaceTokenSegmentAt(raw, 3, updated);
+    expect(replacedSecond).toBe(`Melt ${token}, then swirl in ${updated} at the end.`);
+
+    const removedFirst = replaceTokenSegmentAt(raw, 1, null);
+    expect(removedFirst).toBe(`Melt, then swirl in ${token} at the end.`);
+  });
+
+  it('inserts tokens cleanly at offsets and snaps out of existing token spans', () => {
+    const tokA = '||{"ingredient":"eggs"}||';
+    const tokB = '||{"ingredient":"salt"}||';
+    const initial = `Whisk ${tokA} together`;
+
+    // Inside tokA (offset inside the span) should snap after tokA
+    const inner = insertTokenAtOffset(initial, 10, tokB);
+    expect(inner.nextInstruction).toBe(`Whisk ${tokA} ${tokB} together`);
+    expect(inner.nextCaretOffset).toBe(`Whisk ${tokA} ${tokB} `.length);
+
+    // At end of plain string
+    const atEnd = insertTokenAtOffset('Bake for', 8, '||{"type":"timer","seconds":600}||');
+    expect(atEnd.nextInstruction).toBe('Bake for ||{"type":"timer","seconds":600}|| ');
+  });
+
+  it('derives ingredientIndices, ingredientAmounts, and timers from inline tokens', () => {
+    const ingredients = [
+      { index: 0, id: 'ing-butter', displayName: 'Unsalted Butter', sectionName: 'Sauce' },
+      { index: 1, id: 'ing-butter-crust', displayName: 'Unsalted Butter', sectionName: 'Crust' },
+      { index: 2, id: 'ing-garlic', displayName: 'Garlic', sectionName: null },
+    ];
+    const instruction =
+      'Melt ||{"ingredient":"Unsalted Butter","amount":2,"unit":"tbsp"}||, add ||{"ingredient":"Garlic"}||, and simmer for ||{"type":"timer","seconds":300,"label":"Simmer"}|| at ||{"type":"temperature","fahrenheit":350}||.';
+
+    const meta = deriveStepMetadataFromInstruction(instruction, ingredients, 'Crust');
+    expect(meta.hasTokens).toBe(true);
+    expect(meta.hasIngredientTokens).toBe(true);
+    expect(meta.hasTimerTokens).toBe(true);
+    expect(meta.ingredientIndices).toEqual([1, 2]);
+    expect(meta.ingredientAmounts).toEqual([
+      {
+        ingredientIndex: 1,
+        measurement: {
+          quantity: 2,
+          maxQuantity: null,
+          unit: 'Tbsp',
+          customUnitName: null,
+        },
+      },
+    ]);
+    expect(meta.timers).toEqual([{ durationSeconds: 300, label: 'Simmer' }]);
   });
 });

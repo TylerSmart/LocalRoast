@@ -541,4 +541,25 @@ public sealed class TaggedStepDiagnosticsTests
         var issues = TaggedStepDiagnostics.GetIssues(recipe);
         Assert.IsEmpty(issues);
     }
+
+    [TestMethod]
+    public void GetIssues_InlineTokenAndSynchronizedStepAmountPresent_DoesNotDoubleCount()
+    {
+        var recipe = new LlmExtractedRecipePayload(
+            Title: "Butter Toast",
+            Ingredients: [new(null, 2m, null, "tbsp", "butter", "butter")],
+            Steps:
+            [
+                new(
+                    null,
+                    "Melt ||{\"ingredient\":\"butter\",\"amount\":2,\"unit\":\"tbsp\"}|| in a skillet.",
+                    IngredientIndices: [0],
+                    IngredientAmounts: [new(0, new(2m, "tbsp"))]
+                ),
+            ]
+        );
+
+        var issues = TaggedStepDiagnostics.GetIssues(recipe);
+        Assert.IsEmpty(issues);
+    }
 }

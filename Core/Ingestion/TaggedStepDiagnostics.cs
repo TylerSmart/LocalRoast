@@ -222,6 +222,7 @@ public static partial class TaggedStepDiagnostics
                     var stepUses =
                         (s.IngredientIndices?.Contains(i) == true)
                         || (s.IngredientAmounts?.Any(a => a.IngredientIndex == i) == true);
+                    var hasTokenAmountForIngredient = false;
 
                     var tokens = StepInstructionParser.ExtractTokens(s.Instruction ?? "");
                     foreach (var token in tokens)
@@ -239,6 +240,10 @@ public static partial class TaggedStepDiagnostics
                             if (bestIdx == i)
                             {
                                 stepUses = true;
+                                if (ingToken.Amount.HasValue)
+                                {
+                                    hasTokenAmountForIngredient = true;
+                                }
                                 if (!ingToken.Amount.HasValue && !ingToken.DisplayAmount.HasValue)
                                 {
                                     unmeasuredMentionsCount++;
@@ -280,7 +285,7 @@ public static partial class TaggedStepDiagnostics
                         }
                     }
 
-                    if (s.IngredientAmounts is not null)
+                    if (!hasTokenAmountForIngredient && s.IngredientAmounts is not null)
                     {
                         foreach (
                             var a in s.IngredientAmounts.Where(a =>

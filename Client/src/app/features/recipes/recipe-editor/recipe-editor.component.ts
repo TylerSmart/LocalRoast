@@ -28,23 +28,13 @@ import {
   RecipeSummaryDto,
   UpsertRecipeRequest,
 } from '../../../core/models/recipe.models';
+import { StepDialogIngredientOption } from '../../../core/models/step-token.models';
 import {
-  StepSegment,
-  StepTemperatureToken,
-  StepTimerToken,
-  StepToken,
-} from '../../../core/models/step-token.models';
-import {
-  formatTemperatureToken,
-  formatTimerToken,
-  parseStepInstruction,
+  StepTokenOriginFlags,
+  deriveStepMetadataFromInstruction,
+  resolveStepMetadataForPayload,
 } from '../../../core/utils/step-token-parser';
-import {
-  StepTokenDialogComponent,
-  StepTokenDialogData,
-  StepTokenDialogResult,
-} from '../../../shared/components/step-token-dialog/step-token-dialog.component';
-import { StepIngredientChipComponent } from '../../../shared/components/step-ingredient-chip/step-ingredient-chip.component';
+import { StepInstructionEditorComponent } from '../../../shared/components/step-instruction-editor/step-instruction-editor.component';
 import {
   AllTagCategories,
   CollectionDto,
@@ -157,7 +147,7 @@ export const MEASUREMENT_UNITS: { value: MeasurementUnit; label: string }[] = [
     MatProgressSpinnerModule,
     SearchableSelectComponent,
     MeasurementEditorComponent,
-    StepIngredientChipComponent,
+    StepInstructionEditorComponent,
   ],
   selector: 'app-recipe-editor',
   templateUrl: './recipe-editor.component.html',
@@ -180,6 +170,7 @@ export class RecipeEditorComponent implements OnInit {
   protected readonly isLoading = signal<boolean>(false);
   protected readonly isSaving = signal<boolean>(false);
   protected readonly errorMessage = signal<string | null>(null);
+  private readonly loadedStepTokenOrigins = new WeakMap<FormGroup, StepTokenOriginFlags>();
 
   protected readonly foodItems = signal<FoodItemDto[]>([]);
   protected readonly availableSubRecipes = signal<RecipeSummaryDto[]>([]);
@@ -425,6 +416,12 @@ export class RecipeEditorComponent implements OnInit {
           }),
         ),
         timers: timersArray,
+      });
+
+      const originMeta = deriveStepMetadataFromInstruction(step.instruction, []);
+      this.loadedStepTokenOrigins.set(stepGroup, {
+        hasIngredientTokens: originMeta.hasIngredientTokens,
+        hasTimerTokens: originMeta.hasTimerTokens,
       });
 
       this.stepsArray.push(stepGroup);
@@ -807,106 +804,23 @@ export class RecipeEditorComponent implements OnInit {
     return getStepAmounts(this.stepsArray.at(stepIndex));
   }
 
-  getStepSegments(instruction: string | null | undefined): StepSegment[] {
-    return parseStepInstruction(instruction ?? '');
-  }
-
-  formatTimerSegment(token: StepTimerToken): string {
-    return formatTimerToken(token);
-  }
-
-  formatTemperatureSegment(token: StepTemperatureToken): string {
-    return formatTemperatureToken(token, 'Original');
-  }
-
-  insertTokenAtCursor(stepIndex: number, rawToken: string): void {
-    const stepCtrl = this.stepsArray.at(stepIndex).get('instruction');
-    const current = stepCtrl?.value ?? '';
-    const activeEl = document.activeElement as HTMLTextAreaElement | null;
-    if (
-      activeEl &&
-      activeEl.tagName === 'TEXTAREA' &&
-      activeEl.dataset['stepIndex'] === String(stepIndex)
-    ) {
-      const start = activeEl.selectionStart ?? current.length;
-      const end = activeEl.selectionEnd ?? current.length;
-      const spaceBefore = start > 0 && current[start - 1] !== ' ' ? ' ' : '';
-      const spaceAfter = end < current.length && current[end] !== ' ' ? ' ' : ' ';
-      const next =
-        current.slice(0, start) + spaceBefore + rawToken + spaceAfter + current.slice(end);
-      stepCtrl?.setValue(next);
-      stepCtrl?.markAsDirty();
-    } else {
-      const spaceBefore = current.length > 0 && !current.endsWith(' ') ? ' ' : '';
-      stepCtrl?.setValue(current + spaceBefore + rawToken + ' ');
-      stepCtrl?.markAsDirty();
-    }
-  }
-
-  openTokenDialog(stepIndex: number, mode: 'ingredient' | 'timer' | 'temperature'): void {
-    const availableIngredients = this.ingredientsArray.controls
-      .map((c) => c.get('displayName')?.value?.trim())
-      .filter((name): name is string => !!name);
-
-    const dialogRef = this.dialog.open<
-      StepTokenDialogComponent,
-      StepTokenDialogData,
-      StepTokenDialogResult
-    >(StepTokenDialogComponent, {
-      data: {
-        mode,
-        availableIngredients,
-      },
-      width: '540px',
-    });
-
-    dialogRef.afterClosed().subscribe((result) => {
-      if (result?.rawToken) {
-        this.insertTokenAtCursor(stepIndex, result.rawToken);
-      }
-    });
-  }
-
-  editTokenInStep(stepIndex: number, oldRawToken: string, token: StepToken): void {
-    const stepCtrl = this.stepsArray.at(stepIndex).get('instruction');
-    const current = stepCtrl?.value ?? '';
-    const availableIngredients = this.ingredientsArray.controls
-      .map((c) => c.get('displayName')?.value?.trim())
-      .filter((name): name is string => !!name);
-
-    const dialogRef = this.dialog.open<
-      StepTokenDialogComponent,
-      StepTokenDialogData,
-      StepTokenDialogResult
-    >(StepTokenDialogComponent, {
-      data: {
-        mode:
-          token.type === 'timer'
-            ? 'timer'
-            : token.type === 'temperature'
-              ? 'temperature'
-              : 'ingredient',
-        token,
-        availableIngredients,
-      },
-      width: '540px',
-    });
-
-    dialogRef.afterClosed().subscribe((result) => {
-      if (!result) return;
-      if (result.delete) {
-        const next = current
-          .replace(oldRawToken, '')
-          .replace(/\s{2,}/g, ' ')
-          .trim();
-        stepCtrl?.setValue(next);
-        stepCtrl?.markAsDirty();
-      } else if (result.rawToken) {
-        const next = current.replace(oldRawToken, result.rawToken);
-        stepCtrl?.setValue(next);
-        stepCtrl?.markAsDirty();
-      }
-    });
+  getStepDialogIngredients(): StepDialogIngredientOption[] {
+    return this.ingredientsArray.controls
+      .map((ctrl, index) => ({
+        index,
+        id: ctrl.get('id')?.value ?? null,
+        displayName: (ctrl.get('displayName')?.value || '').trim(),
+        sectionName: ctrl.get('sectionName')?.value?.trim() || null,
+        quantity:
+          ctrl.get('quantity')?.value !== null &&
+          ctrl.get('quantity')?.value !== undefined &&
+          ctrl.get('quantity')?.value !== ''
+            ? Number(ctrl.get('quantity')?.value)
+            : null,
+        unit: ctrl.get('unit')?.value ?? null,
+        customUnitName: ctrl.get('customUnitName')?.value?.trim() || null,
+      }))
+      .filter((item) => !!item.displayName);
   }
 
   // --- Save / Submit ---
@@ -949,9 +863,11 @@ export class RecipeEditorComponent implements OnInit {
     }));
 
     // Map steps
+    const dialogIngredientOptions = this.getStepDialogIngredients();
     const rawSteps = (val.steps || []) as unknown as StepFormValue[];
     const mappedSteps: RecipeStepInput[] = rawSteps.map((s, index) => {
-      const timers = (s.timers || []).map((t) => {
+      const stepGroup = this.stepsArray.at(index);
+      const fallbackTimers = (s.timers || []).map((t) => {
         const mins = Number(t.minutes) || 0;
         const secs = Number(t.seconds) || 0;
         const totalSecs = Math.max(1, mins * 60 + secs);
@@ -961,13 +877,23 @@ export class RecipeEditorComponent implements OnInit {
         };
       });
 
+      const resolved = resolveStepMetadataForPayload(
+        s.instruction,
+        dialogIngredientOptions,
+        s.sectionName,
+        this.loadedStepTokenOrigins.get(stepGroup),
+        s.ingredientIndices || [],
+        buildStepAmounts(stepGroup),
+        fallbackTimers,
+      );
+
       return {
         sectionName: s.sectionName?.trim() || null,
         instruction: (s.instruction || '').trim(),
         imagePath: s.imagePath?.trim() || null,
-        ingredientIndices: s.ingredientIndices || [],
-        ingredientAmounts: buildStepAmounts(this.stepsArray.at(index)),
-        timers,
+        ingredientIndices: resolved.ingredientIndices,
+        ingredientAmounts: resolved.ingredientAmounts,
+        timers: resolved.timers,
       };
     });
 

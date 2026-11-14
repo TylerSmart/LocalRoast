@@ -435,8 +435,8 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
                 "originalRawText": "5 cups (25 ounces) Starter Flour"
               }],
               "steps": [
-                { "instruction": "Combine 1 cup Starter Flour with water.", "ingredientIndices": [0] },
-                { "instruction": "Feed with 4 cups Starter Flour.", "ingredientIndices": [0] }
+                { "instruction": "Combine ||{\"ingredient\":\"Starter Flour\",\"amount\":1,\"unit\":\"cup\"}|| with water.", "ingredientIndices": [0] },
+                { "instruction": "Feed with ||{\"ingredient\":\"Starter Flour\",\"amount\":4,\"unit\":\"cup\"}||.", "ingredientIndices": [0] }
               ]
             }
             """;
@@ -492,13 +492,17 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
             .ToHaveValueAsync("25");
         await Page.Locator("mat-checkbox[formcontrolname='preferAlternativeMeasurement'] input")
             .CheckAsync();
-        var instructions = Page.Locator("textarea[formcontrolname='instruction']");
+        var instructions = Page.Locator("[formcontrolname='instruction']");
         await Expect(instructions.First)
-            .ToHaveValueAsync("Combine 1 cup Starter Flour with water.");
-        var taggedRows = Page.Locator("[data-testid=inline-amount-row]");
-        await Expect(taggedRows).ToHaveCountAsync(2);
-        await Expect(taggedRows.First.Locator("[data-testid=inline-amount-ingredient]"))
-            .ToContainTextAsync("Starter Flour");
+            .ToHaveAttributeAsync(
+                "data-serialized-value",
+                "Combine ||{\"ingredient\":\"Starter Flour\",\"amount\":1,\"unit\":\"cup\"}|| with water."
+            );
+        var taggedChips = Page.Locator(
+            "app-step-instruction-editor .inline-step-chip.is-ingredient"
+        );
+        await Expect(taggedChips).ToHaveCountAsync(2);
+        await Expect(taggedChips.First).ToContainTextAsync("1 cup Starter Flour");
         await Page.Locator("button[aria-label='Save review draft']").ClickAsync();
         await Expect(Page.Locator("mat-snack-bar-container"))
             .ToContainTextAsync("Review draft saved.");
@@ -507,7 +511,7 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
                 Page.Locator("mat-checkbox[formcontrolname='preferAlternativeMeasurement'] input")
             )
             .ToBeCheckedAsync();
-        await Expect(taggedRows).ToHaveCountAsync(2);
+        await Expect(taggedChips).ToHaveCountAsync(2);
         Assert.IsTrue(
             await Page.EvaluateAsync<bool>(
                 "document.documentElement.scrollWidth <= window.innerWidth"
@@ -565,7 +569,7 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await Page.Locator("[aria-label='Edit recipe']").ClickAsync();
         await Expect(alternative.Locator("input[formcontrolname='quantity']"))
             .ToHaveValueAsync("25");
-        await Expect(taggedRows).ToHaveCountAsync(2);
+        await Expect(taggedChips).ToHaveCountAsync(2);
         Assert.IsTrue(
             await Page.EvaluateAsync<bool>(
                 "document.documentElement.scrollWidth <= window.innerWidth"

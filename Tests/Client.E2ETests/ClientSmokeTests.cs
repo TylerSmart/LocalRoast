@@ -64,13 +64,17 @@ public sealed class ClientSmokeTests : E2ETestBase
         await Page.Locator("mat-option", new() { HasText = "Cup (cup)" }).ClickAsync();
 
         // Fill Step Instruction
-        await Page.Locator("textarea[formcontrolname='instruction']")
+        await Page.Locator("[formcontrolname='instruction'] .step-instruction-editable")
             .First.FillAsync("Simmer tomatoes over medium heat until thickened.");
 
         // Add Step Timer
         await Page.Locator(".add-timer-btn").First.ClickAsync();
-        await Page.Locator("input[formcontrolname='minutes']").First.FillAsync("20");
-        await Page.Locator("input[formcontrolname='label']").First.FillAsync("Simmer gently");
+        var timerDialog = Page.Locator("app-step-token-dialog");
+        await Expect(timerDialog).ToBeVisibleAsync();
+        await timerDialog.Locator("input[formcontrolname='minutes']").FillAsync("20");
+        await timerDialog.Locator("input[formcontrolname='label']").FillAsync("Simmer gently");
+        await timerDialog.Locator("button", new() { HasText = "Insert Token" }).ClickAsync();
+        await Expect(timerDialog).ToHaveCountAsync(0);
 
         // Submit recipe
         await Page.Locator("button[type='submit']", new() { HasText = "Save Recipe" })

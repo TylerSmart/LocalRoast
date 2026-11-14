@@ -27,14 +27,20 @@ public sealed class CookModeAndCookLogsE2ETests : E2ETestBase
             .FillAsync(baseServings.ToString());
         await Page.Locator("input[formcontrolname='displayName']").First.FillAsync(ingredientName);
         await Page.Locator("input[formcontrolname='quantity']").First.FillAsync("2");
-        await Page.Locator("textarea[formcontrolname='instruction']").First.FillAsync(instruction);
+        await Page.Locator("[formcontrolname='instruction'] .step-instruction-editable")
+            .First.FillAsync(instruction);
 
         if (timerMinutes.HasValue && !string.IsNullOrEmpty(timerLabel))
         {
             await Page.Locator(".add-timer-btn").First.ClickAsync();
-            await Page.Locator("input[formcontrolname='minutes']")
-                .First.FillAsync(timerMinutes.Value.ToString());
-            await Page.Locator("input[formcontrolname='label']").First.FillAsync(timerLabel);
+            var timerDialog = Page.Locator("app-step-token-dialog");
+            await Expect(timerDialog).ToBeVisibleAsync();
+            await timerDialog
+                .Locator("input[formcontrolname='minutes']")
+                .FillAsync(timerMinutes.Value.ToString());
+            await timerDialog.Locator("input[formcontrolname='label']").FillAsync(timerLabel);
+            await timerDialog.Locator("button", new() { HasText = "Insert Token" }).ClickAsync();
+            await Expect(timerDialog).ToHaveCountAsync(0);
         }
 
         await Page.Locator("button[type='submit']", new() { HasText = "Save Recipe" })
@@ -116,27 +122,42 @@ public sealed class CookModeAndCookLogsE2ETests : E2ETestBase
         await secondIng.Locator("mat-select[formcontrolname='unit']").ClickAsync();
         await Page.Locator("mat-option", new() { HasText = "Clove" }).First.ClickAsync();
 
-        // Step 1: Simmer sauce with timer
-        await Page.Locator("textarea[formcontrolname='instruction']")
-            .First.FillAsync("Simmer sauce with garlic until glaze forms.");
+        // Step 1: Simmer sauce with inline ingredients and timer
+        var step1Card = Page.Locator(".builder-list").Last.Locator(".builder-item-card").First;
+        var step1Editable = step1Card.Locator(
+            "[formcontrolname='instruction'] .step-instruction-editable"
+        );
+        await step1Editable.ClickAsync();
+        await Page.Keyboard.TypeAsync("Simmer ");
 
-        // Connect ingredients to Step 1 callouts
-        var calloutChecks = Page.Locator(".callout-check");
-        if (await calloutChecks.CountAsync() >= 2)
-        {
-            await calloutChecks.Nth(0).ClickAsync();
-            await calloutChecks.Nth(1).ClickAsync();
-        }
+        await step1Card.Locator(".add-ingredient-btn").ClickAsync();
+        var tokenDialog = Page.Locator("app-step-token-dialog");
+        await Expect(tokenDialog).ToBeVisibleAsync();
+        await tokenDialog.Locator(".quick-chip-btn", new() { HasText = "Soy Sauce" }).ClickAsync();
+        await tokenDialog.Locator("button", new() { HasText = "Insert Token" }).ClickAsync();
+        await Expect(tokenDialog).ToHaveCountAsync(0);
 
-        // Add 15 min timer to Step 1
-        await Page.Locator(".add-timer-btn").First.ClickAsync();
-        await Page.Locator("input[formcontrolname='minutes']").First.FillAsync("15");
-        await Page.Locator("input[formcontrolname='label']").First.FillAsync("Simmer glaze");
+        await Page.Keyboard.TypeAsync("with ");
+        await step1Card.Locator(".add-ingredient-btn").ClickAsync();
+        await Expect(tokenDialog).ToBeVisibleAsync();
+        await tokenDialog.Locator(".quick-chip-btn", new() { HasText = "Garlic" }).ClickAsync();
+        await tokenDialog.Locator("button", new() { HasText = "Insert Token" }).ClickAsync();
+        await Expect(tokenDialog).ToHaveCountAsync(0);
+
+        await Page.Keyboard.TypeAsync("until glaze forms ");
+
+        // Add 15 min timer inline to Step 1
+        await step1Card.Locator(".add-timer-btn").ClickAsync();
+        await Expect(tokenDialog).ToBeVisibleAsync();
+        await tokenDialog.Locator("input[formcontrolname='minutes']").FillAsync("15");
+        await tokenDialog.Locator("input[formcontrolname='label']").FillAsync("Simmer glaze");
+        await tokenDialog.Locator("button", new() { HasText = "Insert Token" }).ClickAsync();
+        await Expect(tokenDialog).ToHaveCountAsync(0);
 
         // Step 2: Finish and serve
         await Page.GetByRole(AriaRole.Button, new() { Name = "Add Step", Exact = true })
             .ClickAsync();
-        await Page.Locator("textarea[formcontrolname='instruction']")
+        await Page.Locator("[formcontrolname='instruction'] .step-instruction-editable")
             .Nth(1)
             .FillAsync("Garnish with scallions and serve hot.");
 
