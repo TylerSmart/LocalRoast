@@ -342,13 +342,7 @@
       <!-- Recipe Grid -->
       <div class="recipes-grid">
         @for (recipe of filteredRecipes(); track recipe.id) {
-          <mat-card
-            class="recipe-card"
-            [routerLink]="['/recipes', recipe.id]"
-            tabindex="0"
-            role="button"
-            [attr.aria-label]="recipe.title"
-          >
+          <mat-card class="recipe-card">
             @if (recipe.thumbnailImagePath) {
               <img
                 [src]="recipe.thumbnailImagePath"
@@ -395,7 +389,11 @@
                 </div>
               </div>
 
-              <h2 class="recipe-card-title">{{ recipe.title }}</h2>
+              <h2 class="recipe-card-title">
+                <a class="recipe-card-link" [routerLink]="['/recipes', recipe.id]">
+                  {{ recipe.title }}
+                </a>
+              </h2>
 
               @if (recipe.description) {
                 <p class="recipe-card-desc">{{ recipe.description }}</p>

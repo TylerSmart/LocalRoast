@@ -205,7 +205,33 @@ public sealed class RecipeCookbookE2ETests : E2ETestBase
         await searchInput.FillAsync(
             pubTitle.Replace("Risotto", "Risoto", StringComparison.Ordinal)
         );
-        await Expect(Page.Locator(".recipe-card", new() { HasText = pubTitle })).ToBeVisibleAsync();
+        var pubCard = Page.Locator(".recipe-card", new() { HasText = pubTitle });
+        await Expect(pubCard).ToBeVisibleAsync();
+
+        var cardLink = pubCard.Locator("a.recipe-card-link");
+        await Expect(cardLink).ToBeVisibleAsync();
+        await Expect(cardLink).ToHaveAttributeAsync("href", new Regex("^/recipes/[a-f0-9-]+$"));
+
+        var cardHref = await cardLink.GetAttributeAsync("href");
+        await pubCard.ScrollIntoViewIfNeededAsync();
+        var hitTargetClass = await pubCard.EvaluateAsync<string>(
+            """
+            (card) => {
+              const rect = card.getBoundingClientRect();
+              const el = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height * 0.65);
+              return el?.closest('a')?.className ?? '';
+            }
+            """
+        );
+        Assert.IsTrue(
+            hitTargetClass.Contains("recipe-card-link", StringComparison.Ordinal),
+            $"Expected card hit target to resolve to recipe-card-link, got '{hitTargetClass}'."
+        );
+
+        var editLink = pubCard.Locator("a[aria-label='Edit recipe']");
+        await Expect(editLink).ToBeVisibleAsync();
+        await editLink.ClickAsync();
+        await Expect(Page).ToHaveURLAsync(new Regex($".*{Regex.Escape(cardHref!)}/edit$"));
     }
 
     [TestMethod]

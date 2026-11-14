@@ -120,6 +120,12 @@ describe('RecipeListComponent', () => {
     expect(text).toContain('Classic Bolognese');
     expect(text).toContain('Marcella Hazan');
     expect(text).toContain('Weeknight Staples');
+
+    const cardLink = fixture.nativeElement.querySelector(
+      '.recipe-card a.recipe-card-link',
+    ) as HTMLAnchorElement | null;
+    expect(cardLink).not.toBeNull();
+    expect(cardLink?.getAttribute('href')).toBe('/recipes/r-1');
   });
 
   it('filters recipes by search query matching tags or collections', () => {
