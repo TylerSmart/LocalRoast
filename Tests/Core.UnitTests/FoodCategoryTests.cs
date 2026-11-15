@@ -44,6 +44,12 @@ public sealed class FoodCategoryTests
     [DataRow("Bell Pepper", FoodCategory.Produce)]
     [DataRow("Red Bell Pepper", FoodCategory.Produce)]
     [DataRow("Jasmine Rice", FoodCategory.PantryDryGoods)]
+    [DataRow("Pecan", FoodCategory.PantryDryGoods)]
+    [DataRow("Oysters", FoodCategory.MeatAndSeafood)]
+    [DataRow("Orange Liqueur", FoodCategory.Beverages)]
+    [DataRow("Peach Schnapps", FoodCategory.Beverages)]
+    [DataRow("Gin", FoodCategory.Beverages)]
+    [DataRow("Fresh Ginger", FoodCategory.Produce)]
     [DataRow("Paper Towels", FoodCategory.Other)]
     [DataRow("", FoodCategory.Other)]
     public void Classify_KnownFoods_ReturnsExpectedCategory(string name, FoodCategory expected)

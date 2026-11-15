@@ -1858,7 +1858,7 @@ Household Cookbook Catalog:
            - Move any make-ahead, freezing, thawing, reheating, or storage sentences explicitly present in the source (whether trailing inside the intro paragraph or appended to steps) into description; NEVER keep standalone storage/reheating paragraphs as numbered preparation steps, NEVER graft them onto the final step, and NEVER invent tokens for ingredients outside the master ingredient list.
            - Use the lower number for servings (null if unknown). Times (prepTimeMinutes, cookTimeMinutes, totalTimeMinutes) MUST be integers in MINUTES (e.g. 1 hr = 60, NEVER seconds or oven temps); for No-Cook dishes set cookTimeMinutes: 0 (not null); when prep/cook/total times are not explicitly printed in a header, estimate realistic active integer minutes from the steps rather than leaving prep/total as 0 or null (use null only when unknowable). difficulty: 'Easy' for simple/single-technique dishes, 'Medium' for multi-component cooking, 'Project' for advanced/multi-day work, or null.
         2. Variation & Alternative Method Handling:
-           - If the source provides a base recipe plus variation instructions matching the requested recipe title (e.g. 'Variation Instructions' + 'Base Master Instructions'), synthesize ONE complete standalone recipe for that titled variation: merge variation additions/substitutions into ingredients, remove any omitted base ingredients from BOTH the ingredients array and the step text (do NOT write 'Omit X' instructions in steps), weave all steps in exact chronological cooking order AFTER any base step that prepares a referenced component (e.g., do NOT place 'To the thick, smooth yolk paste, add...' before the base steps that make the yolk paste), and drop superseded base garnish/finishing instructions.
+           - If the source provides a base recipe plus variation instructions matching the requested recipe title (e.g. 'Variation Instructions' + 'Base Master Instructions'), synthesize ONE complete standalone recipe for that titled variation: merge variation additions/substitutions into ingredients, COMPLETELY OMIT any base ingredient that the variation says to omit (e.g., 'Omit parsley leaf garnish') from BOTH the ingredients array and all step text (NEVER keep omitted ingredients in ingredients[] or write 'Omit X' instructions), weave all steps in exact chronological cooking order AFTER any base step that prepares a referenced component (e.g., NEVER place 'To the thick, smooth yolk paste, add...' before the base steps that mash/make the yolk paste), and drop superseded base garnish/finishing instructions.
            - Ignore unrelated sibling variations or alternative equipment sidebars that belong to a different recipe title or secondary cooking method.
         3. ProposedTags:
            - Choose 2-6 tags primarily from the curated culinary taxonomy below (include Course, Cuisine, Dietary, Equipment/Method such as 'Food Processor'/'No-Cook'/'Microwave'/'Steamed'/'Boil & Simmer', Primary Protein/Base, and Meal Prep where clearly applicable):
@@ -1867,7 +1867,7 @@ Household Cookbook Catalog:
            - NEVER invent generic adjectives ('Creamy', 'Spiced', 'Classic', 'Easy'), repeat dish titles ('Hummus'), copy category headings ('Protein & Base', 'Course', 'Equipment & Method'), emit grocery section names, emit non-protein minor ingredients ('Spinach', 'Salt', 'Oil'), emit meats not actually in the recipe (do not tag a pork/onion tart 'Beef'), or use 'Quick Prep'/'30-Minute Meal' when totalTimeMinutes > 30.
         4. Master Ingredients:
            - Assign each ingredient sequential refId ('ing_1', 'ing_2', ...). Extract ONLY ingredients listed in the source ingredients (do NOT invent master entries or {{unlisted_...}} / null/'null' ingredientRefId tokens for incidental tap water, ice cubes, cooking spray, or rendered pan fat unless explicitly listed; leave un-listed water/ice/spray/drippings as plain text in templateText—NEVER bind them to sugar, broth, oil, or bacon).
-           - Split a single source line into TWO sequential master rows ONLY when it specifies two separate components/yields with incompatible units (e.g. '1/4 tsp lime zest plus 1 1/2-2 tbsp juice' -> 'lime zest' + 'lime juice'; '1 tbsp minced parsley, plus 12 whole leaves' -> minced row + whole-leaf garnish row). NEVER split 'X or Y' alternatives into two non-optional master rows—put ONLY the primary item in canonicalFoodItem/displayName and put 'or Y' in preparationNotes. Keep divided uses of ONE single ingredient on one row with its full total amount, and combine compatible 'X plus Y' amounts onto one row (e.g. '6 tbsp plus 1 tsp' -> quantity: 6.3333, unit: 'tbsp'; NEVER put '+ 1 tsp' or a partial pre-plus parenthetical weight into altQuantity/altUnit).
+           - Split a single source line into TWO sequential master rows ONLY when it specifies two separate components/yields with incompatible units (e.g. '1/4 tsp lime zest plus 1 1/2-2 tbsp juice' -> 'lime zest' + 'lime juice'; '1 tbsp minced parsley, plus 12 whole leaves' -> minced row + whole-leaf garnish row). NEVER split 'X or Y' alternatives into two non-optional master rows—put ONLY the primary item in canonicalFoodItem/displayName and put 'or Y' in preparationNotes. Keep divided uses of ONE single ingredient on one row with its full total amount—NEVER create a second master ingredient row named 'remaining X' or 'reserved X' for a later portion of an ingredient already in the master list. Combine compatible 'X plus Y' amounts onto one row (e.g. '6 tbsp plus 1 tsp' -> quantity: 6.3333, unit: 'tbsp'; NEVER put '+ 1 tsp' or a partial pre-plus parenthetical weight into altQuantity/altUnit). For unmeasured step-only water/ice/salt added in multiple steps (e.g. three 1-quart water additions), sum them cleanly on ONE master row with a concise total rawText like '3 quarts cold water (divided)'.
            - canonicalFoodItem: Clean singular base grocery item WITHOUT quantities, units, preparation words, size/temperature modifiers, or 'or' alternatives (e.g. '2 large eggs' -> 'egg', '2 garlic cloves' -> 'garlic', 'cold water' -> 'water', '10 oz frozen chopped spinach' -> 'frozen spinach' with preparationNotes: 'chopped', 'unsalted butter'). Preserve derived forms like 'lemon juice', 'lime juice', 'lime zest' and specific cheese/variety names (e.g. 'ricotta cheese', 'goat cheese', 'Parmesan cheese'—NEVER flatten specific cheeses to generic 'cheese'). Avoid repeating 'whole' inside displayName when unit is 'whole' (use 'parsley leaf', not 'whole parsley leaves' with unit 'whole'). NEVER include 'or' in canonicalFoodItem or displayName.
            - displayName & preparationNotes: displayName must be concise (primary item ONLY if 'X or Y'). Put 'or Y' and prep actions ('chopped, melted, divided, warm at 110°F') as plain text in preparationNotes—NEVER put 'or Y' in displayName/fallbackDisplay and NEVER put {{ing_...}}, {{timer_...}}, or {{temp_...}} placeholders in preparationNotes.
            - unit: tsp, tbsp, cup, fl_oz, pt, qt, gal, oz, lb, g, kg, ml, l, pinch, dash, clove, can, bunch, slice, whole, or short unit string (null if unmeasured). Use 4 decimals for third/sixth fractions (1/3 -> 0.3333, 2/3 -> 0.6667—NEVER approximate 1/3 as 0.25).
@@ -1879,7 +1879,7 @@ Household Cookbook Catalog:
         5. Steps & {{token_key}} Placeholders:
            - Extract EVERY numbered step and action sentence in exact chronological order (stepNumber: 1..N). NEVER drop intermediate actions (e.g. rolling/shaping balls, cutting dough circles, or adding meat before a resting timer) and NEVER move a later stir-in/garnish ingredient (e.g. 'Transfer to a bowl and stir in bell pepper') into an earlier purée/processor list. Keep un-listed water amounts (e.g. '4 cups water') verbatim in templateText. Reference prepared sub-recipe components with {{ing_X_a}} on the first step that uses them when natural. Ensure EVERY non-optional master ingredient (including final garnishes like parsley) is referenced in its matching section/step with its exact ingredientRefId (never substitute a different section's sugar/salt/oil refId or bind un-listed tap water/ice/spray/drippings to another ingredient).
            - In templateText, replace inline ingredient mentions (BOTH measurement AND ingredient noun/phrase), durations (number AND time unit), and real cooking temperatures (number AND 'degrees'/'°F'/'°C') with {{token_key}} placeholders:
-             * Ingredients -> {{ing_1_a}}, {{ing_1_b}}, etc. NEVER reuse the exact same {{ing_1_a}} placeholder twice in a single step (use distinct keys _a, _b, _c). NEVER leave duplicate nouns, leading measurements before prep words ('2 tbsp beaten {{ing_1_a}}'), duplicate connectors ('{{ing_1_a}} of the {{ing_1_b}}', '2 tbsp of the {{ing_1_a}}'), unit words ('block', 'slices'), 'or' alternatives, or redundant parenthetical amounts ('(2 tbsp)') outside '{{ing_1_a}}'. NEVER list unused constituent ingredientTokens for a composite/mixture mention like 'the sauce' or 'the batter', and NEVER apportion raw master stepQuantities when spooning/drizzling a portion of an intermediate combined mixture (e.g. '1 tbsp oil-flour mixture')—leave composite mixtures as plain text or stepQuantity: null. When preceding text already has 'remaining'/'reserved' (e.g. 'remaining {{ing_1_b}}'), keep fallbackDisplay clean ('cheese', NEVER 'remaining cheese'). IMPORTANT: For EVERY measured master ingredient (quantity > 0), its VERY FIRST addition in steps MUST set non-null stepQuantity and stepUnit (the amount added in that step, or full master amount if added all at once), even when the source step prose omits numbers (e.g. 'Add garlic, cumin, and salt' -> emit stepQuantity: 7, stepUnit: 'clove' for garlic, etc.). When shaping or filling a single portion ('fill 1 portion with 1 teaspoon'), emit ONLY that single-portion amount (1 tsp) or stepQuantity: null—NEVER assign the full batch quantity (8 tsp) to a per-portion step. For '2 tbsp on each of 2 baking sheets', either multiply accurately (4 tbsp on the baking sheets without trailing 'each') or tokenize each sheet separately without exceeding master quantity. When one master ingredient has split preparations (e.g. '1 oz grated, 1 oz shaved'), include that specific form in fallbackDisplay ('grated Parmesan cheese' / 'shaved Parmesan cheese') with split stepQuantity (1 oz each). For whole items like 'Halve 1 avocado' from 3 avocados, emit stepQuantity: 1, stepUnit: 'whole' (NEVER divide 1/3 into 0.3333); for 'half of X' measured amounts, compute 50% of X's unit (half of 8 oz = 4 oz, NEVER 0.5) UNLESS 100% of X was already added in an earlier step (e.g. tossing all cauliflower in coating in step 2, then 'Fry half of cauliflower' in step 3 -> set stepQuantity: null and stepUnit: null). NEVER use physical length units ('inch', 'cm') as stepUnit. When a later step re-references, cooks, drains, coats with, transfers, fries in batches, reserves a portion of, or garnishes with an already-added ingredient (e.g. 'cook the beef', 'dip in the egg', 'transfer bacon to plate', 'drain chickpeas', 'set aside 2 tbsp chickpeas', 'sprinkle with remaining bacon'), set stepQuantity: null and stepUnit: null so quantities are not double-counted. NEVER use 0 for stepQuantity! Consume at most 100% of each master ingredient across primary and alternate units combined (never consume BOTH 2 cans AND 30 oz for one 2-can item).
+             * Ingredients -> {{ing_1_a}}, {{ing_1_b}}, etc. NEVER reuse the exact same {{ing_1_a}} placeholder twice in a single step (use distinct keys _a, _b, _c) AND NEVER emit two items with the same tokenKey in ingredientTokens. NEVER leave duplicate nouns, leading measurements before prep words ('2 tbsp beaten {{ing_1_a}}'), duplicate connectors ('{{ing_1_a}} of the {{ing_1_b}}', '2 tbsp of the {{ing_1_a}}'), unit words ('block', 'slices'), 'or' alternatives, or redundant parenthetical amounts ('(2 tbsp)') outside '{{ing_1_a}}'. NEVER list unused constituent ingredientTokens for a composite/mixture mention like 'the sauce', 'the batter', 'shrub syrup', or 'picada', NEVER bind a prepared combined mixture/syrup/paste/sauce (e.g. '2 ounces shrub syrup', '2 tablespoons picada') to one component's refId (such as vinegar or almonds), and NEVER apportion raw master stepQuantities when spooning/drizzling a portion of an intermediate combined mixture (e.g. '1 tbsp oil-flour mixture')—leave composite prepared mixtures as plain text or stepQuantity: null. When preceding text already has 'remaining'/'reserved' (e.g. 'remaining {{ing_1_b}}'), keep fallbackDisplay clean ('cheese', NEVER 'remaining cheese'). IMPORTANT: For EVERY measured master ingredient (quantity > 0), its VERY FIRST addition in steps MUST set non-null stepQuantity and stepUnit (the amount added in that step, or full master amount if added all at once), even when the source step prose omits numbers (e.g. 'Add garlic, cumin, and salt' -> emit stepQuantity: 7, stepUnit: 'clove' for garlic, etc.). When shaping or filling a single portion ('fill 1 portion with 1 teaspoon'), emit ONLY that single-portion amount (1 tsp) or stepQuantity: null—NEVER assign the full batch quantity (8 tsp) to a per-portion step. For '2 tbsp on each of 2 baking sheets', either multiply accurately (4 tbsp on the baking sheets without trailing 'each') or tokenize each sheet separately without exceeding master quantity. When one master ingredient has split preparations (e.g. '1 oz grated, 1 oz shaved'), include that specific form in fallbackDisplay ('grated Parmesan cheese' / 'shaved Parmesan cheese') with split stepQuantity (1 oz each). For whole items like 'Halve 1 avocado' from 3 avocados, emit stepQuantity: 1, stepUnit: 'whole' (NEVER divide 1/3 into 0.3333); for 'half of X' measured amounts, compute 50% of X's unit (half of 8 oz = 4 oz, NEVER 0.5) UNLESS 100% of X was already added in an earlier step (e.g. tossing all cauliflower in coating in step 2, then 'Fry half of cauliflower' in step 3 -> set stepQuantity: null and stepUnit: null). NEVER use physical length units ('inch', 'cm') as stepUnit. When a later step re-references, cooks, drains, coats with, transfers, fries in batches, reserves a portion of, or garnishes with an already-added ingredient (e.g. 'cook the beef', 'dip in the egg', 'transfer bacon to plate', 'drain chickpeas', 'set aside 2 tbsp chickpeas', 'sprinkle with remaining bacon'), set stepQuantity: null and stepUnit: null so quantities are not double-counted. NEVER use 0 for stepQuantity! Consume at most 100% of each master ingredient across primary and alternate units combined (never consume BOTH 2 cans AND 30 oz for one 2-can item).
              * Timers -> {{timer_1}}, {{timer_2}}, etc. durationSeconds MUST ALWAYS match the exact printed duration converted to SECONDS (minutes * 60, hours * 3600; e.g. '30 seconds' -> 30, NEVER multiply seconds by 6 or 10; '14 minutes' -> 840, NEVER 14; '1 hour' -> 3600). Replace the ENTIRE duration phrase including range words and time unit ('between 45 and 60 seconds' or '1 to 2 minutes' -> ONE placeholder '{{timer_1}}' with lower bound durationSeconds: 45 or 60; 'about 30 seconds' -> 'about {{timer_1}}', NEVER 'between {{timer_1}}', '{{timer_1}} seconds', or '{{timer_1}} to {{timer_2}}'). NEVER create timerTokens for food-processor pulse counts ('5 pulses') or physical measurements ('1 1/2 inches deep')—leave pulses and inches as plain text. Keep power/heat settings outside the placeholder ('for {{timer_1}} at 40 percent power'). label MUST be a short 2-4 word verb+object action (NEVER '5 minutes').
              * Temperatures -> {{temp_1}}, {{temp_2}}, etc. Replace number AND 'degrees'/'°F'/'°C' AND any '-degree' hyphenation without duplicating prepositions ('heat oven to {{temp_1}}', 'bake at {{temp_1}}', 'in a {{temp_1}} oven', NEVER 'to at {{temp_1}}', '{{temp_1}} degrees', or '{{temp_1}}-degree oven'). Add matching StepTemperatureTokenDto ONLY for real thermal cooking/proofing temperatures (°F or °C; for dual '350F/175C', emit ONLY F 350). NEVER extract rack distances ('4 inches from broiler element') or microwave power percentages ('40 percent power', '50% power') into temperatureTokens!
            - Keep punctuation OUTSIDE placeholders (e.g. '{{timer_1}}.').
@@ -1898,11 +1898,52 @@ Household Cookbook Catalog:
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     );
 
+    private static readonly Regex MissingTemplateTokenErrorRegex = new(
+        @"^Step\s+(?<step>\d+)\s+TemplateText contains token\s+'\{\{(?<key>[^{}]+)\}\}',\s+which is missing from Step\s+\d+\s+token arrays\.",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    );
+
     private static string FormatValidationErrorWithStepContext(
         string error,
         ExtractedRecipeDto extracted
     )
     {
+        var steps = extracted.Steps ?? [];
+        var missingTokenMatch = MissingTemplateTokenErrorRegex.Match(error);
+        if (missingTokenMatch.Success)
+        {
+            var targetStepNum = int.Parse(
+                missingTokenMatch.Groups["step"].Value,
+                System.Globalization.CultureInfo.InvariantCulture
+            );
+            var rawMissingKey = missingTokenMatch.Groups["key"].Value.Trim();
+            var targetStep = steps
+                .Select((s, idx) => (Step: s, Num: s.StepNumber > 0 ? s.StepNumber : idx + 1))
+                .FirstOrDefault(x => x.Num == targetStepNum)
+                .Step;
+
+            var snippetSuffix = string.Empty;
+            var placeholder = $"{{{{{rawMissingKey}}}}}";
+            var tpl = targetStep?.TemplateText ?? string.Empty;
+            var idxPos = tpl.IndexOf(placeholder, StringComparison.OrdinalIgnoreCase);
+            if (idxPos >= 0)
+            {
+                var start = Math.Max(0, idxPos - 45);
+                var len = Math.Min(tpl.Length - start, placeholder.Length + 90);
+                var snippet = tpl.Substring(start, len).Trim();
+                snippetSuffix = $" (around: \"{snippet}\")";
+            }
+
+            var arrayHint =
+                rawMissingKey.StartsWith("timer_", StringComparison.OrdinalIgnoreCase)
+                    ? "timerTokens (matching the source step durationSeconds)"
+                : rawMissingKey.StartsWith("temp_", StringComparison.OrdinalIgnoreCase)
+                    ? "temperatureTokens"
+                : "ingredientTokens";
+
+            return $"{error} [Look in Step {targetStepNum}{snippetSuffix}: add '{placeholder}' to {arrayHint}, or replace '{placeholder}' with plain text if no token belongs there.]";
+        }
+
         if (
             !error.StartsWith("Quantity sum mismatch", StringComparison.OrdinalIgnoreCase)
             && !error.Contains(
@@ -1921,8 +1962,14 @@ Household Cookbook Catalog:
         }
 
         var targetRefId = match.Groups[1].Value;
+        var master = (extracted.Ingredients ?? []).FirstOrDefault(i =>
+            string.Equals(i.RefId?.Trim(), targetRefId, StringComparison.OrdinalIgnoreCase)
+        );
+        var masterLabel = !string.IsNullOrWhiteSpace(master?.CanonicalFoodItem)
+            ? master.CanonicalFoodItem.Trim()
+            : targetRefId;
         var occurrences = new List<string>();
-        var steps = extracted.Steps ?? [];
+        var hasDistinctMixtureFallback = false;
         for (var i = 0; i < steps.Count; i++)
         {
             var step = steps[i];
@@ -1941,16 +1988,36 @@ Household Cookbook Catalog:
                     var unitLabel = string.IsNullOrWhiteSpace(tok.StepUnit)
                         ? string.Empty
                         : $" {tok.StepUnit.Trim()}";
+                    var fb = tok.FallbackDisplay?.Trim();
+                    var fbLabel = string.Empty;
+                    if (!string.IsNullOrWhiteSpace(fb))
+                    {
+                        fbLabel = $" ['{fb}']";
+                        if (
+                            !fb.Contains(masterLabel, StringComparison.OrdinalIgnoreCase)
+                            && !masterLabel.Contains(fb, StringComparison.OrdinalIgnoreCase)
+                        )
+                        {
+                            hasDistinctMixtureFallback = true;
+                        }
+                    }
+
                     occurrences.Add(
-                        $"Step {stepNum} ({{{{{tok.TokenKey}}}}}={tok.StepQuantity.Value:0.###}{unitLabel})"
+                        $"Step {stepNum} ({{{{{tok.TokenKey}}}}}={tok.StepQuantity.Value:0.###}{unitLabel}{fbLabel})"
                     );
                 }
             }
         }
 
-        return occurrences.Count > 0
-            ? $"{error} [Your current step quantities for {targetRefId}: {string.Join(", ", occurrences)}]"
-            : error;
+        if (occurrences.Count == 0)
+        {
+            return error;
+        }
+
+        var compositeHint = hasDistinctMixtureFallback
+            ? $" If any token is a combined prepared mixture/syrup/paste/sauce rather than pure '{masterLabel}', write it as plain text in templateText and remove that token from ingredientTokens."
+            : string.Empty;
+        return $"{error} [Your current step quantities for {targetRefId}: {string.Join(", ", occurrences)}.{compositeHint}]";
     }
 
     private static string BuildExtractedRecipeSystemPrompt() => ExtractedRecipeSystemPrompt;

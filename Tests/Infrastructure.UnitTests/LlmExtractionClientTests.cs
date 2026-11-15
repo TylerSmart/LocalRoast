@@ -2128,4 +2128,107 @@ public sealed class LlmExtractionClientTests
         );
         Assert.IsTrue(RecipeValidator.Validate(result).IsValid);
     }
+
+    [TestMethod]
+    public async Task ExtractRecipeFromTextAsync_RetriesWithMixtureAndMissingTimerHints()
+    {
+        var attempts = new List<string>();
+        var attemptNum = 0;
+
+        const string invalidReply = """
+            {
+                "title": "New Englander",
+                "ingredients": [
+                    { "refId": "ing_4", "canonicalFoodItem": "white wine vinegar", "displayName": "white wine vinegar", "quantity": 1, "unit": "oz", "rawText": "1 oz white wine vinegar" }
+                ],
+                "steps": [
+                    {
+                        "stepNumber": 1,
+                        "templateText": "Whisk in {{ing_4_a}}.",
+                        "ingredientTokens": [
+                            { "tokenKey": "ing_4_a", "ingredientRefId": "ing_4", "stepQuantity": 1, "stepUnit": "oz", "fallbackDisplay": "vinegar" }
+                        ],
+                        "timerTokens": [],
+                        "temperatureTokens": []
+                    },
+                    {
+                        "stepNumber": 2,
+                        "templateText": "Process until smooth, {{timer_3}}. Add {{ing_4_b}}.",
+                        "ingredientTokens": [
+                            { "tokenKey": "ing_4_b", "ingredientRefId": "ing_4", "stepQuantity": 2, "stepUnit": "oz", "fallbackDisplay": "shrub syrup" }
+                        ],
+                        "timerTokens": [],
+                        "temperatureTokens": []
+                    }
+                ],
+                "qualityAudit": { "isPlausibleRecipe": true, "warnings": [] }
+            }
+            """;
+
+        const string fixedReply = """
+            {
+                "title": "New Englander",
+                "ingredients": [
+                    { "refId": "ing_4", "canonicalFoodItem": "white wine vinegar", "displayName": "white wine vinegar", "quantity": 1, "unit": "oz", "rawText": "1 oz white wine vinegar" }
+                ],
+                "steps": [
+                    {
+                        "stepNumber": 1,
+                        "templateText": "Whisk in {{ing_4_a}}.",
+                        "ingredientTokens": [
+                            { "tokenKey": "ing_4_a", "ingredientRefId": "ing_4", "stepQuantity": 1, "stepUnit": "oz", "fallbackDisplay": "vinegar" }
+                        ],
+                        "timerTokens": [],
+                        "temperatureTokens": []
+                    },
+                    {
+                        "stepNumber": 2,
+                        "templateText": "Process until smooth, {{timer_3}}. Add shrub syrup.",
+                        "ingredientTokens": [],
+                        "timerTokens": [
+                            { "tokenKey": "timer_3", "durationSeconds": 10, "label": "Process mixture" }
+                        ],
+                        "temperatureTokens": []
+                    }
+                ],
+                "qualityAudit": { "isPlausibleRecipe": true, "warnings": [] }
+            }
+            """;
+
+        var handler = new MockHttpMessageHandler(req =>
+        {
+            attemptNum++;
+            attempts.Add(req.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+            return OllamaReply(attemptNum == 1 ? invalidReply : fixedReply);
+        });
+
+        var client = new LlmExtractionClient(new HttpClient(handler));
+        var config = new EffectiveLlmConnectionConfig(
+            Provider: LlmProvider.Ollama,
+            BaseUrl: "http://localhost:11434",
+            ApiKey: null,
+            TextModel: "gemma4:e4b",
+            VisionModel: null,
+            OllamaKeepAlive: "5m",
+            RequestTimeoutSeconds: 30,
+            AutoPublishHighConfidenceText: true
+        );
+
+        var result = await client.ExtractRecipeFromTextAsync(
+            config,
+            new LlmExtractionContext(
+                "New Englander\n- 1 oz white wine vinegar\n1. Whisk in vinegar. 2. Process until smooth, 10 seconds. Add 2 oz shrub syrup."
+            )
+        );
+
+        Assert.HasCount(2, attempts);
+        StringAssert.Contains(attempts[1], "[\\u0027shrub syrup\\u0027]");
+        StringAssert.Contains(attempts[1], "combined prepared mixture/syrup/paste/sauce");
+        StringAssert.Contains(attempts[1], "Process until smooth, {{timer_3}}.");
+        StringAssert.Contains(
+            attempts[1],
+            "timerTokens (matching the source step durationSeconds)"
+        );
+        Assert.IsTrue(RecipeValidator.Validate(result).IsValid);
+    }
 }

@@ -96,6 +96,12 @@ public static partial class RecipeValidator
     private static partial Regex AlternativeOrPlusRawRegex();
 
     [GeneratedRegex(
+        @"\b(?:additional|more|extra|another|divided)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex AdditiveSemicolonCueRegex();
+
+    [GeneratedRegex(
         @"^\s*(?:,\s*)?plus\s+(?:(?:\d+\s+)?\d+/\d+|\d+(?:\.\d+)?)\s+\S+",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
@@ -908,6 +914,20 @@ public static partial class RecipeValidator
                     }
                 }
 
+                if (
+                    ing.RawText.Contains(';', StringComparison.Ordinal)
+                    && TrySumSemicolonAdditiveMeasurements(
+                        ing.RawText,
+                        mUnit,
+                        mCustom,
+                        out var sumMin,
+                        out var sumMax
+                    )
+                )
+                {
+                    candidates.Add(new RecipeMeasurement(sumMin, mUnit, sumMax, mCustom));
+                }
+
                 if (candidates.Count > 0)
                 {
                     var hasConvertibleCandidate = false;
@@ -968,6 +988,102 @@ public static partial class RecipeValidator
         ValidateCompoundPlusDuplicateRows(ingredients, rawTextCounts, errors);
 
         return map;
+    }
+
+    private static bool TrySumSemicolonAdditiveMeasurements(
+        string rawText,
+        MeasurementUnit? targetUnit,
+        string? targetCustomUnit,
+        out decimal sumMin,
+        out decimal? sumMax
+    )
+    {
+        sumMin = 0m;
+        sumMax = null;
+
+        var segments = rawText.Split(
+            ';',
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries
+        );
+        if (segments.Length < 2)
+        {
+            return false;
+        }
+
+        var hasAdditiveCue = AdditiveSemicolonCueRegex().IsMatch(rawText);
+        var seenUnits = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var hasDuplicateUnit = false;
+        decimal minTotal = 0m;
+        decimal maxTotal = 0m;
+        var hasRange = false;
+        var convertedCount = 0;
+
+        foreach (var segment in segments)
+        {
+            var cand = SourceMeasurementParser
+                .FindAllConfirmableMeasurements(segment)
+                .FirstOrDefault(m => m.Quantity is > 0m);
+            if (cand?.Quantity is not > 0m)
+            {
+                return false;
+            }
+
+            if (
+                !TryConvertStepQuantityToTarget(
+                    cand.Quantity.Value,
+                    cand.Unit,
+                    cand.CustomUnitName,
+                    targetUnit,
+                    targetCustomUnit,
+                    out var convMin
+                )
+            )
+            {
+                return false;
+            }
+
+            var unitKey =
+                cand.Unit == MeasurementUnit.Custom
+                    ? $"custom:{cand.CustomUnitName?.Trim()}"
+                    : cand.Unit?.ToString() ?? string.Empty;
+            if (!seenUnits.Add(unitKey))
+            {
+                hasDuplicateUnit = true;
+            }
+
+            minTotal += convMin;
+            if (
+                cand.MaxQuantity is > 0m
+                && TryConvertStepQuantityToTarget(
+                    cand.MaxQuantity.Value,
+                    cand.Unit,
+                    cand.CustomUnitName,
+                    targetUnit,
+                    targetCustomUnit,
+                    out var convMax
+                )
+                && convMax >= convMin
+            )
+            {
+                hasRange = true;
+                maxTotal += convMax;
+            }
+            else
+            {
+                maxTotal += convMin;
+            }
+
+            convertedCount++;
+        }
+
+        if (convertedCount < 2 || (!hasDuplicateUnit && !hasAdditiveCue))
+        {
+            return false;
+        }
+
+        sumMin = minTotal;
+        sumMax = hasRange ? maxTotal : null;
+        return true;
     }
 
     private static void ValidateCompoundPlusDuplicateRows(
@@ -2174,8 +2290,9 @@ public static partial class RecipeValidator
         var combinedBuilder = new global::System.Text.StringBuilder();
         foreach (var step in steps)
         {
-            var tokenMap = (step.IngredientTokens ?? []).ToDictionary(
-                t => NormalizeTokenKey(t.TokenKey),
+            var tokenMap = BuildFirstByNormalizedKey(
+                step.IngredientTokens,
+                t => t.TokenKey,
                 t =>
                 {
                     if (!string.IsNullOrWhiteSpace(t.FallbackDisplay))
@@ -2194,8 +2311,7 @@ public static partial class RecipeValidator
                     }
 
                     return string.Empty;
-                },
-                StringComparer.OrdinalIgnoreCase
+                }
             );
 
             var expanded = PlaceholderRegex()
@@ -2351,10 +2467,10 @@ public static partial class RecipeValidator
                 continue;
             }
 
-            var stepIngByKey = (step.IngredientTokens ?? []).ToDictionary(
-                t => NormalizeTokenKey(t.TokenKey),
-                t => t,
-                StringComparer.OrdinalIgnoreCase
+            var stepIngByKey = BuildFirstByNormalizedKey(
+                step.IngredientTokens,
+                t => t.TokenKey,
+                t => t
             );
             foreach (Match m in PlaceholderRegex().Matches(step.TemplateText))
             {
@@ -2415,25 +2531,28 @@ public static partial class RecipeValidator
         )
         {
             var template = step.TemplateText ?? string.Empty;
-            var ingTokens = (step.IngredientTokens ?? []).ToList();
-            var timerTokens = (step.TimerTokens ?? []).ToList();
-            var tempTokens = (step.TemperatureTokens ?? []).ToList();
+            var ingTokens = DeduplicateTokensByKey(
+                step.IngredientTokens,
+                t => t.TokenKey,
+                t => t.StepQuantity is > 0m,
+                out var dedupIngChanged
+            );
+            var timerTokens = DeduplicateTokensByKey(
+                step.TimerTokens,
+                t => t.TokenKey,
+                t => t.DurationSeconds > 0,
+                out var dedupTimerChanged
+            );
+            var tempTokens = DeduplicateTokensByKey(
+                step.TemperatureTokens,
+                t => t.TokenKey,
+                t => t.Value is > 0m,
+                out var dedupTempChanged
+            );
 
-            var ingMap = ingTokens.ToDictionary(
-                t => NormalizeTokenKey(t.TokenKey),
-                t => t,
-                StringComparer.OrdinalIgnoreCase
-            );
-            var timerMap = timerTokens.ToDictionary(
-                t => NormalizeTokenKey(t.TokenKey),
-                t => t,
-                StringComparer.OrdinalIgnoreCase
-            );
-            var tempMap = tempTokens.ToDictionary(
-                t => NormalizeTokenKey(t.TokenKey),
-                t => t,
-                StringComparer.OrdinalIgnoreCase
-            );
+            var ingMap = BuildFirstByNormalizedKey(ingTokens, t => t.TokenKey, t => t);
+            var timerMap = BuildFirstByNormalizedKey(timerTokens, t => t.TokenKey, t => t);
+            var tempMap = BuildFirstByNormalizedKey(tempTokens, t => t.TokenKey, t => t);
 
             var allDefinedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var k in ingMap.Keys)
@@ -2444,7 +2563,7 @@ public static partial class RecipeValidator
                 allDefinedKeys.Add(k);
 
             var seenInTemplate = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var stepChanged = false;
+            var stepChanged = dedupIngChanged || dedupTimerChanged || dedupTempChanged;
             var keysToInlineRemove = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             var rewrittenTemplate = PlaceholderRegex()
@@ -2706,6 +2825,76 @@ public static partial class RecipeValidator
         }
 
         return changedAny ? recipe with { Steps = updatedSteps } : recipe;
+    }
+
+    private static Dictionary<string, TValue> BuildFirstByNormalizedKey<TToken, TValue>(
+        IEnumerable<TToken>? tokens,
+        Func<TToken, string?> keySelector,
+        Func<TToken, TValue> valueSelector
+    )
+    {
+        var map = new Dictionary<string, TValue>(StringComparer.OrdinalIgnoreCase);
+        if (tokens is null)
+        {
+            return map;
+        }
+
+        foreach (var token in tokens)
+        {
+            var key = NormalizeTokenKey(keySelector(token));
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                continue;
+            }
+
+            if (!map.ContainsKey(key))
+            {
+                map[key] = valueSelector(token);
+            }
+        }
+
+        return map;
+    }
+
+    private static List<TToken> DeduplicateTokensByKey<TToken>(
+        IReadOnlyList<TToken>? tokens,
+        Func<TToken, string?> keySelector,
+        Func<TToken, bool> preferOverExisting,
+        out bool changed
+    )
+    {
+        changed = false;
+        if (tokens is null || tokens.Count == 0)
+        {
+            return [];
+        }
+
+        var result = new List<TToken>(tokens.Count);
+        var indexByKey = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var token in tokens)
+        {
+            var key = NormalizeTokenKey(keySelector(token));
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                result.Add(token);
+                continue;
+            }
+
+            if (indexByKey.TryGetValue(key, out var existingIdx))
+            {
+                changed = true;
+                if (!preferOverExisting(result[existingIdx]) && preferOverExisting(token))
+                {
+                    result[existingIdx] = token;
+                }
+                continue;
+            }
+
+            indexByKey[key] = result.Count;
+            result.Add(token);
+        }
+
+        return result;
     }
 
     private static string FormatSimpleDurationText(int durationSeconds)

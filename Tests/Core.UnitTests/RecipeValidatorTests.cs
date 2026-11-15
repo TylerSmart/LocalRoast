@@ -1572,4 +1572,115 @@ public sealed class RecipeValidatorTests
         var validated = RecipeValidator.Validate(repaired);
         Assert.IsTrue(validated.IsValid, string.Join("; ", validated.Errors));
     }
+
+    [TestMethod]
+    public void Validate_AndRepair_DuplicateStepTokenKey_DoesNotThrowArgumentException()
+    {
+        var dto = new ExtractedRecipeDto(
+            Title: "Roasted Oysters",
+            Ingredients:
+            [
+                new(
+                    "ing_4",
+                    CanonicalFoodItem: "unsalted butter",
+                    DisplayName: "unsalted butter",
+                    Quantity: 4m,
+                    Unit: "tbsp",
+                    RawText: "4 tablespoons unsalted butter"
+                ),
+            ],
+            Steps:
+            [
+                new(
+                    1,
+                    TemplateText: "Melt {{ing_4_a}} in a small bowl.",
+                    IngredientTokens:
+                    [
+                        new("ing_4_a", "ing_4", 2m, "tbsp"),
+                        new("ing_4_a", "ing_4", 2m, "tbsp"),
+                    ]
+                ),
+                new(2, TemplateText: "Roast oysters on grill."),
+                new(3, TemplateText: "Serve hot immediately."),
+            ]
+        );
+
+        var validation = RecipeValidator.Validate(
+            dto,
+            "Roasted Oysters\nIngredients:\n- 4 tablespoons unsalted butter\nInstructions:\n1. Melt butter.\n2. Roast oysters.\n3. Serve hot."
+        );
+
+        Assert.IsFalse(validation.IsValid);
+        Assert.IsTrue(validation.Errors.Any(e => e.Contains("Duplicate token key")));
+
+        var repaired = RecipeValidator.RepairSafeStepTokenGlitches(dto);
+        Assert.HasCount(1, repaired.Steps![0].IngredientTokens!);
+    }
+
+    [TestMethod]
+    public void Validate_SemicolonAdditiveMeasurements_MatchesSumButRejectsWrongSumOrAliases()
+    {
+        var validDto = new ExtractedRecipeDto(
+            Title: "Shrimp Cocktail",
+            Ingredients:
+            [
+                new(
+                    "ing_5",
+                    CanonicalFoodItem: "water",
+                    DisplayName: "cold water",
+                    Quantity: 3m,
+                    Unit: "qt",
+                    RawText: "1 quart cold (65- to 70-degree) water; 1 quart water; additional 1 quart cold water"
+                ),
+            ],
+            Steps:
+            [
+                new(
+                    1,
+                    TemplateText: "Brine in {{ing_5_a}}.",
+                    IngredientTokens: [new("ing_5_a", "ing_5", 3m, "qt")]
+                ),
+            ]
+        );
+
+        var validResult = RecipeValidator.Validate(validDto);
+        Assert.IsTrue(validResult.IsValid, string.Join("; ", validResult.Errors));
+
+        var wrongQtyDto = validDto with
+        {
+            Ingredients = [validDto.Ingredients![0] with { Quantity = 2m }],
+            Steps =
+            [
+                validDto.Steps![0] with
+                {
+                    IngredientTokens = [new("ing_5_a", "ing_5", 2m, "qt")],
+                },
+            ],
+        };
+        Assert.IsFalse(RecipeValidator.Validate(wrongQtyDto).IsValid);
+
+        var aliasDto = new ExtractedRecipeDto(
+            Title: "Milk Test",
+            Ingredients:
+            [
+                new(
+                    "ing_1",
+                    CanonicalFoodItem: "milk",
+                    DisplayName: "milk",
+                    Quantity: 2m,
+                    Unit: "cup",
+                    RawText: "1 cup milk; 240 ml milk"
+                ),
+            ],
+            Steps:
+            [
+                new(
+                    1,
+                    TemplateText: "Pour {{ing_1_a}}.",
+                    IngredientTokens: [new("ing_1_a", "ing_1", 2m, "cup")]
+                ),
+            ]
+        );
+        Assert.IsFalse(RecipeValidator.Validate(aliasDto).IsValid);
+    }
 }
