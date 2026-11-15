@@ -1790,4 +1790,164 @@ public sealed class RecipeValidatorTests
         var validation = RecipeValidator.Validate(dto, source);
         Assert.IsTrue(validation.IsValid, string.Join("; ", validation.Errors));
     }
+
+    [TestMethod]
+    public void NormalizeCompoundIngredients_SumsMultiplePartParentheticalAlternatesInSameUnit()
+    {
+        var dto = new ExtractedRecipeDto(
+            Title: "Green Shakshuka",
+            Ingredients:
+            [
+                new(
+                    "ing_2",
+                    CanonicalFoodItem: "Swiss chard",
+                    DisplayName: "Swiss chard",
+                    Quantity: 1m,
+                    Unit: "lb",
+                    AltQuantity: 2m,
+                    AltUnit: "cup",
+                    RawText: "1 pound Swiss chard, stems sliced 1/4 inch thick (2 cups), leaves cut into 1 1/2- to 2-inch pieces (8 cups)"
+                ),
+            ],
+            Steps:
+            [
+                new(
+                    1,
+                    TemplateText: "Cook {{ing_2_a}} stems until tender.",
+                    IngredientTokens: [new("ing_2_a", "ing_2", 2m, "cup")]
+                ),
+                new(
+                    2,
+                    TemplateText: "Wilt {{ing_2_b}} leaves.",
+                    IngredientTokens: [new("ing_2_b", "ing_2", 8m, "cup")]
+                ),
+            ]
+        );
+
+        var normalized = RecipeValidator.NormalizeCompoundIngredients(dto);
+        Assert.AreEqual(10m, normalized.Ingredients![0].AltQuantity);
+        var validation = RecipeValidator.Validate(normalized);
+        Assert.IsTrue(validation.IsValid, string.Join("; ", validation.Errors));
+    }
+
+    [TestMethod]
+    public void Validate_OpenEndedPlusExtraModifier_AllowsSmallExtraButStillRejectsDoubleCount()
+    {
+        var okDto = new ExtractedRecipeDto(
+            Title: "Spanish Migas",
+            Ingredients:
+            [
+                new(
+                    "ing_1",
+                    CanonicalFoodItem: "water",
+                    DisplayName: "water",
+                    Quantity: 0.3333m,
+                    Unit: "cup",
+                    RawText: "1/3 cup water, plus extra as needed"
+                ),
+            ],
+            Steps:
+            [
+                new(
+                    1,
+                    TemplateText: "Whisk {{ing_1_a}}, then add extra {{ing_1_b}}, {{ing_1_c}} at a time.",
+                    IngredientTokens:
+                    [
+                        new("ing_1_a", "ing_1", 0.3333m, "cup"),
+                        new("ing_1_b", "ing_1", 1m, "tbsp"),
+                        new("ing_1_c", "ing_1", 1m, "tbsp"),
+                    ]
+                ),
+            ]
+        );
+
+        var okResult = RecipeValidator.Validate(okDto);
+        Assert.IsTrue(okResult.IsValid, string.Join("; ", okResult.Errors));
+
+        var doubledDto = okDto with
+        {
+            Steps =
+            [
+                new(
+                    1,
+                    TemplateText: "Whisk {{ing_1_a}} then pour {{ing_1_b}}.",
+                    IngredientTokens:
+                    [
+                        new("ing_1_a", "ing_1", 0.3333m, "cup"),
+                        new("ing_1_b", "ing_1", 0.3333m, "cup"),
+                    ]
+                ),
+            ],
+        };
+        var doubledResult = RecipeValidator.Validate(doubledDto);
+        Assert.IsFalse(doubledResult.IsValid);
+    }
+
+    [TestMethod]
+    public void RepairSafeStepTokenGlitches_ClearsBowlOfAndPairedRemainingBatchDoubleCounts()
+    {
+        var dto = new ExtractedRecipeDto(
+            Title: "Batch Split Test",
+            Ingredients:
+            [
+                new(
+                    "ing_5",
+                    CanonicalFoodItem: "egg",
+                    DisplayName: "large eggs",
+                    Quantity: 6m,
+                    Unit: "whole",
+                    RawText: "6 large eggs"
+                ),
+                new(
+                    "ing_6",
+                    CanonicalFoodItem: "squid",
+                    DisplayName: "squid",
+                    Quantity: 1m,
+                    Unit: "lb",
+                    RawText: "1 pound squid"
+                ),
+                new(
+                    "ing_7",
+                    CanonicalFoodItem: "banana pepper",
+                    DisplayName: "banana peppers",
+                    Quantity: 1.5m,
+                    Unit: "cup",
+                    RawText: "1 1/2 cups jarred sliced banana peppers"
+                ),
+            ],
+            Steps:
+            [
+                new(
+                    1,
+                    TemplateText: "Crack {{ing_5_a}} and {{ing_5_b}} into bowls. Toss {{ing_6_a}} and {{ing_7_a}} in flour.",
+                    IngredientTokens:
+                    [
+                        new("ing_5_a", "ing_5", 3m, "whole"),
+                        new("ing_5_b", "ing_5", 3m, "whole"),
+                        new("ing_6_a", "ing_6", 1m, "lb"),
+                        new("ing_7_a", "ing_7", 1.5m, "cup"),
+                    ]
+                ),
+                new(
+                    2,
+                    TemplateText: "Pour 1 bowl of {{ing_5_c}} and second bowl of {{ing_5_d}}. Fry half of {{ing_6_b}} and repeat with remaining {{ing_6_c}} and {{ing_7_b}}.",
+                    IngredientTokens:
+                    [
+                        new("ing_5_c", "ing_5", 3m, "whole"),
+                        new("ing_5_d", "ing_5", 3m, "whole"),
+                        new("ing_6_b", "ing_6", 0.5m, "lb"),
+                        new("ing_6_c", "ing_6", 0.5m, "lb"),
+                        new("ing_7_b", "ing_7", 0.5m, "cup"),
+                    ]
+                ),
+            ]
+        );
+
+        var repaired = RecipeValidator.RepairSafeStepTokenGlitches(
+            dto,
+            repairBatchSplitDoubleCounts: true
+        );
+        var validation = RecipeValidator.Validate(repaired);
+        Assert.IsTrue(validation.IsValid, string.Join("; ", validation.Errors));
+    }
 }

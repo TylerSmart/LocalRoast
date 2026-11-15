@@ -370,6 +370,30 @@ public static partial class RecipeValidator
     )]
     private static partial Regex TrailingTimerPrepositionRegex();
 
+    [GeneratedRegex(
+        @"\b(?:plus\s+(?:extra|additional|more)(?!\s+\d)|(?:extra|more)\s+(?:as|if)\s+needed)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex OpenEndedExtraQuantityRegex();
+
+    [GeneratedRegex(@"\(([^()\r\n]+)\)", RegexOptions.CultureInvariant)]
+    private static partial Regex StandaloneParenContentRegex();
+
+    [GeneratedRegex(
+        @"\b(?:or|divided|remaining|half|cans?|jars?|packages?|boxes?)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex ParenDisqualifyingWordRegex();
+
+    [GeneratedRegex(
+        @"^\s*(?:cans?|jars?|packages?|boxes?)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex ContainerNounPrefixRegex();
+
+    [GeneratedRegex(@"\bor\s+$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex TrailingOrWordRegex();
+
     public static RecipeValidationResult Validate(ExtractedRecipeDto? recipe) =>
         Validate(recipe, sourceText: null);
 
@@ -603,6 +627,13 @@ public static partial class RecipeValidator
                 }
             }
 
+            if (TrySumMultiPartParenAlternate(ing, out var upgradedAltQty))
+            {
+                updated ??= [.. recipe.Ingredients];
+                updated[i] = ing with { AltQuantity = upgradedAltQty };
+                continue;
+            }
+
             if (
                 ing.MaxQuantity.HasValue
                 && ing.Quantity is > 0m
@@ -658,6 +689,87 @@ public static partial class RecipeValidator
         }
 
         return updated is not null ? recipe with { Ingredients = updated } : recipe;
+    }
+
+    private static bool TrySumMultiPartParenAlternate(
+        ExtractedIngredientDto ing,
+        out decimal summedAltQuantity
+    )
+    {
+        summedAltQuantity = 0m;
+        if (
+            ing.Quantity is not > 0m
+            || string.IsNullOrWhiteSpace(ing.Unit)
+            || ing.AltQuantity is not > 0m
+            || string.IsNullOrWhiteSpace(ing.AltUnit)
+            || string.IsNullOrWhiteSpace(ing.RawText)
+        )
+        {
+            return false;
+        }
+
+        var (aUnit, aCustom) = RecipeUnitAndSectionHelpers.NormalizeUnit(ing.AltUnit);
+        if (!aUnit.HasValue || aUnit == MeasurementUnit.Custom)
+        {
+            return false;
+        }
+
+        var parenQuantities = new List<decimal>();
+        foreach (Match match in StandaloneParenContentRegex().Matches(ing.RawText))
+        {
+            var before = ing.RawText[..match.Index];
+            if (TrailingOrWordRegex().IsMatch(before))
+            {
+                continue;
+            }
+
+            var after = ing.RawText[(match.Index + match.Length)..];
+            if (ContainerNounPrefixRegex().IsMatch(after))
+            {
+                continue;
+            }
+
+            var inner = match.Groups[1].Value.Trim();
+            if (ParenDisqualifyingWordRegex().IsMatch(inner))
+            {
+                continue;
+            }
+
+            var spans = SourceMeasurementParser.FindSpans(inner);
+            if (spans.Count != 1)
+            {
+                continue;
+            }
+
+            var meas = spans[0].Measurement;
+            if (
+                meas.Quantity is > 0m
+                && meas.Unit == aUnit
+                && string.Equals(meas.CustomUnitName, aCustom, StringComparison.OrdinalIgnoreCase)
+            )
+            {
+                parenQuantities.Add(meas.Quantity.Value);
+            }
+        }
+
+        if (parenQuantities.Count < 2)
+        {
+            return false;
+        }
+
+        if (!parenQuantities.Any(q => !ExceedsRoundingTolerance(q, ing.AltQuantity.Value)))
+        {
+            return false;
+        }
+
+        var total = parenQuantities.Sum();
+        if (total <= ing.AltQuantity.Value * 1.05m)
+        {
+            return false;
+        }
+
+        summedAltQuantity = total;
+        return true;
     }
 
     private static bool ExceedsRoundingTolerance(decimal actual, decimal expected) =>
@@ -2392,7 +2504,7 @@ public static partial class RecipeValidator
     private static partial Regex DuplicateTempUnitSuffixRegex();
 
     [GeneratedRegex(
-        @"\b(?:half(?:\s+of)?|other\s+half(?:\s+of)?|remaining|remainder(?:\s+of)?|rest\s+of|portion(?:\s+of)?|all\s+of|reserved)\s+$",
+        @"(?:\b(?:half(?:\s+of)?|other\s+half(?:\s+of)?|remaining|remainder(?:\s+of)?|rest\s+of|portion(?:\s+of)?|all\s+of|reserved)\s+(?:\{\{[^{}]+\}\}\s+and\s+)?|\b(?:(?:\d+|one|first|second|third|each|next|other)\s+)?(?:bowls?|batches|pans?|skillets?|sheets?|trays?)\s+of\s+)$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex BatchSplitPrefixRegex();
@@ -3010,6 +3122,7 @@ public static partial class RecipeValidator
 
             decimal summedInMasterUnit = 0m;
             var comparableCount = 0;
+            var fullPrimaryChunkCount = 0;
             decimal summedInAltUnit = 0m;
             var comparableAltCount = 0;
 
@@ -3042,6 +3155,10 @@ public static partial class RecipeValidator
                 {
                     summedInMasterUnit += convertedMaster;
                     comparableCount++;
+                    if (convertedMaster >= upperLimit * 0.90m)
+                    {
+                        fullPrimaryChunkCount++;
+                    }
                 }
                 else if (
                     master.AltQuantity is > 0m
@@ -3078,11 +3195,17 @@ public static partial class RecipeValidator
                 }
             }
 
+            var openEndedFactor =
+                !string.IsNullOrWhiteSpace(master.RawText)
+                && OpenEndedExtraQuantityRegex().IsMatch(master.RawText)
+                && fullPrimaryChunkCount <= 1
+                    ? 1.75m
+                    : QuantityMismatchToleranceFactor;
+
             if (
                 comparableCount >= 1
                 && summedInMasterUnit
-                    > (upperLimit * QuantityMismatchToleranceFactor)
-                        + QuantityMismatchToleranceAbsolute
+                    > (upperLimit * openEndedFactor) + QuantityMismatchToleranceAbsolute
             )
             {
                 errors.Add(
@@ -3117,7 +3240,7 @@ public static partial class RecipeValidator
         }
     }
 
-    private static bool TryConvertStepQuantityToTarget(
+    public static bool TryConvertStepQuantityToTarget(
         decimal stepQty,
         MeasurementUnit? stepUnit,
         string? stepCustomUnit,

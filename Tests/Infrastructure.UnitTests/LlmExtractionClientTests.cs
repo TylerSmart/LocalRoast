@@ -2333,8 +2333,130 @@ public sealed class LlmExtractionClientTests
         Assert.HasCount(2, attempts);
         StringAssert.Contains(attempts[1], "Source Step 1 durations:");
         StringAssert.Contains(attempts[1], "1 minute");
+        StringAssert.Contains(attempts[1], "(= 60s)");
         StringAssert.Contains(attempts[1], "around:");
-        StringAssert.Contains(attempts[1], "Steps through Step 1 ALREADY consume 100% of ing_1");
+        StringAssert.Contains(attempts[1], "Steps through Step 1");
+        StringAssert.Contains(attempts[1], "ALREADY consume 100% of ing_1");
+        StringAssert.Contains(attempts[1], "Step 2 ({{ing_1_c}})");
         Assert.IsTrue(RecipeValidator.Validate(result).IsValid);
+    }
+
+    [TestMethod]
+    public async Task ExtractRecipeFromTextAsync_RetriesCollectiveUnreferencedAndSecondMultiplierTimer()
+    {
+        var attempts = new List<string>();
+        var attemptNum = 0;
+
+        const string timerErrorReply = """
+            {
+                "title": "Herb-Poached Shrimp",
+                "ingredients": [
+                    { "refId": "ing_1", "sectionName": "SHRIMP", "canonicalFoodItem": "jumbo shrimp", "displayName": "jumbo shrimp", "quantity": 1, "unit": "lb", "rawText": "1 pound jumbo shrimp" },
+                    { "refId": "ing_2", "sectionName": "SHRIMP", "canonicalFoodItem": "dry white wine", "displayName": "dry white wine", "quantity": 1, "unit": "cup", "rawText": "1 cup dry white wine" }
+                ],
+                "steps": [
+                    {
+                        "stepNumber": 1,
+                        "templateText": "Drain {{ing_1_a}}, {{timer_1}}, then boil remaining ingredients except the shrimp.",
+                        "ingredientTokens": [
+                            { "tokenKey": "ing_1_a", "ingredientRefId": "ing_1", "stepQuantity": 1, "stepUnit": "lb" }
+                        ],
+                        "timerTokens": [
+                            { "tokenKey": "timer_1", "durationSeconds": 300, "label": "drain" }
+                        ],
+                        "temperatureTokens": []
+                    }
+                ],
+                "qualityAudit": { "isPlausibleRecipe": true, "warnings": [] }
+            }
+            """;
+
+        const string unreferencedReply = """
+            {
+                "title": "Herb-Poached Shrimp",
+                "ingredients": [
+                    { "refId": "ing_1", "sectionName": "SHRIMP", "canonicalFoodItem": "jumbo shrimp", "displayName": "jumbo shrimp", "quantity": 1, "unit": "lb", "rawText": "1 pound jumbo shrimp" },
+                    { "refId": "ing_2", "sectionName": "SHRIMP", "canonicalFoodItem": "dry white wine", "displayName": "dry white wine", "quantity": 1, "unit": "cup", "rawText": "1 cup dry white wine" }
+                ],
+                "steps": [
+                    {
+                        "stepNumber": 1,
+                        "templateText": "Drain {{ing_1_a}}, {{timer_1}}, then boil remaining ingredients except the shrimp.",
+                        "ingredientTokens": [
+                            { "tokenKey": "ing_1_a", "ingredientRefId": "ing_1", "stepQuantity": 1, "stepUnit": "lb" }
+                        ],
+                        "timerTokens": [
+                            { "tokenKey": "timer_1", "durationSeconds": 20, "label": "drain" }
+                        ],
+                        "temperatureTokens": []
+                    }
+                ],
+                "qualityAudit": { "isPlausibleRecipe": true, "warnings": [] }
+            }
+            """;
+
+        const string fixedReply = """
+            {
+                "title": "Herb-Poached Shrimp",
+                "ingredients": [
+                    { "refId": "ing_1", "sectionName": "SHRIMP", "canonicalFoodItem": "jumbo shrimp", "displayName": "jumbo shrimp", "quantity": 1, "unit": "lb", "rawText": "1 pound jumbo shrimp" },
+                    { "refId": "ing_2", "sectionName": "SHRIMP", "canonicalFoodItem": "dry white wine", "displayName": "dry white wine", "quantity": 1, "unit": "cup", "rawText": "1 cup dry white wine" }
+                ],
+                "steps": [
+                    {
+                        "stepNumber": 1,
+                        "templateText": "Drain {{ing_1_a}}, {{timer_1}}, then boil {{ing_2_a}}.",
+                        "ingredientTokens": [
+                            { "tokenKey": "ing_1_a", "ingredientRefId": "ing_1", "stepQuantity": 1, "stepUnit": "lb" },
+                            { "tokenKey": "ing_2_a", "ingredientRefId": "ing_2", "stepQuantity": 1, "stepUnit": "cup" }
+                        ],
+                        "timerTokens": [
+                            { "tokenKey": "timer_1", "durationSeconds": 20, "label": "drain" }
+                        ],
+                        "temperatureTokens": []
+                    }
+                ],
+                "qualityAudit": { "isPlausibleRecipe": true, "warnings": [] }
+            }
+            """;
+
+        var handler = new MockHttpMessageHandler(req =>
+        {
+            attemptNum++;
+            attempts.Add(req.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+            return OllamaReply(
+                attemptNum == 1 ? timerErrorReply
+                : attemptNum == 2 ? unreferencedReply
+                : fixedReply
+            );
+        });
+
+        var client = new LlmExtractionClient(new HttpClient(handler));
+        var config = new EffectiveLlmConnectionConfig(
+            Provider: LlmProvider.Ollama,
+            BaseUrl: "http://localhost:11434",
+            ApiKey: null,
+            TextModel: "gemma4:e4b",
+            VisionModel: null,
+            OllamaKeepAlive: "5m",
+            RequestTimeoutSeconds: 30,
+            AutoPublishHighConfidenceText: true
+        );
+
+        var result = await client.ExtractRecipeFromTextAsync(
+            config,
+            new LlmExtractionContext(
+                "Herb-Poached Shrimp\n- 1 pound jumbo shrimp\n- 1 cup dry white wine\n1. Drain shrimp, 20 to 30 seconds, then boil remaining ingredients except the shrimp."
+            )
+        );
+
+        Assert.HasCount(3, attempts);
+        StringAssert.Contains(attempts[1], "(= 20..30s)");
+        StringAssert.Contains(attempts[1], "accidentally multiplied by 10");
+        StringAssert.Contains(attempts[2], "section: \\u0027SHRIMP\\u0027");
+        StringAssert.Contains(attempts[2], "Step 1 uses \\u0027remaining ingredients\\u0027");
+        var validation = RecipeValidator.Validate(result);
+        Assert.IsTrue(validation.IsValid);
+        Assert.IsEmpty(validation.Warnings);
     }
 }

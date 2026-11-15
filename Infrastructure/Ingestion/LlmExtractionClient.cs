@@ -331,12 +331,7 @@ public sealed class LlmExtractionClient(
                 );
                 messages.Add(("assistant", cleanedJson));
                 messages.Add(
-                    (
-                        "user",
-                        "Your JSON is valid except these non-optional ingredient(s) were not referenced with a {{token_key}} in any step:\n"
-                            + string.Join("\n", unreferencedWarnings.Select(w => $"- {w}"))
-                            + "\nAttach each missing ingredient using its exact ingredientRefId in the matching step (check carefully that you did not accidentally reuse another ingredient's refId instead, or set isOptional: true if truly optional). Return the complete corrected JSON."
-                    )
+                    ("user", BuildUnreferencedAttachmentRetryPrompt(parsed, unreferencedWarnings))
                 );
                 continue;
             }
@@ -1877,10 +1872,10 @@ Household Cookbook Catalog:
            - sectionName: ONLY when the source explicitly groups ingredients under a subheading (e.g. 'Sauce', 'Filling'); NEVER use generic names like 'Ingredients' or 'Main'.
            - isRecipeReference: True ONLY for prepared sub-recipe/component dishes (e.g. '1 recipe Easy-Peel Hard-Cooked Eggs', '1 recipe Toasted Bread for Bruschetta', 'Garlic Mayonnaise (recipe follows)'); set referencedRecipeTitle to THAT sub-recipe's FULL clean title including any 'for <Dish>' phrase ('Toasted Bread for Bruschetta', NEVER split 'for Bruschetta' into preparationNotes, and NEVER use the parent/base recipe title). Set false for raw groceries even when followed by '(see this page)' or '(facing page)' prep/substitution notes (e.g. '1 lb peeled, deveined jumbo shrimp (see this page)' -> isRecipeReference: false).
         5. Steps & {{token_key}} Placeholders:
-           - Extract EVERY numbered step and action sentence in exact chronological order (stepNumber: 1..N). NEVER drop intermediate actions (e.g. rolling/shaping balls, cutting dough circles, or adding meat before a resting timer) and NEVER move a later stir-in/garnish ingredient (e.g. 'Transfer to a bowl and stir in bell pepper') into an earlier purée/processor list. Keep un-listed water amounts (e.g. '4 cups water') verbatim in templateText, and for lines like '1/4 tsp salt, plus salt for cooking shrimp/pasta', keep only the 1/4 tsp in the dish and write discarded cooking-water salt (e.g. '1 tablespoon salt') as plain text (do NOT divide 0.25 tsp into 0.0069 tsp). Reference prepared sub-recipe components with {{ing_X_a}} on the first step that uses them when natural. Ensure EVERY non-optional master ingredient (including final garnishes like parsley and toasted bread referenced simply as 'toast' or '4 slices of toast') is referenced in its matching section/step with its exact ingredientRefId (never substitute a different section's sugar/salt/oil refId or bind un-listed tap water/ice/spray/drippings to another ingredient).
+           - Extract EVERY numbered step and action sentence in exact chronological order (stepNumber: 1..N). NEVER drop intermediate actions (e.g. rolling/shaping balls, cutting dough circles, or adding meat before a resting timer) and NEVER move a later stir-in/garnish ingredient (e.g. 'Transfer to a bowl and stir in bell pepper') into an earlier purée/processor list. Keep un-listed water amounts (e.g. '4 cups water') verbatim in templateText, and for lines like '1/4 tsp salt, plus salt for cooking shrimp/pasta', keep only the 1/4 tsp in the dish and write discarded cooking-water salt (e.g. '1 tablespoon salt') as plain text (do NOT divide 0.25 tsp into 0.0069 tsp). Reference prepared sub-recipe components with {{ing_X_a}} on the first step that uses them when natural. Ensure EVERY non-optional master ingredient (including final garnishes like parsley and toasted bread referenced simply as 'toast' or '4 slices of toast') is referenced in its matching section/step with its exact ingredientRefId (never substitute a different section's sugar/salt/oil refId or bind un-listed tap water/ice/spray/drippings to another ingredient), and ALWAYS expand collective phrases like 'remaining ingredients (except X)', 'remaining spices/herbs', or 'all ingredients' into explicit individual {{ing_X_a}} placeholders in that step.
            - In templateText, replace inline ingredient mentions (BOTH measurement AND ingredient noun/phrase), durations (number AND time unit), and real cooking temperatures (number AND 'degrees'/'°F'/'°C') with {{token_key}} placeholders:
              * Ingredients -> {{ing_1_a}}, {{ing_1_b}}, etc. NEVER reuse the exact same {{ing_1_a}} placeholder twice in a single step (use distinct keys _a, _b, _c) AND NEVER emit two items with the same tokenKey in ingredientTokens. NEVER leave duplicate nouns, leading measurements before prep words ('2 tbsp beaten {{ing_1_a}}'), duplicate connectors ('{{ing_1_a}} of the {{ing_1_b}}', '2 tbsp of the {{ing_1_a}}'), unit words ('block', 'slices'), 'or' alternatives, or redundant parenthetical amounts ('(2 tbsp)') outside '{{ing_1_a}}'. NEVER list unused constituent ingredientTokens for a composite/mixture mention like 'the sauce', 'the batter', 'shrub syrup', or 'picada', NEVER bind a prepared combined mixture/syrup/paste/sauce (e.g. '2 ounces shrub syrup', '2 tablespoons picada') to one component's refId (such as vinegar or almonds), and NEVER apportion raw master stepQuantities when spooning/drizzling a portion of an intermediate combined mixture (e.g. '1 tbsp oil-flour mixture')—leave composite prepared mixtures as plain text or stepQuantity: null. When preceding text already has 'remaining'/'reserved' (e.g. 'remaining {{ing_1_b}}'), keep fallbackDisplay clean ('cheese', NEVER 'remaining cheese'). IMPORTANT: For EVERY measured master ingredient (quantity > 0), its VERY FIRST addition in steps MUST set non-null stepQuantity and stepUnit (the amount added in that step, or full master amount if added all at once), even when the source step prose omits numbers (e.g. 'Add garlic, cumin, and salt' -> emit stepQuantity: 7, stepUnit: 'clove' for garlic, etc.). When shaping or filling a single portion ('fill 1 portion with 1 teaspoon'), emit ONLY that single-portion amount (1 tsp) or stepQuantity: null—NEVER assign the full batch quantity (8 tsp) to a per-portion step. For '2 tbsp on each of 2 baking sheets', either multiply accurately (4 tbsp on the baking sheets without trailing 'each') or tokenize each sheet separately without exceeding master quantity; for per-serving phrasing like 'Add 2 oz X to each glass' or 'Place 1 slice Y on each muffin', NEVER put the batch total right before 'to/on each' (e.g. NEVER 'Add 4 oz Champagne to each glass'—write 'divide {{ing_X_a}} evenly among the 2 glasses' or keep the per-item count as plain text with stepQuantity: null). Remember 1 stick butter = 8 tbsp (so 1/2 stick = 4 tbsp and 2 sticks = 16 tbsp, NOT 10 + 10). When an earlier step preps/cuts/grates/dredges/coats 100% of an ingredient (e.g. grating 4 tbsp + cutting 16 tbsp butter in Step 1, or tossing 1 lb squid/1 cup peppers in flour in Step 2), any later step that adds those prepared pieces or fries them in half-and-remaining batches MUST set stepQuantity: null and stepUnit: null. When one master ingredient has split preparations (e.g. '1 oz grated, 1 oz shaved'), include that specific form in fallbackDisplay ('grated Parmesan cheese' / 'shaved Parmesan cheese') with split stepQuantity (1 oz each). For whole items like 'Halve 1 avocado' from 3 avocados, emit stepQuantity: 1, stepUnit: 'whole' (NEVER divide 1/3 into 0.3333); for 'half of X' measured amounts, compute 50% of X's unit (half of 8 oz = 4 oz, NEVER 0.5) UNLESS 100% of X was already added in an earlier step (e.g. tossing all cauliflower in coating in step 2, then 'Fry half of cauliflower' in step 3 -> set stepQuantity: null and stepUnit: null). NEVER use physical length units ('inch', 'cm') as stepUnit. When a later step re-references, cooks, drains, coats with, transfers, fries in batches, reserves a portion of, or garnishes with an already-added ingredient (e.g. 'cook the beef', 'dip in the egg', 'transfer bacon to plate', 'drain chickpeas', 'set aside 2 tbsp chickpeas', 'sprinkle with remaining bacon'), set stepQuantity: null and stepUnit: null so quantities are not double-counted. NEVER use 0 for stepQuantity! Consume at most 100% of each master ingredient across primary and alternate units combined (never consume BOTH 2 cans AND 30 oz for one 2-can item).
-             * Timers -> {{timer_1}}, {{timer_2}}, etc. durationSeconds MUST ALWAYS match the exact printed duration converted to SECONDS (minutes * 60, hours * 3600; e.g. '30 seconds' -> 30, NEVER multiply seconds by 6 or 10; '14 minutes' -> 840, NEVER 14; '1 hour' -> 3600). Replace the ENTIRE duration phrase including range words and time unit ('between 45 and 60 seconds' or '1 to 2 minutes' -> ONE placeholder '{{timer_1}}' with lower bound durationSeconds: 45 or 60; 'about 30 seconds' -> 'about {{timer_1}}', NEVER 'between {{timer_1}}', '{{timer_1}} seconds', or '{{timer_1}} to {{timer_2}}'). NEVER create timerTokens for food-processor pulse counts ('5 pulses') or physical measurements ('1 1/2 inches deep')—leave pulses and inches as plain text. Keep power/heat settings outside the placeholder ('for {{timer_1}} at 40 percent power'). label MUST be a short 2-4 word verb+object action (NEVER '5 minutes').
+             * Timers -> {{timer_1}}, {{timer_2}}, etc. durationSeconds MUST ALWAYS match the exact printed duration converted to SECONDS (minutes * 60, hours * 3600; e.g. '20 to 30 seconds' -> 20 NEVER 300, '30 seconds' -> 30, NEVER multiply seconds by 6 or 10; '14 minutes' -> 840, NEVER 14; '1 hour' -> 3600). Replace the ENTIRE duration phrase including range words and time unit ('between 45 and 60 seconds' or '1 to 2 minutes' -> ONE placeholder '{{timer_1}}' with lower bound durationSeconds: 45 or 60; 'about 30 seconds' -> 'about {{timer_1}}', NEVER 'between {{timer_1}}', '{{timer_1}} seconds', or '{{timer_1}} to {{timer_2}}'). NEVER create timerTokens for food-processor pulse counts ('5 pulses') or physical measurements ('1 1/2 inches deep')—leave pulses and inches as plain text. Keep power/heat settings outside the placeholder ('for {{timer_1}} at 40 percent power'). label MUST be a short 2-4 word verb+object action (NEVER '5 minutes').
              * Temperatures -> {{temp_1}}, {{temp_2}}, etc. Replace number AND 'degrees'/'°F'/'°C' AND any '-degree' hyphenation without duplicating prepositions ('heat oven to {{temp_1}}', 'bake at {{temp_1}}', 'in a {{temp_1}} oven', NEVER 'to at {{temp_1}}', '{{temp_1}} degrees', or '{{temp_1}}-degree oven'). Add matching StepTemperatureTokenDto ONLY for real thermal cooking/proofing temperatures (°F or °C; for dual '350F/175C', emit ONLY F 350). NEVER extract rack distances ('4 inches from broiler element') or microwave power percentages ('40 percent power', '50% power') into temperatureTokens!
            - Keep punctuation OUTSIDE placeholders (e.g. '{{timer_1}}.').
            - Every {{...}} placeholder in templateText MUST appear exactly once and have a matching entry in ingredientTokens, timerTokens, or temperatureTokens, and every entry in those arrays MUST appear in templateText. NEVER output ||{...}|| syntax.
@@ -1904,7 +1899,12 @@ Household Cookbook Catalog:
     );
 
     private static readonly Regex TimerMismatchErrorRegex = new(
-        @"^Step\s+(?<step>\d+):\s+TimerToken\s+'\{\{(?<key>[^{}]+)\}\}'\s+has\s+durationSeconds=",
+        @"^Step\s+(?<step>\d+):\s+TimerToken\s+'\{\{(?<key>[^{}]+)\}\}'\s+has\s+durationSeconds=(?<dur>\d+)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    );
+
+    private static readonly Regex CollectiveIngredientPhraseRegex = new(
+        @"\b(?:remaining|all(?:\s+of)?(?:\s+the)?|other|rest\s+of(?:\s+the)?)\s+(?:[a-z]+\s+){0,2}ingredients?\b|\b(?:remaining|other)\s+(?:spices|herbs|aromatics|seasonings)\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     );
 
@@ -1912,6 +1912,73 @@ Household Cookbook Catalog:
         @"(?:\bbetween\s+\d+(?:\s+\d+/\d+|/\d+|\.\d+)?\s+and\s+|\b\d+(?:\s+\d+/\d+|/\d+|\.\d+)?\s*(?:to|or|[-\u2013\u2014])\s*)?\b\d+(?:\s+\d+/\d+|/\d+|\.\d+)?\s*(?:hours?|hrs?|hr|minutes?|mins?|min|seconds?|secs?|sec)\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     );
+
+    private static string BuildUnreferencedAttachmentRetryPrompt(
+        ExtractedRecipeDto parsed,
+        IReadOnlyList<string> unreferencedWarnings
+    )
+    {
+        var ingByRef = (parsed.Ingredients ?? [])
+            .Where(i => !string.IsNullOrWhiteSpace(i.RefId))
+            .GroupBy(i => i.RefId!.Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+        var bulletLines = new List<string>(unreferencedWarnings.Count);
+        foreach (var warning in unreferencedWarnings)
+        {
+            var refMatch = QuantityMismatchErrorRefRegex.Match(warning);
+            if (!refMatch.Success)
+            {
+                refMatch = Regex.Match(
+                    warning,
+                    @"\((ing_\d+)\)",
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+                );
+            }
+
+            if (refMatch.Success && ingByRef.TryGetValue(refMatch.Groups[1].Value, out var ing))
+            {
+                var sectionLabel = string.IsNullOrWhiteSpace(ing.SectionName)
+                    ? string.Empty
+                    : $", section: '{ing.SectionName.Trim()}'";
+                var qtyLabel = ing.Quantity.HasValue
+                    ? $", master: {ing.Quantity.Value:0.###} {ing.Unit ?? "whole"}".TrimEnd()
+                    : ", master: unmeasured";
+                bulletLines.Add(
+                    $"- {warning} [Details: refId='{ing.RefId}'{sectionLabel}{qtyLabel}]"
+                );
+            }
+            else
+            {
+                bulletLines.Add($"- {warning}");
+            }
+        }
+
+        var collectiveHints = new List<string>();
+        var steps = parsed.Steps ?? [];
+        for (var i = 0; i < steps.Count; i++)
+        {
+            var step = steps[i];
+            var stepNum = step.StepNumber > 0 ? step.StepNumber : i + 1;
+            var phraseMatch = CollectiveIngredientPhraseRegex.Match(
+                step.TemplateText ?? string.Empty
+            );
+            if (phraseMatch.Success)
+            {
+                collectiveHints.Add(
+                    $"Hint: Step {stepNum} uses '{phraseMatch.Value.Trim()}' — replace that collective phrase with explicit individual {{{{ing_X_a}}}} placeholders (and matching ingredientTokens with exact stepQuantity/stepUnit) for the missing ingredients."
+                );
+            }
+        }
+
+        var collectiveBlock =
+            collectiveHints.Count > 0 ? "\n" + string.Join("\n", collectiveHints) : string.Empty;
+
+        return "Your JSON is valid except these non-optional ingredient(s) were not referenced with a {{token_key}} in any step:\n"
+            + string.Join("\n", bulletLines)
+            + collectiveBlock
+            + "\nAttach each missing ingredient using its exact ingredientRefId in the matching step (check carefully that you did not accidentally reuse another ingredient's refId instead, or set isOptional: true if truly optional). Never repeat the same {{token_key}} twice in one step, and add every {{...}} placeholder to ingredientTokens. Return the complete corrected JSON.";
+    }
 
     private static string ExtractTokenSnippet(
         IReadOnlyList<ExtractedStepDto> steps,
@@ -1951,13 +2018,122 @@ Household Cookbook Catalog:
         var searchScope = stepMatch.Success ? stepMatch.Groups["body"].Value : sourceText;
         var phrases = SourceDurationPhraseRegex
             .Matches(searchScope)
-            .Select(m => $"'{m.Value.Trim()}'")
+            .Select(m => FormatSourceDurationWithSeconds(m.Value.Trim()))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Take(8)
             .ToList();
         return phrases.Count > 0
             ? $" Source {(stepMatch.Success ? $"Step {targetStepNum} " : string.Empty)}durations: {string.Join(", ", phrases)}."
             : string.Empty;
+    }
+
+    private static string FormatSourceDurationWithSeconds(string phrase)
+    {
+        var unitMatch = Regex.Match(
+            phrase,
+            @"(?<unit>hours?|hrs?|hr|minutes?|mins?|min|seconds?|secs?|sec)\s*$",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+        );
+        if (!unitMatch.Success)
+        {
+            return $"'{phrase}'";
+        }
+
+        var unit = unitMatch.Groups["unit"].Value.ToLowerInvariant();
+        var multiplier =
+            unit.StartsWith("h", StringComparison.Ordinal) ? 3600m
+            : unit.StartsWith("m", StringComparison.Ordinal) ? 60m
+            : 1m;
+        var numMatches = Regex.Matches(
+            phrase[..unitMatch.Index],
+            @"\d+(?:\s+\d+/\d+|/\d+|\.\d+)?",
+            RegexOptions.CultureInvariant
+        );
+        var converted = new List<int>(numMatches.Count);
+        foreach (Match nm in numMatches)
+        {
+            if (TryParseSimpleNumber(nm.Value, out var val))
+            {
+                converted.Add((int)Math.Round(val * multiplier, MidpointRounding.AwayFromZero));
+            }
+        }
+
+        if (converted.Count == 1)
+        {
+            return $"'{phrase}' (= {converted[0]}s)";
+        }
+
+        if (converted.Count >= 2)
+        {
+            return $"'{phrase}' (= {converted[0]}..{converted[^1]}s)";
+        }
+
+        return $"'{phrase}'";
+    }
+
+    private static bool TryParseSimpleNumber(string text, out decimal result)
+    {
+        result = 0m;
+        var parts = text.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (
+            parts.Length == 2
+            && decimal.TryParse(
+                parts[0],
+                NumberStyles.Any,
+                CultureInfo.InvariantCulture,
+                out var whole
+            )
+            && TryParseSimpleFraction(parts[1], out var frac)
+        )
+        {
+            result = whole + frac;
+            return true;
+        }
+
+        if (parts.Length == 1 && TryParseSimpleFraction(parts[0], out frac))
+        {
+            result = frac;
+            return true;
+        }
+
+        return decimal.TryParse(
+            text.Trim(),
+            NumberStyles.Any,
+            CultureInfo.InvariantCulture,
+            out result
+        );
+    }
+
+    private static bool TryParseSimpleFraction(string text, out decimal result)
+    {
+        result = 0m;
+        var slash = text.IndexOf('/');
+        if (slash <= 0 || slash >= text.Length - 1)
+        {
+            return false;
+        }
+
+        if (
+            decimal.TryParse(
+                text[..slash],
+                NumberStyles.Any,
+                CultureInfo.InvariantCulture,
+                out var num
+            )
+            && decimal.TryParse(
+                text[(slash + 1)..],
+                NumberStyles.Any,
+                CultureInfo.InvariantCulture,
+                out var den
+            )
+            && den != 0m
+        )
+        {
+            result = num / den;
+            return true;
+        }
+
+        return false;
     }
 
     private static string FormatValidationErrorWithStepContext(
@@ -2037,7 +2213,28 @@ Household Cookbook Catalog:
             var rawKey = timerMatch.Groups["key"].Value.Trim();
             var snippetSuffix = ExtractTokenSnippet(steps, targetStepNum, rawKey);
             var sourceDurationsHint = ExtractStepSourceDurations(sourceText, targetStepNum);
-            return $"{error} [Look in Step {targetStepNum}{snippetSuffix}.{sourceDurationsHint} Use the exact printed duration in THAT clause converted to seconds (minutes * 60, hours * 3600; e.g. '30 to 60 seconds' -> 30, '1 minute' -> 60, NEVER multiply seconds by 6 or 10 and do not copy durations from another step).]";
+            var wrongDurationHint = string.Empty;
+            if (
+                int.TryParse(
+                    timerMatch.Groups["dur"].Value,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out var badDur
+                ) && sourceDurationsHint.Contains("second", StringComparison.OrdinalIgnoreCase)
+            )
+            {
+                if (badDur % 10 == 0 && badDur / 10 is >= 5 and <= 120)
+                {
+                    wrongDurationHint =
+                        $" Wait: durationSeconds={badDur} looks like {badDur / 10}s accidentally multiplied by 10; replace {badDur} with the exact seconds value from Source Step {targetStepNum} above!";
+                }
+                else if (badDur % 6 == 0 && badDur / 6 is >= 5 and <= 120)
+                {
+                    wrongDurationHint =
+                        $" Wait: durationSeconds={badDur} looks like {badDur / 6}s accidentally multiplied by 6; replace {badDur} with the exact seconds value from Source Step {targetStepNum} above!";
+                }
+            }
+
+            return $"{error} [Look in Step {targetStepNum}{snippetSuffix}.{sourceDurationsHint}{wrongDurationHint} Use the exact printed duration in THAT clause converted to seconds (minutes * 60, hours * 3600; e.g. '20 to 30 seconds' -> 20, '30 to 60 seconds' -> 30, '1 minute' -> 60, NEVER multiply seconds by 6 or 10 and do not copy durations from another step).]";
         }
 
         if (
@@ -2115,54 +2312,107 @@ Household Cookbook Catalog:
             : string.Empty;
 
         var earlyFullStepHint = string.Empty;
-        if (master?.Quantity is > 0m)
+        if (master is not null && master.Quantity is > 0m)
         {
-            var runningSum = 0m;
+            var upperLimit = Math.Max(
+                master.Quantity.Value,
+                master.MaxQuantity ?? master.Quantity.Value
+            );
+            var (masterUnit, masterCustom) = RecipeUnitAndSectionHelpers.NormalizeUnit(master.Unit);
+            var hasAlt = master.AltQuantity is > 0m && !string.IsNullOrWhiteSpace(master.AltUnit);
+            var (altUnit, altCustom) = hasAlt
+                ? RecipeUnitAndSectionHelpers.NormalizeUnit(master.AltUnit)
+                : (null, null);
+
+            decimal cumulativeFraction = 0m;
             var fullReachedStep = 0;
-            var hasLaterStepQty = false;
-            var masterUnitNorm = master.Unit?.Trim();
+            var fullReachedToken = string.Empty;
+            var excessTokens = new List<string>();
             for (var i = 0; i < steps.Count; i++)
             {
                 var step = steps[i];
                 var stepNum = step.StepNumber > 0 ? step.StepNumber : i + 1;
-                foreach (var tok in step.IngredientTokens ?? [])
-                {
-                    if (
+                var matchingTokens = (step.IngredientTokens ?? [])
+                    .Where(tok =>
                         tok.StepQuantity is > 0m
                         && string.Equals(
                             tok.IngredientRefId?.Trim(),
                             targetRefId,
                             StringComparison.OrdinalIgnoreCase
                         )
-                        && string.Equals(
-                            tok.StepUnit?.Trim(),
-                            masterUnitNorm,
+                    )
+                    .OrderBy(tok =>
+                    {
+                        var ph = $"{{{{{tok.TokenKey?.Trim()}}}}}";
+                        var pos = (step.TemplateText ?? string.Empty).IndexOf(
+                            ph,
                             StringComparison.OrdinalIgnoreCase
+                        );
+                        return pos >= 0 ? pos : int.MaxValue;
+                    });
+
+                foreach (var tok in matchingTokens)
+                {
+                    var (sUnit, sCustom) = RecipeUnitAndSectionHelpers.NormalizeUnit(tok.StepUnit);
+                    if (!sUnit.HasValue && string.IsNullOrWhiteSpace(sCustom))
+                    {
+                        sUnit = masterUnit;
+                        sCustom = masterCustom;
+                    }
+
+                    decimal tokenFraction = 0m;
+                    if (
+                        RecipeValidator.TryConvertStepQuantityToTarget(
+                            tok.StepQuantity!.Value,
+                            sUnit,
+                            sCustom,
+                            masterUnit,
+                            masterCustom,
+                            out var inPrimary
                         )
                     )
                     {
-                        if (fullReachedStep > 0 && stepNum > fullReachedStep)
-                        {
-                            hasLaterStepQty = true;
-                        }
-
-                        runningSum += tok.StepQuantity.Value;
-                        if (
-                            fullReachedStep == 0
-                            && runningSum >= master.Quantity.Value * 0.99m
-                            && runningSum <= (master.MaxQuantity ?? master.Quantity.Value) * 1.01m
+                        tokenFraction = inPrimary / upperLimit;
+                    }
+                    else if (
+                        hasAlt
+                        && RecipeValidator.TryConvertStepQuantityToTarget(
+                            tok.StepQuantity.Value,
+                            sUnit,
+                            sCustom,
+                            altUnit,
+                            altCustom,
+                            out var inAlt
                         )
-                        {
-                            fullReachedStep = stepNum;
-                        }
+                    )
+                    {
+                        tokenFraction = inAlt / master.AltQuantity!.Value;
+                    }
+
+                    if (fullReachedStep > 0)
+                    {
+                        excessTokens.Add($"Step {stepNum} ({{{{{tok.TokenKey?.Trim()}}}}})");
+                    }
+
+                    cumulativeFraction += tokenFraction;
+                    if (fullReachedStep == 0 && cumulativeFraction >= 0.99m)
+                    {
+                        fullReachedStep = stepNum;
+                        fullReachedToken = tok.TokenKey?.Trim() ?? string.Empty;
                     }
                 }
             }
 
-            if (hasLaterStepQty)
+            if (excessTokens.Count > 0)
             {
+                var unitDesc = !string.IsNullOrWhiteSpace(master.Unit)
+                    ? $" {master.Unit.Trim()}"
+                    : string.Empty;
+                var altNote = hasAlt
+                    ? $" (alt: {master.AltQuantity!.Value:0.###} {master.AltUnit?.Trim()}; keep primary and alt consistent)"
+                    : string.Empty;
                 earlyFullStepHint =
-                    $" Steps through Step {fullReachedStep} ALREADY consume 100% of {targetRefId} ({master.Quantity.Value:0.###} {masterUnitNorm}); set stepQuantity and stepUnit to null on later occurrences (prep-then-use or dredge-then-fry batches).";
+                    $" Steps through Step {fullReachedStep} (token '{fullReachedToken}') ALREADY consume 100% of {targetRefId} ({master.Quantity.Value:0.###}{unitDesc}){altNote}; set stepQuantity and stepUnit to null on subsequent mention(s) [{string.Join(", ", excessTokens)}] (prep-then-use, poured bowls, or dredge-then-fry batches; only keep a quantity if placing an un-added fresh reserve at the end).";
             }
         }
 
