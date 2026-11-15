@@ -409,6 +409,18 @@ public static partial class RecipeValidator
     )]
     private static partial Regex LeadingPieceUnitRegex();
 
+    [GeneratedRegex(@"^\s+each\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex EachSuffixRegex();
+
+    [GeneratedRegex(@"\bdivided\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex DividedWordRegex();
+
+    [GeneratedRegex(
+        @"\b(?:remaining|reserved|rest\s+of(?:\s+the)?|other)\s+(?:the\s+)?$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex DividedBarePortionPrefixRegex();
+
     public static RecipeValidationResult Validate(ExtractedRecipeDto? recipe) =>
         Validate(recipe, sourceText: null);
 
@@ -453,6 +465,7 @@ public static partial class RecipeValidator
         var stepQuantitiesByRefId = new Dictionary<string, List<(decimal Quantity, string? Unit)>>(
             StringComparer.OrdinalIgnoreCase
         );
+        var dividedFreshNullRefIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var sourceDurations = ParseSourceDurations(sourceText);
 
         ValidateSteps(
@@ -460,13 +473,19 @@ public static partial class RecipeValidator
             ingredientsByRefId,
             referencedIds,
             stepQuantitiesByRefId,
+            dividedFreshNullRefIds,
             sourceDurations,
             sourceText,
             recipe.Servings,
             errors
         );
 
-        ValidateIngredientQuantitySums(ingredientsByRefId, stepQuantitiesByRefId, errors);
+        ValidateIngredientQuantitySums(
+            ingredientsByRefId,
+            stepQuantitiesByRefId,
+            dividedFreshNullRefIds,
+            errors
+        );
         CollectUnreferencedIngredientWarnings(recipe.Ingredients ?? [], referencedIds, warnings);
 
         return new RecipeValidationResult(errors, warnings);
@@ -1881,6 +1900,7 @@ public static partial class RecipeValidator
         Dictionary<string, ExtractedIngredientDto> ingredientsByRefId,
         HashSet<string> referencedIds,
         Dictionary<string, List<(decimal Quantity, string? Unit)>> stepQuantitiesByRefId,
+        HashSet<string> dividedFreshNullRefIds,
         SourceDurationIndex sourceDurations,
         string? sourceText,
         decimal? servings,
@@ -2119,6 +2139,30 @@ public static partial class RecipeValidator
                             errors.Add(
                                 $"Step {stepNum}: IngredientToken '{{{{{key}}}}}' describes a piece/portion size ('into ... pieces/cubes'), not an added ingredient quantity. Write the size descriptor as plain text (e.g. '1/2-tablespoon pieces') and remove '{{{{{key}}}}}' from ingredientTokens."
                             );
+                        }
+                    }
+
+                    if (
+                        tok.StepQuantity is null
+                        && !string.IsNullOrEmpty(step.TemplateText)
+                        && placeholderMatchesByKey.TryGetValue(key, out var nullTokMatch)
+                    )
+                    {
+                        var nullPrefixStart = Math.Max(0, nullTokMatch.Index - 32);
+                        var nullPrefix = step.TemplateText[nullPrefixStart..nullTokMatch.Index];
+                        var nullSuffixEnd = Math.Min(
+                            step.TemplateText.Length,
+                            nullTokMatch.Index + nullTokMatch.Length + 16
+                        );
+                        var nullSuffix = step.TemplateText[
+                            (nullTokMatch.Index + nullTokMatch.Length)..nullSuffixEnd
+                        ];
+                        if (
+                            DividedBarePortionPrefixRegex().IsMatch(nullPrefix)
+                            || EachSuffixRegex().IsMatch(nullSuffix)
+                        )
+                        {
+                            dividedFreshNullRefIds.Add(refId);
                         }
                     }
                 }
@@ -2555,7 +2599,7 @@ public static partial class RecipeValidator
     private static partial Regex DuplicateTempUnitSuffixRegex();
 
     [GeneratedRegex(
-        @"(?:\b(?:half(?:\s+of)?|other\s+half(?:\s+of)?|remaining|remainder(?:\s+of)?|rest\s+of|portion(?:\s+of)?|all\s+of|reserved)\s+(?:\{\{[^{}]+\}\}\s+and\s+)?|\b(?:(?:\d+|one|first|second|third|each|next|other)\s+)?(?:bowls?|batches|pans?|skillets?|sheets?|trays?)\s+of\s+)$",
+        @"(?:\b(?:half(?:\s+of)?|other\s+half(?:\s+of)?|remaining|remainder(?:\s+of)?|rest\s+of|portion(?:\s+of)?|all\s+of|reserved)\s+(?:\{\{[^{}]+\}\}\s+and\s+)?|\b(?:(?:\d+|one|first|second|third|each|next|other)\s+)?(?:bowls?|batches|pans?|skillets?|sheets?|trays?)\s+of\s+|\b(?:coated|dredged|breaded|battered|tossed|marinated|seasoned|cooked|browned|seared|fried|baked|roasted|grilled|broiled|poached|steamed|simmered|boiled|drained|strained|blotted|patted|cooled|chilled|warmed|melted|whisked|beaten|whipped|mashed|pureed|chopped|minced|diced|sliced|grated|shredded|crushed|prepared)\s+)$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex BatchSplitPrefixRegex();
@@ -3146,6 +3190,7 @@ public static partial class RecipeValidator
     private static void ValidateIngredientQuantitySums(
         Dictionary<string, ExtractedIngredientDto> ingredientsByRefId,
         Dictionary<string, List<(decimal Quantity, string? Unit)>> stepQuantitiesByRefId,
+        HashSet<string> dividedFreshNullRefIds,
         List<string> errors
     )
     {
@@ -3176,6 +3221,7 @@ public static partial class RecipeValidator
             var fullPrimaryChunkCount = 0;
             decimal summedInAltUnit = 0m;
             var comparableAltCount = 0;
+            var incomparableUsages = new List<(decimal Qty, string? Unit)>();
 
             foreach (var (stepQty, stepUnitRaw) in stepUsages)
             {
@@ -3244,6 +3290,12 @@ public static partial class RecipeValidator
                         $"Step quantity unit '{stepUnitRaw ?? stepUnit.ToString()}' for '{master.CanonicalFoodItem}' ({refId}) is incompatible with master unit '{master.Unit}'. Use a compatible unit or set stepQuantity and stepUnit to null when referencing rendered fat or unmeasured portions."
                     );
                 }
+                else
+                {
+                    incomparableUsages.Add(
+                        (stepQty, stepUnitRaw ?? stepCustomUnit ?? stepUnit?.ToString())
+                    );
+                }
             }
 
             var openEndedFactor =
@@ -3286,6 +3338,30 @@ public static partial class RecipeValidator
             {
                 errors.Add(
                     $"Quantity sum mismatch for '{master.CanonicalFoodItem}' ({refId}): step quantities consume {summedInMasterUnit:0.###} of {upperLimit:0.###} ({master.Unit}) plus {summedInAltUnit:0.###} of {master.AltQuantity.Value:0.###} ({master.AltUnit}), exceeding 100% of the ingredient across primary and alternate units. Use one consistent unit or set stepQuantity and stepUnit to null on subsequent mentions."
+                );
+            }
+            else if (
+                comparableCount >= 1
+                && summedInMasterUnit >= upperLimit * 0.99m
+                && incomparableUsages.Count > 0
+            )
+            {
+                var firstIncomp = incomparableUsages[0];
+                errors.Add(
+                    $"Quantity sum mismatch for '{master.CanonicalFoodItem}' ({refId}): step quantities already consume {summedInMasterUnit:0.###} of {upperLimit:0.###} ({master.Unit}), and another token uses incompatible stepQuantity '{firstIncomp.Qty:0.###} {firstIncomp.Unit ?? "whole"}'. Set stepQuantity and stepUnit to null on subsequent mentions (keeping any cooked/portion measurement like '1/3 cup ' or '2 tbsp ' as plain text before the placeholder if needed)."
+                );
+            }
+            else if (
+                !string.IsNullOrWhiteSpace(master.RawText)
+                && DividedWordRegex().IsMatch(master.RawText)
+                && comparableCount == 1
+                && fullPrimaryChunkCount >= 1
+                && summedInMasterUnit >= upperLimit * 0.95m
+                && dividedFreshNullRefIds.Contains(refId)
+            )
+            {
+                errors.Add(
+                    $"Quantity sum mismatch for '{master.CanonicalFoodItem}' ({refId}): master rawText ('{master.RawText}') is marked 'divided', yet a single step token assigns {summedInMasterUnit:0.###} {master.Unit ?? "whole"} while another divided mention has null stepQuantity. Keep each printed split quantity across steps (e.g., 3 tbsp here, 1 tbsp later) rather than dumping 100% into one token and nulling remaining additions."
                 );
             }
         }

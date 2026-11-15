@@ -2062,4 +2062,158 @@ public sealed class RecipeValidatorTests
             string.Join("; ", result.Errors)
         );
     }
+
+    [TestMethod]
+    public void Validate_RejectsIncompatibleStepUnitAfterFullPrimaryConsumed()
+    {
+        var invalidDto = new ExtractedRecipeDto(
+            Title: "Fried Calamari",
+            Ingredients:
+            [
+                new(
+                    "ing_1",
+                    CanonicalFoodItem: "all-purpose flour",
+                    DisplayName: "all-purpose flour",
+                    Quantity: 1.5m,
+                    Unit: "cup",
+                    RawText: "1 1/2 cups all-purpose flour"
+                ),
+            ],
+            Steps:
+            [
+                new(
+                    1,
+                    TemplateText: "Place {{ing_1_a}} in bowl. Add squid to bowl with {{ing_1_b}}.",
+                    IngredientTokens:
+                    [
+                        new("ing_1_a", "ing_1", 1.5m, "cup"),
+                        new("ing_1_b", "ing_1", 0.5m, "lb"),
+                    ]
+                ),
+            ]
+        );
+
+        var result = RecipeValidator.Validate(invalidDto);
+        Assert.IsFalse(result.IsValid);
+        Assert.IsTrue(
+            result.Errors.Any(e =>
+                e.Contains("incompatible stepQuantity", StringComparison.OrdinalIgnoreCase)
+            ),
+            string.Join("; ", result.Errors)
+        );
+
+        var fixedDto = invalidDto with
+        {
+            Steps =
+            [
+                invalidDto.Steps![0] with
+                {
+                    IngredientTokens =
+                    [
+                        new("ing_1_a", "ing_1", 1.5m, "cup"),
+                        new("ing_1_b", "ing_1", null, null),
+                    ],
+                },
+            ],
+        };
+        Assert.IsTrue(RecipeValidator.Validate(fixedDto).IsValid);
+    }
+
+    [TestMethod]
+    public void Validate_RejectsDividedFullDumpWithNullRemainingAddition_AndPermitsSplitQuantities()
+    {
+        var invalidDto = new ExtractedRecipeDto(
+            Title: "Scrambled Eggs",
+            Ingredients:
+            [
+                new(
+                    "ing_1",
+                    CanonicalFoodItem: "cilantro",
+                    DisplayName: "fresh cilantro",
+                    Quantity: 0.25m,
+                    Unit: "cup",
+                    RawText: "1/4 cup chopped fresh cilantro, divided"
+                ),
+            ],
+            Steps:
+            [
+                new(
+                    1,
+                    TemplateText: "Add {{ing_1_a}}.",
+                    IngredientTokens: [new("ing_1_a", "ing_1", 0.25m, "cup")]
+                ),
+                new(
+                    2,
+                    TemplateText: "Sprinkle with remaining {{ing_1_b}}.",
+                    IngredientTokens: [new("ing_1_b", "ing_1", null, null)]
+                ),
+            ]
+        );
+
+        var result = RecipeValidator.Validate(invalidDto);
+        Assert.IsFalse(result.IsValid);
+        Assert.IsTrue(
+            result.Errors.Any(e =>
+                e.Contains("marked 'divided'", StringComparison.OrdinalIgnoreCase)
+            ),
+            string.Join("; ", result.Errors)
+        );
+
+        var validSplitDto = invalidDto with
+        {
+            Steps =
+            [
+                new(
+                    1,
+                    TemplateText: "Add {{ing_1_a}}.",
+                    IngredientTokens: [new("ing_1_a", "ing_1", 3m, "tbsp")]
+                ),
+                new(
+                    2,
+                    TemplateText: "Sprinkle with remaining {{ing_1_b}}.",
+                    IngredientTokens: [new("ing_1_b", "ing_1", 1m, "tbsp")]
+                ),
+            ],
+        };
+        Assert.IsTrue(RecipeValidator.Validate(validSplitDto).IsValid);
+    }
+
+    [TestMethod]
+    public void RepairSafeStepTokenGlitches_StripsCoatedBatchSplitDuplicateQuantity()
+    {
+        var dto = new ExtractedRecipeDto(
+            Title: "Fried Calamari",
+            Ingredients:
+            [
+                new(
+                    "ing_1",
+                    CanonicalFoodItem: "squid",
+                    DisplayName: "squid",
+                    Quantity: 1m,
+                    Unit: "lb",
+                    RawText: "1 pound squid"
+                ),
+            ],
+            Steps:
+            [
+                new(
+                    1,
+                    TemplateText: "Add {{ing_1_a}} to milk. Remove half of {{ing_1_b}}, dredge, and place coated {{ing_1_c}} on rack.",
+                    IngredientTokens:
+                    [
+                        new("ing_1_a", "ing_1", 0.5m, "lb"),
+                        new("ing_1_b", "ing_1", 0.5m, "lb"),
+                        new("ing_1_c", "ing_1", 0.5m, "lb"),
+                    ]
+                ),
+            ]
+        );
+
+        var repaired = RecipeValidator.RepairSafeStepTokenGlitches(
+            dto,
+            repairBatchSplitDoubleCounts: true
+        );
+        Assert.IsTrue(RecipeValidator.Validate(repaired).IsValid);
+        Assert.IsNull(repaired.Steps![0].IngredientTokens![2].StepQuantity);
+    }
 }

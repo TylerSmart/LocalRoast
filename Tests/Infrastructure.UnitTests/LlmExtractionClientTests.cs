@@ -2337,7 +2337,7 @@ public sealed class LlmExtractionClientTests
         StringAssert.Contains(attempts[1], "around:");
         StringAssert.Contains(attempts[1], "Steps through Step 1");
         StringAssert.Contains(attempts[1], "ALREADY consume 100% of ing_1");
-        StringAssert.Contains(attempts[1], "Step 2 ({{ing_1_c}})");
+        StringAssert.Contains(attempts[1], "Step 2 ({{ing_1_c}}=10 tbsp)");
         Assert.IsTrue(RecipeValidator.Validate(result).IsValid);
     }
 
@@ -2454,7 +2454,10 @@ public sealed class LlmExtractionClientTests
         StringAssert.Contains(attempts[1], "(= 20..30s)");
         StringAssert.Contains(attempts[1], "accidentally multiplied by 10");
         StringAssert.Contains(attempts[2], "section: \\u0027SHRIMP\\u0027");
-        StringAssert.Contains(attempts[2], "Step 1 uses \\u0027remaining ingredients\\u0027");
+        StringAssert.Contains(
+            attempts[2],
+            "Step 1 uses \\u0027remaining ingredients except the shrimp\\u0027"
+        );
         var validation = RecipeValidator.Validate(result);
         Assert.IsTrue(validation.IsValid);
         Assert.IsEmpty(validation.Warnings);
@@ -2537,6 +2540,270 @@ public sealed class LlmExtractionClientTests
 
         Assert.HasCount(2, attempts);
         StringAssert.Contains(attempts[1], "REMOVE \\u0027ing_1\\u0027");
+        Assert.IsTrue(RecipeValidator.Validate(result).IsValid);
+    }
+
+    [TestMethod]
+    public async Task ExtractRecipeFromTextAsync_AddsCutCountFromHintOnRetry()
+    {
+        var attempts = new List<string>();
+        var attemptNum = 0;
+
+        const string invalidReply = """
+            {
+                "title": "Bouyourdi",
+                "ingredients": [
+                    { "refId": "ing_1", "canonicalFoodItem": "tomato", "displayName": "tomato", "quantity": 1, "unit": "whole", "rawText": "1 large tomato, cored" }
+                ],
+                "steps": [
+                    {
+                        "stepNumber": 1,
+                        "templateText": "Slice two 1/4-inch rounds from {{ing_1_a}}. Chop remaining {{ing_1_b}}.",
+                        "ingredientTokens": [
+                            { "tokenKey": "ing_1_a", "ingredientRefId": "ing_1", "stepQuantity": 2, "stepUnit": "whole" },
+                            { "tokenKey": "ing_1_b", "ingredientRefId": "ing_1", "stepQuantity": null, "stepUnit": null }
+                        ],
+                        "timerTokens": [],
+                        "temperatureTokens": []
+                    }
+                ],
+                "qualityAudit": { "isPlausibleRecipe": true, "warnings": [] }
+            }
+            """;
+
+        const string fixedReply = """
+            {
+                "title": "Bouyourdi",
+                "ingredients": [
+                    { "refId": "ing_1", "canonicalFoodItem": "tomato", "displayName": "tomato", "quantity": 1, "unit": "whole", "rawText": "1 large tomato, cored" }
+                ],
+                "steps": [
+                    {
+                        "stepNumber": 1,
+                        "templateText": "Slice two 1/4-inch rounds from {{ing_1_a}}. Chop remaining {{ing_1_b}}.",
+                        "ingredientTokens": [
+                            { "tokenKey": "ing_1_a", "ingredientRefId": "ing_1", "stepQuantity": 1, "stepUnit": "whole" },
+                            { "tokenKey": "ing_1_b", "ingredientRefId": "ing_1", "stepQuantity": null, "stepUnit": null }
+                        ],
+                        "timerTokens": [],
+                        "temperatureTokens": []
+                    }
+                ],
+                "qualityAudit": { "isPlausibleRecipe": true, "warnings": [] }
+            }
+            """;
+
+        var handler = new MockHttpMessageHandler(req =>
+        {
+            attemptNum++;
+            attempts.Add(req.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+            return OllamaReply(attemptNum == 1 ? invalidReply : fixedReply);
+        });
+
+        var client = new LlmExtractionClient(new HttpClient(handler));
+        var config = new EffectiveLlmConnectionConfig(
+            Provider: LlmProvider.Ollama,
+            BaseUrl: "http://localhost:11434",
+            ApiKey: null,
+            TextModel: "gemma4:e4b",
+            VisionModel: null,
+            OllamaKeepAlive: "5m",
+            RequestTimeoutSeconds: 30,
+            AutoPublishHighConfidenceText: true
+        );
+
+        var result = await client.ExtractRecipeFromTextAsync(
+            config,
+            new LlmExtractionContext(
+                "Bouyourdi\n- 1 large tomato, cored\n1. Slice two 1/4-inch rounds from tomato. Chop remaining tomato."
+            )
+        );
+
+        Assert.HasCount(2, attempts);
+        StringAssert.Contains(attempts[1], "cut-piece phrase");
+        Assert.IsTrue(RecipeValidator.Validate(result).IsValid);
+    }
+
+    [TestMethod]
+    public async Task ExtractRecipeFromTextAsync_SuggestsPlaceholdersForExceptClauseInCollectiveAttachmentRetry()
+    {
+        var attempts = new List<string>();
+        var attemptNum = 0;
+
+        const string unreferencedReply = """
+            {
+                "title": "Quiche",
+                "ingredients": [
+                    { "refId": "ing_1", "canonicalFoodItem": "whole milk", "displayName": "whole milk", "quantity": 1, "unit": "cup", "rawText": "1 cup whole milk" },
+                    { "refId": "ing_2", "canonicalFoodItem": "Gruyère cheese", "displayName": "Gruyère cheese", "quantity": 4, "unit": "oz", "rawText": "4 ounces Gruyère cheese" }
+                ],
+                "steps": [
+                    {
+                        "stepNumber": 1,
+                        "templateText": "Whisk the remaining ingredients except the {{ing_2_a}} together. Bake with {{ing_2_b}}.",
+                        "ingredientTokens": [
+                            { "tokenKey": "ing_2_a", "ingredientRefId": "ing_2", "stepQuantity": null, "stepUnit": null },
+                            { "tokenKey": "ing_2_b", "ingredientRefId": "ing_2", "stepQuantity": 4, "stepUnit": "oz" }
+                        ],
+                        "timerTokens": [],
+                        "temperatureTokens": []
+                    }
+                ],
+                "qualityAudit": { "isPlausibleRecipe": true, "warnings": [] }
+            }
+            """;
+
+        const string fixedReply = """
+            {
+                "title": "Quiche",
+                "ingredients": [
+                    { "refId": "ing_1", "canonicalFoodItem": "whole milk", "displayName": "whole milk", "quantity": 1, "unit": "cup", "rawText": "1 cup whole milk" },
+                    { "refId": "ing_2", "canonicalFoodItem": "Gruyère cheese", "displayName": "Gruyère cheese", "quantity": 4, "unit": "oz", "rawText": "4 ounces Gruyère cheese" }
+                ],
+                "steps": [
+                    {
+                        "stepNumber": 1,
+                        "templateText": "Whisk {{ing_1_a}} together. Bake with {{ing_2_b}}.",
+                        "ingredientTokens": [
+                            { "tokenKey": "ing_1_a", "ingredientRefId": "ing_1", "stepQuantity": 1, "stepUnit": "cup" },
+                            { "tokenKey": "ing_2_b", "ingredientRefId": "ing_2", "stepQuantity": 4, "stepUnit": "oz" }
+                        ],
+                        "timerTokens": [],
+                        "temperatureTokens": []
+                    }
+                ],
+                "qualityAudit": { "isPlausibleRecipe": true, "warnings": [] }
+            }
+            """;
+
+        var handler = new MockHttpMessageHandler(req =>
+        {
+            attemptNum++;
+            attempts.Add(req.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+            return OllamaReply(attemptNum == 1 ? unreferencedReply : fixedReply);
+        });
+
+        var client = new LlmExtractionClient(new HttpClient(handler));
+        var config = new EffectiveLlmConnectionConfig(
+            Provider: LlmProvider.Ollama,
+            BaseUrl: "http://localhost:11434",
+            ApiKey: null,
+            TextModel: "gemma4:e4b",
+            VisionModel: null,
+            OllamaKeepAlive: "5m",
+            RequestTimeoutSeconds: 30,
+            AutoPublishHighConfidenceText: true
+        );
+
+        var result = await client.ExtractRecipeFromTextAsync(
+            config,
+            new LlmExtractionContext(
+                "Quiche\n- 1 cup whole milk\n- 4 ounces Gruyère cheese\n1. Whisk the remaining ingredients except the Gruyère together. Bake with Gruyère."
+            )
+        );
+
+        Assert.HasCount(2, attempts);
+        StringAssert.Contains(attempts[1], "except the {{ing_2_a}}");
+        StringAssert.Contains(attempts[1], "{{ing_1_a}} (1 cup whole milk)");
+        var validation = RecipeValidator.Validate(result);
+        Assert.IsTrue(validation.IsValid);
+        Assert.IsEmpty(validation.Warnings);
+    }
+
+    [TestMethod]
+    public async Task ExtractRecipeFromTextAsync_AddsDividedSplitHintInsteadOfNullingLaterAdditions()
+    {
+        var attempts = new List<string>();
+        var attemptNum = 0;
+
+        const string invalidReply = """
+            {
+                "title": "Scrambled Eggs",
+                "ingredients": [
+                    { "refId": "ing_1", "canonicalFoodItem": "cilantro", "displayName": "fresh cilantro", "quantity": 0.25, "unit": "cup", "rawText": "1/4 cup chopped fresh cilantro, divided" }
+                ],
+                "steps": [
+                    {
+                        "stepNumber": 1,
+                        "templateText": "Add {{ing_1_a}}.",
+                        "ingredientTokens": [
+                            { "tokenKey": "ing_1_a", "ingredientRefId": "ing_1", "stepQuantity": 0.25, "stepUnit": "cup" }
+                        ],
+                        "timerTokens": [],
+                        "temperatureTokens": []
+                    },
+                    {
+                        "stepNumber": 2,
+                        "templateText": "Top with remaining {{ing_1_b}}.",
+                        "ingredientTokens": [
+                            { "tokenKey": "ing_1_b", "ingredientRefId": "ing_1", "stepQuantity": 1, "stepUnit": "tbsp" }
+                        ],
+                        "timerTokens": [],
+                        "temperatureTokens": []
+                    }
+                ],
+                "qualityAudit": { "isPlausibleRecipe": true, "warnings": [] }
+            }
+            """;
+
+        const string fixedReply = """
+            {
+                "title": "Scrambled Eggs",
+                "ingredients": [
+                    { "refId": "ing_1", "canonicalFoodItem": "cilantro", "displayName": "fresh cilantro", "quantity": 0.25, "unit": "cup", "rawText": "1/4 cup chopped fresh cilantro, divided" }
+                ],
+                "steps": [
+                    {
+                        "stepNumber": 1,
+                        "templateText": "Add {{ing_1_a}}.",
+                        "ingredientTokens": [
+                            { "tokenKey": "ing_1_a", "ingredientRefId": "ing_1", "stepQuantity": 3, "stepUnit": "tbsp" }
+                        ],
+                        "timerTokens": [],
+                        "temperatureTokens": []
+                    },
+                    {
+                        "stepNumber": 2,
+                        "templateText": "Top with remaining {{ing_1_b}}.",
+                        "ingredientTokens": [
+                            { "tokenKey": "ing_1_b", "ingredientRefId": "ing_1", "stepQuantity": 1, "stepUnit": "tbsp" }
+                        ],
+                        "timerTokens": [],
+                        "temperatureTokens": []
+                    }
+                ],
+                "qualityAudit": { "isPlausibleRecipe": true, "warnings": [] }
+            }
+            """;
+
+        var handler = new MockHttpMessageHandler(req =>
+        {
+            attemptNum++;
+            attempts.Add(req.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+            return OllamaReply(attemptNum == 1 ? invalidReply : fixedReply);
+        });
+
+        var client = new LlmExtractionClient(new HttpClient(handler));
+        var config = new EffectiveLlmConnectionConfig(
+            Provider: LlmProvider.Ollama,
+            BaseUrl: "http://localhost:11434",
+            ApiKey: null,
+            TextModel: "gemma4:e4b",
+            VisionModel: null,
+            OllamaKeepAlive: "5m",
+            RequestTimeoutSeconds: 30,
+            AutoPublishHighConfidenceText: true
+        );
+
+        var result = await client.ExtractRecipeFromTextAsync(
+            config,
+            new LlmExtractionContext(
+                "Scrambled Eggs\n- 1/4 cup chopped fresh cilantro, divided\n1. Add 3 tbsp cilantro.\n2. Top with remaining 1 tbsp cilantro."
+            )
+        );
+
+        Assert.HasCount(2, attempts);
+        StringAssert.Contains(attempts[1], "Do NOT null later additions");
         Assert.IsTrue(RecipeValidator.Validate(result).IsValid);
     }
 }
