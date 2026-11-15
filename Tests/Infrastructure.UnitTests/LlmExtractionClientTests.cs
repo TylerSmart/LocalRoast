@@ -2806,4 +2806,189 @@ public sealed class LlmExtractionClientTests
         StringAssert.Contains(attempts[1], "Do NOT null later additions");
         Assert.IsTrue(RecipeValidator.Validate(result).IsValid);
     }
+
+    [TestMethod]
+    public async Task ExtractRecipeFromTextAsync_AddsStepWordMatchHintForUnreferencedRollOnAttachmentRetry()
+    {
+        var attempts = new List<string>();
+        var attemptNum = 0;
+
+        const string unreferencedReply = """
+            {
+                "title": "Egg, Kimchi, and Avocado Sandwiches",
+                "ingredients": [
+                    { "refId": "ing_1", "canonicalFoodItem": "mayonnaise", "displayName": "mayonnaise", "quantity": 0.25, "unit": "cup", "rawText": "1/4 cup mayonnaise" },
+                    { "refId": "ing_2", "canonicalFoodItem": "kaiser roll", "displayName": "kaiser rolls", "quantity": 4, "unit": "whole", "rawText": "4 kaiser rolls, halved and lightly toasted" }
+                ],
+                "steps": [
+                    {
+                        "stepNumber": 1,
+                        "templateText": "Spread {{ing_1_a}} on roll bottoms. Set roll tops over fillings.",
+                        "ingredientTokens": [
+                            { "tokenKey": "ing_1_a", "ingredientRefId": "ing_1", "stepQuantity": 0.25, "stepUnit": "cup" }
+                        ],
+                        "timerTokens": [],
+                        "temperatureTokens": []
+                    }
+                ],
+                "qualityAudit": { "isPlausibleRecipe": true, "warnings": [] }
+            }
+            """;
+
+        const string fixedReply = """
+            {
+                "title": "Egg, Kimchi, and Avocado Sandwiches",
+                "ingredients": [
+                    { "refId": "ing_1", "canonicalFoodItem": "mayonnaise", "displayName": "mayonnaise", "quantity": 0.25, "unit": "cup", "rawText": "1/4 cup mayonnaise" },
+                    { "refId": "ing_2", "canonicalFoodItem": "kaiser roll", "displayName": "kaiser rolls", "quantity": 4, "unit": "whole", "rawText": "4 kaiser rolls, halved and lightly toasted" }
+                ],
+                "steps": [
+                    {
+                        "stepNumber": 1,
+                        "templateText": "Spread {{ing_1_a}} on {{ing_2_a}} bottoms. Set {{ing_2_b}} tops over fillings.",
+                        "ingredientTokens": [
+                            { "tokenKey": "ing_1_a", "ingredientRefId": "ing_1", "stepQuantity": 0.25, "stepUnit": "cup" },
+                            { "tokenKey": "ing_2_a", "ingredientRefId": "ing_2", "stepQuantity": null, "stepUnit": null },
+                            { "tokenKey": "ing_2_b", "ingredientRefId": "ing_2", "stepQuantity": null, "stepUnit": null }
+                        ],
+                        "timerTokens": [],
+                        "temperatureTokens": []
+                    }
+                ],
+                "qualityAudit": { "isPlausibleRecipe": true, "warnings": [] }
+            }
+            """;
+
+        var handler = new MockHttpMessageHandler(req =>
+        {
+            attemptNum++;
+            attempts.Add(req.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+            return OllamaReply(attemptNum == 1 ? unreferencedReply : fixedReply);
+        });
+
+        var client = new LlmExtractionClient(new HttpClient(handler));
+        var config = new EffectiveLlmConnectionConfig(
+            Provider: LlmProvider.Ollama,
+            BaseUrl: "http://localhost:11434",
+            ApiKey: null,
+            TextModel: "gemma4:e4b",
+            VisionModel: null,
+            OllamaKeepAlive: "5m",
+            RequestTimeoutSeconds: 30,
+            AutoPublishHighConfidenceText: true
+        );
+
+        var result = await client.ExtractRecipeFromTextAsync(
+            config,
+            new LlmExtractionContext(
+                "Egg, Kimchi, and Avocado Sandwiches\n- 1/4 cup mayonnaise\n- 4 kaiser rolls, halved and lightly toasted\n1. Spread mayonnaise on roll bottoms. Set roll tops over fillings."
+            )
+        );
+
+        Assert.HasCount(2, attempts);
+        StringAssert.Contains(attempts[1], "already mentions");
+        StringAssert.Contains(attempts[1], "{{ing_2_a}}");
+        StringAssert.Contains(attempts[1], "{{ing_2_b}}");
+        var validation = RecipeValidator.Validate(result);
+        Assert.IsTrue(validation.IsValid);
+        Assert.IsEmpty(validation.Warnings);
+    }
+
+    [TestMethod]
+    public async Task ExtractRecipeFromTextAsync_AddsCountedPieceRewriteHintAfterFullConsumed()
+    {
+        var attempts = new List<string>();
+        var attemptNum = 0;
+
+        const string invalidReply = """
+            {
+                "title": "Gỏi Cuốn",
+                "ingredients": [
+                    { "refId": "ing_1", "canonicalFoodItem": "shrimp", "displayName": "shrimp", "quantity": 18, "unit": "whole", "rawText": "18 medium-large shrimp" }
+                ],
+                "steps": [
+                    {
+                        "stepNumber": 1,
+                        "templateText": "Boil {{ing_1_a}} and halve lengthwise.",
+                        "ingredientTokens": [
+                            { "tokenKey": "ing_1_a", "ingredientRefId": "ing_1", "stepQuantity": 18, "stepUnit": "whole" }
+                        ],
+                        "timerTokens": [],
+                        "temperatureTokens": []
+                    },
+                    {
+                        "stepNumber": 2,
+                        "templateText": "Arrange {{ing_1_b}} halves on wrapper.",
+                        "ingredientTokens": [
+                            { "tokenKey": "ing_1_b", "ingredientRefId": "ing_1", "stepQuantity": 3, "stepUnit": "whole" }
+                        ],
+                        "timerTokens": [],
+                        "temperatureTokens": []
+                    }
+                ],
+                "qualityAudit": { "isPlausibleRecipe": true, "warnings": [] }
+            }
+            """;
+
+        const string fixedReply = """
+            {
+                "title": "Gỏi Cuốn",
+                "ingredients": [
+                    { "refId": "ing_1", "canonicalFoodItem": "shrimp", "displayName": "shrimp", "quantity": 18, "unit": "whole", "rawText": "18 medium-large shrimp" }
+                ],
+                "steps": [
+                    {
+                        "stepNumber": 1,
+                        "templateText": "Boil {{ing_1_a}} and halve lengthwise.",
+                        "ingredientTokens": [
+                            { "tokenKey": "ing_1_a", "ingredientRefId": "ing_1", "stepQuantity": 18, "stepUnit": "whole" }
+                        ],
+                        "timerTokens": [],
+                        "temperatureTokens": []
+                    },
+                    {
+                        "stepNumber": 2,
+                        "templateText": "Arrange 3 {{ing_1_b}} halves on wrapper.",
+                        "ingredientTokens": [
+                            { "tokenKey": "ing_1_b", "ingredientRefId": "ing_1", "stepQuantity": null, "stepUnit": null }
+                        ],
+                        "timerTokens": [],
+                        "temperatureTokens": []
+                    }
+                ],
+                "qualityAudit": { "isPlausibleRecipe": true, "warnings": [] }
+            }
+            """;
+
+        var handler = new MockHttpMessageHandler(req =>
+        {
+            attemptNum++;
+            attempts.Add(req.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+            return OllamaReply(attemptNum == 1 ? invalidReply : fixedReply);
+        });
+
+        var client = new LlmExtractionClient(new HttpClient(handler));
+        var config = new EffectiveLlmConnectionConfig(
+            Provider: LlmProvider.Ollama,
+            BaseUrl: "http://localhost:11434",
+            ApiKey: null,
+            TextModel: "gemma4:e4b",
+            VisionModel: null,
+            OllamaKeepAlive: "5m",
+            RequestTimeoutSeconds: 30,
+            AutoPublishHighConfidenceText: true
+        );
+
+        var result = await client.ExtractRecipeFromTextAsync(
+            config,
+            new LlmExtractionContext(
+                "Gỏi Cuốn\n- 18 medium-large shrimp\n1. Boil shrimp and halve lengthwise.\n2. Arrange 3 shrimp halves on wrapper."
+            )
+        );
+
+        Assert.HasCount(2, attempts);
+        StringAssert.Contains(attempts[1], "rewrite");
+        StringAssert.Contains(attempts[1], "3 {{ing_1_b}} halves");
+        Assert.IsTrue(RecipeValidator.Validate(result).IsValid);
+    }
 }

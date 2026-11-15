@@ -2216,4 +2216,117 @@ public sealed class RecipeValidatorTests
         Assert.IsTrue(RecipeValidator.Validate(repaired).IsValid);
         Assert.IsNull(repaired.Steps![0].IngredientTokens![2].StepQuantity);
     }
+
+    [TestMethod]
+    public void Validate_RepairsMalformedSuffixBracesAndRejectsUnmatchedBraces()
+    {
+        var dtoWithTypo = new ExtractedRecipeDto(
+            Title: "Fluffy Omelets",
+            Ingredients:
+            [
+                new(
+                    "ing_1",
+                    CanonicalFoodItem: "egg",
+                    DisplayName: "egg whites",
+                    Quantity: 4m,
+                    Unit: "whole",
+                    RawText: "4 large eggs"
+                ),
+            ],
+            Steps:
+            [
+                new(
+                    1,
+                    TemplateText: "Whip {{ing_1}_a} until foamy and whip {{ing_1}_b} until stiff.",
+                    IngredientTokens:
+                    [
+                        new("ing_1_a", "ing_1", 4m, "whole"),
+                        new("ing_1_b", "ing_1", null, null),
+                    ]
+                ),
+            ]
+        );
+
+        Assert.IsFalse(RecipeValidator.Validate(dtoWithTypo).IsValid);
+        var repaired = RecipeValidator.RepairSafeStepTokenGlitches(dtoWithTypo);
+        Assert.AreEqual(
+            "Whip {{ing_1_a}} until foamy and whip {{ing_1_b}} until stiff.",
+            repaired.Steps![0].TemplateText
+        );
+        Assert.IsTrue(RecipeValidator.Validate(repaired).IsValid);
+
+        var orphanBraceDto = dtoWithTypo with
+        {
+            Steps =
+            [
+                new(
+                    1,
+                    TemplateText: "Whip {{unknown}_z} {{ing_1_a}} until foamy.",
+                    IngredientTokens: [new("ing_1_a", "ing_1", 4m, "whole")]
+                ),
+            ],
+        };
+        var orphanRes = RecipeValidator.Validate(
+            RecipeValidator.RepairSafeStepTokenGlitches(orphanBraceDto)
+        );
+        Assert.IsFalse(orphanRes.IsValid);
+        Assert.IsTrue(
+            orphanRes.Errors.Any(e =>
+                e.Contains("malformed placeholder braces", StringComparison.OrdinalIgnoreCase)
+            ),
+            string.Join("; ", orphanRes.Errors)
+        );
+    }
+
+    [TestMethod]
+    public void Validate_RejectsPurePrepDisplayName()
+    {
+        var dto = new ExtractedRecipeDto(
+            Title: "Caramelized Onion Tart",
+            Ingredients:
+            [
+                new(
+                    "ing_1",
+                    CanonicalFoodItem: "salt",
+                    DisplayName: "table",
+                    Quantity: 0.75m,
+                    Unit: "tsp",
+                    RawText: "3/4 teaspoon table salt"
+                ),
+                new(
+                    "ing_2",
+                    CanonicalFoodItem: "bacon",
+                    DisplayName: "chopped fine",
+                    Quantity: 8m,
+                    Unit: "slice",
+                    RawText: "8 slices bacon, chopped fine"
+                ),
+                new(
+                    "ing_3",
+                    CanonicalFoodItem: "pear",
+                    DisplayName: "quartered, cored, and sliced 1/4 inch thick, divided",
+                    Quantity: 1m,
+                    Unit: "whole",
+                    RawText: "1 Bosc pear, quartered, cored, and sliced 1/4 inch thick, divided"
+                ),
+            ],
+            Steps:
+            [
+                new(
+                    1,
+                    TemplateText: "Cook {{ing_2_a}} with {{ing_1_a}} and {{ing_3_a}}.",
+                    IngredientTokens:
+                    [
+                        new("ing_1_a", "ing_1", 0.75m, "tsp"),
+                        new("ing_2_a", "ing_2", 8m, "slice"),
+                        new("ing_3_a", "ing_3", 1m, "whole"),
+                    ]
+                ),
+            ]
+        );
+
+        var res = RecipeValidator.Validate(dto);
+        Assert.IsFalse(res.IsValid);
+        Assert.IsTrue(res.Errors.Count >= 3, string.Join("; ", res.Errors));
+    }
 }

@@ -391,6 +391,18 @@ public static partial class RecipeValidator
     )]
     private static partial Regex ContainerNounPrefixRegex();
 
+    [GeneratedRegex(
+        @"\{\{(?<key>(?:ing|timer|temp)[a-zA-Z0-9_]*)\}(?<suffix>_[a-zA-Z0-9_]+)\}",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex MalformedSuffixBracePlaceholderRegex();
+
+    [GeneratedRegex(
+        @"^(?:(?:table|packed|crumbled|chopped|minced|diced|sliced|grated|shredded|crushed|melted|softened|divided|peeled|deveined|trimmed|halved|quartered|seeded|cored|stemmed|pitted|torn|toasted|lightly|beaten|fresh|dried)\b(?:[\s,]+(?:and|or|fresh|fine(?:ly)?|coarse(?:ly)?|thin(?:ly)?|thick|\d+(?:/\d+)?\s*(?:inch|in\.?)|pieces?|divided|chopped|minced|diced|sliced|grated|shredded|crumbled|melted|softened|peeled|deveined|trimmed|halved|quartered|seeded|cored|stemmed|pitted|torn|into|room|temperature))*)+\s*$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex PurePrepOnlyDisplayNameRegex();
+
     [GeneratedRegex(@"\bor\s+$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex TrailingOrWordRegex();
 
@@ -903,6 +915,21 @@ public static partial class RecipeValidator
                         $"Ingredient '{ing.CanonicalFoodItem}' ({refKey}) preparationNotes must be plain text and must not contain placeholder '{{{{{key}}}}}'."
                     );
                 }
+            }
+
+            if (
+                !string.IsNullOrWhiteSpace(ing.DisplayName)
+                && PurePrepOnlyDisplayNameRegex().IsMatch(ing.DisplayName.Trim())
+                && !string.Equals(
+                    ing.DisplayName.Trim(),
+                    ing.CanonicalFoodItem?.Trim(),
+                    StringComparison.OrdinalIgnoreCase
+                )
+            )
+            {
+                errors.Add(
+                    $"Ingredient '{ing.CanonicalFoodItem}' ({refKey}) has preparation text '{ing.DisplayName.Trim()}' in displayName instead of the food name. Put the food name (e.g., '{ing.CanonicalFoodItem}') in displayName and move preparation words to preparationNotes."
+                );
             }
 
             if (ing.IsRecipeReference && IsRawGrocerySeePageNote(ing.RawText))
@@ -2471,6 +2498,21 @@ public static partial class RecipeValidator
                     );
                 }
             }
+
+            var remainingNonPlaceholderText = PlaceholderRegex()
+                .Replace(step.TemplateText, string.Empty);
+            var strayBraceIdx = remainingNonPlaceholderText.IndexOfAny(['{', '}']);
+            if (strayBraceIdx >= 0)
+            {
+                var braceStart = Math.Max(0, strayBraceIdx - 20);
+                var braceLen = Math.Min(remainingNonPlaceholderText.Length - braceStart, 45);
+                var braceSnippet = remainingNonPlaceholderText
+                    .Substring(braceStart, braceLen)
+                    .Trim();
+                errors.Add(
+                    $"Step {stepNum} TemplateText contains malformed placeholder braces around '{braceSnippet}'. Wrap the complete tokenKey inside double curly braces (e.g. '{{{{ing_1_a}}}}' or '{{{{ing_1_b_a}}}}', never '{{{{ing_1_b}}}}_a')."
+                );
+            }
         }
 
         ValidateNumberedSourceStepCoverage(steps, ingredientsByRefId, sourceText, errors);
@@ -2780,6 +2822,24 @@ public static partial class RecipeValidator
             var seenInTemplate = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var stepChanged = dedupIngChanged || dedupTimerChanged || dedupTempChanged;
             var keysToInlineRemove = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            template = MalformedSuffixBracePlaceholderRegex()
+                .Replace(
+                    template,
+                    m =>
+                    {
+                        var combined = NormalizeTokenKey(
+                            $"{m.Groups["key"].Value}{m.Groups["suffix"].Value}"
+                        );
+                        if (allDefinedKeys.Contains(combined))
+                        {
+                            stepChanged = true;
+                            return $"{{{{{combined}}}}}";
+                        }
+
+                        return m.Value;
+                    }
+                );
 
             var rewrittenTemplate = PlaceholderRegex()
                 .Replace(
