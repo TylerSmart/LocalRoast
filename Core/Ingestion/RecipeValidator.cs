@@ -168,10 +168,16 @@ public static partial class RecipeValidator
     private static partial Regex DistanceOrRackTempContextRegex();
 
     [GeneratedRegex(
-        @"^\s*(?:[-–—]\s*)?(?:inch(?:es)?|in\.?|cm|mm|apart|from\s+(?:the\s+)?(?:broiler|heat|element))\b",
+        @"^\s*(?:[-–—]\s*)?(?:inch(?:es)?|in\.|in(?=\s+(?:from|apart|deep|long|wide|high|thick|tall|square|round)\b)|cm|mm|apart|from\s+(?:the\s+)?(?:broiler|heat|element))\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex AdjacentDistanceAfterTempRegex();
+
+    [GeneratedRegex(
+        @"^(?<ref>ing_\d+)(?:_[a-z0-9]+)?$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex OrphanIngTokenKeyRegex();
 
     [GeneratedRegex(
         @"\b\d+(?:\s+\d+/\d+|/\d+|\.\d+)?\s*[-\u2013]?\s*(?:inch(?:es)?|in|cm|mm)\b|\b(?:upper|middle|lower|bottom|top|center)(?:[-\s]+(?:middle|third))?\s+(?:rack\s+)?position\b",
@@ -2588,6 +2594,26 @@ public static partial class RecipeValidator
                             return maybeUnlisted.FallbackDisplay!.Trim();
                         }
 
+                        if (
+                            !ingMap.ContainsKey(key)
+                            && !timerMap.ContainsKey(key)
+                            && !tempMap.ContainsKey(key)
+                            && TrySynthesizeOrphanIngredientToken(
+                                key,
+                                ingredientsByRefId,
+                                usedTemplateIngRefIds,
+                                out var synthIng
+                            )
+                        )
+                        {
+                            ingTokens.Add(synthIng);
+                            ingMap[key] = synthIng;
+                            allDefinedKeys.Add(key);
+                            seenInTemplate.Add(key);
+                            stepChanged = true;
+                            return m.Value;
+                        }
+
                         if (seenInTemplate.Add(key))
                         {
                             return m.Value;
@@ -2825,6 +2851,44 @@ public static partial class RecipeValidator
         }
 
         return changedAny ? recipe with { Steps = updatedSteps } : recipe;
+    }
+
+    private static bool TrySynthesizeOrphanIngredientToken(
+        string tokenKey,
+        Dictionary<string, ExtractedIngredientDto> ingredientsByRefId,
+        HashSet<string> usedTemplateIngRefIds,
+        out StepIngredientTokenDto synthesized
+    )
+    {
+        synthesized = default!;
+        var match = OrphanIngTokenKeyRegex().Match(tokenKey);
+        if (!match.Success)
+        {
+            return false;
+        }
+
+        var refId = match.Groups["ref"].Value;
+        if (!ingredientsByRefId.TryGetValue(refId, out var master))
+        {
+            return false;
+        }
+
+        if (!usedTemplateIngRefIds.Contains(refId) && master.Quantity.HasValue)
+        {
+            return false;
+        }
+
+        var fallback = !string.IsNullOrWhiteSpace(master.DisplayName)
+            ? master.DisplayName.Trim()
+            : master.CanonicalFoodItem.Trim();
+        synthesized = new StepIngredientTokenDto(
+            TokenKey: tokenKey,
+            IngredientRefId: refId,
+            StepQuantity: null,
+            StepUnit: null,
+            FallbackDisplay: fallback
+        );
+        return true;
     }
 
     private static Dictionary<string, TValue> BuildFirstByNormalizedKey<TToken, TValue>(

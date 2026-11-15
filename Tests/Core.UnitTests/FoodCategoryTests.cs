@@ -50,6 +50,7 @@ public sealed class FoodCategoryTests
     [DataRow("Peach Schnapps", FoodCategory.Beverages)]
     [DataRow("Gin", FoodCategory.Beverages)]
     [DataRow("Fresh Ginger", FoodCategory.Produce)]
+    [DataRow("Pomegranate Molasses", FoodCategory.CondimentsAndSauces)]
     [DataRow("Paper Towels", FoodCategory.Other)]
     [DataRow("", FoodCategory.Other)]
     public void Classify_KnownFoods_ReturnsExpectedCategory(string name, FoodCategory expected)

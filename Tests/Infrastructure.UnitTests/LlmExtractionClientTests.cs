@@ -2231,4 +2231,108 @@ public sealed class LlmExtractionClientTests
         );
         Assert.IsTrue(RecipeValidator.Validate(result).IsValid);
     }
+
+    [TestMethod]
+    public async Task ExtractRecipeFromTextAsync_RetriesWithEarlyFullStepAndTimerUnitHints()
+    {
+        var attempts = new List<string>();
+        var attemptNum = 0;
+
+        const string invalidReply = """
+            {
+                "title": "Butter Pie Crust",
+                "ingredients": [
+                    { "refId": "ing_1", "canonicalFoodItem": "unsalted butter", "displayName": "unsalted butter", "quantity": 20, "unit": "tbsp", "rawText": "20 tablespoons unsalted butter" }
+                ],
+                "steps": [
+                    {
+                        "stepNumber": 1,
+                        "templateText": "Grate {{ing_1_a}} and cut {{ing_1_b}}, wait {{timer_1}}.",
+                        "ingredientTokens": [
+                            { "tokenKey": "ing_1_a", "ingredientRefId": "ing_1", "stepQuantity": 4, "stepUnit": "tbsp" },
+                            { "tokenKey": "ing_1_b", "ingredientRefId": "ing_1", "stepQuantity": 16, "stepUnit": "tbsp" }
+                        ],
+                        "timerTokens": [
+                            { "tokenKey": "timer_1", "durationSeconds": 3600, "label": "chill butter" }
+                        ],
+                        "temperatureTokens": []
+                    },
+                    {
+                        "stepNumber": 2,
+                        "templateText": "Add {{ing_1_c}} to processor.",
+                        "ingredientTokens": [
+                            { "tokenKey": "ing_1_c", "ingredientRefId": "ing_1", "stepQuantity": 10, "stepUnit": "tbsp" }
+                        ],
+                        "timerTokens": [],
+                        "temperatureTokens": []
+                    }
+                ],
+                "qualityAudit": { "isPlausibleRecipe": true, "warnings": [] }
+            }
+            """;
+
+        const string fixedReply = """
+            {
+                "title": "Butter Pie Crust",
+                "ingredients": [
+                    { "refId": "ing_1", "canonicalFoodItem": "unsalted butter", "displayName": "unsalted butter", "quantity": 20, "unit": "tbsp", "rawText": "20 tablespoons unsalted butter" }
+                ],
+                "steps": [
+                    {
+                        "stepNumber": 1,
+                        "templateText": "Grate {{ing_1_a}} and cut {{ing_1_b}}, wait {{timer_1}}.",
+                        "ingredientTokens": [
+                            { "tokenKey": "ing_1_a", "ingredientRefId": "ing_1", "stepQuantity": 4, "stepUnit": "tbsp" },
+                            { "tokenKey": "ing_1_b", "ingredientRefId": "ing_1", "stepQuantity": 16, "stepUnit": "tbsp" }
+                        ],
+                        "timerTokens": [
+                            { "tokenKey": "timer_1", "durationSeconds": 60, "label": "chill butter" }
+                        ],
+                        "temperatureTokens": []
+                    },
+                    {
+                        "stepNumber": 2,
+                        "templateText": "Add {{ing_1_c}} to processor.",
+                        "ingredientTokens": [
+                            { "tokenKey": "ing_1_c", "ingredientRefId": "ing_1", "stepQuantity": null, "stepUnit": null }
+                        ],
+                        "timerTokens": [],
+                        "temperatureTokens": []
+                    }
+                ],
+                "qualityAudit": { "isPlausibleRecipe": true, "warnings": [] }
+            }
+            """;
+
+        var handler = new MockHttpMessageHandler(req =>
+        {
+            attemptNum++;
+            attempts.Add(req.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+            return OllamaReply(attemptNum == 1 ? invalidReply : fixedReply);
+        });
+
+        var client = new LlmExtractionClient(new HttpClient(handler));
+        var config = new EffectiveLlmConnectionConfig(
+            Provider: LlmProvider.Ollama,
+            BaseUrl: "http://localhost:11434",
+            ApiKey: null,
+            TextModel: "gemma4:e4b",
+            VisionModel: null,
+            OllamaKeepAlive: "5m",
+            RequestTimeoutSeconds: 30,
+            AutoPublishHighConfidenceText: true
+        );
+
+        var result = await client.ExtractRecipeFromTextAsync(
+            config,
+            new LlmExtractionContext(
+                "Butter Pie Crust\n- 20 tablespoons unsalted butter\n1. Grate butter and cut remaining butter, wait 1 minute.\n2. Add butter pieces to processor."
+            )
+        );
+
+        Assert.HasCount(2, attempts);
+        StringAssert.Contains(attempts[1], "1 minute = 60, NOT 3600");
+        StringAssert.Contains(attempts[1], "Steps through Step 1 ALREADY consume 100% of ing_1");
+        Assert.IsTrue(RecipeValidator.Validate(result).IsValid);
+    }
 }

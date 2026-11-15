@@ -1683,4 +1683,67 @@ public sealed class RecipeValidatorTests
         );
         Assert.IsFalse(RecipeValidator.Validate(aliasDto).IsValid);
     }
+
+    [TestMethod]
+    public void Validate_TemperatureBeforeInContainerPreposition_DoesNotFalseTriggerDistanceRule()
+    {
+        var dto = new ExtractedRecipeDto(
+            Title: "Sous Vide Soft-Poached Eggs",
+            Ingredients:
+            [
+                new(
+                    "ing_1",
+                    CanonicalFoodItem: "large egg",
+                    DisplayName: "large eggs",
+                    Quantity: 4m,
+                    Unit: "whole",
+                    RawText: "4 large eggs"
+                ),
+            ],
+            Steps:
+            [
+                new(
+                    1,
+                    TemplateText: "Bring water to {{temp_1}} in 7-quart container, then add {{ing_1_a}}.",
+                    IngredientTokens: [new("ing_1_a", "ing_1", 4m, "whole")],
+                    TemperatureTokens: [new("temp_1", 167m, "F")]
+                ),
+            ]
+        );
+
+        var result = RecipeValidator.Validate(dto);
+        Assert.IsTrue(result.IsValid, string.Join("; ", result.Errors));
+    }
+
+    [TestMethod]
+    public void RepairSafeStepTokenGlitches_SynthesizesMissingIngTokenWhenAlreadyQuantified()
+    {
+        var dto = new ExtractedRecipeDto(
+            Title: "Huevos Rancheros",
+            Ingredients:
+            [
+                new(
+                    "ing_2",
+                    CanonicalFoodItem: "ripe plum tomato",
+                    DisplayName: "ripe plum tomatoes",
+                    Quantity: 1.5m,
+                    Unit: "lb",
+                    RawText: "1 1/2 pounds ripe plum tomatoes"
+                ),
+            ],
+            Steps:
+            [
+                new(
+                    1,
+                    TemplateText: "Roast {{ing_2_a}}, then add {{ing_2_b}} to salsa.",
+                    IngredientTokens: [new("ing_2_b", "ing_2", 1.5m, "lb")]
+                ),
+            ]
+        );
+
+        var repaired = RecipeValidator.RepairSafeStepTokenGlitches(dto);
+        Assert.HasCount(2, repaired.Steps![0].IngredientTokens!);
+        var validation = RecipeValidator.Validate(repaired);
+        Assert.IsTrue(validation.IsValid, string.Join("; ", validation.Errors));
+    }
 }

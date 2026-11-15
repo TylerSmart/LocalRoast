@@ -106,6 +106,7 @@ public static partial class FoodCategoryClassifier
             ],
             FoodCategory.SpicesAndSeasonings
         ),
+        (["pomegranate molasses"], FoodCategory.CondimentsAndSauces),
         (
             [
                 "baking powder",
