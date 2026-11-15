@@ -2459,4 +2459,84 @@ public sealed class LlmExtractionClientTests
         Assert.IsTrue(validation.IsValid);
         Assert.IsEmpty(validation.Warnings);
     }
+
+    [TestMethod]
+    public async Task ExtractRecipeFromTextAsync_RetriesSynthesizedStepWaterLeadingMeasurementMismatch()
+    {
+        var attempts = new List<string>();
+        var attemptNum = 0;
+
+        const string invalidReply = """
+            {
+                "title": "Customizing Shrimp Cocktail",
+                "ingredients": [
+                    { "refId": "ing_1", "canonicalFoodItem": "cold water", "displayName": "cold water", "quantity": 2, "unit": "qt", "rawText": "1 quart cold water in Dutch oven. ... combine ice and 1 quart water in bowl" }
+                ],
+                "steps": [
+                    {
+                        "stepNumber": 1,
+                        "templateText": "Pour {{ing_1_a}} and {{ing_1_b}}.",
+                        "ingredientTokens": [
+                            { "tokenKey": "ing_1_a", "ingredientRefId": "ing_1", "stepQuantity": 1, "stepUnit": "qt" },
+                            { "tokenKey": "ing_1_b", "ingredientRefId": "ing_1", "stepQuantity": 1, "stepUnit": "qt" }
+                        ],
+                        "timerTokens": [],
+                        "temperatureTokens": []
+                    }
+                ],
+                "qualityAudit": { "isPlausibleRecipe": true, "warnings": [] }
+            }
+            """;
+
+        const string fixedReply = """
+            {
+                "title": "Customizing Shrimp Cocktail",
+                "ingredients": [
+                    { "refId": "ing_1", "canonicalFoodItem": "table salt", "displayName": "table salt", "quantity": 3, "unit": "tbsp", "rawText": "3 tablespoons table salt" }
+                ],
+                "steps": [
+                    {
+                        "stepNumber": 1,
+                        "templateText": "Dissolve {{ing_1_a}} in 1 quart cold water and combine with 1 quart water.",
+                        "ingredientTokens": [
+                            { "tokenKey": "ing_1_a", "ingredientRefId": "ing_1", "stepQuantity": 3, "stepUnit": "tbsp" }
+                        ],
+                        "timerTokens": [],
+                        "temperatureTokens": []
+                    }
+                ],
+                "qualityAudit": { "isPlausibleRecipe": true, "warnings": [] }
+            }
+            """;
+
+        var handler = new MockHttpMessageHandler(req =>
+        {
+            attemptNum++;
+            attempts.Add(req.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+            return OllamaReply(attemptNum == 1 ? invalidReply : fixedReply);
+        });
+
+        var client = new LlmExtractionClient(new HttpClient(handler));
+        var config = new EffectiveLlmConnectionConfig(
+            Provider: LlmProvider.Ollama,
+            BaseUrl: "http://localhost:11434",
+            ApiKey: null,
+            TextModel: "gemma4:e4b",
+            VisionModel: null,
+            OllamaKeepAlive: "5m",
+            RequestTimeoutSeconds: 30,
+            AutoPublishHighConfidenceText: true
+        );
+
+        var result = await client.ExtractRecipeFromTextAsync(
+            config,
+            new LlmExtractionContext(
+                "Customizing Shrimp Cocktail\n- 3 tablespoons table salt\n1. Dissolve salt in 1 quart cold water and combine ice and 1 quart water."
+            )
+        );
+
+        Assert.HasCount(2, attempts);
+        StringAssert.Contains(attempts[1], "REMOVE \\u0027ing_1\\u0027");
+        Assert.IsTrue(RecipeValidator.Validate(result).IsValid);
+    }
 }

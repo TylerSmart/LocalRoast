@@ -1950,4 +1950,116 @@ public sealed class RecipeValidatorTests
         var validation = RecipeValidator.Validate(repaired);
         Assert.IsTrue(validation.IsValid, string.Join("; ", validation.Errors));
     }
+
+    [TestMethod]
+    public void Validate_RejectsCompositePreparedMixtureBoundToSingleIngredient_AndPermitsMatchingMaster()
+    {
+        var invalidDto = new ExtractedRecipeDto(
+            Title: "New Englander with Vodka",
+            Ingredients:
+            [
+                new(
+                    "ing_2",
+                    CanonicalFoodItem: "sugar",
+                    DisplayName: "sugar",
+                    Quantity: 1m,
+                    Unit: "cup",
+                    RawText: "1 cup sugar"
+                ),
+            ],
+            Steps:
+            [
+                new(
+                    1,
+                    TemplateText: "Simmer {{ing_2_a}}.",
+                    IngredientTokens: [new("ing_2_a", "ing_2", 1m, "cup")]
+                ),
+                new(
+                    2,
+                    TemplateText: "Add {{ing_2_b}} to glass.",
+                    IngredientTokens:
+                    [
+                        new("ing_2_b", "ing_2", 2m, "oz", FallbackDisplay: "shrub syrup"),
+                    ]
+                ),
+            ]
+        );
+
+        var invalidResult = RecipeValidator.Validate(invalidDto);
+        Assert.IsFalse(invalidResult.IsValid);
+        Assert.IsTrue(
+            invalidResult.Errors.Any(e =>
+                e.Contains("composite prepared mixture", StringComparison.OrdinalIgnoreCase)
+            ),
+            string.Join("; ", invalidResult.Errors)
+        );
+
+        var validMasterMatchDto = new ExtractedRecipeDto(
+            Title: "Maple Syrup Dish",
+            Ingredients:
+            [
+                new(
+                    "ing_1",
+                    CanonicalFoodItem: "maple syrup",
+                    DisplayName: "maple syrup",
+                    Quantity: 0.25m,
+                    Unit: "cup",
+                    RawText: "1/4 cup maple syrup"
+                ),
+            ],
+            Steps:
+            [
+                new(
+                    1,
+                    TemplateText: "Drizzle {{ing_1_a}}.",
+                    IngredientTokens:
+                    [
+                        new("ing_1_a", "ing_1", 0.25m, "cup", FallbackDisplay: "maple syrup"),
+                    ]
+                ),
+            ]
+        );
+        Assert.IsTrue(RecipeValidator.Validate(validMasterMatchDto).IsValid);
+    }
+
+    [TestMethod]
+    public void Validate_RejectsPieceSizeDescriptorAsIngredientToken()
+    {
+        var dto = new ExtractedRecipeDto(
+            Title: "Deluxe Blueberry Pancakes",
+            Ingredients:
+            [
+                new(
+                    "ing_1",
+                    CanonicalFoodItem: "unsalted butter",
+                    DisplayName: "unsalted butter",
+                    Quantity: 5m,
+                    Unit: "tbsp",
+                    RawText: "2 tablespoons unsalted butter, plus 3 tablespoons melted"
+                ),
+            ],
+            Steps:
+            [
+                new(
+                    1,
+                    TemplateText: "Cut {{ing_1_a}} into {{ing_1_b}} pieces. Stir in {{ing_1_c}}.",
+                    IngredientTokens:
+                    [
+                        new("ing_1_a", "ing_1", 2m, "tbsp"),
+                        new("ing_1_b", "ing_1", 0.5m, "tbsp"),
+                        new("ing_1_c", "ing_1", 3m, "tbsp"),
+                    ]
+                ),
+            ]
+        );
+
+        var result = RecipeValidator.Validate(dto);
+        Assert.IsFalse(result.IsValid);
+        Assert.IsTrue(
+            result.Errors.Any(e =>
+                e.Contains("piece/portion size", StringComparison.OrdinalIgnoreCase)
+            ),
+            string.Join("; ", result.Errors)
+        );
+    }
 }

@@ -394,6 +394,21 @@ public static partial class RecipeValidator
     [GeneratedRegex(@"\bor\s+$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex TrailingOrWordRegex();
 
+    [GeneratedRegex(
+        @"\b(?:syrup|marinade|brine|batter|glaze|sauce|dressing|custard|roux|compote)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex CompositePreparedNounRegex();
+
+    [GeneratedRegex(@"\binto\s+$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex TrailingIntoWordRegex();
+
+    [GeneratedRegex(
+        @"^\s+(?:pieces?|chunks?|cubes?|balls?|portions?|mounds?|pats?|drops?|rounds?|disks?|strips?|slices?)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex LeadingPieceUnitRegex();
+
     public static RecipeValidationResult Validate(ExtractedRecipeDto? recipe) =>
         Validate(recipe, sourceText: null);
 
@@ -2010,6 +2025,16 @@ public static partial class RecipeValidator
                                 $"Step {stepNum}: IngredientToken '{{{{{key}}}}}' ('{tok.FallbackDisplay}') binds rendered fat/drippings to '{masterIng.CanonicalFoodItem}' ({refId}). Keep derived cooking fat as plain text or reference the meat with stepQuantity: null."
                             );
                         }
+                        else if (
+                            CompositePreparedNounRegex().IsMatch(tok.FallbackDisplay)
+                            && !CompositePreparedNounRegex().IsMatch(masterText)
+                            && tok.StepQuantity is > 0m
+                        )
+                        {
+                            errors.Add(
+                                $"Step {stepNum}: IngredientToken '{{{{{key}}}}}' ('{tok.FallbackDisplay.Trim()}') binds a composite prepared mixture to single ingredient '{masterIng.CanonicalFoodItem}' ({refId}). Write '{tok.FallbackDisplay.Trim()}' (with its quantity/unit) as plain text in templateText and remove '{{{{{key}}}}}' from ingredientTokens."
+                            );
+                        }
                     }
 
                     if (
@@ -2067,6 +2092,32 @@ public static partial class RecipeValidator
                         {
                             errors.Add(
                                 $"Step {stepNum}: IngredientToken '{{{{{key}}}}}' places full batch quantity ({tok.StepQuantity.Value:0.###} {tok.StepUnit}) inside a singular per-portion phrase ('{prefix.Trim()}') for '{masterIng.CanonicalFoodItem}'. Put the total batch quantity on the portioning step instead and use the per-portion amount or null here."
+                            );
+                        }
+                    }
+
+                    if (
+                        tok.StepQuantity is > 0m
+                        && !string.IsNullOrEmpty(step.TemplateText)
+                        && placeholderMatchesByKey.TryGetValue(key, out var sizeTokMatch)
+                    )
+                    {
+                        var sizePrefixStart = Math.Max(0, sizeTokMatch.Index - 16);
+                        var sizePrefix = step.TemplateText[sizePrefixStart..sizeTokMatch.Index];
+                        var sizeSuffixEnd = Math.Min(
+                            step.TemplateText.Length,
+                            sizeTokMatch.Index + sizeTokMatch.Length + 24
+                        );
+                        var sizeSuffix = step.TemplateText[
+                            (sizeTokMatch.Index + sizeTokMatch.Length)..sizeSuffixEnd
+                        ];
+                        if (
+                            TrailingIntoWordRegex().IsMatch(sizePrefix)
+                            && LeadingPieceUnitRegex().IsMatch(sizeSuffix)
+                        )
+                        {
+                            errors.Add(
+                                $"Step {stepNum}: IngredientToken '{{{{{key}}}}}' describes a piece/portion size ('into ... pieces/cubes'), not an added ingredient quantity. Write the size descriptor as plain text (e.g. '1/2-tablespoon pieces') and remove '{{{{{key}}}}}' from ingredientTokens."
                             );
                         }
                     }
