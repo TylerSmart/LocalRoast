@@ -32,16 +32,6 @@ public enum IngestionJobStatus
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
-public enum IngestionRefinementStatus
-{
-    Pending = 0,
-    Running = 1,
-    Improved = 2,
-    NoImprovement = 3,
-    Failed = 4,
-}
-
-[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum PdfExtractionMode
 {
     DigitalText = 0,
@@ -49,9 +39,16 @@ public enum PdfExtractionMode
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
-public enum IngestionIssueTriageResolution
+public enum IngestionJobSortBy
 {
-    NeedsHumanReview = 0,
-    Resolved = 1,
-    IgnoreAsFalsePositive = 2,
+    CreatedAt = 0,
+    ModifiedAt = 1,
+    Name = 2,
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum IngestionJobSortDirection
+{
+    Desc = 0,
+    Asc = 1,
 }

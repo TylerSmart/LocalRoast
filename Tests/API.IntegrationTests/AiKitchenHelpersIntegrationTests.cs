@@ -53,18 +53,6 @@ public sealed class AiKitchenHelpersIntegrationTests
 
     private sealed class MockLlmExtractionClient : ILlmExtractionClient
     {
-        public Task<LlmAutoRepairAndTriageResult> TriageAndRepairRecipeAsync(
-            EffectiveLlmConnectionConfig config,
-            LlmAutoRepairAndTriageContext context,
-            CancellationToken cancellationToken = default
-        ) => throw new NotImplementedException();
-
-        public Task<LlmRecipeRepairResult> RepairRecipeDraftAsync(
-            EffectiveLlmConnectionConfig config,
-            LlmRecipeRepairContext context,
-            CancellationToken cancellationToken = default
-        ) => throw new NotImplementedException();
-
         public bool ProbeReachable { get; set; } = true;
         public bool ThrowUnavailable { get; set; }
         public LlmKitchenQuestionContext? LastKitchenQuestionContext { get; private set; }
@@ -118,17 +106,17 @@ public sealed class AiKitchenHelpersIntegrationTests
             );
         }
 
-        public Task<string?> StructureRecipeSourceAsync(
-            EffectiveLlmConnectionConfig config,
-            string sourceText,
-            CancellationToken cancellationToken = default
-        ) => throw new NotImplementedException();
-
-        public Task<LlmExtractedRecipePayload> ExtractRecipeFromTextAsync(
+        public Task<ExtractedRecipeDto> ExtractRecipeFromTextAsync(
             EffectiveLlmConnectionConfig config,
             LlmExtractionContext context,
             CancellationToken cancellationToken = default
         ) => throw new NotImplementedException();
+
+        public Task<LlmEntityDisambiguationResult> DisambiguateEntitiesAsync(
+            EffectiveLlmConnectionConfig config,
+            LlmEntityDisambiguationContext context,
+            CancellationToken cancellationToken = default
+        ) => Task.FromResult(new LlmEntityDisambiguationResult());
 
         public Task<string?> TranscribeRecipeImagesAsync(
             EffectiveLlmConnectionConfig config,

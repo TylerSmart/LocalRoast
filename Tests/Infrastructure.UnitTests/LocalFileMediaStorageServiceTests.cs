@@ -223,4 +223,48 @@ public sealed class LocalFileMediaStorageServiceTests
             }
         }
     }
+
+    [TestMethod]
+    public async Task PurgeUnreferencedMediaAsync_PreservesSpecifiedPathsAndDeletesOrphans()
+    {
+        using var coverStream = CreateTestImageStream(400, 300);
+        var cover = await _service.SaveRecipeCoverAsync(
+            coverStream,
+            "cover.png",
+            coverStream.Length
+        );
+
+        using var stepStream = CreateTestImageStream(200, 200);
+        var step = await _service.SaveStepImageAsync(stepStream, "step.png", stepStream.Length);
+
+        var textFile = await _service.SaveIngestionSourceTextAsync(
+            "Sample text",
+            "recipe.txt",
+            "job123"
+        );
+
+        var preservedCoverDiskPath = Path.Combine(
+            _tempDirectory,
+            "recipes",
+            Path.GetFileName(cover.CoverImagePath)
+        );
+        var orphanThumbDiskPath = Path.Combine(
+            _tempDirectory,
+            "recipes",
+            Path.GetFileName(cover.ThumbnailImagePath)
+        );
+        var stepDiskPath = Path.Combine(_tempDirectory, "steps", Path.GetFileName(step.ImagePath));
+        var preservedTextDiskPath = Path.Combine(
+            _tempDirectory,
+            "ingestion",
+            Path.GetFileName(textFile.MediaUrlPath)
+        );
+
+        await _service.PurgeUnreferencedMediaAsync([cover.CoverImagePath, textFile.MediaUrlPath]);
+
+        Assert.IsTrue(File.Exists(preservedCoverDiskPath));
+        Assert.IsTrue(File.Exists(preservedTextDiskPath));
+        Assert.IsFalse(File.Exists(orphanThumbDiskPath));
+        Assert.IsFalse(File.Exists(stepDiskPath));
+    }
 }

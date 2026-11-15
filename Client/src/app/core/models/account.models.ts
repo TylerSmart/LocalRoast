@@ -24,6 +24,10 @@ export interface UpdateThemeSettingsRequest {
   settings: ThemeConfig;
 }
 
+export interface ResetAppDataRequest {
+  keepIngestionJobs?: boolean;
+}
+
 export interface ResetAppDataResultDto {
   deletedRecipesCount: number;
   deletedMealPlansCount: number;
@@ -34,4 +38,5 @@ export interface ResetAppDataResultDto {
   deletedCollectionsCount: number;
   resetAt: string;
   restoredDefaultTagsCount?: number;
+  resetIngestionJobsCount?: number;
 }

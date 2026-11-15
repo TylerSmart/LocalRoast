@@ -480,7 +480,7 @@ public sealed class McpCookbookService(
                     continue;
                 }
 
-                var (unit, customUnit) = RecipeDraftNormalizer.NormalizeUnit(ing.Unit);
+                var (unit, customUnit) = RecipeUnitAndSectionHelpers.NormalizeUnit(ing.Unit);
                 var candidateName = !string.IsNullOrWhiteSpace(ing.CanonicalFoodName)
                     ? ing.CanonicalFoodName.Trim()
                     : ing.DisplayName.Trim();
@@ -586,7 +586,25 @@ public sealed class McpCookbookService(
 
                 if (timers.Count == 0)
                 {
-                    timers.AddRange(StepTimerExtractor.DetectTimers(instruction, i + 1));
+                    timers.AddRange(
+                        StepInstructionParser
+                            .ExtractTokens(instruction)
+                            .OfType<StepTimerToken>()
+                            .Where(t => t.Seconds >= 1)
+                            .Select(t => new RecipeStepTimerInput(
+                                t.Seconds,
+                                !string.IsNullOrWhiteSpace(t.Label)
+                                    ? t.Label.Trim()
+                                    : $"Step {i + 1} timer"
+                            ))
+                    );
+                }
+
+                if (timers.Count == 0)
+                {
+                    timers.AddRange(
+                        RecipeUnitAndSectionHelpers.DetectPlainTextTimers(instruction, i + 1)
+                    );
                 }
 
                 var validIndices = (s.IngredientIndices ?? [])
@@ -681,7 +699,7 @@ public sealed class McpCookbookService(
                         var createdTag = await taxonomyService.CreateTagAsync(
                             new UpsertTagRequest(
                                 clean,
-                                RecipeDraftNormalizer.InferTagCategory(clean)
+                                RecipeUnitAndSectionHelpers.InferTagCategory(clean)
                             ),
                             cancellationToken
                         );

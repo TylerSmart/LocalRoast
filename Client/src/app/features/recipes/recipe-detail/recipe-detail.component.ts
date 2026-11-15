@@ -65,6 +65,7 @@ import {
   KitchenQuestionDialogComponent,
   KitchenQuestionDialogData,
 } from '../kitchen-question-dialog/kitchen-question-dialog.component';
+import { Title } from '@angular/platform-browser';
 
 export interface ScaledIngredientItem {
   ingredient: RecipeIngredientDto;
@@ -118,6 +119,7 @@ export class RecipeDetailComponent implements OnInit {
   private readonly dialog = inject(MatDialog);
   private readonly snackBar = inject(MatSnackBar);
   protected readonly aiHelper = inject(AiKitchenHelperService);
+  private readonly title = inject(Title);
 
   protected readonly recipe = signal<RecipeDetailDto | null>(null);
   protected readonly isLoading = signal<boolean>(true);
@@ -326,6 +328,7 @@ export class RecipeDetailComponent implements OnInit {
       next: (detail) => {
         this.recipe.set(detail);
         this.targetServings.set(detail.baseServings);
+        this.title.setTitle(`LocalRoast | ${detail.title}`);
         this.isLoading.set(false);
       },
       error: (err: { error?: { detail?: string; title?: string } }) => {

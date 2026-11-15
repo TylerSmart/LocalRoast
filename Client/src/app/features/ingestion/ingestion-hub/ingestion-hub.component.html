@@ -609,8 +609,6 @@
           <span class="refresh-text">
             @if (isRefreshing()) {
               Refreshing...
-            } @else if (refreshInterval() > 0) {
-              Refresh ({{ remainingTimeDisplay() }})
             } @else {
               Refresh
             }
@@ -659,7 +657,7 @@
     </div>
   </div>
 
-  <!-- Real-time Ingestion Search (Dedicated Line) -->
+  <!-- Real-time Ingestion Search & Sort -->
   <div class="queue-search-row">
     <mat-form-field appearance="outline" subscriptSizing="dynamic" class="search-form-field">
       <mat-icon matPrefix>search</mat-icon>
@@ -683,6 +681,41 @@
         </button>
       }
     </mat-form-field>
+
+    <div class="sort-controls">
+      <mat-form-field appearance="outline" subscriptSizing="dynamic" class="sort-form-field">
+        <mat-label>Sort by</mat-label>
+        <mat-icon matPrefix>sort</mat-icon>
+        <mat-select
+          [value]="sortBy()"
+          (selectionChange)="onSortByChange($event.value)"
+          aria-label="Sort ingestion jobs by"
+        >
+          @for (option of sortOptions; track option.value) {
+            <mat-option [value]="option.value">{{ option.label }}</mat-option>
+          }
+        </mat-select>
+      </mat-form-field>
+
+      <button
+        mat-stroked-button
+        type="button"
+        class="sort-direction-btn"
+        (click)="toggleSortDirection()"
+        [matTooltip]="
+          sortDirection() === 'Asc'
+            ? 'Sorted ascending (click to switch to descending)'
+            : 'Sorted descending (click to switch to ascending)'
+        "
+        [attr.aria-label]="
+          sortDirection() === 'Asc'
+            ? 'Sort direction: Ascending. Click to sort descending.'
+            : 'Sort direction: Descending. Click to sort ascending.'
+        "
+      >
+        <mat-icon>{{ sortDirection() === 'Asc' ? 'arrow_upward' : 'arrow_downward' }}</mat-icon>
+      </button>
+    </div>
   </div>
 
   <!-- Job List -->

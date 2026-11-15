@@ -108,6 +108,11 @@ public sealed class CookLogServiceTests
 
         public Task PurgeAllMediaAsync(CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
+
+        public Task PurgeUnreferencedMediaAsync(
+            IReadOnlyCollection<string> preservedMediaUrlPaths,
+            CancellationToken cancellationToken = default
+        ) => Task.CompletedTask;
     }
 
     private sealed class TestUserContext(string userId) : IUserContext

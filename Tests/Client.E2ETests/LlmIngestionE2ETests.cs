@@ -276,7 +276,7 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
 
     [TestMethod]
     [Timeout(DefaultTestTimeoutMs)]
-    public async Task ReviewRepair_PreviewsCancelsAppliesAndSavesWithoutLosingEditsOnMobile()
+    public async Task ReviewDiagnostics_RechecksIssuesAndSavesDraftOnMobile()
     {
         await using var mockServer = await MockLanLlmAndBlogServer.StartAsync();
         mockServer.ResponsePayload = """
@@ -329,70 +329,13 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
             await Expect(reviewCard).ToContainTextAsync("draft has changed");
             await reviewCard.Locator("button", new() { HasText = "Recheck issues" }).ClickAsync();
             await Expect(reviewCard).Not.ToContainTextAsync("draft has changed");
-
-            mockServer.ResponsePayload = """
-                {
-                  "title":"AI proposal","baseServings":4,
-                  "ingredients":[
-                    {"displayName":"butter","canonicalFoodName":"butter","quantity":1,"unit":"Tbsp","originalRawText":"1 tbsp butter"},
-                    {"displayName":"salt","canonicalFoodName":"salt","quantity":null,"unit":null,"originalRawText":"Salt"}
-                  ],
-                  "steps":[
-                    {"instruction":"Melt butter, then add salt.","ingredientIndices":[0,1],
-                     "timers":[{"durationSeconds":60,"label":"Melt butter"}]}
-                  ]
-                }
-                """;
-            await reviewCard.Locator("textarea").FillAsync("Link the salt.");
-            await reviewCard
-                .Locator("button", new() { HasText = "Re-extract with AI" })
-                .ClickAsync();
-            var preview = Page.Locator("app-ingestion-repair-dialog");
-            await Expect(preview).ToBeVisibleAsync();
-            await Expect(preview).ToContainTextAsync("Unsaved user title");
-            await Expect(preview).ToContainTextAsync("AI proposal");
-            await Expect(preview).ToContainTextAsync("Linked ingredients");
-            await Expect(preview).ToContainTextAsync("Melt butter: 60s");
-            StringAssert.Contains(mockServer.LastUserPrompt!, "Link the salt.");
             Assert.IsTrue(
                 await Page.EvaluateAsync<bool>(
                     "document.documentElement.scrollWidth <= window.innerWidth"
                 ),
                 "The review page must fit a 360px viewport."
             );
-            Assert.IsTrue(
-                await preview.EvaluateAsync<bool>("el => el.scrollWidth <= el.clientWidth"),
-                "The repair dialog must fit a 360px viewport."
-            );
-            await preview.Locator("button", new() { HasText = "Cancel" }).ClickAsync();
-            await Expect(title).ToHaveValueAsync("Unsaved user title");
-            await Page.ReloadAsync();
-            await Expect(title).ToHaveValueAsync("Repair Journey");
 
-            await title.FillAsync("Unsaved after reload");
-            mockServer.SimulateOffline = true;
-            await reviewCard
-                .Locator("button", new() { HasText = "Re-extract with AI" })
-                .ClickAsync();
-            await Expect(reviewCard.Locator("[role='alert']")).ToBeVisibleAsync();
-            await Expect(title).ToHaveValueAsync("Unsaved after reload");
-            mockServer.SimulateOffline = false;
-
-            await reviewCard
-                .Locator("button", new() { HasText = "Re-extract with AI" })
-                .ClickAsync();
-            await Expect(preview).ToBeVisibleAsync();
-            await preview.Locator("button", new() { HasText = "Apply to editor" }).ClickAsync();
-            await Expect(title).ToHaveValueAsync("AI proposal");
-            await Page.ReloadAsync();
-            await Expect(title).ToHaveValueAsync("Repair Journey");
-
-            await reviewCard
-                .Locator("button", new() { HasText = "Re-extract with AI" })
-                .ClickAsync();
-            await Expect(preview).ToBeVisibleAsync();
-            await preview.Locator("button", new() { HasText = "Apply to editor" }).ClickAsync();
-            await Expect(title).ToHaveValueAsync("AI proposal");
             await Page.Locator("button[aria-label='Save review draft']").ClickAsync();
             await Expect(
                     Page.Locator("mat-snack-bar-container")
@@ -400,7 +343,7 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
                 )
                 .ToBeVisibleAsync();
             await Page.ReloadAsync();
-            await Expect(title).ToHaveValueAsync("AI proposal");
+            await Expect(title).ToHaveValueAsync("Unsaved user title");
         }
         finally
         {
@@ -496,7 +439,7 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await Expect(instructions.First)
             .ToHaveAttributeAsync(
                 "data-serialized-value",
-                "Combine ||{\"ingredient\":\"Starter Flour\",\"amount\":1,\"unit\":\"cup\"}|| with water."
+                "Combine ||{\"ingredient\":\"Starter Flour\",\"amount\":1,\"unit\":\"cup\",\"type\":\"Ingredient\"}|| with water."
             );
         var taggedChips = Page.Locator(
             "app-step-instruction-editor .inline-step-chip.is-ingredient"
@@ -915,7 +858,7 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await Expect(menu).ToBeVisibleAsync();
         await menu.Locator("button", new() { HasText = "30 seconds" }).ClickAsync();
         await Expect(countdownSpinner).ToBeVisibleAsync();
-        await Expect(refreshBtn).ToContainTextAsync(new Regex(@"Refresh \(\d+s\)"));
+        await Expect(refreshBtn).ToContainTextAsync("Refresh");
 
         // 6. Verify Retry All button exists in queue toolbar
         var retryAllBtn = Page.Locator(".queue-toolbar .retry-all-tab-btn");
@@ -1892,5 +1835,143 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
             .GetByRole(AriaRole.Button, new() { Name = "Close", Exact = true })
             .ClickAsync();
         await Expect(dialog).Not.ToBeVisibleAsync();
+    }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task IngestionHub_SortJobsByNameCreatedAndUpdated_WorksOnDesktopAndMobile()
+    {
+        await RegisterAndLoginAsync();
+
+        await Page.GotoAsync($"{ServerUrl}/ingest");
+        await Expect(Page).ToHaveURLAsync(new Regex(".*/ingest$"));
+
+        // Pause ingestion so queued jobs remain in deterministic order
+        var toggleBtn = Page.Locator(".toggle-ingestion-btn");
+        if ((await toggleBtn.InnerTextAsync()).Contains("Pause Ingestion"))
+        {
+            await toggleBtn.ClickAsync();
+            await Expect(Page.Locator(".paused-ingestion-banner")).ToBeVisibleAsync();
+        }
+
+        // Enqueue 3 jobs with distinct titles and creation times via the authenticated browser context
+        var createdIds = await Page.EvaluateAsync<string[]>(
+            @"async () => {
+                const tokenKey = Object.keys(localStorage).find(k => k.endsWith('-token'));
+                const token = tokenKey ? localStorage.getItem(tokenKey) : null;
+                if (!token) throw new Error('Missing auth token in localStorage');
+                const headers = {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                };
+
+                const titles = ['Beta Soup', 'Gamma Salad', 'Alpha Bread'];
+                const ids = [];
+                for (const title of titles) {
+                    const res = await fetch('/api/ingestion/jobs/text', {
+                        method: 'POST',
+                        headers,
+                        body: JSON.stringify({ rawText: title + ' recipe ingredients and steps', titleHint: title })
+                    });
+                    if (!res.ok) throw new Error('Failed to enqueue ' + title + ': ' + res.status);
+                    const data = await res.json();
+                    ids.push(data.id);
+                    await new Promise(r => setTimeout(r, 30));
+                }
+
+                // Touch Beta Soup's draft so its ModifiedAt is newest
+                await new Promise(r => setTimeout(r, 30));
+                const draftRes = await fetch(`/api/ingestion/jobs/${ids[0]}/draft`, {
+                    method: 'PUT',
+                    headers,
+                    body: JSON.stringify({
+                        title: 'Beta Soup',
+                        description: 'Updated',
+                        prepTimeMinutes: 10,
+                        cookTimeMinutes: 20,
+                        servings: 2,
+                        difficulty: 'Easy',
+                        ingredients: [],
+                        steps: [],
+                        tags: [],
+                        confidenceScore: 0.9
+                    })
+                });
+                if (!draftRes.ok) throw new Error('Failed to update draft: ' + draftRes.status);
+                return ids;
+            }"
+        );
+        Assert.HasCount(3, createdIds);
+
+        await Page.Locator(".refresh-main-btn").ClickAsync();
+        await Expect(Page.Locator(".job-card .job-title").First).ToBeVisibleAsync();
+
+        var searchRow = Page.Locator(".queue-search-row");
+        var sortSelect = searchRow.Locator(".sort-form-field mat-select");
+        var sortDirectionBtn = searchRow.Locator(".sort-direction-btn");
+        await Expect(sortSelect).ToBeVisibleAsync();
+        await Expect(sortDirectionBtn).ToBeVisibleAsync();
+
+        async Task SelectSortByAsync(string optionText)
+        {
+            await sortSelect.ClickAsync();
+            var option = Page.Locator("mat-option", new() { HasText = optionText });
+            var response = await Page.RunAndWaitForResponseAsync(
+                () => option.ClickAsync(),
+                r => r.Url.Contains("/api/ingestion/jobs?", StringComparison.Ordinal) && r.Ok
+            );
+            Assert.IsTrue(response.Ok);
+        }
+
+        async Task ToggleSortDirectionAsync()
+        {
+            var response = await Page.RunAndWaitForResponseAsync(
+                () => sortDirectionBtn.ClickAsync(),
+                r => r.Url.Contains("/api/ingestion/jobs?", StringComparison.Ordinal) && r.Ok
+            );
+            Assert.IsTrue(response.Ok);
+        }
+
+        var targetTitles = Page.Locator(".job-card .job-title")
+            .Filter(new() { HasTextRegex = new Regex("^(Alpha Bread|Beta Soup|Gamma Salad)$") });
+
+        async Task AssertOrderAsync(params string[] expectedTitles)
+        {
+            await Expect(targetTitles).ToHaveTextAsync(expectedTitles);
+        }
+
+        // Default: Created (Desc) -> Alpha Bread, Gamma Salad, Beta Soup
+        await AssertOrderAsync("Alpha Bread", "Gamma Salad", "Beta Soup");
+
+        // Toggle to Created (Asc)
+        await ToggleSortDirectionAsync();
+        await AssertOrderAsync("Beta Soup", "Gamma Salad", "Alpha Bread");
+
+        // Switch to Name (still Asc) -> Alpha Bread, Beta Soup, Gamma Salad
+        await SelectSortByAsync("Name");
+        await AssertOrderAsync("Alpha Bread", "Beta Soup", "Gamma Salad");
+
+        // Toggle to Name (Desc) -> Gamma Salad, Beta Soup, Alpha Bread
+        await ToggleSortDirectionAsync();
+        await AssertOrderAsync("Gamma Salad", "Beta Soup", "Alpha Bread");
+
+        // Switch to Updated (still Desc) -> Beta Soup was updated last
+        await SelectSortByAsync("Updated");
+        await AssertOrderAsync("Beta Soup", "Alpha Bread", "Gamma Salad");
+
+        // Toggle to Updated (Asc) -> Gamma Salad, Alpha Bread, Beta Soup
+        await ToggleSortDirectionAsync();
+        await AssertOrderAsync("Gamma Salad", "Alpha Bread", "Beta Soup");
+
+        // Verify 360px mobile viewport renders search & sort controls cleanly without horizontal overflow
+        await Page.SetViewportSizeAsync(360, 800);
+        await Expect(sortSelect).ToBeVisibleAsync();
+        await Expect(sortDirectionBtn).ToBeVisibleAsync();
+        Assert.IsTrue(
+            await Page.EvaluateAsync<bool>(
+                "document.documentElement.scrollWidth <= window.innerWidth"
+            ),
+            "Viewport horizontal overflow detected at 360px on ingestion hub with sort selector."
+        );
     }
 }

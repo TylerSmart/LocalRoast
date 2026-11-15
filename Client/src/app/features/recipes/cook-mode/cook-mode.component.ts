@@ -54,6 +54,7 @@ import {
   CookLogDialogComponent,
   CookLogDialogData,
 } from '../cook-log-dialog/cook-log-dialog.component';
+import { Title } from '@angular/platform-browser';
 
 export interface ScaledCookIngredient {
   ingredient: RecipeIngredientDto;
@@ -102,6 +103,7 @@ export class CookModeComponent implements OnInit, OnDestroy {
   protected readonly voiceControlService = inject(VoiceControlService);
   protected readonly aiHelper = inject(AiKitchenHelperService);
   private readonly dialog = inject(MatDialog);
+  private readonly title = inject(Title);
 
   protected readonly showVoiceHelp = signal<boolean>(false);
   private voiceSub?: Subscription;
@@ -310,6 +312,7 @@ export class CookModeComponent implements OnInit, OnDestroy {
           this.targetServings.set(data.baseServings);
         }
         this.isLoading.set(false);
+        this.title.setTitle(`LocalRoast | Cook ${data.title}`);
         this.narrateCurrentStepIfEnabled();
       },
       error: (err) => {

@@ -47,6 +47,10 @@ export type IngestionJobStatus =
   | 'Failed'
   | 'Discarded';
 
+export type IngestionJobSortBy = 'CreatedAt' | 'ModifiedAt' | 'Name';
+
+export type IngestionJobSortDirection = 'Asc' | 'Desc';
+
 export interface LlmModelProfile {
   id: string;
   displayName: string;
@@ -349,6 +353,8 @@ export interface IngestionExtractedDraftDto {
   extractedModel?: string | null;
   proposedTagNames?: string[] | null;
   measurementWarnings?: string[] | null;
+  qualityWarnings?: string[] | null;
+  validationIssues?: string[] | null;
 }
 
 export interface IngestionDiagnosticTargetDto {
@@ -362,29 +368,6 @@ export interface IngestionReviewDiagnosticsDto {
   validationIssues: string[];
   qualityWarnings: string[];
   targetedDiagnostics?: IngestionDiagnosticTargetDto[];
-}
-
-export interface IngestionRepairPreviewDto {
-  draft: IngestionExtractedDraftDto;
-  before: IngestionReviewDiagnosticsDto;
-  after: IngestionReviewDiagnosticsDto;
-  notices: string[];
-}
-
-export type IngestionRefinementStatus =
-  'Pending' | 'Running' | 'Improved' | 'NoImprovement' | 'Failed';
-
-/** issuesBefore and issuesAfter count validation issues plus quality warnings. */
-export interface IngestionRefinementDto {
-  status: IngestionRefinementStatus;
-  model: string;
-  detail: string | null;
-  issuesBefore: number | null;
-  issuesAfter: number | null;
-  requestedAt: string;
-  completedAt: string | null;
-  hasProposal: boolean;
-  basedOnEarlierDraft: boolean;
 }
 
 export interface EnqueueWebUrlIngestionRequest {

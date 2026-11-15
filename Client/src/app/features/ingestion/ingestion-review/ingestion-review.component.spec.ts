@@ -4,19 +4,16 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { MatDialog } from '@angular/material/dialog';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { ActivatedRoute, Router, provideRouter } from '@angular/router';
-import { Subject, of, throwError } from 'rxjs';
+import { Subject, of } from 'rxjs';
 import { FoodItemDto } from '../../../core/models/food-catalog.models';
 import type {
   IngestionJobDetailDto,
-  IngestionRefinementDto,
-  IngestionRepairPreviewDto,
   IngestionReviewDiagnosticsDto,
 } from '../../../core/models/ingestion.models';
 import { RecipeDetailDto } from '../../../core/models/recipe.models';
 import { CollectionDto, TagDto } from '../../../core/models/taxonomy.models';
 import { FoodCatalogService } from '../../../core/services/food-catalog/food-catalog.service';
 import { IngestionService } from '../../../core/services/ingestion/ingestion.service';
-import { LlmSettingsService } from '../../../core/services/llm-settings/llm-settings.service';
 import { TaxonomyService } from '../../../core/services/taxonomy/taxonomy.service';
 import { IngestionReviewComponent } from './ingestion-review.component';
 
@@ -61,14 +58,6 @@ describe('IngestionReviewComponent', () => {
     discardJob: ReturnType<typeof vi.fn>;
     retryJob: ReturnType<typeof vi.fn>;
     getReviewDiagnostics: ReturnType<typeof vi.fn>;
-    previewRepair: ReturnType<typeof vi.fn>;
-    getRefinement: ReturnType<typeof vi.fn>;
-    requestRefinement: ReturnType<typeof vi.fn>;
-    dismissRefinement: ReturnType<typeof vi.fn>;
-    previewRefinement: ReturnType<typeof vi.fn>;
-  };
-  let mockLlmSettingsService: {
-    getSettings: ReturnType<typeof vi.fn>;
   };
   let mockFoodCatalogService: {
     getFoodItems: ReturnType<typeof vi.fn>;
@@ -244,15 +233,6 @@ describe('IngestionReviewComponent', () => {
       getReviewDiagnostics: vi
         .fn()
         .mockReturnValue(of({ validationIssues: [], qualityWarnings: [] })),
-      previewRepair: vi.fn(),
-      getRefinement: vi.fn().mockReturnValue(of(null)),
-      requestRefinement: vi.fn(),
-      dismissRefinement: vi.fn().mockReturnValue(of(undefined)),
-      previewRefinement: vi.fn(),
-    };
-
-    mockLlmSettingsService = {
-      getSettings: vi.fn().mockReturnValue(of({ refineModel: 'gemma4:12b' })),
     };
 
     mockFoodCatalogService = {
@@ -289,7 +269,6 @@ describe('IngestionReviewComponent', () => {
           },
         },
         { provide: IngestionService, useValue: mockIngestionService },
-        { provide: LlmSettingsService, useValue: mockLlmSettingsService },
         { provide: FoodCatalogService, useValue: mockFoodCatalogService },
         { provide: TaxonomyService, useValue: mockTaxonomyService },
         { provide: MatDialog, useValue: mockDialog },
@@ -358,25 +337,6 @@ describe('IngestionReviewComponent', () => {
     expect(component.diagnosticsStale()).toBe(true);
   });
 
-  function makePreview(): IngestionRepairPreviewDto {
-    const draft = component.buildDraftPayload();
-    return {
-      draft: {
-        ...draft,
-        title: 'AI suggestion',
-        suggestedCollectionIds: [],
-        suggestedTagIds: [],
-        proposedTagNames: [],
-        ingredients: draft.ingredients.map((item, index) =>
-          index === 0 ? { ...item, createNewFoodItem: false } : item,
-        ),
-      },
-      before: { validationIssues: ['A problem'], qualityWarnings: [] },
-      after: { validationIssues: [], qualityWarnings: [] },
-      notices: [],
-    };
-  }
-
   it('inserts, previews and builds payload with inline step tokens', () => {
     component.stepsArray.at(0).patchValue({
       instruction:
@@ -397,95 +357,6 @@ describe('IngestionReviewComponent', () => {
 
     component['refreshPreviewData']();
     expect(component.previewData()?.steps[0].instruction).toContain('tofu');
-  });
-
-  it('passes the current edits and hint to AI and leaves a cancelled preview unsaved', () => {
-    component.form.controls.title.setValue('My unsaved title');
-    component.repairHint.setValue('  Fix the timer  ');
-    const preview = makePreview();
-    mockIngestionService.previewRepair.mockReturnValue(of(preview));
-    mockDialog.open.mockReturnValue({ afterClosed: () => of(false) });
-
-    component.fixWithAi();
-
-    expect(mockIngestionService.previewRepair).toHaveBeenCalledWith(
-      'job-123',
-      expect.objectContaining({ title: 'My unsaved title' }),
-      'Fix the timer',
-    );
-    expect(component.form.controls.title.value).toBe('My unsaved title');
-    expect(mockIngestionService.saveDraft).not.toHaveBeenCalled();
-  });
-
-  it('applies a preview only to the editor and preserves cleared fields and food settings', () => {
-    component.form.controls.sourceUrl.setValue('');
-    component.form.controls.difficulty.setValue(null);
-    component.proposedTagNames.set(['Previously unselected']);
-    const preview = makePreview();
-    mockIngestionService.previewRepair.mockReturnValue(of(preview));
-    const dialogResult = new Subject<boolean>();
-    mockDialog.open.mockReturnValue({ afterClosed: () => dialogResult });
-
-    component.fixWithAi();
-    expect(component.form.controls.title.value).toBe('Crispy Sesame Tofu');
-    dialogResult.next(true);
-
-    expect(component.form.controls.title.value).toBe('AI suggestion');
-    expect(component.form.controls.sourceUrl.value).toBe('');
-    expect(component.form.controls.difficulty.value).toBeNull();
-    expect(component.selectedCollectionIds().size).toBe(0);
-    expect(component.selectedTagIds().size).toBe(0);
-    expect(component.proposedTagNames()).toContain('Previously unselected');
-    expect(component.buildDraftPayload().ingredients[0].createNewFoodItem).toBe(false);
-    expect(component.form.dirty).toBe(true);
-    expect(mockIngestionService.saveDraft).not.toHaveBeenCalled();
-  });
-
-  it('does not overwrite edits made during inference or while the preview is open', () => {
-    const response = new Subject<IngestionRepairPreviewDto>();
-    const preview = makePreview();
-    const dialogResult = new Subject<boolean>();
-    mockIngestionService.previewRepair.mockReturnValue(response);
-    mockDialog.open.mockReturnValue({ afterClosed: () => dialogResult });
-
-    component.fixWithAi();
-    component.form.controls.title.setValue('Edited while waiting');
-    response.next(preview);
-    component.form.controls.description.setValue('Edited while previewing');
-    dialogResult.next(true);
-
-    expect(component.form.controls.title.value).toBe('Edited while waiting');
-    expect(component.form.controls.description.value).toBe('Edited while previewing');
-    expect(component.reviewError()).toContain('Your edits were kept');
-    expect(mockIngestionService.saveDraft).not.toHaveBeenCalled();
-  });
-
-  it('refuses to apply a preview if another session changed the saved job', () => {
-    mockIngestionService.previewRepair.mockReturnValue(of(makePreview()));
-    const dialogResult = new Subject<boolean>();
-    mockDialog.open.mockReturnValue({ afterClosed: () => dialogResult });
-    component.fixWithAi();
-    mockIngestionService.getJobById.mockReturnValue(
-      of({ ...sampleJob, modifiedAt: '2026-10-27T12:00:00Z' }),
-    );
-    dialogResult.next(true);
-    expect(component.form.controls.title.value).toBe('Crispy Sesame Tofu');
-    expect(component.reviewError()).toContain('job changed');
-    expect(mockIngestionService.saveDraft).not.toHaveBeenCalled();
-  });
-
-  it('keeps unsaved edits accessible when AI repair fails', () => {
-    component.form.controls.title.setValue('Still editing');
-    mockIngestionService.previewRepair.mockReturnValue(
-      throwError(() => ({ error: { detail: 'The model is offline.' } })),
-    );
-    component.fixWithAi();
-    fixture.detectChanges();
-
-    expect(component.reviewError()).toBe('The model is offline.');
-    expect(component.errorMessage()).toBeNull();
-    expect(component.form.controls.title.value).toBe('Still editing');
-    expect(fixture.nativeElement.querySelector('.draft-form')).toBeTruthy();
   });
 
   it('toggles mobile panes cleanly', () => {
@@ -705,98 +576,6 @@ describe('IngestionReviewComponent', () => {
     expect(mockIngestionService.approveAndPublish).toHaveBeenCalled();
   });
 
-  function makeRefinement(overrides: Partial<IngestionRefinementDto> = {}): IngestionRefinementDto {
-    return {
-      status: 'Improved',
-      model: 'gemma4:12b',
-      detail: null,
-      issuesBefore: 3,
-      issuesAfter: 1,
-      requestedAt: '2026-01-01T00:00:00Z',
-      completedAt: '2026-01-01T00:05:00Z',
-      hasProposal: true,
-      basedOnEarlierDraft: false,
-      ...overrides,
-    };
-  }
-
-  it('offers a refinement request when a refine model is configured', () => {
-    const element: HTMLElement = fixture.nativeElement;
-    const button = element.querySelector<HTMLButtonElement>('[data-testid="request-refinement"]');
-    expect(button?.textContent).toContain('Refine with gemma4:12b');
-
-    mockIngestionService.requestRefinement.mockReturnValue(
-      of(makeRefinement({ status: 'Pending', hasProposal: false, completedAt: null })),
-    );
-    vi.useFakeTimers();
-    try {
-      button?.click();
-      fixture.detectChanges();
-      expect(mockIngestionService.requestRefinement).toHaveBeenCalledWith('job-123');
-      expect(element.querySelector('[data-testid="refinement-panel"]')?.textContent).toContain(
-        'Waiting to run',
-      );
-
-      mockIngestionService.getRefinement.mockReturnValue(of(makeRefinement()));
-      vi.advanceTimersByTime(IngestionReviewComponent.refinementPollMs);
-      fixture.detectChanges();
-      expect(component.refinement()?.status).toBe('Improved');
-      expect(element.textContent).toContain('3 → 1 issues');
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('hides the refinement request when no refine model is configured', () => {
-    mockLlmSettingsService.getSettings.mockReturnValue(of({ refineModel: null }));
-    const second = TestBed.createComponent(IngestionReviewComponent);
-    second.detectChanges();
-    expect(
-      (second.nativeElement as HTMLElement).querySelector('[data-testid="request-refinement"]'),
-    ).toBeNull();
-  });
-
-  it('compares a refined draft and applies it only to the editor', () => {
-    component.refinement.set(makeRefinement({ basedOnEarlierDraft: true }));
-    fixture.detectChanges();
-    expect(fixture.nativeElement.textContent).toContain('saved draft changed');
-
-    const preview = makePreview();
-    mockIngestionService.previewRefinement.mockReturnValue(of(preview));
-    mockDialog.open.mockReturnValue({ afterClosed: () => of(true) });
-
-    component.compareRefinement();
-
-    expect(mockIngestionService.previewRefinement).toHaveBeenCalledWith(
-      'job-123',
-      expect.objectContaining({ title: 'Crispy Sesame Tofu' }),
-    );
-    expect(mockDialog.open.mock.calls[0][1].data.title).toBe('Review refined draft');
-    expect(component.form.controls.title.value).toBe('AI suggestion');
-    expect(component.form.dirty).toBe(true);
-    expect(mockIngestionService.saveDraft).not.toHaveBeenCalled();
-  });
-
-  it('keeps edits made while the refined draft comparison is open', () => {
-    component.refinement.set(makeRefinement());
-    const dialogResult = new Subject<boolean>();
-    mockIngestionService.previewRefinement.mockReturnValue(of(makePreview()));
-    mockDialog.open.mockReturnValue({ afterClosed: () => dialogResult });
-
-    component.compareRefinement();
-    component.form.controls.title.setValue('Edited while comparing');
-    dialogResult.next(true);
-
-    expect(component.form.controls.title.value).toBe('Edited while comparing');
-    expect(component.reviewError()).toContain('Your edits were kept');
-  });
-
-  it('dismisses a refinement', () => {
-    component.refinement.set(makeRefinement({ status: 'NoImprovement', hasProposal: false }));
-    component.dismissRefinement();
-    expect(mockIngestionService.dismissRefinement).toHaveBeenCalledWith('job-123');
-    expect(component.refinement()).toBeNull();
-  });
   it('maps targeted diagnostics to ingredient and step cards and generates jump targets', () => {
     component.diagnostics.set({
       validationIssues: ['Draft title is missing'],

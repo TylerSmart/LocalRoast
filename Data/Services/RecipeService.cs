@@ -1398,7 +1398,7 @@ public sealed partial class RecipeService(
                 unit == MeasurementUnit.Custom
                 && (
                     string.IsNullOrWhiteSpace(customUnitName)
-                    || RecipeDraftNormalizer.IsDisallowedUnitPlaceholder(customUnitName)
+                    || RecipeUnitAndSectionHelpers.IsDisallowedUnitPlaceholder(customUnitName)
                 )
             )
             {
@@ -1419,7 +1419,9 @@ public sealed partial class RecipeService(
             {
                 RecipeId = recipe.Id,
                 SortOrder = i,
-                SectionName = RecipeDraftNormalizer.IsGenericTopLevelSection(input.SectionName)
+                SectionName = RecipeUnitAndSectionHelpers.IsGenericTopLevelSection(
+                    input.SectionName
+                )
                     ? null
                     : input.SectionName?.Trim(),
                 Quantity = quantity,
@@ -1479,7 +1481,9 @@ public sealed partial class RecipeService(
             {
                 RecipeId = recipe.Id,
                 StepNumber = s + 1,
-                SectionName = RecipeDraftNormalizer.IsGenericTopLevelSection(sInput.SectionName)
+                SectionName = RecipeUnitAndSectionHelpers.IsGenericTopLevelSection(
+                    sInput.SectionName
+                )
                     ? null
                     : sInput.SectionName?.Trim(),
                 Instruction = sInput.Instruction.Trim(),
@@ -1515,7 +1519,7 @@ public sealed partial class RecipeService(
             {
                 if (token is StepIngredientToken ingToken)
                 {
-                    var matchIdx = RecipeDraftNormalizer.FindBestMatchingIngredientIndex(
+                    var matchIdx = StepInstructionParser.FindBestMatchingIngredientIndex(
                         ingToken,
                         sInput.SectionName,
                         ingredientCandidates,

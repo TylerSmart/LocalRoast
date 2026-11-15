@@ -69,6 +69,7 @@ import {
   CollectionDialogData,
 } from '../collection-dialog/collection-dialog.component';
 import { TagDialogComponent, TagDialogData } from '../tag-dialog/tag-dialog.component';
+import { Title } from '@angular/platform-browser';
 
 interface IngredientFormValue {
   id?: string | null;
@@ -163,6 +164,7 @@ export class RecipeEditorComponent implements OnInit {
   private readonly taxonomyService = inject(TaxonomyService);
   private readonly dialog = inject(MatDialog);
   private readonly snackBar = inject(MatSnackBar);
+  private readonly title = inject(Title);
 
   protected readonly measurementUnits = MEASUREMENT_UNITS;
   protected readonly isEdit = signal<boolean>(false);
@@ -311,6 +313,7 @@ export class RecipeEditorComponent implements OnInit {
 
     this.recipeService.getRecipeById(id).subscribe({
       next: (detail) => {
+        this.title.setTitle(`LocalRoast | Edit ${detail.title}`);
         this.populateForm(detail);
         this.isLoading.set(false);
       },

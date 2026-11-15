@@ -10,8 +10,20 @@ using Microsoft.EntityFrameworkCore;
 
 namespace App.Data.Services;
 
-public static class IngestionCatalogMaterializer
+public static partial class IngestionCatalogMaterializer
 {
+    [GeneratedRegex(
+        @"\b(?:recipe\s+(?:follows|below|above|included|on\s+(?:this\s+|facing\s+)?page)|1\s+recipe\b|see\s+recipe\b)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex ExplicitRecipeReferenceCueRegex();
+
+    [GeneratedRegex(
+        @"\b(?:this\s+page|facing\s+page)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex PageReferenceCueRegex();
+
     public static string? ValidateOptionalMediaPath(string? path)
     {
         if (string.IsNullOrWhiteSpace(path))
@@ -59,7 +71,7 @@ public static class IngestionCatalogMaterializer
 
         var normName = cleanName.ToLowerInvariant();
 
-        var singularNorm = RecipeDraftNormalizer.Singularize(normName);
+        var singularNorm = RecipeUnitAndSectionHelpers.Singularize(normName);
 
         var candidateNorms = new[]
         {
@@ -113,7 +125,8 @@ public static class IngestionCatalogMaterializer
         CancellationToken cancellationToken
     )
     {
-        var cleanTitle = RecipeDraftNormalizer.NormalizeRecipeReferenceTitle(title) ?? title.Trim();
+        var cleanTitle =
+            RecipeUnitAndSectionHelpers.NormalizeRecipeReferenceTitle(title) ?? title.Trim();
         if (string.IsNullOrWhiteSpace(cleanTitle))
         {
             return null;
@@ -226,7 +239,8 @@ public static class IngestionCatalogMaterializer
     )
     {
         var cleanTitle =
-            RecipeDraftNormalizer.NormalizeRecipeReferenceTitle(recipeTitle) ?? recipeTitle.Trim();
+            RecipeUnitAndSectionHelpers.NormalizeRecipeReferenceTitle(recipeTitle)
+            ?? recipeTitle.Trim();
         if (string.IsNullOrWhiteSpace(cleanTitle))
             return 0;
 
@@ -242,7 +256,7 @@ public static class IngestionCatalogMaterializer
         foreach (var ri in waitingIngredients)
         {
             var candidateTitle =
-                RecipeDraftNormalizer.NormalizeRecipeReferenceTitle(ri.UnresolvedRecipeTitle)
+                RecipeUnitAndSectionHelpers.NormalizeRecipeReferenceTitle(ri.UnresolvedRecipeTitle)
                 ?? ri.UnresolvedRecipeTitle!.Trim();
             if (
                 string.Equals(candidateTitle, cleanTitle, StringComparison.OrdinalIgnoreCase)
@@ -286,7 +300,8 @@ public static class IngestionCatalogMaterializer
         foreach (var r in allRecipes)
         {
             var clean =
-                RecipeDraftNormalizer.NormalizeRecipeReferenceTitle(r.Title) ?? r.Title.Trim();
+                RecipeUnitAndSectionHelpers.NormalizeRecipeReferenceTitle(r.Title)
+                ?? r.Title.Trim();
             if (!recipeMap.ContainsKey(clean))
             {
                 recipeMap[clean] = r.Id;
@@ -301,7 +316,7 @@ public static class IngestionCatalogMaterializer
         foreach (var ri in waitingIngredients)
         {
             var candidateTitle =
-                RecipeDraftNormalizer.NormalizeRecipeReferenceTitle(ri.UnresolvedRecipeTitle)
+                RecipeUnitAndSectionHelpers.NormalizeRecipeReferenceTitle(ri.UnresolvedRecipeTitle)
                 ?? ri.UnresolvedRecipeTitle!.Trim();
             Guid matchedId = Guid.Empty;
             var found =
@@ -347,10 +362,7 @@ public static class IngestionCatalogMaterializer
     )
     {
         var unresolvedIssues = new List<string>();
-        if (
-            draft.Ingredients is not { Count: > 0 }
-            || !draft.Ingredients.Any(i => i.IsRecipeReference)
-        )
+        if (draft.Ingredients is not { Count: > 0 })
         {
             return (draft, unresolvedIssues);
         }
@@ -360,22 +372,39 @@ public static class IngestionCatalogMaterializer
         {
             if (ing.IsRecipeReference && !string.IsNullOrWhiteSpace(ing.ReferencedRecipeTitle))
             {
-                var cleanTitle =
-                    RecipeDraftNormalizer.NormalizeRecipeReferenceTitle(ing.ReferencedRecipeTitle)
-                    ?? ing.ReferencedRecipeTitle.Trim();
+                var candidates = BuildRecipeReferenceTitleCandidates(ing);
+                MatchedRecipeReference? matchedRecipe = null;
+                string? matchedCandidate = null;
+                foreach (var candidate in candidates)
+                {
+                    matchedRecipe = await FindMatchingRecipeAsync(
+                        dbContext,
+                        candidate,
+                        excludedRecipeId,
+                        cancellationToken
+                    );
+                    if (matchedRecipe is not null)
+                    {
+                        matchedCandidate = candidate;
+                        break;
+                    }
+                }
 
-                var matchedRecipe = await FindMatchingRecipeAsync(
-                    dbContext,
-                    cleanTitle,
-                    excludedRecipeId,
-                    cancellationToken
-                );
+                var cleanTitle = candidates.FirstOrDefault() ?? ing.ReferencedRecipeTitle.Trim();
 
                 if (matchedRecipe is not null)
                 {
+                    var (updatedRefTitle, updatedPrepNote) = ReconcileMatchedReferenceFields(
+                        ing,
+                        cleanTitle,
+                        matchedCandidate,
+                        matchedRecipe.Title
+                    );
                     updatedIngredients.Add(
                         ing with
                         {
+                            ReferencedRecipeTitle = updatedRefTitle,
+                            PreparationNote = updatedPrepNote,
                             MatchedRecipeId = matchedRecipe.Id,
                             MatchedRecipeTitle = matchedRecipe.Title,
                             MatchedRecipeSlug = matchedRecipe.Slug,
@@ -384,14 +413,30 @@ public static class IngestionCatalogMaterializer
                     continue;
                 }
 
-                var unlinkedTitle = !string.IsNullOrWhiteSpace(cleanTitle)
-                    ? cleanTitle
-                    : (
-                        !string.IsNullOrWhiteSpace(ing.DisplayName) ? ing.DisplayName : "sub-recipe"
-                    );
+                var unlinkedTitle = PickPreferredUnlinkedTitle(candidates, cleanTitle, ing);
                 unresolvedIssues.Add(
                     $"Referenced recipe '{unlinkedTitle}' is not published yet and could not be linked."
                 );
+                if (
+                    !string.Equals(
+                        unlinkedTitle,
+                        ing.ReferencedRecipeTitle.Trim(),
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                )
+                {
+                    updatedIngredients.Add(
+                        ing with
+                        {
+                            ReferencedRecipeTitle = unlinkedTitle,
+                            PreparationNote = StripMatchedPrepSuffix(
+                                ing.PreparationNote,
+                                unlinkedTitle
+                            ),
+                        }
+                    );
+                    continue;
+                }
             }
             else if (ing.IsRecipeReference && !ing.MatchedRecipeId.HasValue)
             {
@@ -402,11 +447,269 @@ public static class IngestionCatalogMaterializer
                     $"Referenced recipe '{unlinkedTitle}' is missing a referenced recipe title."
                 );
             }
+            else if (!ing.IsRecipeReference)
+            {
+                var promoted = await TryPromoteUnflaggedRecipeReferenceAsync(
+                    dbContext,
+                    ing,
+                    excludedRecipeId,
+                    unresolvedIssues,
+                    cancellationToken
+                );
+                if (promoted is not null)
+                {
+                    updatedIngredients.Add(promoted);
+                    continue;
+                }
+            }
 
             updatedIngredients.Add(ing);
         }
 
         return (draft with { Ingredients = updatedIngredients }, unresolvedIssues);
+    }
+
+    private static List<string> BuildRecipeReferenceTitleCandidates(IngestionDraftIngredientDto ing)
+    {
+        var candidates = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void AddCandidate(string? raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                return;
+            }
+
+            var normalized =
+                RecipeUnitAndSectionHelpers.NormalizeRecipeReferenceTitle(raw) ?? raw.Trim();
+            if (!string.IsNullOrWhiteSpace(normalized) && seen.Add(normalized))
+            {
+                candidates.Add(normalized);
+            }
+        }
+
+        var rawBase = !string.IsNullOrWhiteSpace(ing.ReferencedRecipeTitle)
+            ? ing.ReferencedRecipeTitle
+            : ing.DisplayName;
+        AddCandidate(rawBase);
+
+        if (
+            candidates.Count > 0
+            && !string.IsNullOrWhiteSpace(ing.PreparationNote)
+            && ing.PreparationNote.TrimStart()
+                .StartsWith("for ", StringComparison.OrdinalIgnoreCase)
+        )
+        {
+            AddCandidate($"{candidates[0]} {ing.PreparationNote.Trim()}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(ing.OriginalRawText))
+        {
+            AddCandidate(ing.OriginalRawText);
+        }
+
+        return candidates;
+    }
+
+    private static string PickPreferredUnlinkedTitle(
+        IReadOnlyList<string> candidates,
+        string cleanTitle,
+        IngestionDraftIngredientDto ing
+    )
+    {
+        if (
+            candidates.Count > 1
+            && !string.IsNullOrWhiteSpace(ing.PreparationNote)
+            && ing.PreparationNote.TrimStart()
+                .StartsWith("for ", StringComparison.OrdinalIgnoreCase)
+        )
+        {
+            var expanded = candidates.FirstOrDefault(c =>
+                c.StartsWith(cleanTitle, StringComparison.OrdinalIgnoreCase)
+                && c.Length > cleanTitle.Length
+            );
+            if (!string.IsNullOrWhiteSpace(expanded))
+            {
+                return expanded;
+            }
+        }
+
+        return !string.IsNullOrWhiteSpace(cleanTitle)
+            ? cleanTitle
+            : (!string.IsNullOrWhiteSpace(ing.DisplayName) ? ing.DisplayName : "sub-recipe");
+    }
+
+    private static (
+        string? ReferencedRecipeTitle,
+        string? PreparationNote
+    ) ReconcileMatchedReferenceFields(
+        IngestionDraftIngredientDto ing,
+        string baseCleanTitle,
+        string? matchedCandidate,
+        string matchedRecipeTitle
+    )
+    {
+        var prepTrimmed = ing.PreparationNote?.Trim();
+        var absorbedPrepNote =
+            !string.IsNullOrWhiteSpace(prepTrimmed)
+            && prepTrimmed.StartsWith("for ", StringComparison.OrdinalIgnoreCase)
+            && (
+                matchedRecipeTitle.EndsWith(prepTrimmed, StringComparison.OrdinalIgnoreCase)
+                || (
+                    matchedCandidate is not null
+                    && !string.Equals(
+                        matchedCandidate,
+                        baseCleanTitle,
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                    && matchedCandidate.EndsWith(prepTrimmed, StringComparison.OrdinalIgnoreCase)
+                )
+            );
+
+        if (absorbedPrepNote)
+        {
+            return (matchedRecipeTitle, null);
+        }
+
+        return (ing.ReferencedRecipeTitle, ing.PreparationNote);
+    }
+
+    private static string? StripMatchedPrepSuffix(string? preparationNote, string resolvedTitle)
+    {
+        if (string.IsNullOrWhiteSpace(preparationNote))
+        {
+            return null;
+        }
+
+        var trimmed = preparationNote.Trim();
+        return
+            trimmed.StartsWith("for ", StringComparison.OrdinalIgnoreCase)
+            && resolvedTitle.EndsWith(trimmed, StringComparison.OrdinalIgnoreCase)
+            ? null
+            : preparationNote;
+    }
+
+    private static async Task<IngestionDraftIngredientDto?> TryPromoteUnflaggedRecipeReferenceAsync(
+        AppDbContext dbContext,
+        IngestionDraftIngredientDto ing,
+        Guid? excludedRecipeId,
+        List<string> unresolvedIssues,
+        CancellationToken cancellationToken
+    )
+    {
+        if (RecipeValidator.IsRawGrocerySeePageNote(ing.OriginalRawText))
+        {
+            return null;
+        }
+
+        var hasExplicitCue =
+            (
+                !string.IsNullOrWhiteSpace(ing.OriginalRawText)
+                && ExplicitRecipeReferenceCueRegex().IsMatch(ing.OriginalRawText)
+            )
+            || (
+                !string.IsNullOrWhiteSpace(ing.PreparationNote)
+                && ExplicitRecipeReferenceCueRegex().IsMatch(ing.PreparationNote)
+            )
+            || (
+                !string.IsNullOrWhiteSpace(ing.DisplayName)
+                && ExplicitRecipeReferenceCueRegex().IsMatch(ing.DisplayName)
+            );
+
+        var hasPageNote =
+            (
+                !string.IsNullOrWhiteSpace(ing.OriginalRawText)
+                && PageReferenceCueRegex().IsMatch(ing.OriginalRawText)
+            )
+            || (
+                !string.IsNullOrWhiteSpace(ing.PreparationNote)
+                && PageReferenceCueRegex().IsMatch(ing.PreparationNote)
+            )
+            || (
+                !string.IsNullOrWhiteSpace(ing.DisplayName)
+                && PageReferenceCueRegex().IsMatch(ing.DisplayName)
+            );
+
+        var candidates = BuildRecipeReferenceTitleCandidates(ing);
+        if (candidates.Count == 0)
+        {
+            return null;
+        }
+
+        var cleanTitle = candidates[0];
+        var wordCount = cleanTitle.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
+        var shouldLookupMatch =
+            hasExplicitCue
+            || hasPageNote
+            || (
+                !ing.MatchedFoodItemId.HasValue && wordCount >= 2 && ing.Unit != MeasurementUnit.Can
+            );
+
+        if (!shouldLookupMatch)
+        {
+            return null;
+        }
+
+        MatchedRecipeReference? matchedRecipe = null;
+        string? matchedCandidate = null;
+        foreach (var candidate in candidates)
+        {
+            matchedRecipe = await FindMatchingRecipeAsync(
+                dbContext,
+                candidate,
+                excludedRecipeId,
+                cancellationToken
+            );
+            if (matchedRecipe is not null)
+            {
+                matchedCandidate = candidate;
+                break;
+            }
+        }
+
+        if (matchedRecipe is not null)
+        {
+            var (_, updatedPrepNote) = ReconcileMatchedReferenceFields(
+                ing,
+                cleanTitle,
+                matchedCandidate,
+                matchedRecipe.Title
+            );
+            return ing with
+            {
+                IsRecipeReference = true,
+                ReferencedRecipeTitle = matchedRecipe.Title,
+                PreparationNote = updatedPrepNote,
+                MatchedRecipeId = matchedRecipe.Id,
+                MatchedRecipeTitle = matchedRecipe.Title,
+                MatchedRecipeSlug = matchedRecipe.Slug,
+                MatchedFoodItemId = null,
+                MatchedFoodItemName = null,
+                ProposedFoodItemName = null,
+                CreateNewFoodItem = false,
+            };
+        }
+
+        if (hasExplicitCue && !ing.IsOptional)
+        {
+            var preferredTitle = PickPreferredUnlinkedTitle(candidates, cleanTitle, ing);
+            unresolvedIssues.Add(
+                $"Referenced recipe '{preferredTitle}' is not published yet and could not be linked."
+            );
+            return ing with
+            {
+                IsRecipeReference = true,
+                ReferencedRecipeTitle = preferredTitle,
+                PreparationNote = StripMatchedPrepSuffix(ing.PreparationNote, preferredTitle),
+                MatchedFoodItemId = null,
+                MatchedFoodItemName = null,
+                ProposedFoodItemName = null,
+                CreateNewFoodItem = false,
+            };
+        }
+
+        return null;
     }
 
     public static async Task<RecipeDetailDto> PublishDraftAsync(
@@ -463,7 +766,7 @@ public static class IngestionCatalogMaterializer
                     );
                 }
 
-                var (cleanQty, cleanMaxQty) = RecipeDraftNormalizer.NormalizeQuantities(
+                var (cleanQty, cleanMaxQty) = RecipeUnitAndSectionHelpers.NormalizeQuantities(
                     ing.Quantity,
                     ing.MaxQuantity
                 );
@@ -472,7 +775,9 @@ public static class IngestionCatalogMaterializer
                     ing.Unit == MeasurementUnit.Custom
                     && (
                         string.IsNullOrWhiteSpace(ing.CustomUnitName)
-                        || RecipeDraftNormalizer.IsDisallowedUnitPlaceholder(ing.CustomUnitName)
+                        || RecipeUnitAndSectionHelpers.IsDisallowedUnitPlaceholder(
+                            ing.CustomUnitName
+                        )
                     )
                         ? null
                         : ing.Unit;
@@ -532,7 +837,8 @@ public static class IngestionCatalogMaterializer
             dbContext,
             draft.SuggestedTagIds,
             draft.ProposedTagNames,
-            cancellationToken
+            cancellationToken,
+            allowNewCustomTags: false
         );
 
         var upsertRequest = new UpsertRecipeRequest(
@@ -681,36 +987,47 @@ public static class IngestionCatalogMaterializer
                     cancellationToken
                 );
 
-                var diagSource = !string.IsNullOrWhiteSpace(waitingJob.StructuredSourceText)
-                    ? waitingJob.StructuredSourceText
-                    : waitingJob.NormalizedSourceText ?? waitingJob.RawText;
-                var payload = IngestionDraftRepairMapper.ToPayload(resolvedDraft);
-                var diagIssues = RecipeExtractionDiagnostics.GetReviewIssues(payload, diagSource);
-                var qualityWarnings = RecipeExtractionDiagnostics.GetQualityWarnings(payload);
-
-                var allIssues = diagIssues
+                var existingValidationIssues = (resolvedDraft.ValidationIssues ?? [])
+                    .Where(i =>
+                        !i.Contains(
+                            "is not published yet and could not be linked.",
+                            StringComparison.Ordinal
+                        )
+                        && !i.Contains(
+                            "is missing a referenced recipe title.",
+                            StringComparison.Ordinal
+                        )
+                    )
+                    .ToList();
+                var existingQualityWarnings = resolvedDraft.QualityWarnings ?? [];
+                var allIssues = existingValidationIssues
                     .Concat(refIssues)
                     .Distinct(StringComparer.Ordinal)
                     .ToList();
-
-                var updatedScore = RecipeDraftNormalizer.CalculateConfidenceScore(
-                    resolvedDraft.ConfidenceScore,
-                    resolvedDraft.Ingredients?.Count ?? 0,
-                    resolvedDraft.Steps?.Count ?? 0,
-                    validationIssueCount: allIssues.Count,
-                    measurementWarningCount: resolvedDraft.MeasurementWarnings?.Count ?? 0,
-                    qualityWarningCount: qualityWarnings.Count
-                );
-
-                resolvedDraft = resolvedDraft with { ConfidenceScore = updatedScore };
 
                 var hasUnresolvedRefs =
                     resolvedDraft.Ingredients?.Any(i =>
                         i.IsRecipeReference && !i.MatchedRecipeId.HasValue
                     ) == true;
 
+                var updatedScore = Math.Clamp(
+                    1.0m
+                        - (allIssues.Count * 0.15m)
+                        - (existingQualityWarnings.Count * 0.10m)
+                        - ((resolvedDraft.MeasurementWarnings?.Count ?? 0) * 0.05m),
+                    0.10m,
+                    0.99m
+                );
+
+                resolvedDraft = resolvedDraft with
+                {
+                    ValidationIssues = allIssues,
+                    ConfidenceScore = updatedScore,
+                };
+
                 var canAutoPublish =
                     allIssues.Count == 0
+                    && existingQualityWarnings.Count == 0
                     && !hasUnresolvedRefs
                     && (globalAutoPublish || waitingJob.AutoPublish)
                     && waitingJob.Channel is IngestionChannel.WebUrl or IngestionChannel.RawText
@@ -778,7 +1095,8 @@ public static class IngestionCatalogMaterializer
         AppDbContext dbContext,
         IReadOnlyList<Guid>? suggestedTagIds,
         IReadOnlyList<string>? proposedTagNames,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        bool allowNewCustomTags = true
     )
     {
         var resolvedIds = new List<Guid>();
@@ -816,20 +1134,31 @@ public static class IngestionCatalogMaterializer
                 continue;
             }
 
-            var cleanName = RecipeDraftNormalizer.ToTagDisplayCase(rawTag.Trim().TrimStart('#'));
+            var cleanName = RecipeUnitAndSectionHelpers.ToTagDisplayCase(
+                rawTag.Trim().TrimStart('#')
+            );
 
-            if (string.IsNullOrWhiteSpace(cleanName))
+            if (
+                string.IsNullOrWhiteSpace(cleanName)
+                || BuiltInTags.DisallowedGrocerySectionNames.Contains(cleanName)
+                || BuiltInTags.DisallowedGenericStaples.Contains(cleanName)
+            )
             {
                 continue;
             }
 
+            if (BuiltInTags.CanonicalAliases.TryGetValue(cleanName, out var canonicalAlias))
+            {
+                cleanName = canonicalAlias;
+            }
+
             var normName = cleanName.ToLowerInvariant();
 
-            var singularNorm = RecipeDraftNormalizer.Singularize(normName);
+            var singularNorm = RecipeUnitAndSectionHelpers.Singularize(normName);
 
             var existingTag = allTags.FirstOrDefault(t =>
                 t.NormalizedName == normName
-                || RecipeDraftNormalizer.Singularize(t.NormalizedName) == singularNorm
+                || RecipeUnitAndSectionHelpers.Singularize(t.NormalizedName) == singularNorm
             );
 
             if (existingTag is not null)
@@ -842,7 +1171,11 @@ public static class IngestionCatalogMaterializer
                 continue;
             }
 
-            var category = RecipeDraftNormalizer.InferTagCategory(cleanName);
+            var category = RecipeUnitAndSectionHelpers.InferTagCategory(cleanName);
+            if (!allowNewCustomTags && category == TagCategory.Custom)
+            {
+                continue;
+            }
 
             var slug = GenerateUniqueTagSlug(cleanName, category, allTags);
 

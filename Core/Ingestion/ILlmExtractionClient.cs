@@ -2,47 +2,17 @@ namespace App.Core.Ingestion;
 
 public record LlmExtractionContext(
     string SourceContent,
-    IReadOnlyList<string> AvailableTagNames,
-    IReadOnlyList<string>? AvailableFoodNames = null,
-    string? ReviewerHint = null,
-    IReadOnlyList<LlmExtractedIngredientItem>? CurrentIngredients = null
+    string? SourceUrl = null,
+    string? TitleHint = null
 );
 
 public record LlmVisionImageInput(int PageNumber, string MimeType, string Base64Data);
 
 public record LlmVisionExtractionContext(
     IReadOnlyList<LlmVisionImageInput> Images,
-    string? SupplementalHintText,
-    IReadOnlyList<string> AvailableTagNames,
-    IReadOnlyList<string>? AvailableFoodNames = null
-);
-
-public record LlmRecipeRepairContext(
-    string SourceContent,
-    LlmExtractedRecipePayload Draft,
-    string? UserHint = null
-);
-
-public record LlmRecipeRepairResult(LlmExtractedRecipePayload Draft, IReadOnlyList<string> Notices);
-
-public record LlmIssueTriageItem(
-    string Issue,
-    IngestionIssueTriageResolution Resolution,
-    string? Reason = null
-);
-
-public record LlmAutoRepairAndTriageContext(
-    string SourceContent,
-    LlmExtractedRecipePayload Draft,
-    IReadOnlyList<string> ValidationIssues,
-    IReadOnlyList<string> QualityWarnings,
+    string? SupplementalHintText = null,
     IReadOnlyList<string>? AvailableTagNames = null,
     IReadOnlyList<string>? AvailableFoodNames = null
-);
-
-public record LlmAutoRepairAndTriageResult(
-    LlmExtractedRecipePayload Draft,
-    IReadOnlyList<LlmIssueTriageItem> TriageDecisions
 );
 
 public record LlmSubstitutionContext(
@@ -121,20 +91,19 @@ public interface ILlmExtractionClient
         CancellationToken cancellationToken = default
     );
 
-    Task<LlmExtractedRecipePayload> ExtractRecipeFromTextAsync(
+    Task<ExtractedRecipeDto> ExtractRecipeFromTextAsync(
         EffectiveLlmConnectionConfig config,
         LlmExtractionContext context,
         CancellationToken cancellationToken = default
     );
 
     /// <summary>
-    /// Asks the text model to locate the recipe sections in an unstructured source and returns
-    /// a canonical Ingredients/Instructions copy built only from verbatim source lines, or null
-    /// when the sections could not be identified.
+    /// Targeted micro-disambiguation call for unresolved ingredients and proposed tags that have
+    /// medium-confidence fuzzy catalog candidates.
     /// </summary>
-    Task<string?> StructureRecipeSourceAsync(
+    Task<LlmEntityDisambiguationResult> DisambiguateEntitiesAsync(
         EffectiveLlmConnectionConfig config,
-        string sourceText,
+        LlmEntityDisambiguationContext context,
         CancellationToken cancellationToken = default
     );
 
@@ -146,13 +115,6 @@ public interface ILlmExtractionClient
     Task<string?> TranscribeRecipeImagesAsync(
         EffectiveLlmConnectionConfig config,
         LlmVisionExtractionContext context,
-        CancellationToken cancellationToken = default
-    );
-
-    /// <summary>Re-extracts the source with the reviewer hint and the current rows as context.</summary>
-    Task<LlmRecipeRepairResult> RepairRecipeDraftAsync(
-        EffectiveLlmConnectionConfig config,
-        LlmRecipeRepairContext context,
         CancellationToken cancellationToken = default
     );
 
@@ -171,12 +133,6 @@ public interface ILlmExtractionClient
     Task<LlmDraftMealPlanPayload> DraftWeeklyMealPlanAsync(
         EffectiveLlmConnectionConfig config,
         LlmDraftMealPlanContext context,
-        CancellationToken cancellationToken = default
-    );
-
-    Task<LlmAutoRepairAndTriageResult> TriageAndRepairRecipeAsync(
-        EffectiveLlmConnectionConfig config,
-        LlmAutoRepairAndTriageContext context,
         CancellationToken cancellationToken = default
     );
 }

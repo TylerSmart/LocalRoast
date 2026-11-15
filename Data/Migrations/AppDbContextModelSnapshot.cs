@@ -414,75 +414,6 @@ namespace App.Data.Migrations
                     b.ToTable("HouseholdLlmSettings", (string)null);
                 });
 
-            modelBuilder.Entity("App.Data.Entities.IngestionDraftRefinement", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("BaseDraftJson")
-                        .HasMaxLength(200000)
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<DateTimeOffset?>("CompletedAt")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<string>("CreatedBy")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
-
-                    b.Property<string>("Detail")
-                        .HasMaxLength(2000)
-                        .HasColumnType("nvarchar(2000)");
-
-                    b.Property<Guid>("IngestionJobId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<int?>("IssuesAfter")
-                        .HasColumnType("int");
-
-                    b.Property<int?>("IssuesBefore")
-                        .HasColumnType("int");
-
-                    b.Property<string>("Model")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<DateTimeOffset>("ModifiedAt")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<string>("ModifiedBy")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
-
-                    b.Property<string>("ProposalJson")
-                        .HasMaxLength(200000)
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<DateTimeOffset>("RequestedAt")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("nvarchar(32)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("IngestionJobId")
-                        .IsUnique();
-
-                    b.HasIndex("Status", "RequestedAt");
-
-                    b.ToTable("IngestionDraftRefinements", (string)null);
-                });
-
             modelBuilder.Entity("App.Data.Entities.IngestionJob", b =>
                 {
                     b.Property<Guid>("Id")
@@ -604,10 +535,6 @@ namespace App.Data.Migrations
                     b.Property<string>("StatusDetail")
                         .HasMaxLength(2000)
                         .HasColumnType("nvarchar(2000)");
-
-                    b.Property<string>("StructuredSourceText")
-                        .HasMaxLength(100000)
-                        .HasColumnType("nvarchar(max)");
 
                     b.HasKey("Id");
 
@@ -2056,17 +1983,6 @@ namespace App.Data.Migrations
                     b.Navigation("TextModelConfiguration");
 
                     b.Navigation("VisionModelConfiguration");
-                });
-
-            modelBuilder.Entity("App.Data.Entities.IngestionDraftRefinement", b =>
-                {
-                    b.HasOne("App.Data.Entities.IngestionJob", "IngestionJob")
-                        .WithOne()
-                        .HasForeignKey("App.Data.Entities.IngestionDraftRefinement", "IngestionJobId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("IngestionJob");
                 });
 
             modelBuilder.Entity("App.Data.Entities.IngestionJob", b =>

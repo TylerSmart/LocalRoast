@@ -168,7 +168,9 @@ public record IngestionExtractedDraftDto(
     bool RetainSourceAttachments = true,
     [MaxLength(200)] string? ExtractedModel = null,
     IReadOnlyList<string>? ProposedTagNames = null,
-    IReadOnlyList<string>? MeasurementWarnings = null
+    IReadOnlyList<string>? MeasurementWarnings = null,
+    IReadOnlyList<string>? QualityWarnings = null,
+    IReadOnlyList<string>? ValidationIssues = null
 );
 
 public record EnqueueWebUrlIngestionRequest([Required] IReadOnlyList<string> Urls);
@@ -245,7 +247,9 @@ public record IngestionJobQueryParameters(
     [MaxLength(200)] string? Search = null,
     int PageNumber = 1,
     int PageSize = 25,
-    bool ActiveWaitingOnly = false
+    bool ActiveWaitingOnly = false,
+    IngestionJobSortBy SortBy = IngestionJobSortBy.CreatedAt,
+    IngestionJobSortDirection SortDirection = IngestionJobSortDirection.Desc
 );
 
 public record IngestionJobSummaryDto(
@@ -309,3 +313,22 @@ public sealed record RetryBatchJobsRequest(
 );
 
 public sealed record RetryBatchJobsResultDto(int RequeuedCount);
+
+public record IngestionDiagnosticTargetDto(
+    string Message,
+    string Severity,
+    int? IngredientIndex = null,
+    int? StepNumber = null
+);
+
+public sealed record IngestionReviewDiagnosticsDto(
+    IReadOnlyList<string> ValidationIssues,
+    IReadOnlyList<string> QualityWarnings,
+    IReadOnlyList<IngestionDiagnosticTargetDto>? TargetedDiagnostics = null
+)
+{
+    public IReadOnlyList<IngestionDiagnosticTargetDto> TargetedDiagnostics { get; init; } =
+        TargetedDiagnostics ?? [];
+};
+
+public sealed record IngestionDraftDiagnosticsRequest([Required] IngestionExtractedDraftDto Draft);

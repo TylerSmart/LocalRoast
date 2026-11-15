@@ -119,6 +119,29 @@ describe('AccountService', () => {
     const promise = firstValueFrom(service.resetAppData());
     const req = httpMock.expectOne('/api/account/reset-data');
     expect(req.request.method).toBe('POST');
+    expect(req.request.body).toEqual({});
+    req.flush(expectedRes);
+
+    await expect(promise).resolves.toEqual(expectedRes);
+  });
+
+  it('sends keepIngestionJobs option when resetting app data', async () => {
+    const expectedRes: ResetAppDataResultDto = {
+      deletedRecipesCount: 5,
+      deletedMealPlansCount: 2,
+      deletedShoppingListsCount: 1,
+      deletedIngestionJobsCount: 0,
+      deletedFoodItemsCount: 10,
+      deletedTagsCount: 4,
+      deletedCollectionsCount: 1,
+      resetAt: '2026-11-04T12:00:00Z',
+      resetIngestionJobsCount: 12,
+    };
+
+    const promise = firstValueFrom(service.resetAppData({ keepIngestionJobs: true }));
+    const req = httpMock.expectOne('/api/account/reset-data');
+    expect(req.request.method).toBe('POST');
+    expect(req.request.body).toEqual({ keepIngestionJobs: true });
     req.flush(expectedRes);
 
     await expect(promise).resolves.toEqual(expectedRes);

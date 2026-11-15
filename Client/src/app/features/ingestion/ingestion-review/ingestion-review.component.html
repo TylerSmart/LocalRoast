@@ -68,7 +68,6 @@
           mat-button
           type="button"
           (click)="discardJob()"
-          [disabled]="isRepairing()"
           class="discard-btn"
           aria-label="Discard ingestion job"
         >
@@ -80,7 +79,7 @@
           mat-stroked-button
           type="button"
           (click)="rerunExtraction()"
-          [disabled]="isRerunning() || isSaving() || isPublishing() || isRepairing()"
+          [disabled]="isRerunning() || isSaving() || isPublishing()"
           matTooltip="Rerun extraction using currently configured LLM model"
           aria-label="Rerun extraction with current model"
           class="rerun-btn"
@@ -121,7 +120,7 @@
           mat-stroked-button
           type="button"
           (click)="saveDraft()"
-          [disabled]="isSaving() || isPublishing() || isRepairing()"
+          [disabled]="isSaving() || isPublishing()"
           aria-label="Save review draft"
         >
           @if (isSaving()) {
@@ -138,7 +137,7 @@
           type="button"
           class="publish-btn"
           (click)="approveAndPublish()"
-          [disabled]="form.invalid || isPublishing() || isSaving() || isRepairing()"
+          [disabled]="form.invalid || isPublishing() || isSaving()"
           aria-label="Approve and publish recipe"
         >
           @if (isPublishing()) {
@@ -423,150 +422,17 @@
                   <p class="review-error" role="alert">{{ reviewError() }}</p>
                 }
 
-                <mat-form-field appearance="outline" class="form-field">
-                  <mat-label>Optional instructions for AI</mat-label>
-                  <textarea
-                    matInput
-                    [formControl]="repairHint"
-                    maxlength="2000"
-                    rows="2"
-                    placeholder="For example: the butter is divided between the dough and the topping"
-                  ></textarea>
-                </mat-form-field>
                 <div class="review-actions">
                   <button
                     mat-stroked-button
                     type="button"
                     (click)="recheckReviewIssues()"
-                    [disabled]="isCheckingDiagnostics() || isRepairing()"
+                    [disabled]="isCheckingDiagnostics()"
                   >
                     <mat-icon>fact_check</mat-icon>
                     Recheck issues
                   </button>
-                  <button
-                    mat-flat-button
-                    type="button"
-                    (click)="fixWithAi()"
-                    [disabled]="
-                      isCheckingDiagnostics() ||
-                      isRepairing() ||
-                      isSaving() ||
-                      isPublishing() ||
-                      isRerunning() ||
-                      repairHint.invalid ||
-                      !canEditReview()
-                    "
-                  >
-                    @if (isRepairing()) {
-                      <mat-spinner diameter="18" class="inline-spinner"></mat-spinner>
-                    } @else {
-                      <mat-icon>auto_fix_high</mat-icon>
-                    }
-                    {{ isRepairing() ? 'Preparing preview...' : 'Re-extract with AI' }}
-                  </button>
                 </div>
-                @if (isRepairing()) {
-                  <p role="status">
-                    Re-extracting regenerates the steps from the source text and can take several
-                    minutes. You can keep editing.
-                  </p>
-                }
-
-                @if (refinement(); as refined) {
-                  <section
-                    class="refinement-panel"
-                    aria-label="Background refinement"
-                    data-testid="refinement-panel"
-                  >
-                    <h3>Background refinement ({{ refined.model }})</h3>
-                    @switch (refined.status) {
-                      @case ('Pending') {
-                        <p role="status">
-                          Waiting to run. It starts when no imports are queued.
-                          @if (refined.detail) {
-                            {{ refined.detail }}
-                          }
-                        </p>
-                      }
-                      @case ('Running') {
-                        <p role="status">
-                          <mat-spinner diameter="16" class="inline-spinner"></mat-spinner>
-                          Refining in the background. You can keep editing.
-                        </p>
-                      }
-                      @case ('Improved') {
-                        <p role="status">
-                          A refined draft is ready: {{ refined.issuesBefore }} →
-                          {{ refined.issuesAfter }} issues and warnings.
-                        </p>
-                      }
-                      @case ('NoImprovement') {
-                        <p role="status">
-                          {{ refined.detail || 'The refine model found nothing to improve.' }}
-                        </p>
-                      }
-                      @case ('Failed') {
-                        <p class="review-error" role="status">
-                          {{ refined.detail || 'Refinement failed.' }}
-                        </p>
-                      }
-                    }
-                    @if (refined.basedOnEarlierDraft) {
-                      <p class="stale-notice" role="status">
-                        The saved draft changed after refinement started. Compare carefully before
-                        applying.
-                      </p>
-                    }
-                    <div class="review-actions">
-                      @if (refined.hasProposal) {
-                        <button
-                          mat-flat-button
-                          type="button"
-                          (click)="compareRefinement()"
-                          [disabled]="
-                            isRefinementBusy() ||
-                            isRepairing() ||
-                            isSaving() ||
-                            isPublishing() ||
-                            isRerunning() ||
-                            job()?.status !== 'ReadyForReview'
-                          "
-                          data-testid="compare-refinement"
-                        >
-                          <mat-icon>compare</mat-icon>
-                          Compare refined draft
-                        </button>
-                      }
-                      <button
-                        mat-stroked-button
-                        type="button"
-                        (click)="dismissRefinement()"
-                        [disabled]="isRefinementBusy()"
-                        data-testid="dismiss-refinement"
-                      >
-                        <mat-icon>close</mat-icon>
-                        {{ refinementActive() ? 'Cancel refinement' : 'Dismiss' }}
-                      </button>
-                    </div>
-                  </section>
-                } @else if (refineModel() && job()?.status === 'ReadyForReview') {
-                  <div class="review-actions">
-                    <button
-                      mat-stroked-button
-                      type="button"
-                      (click)="requestRefinement()"
-                      [disabled]="isRefinementBusy()"
-                      data-testid="request-refinement"
-                    >
-                      <mat-icon>psychology</mat-icon>
-                      Refine with {{ refineModel() }}
-                    </button>
-                  </div>
-                  <p class="refinement-hint">
-                    Runs a slower second pass in the background with the refine model. Your edits
-                    are not changed until you compare and apply it.
-                  </p>
-                }
               </mat-card-content>
             </mat-card>
 

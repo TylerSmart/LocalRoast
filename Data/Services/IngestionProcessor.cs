@@ -42,24 +42,8 @@ public sealed class IngestionProcessor(
             )
             .ToListAsync(cancellationToken);
 
-        var interruptedRefinements = await dbContext
-            .IngestionDraftRefinements.Where(item =>
-                item.Status == IngestionRefinementStatus.Running
-                && (activeId == null || item.IngestionJobId != activeId)
-            )
-            .ToListAsync(cancellationToken);
-        foreach (var refinement in interruptedRefinements)
-        {
-            refinement.Status = IngestionRefinementStatus.Pending;
-            refinement.Detail = "Resuming after an interrupted refine pass.";
-        }
-
         if (interrupted.Count == 0)
         {
-            if (interruptedRefinements.Count > 0)
-            {
-                await dbContext.SaveChangesAsync(cancellationToken);
-            }
             return 0;
         }
 
@@ -151,12 +135,6 @@ public sealed class IngestionProcessor(
 
             // A run-now request covers this attempt only; later retries follow the pause setting.
             job.RunNowRequested = false;
-
-            // A refine pass of an earlier draft no longer applies once the job is reprocessed.
-            var staleRefinements = await dbContext
-                .IngestionDraftRefinements.Where(item => item.IngestionJobId == job.Id)
-                .ToListAsync(jobCt);
-            dbContext.IngestionDraftRefinements.RemoveRange(staleRefinements);
 
             await dbContext.SaveChangesAsync(jobCt);
 
@@ -327,67 +305,7 @@ public sealed class IngestionProcessor(
                 ))
                 .ToListAsync(jobCt);
 
-            var tagNames = tags.Select(t => t.Name).ToList();
-
-            var availableFoodNames = await dbContext
-                .FoodItems.AsNoTracking()
-                .OrderByDescending(f => f.RecipeIngredients.Count)
-                .ThenBy(f => f.Name)
-                .Select(f => f.Name)
-                .Take(500)
-                .ToListAsync(jobCt);
-
-            var pendingDraftJsons = await dbContext
-                .IngestionJobs.AsNoTracking()
-                .Where(j =>
-                    j.Status == IngestionJobStatus.ReadyForReview && j.ExtractedDraftJson != null
-                )
-                .OrderByDescending(j => j.ProcessedAt)
-                .Take(100)
-                .Select(j => j.ExtractedDraftJson!)
-                .ToListAsync(jobCt);
-
-            foreach (var dj in pendingDraftJsons)
-            {
-                try
-                {
-                    var pd = JsonSerializer.Deserialize<IngestionExtractedDraftDto>(
-                        dj,
-                        JsonOptions
-                    );
-
-                    if (pd?.ProposedTagNames is { Count: > 0 })
-                    {
-                        foreach (var pt in pd.ProposedTagNames)
-                        {
-                            if (
-                                !string.IsNullOrWhiteSpace(pt)
-                                && !tagNames.Contains(pt, StringComparer.OrdinalIgnoreCase)
-                            )
-                                tagNames.Add(pt);
-                        }
-                    }
-
-                    if (pd?.Ingredients is { Count: > 0 })
-                    {
-                        foreach (var ing in pd.Ingredients)
-                        {
-                            if (
-                                !string.IsNullOrWhiteSpace(ing.ProposedFoodItemName)
-                                && availableFoodNames.Count < 500
-                                && !availableFoodNames.Contains(
-                                    ing.ProposedFoodItemName,
-                                    StringComparer.OrdinalIgnoreCase
-                                )
-                            )
-                                availableFoodNames.Add(ing.ProposedFoodItemName);
-                        }
-                    }
-                }
-                catch { }
-            }
-
-            // Determine if Vision or Text pipeline is needed
+            // Stage 1b: Transcribe images if Vision pipeline is required
 
             var requiresVision = job.Channel == IngestionChannel.Images;
 
@@ -415,8 +333,7 @@ public sealed class IngestionProcessor(
             }
 
             string modelUsed;
-
-            var diagnosticsSource = job.NormalizedSourceText ?? job.RawText;
+            string sourceText;
 
             if (requiresVision)
             {
@@ -512,19 +429,17 @@ public sealed class IngestionProcessor(
 
                 var visionContext = new LlmVisionExtractionContext(
                     Images: imageInputs,
-                    SupplementalHintText: hintText,
-                    AvailableTagNames: tagNames,
-                    AvailableFoodNames: availableFoodNames
+                    SupplementalHintText: hintText
                 );
 
                 job.StatusDetail = "Reading recipe text from images via local LLM...";
                 await dbContext.SaveChangesAsync(jobCt);
-                job.StructuredSourceText =
+                sourceText =
                     await llmClient.TranscribeRecipeImagesAsync(config, visionContext, jobCt)
                     ?? throw new DomainValidationException(
                         "No recipe text could be read from the images."
                     );
-                diagnosticsSource = job.StructuredSourceText;
+                job.NormalizedSourceText = sourceText;
                 job.StatusDetail = "Extracting structured recipe via local LLM...";
                 await dbContext.SaveChangesAsync(jobCt);
             }
@@ -538,67 +453,53 @@ public sealed class IngestionProcessor(
                 }
 
                 modelUsed = config.TextModel;
-
-                var sourceText = job.NormalizedSourceText ?? job.RawText ?? "";
-                job.StructuredSourceText = null;
-                if (!RecipeSourceSectioner.HasCanonicalSections(sourceText))
-                {
-                    job.StatusDetail = "Organizing source text via local LLM...";
-                    await dbContext.SaveChangesAsync(jobCt);
-                    try
-                    {
-                        job.StructuredSourceText = await llmClient.StructureRecipeSourceAsync(
-                            config,
-                            sourceText,
-                            jobCt
-                        );
-                    }
-                    catch (Exception ex)
-                        when ((ex is DomainValidationException or LlmHostUnavailableException)
-                            && !jobCt.IsCancellationRequested
-                        )
-                    {
-                        // Without sections there is no method to extract, so a host outage must
-                        // surface as one instead of as a missing Instructions section.
-                        if (
-                            ex is LlmHostUnavailableException
-                            && !sourceText.Contains(
-                                "Instructions:",
-                                StringComparison.OrdinalIgnoreCase
-                            )
-                        )
-                        {
-                            throw;
-                        }
-                        // Sectioning is optional; if the host is really down, extraction below fails the same way.
-                        logger.LogWarning(
-                            ex,
-                            "Source sectioning failed for job {JobId}; extracting from the unstructured text.",
-                            job.Id
-                        );
-                    }
-                    job.StatusDetail = "Extracting structured recipe via local LLM...";
-                    await dbContext.SaveChangesAsync(jobCt);
-                }
-
-                diagnosticsSource = job.StructuredSourceText ?? sourceText;
+                sourceText = job.NormalizedSourceText ?? job.RawText ?? "";
             }
 
-            var extractionContext = new LlmExtractionContext(
-                SourceContent: diagnosticsSource,
-                AvailableTagNames: tagNames,
-                AvailableFoodNames: availableFoodNames
-            );
+            // Stage 2: Extract + Deterministic Validate (with multi-turn self-correction)
 
-            var rawExtracted = await llmClient.ExtractRecipeFromTextAsync(
+            var extracted = await llmClient.ExtractRecipeFromTextAsync(
                 config,
-                extractionContext,
+                new LlmExtractionContext(
+                    SourceContent: sourceText,
+                    SourceUrl: job.SourceUrl,
+                    TitleHint: job.DisplayTitle
+                ),
                 jobCt
             );
 
             if (await IsJobDiscardedInDbAsync(job.Id, jobCt))
             {
                 return false;
+            }
+
+            extracted = RecipeValidator.NormalizeCompoundIngredients(extracted);
+            var validation = RecipeValidator.Validate(extracted, sourceText);
+
+            // Stage 3: Deterministic Candidate Matching + Targeted Micro-Disambiguation
+
+            var matchResult = EntityCandidateMatcher.Match(extracted, catalogFoods, tags);
+            if (matchResult.AmbiguousIngredients.Count > 0 || matchResult.AmbiguousTags.Count > 0)
+            {
+                job.StatusDetail = "Disambiguating catalog items via local LLM...";
+                await dbContext.SaveChangesAsync(jobCt);
+
+                var disambiguation = await llmClient.DisambiguateEntitiesAsync(
+                    config,
+                    new LlmEntityDisambiguationContext(
+                        RecipeTitle: extracted.Title,
+                        AmbiguousIngredients: matchResult.AmbiguousIngredients,
+                        AmbiguousTags: matchResult.AmbiguousTags
+                    ),
+                    jobCt
+                );
+
+                matchResult = EntityCandidateMatcher.ApplyDisambiguation(
+                    matchResult,
+                    disambiguation,
+                    catalogFoods,
+                    tags
+                );
             }
 
             string? fallbackSourceName = job.SourceName;
@@ -652,156 +553,31 @@ public sealed class IngestionProcessor(
                 }
             }
 
-            var extractionIssues = RecipeExtractionDiagnostics.GetReviewIssues(
-                rawExtracted,
-                diagnosticsSource
-            );
-            var qualityWarnings = RecipeExtractionDiagnostics.GetQualityWarnings(rawExtracted);
-            var unresolvedIssues = new List<string>(extractionIssues);
+            // Stage 4: Deterministic Compiler -> IngestionExtractedDraftDto
 
-            const int maxRepairIterations = 2;
-            var currentIteration = 0;
-
-            while (unresolvedIssues.Count > 0 && currentIteration < maxRepairIterations)
-            {
-                currentIteration++;
-                job.StatusDetail =
-                    $"Auto-repairing recipe issues via local LLM (pass {currentIteration}/{maxRepairIterations})...";
-                await dbContext.SaveChangesAsync(jobCt);
-                try
-                {
-                    var repairResult = await llmClient.TriageAndRepairRecipeAsync(
-                        config,
-                        new LlmAutoRepairAndTriageContext(
-                            SourceContent: diagnosticsSource,
-                            Draft: rawExtracted,
-                            ValidationIssues: unresolvedIssues,
-                            QualityWarnings: qualityWarnings,
-                            AvailableTagNames: tagNames,
-                            AvailableFoodNames: availableFoodNames
-                        ),
-                        jobCt
-                    );
-
-                    var postRepairIssues = RecipeExtractionDiagnostics.GetReviewIssues(
-                        repairResult.Draft,
-                        diagnosticsSource
-                    );
-
-                    var remainingHumanReviewIssues = postRepairIssues
-                        .Where(issue =>
-                        {
-                            if (RecipeExtractionDiagnostics.IsHardStructuralIssue(issue))
-                            {
-                                return true;
-                            }
-
-                            var decision = repairResult.TriageDecisions.FirstOrDefault(d =>
-                                string.Equals(
-                                    d.Issue?.Trim(),
-                                    issue.Trim(),
-                                    StringComparison.OrdinalIgnoreCase
-                                )
-                                || issue.Contains(
-                                    d.Issue?.Trim() ?? "",
-                                    StringComparison.OrdinalIgnoreCase
-                                )
-                            );
-                            return decision is null
-                                || decision.Resolution
-                                    == IngestionIssueTriageResolution.NeedsHumanReview;
-                        })
-                        .ToList();
-
-                    if (remainingHumanReviewIssues.Count < unresolvedIssues.Count)
-                    {
-                        var initialCount = unresolvedIssues.Count;
-                        rawExtracted = repairResult.Draft;
-                        unresolvedIssues = remainingHumanReviewIssues;
-                        qualityWarnings = RecipeExtractionDiagnostics.GetQualityWarnings(
-                            rawExtracted
-                        );
-                        logger.LogInformation(
-                            "Auto-repair pass {Pass} improved job {JobId}: issues reduced from {Initial} to {Remaining}",
-                            currentIteration,
-                            job.Id,
-                            initialCount,
-                            unresolvedIssues.Count
-                        );
-                    }
-                    else
-                    {
-                        logger.LogInformation(
-                            "Auto-repair pass {Pass} for job {JobId} did not reduce issues ({Count}); ending repair loop.",
-                            currentIteration,
-                            job.Id,
-                            unresolvedIssues.Count
-                        );
-                        break;
-                    }
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    logger.LogWarning(
-                        ex,
-                        "Auto-repair pass {Pass} failed for job {JobId}; continuing with current draft.",
-                        currentIteration,
-                        job.Id
-                    );
-                    break;
-                }
-            }
-
-            var draft = RecipeDraftNormalizer.Normalize(
-                raw: rawExtracted,
-                catalogFoods: catalogFoods,
-                tags: tags,
+            var draft = RecipeDraftCompiler.Compile(
+                extracted: extracted,
+                validation: validation,
+                matches: matchResult,
                 sourceUrl: job.SourceUrl,
                 fallbackSourceName: fallbackSourceName,
                 fallbackSourceAuthor: fallbackSourceAuthor,
                 coverImagePath: job.DownloadedCoverImagePath,
                 thumbnailImagePath: job.DownloadedThumbnailImagePath,
-                fallbackSourceBookTitle: job.SourceBookTitle,
-                fallbackSourceBookPage: job.SourceBookPage,
+                sourceBookTitle: job.SourceBookTitle,
+                sourceBookPage: job.SourceBookPage,
                 retainSourceAttachments: job.Channel
                     is IngestionChannel.Images
                         or IngestionChannel.Pdf
                         or IngestionChannel.RawText,
                 extractedModel: modelUsed,
-                fallbackCollectionIds: fallbackCollectionIds,
-                rawSourceText: job.NormalizedSourceText ?? job.RawText
+                suggestedCollectionIds: fallbackCollectionIds,
+                sourceText: sourceText
             );
 
-            var postNormalizedPayload = IngestionDraftRepairMapper.ToPayload(draft);
-            var postNormalizedIssues = RecipeExtractionDiagnostics.GetReviewIssues(
-                postNormalizedPayload,
-                diagnosticsSource
-            );
-            unresolvedIssues = unresolvedIssues
-                .Where(issue =>
-                    issue.Contains("out of food names", StringComparison.OrdinalIgnoreCase)
-                )
-                .Concat(postNormalizedIssues)
-                .Distinct(StringComparer.Ordinal)
-                .ToList();
-            qualityWarnings = RecipeExtractionDiagnostics.GetQualityWarnings(postNormalizedPayload);
+            var allValidationIssues = new List<string>(draft.ValidationIssues ?? []);
 
-            draft = draft with
-            {
-                ConfidenceScore = RecipeDraftNormalizer.CalculateConfidenceScore(
-                    rawExtracted.ConfidenceScore,
-                    draft.Ingredients?.Count ?? 0,
-                    draft.Steps?.Count ?? 0,
-                    validationIssueCount: unresolvedIssues.Count,
-                    measurementWarningCount: draft.MeasurementWarnings?.Count ?? 0,
-                    qualityWarningCount: qualityWarnings.Count
-                ),
-            };
-
-            if (
-                draft.Ingredients is { Count: > 0 }
-                && draft.Ingredients.Any(i => i.IsRecipeReference)
-            )
+            if (draft.Ingredients is { Count: > 0 })
             {
                 var (resolvedDraft, referenceIssues) =
                     await IngestionCatalogMaterializer.ResolveDraftRecipeReferencesAsync(
@@ -810,26 +586,29 @@ public sealed class IngestionProcessor(
                         job.ResultingRecipeId,
                         jobCt
                     );
-                unresolvedIssues.AddRange(referenceIssues);
+                allValidationIssues.AddRange(referenceIssues);
+                var distinctIssues = allValidationIssues
+                    .Where(s => !string.IsNullOrWhiteSpace(s))
+                    .Distinct(StringComparer.Ordinal)
+                    .ToList();
+                var warningCount = resolvedDraft.QualityWarnings?.Count ?? 0;
                 draft = resolvedDraft with
                 {
-                    ConfidenceScore = RecipeDraftNormalizer.CalculateConfidenceScore(
-                        rawExtracted.ConfidenceScore,
-                        resolvedDraft.Ingredients?.Count ?? 0,
-                        resolvedDraft.Steps?.Count ?? 0,
-                        validationIssueCount: unresolvedIssues.Count,
-                        measurementWarningCount: resolvedDraft.MeasurementWarnings?.Count ?? 0,
-                        qualityWarningCount: qualityWarnings.Count
+                    ValidationIssues = distinctIssues,
+                    ConfidenceScore = Math.Clamp(
+                        0.96m - (distinctIssues.Count * 0.15m) - (warningCount * 0.10m),
+                        0.10m,
+                        0.99m
                     ),
                 };
             }
 
-            if (unresolvedIssues.Count > 0)
+            if (allValidationIssues.Count > 0)
             {
                 logger.LogWarning(
                     "Recipe extraction for job {JobId} requires review: {Issues}",
                     job.Id,
-                    string.Join(" ", unresolvedIssues)
+                    string.Join(" ", allValidationIssues)
                 );
             }
 
@@ -848,14 +627,17 @@ public sealed class IngestionProcessor(
                 job.SourceBookPage = draft.SourceBookPage;
             }
 
-            // Auto-Publish check
+            // Stage 5: Auto-Publish vs ReadyForReview
 
             var hasUnresolvedRecipeReferences =
                 draft.Ingredients?.Any(i => i.IsRecipeReference && !i.MatchedRecipeId.HasValue)
                 == true;
 
             var canAutoPublish =
-                unresolvedIssues.Count == 0
+                validation.IsValid
+                && (draft.ValidationIssues?.Count ?? 0) == 0
+                && extracted.QualityAudit?.IsPlausibleRecipe != false
+                && (draft.QualityWarnings?.Count ?? 0) == 0
                 && !hasUnresolvedRecipeReferences
                 && (config.AutoPublishHighConfidenceText || job.AutoPublish)
                 && (
@@ -867,32 +649,77 @@ public sealed class IngestionProcessor(
                 && (draft.Steps?.Count ?? 0) >= 1
                 && draft.ConfidenceScore >= (job.AutoPublish ? 0.60m : 0.85m);
 
+            var publishedSuccessfully = false;
             if (canAutoPublish)
             {
-                var createdRecipe = await PublishDraftInternalAsync(job, draft, jobCt);
+                try
+                {
+                    var createdRecipe = await PublishDraftInternalAsync(job, draft, jobCt);
 
-                await IngestionCatalogMaterializer.BacklinkUnresolvedRecipeReferencesAsync(
-                    dbContext,
-                    createdRecipe.Id,
-                    createdRecipe.Title,
-                    jobCt
-                );
+                    await IngestionCatalogMaterializer.BacklinkUnresolvedRecipeReferencesAsync(
+                        dbContext,
+                        createdRecipe.Id,
+                        createdRecipe.Title,
+                        jobCt
+                    );
 
-                job.Status = IngestionJobStatus.Published;
+                    job.Status = IngestionJobStatus.Published;
 
-                job.ResultingRecipeId = createdRecipe.Id;
+                    job.ResultingRecipeId = createdRecipe.Id;
 
-                job.ExtractedDraftJson = JsonSerializer.Serialize(draft, JsonOptions);
+                    job.ExtractedDraftJson = JsonSerializer.Serialize(draft, JsonOptions);
 
-                job.ConfidenceScore = draft.ConfidenceScore;
+                    job.ConfidenceScore = draft.ConfidenceScore;
 
-                job.DisplayTitle = draft.Title;
+                    job.DisplayTitle = draft.Title;
 
-                job.ProcessedAt = DateTimeOffset.UtcNow;
+                    job.ProcessedAt = DateTimeOffset.UtcNow;
 
-                job.StatusDetail = $"Auto-published high-confidence extraction ({modelUsed}).";
+                    job.StatusDetail = $"Auto-published high-confidence extraction ({modelUsed}).";
+                    publishedSuccessfully = true;
+                }
+                catch (DomainValidationException ex)
+                {
+                    logger.LogWarning(
+                        ex,
+                        "Auto-publish failed validation for job {JobId}; demoting to ReadyForReview with saved draft.",
+                        job.Id
+                    );
+
+                    var combinedIssues = (draft.ValidationIssues ?? [])
+                        .Append(ex.Message)
+                        .Where(s => !string.IsNullOrWhiteSpace(s))
+                        .Distinct(StringComparer.Ordinal)
+                        .ToList();
+                    draft = draft with
+                    {
+                        ValidationIssues = combinedIssues,
+                        ConfidenceScore = Math.Min(draft.ConfidenceScore, 0.70m),
+                    };
+
+                    var preservedBookTitle = job.SourceBookTitle;
+                    var preservedBookPage = job.SourceBookPage;
+                    dbContext.ChangeTracker.Clear();
+                    job =
+                        await dbContext.IngestionJobs.FirstOrDefaultAsync(
+                            j => j.Id == job.Id,
+                            jobCt
+                        ) ?? job;
+                    job.ExtractedModel = modelUsed;
+                    if (!string.IsNullOrWhiteSpace(preservedBookTitle))
+                    {
+                        job.SourceBookTitle = preservedBookTitle;
+                    }
+                    if (preservedBookPage.HasValue)
+                    {
+                        job.SourceBookPage = preservedBookPage;
+                    }
+
+                    allValidationIssues.Add(ex.Message);
+                }
             }
-            else
+
+            if (!publishedSuccessfully)
             {
                 job.Status = IngestionJobStatus.ReadyForReview;
 
@@ -905,34 +732,17 @@ public sealed class IngestionProcessor(
                 job.ProcessedAt = DateTimeOffset.UtcNow;
 
                 job.StatusDetail = $"Ready for side-by-side review ({modelUsed}).";
-                if (unresolvedIssues.Count > 0)
+                if (allValidationIssues.Count > 0)
                 {
                     var detail =
-                        $"{job.StatusDetail} Validation: {string.Join(" ", unresolvedIssues)}";
+                        $"{job.StatusDetail} Validation: {string.Join(" ", allValidationIssues.Distinct(StringComparer.Ordinal))}";
                     job.StatusDetail = detail[..Math.Min(detail.Length, 2000)];
-                }
-
-                var refineModel = config.RefineModel?.Trim();
-                if (
-                    !string.IsNullOrWhiteSpace(refineModel)
-                    && config.HasDistinctRefinement()
-                    && IngestionReviewService.Diagnose(draft, IngestionReviewService.GetSource(job))
-                        is { } savedDiagnostics
-                    && (
-                        savedDiagnostics.ValidationIssues.Count > 0
-                        || savedDiagnostics.QualityWarnings.Count > 0
-                    )
-                )
-                {
-                    var refinement = new IngestionDraftRefinement { IngestionJobId = job.Id };
-                    IngestionReviewService.Requeue(refinement, refineModel, DateTimeOffset.UtcNow);
-                    dbContext.IngestionDraftRefinements.Add(refinement);
                 }
             }
 
             await dbContext.SaveChangesAsync(jobCt);
 
-            if (canAutoPublish)
+            if (publishedSuccessfully)
             {
                 await IngestionCatalogMaterializer.PromoteWaitingRecipeReferenceJobsAsync(
                     dbContext,

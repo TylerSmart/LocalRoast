@@ -12,9 +12,31 @@
   <mat-dialog-content class="dialog-content">
     <div class="warning-banner">
       <mat-icon aria-hidden="true">report_problem</mat-icon>
-      <p>
-        You are about to completely wipe all culinary and application data from your LocalRoast
-        instance.
+      @if (keepIngestionJobs()) {
+        <p>
+          You are about to wipe all recipes, food catalog items, meal plans, and shopping lists, and
+          reset non-discarded ingestion jobs back to Queued.
+        </p>
+      } @else {
+        <p>
+          You are about to completely wipe all culinary and application data from your LocalRoast
+          instance.
+        </p>
+      }
+    </div>
+
+    <div class="reset-options-card">
+      <mat-checkbox
+        [checked]="keepIngestionJobs()"
+        (change)="keepIngestionJobs.set($event.checked)"
+        [disabled]="isResetting()"
+        data-testid="keep-ingestion-jobs-checkbox"
+      >
+        Reset and re-queue ingestion jobs instead of deleting them
+      </mat-checkbox>
+      <p class="option-hint">
+        Clears extracted drafts and results, returns non-discarded jobs to Queued, and preserves
+        uploaded source files, cover images, and initial collections referenced by those jobs.
       </p>
     </div>
 
@@ -25,12 +47,21 @@
           <span>What will be permanently deleted:</span>
         </div>
         <ul>
-          <li>All recipes, ingredients, steps, and photos</li>
-          <li>All meal plans and meal plan templates</li>
-          <li>All shopping lists and items</li>
-          <li>All ingestion jobs, review drafts, and queue history</li>
-          <li>All food catalog items, aliases, and matcher data</li>
-          <li>All custom tags, collections, and cook logs</li>
+          @if (keepIngestionJobs()) {
+            <li>All recipes, ingredients, steps, and recipe photos</li>
+            <li>All meal plans and meal plan templates</li>
+            <li>All shopping lists and items</li>
+            <li>All extracted drafts, queue history, and discarded jobs</li>
+            <li>All food catalog items, aliases, and matcher data</li>
+            <li>All custom tags, unreferenced collections, and cook logs</li>
+          } @else {
+            <li>All recipes, ingredients, steps, and photos</li>
+            <li>All meal plans and meal plan templates</li>
+            <li>All shopping lists and items</li>
+            <li>All ingestion jobs, review drafts, and queue history</li>
+            <li>All food catalog items, aliases, and matcher data</li>
+            <li>All custom tags, collections, and cook logs</li>
+          }
         </ul>
       </div>
 
@@ -40,6 +71,12 @@
           <span>What will be preserved:</span>
         </div>
         <ul>
+          @if (keepIngestionJobs()) {
+            <li>
+              Non-discarded ingestion jobs (re-queued with source files, covers, and referenced
+              collections)
+            </li>
+          }
           <li>Your user account, email, and password</li>
           <li>Configured LLM providers and API keys</li>
           <li>Personal Access Tokens (MCP)</li>
@@ -90,7 +127,9 @@
       } @else {
         <span class="btn-label-group">
           <mat-icon aria-hidden="true">delete_forever</mat-icon>
-          <span>I understand, reset everything</span>
+          <span>{{
+            keepIngestionJobs() ? 'Reset data & re-queue jobs' : 'I understand, reset everything'
+          }}</span>
         </span>
       }
     </button>

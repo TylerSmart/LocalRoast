@@ -7,6 +7,7 @@ import { apiUrl } from '../../api/api-url';
 import {
   AccountDto,
   ChangePasswordRequest,
+  ResetAppDataRequest,
   ResetAppDataResultDto,
   UpdateProfileRequest,
 } from '../../models/account.models';
@@ -31,8 +32,8 @@ export class AccountService {
     return this.http.put<AuthResponse>(apiUrl('/account/password'), request);
   }
 
-  resetAppData(): Observable<ResetAppDataResultDto> {
-    return this.http.post<ResetAppDataResultDto>(apiUrl('/account/reset-data'), {});
+  resetAppData(request: ResetAppDataRequest = {}): Observable<ResetAppDataResultDto> {
+    return this.http.post<ResetAppDataResultDto>(apiUrl('/account/reset-data'), request);
   }
 
   async openAccountSettingsDialog(

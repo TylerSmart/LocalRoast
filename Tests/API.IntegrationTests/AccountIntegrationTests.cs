@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using App.Core.Account;
 using App.Core.Authentication;
 using App.Core.FoodCatalog;
+using App.Core.Ingestion;
 using App.Core.Maintenance;
 using App.Core.Recipes;
 using App.Core.Shopping;
@@ -411,6 +412,99 @@ public sealed class AccountIntegrationTests
         Assert.IsNotNull(account);
         Assert.AreEqual("nuke@example.com", account.Email);
         Assert.AreEqual("nukeuser", account.Username);
+    }
+
+    [TestMethod]
+    public async Task ResetAppData_WithKeepIngestionJobs_ResetsJobsAndPreservesReferencedCollections()
+    {
+        await RegisterAndAuthorizeAsync("keepjobs@example.com", "keepjobs", "Password123!");
+
+        // 1. Seed two collections (one referenced by job, one extra)
+        var bookColRes = await _client.PostAsJsonAsync(
+            "/api/collections",
+            new UpsertCollectionRequest("Cookbook Imports", "From EPUB", 1)
+        );
+        Assert.AreEqual(HttpStatusCode.Created, bookColRes.StatusCode);
+        var bookCol = await bookColRes.Content.ReadFromJsonAsync<CollectionDto>();
+        Assert.IsNotNull(bookCol);
+
+        var extraColRes = await _client.PostAsJsonAsync(
+            "/api/collections",
+            new UpsertCollectionRequest("Weekend Brunch", "Extra", 2)
+        );
+        Assert.AreEqual(HttpStatusCode.Created, extraColRes.StatusCode);
+
+        // 2. Enqueue raw text job referencing Cookbook Imports
+        var jobRes = await _client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest(
+                RawText: "Ingredients:\n- 1 cup oats\nInstructions:\nCook oats.",
+                TitleHint: "Morning Oats",
+                CollectionIds: [bookCol.Id]
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Accepted, jobRes.StatusCode);
+        var job = await jobRes.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
+        Assert.IsNotNull(job);
+
+        // 3. Approve the job so it transitions to Published with a linked recipe
+        var approveRes = await _client.PostAsJsonAsync(
+            $"/api/ingestion/jobs/{job.Id}/approve",
+            new IngestionExtractedDraftDto(
+                Title: "Published Recipe",
+                Description: "Old",
+                SuggestedCollectionIds: [bookCol.Id],
+                Ingredients:
+                [
+                    new IngestionDraftIngredientDto(
+                        Quantity: 1m,
+                        Unit: MeasurementUnit.Cup,
+                        IsNewFoodItem: true,
+                        ProposedFoodItemName: "Rolled Oats",
+                        CreateNewFoodItem: true,
+                        DisplayName: "rolled oats"
+                    ),
+                ],
+                Steps:
+                [
+                    new IngestionDraftStepDto(Instruction: "Cook oats.", IngredientIndices: [0]),
+                ]
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Created, approveRes.StatusCode);
+
+        // 4. Reset app data with KeepIngestionJobs = true
+        var resetRes = await _client.PostAsJsonAsync(
+            "/api/account/reset-data",
+            new ResetAppDataRequest(KeepIngestionJobs: true)
+        );
+        Assert.AreEqual(HttpStatusCode.OK, resetRes.StatusCode);
+
+        var result = await resetRes.Content.ReadFromJsonAsync<ResetAppDataResultDto>();
+        Assert.IsNotNull(result);
+        Assert.IsGreaterThanOrEqualTo(1, result.DeletedRecipesCount);
+        Assert.IsGreaterThanOrEqualTo(1, result.DeletedCollectionsCount);
+        Assert.AreEqual(0, result.DeletedIngestionJobsCount);
+        Assert.IsGreaterThanOrEqualTo(1, result.ResetIngestionJobsCount);
+
+        // 5. Recipes deleted, referenced collection preserved, extra collection deleted
+        var recipes = await _client.GetFromJsonAsync<List<RecipeSummaryDto>>("/api/recipes");
+        Assert.IsNotNull(recipes);
+        Assert.HasCount(0, recipes);
+
+        var collections = await _client.GetFromJsonAsync<List<CollectionDto>>("/api/collections");
+        Assert.IsNotNull(collections);
+        Assert.IsTrue(collections.Any(c => c.Id == bookCol.Id));
+        Assert.IsFalse(collections.Any(c => c.Name == "Weekend Brunch"));
+
+        // 6. Ingestion job still exists in Queued state
+        var jobDetail = await _client.GetFromJsonAsync<IngestionJobDetailDto>(
+            $"/api/ingestion/jobs/{job.Id}"
+        );
+        Assert.IsNotNull(jobDetail);
+        Assert.AreEqual(IngestionJobStatus.Queued, jobDetail.Status);
+        Assert.AreEqual(0, jobDetail.AttemptCount);
+        Assert.IsNull(jobDetail.ResultingRecipeId);
     }
 
     [TestMethod]

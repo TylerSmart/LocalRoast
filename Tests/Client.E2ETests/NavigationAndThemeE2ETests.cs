@@ -243,6 +243,145 @@ public sealed class NavigationAndThemeE2ETests : E2ETestBase
         await Expect(Page.Locator(".empty-state")).ToBeVisibleAsync();
     }
 
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task ResetAppData_WithKeepIngestionJobsChecked_RequeuesJobsAndKeepsReferencedCollections()
+    {
+        await RegisterAndLoginAsync();
+
+        // Pause background queue so re-queued job stays in Queued for assertion
+        // and seed referenced/unreferenced collections + a published ingestion job.
+        var seededJobId = await Page.EvaluateAsync<string>(
+            @"async () => {
+                const tokenKey = Object.keys(localStorage).find(k => k.endsWith('-token'));
+                const token = tokenKey ? localStorage.getItem(tokenKey) : null;
+                const headers = {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                };
+
+                await fetch('/api/llm-settings/workflows', {
+                    method: 'PUT',
+                    headers,
+                    body: JSON.stringify({ enableIngestion: false, autoResumeQueue: false })
+                });
+
+                const bookRes = await fetch('/api/collections', {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({ name: 'Cookbook Imports', description: 'Book', sortOrder: 1 })
+                });
+                const bookCol = await bookRes.json();
+
+                await fetch('/api/collections', {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({ name: 'Extra Unused Collection', description: 'Temp', sortOrder: 2 })
+                });
+
+                const jobRes = await fetch('/api/ingestion/jobs/text', {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({
+                        rawText: 'Ingredients:\n- 1 cup oats\nInstructions:\nCook oats.',
+                        titleHint: 'Morning Oats',
+                        collectionIds: [bookCol.id]
+                    })
+                });
+                const job = await jobRes.json();
+
+                await fetch(`/api/ingestion/jobs/${job.id}/approve`, {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({
+                        title: 'Morning Oats',
+                        description: 'Warm breakfast',
+                        suggestedCollectionIds: [bookCol.id],
+                        ingredients: [
+                            {
+                                quantity: 1,
+                                unit: 'Cup',
+                                isNewFoodItem: true,
+                                proposedFoodItemName: 'Rolled Oats',
+                                createNewFoodItem: true,
+                                displayName: 'rolled oats'
+                            }
+                        ],
+                        steps: [{ instruction: 'Cook oats.', ingredientIndices: [0] }]
+                    })
+                });
+
+                return job.id;
+            }"
+        );
+
+        // 1. Open User Menu -> Account Settings -> Data tab -> Reset App Data
+        await Page.Locator("button.user-profile-btn").ClickAsync();
+        await Page.Locator("button[role='menuitem']", new() { HasText = "Account Settings" })
+            .ClickAsync();
+
+        var accountDialog = Page.Locator("app-account-settings-dialog");
+        await Expect(accountDialog).ToBeVisibleAsync();
+
+        await accountDialog.Locator(".mat-mdc-tab", new() { HasText = "Data" }).ClickAsync();
+        await accountDialog.Locator("button.reset-data-button").ClickAsync();
+
+        var resetDialog = Page.Locator("app-reset-app-data-dialog");
+        await Expect(resetDialog).ToBeVisibleAsync();
+
+        // 2. Toggle 'Reset and re-queue ingestion jobs' option
+        var keepJobsCheckbox = resetDialog.Locator("[data-testid='keep-ingestion-jobs-checkbox']");
+        await keepJobsCheckbox.ClickAsync();
+
+        await Expect(resetDialog.Locator(".will-keep"))
+            .ToContainTextAsync("Non-discarded ingestion jobs");
+        var confirmBtn = resetDialog.Locator("button.destructive-btn");
+        await Expect(confirmBtn).ToContainTextAsync("Reset data & re-queue jobs");
+
+        // 3. Confirm and submit
+        await resetDialog
+            .Locator("input[aria-label='Confirm data reset by typing DELETE']")
+            .FillAsync("DELETE");
+        await Expect(confirmBtn).ToBeEnabledAsync();
+        await confirmBtn.ClickAsync();
+
+        await Expect(resetDialog).Not.ToBeVisibleAsync();
+        await Expect(accountDialog).Not.ToBeVisibleAsync();
+
+        // 4. Verify recipes were wiped while referenced collection remains and unreferenced collection is deleted
+        await Page.GotoAsync($"{ServerUrl}/recipes");
+        await Expect(Page.Locator(".empty-state")).ToBeVisibleAsync();
+
+        var state = await Page.EvaluateAsync<string>(
+            @"async (jobId) => {
+                const tokenKey = Object.keys(localStorage).find(k => k.endsWith('-token'));
+                const token = tokenKey ? localStorage.getItem(tokenKey) : null;
+                const headers = { 'Authorization': `Bearer ${token}` };
+
+                const colRes = await fetch('/api/collections', { headers });
+                const cols = await colRes.json();
+                const colNames = cols.map(c => c.name);
+
+                const jobRes = await fetch(`/api/ingestion/jobs/${jobId}`, { headers });
+                const job = await jobRes.json();
+
+                return JSON.stringify({ colNames, status: job.status, recipeId: job.resultingRecipeId });
+            }",
+            seededJobId
+        );
+
+        StringAssert.Contains(state, "Cookbook Imports");
+        Assert.IsFalse(state.Contains("Extra Unused Collection", StringComparison.Ordinal));
+        StringAssert.Contains(state, "\"status\":\"Queued\"");
+        StringAssert.Contains(state, "\"recipeId\":null");
+
+        // 5. Verify Ingestion Hub visibly displays the re-queued job
+        await Page.GotoAsync($"{ServerUrl}/ingest");
+        var jobCard = Page.Locator(".job-card", new() { HasText = "Morning Oats" });
+        await Expect(jobCard).ToBeVisibleAsync();
+        await Expect(jobCard.Locator(".status-badge")).ToContainTextAsync("Queued");
+    }
+
     private sealed class NavMetrics
     {
         public double NavClientWidth { get; set; }

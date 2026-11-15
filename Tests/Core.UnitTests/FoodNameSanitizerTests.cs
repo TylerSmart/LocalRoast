@@ -61,4 +61,31 @@ public sealed class FoodNameSanitizerTests
         Assert.AreEqual("Garlic", FoodNameSanitizer.SanitizeFoodName("  Garlic  "));
         Assert.AreEqual("Kosher Salt", FoodNameSanitizer.SanitizeFoodName("Kosher Salt"));
     }
+
+    [TestMethod]
+    [DataRow("cold water", "water")]
+    [DataRow("Warm Water", "water")]
+    [DataRow("boiling water", "water")]
+    [DataRow("hot sauce", "hot sauce")]
+    [DataRow("large egg", "egg")]
+    [DataRow("extra-large eggs", "egg")]
+    [DataRow("garlic clove", "garlic")]
+    [DataRow("garlic cloves", "garlic")]
+    [DataRow("frozen chopped spinach", "frozen spinach")]
+    [DataRow("table salt", "salt")]
+    [DataRow("Fine Salt", "salt")]
+    [DataRow("ground black pepper", "black pepper")]
+    [DataRow("freshly ground black pepper", "black pepper")]
+    [DataRow("ground pepper", "black pepper")]
+    [DataRow("freshly ground pepper", "black pepper")]
+    [DataRow("cracked pepper", "black pepper")]
+    [DataRow("peppercorns", "peppercorns")]
+    [DataRow("cayenne pepper", "cayenne pepper")]
+    [DataRow("peanut or vegetable oil", "peanut oil")]
+    [DataRow("olive oil or vegetable oil", "olive oil")]
+    [DataRow("butter or vegetable oil", "butter")]
+    public void NormalizeCanonicalFoodName_StripsSafeModifiersOnly(string input, string expected)
+    {
+        Assert.AreEqual(expected, FoodNameSanitizer.NormalizeCanonicalFoodName(input));
+    }
 }

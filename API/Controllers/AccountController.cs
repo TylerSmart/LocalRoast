@@ -5,6 +5,7 @@ using App.Core.Exceptions;
 using App.Core.Maintenance;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 
 namespace App.API.Controllers;
 
@@ -211,7 +212,8 @@ public sealed class AccountController(IAccountService accountService) : Controll
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> ResetAppData(
         [FromServices] IAppDataMaintenanceService maintenanceService,
-        CancellationToken cancellationToken
+        [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] ResetAppDataRequest? request = null,
+        CancellationToken cancellationToken = default
     )
     {
         var userId = TryGetCurrentUserId();
@@ -220,7 +222,7 @@ public sealed class AccountController(IAccountService accountService) : Controll
             return Unauthorized();
         }
 
-        var result = await maintenanceService.ResetAppDataAsync(cancellationToken);
+        var result = await maintenanceService.ResetAppDataAsync(request, cancellationToken);
         return Ok(result);
     }
 }

@@ -22,12 +22,15 @@ import { MatInputModule } from '@angular/material/input';
 import { MatMenuModule } from '@angular/material/menu';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatPaginatorModule, PageEvent } from '@angular/material/paginator';
+import { MatSelectModule } from '@angular/material/select';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { RouterLink } from '@angular/router';
 import { interval } from 'rxjs';
 import { APP_STORAGE_PREFIX } from '../../../app.branding';
 import type {
   IngestionChannel,
+  IngestionJobSortBy,
+  IngestionJobSortDirection,
   IngestionJobStatus,
   IngestionJobSummaryDto,
 } from '../../../core/models/ingestion.models';
@@ -35,6 +38,17 @@ import { IngestionService } from '../../../core/services/ingestion/ingestion.ser
 import { LlmSettingsService } from '../../../core/services/llm-settings/llm-settings.service';
 
 export type IngestionFilter = 'All' | 'ReadyForReview' | 'ActiveWaiting' | 'Published' | 'Failed';
+
+export interface SortByOption {
+  readonly value: IngestionJobSortBy;
+  readonly label: string;
+}
+
+export const SORT_OPTIONS: SortByOption[] = [
+  { value: 'CreatedAt', label: 'Created' },
+  { value: 'ModifiedAt', label: 'Updated' },
+  { value: 'Name', label: 'Name' },
+];
 
 export interface RefreshOption {
   readonly label: string;
@@ -68,6 +82,7 @@ export const REFRESH_OPTIONS: RefreshOption[] = [
     MatMenuModule,
     MatPaginatorModule,
     MatProgressSpinnerModule,
+    MatSelectModule,
     MatTooltipModule,
   ],
   templateUrl: './ingestion-hub.component.html',
@@ -81,6 +96,7 @@ export class IngestionHubComponent implements OnInit {
   private readonly llmSettingsService = inject(LlmSettingsService);
 
   readonly refreshOptions = REFRESH_OPTIONS;
+  readonly sortOptions = SORT_OPTIONS;
   private readonly refreshStorageKey = `${APP_STORAGE_PREFIX}:ingestion-refresh-interval`;
   private lastActiveInterval = 15;
 
@@ -120,9 +136,9 @@ export class IngestionHubComponent implements OnInit {
     if (remaining >= 60) {
       const minutes = Math.floor(remaining / 60);
       const seconds = remaining % 60;
-      return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+      return seconds > 0 ? `${minutes}m ${Math.round(seconds)}s` : `${minutes}m`;
     }
-    return `${remaining}s`;
+    return `${Math.round(remaining)}s`;
   });
 
   readonly urlForm = this.fb.nonNullable.group({
@@ -204,6 +220,8 @@ export class IngestionHubComponent implements OnInit {
   readonly publishedCount = computed(() => this.ingestionService.summary().publishedCount ?? 0);
 
   readonly searchQuery = signal<string>('');
+  readonly sortBy = signal<IngestionJobSortBy>('CreatedAt');
+  readonly sortDirection = signal<IngestionJobSortDirection>('Desc');
 
   readonly filteredJobs = computed(() => this.jobs());
 
@@ -219,6 +237,18 @@ export class IngestionHubComponent implements OnInit {
 
   clearSearch(): void {
     this.searchQuery.set('');
+    this.pageIndex.set(0);
+    this.executeRefresh();
+  }
+
+  onSortByChange(value: IngestionJobSortBy): void {
+    this.sortBy.set(value);
+    this.pageIndex.set(0);
+    this.executeRefresh();
+  }
+
+  toggleSortDirection(): void {
+    this.sortDirection.update((dir) => (dir === 'Asc' ? 'Desc' : 'Asc'));
     this.pageIndex.set(0);
     this.executeRefresh();
   }
@@ -322,6 +352,8 @@ export class IngestionHubComponent implements OnInit {
         this.pageIndex() + 1,
         this.pageSize(),
         activeWaiting,
+        this.sortBy(),
+        this.sortDirection(),
       )
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
@@ -341,7 +373,7 @@ export class IngestionHubComponent implements OnInit {
   }
 
   private setupPolling(): void {
-    interval(1000)
+    interval(100)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(() => {
         const intervalVal = this.refreshInterval();
@@ -360,7 +392,7 @@ export class IngestionHubComponent implements OnInit {
           this.remainingSeconds.set(intervalVal);
           this.executeRefresh();
         } else {
-          this.remainingSeconds.set(remaining - 1);
+          this.remainingSeconds.set(remaining - 0.1);
         }
       });
   }

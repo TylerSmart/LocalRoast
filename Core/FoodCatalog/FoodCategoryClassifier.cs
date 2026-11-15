@@ -11,9 +11,28 @@ public static partial class FoodCategoryClassifier
 {
     private static readonly (string[] Terms, FoodCategory Category)[] Rules =
     [
+        // Plant-based / specialty yogurts before generic "coconut milk" canned match.
+        (
+            [
+                "coconut milk yogurt",
+                "coconut yogurt",
+                "almond milk yogurt",
+                "almond yogurt",
+                "soy yogurt",
+                "oat yogurt",
+                "greek yogurt",
+            ],
+            FoodCategory.DairyAndEggs
+        ),
         // Explicit storage modifiers first.
         (["frozen", "ice cream", "popsicle"], FoodCategory.Frozen),
-        (["canned", "tinned", "jarred"], FoodCategory.CannedAndJarred),
+        (["canned", "tinned", "jarred", "aquafaba"], FoodCategory.CannedAndJarred),
+        // Pastry / dumpling wrappers before generic "egg" or "rice" substring matches.
+        (["wonton wrappers", "egg roll wrappers", "dumpling wrappers"], FoodCategory.Refrigerated),
+        (
+            ["lumpia wrappers", "spring roll wrappers", "rice paper wrappers", "rice paper"],
+            FoodCategory.PantryDryGoods
+        ),
         // Specific phrases that would otherwise be misread by a generic word.
         (
             [
@@ -70,10 +89,14 @@ public static partial class FoodCategoryClassifier
                 "dried rosemary",
                 "dried mint",
                 "chili powder",
+                "chile powder",
                 "curry powder",
                 "red pepper flakes",
                 "chili flakes",
+                "chile flakes",
                 "black pepper",
+                "ground pepper",
+                "cracked pepper",
                 "white pepper",
                 "peppercorn",
                 "peppercorns",
@@ -167,6 +190,15 @@ public static partial class FoodCategoryClassifier
                 "miso",
                 "gochujang",
                 "harissa",
+                "tamarind juice concentrate",
+                "tamarind concentrate",
+                "tamarind paste",
+                "tamarind pulp",
+                "tamarind",
+                "curry paste",
+                "chili paste",
+                "chile paste",
+                "pomegranate molasses",
             ],
             FoodCategory.CondimentsAndSauces
         ),
@@ -338,6 +370,9 @@ public static partial class FoodCategoryClassifier
                 "whiskey",
                 "tequila",
                 "water",
+                "ice cube",
+                "ice cubes",
+                "ice",
             ],
             FoodCategory.Beverages
         ),
@@ -415,6 +450,7 @@ public static partial class FoodCategoryClassifier
                 "dill",
                 "rosemary",
                 "sage",
+                "chive",
                 "chives",
                 "herbs",
                 "peach",
@@ -442,8 +478,13 @@ public static partial class FoodCategoryClassifier
             return FoodCategory.Other;
         }
 
-        var normalized =
-            " " + NonWordRegex().Replace(foodName.ToLowerInvariant(), " ").Trim() + " ";
+        var trimmedNormalized = NonWordRegex().Replace(foodName.ToLowerInvariant(), " ").Trim();
+        if (string.Equals(trimmedNormalized, "pepper", StringComparison.Ordinal))
+        {
+            return FoodCategory.SpicesAndSeasonings;
+        }
+
+        var normalized = " " + trimmedNormalized + " ";
 
         foreach (var (terms, category) in Rules)
         {
@@ -458,6 +499,128 @@ public static partial class FoodCategoryClassifier
         }
 
         return FoodCategory.Other;
+    }
+
+    private static readonly string[] ExactPantryStapleNames =
+    [
+        "water",
+        "ice",
+        "ice cube",
+        "ice cubes",
+        "flour",
+        "all purpose flour",
+        "bread flour",
+        "whole wheat flour",
+        "cake flour",
+        "pastry flour",
+        "sugar",
+        "granulated sugar",
+        "white sugar",
+        "brown sugar",
+        "light brown sugar",
+        "dark brown sugar",
+        "powdered sugar",
+        "confectioners sugar",
+        "turbinado sugar",
+        "mustard",
+        "dijon mustard",
+        "yellow mustard",
+        "whole grain mustard",
+        "brown mustard",
+        "spicy brown mustard",
+    ];
+
+    private static readonly string[] PantryStapleTerms =
+    [
+        "olive oil",
+        "vegetable oil",
+        "canola oil",
+        "sesame oil",
+        "avocado oil",
+        "coconut oil",
+        "peanut oil",
+        "corn oil",
+        "sunflower oil",
+        "safflower oil",
+        "grapeseed oil",
+        "cooking oil",
+        "neutral oil",
+        "salad oil",
+        "cooking spray",
+        "nonstick spray",
+        "vinegar",
+        "baking soda",
+        "baking powder",
+        "cornstarch",
+        "corn starch",
+        "yeast",
+        "vanilla",
+        "cocoa powder",
+        "honey",
+        "maple syrup",
+        "molasses",
+        "agave",
+        "soy sauce",
+        "fish sauce",
+        "worcestershire",
+        "hot sauce",
+        "sriracha",
+        "ketchup",
+    ];
+
+    /// <summary>
+    /// Determines whether a newly created catalog food item should default to <c>IsPantryStaple = true</c>
+    /// (seasonings, cooking oils, vinegars, water, core baking goods, and shelf-stable condiments).
+    /// </summary>
+    public static bool IsLikelyPantryStaple(string? foodName, FoodCategory category)
+    {
+        if (category == FoodCategory.SpicesAndSeasonings)
+        {
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(foodName))
+        {
+            return false;
+        }
+
+        var normalized = NonWordRegex().Replace(foodName.ToLowerInvariant(), " ").Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return false;
+        }
+
+        if (
+            Array.Exists(
+                ExactPantryStapleNames,
+                exact => string.Equals(normalized, exact, StringComparison.Ordinal)
+            )
+        )
+        {
+            return true;
+        }
+
+        if (
+            category
+            is FoodCategory.Produce
+                or FoodCategory.MeatAndSeafood
+                or FoodCategory.DairyAndEggs
+        )
+        {
+            return false;
+        }
+
+        var padded = " " + normalized + " ";
+        foreach (var term in PantryStapleTerms)
+        {
+            var normalizedTerm = " " + NonWordRegex().Replace(term, " ").Trim() + " ";
+            if (padded.Contains(normalizedTerm, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     [GeneratedRegex(@"[^\p{L}\p{N}']+")]

@@ -442,6 +442,12 @@ public sealed class FoodItemMergeAndAiHelpersE2ETests : E2ETestBase
         );
 
         var dialog = Page.Locator("app-kitchen-question-dialog");
+        async Task CloseKitchenDialogAsync()
+        {
+            await dialog.Locator("button[aria-label='Close Kitchen AI']").ClickAsync();
+            await Expect(dialog).ToHaveCountAsync(0);
+        }
+
         await Page.Locator(".explain-ing-btn").First.ClickAsync();
         await Expect(dialog.Locator(".answer-text")).ToContainTextAsync("thin matchsticks");
         Assert.IsNotNull(mockServer.LastKitchenPrompt);
@@ -457,13 +463,13 @@ public sealed class FoodItemMergeAndAiHelpersE2ETests : E2ETestBase
         await Expect(dialog.Locator(".answer-text")).ToContainTextAsync("thin matchsticks");
         Assert.IsNotNull(mockServer.LastKitchenPrompt);
         StringAssert.Contains(mockServer.LastKitchenPrompt, "How do I peel a kiwi?");
-        await dialog.Locator("button[aria-label='Close Kitchen AI']").ClickAsync();
+        await CloseKitchenDialogAsync();
 
         await Page.Locator(".explain-step-btn").First.ClickAsync();
         await Expect(dialog.Locator(".answer-text")).ToBeVisibleAsync();
         Assert.IsNotNull(mockServer.LastKitchenPrompt);
         StringAssert.Contains(mockServer.LastKitchenPrompt, "Julienne the peeled kiwi.");
-        await dialog.Locator("button[aria-label='Close Kitchen AI']").ClickAsync();
+        await CloseKitchenDialogAsync();
 
         await Page.Locator("button[aria-label='More recipe actions']").ClickAsync();
         await Page.GetByRole(AriaRole.Menuitem, new() { Name = "Ask Kitchen AI" }).ClickAsync();
@@ -472,7 +478,7 @@ public sealed class FoodItemMergeAndAiHelpersE2ETests : E2ETestBase
         await Expect(dialog.Locator(".answer-text")).ToBeVisibleAsync();
         Assert.IsNotNull(mockServer.LastKitchenPrompt);
         StringAssert.Contains(mockServer.LastKitchenPrompt, "What is aquafaba?");
-        await dialog.Locator("button[aria-label='Close Kitchen AI']").ClickAsync();
+        await CloseKitchenDialogAsync();
 
         await Page.SetViewportSizeAsync(360, 740);
         await Page.Locator(".explain-ing-btn").First.ClickAsync();
@@ -487,13 +493,13 @@ public sealed class FoodItemMergeAndAiHelpersE2ETests : E2ETestBase
             await Page.EvaluateAsync<int>("() => document.documentElement.scrollWidth"),
             "Recipe detail must not overflow horizontally at 360px."
         );
-        await dialog.Locator("button[aria-label='Close Kitchen AI']").ClickAsync();
+        await CloseKitchenDialogAsync();
         await Page.SetViewportSizeAsync(1280, 720);
 
         await Page.Locator(".start-cooking-btn").ClickAsync();
         await Page.Locator(".desktop-explain-btn").First.ClickAsync();
         await Expect(dialog.Locator(".answer-text")).ToBeVisibleAsync();
-        await dialog.Locator("button[aria-label='Close Kitchen AI']").ClickAsync();
+        await CloseKitchenDialogAsync();
         await Expect(Page.Locator(".cook-ingredients-pane .ingredient-item").First)
             .Not.ToHaveClassAsync(new Regex("is-checked"));
 
@@ -501,7 +507,7 @@ public sealed class FoodItemMergeAndAiHelpersE2ETests : E2ETestBase
         await Expect(dialog.Locator(".answer-text")).ToBeVisibleAsync();
         Assert.IsNotNull(mockServer.LastKitchenPrompt);
         StringAssert.Contains(mockServer.LastKitchenPrompt, "Julienne the peeled kiwi.");
-        await dialog.Locator("button[aria-label='Close Kitchen AI']").ClickAsync();
+        await CloseKitchenDialogAsync();
 
         await Page.SetViewportSizeAsync(360, 740);
         await Page.Locator(".mobile-ingredients-btn").ClickAsync();
@@ -523,7 +529,7 @@ public sealed class FoodItemMergeAndAiHelpersE2ETests : E2ETestBase
             "() => document.documentElement.scrollWidth"
         );
         Assert.IsLessThanOrEqualTo(360, pageScrollWidth);
-        await dialog.Locator("button[aria-label='Close Kitchen AI']").ClickAsync();
+        await CloseKitchenDialogAsync();
         await Page.Locator(
                 ".mobile-ingredients-drawer button[aria-label='Close ingredients drawer']"
             )
@@ -533,11 +539,11 @@ public sealed class FoodItemMergeAndAiHelpersE2ETests : E2ETestBase
         await dialog.Locator("textarea").FillAsync("What is aquafaba?");
         await dialog.Locator("button[type='submit']").ClickAsync();
         await Expect(dialog.Locator(".answer-text")).ToBeVisibleAsync();
-        await dialog.Locator("button[aria-label='Close Kitchen AI']").ClickAsync();
+        await CloseKitchenDialogAsync();
 
         await Page.Locator(".step-ai-explain-btn").ClickAsync();
         await Expect(dialog.Locator(".answer-text")).ToBeVisibleAsync();
-        await dialog.Locator("button[aria-label='Close Kitchen AI']").ClickAsync();
+        await CloseKitchenDialogAsync();
     }
 
     [TestMethod]

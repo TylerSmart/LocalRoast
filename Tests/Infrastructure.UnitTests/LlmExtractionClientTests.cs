@@ -52,14 +52,14 @@ public sealed class LlmExtractionClientTests
             var schema = body.RootElement.GetProperty("format").GetProperty("properties");
             if (calls == 0)
             {
-                Assert.IsTrue(
-                    schema
-                        .GetProperty("ingredients")
-                        .GetProperty("items")
-                        .GetProperty("properties")
-                        .TryGetProperty("alternativeMeasurement", out _)
-                );
+                var ingProps = schema
+                    .GetProperty("ingredients")
+                    .GetProperty("items")
+                    .GetProperty("properties");
+                Assert.IsTrue(ingProps.TryGetProperty("altQuantity", out _));
+                Assert.IsTrue(ingProps.TryGetProperty("altUnit", out _));
                 Assert.IsTrue(schema.TryGetProperty("steps", out _));
+                Assert.IsTrue(schema.TryGetProperty("qualityAudit", out _));
             }
             calls++;
             return OllamaReply(ButterIngredientsJson);
@@ -77,7 +77,7 @@ public sealed class LlmExtractionClientTests
             OllamaCpuOnly: cpuOnly,
             OllamaGpuLayers: gpuLayers
         );
-        await client.ExtractRecipeFromTextAsync(config, new LlmExtractionContext(TaggedSource, []));
+        await client.ExtractRecipeFromTextAsync(config, new LlmExtractionContext(TaggedSource));
         await client.TranscribeRecipeImagesAsync(
             config,
             new LlmVisionExtractionContext(
@@ -147,7 +147,7 @@ public sealed class LlmExtractionClientTests
             TopK: overridden ? 64 : null
         );
 
-        await client.ExtractRecipeFromTextAsync(config, new LlmExtractionContext(TaggedSource, []));
+        await client.ExtractRecipeFromTextAsync(config, new LlmExtractionContext(TaggedSource));
         await client.TranscribeRecipeImagesAsync(
             config,
             new LlmVisionExtractionContext(
@@ -219,7 +219,7 @@ public sealed class LlmExtractionClientTests
             false
         );
         var error = await Assert.ThrowsAsync<DomainValidationException>(() =>
-            client.ExtractRecipeFromTextAsync(config, new LlmExtractionContext(TaggedSource, []))
+            client.ExtractRecipeFromTextAsync(config, new LlmExtractionContext(TaggedSource))
         );
         StringAssert.Contains(error.Message, "CPU-only");
         StringAssert.Contains(error.Message, "not a missing application setting");
@@ -230,15 +230,12 @@ public sealed class LlmExtractionClientTests
         "Butter Toast\n\nIngredients:\n- 2 tablespoons unsalted butter\n\nInstructions:\n1. Melt 2 tablespoons butter in skillet for 2 minutes.";
 
     private const string ButterIngredientsJson = """
-        {"title":"Butter Toast","ingredients":[{"quantity":2,"unit":"tbsp","canonicalFoodName":"unsalted butter","displayName":"unsalted butter","originalRawText":"2 tablespoons unsalted butter"}]}
+        {"title":"Butter Toast","proposedTags":["Breakfast"],"ingredients":[{"refId":"ing_1","canonicalFoodItem":"unsalted butter","displayName":"unsalted butter","quantity":2,"unit":"tbsp","rawText":"2 tablespoons unsalted butter"}],"steps":[{"stepNumber":1,"templateText":"Melt {{ing_1_a}} in skillet for {{timer_1}}.","ingredientTokens":[{"tokenKey":"ing_1_a","ingredientRefId":"ing_1","stepQuantity":2,"stepUnit":"tbsp"}],"timerTokens":[{"tokenKey":"timer_1","durationSeconds":120,"label":"Melt butter"}],"temperatureTokens":[]}],"qualityAudit":{"isPlausibleRecipe":true,"warnings":[]}}
         """;
 
     private const string TranscriptionJson = """
         {"title":"Butter Toast","introduction":"","ingredientLines":["2 tablespoons unsalted butter"],"instructionParagraphs":["Melt butter."],"notes":""}
         """;
-
-    private static bool IsMethodTagRequest(string body) =>
-        body.Contains("You annotate a recipe method", StringComparison.Ordinal);
 
     private static HttpResponseMessage OllamaReply(string content) =>
         new(HttpStatusCode.OK)
@@ -411,7 +408,7 @@ public sealed class LlmExtractionClientTests
             {
                 "message": {
                     "role": "assistant",
-                    "content": "{\"title\":\"Skillet Rosemary Chicken\",\"description\":\"Crisp chicken with fresh rosemary.\",\"baseServings\":4,\"yieldDisplay\":\"4 portions\",\"prepTimeMinutes\":10,\"cookTimeMinutes\":25,\"totalTimeMinutes\":35,\"difficulty\":\"Medium\",\"sourceName\":\"Chef Daily\",\"sourceAuthor\":\"Elena\",\"confidenceScore\":0.92,\"suggestedTagNames\":[\"Main\",\"One-Pot\"],\"ingredients\":[{\"sectionName\":null,\"quantity\":4,\"maxQuantity\":null,\"unit\":\"whole\",\"canonicalFoodName\":\"chicken thighs\",\"displayName\":\"bone-in chicken thighs\",\"preparationNote\":null,\"isOptional\":false,\"originalRawText\":\"4 bone-in chicken thighs\",\"suggestedIsPantryStaple\":false,\"suggestedCategory\":\"MeatAndSeafood\"}],\"steps\":[{\"sectionName\":null,\"instruction\":\"Sear chicken in olive oil for 8 minutes per side.\",\"ingredientIndices\":[0],\"timers\":[{\"durationSeconds\":480,\"label\":\"Sear\"}]}]}"
+                    "content": "{\"title\":\"Skillet Rosemary Chicken\",\"description\":\"Crisp chicken with fresh rosemary.\",\"servings\":4,\"yieldDisplay\":\"4 portions\",\"prepTimeMinutes\":10,\"cookTimeMinutes\":25,\"totalTimeMinutes\":35,\"difficulty\":\"Medium\",\"sourceName\":\"Chef Daily\",\"sourceAuthor\":\"Elena\",\"proposedTags\":[\"Main\",\"One-Pot\"],\"ingredients\":[{\"refId\":\"ing_1\",\"sectionName\":null,\"canonicalFoodItem\":\"chicken thighs\",\"displayName\":\"bone-in chicken thighs\",\"category\":\"MeatAndSeafood\",\"quantity\":4,\"maxQuantity\":null,\"unit\":\"whole\",\"altQuantity\":null,\"altUnit\":null,\"preparationNotes\":null,\"isOptional\":false,\"isRecipeReference\":false,\"referencedRecipeTitle\":null,\"rawText\":\"4 bone-in chicken thighs\"}],\"steps\":[{\"stepNumber\":1,\"sectionName\":null,\"templateText\":\"Sear {{ing_1_a}} in olive oil for {{timer_1}}.\",\"ingredientTokens\":[{\"tokenKey\":\"ing_1_a\",\"ingredientRefId\":\"ing_1\",\"stepQuantity\":4,\"stepUnit\":\"whole\",\"fallbackDisplay\":null}],\"timerTokens\":[{\"tokenKey\":\"timer_1\",\"durationSeconds\":480,\"label\":\"Sear chicken\"}],\"temperatureTokens\":[]}],\"qualityAudit\":{\"isPlausibleRecipe\":true,\"warnings\":[]}}"
                 }
             }
             """;
@@ -423,8 +420,7 @@ public sealed class LlmExtractionClientTests
             StringAssert.Contains(body, "\"think\":false");
             StringAssert.Contains(body, "\"num_ctx\":16384");
             StringAssert.Contains(body, "\"num_predict\":16384");
-            if (!IsMethodTagRequest(body))
-                StringAssert.Contains(body, "shopping ingredient list");
+            StringAssert.Contains(body, "master shopping ingredient list");
             using var request = JsonDocument.Parse(body);
             Assert.AreEqual(
                 1,
@@ -438,14 +434,10 @@ public sealed class LlmExtractionClientTests
                 expected: 16384,
                 actual: request.RootElement.GetProperty("options").GetProperty("num_ctx").GetInt32()
             );
-            return IsMethodTagRequest(body)
-                ? OllamaReply(
-                    """{"timers":{"T1":"Sear chicken"},"steps":{"1":["0 bone-in chicken thighs"]}}"""
-                )
-                : new HttpResponseMessage(HttpStatusCode.OK)
-                {
-                    Content = new StringContent(ollamaResponse, Encoding.UTF8, "application/json"),
-                };
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(ollamaResponse, Encoding.UTF8, "application/json"),
+            };
         });
 
         var client = new LlmExtractionClient(new HttpClient(handler));
@@ -462,25 +454,24 @@ public sealed class LlmExtractionClientTests
         );
 
         var context = new LlmExtractionContext(
-            SourceContent: "Skillet Rosemary Chicken\n\nIngredients:\n- 4 bone-in chicken thighs\n\nInstructions:\n1. Sear chicken in olive oil for 8 minutes per side.",
-            AvailableTagNames: ["Main", "One-Pot"]
+            SourceContent: "Skillet Rosemary Chicken\n\nIngredients:\n- 4 bone-in chicken thighs\n\nInstructions:\n1. Sear chicken in olive oil for 8 minutes per side."
         );
 
         var result = await client.ExtractRecipeFromTextAsync(config, context);
 
         Assert.AreEqual("Skillet Rosemary Chicken", result.Title);
-        Assert.AreEqual(4, result.BaseServings);
-        Assert.AreEqual(1, result.Ingredients?.Count);
-        Assert.AreEqual("chicken thighs", result.Ingredients![0].CanonicalFoodName);
-        Assert.AreEqual("MeatAndSeafood", result.Ingredients[0].SuggestedCategory);
-        Assert.AreEqual(1, result.Steps?.Count);
+        Assert.AreEqual(4, result.Servings);
+        Assert.HasCount(1, result.Ingredients!);
+        Assert.AreEqual("chicken thighs", result.Ingredients![0].CanonicalFoodItem);
+        Assert.AreEqual("MeatAndSeafood", result.Ingredients[0].Category);
+        Assert.HasCount(1, result.Steps!);
         Assert.AreEqual(
-            "Sear chicken in olive oil for 8 minutes per side.",
-            result.Steps![0].Instruction
+            "Sear {{ing_1_a}} in olive oil for {{timer_1}}.",
+            result.Steps![0].TemplateText
         );
-        CollectionAssert.AreEqual(new[] { 0 }, result.Steps[0].IngredientIndices!.ToArray());
-        Assert.AreEqual(480, result.Steps[0].Timers![0].DurationSeconds);
-        Assert.AreEqual("Sear", result.Steps[0].Timers![0].Label);
+        Assert.AreEqual("ing_1", result.Steps[0].IngredientTokens![0].IngredientRefId);
+        Assert.AreEqual(480, result.Steps[0].TimerTokens![0].DurationSeconds);
+        Assert.AreEqual("Sear chicken", result.Steps[0].TimerTokens![0].Label);
     }
 
     [TestMethod]
@@ -505,7 +496,7 @@ public sealed class LlmExtractionClientTests
             AutoPublishHighConfidenceText: false
         );
 
-        var context = new LlmExtractionContext(TaggedSource, []);
+        var context = new LlmExtractionContext(TaggedSource);
 
         await Assert.ThrowsAsync<LlmHostUnavailableException>(async () =>
         {
@@ -670,20 +661,33 @@ public sealed class LlmExtractionClientTests
             {
                 "title": "Mango Tango Tacos",
                 "description": "Flavorful beef tacos with fresh mango.",
-                "baseServings": 4,
+                "servings": 4,
                 "ingredients": [
-                    { "displayName": "ground beef", "canonicalFoodName": "ground beef", "quantity": 1, "unit": "lb" },
+                    { "refId": "ing_1", "displayName": "ground beef", "canonicalFoodItem": "ground beef", "quantity": 1, "unit": "lb", "rawText": "1 lb ground beef" },
                     {
+                        "refId": "ing_2",
+                        "canonicalFoodItem": "Foolproof All-Butter Dough",
                         "displayName": "Foolproof All-Butter Dough",
                         "isRecipeReference": true,
                         "referencedRecipeTitle": "Foolproof All-Butter Dough",
                         "quantity": 1,
-                        "unit": "recipe"
+                        "unit": "recipe",
+                        "rawText": "1 recipe Foolproof All-Butter Dough"
                     }
                 ],
                 "steps": [
-                    { "instruction": "Brown ||{\"ingredient\": \"ground beef\", \"amount\": 1, \"unit\": \"lb\"}|| in a skillet." }
-                ]
+                    {
+                        "stepNumber": 1,
+                        "templateText": "Brown {{ing_1_a}} in a skillet and serve on {{ing_2_a}}.",
+                        "ingredientTokens": [
+                            { "tokenKey": "ing_1_a", "ingredientRefId": "ing_1", "stepQuantity": 1, "stepUnit": "lb" },
+                            { "tokenKey": "ing_2_a", "ingredientRefId": "ing_2", "stepQuantity": 1, "stepUnit": "recipe" }
+                        ],
+                        "timerTokens": [],
+                        "temperatureTokens": []
+                    }
+                ],
+                "qualityAudit": { "isPlausibleRecipe": true, "warnings": [] }
             }
             """;
 
@@ -703,7 +707,7 @@ public sealed class LlmExtractionClientTests
             var body = req.Content!.ReadAsStringAsync().Result;
             StringAssert.Contains(body, "\"json_schema\"");
             Assert.IsFalse(body.Contains("\"num_gpu\"", StringComparison.Ordinal));
-            StringAssert.Contains(body, "\"recipe_extraction\"");
+            StringAssert.Contains(body, "\"extracted_recipe\"");
             StringAssert.Contains(body, "\"isRecipeReference\"");
             StringAssert.Contains(body, "\"referencedRecipeTitle\"");
             return new HttpResponseMessage(HttpStatusCode.OK)
@@ -727,20 +731,19 @@ public sealed class LlmExtractionClientTests
         );
 
         var context = new LlmExtractionContext(
-            SourceContent: "Mango Tango Tacos\n\nIngredients:\n- 1 lb ground beef\n\nInstructions:\n1. Brown beef in a skillet.",
-            AvailableTagNames: ["Mexican"]
+            SourceContent: "Mango Tango Tacos\n\nIngredients:\n- 1 lb ground beef\n\nInstructions:\n1. Brown beef in a skillet."
         );
 
         var result = await client.ExtractRecipeFromTextAsync(config, context);
 
         Assert.AreEqual("Mango Tango Tacos", result.Title);
-        Assert.AreEqual(4, result.BaseServings);
-        Assert.AreEqual(2, result.Ingredients?.Count);
+        Assert.AreEqual(4, result.Servings);
+        Assert.HasCount(2, result.Ingredients!);
         Assert.IsTrue(result.Ingredients![1].IsRecipeReference);
         Assert.AreEqual("Foolproof All-Butter Dough", result.Ingredients[1].ReferencedRecipeTitle);
         Assert.AreEqual(
-            "Brown ||{\"ingredient\": \"ground beef\", \"amount\": 1, \"unit\": \"lb\"}|| in a skillet.",
-            result.Steps![0].Instruction
+            "Brown {{ing_1_a}} in a skillet and serve on {{ing_2_a}}.",
+            result.Steps![0].TemplateText
         );
     }
 
@@ -1157,10 +1160,7 @@ public sealed class LlmExtractionClientTests
 
         var ex = await Assert.ThrowsAsync<DomainValidationException>(async () =>
         {
-            await client.ExtractRecipeFromTextAsync(
-                config,
-                new LlmExtractionContext(TaggedSource, [])
-            );
+            await client.ExtractRecipeFromTextAsync(config, new LlmExtractionContext(TaggedSource));
         });
 
         StringAssert.Contains(ex.Message, "done_reason: length");
@@ -1202,10 +1202,7 @@ public sealed class LlmExtractionClientTests
 
         await Assert.ThrowsAsync<DomainValidationException>(async () =>
         {
-            await client.ExtractRecipeFromTextAsync(
-                config,
-                new LlmExtractionContext(TaggedSource, [])
-            );
+            await client.ExtractRecipeFromTextAsync(config, new LlmExtractionContext(TaggedSource));
         });
 
         CollectionAssert.AreEqual(new[] { true, false }, thinkFlags);
@@ -1245,10 +1242,7 @@ public sealed class LlmExtractionClientTests
 
         var ex = await Assert.ThrowsAsync<DomainValidationException>(async () =>
         {
-            await client.ExtractRecipeFromTextAsync(
-                config,
-                new LlmExtractionContext(TaggedSource, [])
-            );
+            await client.ExtractRecipeFromTextAsync(config, new LlmExtractionContext(TaggedSource));
         });
 
         StringAssert.Contains(ex.Message, "internal reasoning tokens");
@@ -1290,38 +1284,20 @@ public sealed class LlmExtractionClientTests
 
         var ex = await Assert.ThrowsAsync<DomainValidationException>(async () =>
         {
-            await client.ExtractRecipeFromTextAsync(
-                config,
-                new LlmExtractionContext(TaggedSource, [])
-            );
+            await client.ExtractRecipeFromTextAsync(config, new LlmExtractionContext(TaggedSource));
         });
 
         StringAssert.Contains(ex.Message, "finish_reason: length");
     }
 
     [TestMethod]
-    public async Task ExtractRecipeFromTextAsync_IncludesExistingFoodAndTagNames()
+    public async Task ExtractRecipeFromTextAsync_IncludesSourceHintsWithoutCatalogLists()
     {
-        var ollamaResponse = """
-            {
-                "message": {
-                    "role": "assistant",
-                    "content": "{\"title\":\"Garlic Pasta\",\"ingredients\":[{\"displayName\":\"garlic\",\"canonicalFoodName\":\"Garlic\"}]}"
-                }
-            }
-            """;
-
         string capturedBody = "";
         var handler = new MockHttpMessageHandler(req =>
         {
-            var body = req.Content!.ReadAsStringAsync().Result;
-            if (IsMethodTagRequest(body))
-                return OllamaReply("{}");
-            capturedBody = body;
-            return new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent(ollamaResponse, Encoding.UTF8, "application/json"),
-            };
+            capturedBody = req.Content!.ReadAsStringAsync().Result;
+            return OllamaReply(ButterIngredientsJson);
         });
 
         var client = new LlmExtractionClient(new HttpClient(handler));
@@ -1337,49 +1313,40 @@ public sealed class LlmExtractionClientTests
         );
 
         var context = new LlmExtractionContext(
-            SourceContent: "Garlic Pasta\n\nIngredients:\n- 2 cloves garlic\n\nInstructions:\n1. Boil pasta.",
-            AvailableTagNames: ["Dinner", "Italian"],
-            AvailableFoodNames: ["Garlic", "Unsalted Butter", "Kosher Salt"]
+            SourceContent: TaggedSource,
+            SourceUrl: "https://example.com/butter-toast",
+            TitleHint: "Butter Toast"
         );
 
         await client.ExtractRecipeFromTextAsync(config, context);
 
-        StringAssert.Contains(capturedBody, "Unsalted Butter");
-        StringAssert.Contains(capturedBody, "Dinner");
-        StringAssert.Contains(capturedBody, "Italian");
-        StringAssert.Contains(capturedBody, "Use existing names ONLY if equivalent");
-        StringAssert.Contains(capturedBody, "suggestedIsPantryStaple");
-        StringAssert.Contains(capturedBody, "suggestedCategory");
-        StringAssert.Contains(capturedBody, "SpicesAndSeasonings");
+        StringAssert.Contains(capturedBody, "https://example.com/butter-toast");
+        StringAssert.Contains(capturedBody, "Title hint: Butter Toast");
+        StringAssert.Contains(capturedBody, "qualityAudit");
+        StringAssert.Contains(capturedBody, "templateText");
+        Assert.IsFalse(capturedBody.Contains("AvailableFoods", StringComparison.Ordinal));
     }
 
     [TestMethod]
-    public async Task ExtractRecipeFromTextAsync_StringSourceBookPageWithPrefix_ParsesPageNumber()
+    public async Task ExtractRecipeFromTextAsync_StringNumericFieldsWithUnits_ParseFlexibly()
     {
         var rawRecipeJson = """
             {
                 "title": "Cast Iron Steak",
-                "sourceBookTitle": "The Cook's Illustrated Meat Book",
-                "sourceBookPage": "p. 210",
-                "confidenceScore": "0.95",
+                "servings": "2",
+                "prepTimeMinutes": "5 mins",
+                "cookTimeMinutes": "10",
                 "ingredients": [
-                    { "displayName": "1 strip steak", "quantity": "1", "unit": "whole" }
-                ]
+                    { "refId": "ing_1", "canonicalFoodItem": "strip steak", "displayName": "strip steak", "quantity": "1", "unit": "whole", "rawText": "1 strip steak" }
+                ],
+                "steps": [
+                    { "stepNumber": 1, "templateText": "Sear {{ing_1_a}}.", "ingredientTokens": [{ "tokenKey": "ing_1_a", "ingredientRefId": "ing_1", "stepQuantity": 1, "stepUnit": "whole" }], "timerTokens": [], "temperatureTokens": [] }
+                ],
+                "qualityAudit": { "isPlausibleRecipe": true, "warnings": [] }
             }
             """;
 
-        var ollamaResponse = System.Text.Json.JsonSerializer.Serialize(
-            new { message = new { role = "assistant", content = rawRecipeJson } }
-        );
-
-        var handler = new MockHttpMessageHandler(req =>
-            IsMethodTagRequest(req.Content!.ReadAsStringAsync().Result)
-                ? OllamaReply("{}")
-                : new HttpResponseMessage(HttpStatusCode.OK)
-                {
-                    Content = new StringContent(ollamaResponse, Encoding.UTF8, "application/json"),
-                }
-        );
+        var handler = new MockHttpMessageHandler(_ => OllamaReply(rawRecipeJson));
 
         var client = new LlmExtractionClient(new HttpClient(handler));
         var config = new EffectiveLlmConnectionConfig(
@@ -1395,12 +1362,13 @@ public sealed class LlmExtractionClientTests
 
         var result = await client.ExtractRecipeFromTextAsync(
             config,
-            new LlmExtractionContext(TaggedSource, [])
+            new LlmExtractionContext(TaggedSource)
         );
 
         Assert.AreEqual("Cast Iron Steak", result.Title);
-        Assert.AreEqual(210, result.SourceBookPage);
-        Assert.AreEqual(0.95m, result.ConfidenceScore);
+        Assert.AreEqual(2m, result.Servings);
+        Assert.AreEqual(5, result.PrepTimeMinutes);
+        Assert.AreEqual(10, result.CookTimeMinutes);
         Assert.AreEqual(1m, result.Ingredients![0].Quantity);
     }
 
@@ -1416,27 +1384,17 @@ public sealed class LlmExtractionClientTests
             {
                 "title": "Herb Roasted Chicken",
                 "ingredients": [
-                    { "displayName": "1 whole chicken", "quantity": "1", "unit": "whole" }
+                    { "refId": "ing_1", "canonicalFoodItem": "whole chicken", "displayName": "1 whole chicken", "quantity": "1", "unit": "whole", "rawText": "1 whole chicken" }
                 ],
                 "steps": [
-                    { "instruction": "Melt 2 tablespoons butter in skillet for 2 minutes." }
-                ]
+                    { "stepNumber": 1, "templateText": "Roast {{ing_1_a}} for {{timer_1}}.", "ingredientTokens": [{ "tokenKey": "ing_1_a", "ingredientRefId": "ing_1" }], "timerTokens": [{ "tokenKey": "timer_1", "durationSeconds": 120, "label": "Roast chicken" }], "temperatureTokens": [] }
+                ],
+                "qualityAudit": { "isPlausibleRecipe": true, "warnings": [] }
             }
             ```
             """;
 
-        var ollamaResponse = System.Text.Json.JsonSerializer.Serialize(
-            new { message = new { role = "assistant", content = rawRecipeJson } }
-        );
-
-        var handler = new MockHttpMessageHandler(req =>
-            IsMethodTagRequest(req.Content!.ReadAsStringAsync().Result)
-                ? OllamaReply("{}")
-                : new HttpResponseMessage(HttpStatusCode.OK)
-                {
-                    Content = new StringContent(ollamaResponse, Encoding.UTF8, "application/json"),
-                }
-        );
+        var handler = new MockHttpMessageHandler(_ => OllamaReply(rawRecipeJson));
 
         var client = new LlmExtractionClient(new HttpClient(handler));
         var config = new EffectiveLlmConnectionConfig(
@@ -1453,15 +1411,12 @@ public sealed class LlmExtractionClientTests
 
         var result = await client.ExtractRecipeFromTextAsync(
             config,
-            new LlmExtractionContext(TaggedSource, [])
+            new LlmExtractionContext(TaggedSource)
         );
 
         Assert.AreEqual("Herb Roasted Chicken", result.Title);
-        Assert.AreEqual(1, result.Ingredients!.Count);
-        Assert.AreEqual(
-            "Melt 2 tablespoons butter in skillet for 2 minutes.",
-            result.Steps![0].Instruction
-        );
+        Assert.HasCount(1, result.Ingredients!);
+        Assert.AreEqual("Roast {{ing_1_a}} for {{timer_1}}.", result.Steps![0].TemplateText);
     }
 
     [TestMethod]
@@ -1472,7 +1427,19 @@ public sealed class LlmExtractionClientTests
         var rawRecipeJson = """
             {
                 "title": "Simple Pasta",
-                "ingredients": [{ "displayName": "Pasta", "quantity": 1, "unit": "package" }]
+                "ingredients": [
+                    { "refId": "ing_1", "displayName": "Pasta", "quantity": 1, "unit": "package" }
+                ],
+                "steps": [
+                    {
+                        "stepNumber": 1,
+                        "templateText": "Boil {{ing_1}} until tender.",
+                        "ingredientTokens": [{ "tokenKey": "ing_1", "ingredientRefId": "ing_1" }],
+                        "timerTokens": [],
+                        "temperatureTokens": []
+                    }
+                ],
+                "qualityAudit": { "isPlausibleRecipe": true, "warnings": [] }
             }
             """;
 
@@ -1483,8 +1450,6 @@ public sealed class LlmExtractionClientTests
         var handler = new MockHttpMessageHandler(req =>
         {
             capturedRequestBody = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
-            if (IsMethodTagRequest(capturedRequestBody))
-                return OllamaReply("{}");
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(ollamaResponse, Encoding.UTF8, "application/json"),
@@ -1504,49 +1469,53 @@ public sealed class LlmExtractionClientTests
             EnableThinking: true
         );
 
-        await client.ExtractRecipeFromTextAsync(config, new LlmExtractionContext(TaggedSource, []));
+        await client.ExtractRecipeFromTextAsync(config, new LlmExtractionContext(TaggedSource));
 
         Assert.IsNotNull(capturedRequestBody);
         Assert.IsTrue(capturedRequestBody.Contains("\"think\":true"));
     }
 
     [TestMethod]
-    public async Task TriageAndRepairRecipeAsync_SendsValidationIssuesInPrompt_AndParsesTriageDecisions()
+    public async Task ExtractRecipeFromTextAsync_ValidationFailure_RetriesMultiTurnAndSucceeds()
     {
-        string? capturedPrompt = null;
-        var repairedRecipeJson = """
+        var attempt = 0;
+        string? secondTurnPrompt = null;
+
+        var brokenJson = """
             {
-                "title": "Repaired Soup",
+                "title": "Simple Soup",
                 "ingredients": [
-                    { "displayName": "carrots", "quantity": 2, "unit": "whole", "originalRawText": "2 carrots" }
+                    { "refId": "ing_1", "canonicalFoodItem": "carrot", "displayName": "carrots", "quantity": 2, "unit": "whole", "rawText": "2 carrots" }
                 ],
                 "steps": [
-                    { "instruction": "Chop 2 carrots.", "ingredientIndices": [0] }
+                    { "stepNumber": 1, "templateText": "Chop {{missing_token}}.", "ingredientTokens": [], "timerTokens": [], "temperatureTokens": [] }
                 ]
             }
             """;
 
-        var triageResponseJson = """
+        var repairedJson = """
             {
-                "decisions": [
-                    {
-                        "issue": "carrots: not used in any step.",
-                        "resolution": "Resolved",
-                        "reason": "Step now correctly links carrots."
-                    }
-                ]
+                "title": "Simple Soup",
+                "ingredients": [
+                    { "refId": "ing_1", "canonicalFoodItem": "carrot", "displayName": "carrots", "quantity": 2, "unit": "whole", "rawText": "2 carrots" }
+                ],
+                "steps": [
+                    { "stepNumber": 1, "templateText": "Chop {{ing_1_a}}.", "ingredientTokens": [{ "tokenKey": "ing_1_a", "ingredientRefId": "ing_1", "stepQuantity": 2, "stepUnit": "whole" }], "timerTokens": [], "temperatureTokens": [] }
+                ],
+                "qualityAudit": { "isPlausibleRecipe": true, "warnings": [] }
             }
             """;
 
         var handler = new MockHttpMessageHandler(req =>
         {
-            var body = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
-            capturedPrompt = body;
-            if (IsMethodTagRequest(body))
-                return OllamaReply("""{"amounts":{"A1":"0 carrots"}}""");
-            if (body.Contains("recipe_issue_triage") || body.Contains("expert culinary editor"))
-                return OllamaReply(triageResponseJson);
-            return OllamaReply(repairedRecipeJson);
+            attempt++;
+            if (attempt == 1)
+            {
+                return OllamaReply(brokenJson);
+            }
+
+            secondTurnPrompt = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            return OllamaReply(repairedJson);
         });
 
         var client = new LlmExtractionClient(new HttpClient(handler));
@@ -1562,23 +1531,73 @@ public sealed class LlmExtractionClientTests
             EnableThinking: false
         );
 
-        var context = new LlmAutoRepairAndTriageContext(
-            SourceContent: "Ingredients:\n- 2 carrots\nInstructions:\nChop 2 carrots.",
-            Draft: new LlmExtractedRecipePayload(Title: "Soup"),
-            ValidationIssues: ["carrots: not used in any step."],
-            QualityWarnings: []
+        var result = await client.ExtractRecipeFromTextAsync(
+            config,
+            new LlmExtractionContext("Simple Soup\n2 carrots\nChop carrots.")
         );
 
-        var result = await client.TriageAndRepairRecipeAsync(config, context);
+        Assert.AreEqual(2, attempt);
+        Assert.IsNotNull(secondTurnPrompt);
+        StringAssert.Contains(secondTurnPrompt, "Your JSON failed validation");
+        StringAssert.Contains(secondTurnPrompt, "{{missing_token}}");
+        Assert.AreEqual("Chop {{ing_1_a}}.", result.Steps![0].TemplateText);
+    }
 
-        Assert.IsNotNull(result);
-        Assert.AreEqual("Repaired Soup", result.Draft.Title);
-        Assert.IsNotNull(result.TriageDecisions);
-        Assert.HasCount(1, result.TriageDecisions);
-        Assert.AreEqual(
-            IngestionIssueTriageResolution.Resolved,
-            result.TriageDecisions[0].Resolution
+    [TestMethod]
+    public async Task DisambiguateEntitiesAsync_SendsCandidatesAndParsesDecisions()
+    {
+        var unsaltedId = Guid.NewGuid();
+        var dinnerTagId = Guid.NewGuid();
+        string? capturedBody = null;
+
+        var handler = new MockHttpMessageHandler(req =>
+        {
+            capturedBody = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            return OllamaReply(
+                $$"""{"ingredientDecisions":[{"refId":"ing_1","matchedFoodItemId":"{{unsaltedId}}"}],"tagDecisions":[{"proposedTag":"Supper","matchedTagId":"{{dinnerTagId}}"}]}"""
+            );
+        });
+
+        var client = new LlmExtractionClient(new HttpClient(handler));
+        var config = new EffectiveLlmConnectionConfig(
+            Provider: LlmProvider.Ollama,
+            BaseUrl: "http://localhost:11434",
+            ApiKey: null,
+            TextModel: "qwen2.5:14b",
+            VisionModel: null,
+            OllamaKeepAlive: "5m",
+            RequestTimeoutSeconds: 30,
+            AutoPublishHighConfidenceText: false
         );
+
+        var disambiguation = await client.DisambiguateEntitiesAsync(
+            config,
+            new LlmEntityDisambiguationContext(
+                RecipeTitle: "Butter Toast",
+                AmbiguousIngredients:
+                [
+                    new AmbiguousIngredientCandidate(
+                        "ing_1",
+                        "butter",
+                        "2 tbsp butter",
+                        [new EntityCandidateOption(unsaltedId, "Unsalted Butter", 0.65)]
+                    ),
+                ],
+                AmbiguousTags:
+                [
+                    new AmbiguousTagCandidate(
+                        "Supper",
+                        [new EntityCandidateOption(dinnerTagId, "Dinner", 0.60)]
+                    ),
+                ]
+            )
+        );
+
+        Assert.IsNotNull(capturedBody);
+        StringAssert.Contains(capturedBody, "Unsalted Butter");
+        StringAssert.Contains(capturedBody, "Supper");
+        Assert.AreEqual(unsaltedId, disambiguation.IngredientDecisions![0].MatchedFoodItemId);
+        Assert.AreEqual(dinnerTagId, disambiguation.TagDecisions![0].MatchedTagId);
     }
 
     [TestMethod]
@@ -1602,16 +1621,8 @@ public sealed class LlmExtractionClientTests
                 return response;
             }
 
-            var body = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
-            if (IsMethodTagRequest(body))
-            {
-                return OpenAiReply(
-                    """{"amounts":{"A1":"0 carrots"},"timers":{},"steps":{"1":["0 carrots"]}}"""
-                );
-            }
-
             return OpenAiReply(
-                """{"title":"Carrot Soup","ingredients":[{"displayName":"carrots","quantity":2,"unit":"whole","originalRawText":"2 carrots"}]}"""
+                """{"title":"Carrot Soup","ingredients":[{"refId":"ing_1","canonicalFoodItem":"carrot","displayName":"carrots","quantity":2,"unit":"whole","rawText":"2 carrots"}],"steps":[{"stepNumber":1,"templateText":"Chop {{ing_1_a}}.","ingredientTokens":[{"tokenKey":"ing_1_a","ingredientRefId":"ing_1","stepQuantity":2,"stepUnit":"whole"}],"timerTokens":[],"temperatureTokens":[]}],"qualityAudit":{"isPlausibleRecipe":true,"warnings":[]}}"""
             );
         });
 
@@ -1631,10 +1642,7 @@ public sealed class LlmExtractionClientTests
 
         var result = await client.ExtractRecipeFromTextAsync(
             config,
-            new LlmExtractionContext(
-                "Ingredients:\n- 2 carrots\nInstructions:\nStep 1: Chop [A1: 2] carrots.",
-                []
-            )
+            new LlmExtractionContext("Ingredients:\n- 2 carrots\nInstructions:\nChop 2 carrots.")
         );
 
         Assert.IsNotNull(result);
@@ -1675,8 +1683,7 @@ public sealed class LlmExtractionClientTests
             client.ExtractRecipeFromTextAsync(
                 config,
                 new LlmExtractionContext(
-                    "Ingredients:\n- 2 carrots\nInstructions:\nStep 1: Chop [A1: 2] carrots.",
-                    []
+                    "Ingredients:\n- 2 carrots\nInstructions:\nChop 2 carrots."
                 )
             )
         );
@@ -1720,8 +1727,7 @@ public sealed class LlmExtractionClientTests
             client.ExtractRecipeFromTextAsync(
                 config,
                 new LlmExtractionContext(
-                    "Ingredients:\n- 2 carrots\nInstructions:\nStep 1: Chop [A1: 2] carrots.",
-                    []
+                    "Ingredients:\n- 2 carrots\nInstructions:\nChop 2 carrots."
                 )
             )
         );
@@ -1731,5 +1737,326 @@ public sealed class LlmExtractionClientTests
             attempt,
             "When safeguards are disabled, 429 should not trigger in-place retries."
         );
+    }
+
+    [TestMethod]
+    public async Task ExtractRecipeFromTextAsync_PromptIncludesCuratedTaxonomyAndVariationRules()
+    {
+        string capturedBody = "";
+        var handler = new MockHttpMessageHandler(req =>
+        {
+            capturedBody = req.Content!.ReadAsStringAsync().Result;
+            return OllamaReply(ButterIngredientsJson);
+        });
+
+        var client = new LlmExtractionClient(new HttpClient(handler));
+        var config = new EffectiveLlmConnectionConfig(
+            Provider: LlmProvider.Ollama,
+            BaseUrl: "http://localhost:11434",
+            ApiKey: null,
+            TextModel: "gemma4:e4b",
+            VisionModel: null,
+            OllamaKeepAlive: "5m",
+            RequestTimeoutSeconds: 30,
+            AutoPublishHighConfidenceText: true
+        );
+
+        await client.ExtractRecipeFromTextAsync(
+            config,
+            new LlmExtractionContext("Ingredients:\n- 1 tbsp butter\nInstructions:\nMelt butter.")
+        );
+
+        using var bodyDoc = JsonDocument.Parse(capturedBody);
+        var systemPrompt = bodyDoc
+            .RootElement.GetProperty("messages")[0]
+            .GetProperty("content")
+            .GetString();
+        Assert.IsNotNull(systemPrompt);
+        StringAssert.Contains(systemPrompt, "Boil & Simmer");
+        StringAssert.Contains(systemPrompt, "Food Processor");
+        StringAssert.Contains(systemPrompt, "Variation Instructions");
+        StringAssert.Contains(systemPrompt, "altQuantity: 30");
+        StringAssert.Contains(systemPrompt, "microwave power percentages");
+        StringAssert.Contains(systemPrompt, "chronological cooking order");
+        StringAssert.Contains(systemPrompt, "NEVER multiply seconds by 6 or 10");
+        StringAssert.Contains(systemPrompt, "parenthetical hints");
+        Assert.DoesNotContain("AvailableFoods", systemPrompt, StringComparison.Ordinal);
+    }
+
+    [TestMethod]
+    public async Task ExtractRecipeFromTextAsync_RetriesOnceOnUnreferencedIngredientWarning_AndFallsBackIfRetryFails()
+    {
+        var unreferencedFirstReply = """
+            {
+                "title": "Hummus",
+                "ingredients": [
+                    { "refId": "ing_1", "canonicalFoodItem": "chickpea", "displayName": "chickpeas", "quantity": 2, "unit": "can", "rawText": "2 cans chickpeas" },
+                    { "refId": "ing_2", "canonicalFoodItem": "parsley", "displayName": "fresh parsley", "quantity": 1, "unit": "tbsp", "rawText": "1 tablespoon minced fresh parsley" }
+                ],
+                "steps": [
+                    { "stepNumber": 1, "templateText": "Blend {{ing_1_a}} until smooth.", "ingredientTokens": [{ "tokenKey": "ing_1_a", "ingredientRefId": "ing_1", "stepQuantity": 2, "stepUnit": "can" }], "timerTokens": [], "temperatureTokens": [] }
+                ],
+                "qualityAudit": { "isPlausibleRecipe": true, "warnings": [] }
+            }
+            """;
+        var fixedSecondReply = """
+            {
+                "title": "Hummus",
+                "ingredients": [
+                    { "refId": "ing_1", "canonicalFoodItem": "chickpea", "displayName": "chickpeas", "quantity": 2, "unit": "can", "rawText": "2 cans chickpeas" },
+                    { "refId": "ing_2", "canonicalFoodItem": "parsley", "displayName": "fresh parsley", "quantity": 1, "unit": "tbsp", "rawText": "1 tablespoon minced fresh parsley" }
+                ],
+                "steps": [
+                    { "stepNumber": 1, "templateText": "Blend {{ing_1_a}} until smooth and top with {{ing_2_a}}.", "ingredientTokens": [{ "tokenKey": "ing_1_a", "ingredientRefId": "ing_1", "stepQuantity": 2, "stepUnit": "can" }, { "tokenKey": "ing_2_a", "ingredientRefId": "ing_2", "stepQuantity": 1, "stepUnit": "tbsp" }], "timerTokens": [], "temperatureTokens": [] }
+                ],
+                "qualityAudit": { "isPlausibleRecipe": true, "warnings": [] }
+            }
+            """;
+
+        var attempt = 0;
+        var handler = new MockHttpMessageHandler(_ =>
+        {
+            attempt++;
+            return attempt == 1
+                ? OllamaReply(unreferencedFirstReply)
+                : OllamaReply(fixedSecondReply);
+        });
+
+        var config = new EffectiveLlmConnectionConfig(
+            Provider: LlmProvider.Ollama,
+            BaseUrl: "http://localhost:11434",
+            ApiKey: null,
+            TextModel: "gemma4:e4b",
+            VisionModel: null,
+            OllamaKeepAlive: "5m",
+            RequestTimeoutSeconds: 30,
+            AutoPublishHighConfidenceText: true
+        );
+
+        var fixedResult = await new LlmExtractionClient(
+            new HttpClient(handler)
+        ).ExtractRecipeFromTextAsync(config, new LlmExtractionContext("Hummus recipe"));
+
+        Assert.AreEqual(2, attempt);
+        StringAssert.Contains(fixedResult.Steps![0].TemplateText, "{{ing_2_a}}");
+
+        var fallbackAttempt = 0;
+        var fallbackHandler = new MockHttpMessageHandler(_ =>
+        {
+            fallbackAttempt++;
+            return fallbackAttempt == 1
+                ? OllamaReply(unreferencedFirstReply)
+                : OllamaReply("{ not valid json");
+        });
+
+        var fallbackResult = await new LlmExtractionClient(
+            new HttpClient(fallbackHandler)
+        ).ExtractRecipeFromTextAsync(config, new LlmExtractionContext("Hummus recipe"));
+
+        Assert.AreEqual("Hummus", fallbackResult.Title);
+        Assert.HasCount(2, fallbackResult.Ingredients!);
+    }
+
+    [TestMethod]
+    public async Task ExtractRecipeFromTextAsync_NormalizesCompoundPlusAndRetriesOnTimerMinutesOrDuplicatePlaceholder()
+    {
+        var attempt = 0;
+        string? retryFeedback = null;
+
+        var firstReply = """
+            {
+                "title": "Gougères",
+                "ingredients": [
+                    { "refId": "ing_1", "canonicalFoodItem": "olive oil", "displayName": "olive oil", "quantity": 6, "unit": "tbsp", "altQuantity": 1, "altUnit": "tsp", "rawText": "6 tablespoons plus 1 teaspoon olive oil" }
+                ],
+                "steps": [
+                    { "stepNumber": 1, "templateText": "Warm {{ing_1_a}}, pulse {{timer_1}} pulses, then bake {{timer_2}} and drizzle {{ing_1_a}}.", "ingredientTokens": [{ "tokenKey": "ing_1_a", "ingredientRefId": "ing_1", "stepQuantity": 6.3333, "stepUnit": "tbsp" }], "timerTokens": [{ "tokenKey": "timer_1", "durationSeconds": 10, "label": "Pulse" }, { "tokenKey": "timer_2", "durationSeconds": 14, "label": "Bake" }], "temperatureTokens": [] }
+                ],
+                "qualityAudit": { "isPlausibleRecipe": true, "warnings": [] }
+            }
+            """;
+
+        var fixedReply = """
+            {
+                "title": "Gougères",
+                "ingredients": [
+                    { "refId": "ing_1", "canonicalFoodItem": "olive oil", "displayName": "olive oil", "quantity": 6.3333, "unit": "tbsp", "rawText": "6 tablespoons plus 1 teaspoon olive oil" }
+                ],
+                "steps": [
+                    { "stepNumber": 1, "templateText": "Warm {{ing_1_a}}, pulse 5 pulses, then bake {{timer_1}} and drizzle {{ing_1_b}}.", "ingredientTokens": [{ "tokenKey": "ing_1_a", "ingredientRefId": "ing_1", "stepQuantity": 6.3333, "stepUnit": "tbsp" }, { "tokenKey": "ing_1_b", "ingredientRefId": "ing_1", "stepQuantity": null, "stepUnit": null }], "timerTokens": [{ "tokenKey": "timer_1", "durationSeconds": 840, "label": "Bake gougères" }], "temperatureTokens": [] }
+                ],
+                "qualityAudit": { "isPlausibleRecipe": true, "warnings": [] }
+            }
+            """;
+
+        var handler = new MockHttpMessageHandler(req =>
+        {
+            attempt++;
+            if (attempt == 1)
+            {
+                return OllamaReply(firstReply);
+            }
+
+            retryFeedback = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            return OllamaReply(fixedReply);
+        });
+
+        var client = new LlmExtractionClient(new HttpClient(handler));
+        var config = new EffectiveLlmConnectionConfig(
+            Provider: LlmProvider.Ollama,
+            BaseUrl: "http://localhost:11434",
+            ApiKey: null,
+            TextModel: "gemma4:e4b",
+            VisionModel: null,
+            OllamaKeepAlive: "5m",
+            RequestTimeoutSeconds: 30,
+            AutoPublishHighConfidenceText: true
+        );
+
+        var result = await client.ExtractRecipeFromTextAsync(
+            config,
+            new LlmExtractionContext(
+                "Gougères\n6 tablespoons plus 1 teaspoon olive oil\nPulse 5 pulses, bake 14 to 20 minutes."
+            )
+        );
+
+        Assert.AreEqual(2, attempt);
+        Assert.IsNotNull(retryFeedback);
+        StringAssert.Contains(retryFeedback, "appears more than once in TemplateText");
+        StringAssert.Contains(retryFeedback, "durationSeconds=14");
+        StringAssert.Contains(retryFeedback, "food-processor pulses");
+        Assert.AreEqual(840, result.Steps![0].TimerTokens![0].DurationSeconds);
+        Assert.AreEqual(6.3333m, result.Ingredients![0].Quantity);
+        Assert.IsNull(result.Ingredients![0].AltQuantity);
+    }
+
+    [TestMethod]
+    public async Task ExtractRecipeFromTextAsync_RetriesWhenTimerDurationDoesNotMatchSourceText()
+    {
+        var attempt = 0;
+        string? retryFeedback = null;
+
+        var firstReply = """
+            {
+                "title": "Pizza Dough",
+                "ingredients": [
+                    { "refId": "ing_1", "canonicalFoodItem": "flour", "displayName": "flour", "quantity": 3, "unit": "cup", "rawText": "3 cups flour" }
+                ],
+                "steps": [
+                    { "stepNumber": 1, "templateText": "Knead {{ing_1_a}} for {{timer_1}}.", "ingredientTokens": [{ "tokenKey": "ing_1_a", "ingredientRefId": "ing_1", "stepQuantity": 3, "stepUnit": "cup" }], "timerTokens": [{ "tokenKey": "timer_1", "durationSeconds": 180, "label": "Knead dough" }], "temperatureTokens": [] }
+                ],
+                "qualityAudit": { "isPlausibleRecipe": true, "warnings": [] }
+            }
+            """;
+
+        var fixedReply = """
+            {
+                "title": "Pizza Dough",
+                "ingredients": [
+                    { "refId": "ing_1", "canonicalFoodItem": "flour", "displayName": "flour", "quantity": 3, "unit": "cup", "rawText": "3 cups flour" }
+                ],
+                "steps": [
+                    { "stepNumber": 1, "templateText": "Knead {{ing_1_a}} for {{timer_1}}.", "ingredientTokens": [{ "tokenKey": "ing_1_a", "ingredientRefId": "ing_1", "stepQuantity": 3, "stepUnit": "cup" }], "timerTokens": [{ "tokenKey": "timer_1", "durationSeconds": 30, "label": "Knead dough" }], "temperatureTokens": [] }
+                ],
+                "qualityAudit": { "isPlausibleRecipe": true, "warnings": [] }
+            }
+            """;
+
+        var handler = new MockHttpMessageHandler(req =>
+        {
+            attempt++;
+            if (attempt == 1)
+            {
+                return OllamaReply(firstReply);
+            }
+
+            retryFeedback = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            return OllamaReply(fixedReply);
+        });
+
+        var client = new LlmExtractionClient(new HttpClient(handler));
+        var config = new EffectiveLlmConnectionConfig(
+            Provider: LlmProvider.Ollama,
+            BaseUrl: "http://localhost:11434",
+            ApiKey: null,
+            TextModel: "gemma4:e4b",
+            VisionModel: null,
+            OllamaKeepAlive: "5m",
+            RequestTimeoutSeconds: 30,
+            AutoPublishHighConfidenceText: true
+        );
+
+        var result = await client.ExtractRecipeFromTextAsync(
+            config,
+            new LlmExtractionContext("Pizza Dough\n3 cups flour\nProcess for 30 to 40 seconds.")
+        );
+
+        Assert.AreEqual(2, attempt);
+        Assert.IsNotNull(retryFeedback);
+        StringAssert.Contains(retryFeedback, "does not match any timed duration in the source");
+        Assert.AreEqual(30, result.Steps![0].TimerTokens![0].DurationSeconds);
+    }
+
+    [TestMethod]
+    public async Task ExtractRecipeFromTextAsync_WhenRetriesExhaust_AppliesSafeStepTokenGlitchRepair()
+    {
+        var attempt = 0;
+        const string glitchyReply = """
+            {
+                "title": "Buffalo Cauliflower",
+                "ingredients": [
+                    { "refId": "ing_1", "canonicalFoodItem": "cauliflower", "displayName": "cauliflower", "quantity": 1, "unit": "whole", "rawText": "1 head cauliflower" }
+                ],
+                "steps": [
+                    {
+                        "stepNumber": 1,
+                        "templateText": "Heat oven to at {{temp_1}}, roast {{ing_1_a}}.",
+                        "ingredientTokens": [{ "tokenKey": "ing_1_a", "ingredientRefId": "ing_1", "stepQuantity": 1, "stepUnit": "whole" }],
+                        "timerTokens": [],
+                        "temperatureTokens": [{ "tokenKey": "temp_1", "value": 400, "baseUnit": "F" }]
+                    },
+                    {
+                        "stepNumber": 2,
+                        "templateText": "Toss in the sauce.",
+                        "ingredientTokens": [{ "tokenKey": "ing_1_b", "ingredientRefId": "ing_1", "stepQuantity": null, "stepUnit": null, "fallbackDisplay": "cauliflower" }],
+                        "timerTokens": [],
+                        "temperatureTokens": []
+                    }
+                ],
+                "qualityAudit": { "isPlausibleRecipe": true, "warnings": [] }
+            }
+            """;
+
+        var handler = new MockHttpMessageHandler(_ =>
+        {
+            attempt++;
+            return OllamaReply(glitchyReply);
+        });
+
+        var client = new LlmExtractionClient(new HttpClient(handler));
+        var config = new EffectiveLlmConnectionConfig(
+            Provider: LlmProvider.Ollama,
+            BaseUrl: "http://localhost:11434",
+            ApiKey: null,
+            TextModel: "gemma4:e4b",
+            VisionModel: null,
+            OllamaKeepAlive: "5m",
+            RequestTimeoutSeconds: 30,
+            AutoPublishHighConfidenceText: true
+        );
+
+        var result = await client.ExtractRecipeFromTextAsync(
+            config,
+            new LlmExtractionContext(
+                "Buffalo Cauliflower\n1 head cauliflower\nHeat oven to 400°F, roast cauliflower. Toss in the sauce."
+            )
+        );
+
+        Assert.AreEqual(3, attempt);
+        Assert.AreEqual(
+            "Heat oven to {{temp_1}}, roast {{ing_1_a}}.",
+            result.Steps![0].TemplateText
+        );
+        Assert.IsEmpty(result.Steps![1].IngredientTokens!);
     }
 }

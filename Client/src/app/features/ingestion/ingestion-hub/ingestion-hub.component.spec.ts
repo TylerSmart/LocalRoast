@@ -509,4 +509,57 @@ describe('IngestionHubComponent', () => {
     expect(openRecipeBtn).toBeTruthy();
     expect(openRecipeBtn.textContent).toContain('Open Recipe');
   });
+
+  it('renders sort selector and direction toggle next to search bar and reloads on change', () => {
+    const sortField = fixture.nativeElement.querySelector('.queue-search-row .sort-form-field');
+    const directionBtn = fixture.nativeElement.querySelector(
+      '.queue-search-row .sort-direction-btn',
+    );
+    expect(sortField).toBeTruthy();
+    expect(directionBtn).toBeTruthy();
+
+    expect(component.sortBy()).toBe('CreatedAt');
+    expect(component.sortDirection()).toBe('Desc');
+    expect(mockIngestionService.getJobsPaged).toHaveBeenCalledWith(
+      null,
+      null,
+      1,
+      25,
+      false,
+      'CreatedAt',
+      'Desc',
+    );
+
+    component.pageIndex.set(2);
+    component.onSortByChange('Name');
+    fixture.detectChanges();
+
+    expect(component.sortBy()).toBe('Name');
+    expect(component.sortDirection()).toBe('Desc');
+    expect(component.pageIndex()).toBe(0);
+    expect(mockIngestionService.getJobsPaged).toHaveBeenLastCalledWith(
+      null,
+      null,
+      1,
+      25,
+      false,
+      'Name',
+      'Desc',
+    );
+
+    directionBtn.click();
+    fixture.detectChanges();
+
+    expect(component.sortDirection()).toBe('Asc');
+    expect(component.pageIndex()).toBe(0);
+    expect(mockIngestionService.getJobsPaged).toHaveBeenLastCalledWith(
+      null,
+      null,
+      1,
+      25,
+      false,
+      'Name',
+      'Asc',
+    );
+  });
 });

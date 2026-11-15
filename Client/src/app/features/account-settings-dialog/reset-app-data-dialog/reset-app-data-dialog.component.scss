@@ -85,6 +85,24 @@
   }
 }
 
+.reset-options-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--mat-sys-outline-variant);
+  background-color: var(--mat-sys-surface-container-low);
+
+  .option-hint {
+    margin: 0;
+    padding-left: 28px;
+    font-size: 0.8125rem;
+    line-height: 1.45;
+    color: var(--mat-sys-on-surface-variant);
+  }
+}
+
 .deletion-breakdown {
   display: grid;
   grid-template-columns: 1fr;

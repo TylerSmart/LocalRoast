@@ -86,18 +86,6 @@ public sealed class AiKitchenHelperServiceTests
 
     private sealed class MockLlmExtractionClient : ILlmExtractionClient
     {
-        public Task<LlmAutoRepairAndTriageResult> TriageAndRepairRecipeAsync(
-            EffectiveLlmConnectionConfig config,
-            LlmAutoRepairAndTriageContext context,
-            CancellationToken cancellationToken = default
-        ) => throw new NotImplementedException();
-
-        public Task<LlmRecipeRepairResult> RepairRecipeDraftAsync(
-            EffectiveLlmConnectionConfig config,
-            LlmRecipeRepairContext context,
-            CancellationToken cancellationToken = default
-        ) => throw new NotImplementedException();
-
         public bool ProbeReachable { get; set; } = true;
         public LlmSubstitutionPayload SubstitutionResult { get; set; } = new([]);
         public LlmDraftMealPlanPayload DraftResult { get; set; } = new([]);
@@ -125,17 +113,17 @@ public sealed class AiKitchenHelperServiceTests
             );
         }
 
-        public Task<string?> StructureRecipeSourceAsync(
-            EffectiveLlmConnectionConfig config,
-            string sourceText,
-            CancellationToken cancellationToken = default
-        ) => throw new NotImplementedException();
-
-        public Task<LlmExtractedRecipePayload> ExtractRecipeFromTextAsync(
+        public Task<ExtractedRecipeDto> ExtractRecipeFromTextAsync(
             EffectiveLlmConnectionConfig config,
             LlmExtractionContext context,
             CancellationToken cancellationToken = default
         ) => throw new NotImplementedException();
+
+        public Task<LlmEntityDisambiguationResult> DisambiguateEntitiesAsync(
+            EffectiveLlmConnectionConfig config,
+            LlmEntityDisambiguationContext context,
+            CancellationToken cancellationToken = default
+        ) => Task.FromResult(new LlmEntityDisambiguationResult());
 
         public Task<string?> TranscribeRecipeImagesAsync(
             EffectiveLlmConnectionConfig config,

@@ -10,10 +10,7 @@ namespace App.API.Controllers;
 [ApiController]
 [Route("ingestion/jobs")]
 [Authorize]
-public sealed class IngestionJobsController(
-    IIngestionService ingestionService,
-    IIngestionReviewService reviewService
-) : ControllerBase
+public sealed class IngestionJobsController(IIngestionService ingestionService) : ControllerBase
 {
     [HttpGet("summary")]
     [ProducesResponseType(typeof(IngestionQueueSummaryDto), StatusCodes.Status200OK)]
@@ -32,6 +29,8 @@ public sealed class IngestionJobsController(
         [FromQuery] int? page,
         [FromQuery] int? pageSize,
         [FromQuery] bool activeWaiting = false,
+        [FromQuery] IngestionJobSortBy sortBy = IngestionJobSortBy.CreatedAt,
+        [FromQuery] IngestionJobSortDirection sortDirection = IngestionJobSortDirection.Desc,
         CancellationToken cancellationToken = default
     )
     {
@@ -43,7 +42,9 @@ public sealed class IngestionJobsController(
                     search,
                     page ?? 1,
                     pageSize ?? 25,
-                    activeWaiting
+                    activeWaiting,
+                    sortBy,
+                    sortDirection
                 ),
                 cancellationToken
             );
@@ -399,152 +400,12 @@ public sealed class IngestionJobsController(
     {
         try
         {
-            return Ok(
-                await reviewService.GetDiagnosticsAsync(id, request.Draft, cancellationToken)
+            var diagnostics = await ingestionService.GetReviewDiagnosticsAsync(
+                id,
+                request.Draft,
+                cancellationToken
             );
-        }
-        catch (NotFoundException)
-        {
-            return NotFound();
-        }
-        catch (DomainValidationException ex)
-        {
-            return BadRequest(
-                new ProblemDetails
-                {
-                    Status = StatusCodes.Status400BadRequest,
-                    Title = ex.Title,
-                    Detail = ex.Message,
-                }
-            );
-        }
-    }
-
-    [HttpPost("{id:guid}/repair-preview")]
-    [ProducesResponseType(typeof(IngestionRepairPreviewDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status503ServiceUnavailable)]
-    public async Task<IActionResult> PreviewRepair(
-        Guid id,
-        [FromBody] IngestionRepairPreviewRequest request,
-        CancellationToken cancellationToken
-    )
-    {
-        try
-        {
-            return Ok(await reviewService.PreviewRepairAsync(id, request, cancellationToken));
-        }
-        catch (NotFoundException)
-        {
-            return NotFound();
-        }
-        catch (ConflictException ex)
-        {
-            return Conflict(
-                new ProblemDetails
-                {
-                    Status = StatusCodes.Status409Conflict,
-                    Title = ex.Title,
-                    Detail = ex.Message,
-                }
-            );
-        }
-        catch (DomainValidationException ex)
-        {
-            return BadRequest(
-                new ProblemDetails
-                {
-                    Status = StatusCodes.Status400BadRequest,
-                    Title = ex.Title,
-                    Detail = ex.Message,
-                }
-            );
-        }
-        catch (LlmHostUnavailableException ex)
-        {
-            return StatusCode(
-                StatusCodes.Status503ServiceUnavailable,
-                new ProblemDetails
-                {
-                    Status = StatusCodes.Status503ServiceUnavailable,
-                    Title = "LLM Host Unavailable",
-                    Detail = ex.Message,
-                }
-            );
-        }
-    }
-
-    [HttpGet("{id:guid}/refinement")]
-    [ProducesResponseType(typeof(IngestionRefinementDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> GetRefinement(Guid id, CancellationToken cancellationToken)
-    {
-        try
-        {
-            var refinement = await reviewService.GetRefinementAsync(id, cancellationToken);
-            return refinement is null ? NoContent() : Ok(refinement);
-        }
-        catch (NotFoundException)
-        {
-            return NotFound();
-        }
-    }
-
-    [HttpPost("{id:guid}/refinement")]
-    [ProducesResponseType(typeof(IngestionRefinementDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
-    public Task<IActionResult> RequestRefinement(Guid id, CancellationToken cancellationToken) =>
-        HandleRefinementAsync(async () =>
-            Ok(await reviewService.RequestRefinementAsync(id, cancellationToken))
-        );
-
-    [HttpDelete("{id:guid}/refinement")]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
-    public async Task<IActionResult> DismissRefinement(Guid id, CancellationToken cancellationToken)
-    {
-        await reviewService.DismissRefinementAsync(id, cancellationToken);
-        return NoContent();
-    }
-
-    [HttpPost("{id:guid}/refinement/preview")]
-    [ProducesResponseType(typeof(IngestionRepairPreviewDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
-    public Task<IActionResult> PreviewRefinement(
-        Guid id,
-        [FromBody] IngestionDraftDiagnosticsRequest request,
-        CancellationToken cancellationToken
-    ) =>
-        HandleRefinementAsync(async () =>
-            Ok(await reviewService.PreviewRefinementAsync(id, request.Draft, cancellationToken))
-        );
-
-    private async Task<IActionResult> HandleRefinementAsync(Func<Task<IActionResult>> action)
-    {
-        try
-        {
-            return await action();
-        }
-        catch (NotFoundException)
-        {
-            return NotFound();
-        }
-        catch (ConflictException ex)
-        {
-            return Conflict(
-                new ProblemDetails
-                {
-                    Status = StatusCodes.Status409Conflict,
-                    Title = ex.Title,
-                    Detail = ex.Message,
-                }
-            );
+            return diagnostics is not null ? Ok(diagnostics) : NotFound();
         }
         catch (DomainValidationException ex)
         {

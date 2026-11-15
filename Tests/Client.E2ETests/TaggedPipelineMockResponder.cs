@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
@@ -5,9 +6,9 @@ using System.Text.RegularExpressions;
 namespace App.Client.E2ETests;
 
 /// <summary>
-/// Answers each request of the tagged ingestion pipeline (source line labels, vision
-/// transcription, ingredient extraction and method tags) from one full recipe payload, so mock
-/// LLM hosts can keep describing a recipe as a single JSON document.
+/// Answers requests for the clean-slate ingestion pipeline (vision transcription, Stage 2
+/// structured extraction, and Stage 3 entity disambiguation) from a single recipe JSON document
+/// so mock LLM hosts remain concise.
 /// </summary>
 public static partial class TaggedPipelineMockResponder
 {
@@ -15,20 +16,23 @@ public static partial class TaggedPipelineMockResponder
     {
         var messages = request.GetProperty("messages");
         var system = ReadText(messages[0]);
-        var user = ReadText(messages[messages.GetArrayLength() - 1]);
-        if (system.StartsWith("Label every line", StringComparison.Ordinal))
-        {
-            return LabelSourceLines(user);
-        }
         if (system.StartsWith("Transcribe the recipe", StringComparison.Ordinal))
         {
             return Transcribe(recipeJson);
         }
-        if (system.StartsWith("You annotate a recipe method", StringComparison.Ordinal))
+
+        if (
+            system.Contains("disambiguate", StringComparison.OrdinalIgnoreCase)
+            || (
+                request.TryGetProperty("format", out var format)
+                && format.GetRawText().Contains("ingredientDecisions", StringComparison.Ordinal)
+            )
+        )
         {
-            return TagMethod(user, recipeJson);
+            return """{"ingredientDecisions":[],"tagDecisions":[]}""";
         }
-        return recipeJson;
+
+        return ToExtractedRecipeJson(recipeJson);
     }
 
     public static string ReadText(JsonElement message)
@@ -37,55 +41,6 @@ public static partial class TaggedPipelineMockResponder
         return content.ValueKind == JsonValueKind.String
             ? content.GetString() ?? ""
             : content[0].GetProperty("text").GetString() ?? "";
-    }
-
-    private static string LabelSourceLines(string numberedLines)
-    {
-        var labels = new JsonObject();
-        string? mode = null;
-        var sawIngredient = false;
-        foreach (var line in numberedLines.Split('\n'))
-        {
-            var match = NumberedLine().Match(line);
-            if (!match.Success)
-            {
-                continue;
-            }
-            var number = match.Groups["number"].Value;
-            var text = match.Groups["text"].Value.Trim();
-            string label;
-            if (IngredientsHeader().IsMatch(text))
-            {
-                (label, mode) = ("skip", "ingredient");
-            }
-            else if (InstructionsHeader().IsMatch(text))
-            {
-                (label, mode) = ("skip", "instruction");
-            }
-            else if (mode is not null)
-            {
-                label = mode;
-            }
-            else if (StepLine().IsMatch(text))
-            {
-                label = "instruction";
-            }
-            else if (QuantityLine().IsMatch(text))
-            {
-                label = "ingredient";
-                sawIngredient = true;
-            }
-            else if (sawIngredient)
-            {
-                label = "instruction";
-            }
-            else
-            {
-                label = number == "1" ? "title" : "description";
-            }
-            labels[number] = label;
-        }
-        return labels.ToJsonString();
     }
 
     private static string Transcribe(string recipeJson)
@@ -100,6 +55,7 @@ public static partial class TaggedPipelineMockResponder
                     .Select(i =>
                         (JsonNode?)(
                             i?["originalRawText"]?.GetValue<string>()
+                            ?? i?["rawText"]?.GetValue<string>()
                             ?? i?["displayName"]?.GetValue<string>()
                         )
                     )
@@ -107,131 +63,268 @@ public static partial class TaggedPipelineMockResponder
             ),
             ["instructionParagraphs"] = new JsonArray(
                 (recipe["steps"]?.AsArray() ?? [])
-                    .Select(s => (JsonNode?)s?["instruction"]?.GetValue<string>())
+                    .Select(s =>
+                        (JsonNode?)(
+                            s?["instruction"]?.GetValue<string>()
+                            ?? s?["templateText"]?.GetValue<string>()
+                        )
+                    )
                     .ToArray()
             ),
             ["notes"] = "",
         }.ToJsonString();
     }
 
-    // Links each step to the payload step's ingredient rows and timer labels, and tags each
-    // amount with the row whose name follows it.
-    private static string TagMethod(string prompt, string recipeJson)
+    private static string ToExtractedRecipeJson(string recipeJson)
     {
-        var payloadSteps = JsonNode.Parse(recipeJson)?["steps"]?.AsArray() ?? [];
-        var labels = new List<string>();
-        var amounts = new JsonObject();
-        var timers = new JsonObject();
-        var steps = new JsonObject();
-        foreach (var line in prompt.Split('\n'))
+        var root = JsonNode.Parse(recipeJson)?.AsObject();
+        if (root is null || root["qualityAudit"] is not null)
         {
-            var ingredient = IngredientLine().Match(line);
-            if (ingredient.Success && !line.StartsWith("Step ", StringComparison.Ordinal))
-            {
-                labels.Add(ingredient.Groups["label"].Value);
-                continue;
-            }
-            var step = StepPromptLine().Match(line);
-            if (!step.Success)
-            {
-                continue;
-            }
-            var stepNumber = int.Parse(step.Groups["number"].Value);
-            var text = step.Groups["text"].Value;
-            var payloadStep =
-                stepNumber <= payloadSteps.Count ? payloadSteps[stepNumber - 1] : null;
-            var linked = (payloadStep?["ingredientIndices"]?.AsArray() ?? [])
-                .Select(i => i!.GetValue<int>())
-                .Where(i => i < labels.Count)
-                .Select(i => labels[i])
-                .ToList();
-            if (payloadStep is null)
-            {
-                linked = labels.Where(l => Mentions(text, l)).ToList();
-            }
-            steps[stepNumber.ToString()] = new JsonArray(
-                linked.Select(l => (JsonNode?)l).ToArray()
-            );
+            return recipeJson;
+        }
 
-            var payloadTimers = payloadStep?["timers"]?.AsArray() ?? [];
-            var timerIndex = 0;
-            foreach (Match mark in Mark().Matches(text))
+        var legacyIngredients = root["ingredients"]?.AsArray() ?? [];
+        var extractedIngredients = new JsonArray();
+        var refIds = new List<string>(legacyIngredients.Count);
+        var namesByRef = new List<string>(legacyIngredients.Count);
+
+        for (var i = 0; i < legacyIngredients.Count; i++)
+        {
+            var src = legacyIngredients[i]?.AsObject();
+            if (src is null)
             {
-                var id = mark.Groups["id"].Value;
-                if (id[0] == 'T')
+                continue;
+            }
+
+            var refId = src["refId"]?.GetValue<string>() ?? $"ing_{i + 1}";
+            var displayName = src["displayName"]?.GetValue<string>() ?? "ingredient";
+            var canonical =
+                src["canonicalFoodName"]?.GetValue<string>()
+                ?? src["canonicalFoodItem"]?.GetValue<string>()
+                ?? src["matchedFoodName"]?.GetValue<string>()
+                ?? displayName;
+            var rawText =
+                src["originalRawText"]?.GetValue<string>()
+                ?? src["rawText"]?.GetValue<string>()
+                ?? displayName;
+
+            decimal? altQty = src["altQuantity"]?.GetValue<decimal?>();
+            string? altUnit = src["altUnit"]?.GetValue<string?>();
+            if (!altQty.HasValue && !string.IsNullOrWhiteSpace(rawText))
+            {
+                var altMatch = AltInParens().Match(rawText);
+                if (
+                    altMatch.Success
+                    && decimal.TryParse(
+                        altMatch.Groups[1].Value,
+                        NumberStyles.Any,
+                        CultureInfo.InvariantCulture,
+                        out var parsedAltQty
+                    )
+                )
                 {
-                    timers[id] =
-                        timerIndex < payloadTimers.Count
-                            ? payloadTimers[timerIndex]?["label"]?.GetValue<string>() ?? "Timer"
-                            : "Timer";
-                    timerIndex++;
-                    continue;
+                    altQty = parsedAltQty;
+                    altUnit = altMatch.Groups[2].Value;
                 }
-                var following = text[(mark.Index + mark.Length)..];
-                var nextMark = following.IndexOf('[');
-                following = nextMark >= 0 ? following[..nextMark] : following;
-                amounts[id] =
-                    linked
-                        .Concat(labels)
-                        .Select(l => (Label: l, Index: MentionIndex(following, l)))
-                        .Where(m => m.Index >= 0)
-                        .OrderBy(m => m.Index)
-                        .Select(m => m.Label)
-                        .FirstOrDefault()
-                    ?? "other";
             }
+
+            var category = src["category"]?.GetValue<string?>();
+            if (
+                string.IsNullOrWhiteSpace(category)
+                && src["isPantryStaple"]?.GetValue<bool>() == true
+                && canonical.Contains("salt", StringComparison.OrdinalIgnoreCase)
+            )
+            {
+                category = "Spices & Seasonings";
+            }
+
+            refIds.Add(refId);
+            namesByRef.Add(displayName);
+            extractedIngredients.Add(
+                new JsonObject
+                {
+                    ["refId"] = refId,
+                    ["sectionName"] = src["sectionName"]?.DeepClone(),
+                    ["canonicalFoodItem"] = canonical,
+                    ["displayName"] = displayName,
+                    ["category"] = category,
+                    ["quantity"] = src["quantity"]?.DeepClone(),
+                    ["maxQuantity"] = src["maxQuantity"]?.DeepClone(),
+                    ["unit"] = src["unit"]?.DeepClone(),
+                    ["altQuantity"] = altQty.HasValue ? JsonValue.Create(altQty.Value) : null,
+                    ["altUnit"] = altUnit is not null ? JsonValue.Create(altUnit) : null,
+                    ["preparationNotes"] = src["preparationNote"]?.DeepClone(),
+                    ["isOptional"] = src["isOptional"]?.DeepClone() ?? JsonValue.Create(false),
+                    ["isRecipeReference"] =
+                        src["isRecipeReference"]?.DeepClone() ?? JsonValue.Create(false),
+                    ["referencedRecipeTitle"] = src["referencedRecipeTitle"]?.DeepClone(),
+                    ["rawText"] = rawText,
+                }
+            );
         }
 
-        var tags = new JsonObject();
-        if (amounts.Count > 0)
+        var legacySteps = root["steps"]?.AsArray() ?? [];
+        var extractedSteps = new JsonArray();
+        for (var sIdx = 0; sIdx < legacySteps.Count; sIdx++)
         {
-            tags["amounts"] = amounts;
+            var srcStep = legacySteps[sIdx]?.AsObject();
+            if (srcStep is null)
+            {
+                continue;
+            }
+
+            var stepNum = srcStep["stepNumber"]?.GetValue<int?>() ?? (sIdx + 1);
+            var instruction =
+                srcStep["instruction"]?.GetValue<string>()
+                ?? srcStep["templateText"]?.GetValue<string>()
+                ?? "";
+            var ingIndices = (srcStep["ingredientIndices"]?.AsArray() ?? [])
+                .Select(n => n?.GetValue<int>() ?? -1)
+                .Where(idx => idx >= 0 && idx < refIds.Count)
+                .ToList();
+
+            var ingredientTokens = new JsonArray();
+            var timerTokens = new JsonArray();
+            var temperatureTokens = new JsonArray();
+
+            string templateText;
+            var inlineCounter = 0;
+            if (LegacyInlineToken().IsMatch(instruction))
+            {
+                templateText = LegacyInlineToken()
+                    .Replace(
+                        instruction,
+                        match =>
+                        {
+                            var tokKey = $"ing_s{stepNum}_{inlineCounter++}";
+                            var tokJson = JsonNode.Parse(match.Groups["json"].Value)?.AsObject();
+                            var ingName = tokJson?["ingredient"]?.GetValue<string>();
+                            var amount = tokJson?["amount"]?.DeepClone();
+                            var unit = tokJson?["unit"]?.DeepClone();
+
+                            var matchedIdx = !string.IsNullOrWhiteSpace(ingName)
+                                ? namesByRef.FindIndex(n =>
+                                    n.Equals(ingName, StringComparison.OrdinalIgnoreCase)
+                                )
+                                : -1;
+                            if (matchedIdx < 0 && ingIndices.Count > 0)
+                            {
+                                matchedIdx = ingIndices[0];
+                            }
+
+                            var refId =
+                                matchedIdx >= 0 && matchedIdx < refIds.Count
+                                    ? refIds[matchedIdx]
+                                    : refIds.FirstOrDefault() ?? "ing_1";
+
+                            ingredientTokens.Add(
+                                new JsonObject
+                                {
+                                    ["tokenKey"] = tokKey,
+                                    ["ingredientRefId"] = refId,
+                                    ["stepQuantity"] = amount,
+                                    ["stepUnit"] = unit,
+                                    ["fallbackDisplay"] = null,
+                                }
+                            );
+                            return $"{{{{{tokKey}}}}}";
+                        }
+                    );
+            }
+            else
+            {
+                var appendedPlaceholders = new List<string>();
+                foreach (var idx in ingIndices)
+                {
+                    var tokKey = $"ing_{idx + 1}_s{stepNum}";
+                    ingredientTokens.Add(
+                        new JsonObject
+                        {
+                            ["tokenKey"] = tokKey,
+                            ["ingredientRefId"] = refIds[idx],
+                            ["stepQuantity"] = null,
+                            ["stepUnit"] = null,
+                            ["fallbackDisplay"] = null,
+                        }
+                    );
+                    appendedPlaceholders.Add($"{{{{{tokKey}}}}}");
+                }
+
+                var timers = srcStep["timers"]?.AsArray() ?? [];
+                for (var tIdx = 0; tIdx < timers.Count; tIdx++)
+                {
+                    var timerObj = timers[tIdx]?.AsObject();
+                    if (timerObj is null)
+                    {
+                        continue;
+                    }
+
+                    var tokKey = $"timer_{stepNum}_{tIdx + 1}";
+                    timerTokens.Add(
+                        new JsonObject
+                        {
+                            ["tokenKey"] = tokKey,
+                            ["durationSeconds"] =
+                                timerObj["durationSeconds"]?.DeepClone() ?? JsonValue.Create(60),
+                            ["label"] = timerObj["label"]?.DeepClone() ?? JsonValue.Create("Timer"),
+                        }
+                    );
+                    appendedPlaceholders.Add($"{{{{{tokKey}}}}}");
+                }
+
+                templateText =
+                    appendedPlaceholders.Count > 0
+                        ? $"{instruction} {string.Join(" ", appendedPlaceholders)}".Trim()
+                        : instruction;
+            }
+
+            extractedSteps.Add(
+                new JsonObject
+                {
+                    ["stepNumber"] = stepNum,
+                    ["sectionName"] = srcStep["sectionName"]?.DeepClone(),
+                    ["templateText"] = templateText,
+                    ["ingredientTokens"] = ingredientTokens,
+                    ["timerTokens"] = timerTokens,
+                    ["temperatureTokens"] = temperatureTokens,
+                }
+            );
         }
-        if (timers.Count > 0)
+
+        var proposedTags =
+            root["proposedTags"]?.DeepClone()
+            ?? root["suggestedTagNames"]?.DeepClone()
+            ?? new JsonArray();
+
+        var isPlausible = (root["confidenceScore"]?.GetValue<decimal?>() ?? 0.90m) >= 0.85m;
+        var extracted = new JsonObject
         {
-            tags["timers"] = timers;
-        }
-        tags["steps"] = steps;
-        return tags.ToJsonString();
+            ["title"] = root["title"]?.DeepClone(),
+            ["description"] = root["description"]?.DeepClone(),
+            ["servings"] = root["servings"]?.DeepClone() ?? root["baseServings"]?.DeepClone(),
+            ["yieldDisplay"] = root["yieldDisplay"]?.DeepClone(),
+            ["prepTimeMinutes"] = root["prepTimeMinutes"]?.DeepClone(),
+            ["cookTimeMinutes"] = root["cookTimeMinutes"]?.DeepClone(),
+            ["totalTimeMinutes"] = root["totalTimeMinutes"]?.DeepClone(),
+            ["difficulty"] = root["difficulty"]?.DeepClone(),
+            ["sourceName"] = root["sourceName"]?.DeepClone(),
+            ["sourceAuthor"] = root["sourceAuthor"]?.DeepClone(),
+            ["proposedTags"] = proposedTags,
+            ["ingredients"] = extractedIngredients,
+            ["steps"] = extractedSteps,
+            ["qualityAudit"] = new JsonObject
+            {
+                ["isPlausibleRecipe"] = isPlausible,
+                ["warnings"] = new JsonArray(),
+            },
+        };
+
+        return extracted.ToJsonString();
     }
 
-    private static bool Mentions(string text, string label) => MentionIndex(text, label) >= 0;
+    [GeneratedRegex(@"\((?<qty>\d+(?:\.\d+)?)\s+(?<unit>[a-zA-Z]+)\)")]
+    private static partial Regex AltInParens();
 
-    private static int MentionIndex(string text, string label)
-    {
-        var name = IngredientName().Match(label).Groups["name"].Value;
-        return name.Split(' ', StringSplitOptions.RemoveEmptyEntries)
-            .Where(word => word.Length >= 3)
-            .Select(word => text.IndexOf(word, StringComparison.OrdinalIgnoreCase))
-            .Where(index => index >= 0)
-            .DefaultIfEmpty(-1)
-            .Min();
-    }
-
-    [GeneratedRegex(@"^(?<number>\d+)\|(?<text>.*)$")]
-    private static partial Regex NumberedLine();
-
-    [GeneratedRegex(@"^ingredients:?$", RegexOptions.IgnoreCase)]
-    private static partial Regex IngredientsHeader();
-
-    [GeneratedRegex(@"^(instructions|directions|method|preparation):?$", RegexOptions.IgnoreCase)]
-    private static partial Regex InstructionsHeader();
-
-    [GeneratedRegex(@"^\d+[A-Za-z]?[.)]\s")]
-    private static partial Regex StepLine();
-
-    [GeneratedRegex(@"^(\d|[½¼¾⅓⅔])")]
-    private static partial Regex QuantityLine();
-
-    [GeneratedRegex(@"^(?<label>\d+ [^|]+?) \| ")]
-    private static partial Regex IngredientLine();
-
-    [GeneratedRegex(@"^Step (?<number>\d+)(?: \([^)]*\))?: (?<text>.*)$")]
-    private static partial Regex StepPromptLine();
-
-    [GeneratedRegex(@"\[(?<id>[AT]\d+): [^\]]*\]")]
-    private static partial Regex Mark();
-
-    [GeneratedRegex(@"^\d+ (?<name>[^(]+)")]
-    private static partial Regex IngredientName();
+    [GeneratedRegex(@"\|\|(?<json>\{.*?\})\|\|")]
+    private static partial Regex LegacyInlineToken();
 }

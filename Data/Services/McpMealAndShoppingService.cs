@@ -401,7 +401,7 @@ public sealed class McpMealAndShoppingService(
                 continue;
             }
 
-            var (normUnit, customUnit) = RecipeDraftNormalizer.NormalizeUnit(item.Unit);
+            var (normUnit, customUnit) = RecipeUnitAndSectionHelpers.NormalizeUnit(item.Unit);
 
             if (item.ItemId.HasValue)
             {

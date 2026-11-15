@@ -13,7 +13,6 @@ import {
   AbstractControl,
   FormArray,
   FormBuilder,
-  FormControl,
   FormGroup,
   ReactiveFormsModule,
   Validators,
@@ -42,7 +41,6 @@ import type {
   IngestionDraftStepDto,
   IngestionExtractedDraftDto,
   IngestionJobDetailDto,
-  IngestionRefinementDto,
   IngestionDiagnosticTargetDto,
   IngestionReviewDiagnosticsDto,
 } from '../../../core/models/ingestion.models';
@@ -63,7 +61,6 @@ import { StepInstructionEditorComponent } from '../../../shared/components/step-
 import { CollectionDto, TagDto } from '../../../core/models/taxonomy.models';
 import { FoodCatalogService } from '../../../core/services/food-catalog/food-catalog.service';
 import { IngestionService } from '../../../core/services/ingestion/ingestion.service';
-import { LlmSettingsService } from '../../../core/services/llm-settings/llm-settings.service';
 import { TaxonomyService } from '../../../core/services/taxonomy/taxonomy.service';
 import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialog/confirm-dialog.component';
 import { MeasurementEditorComponent } from '../../../shared/components/measurement-editor/measurement-editor.component';
@@ -77,14 +74,11 @@ import {
 } from '../../../core/utils/recipe-measurement-forms';
 import { RecipeDetailPreviewComponent } from '../recipe-detail-preview/recipe-detail-preview.component';
 import {
-  IngestionRepairDialogComponent,
-  IngestionRepairDialogData,
-} from '../ingestion-repair-dialog/ingestion-repair-dialog.component';
-import {
   RecipeDetailPreviewDialogComponent,
   RecipeDetailPreviewDialogData,
   RecipeDetailPreviewDialogResult,
 } from '../recipe-detail-preview-dialog/recipe-detail-preview-dialog.component';
+import { Title } from '@angular/platform-browser';
 
 export interface DiagnosticJumpTarget {
   id: string;
@@ -128,10 +122,8 @@ export class IngestionReviewComponent implements OnInit {
   private readonly taxonomyService = inject(TaxonomyService);
   private readonly dialog = inject(MatDialog);
   private readonly snackBar = inject(MatSnackBar);
-  private readonly llmSettingsService = inject(LlmSettingsService);
   private readonly loadedStepTokenOrigins = new WeakMap<FormGroup, StepTokenOriginFlags>();
-  private refinementPollHandle: ReturnType<typeof setTimeout> | null = null;
-  static readonly refinementPollMs = 15000;
+  private readonly title = inject(Title);
 
   readonly measurementUnits = MEASUREMENT_UNITS;
 
@@ -334,19 +326,7 @@ export class IngestionReviewComponent implements OnInit {
     );
   }
   readonly isCheckingDiagnostics = signal<boolean>(false);
-  readonly isRepairing = signal<boolean>(false);
-  readonly refinement = signal<IngestionRefinementDto | null>(null);
-  readonly refineModel = signal<string | null>(null);
-  readonly isRefinementBusy = signal<boolean>(false);
-  readonly refinementActive = computed(() => {
-    const status = this.refinement()?.status;
-    return status === 'Pending' || status === 'Running';
-  });
   readonly reviewError = signal<string | null>(null);
-  readonly repairHint = new FormControl('', {
-    nonNullable: true,
-    validators: [Validators.maxLength(2000)],
-  });
   private readonly ingredientRevision = signal(0);
 
   readonly foodItems = signal<FoodItemDto[]>([]);
@@ -354,6 +334,8 @@ export class IngestionReviewComponent implements OnInit {
   readonly tags = signal<TagDto[]>([]);
   readonly proposedTagNames = signal<string[]>([]);
   readonly measurementWarnings = signal<string[]>([]);
+  readonly qualityWarnings = signal<string[]>([]);
+  readonly validationIssues = signal<string[]>([]);
   readonly selectedCollectionIds = signal<Set<string>>(new Set());
   readonly selectedTagIds = signal<Set<string>>(new Set());
   readonly selectedProposedTagNames = signal<Set<string>>(new Set());
@@ -403,173 +385,10 @@ export class IngestionReviewComponent implements OnInit {
       this.markDiagnosticsStale();
     });
     this.loadCatalogData();
-    this.loadRefineModel();
     this.loadJob();
     this.destroyRef.onDestroy(() => {
-      this.clearRefinementPoll();
       if (this.highlightTimer) clearTimeout(this.highlightTimer);
     });
-  }
-
-  private loadRefineModel(): void {
-    this.llmSettingsService
-      .getSettings()
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (settings) => this.refineModel.set(settings.refineModel?.trim() || null),
-        error: () => this.refineModel.set(null),
-      });
-  }
-
-  private loadRefinement(jobId: string): void {
-    this.clearRefinementPoll();
-    this.ingestionService
-      .getRefinement(jobId)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (refinement) => {
-          this.refinement.set(refinement);
-          this.scheduleRefinementPoll(jobId);
-        },
-        error: () => this.scheduleRefinementPoll(jobId),
-      });
-  }
-
-  private scheduleRefinementPoll(jobId: string): void {
-    this.clearRefinementPoll();
-    if (!this.refinementActive()) return;
-    this.refinementPollHandle = setTimeout(
-      () => this.loadRefinement(jobId),
-      IngestionReviewComponent.refinementPollMs,
-    );
-  }
-
-  private clearRefinementPoll(): void {
-    if (this.refinementPollHandle !== null) {
-      clearTimeout(this.refinementPollHandle);
-      this.refinementPollHandle = null;
-    }
-  }
-
-  requestRefinement(): void {
-    const currentJob = this.job();
-    if (!currentJob || !this.canEditReview() || this.isRefinementBusy()) return;
-
-    this.isRefinementBusy.set(true);
-    this.ingestionService
-      .requestRefinement(currentJob.id)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (refinement) => {
-          this.isRefinementBusy.set(false);
-          this.refinement.set(refinement);
-          this.scheduleRefinementPoll(currentJob.id);
-          this.snackBar.open(
-            'Refinement queued. It runs in the background when no imports are waiting.',
-            'Close',
-            { duration: 5000 },
-          );
-        },
-        error: (err) => {
-          this.isRefinementBusy.set(false);
-          this.reviewError.set(
-            err?.error?.detail || err?.error?.title || 'Could not queue the refinement.',
-          );
-        },
-      });
-  }
-
-  dismissRefinement(): void {
-    const currentJob = this.job();
-    if (!currentJob || this.isRefinementBusy()) return;
-
-    this.isRefinementBusy.set(true);
-    this.ingestionService
-      .dismissRefinement(currentJob.id)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: () => {
-          this.isRefinementBusy.set(false);
-          this.clearRefinementPoll();
-          this.refinement.set(null);
-        },
-        error: (err) => {
-          this.isRefinementBusy.set(false);
-          this.reviewError.set(
-            err?.error?.detail || err?.error?.title || 'Could not dismiss the refinement.',
-          );
-        },
-      });
-  }
-
-  compareRefinement(): void {
-    const currentJob = this.job();
-    if (
-      !currentJob ||
-      !this.canEditReview() ||
-      !this.refinement()?.hasProposal ||
-      this.isRefinementBusy() ||
-      this.isRepairing() ||
-      this.isSaving() ||
-      this.isPublishing() ||
-      this.isRerunning()
-    ) {
-      return;
-    }
-
-    const snapshot = this.reviewEditSnapshot();
-    const draft = this.buildDraftPayload();
-    this.isRefinementBusy.set(true);
-    this.reviewError.set(null);
-    this.ingestionService
-      .previewRefinement(currentJob.id, draft)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (preview) => {
-          this.isRefinementBusy.set(false);
-          const data: IngestionRepairDialogData = {
-            before: draft,
-            preview,
-            collections: this.collections(),
-            tags: this.tags(),
-            title: 'Review refined draft',
-          };
-          this.dialog
-            .open<IngestionRepairDialogComponent, IngestionRepairDialogData, boolean>(
-              IngestionRepairDialogComponent,
-              { data, width: '1000px', maxWidth: '95vw', autoFocus: 'dialog' },
-            )
-            .afterClosed()
-            .pipe(takeUntilDestroyed(this.destroyRef))
-            .subscribe((apply) => {
-              if (!apply) return;
-              if (snapshot !== this.reviewEditSnapshot()) {
-                this.reviewError.set(
-                  'The draft changed while the comparison was open. Your edits were kept; compare again to use the current draft.',
-                );
-                return;
-              }
-              this.populateForm({ ...currentJob, extractedDraft: preview.draft }, true);
-              this.form.markAsDirty();
-              this.diagnostics.set(preview.after);
-              this.diagnosticsStale.set(true);
-              this.recheckReviewIssues();
-              this.snackBar.open(
-                'Refined draft applied to the editor. Save or publish separately.',
-                'Close',
-                { duration: 5000 },
-              );
-            });
-        },
-        error: (err) => {
-          this.isRefinementBusy.set(false);
-          this.reviewError.set(
-            err?.error?.detail ||
-              err?.error?.title ||
-              'Could not load the refined draft. Your draft was not changed.',
-          );
-        },
-      });
   }
 
   private loadCatalogData(): void {
@@ -607,8 +426,8 @@ export class IngestionReviewComponent implements OnInit {
         next: (jobDetail) => {
           this.job.set(jobDetail);
           this.populateForm(jobDetail);
+          this.title.setTitle(`LocalRoast | Review ${jobDetail.displayTitle}`);
           this.isLoading.set(false);
-          this.loadRefinement(jobDetail.id);
           if (jobDetail.extractedDraft) {
             this.recheckReviewIssues();
           }
@@ -665,6 +484,8 @@ export class IngestionReviewComponent implements OnInit {
       this.selectedTagIds.set(new Set());
     }
     this.measurementWarnings.set(draft.measurementWarnings ?? []);
+    this.qualityWarnings.set(draft.qualityWarnings ?? []);
+    this.validationIssues.set(draft.validationIssues ?? []);
     this.proposedTagNames.set(
       applyingProposal
         ? Array.from(new Set([...this.proposedTagNames(), ...(draft.proposedTagNames ?? [])]))
@@ -1029,7 +850,7 @@ export class IngestionReviewComponent implements OnInit {
       RecipeDetailPreviewDialogData,
       RecipeDetailPreviewDialogResult
     >(RecipeDetailPreviewDialogComponent, {
-      width: '920px',
+      width: 'var(--app-content-width)',
       maxWidth: '96vw',
       maxHeight: '92vh',
       data: {
@@ -1163,6 +984,8 @@ export class IngestionReviewComponent implements OnInit {
       suggestedTagIds: Array.from(this.selectedTagIds()),
       proposedTagNames: Array.from(this.selectedProposedTagNames()),
       measurementWarnings: this.measurementWarnings(),
+      qualityWarnings: this.qualityWarnings(),
+      validationIssues: this.validationIssues(),
       ingredients,
       steps,
       confidenceScore: this.job()?.confidenceScore ?? 0.8,
@@ -1172,7 +995,7 @@ export class IngestionReviewComponent implements OnInit {
 
   recheckReviewIssues(): void {
     const currentJob = this.job();
-    if (!currentJob || this.isCheckingDiagnostics() || this.isRepairing()) return;
+    if (!currentJob || this.isCheckingDiagnostics()) return;
 
     const snapshot = this.reviewEditSnapshot();
     const draft = this.buildDraftPayload();
@@ -1191,102 +1014,6 @@ export class IngestionReviewComponent implements OnInit {
           this.isCheckingDiagnostics.set(false);
           this.reviewError.set(
             err?.error?.detail || err?.error?.title || 'Could not check the review draft.',
-          );
-        },
-      });
-  }
-
-  fixWithAi(): void {
-    const currentJob = this.job();
-    if (
-      !currentJob ||
-      !this.canEditReview() ||
-      this.isRepairing() ||
-      this.isCheckingDiagnostics() ||
-      this.isSaving() ||
-      this.isPublishing() ||
-      this.isRerunning() ||
-      this.repairHint.invalid
-    ) {
-      return;
-    }
-
-    const snapshot = this.reviewEditSnapshot();
-    const draft = this.buildDraftPayload();
-    this.isRepairing.set(true);
-    this.reviewError.set(null);
-    this.ingestionService
-      .previewRepair(currentJob.id, draft, this.repairHint.value.trim() || null)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (preview) => {
-          this.isRepairing.set(false);
-          const data: IngestionRepairDialogData = {
-            before: draft,
-            preview,
-            collections: this.collections(),
-            tags: this.tags(),
-          };
-          this.dialog
-            .open<IngestionRepairDialogComponent, IngestionRepairDialogData, boolean>(
-              IngestionRepairDialogComponent,
-              { data, width: '1000px', maxWidth: '95vw', autoFocus: 'dialog' },
-            )
-            .afterClosed()
-            .pipe(takeUntilDestroyed(this.destroyRef))
-            .subscribe((apply) => {
-              if (!apply) return;
-              if (snapshot !== this.reviewEditSnapshot()) {
-                this.reviewError.set(
-                  'The draft changed while AI re-extraction was running. Your edits were kept; re-extract again to use the current draft.',
-                );
-                return;
-              }
-              this.isRepairing.set(true);
-              this.ingestionService
-                .getJobById(currentJob.id)
-                .pipe(takeUntilDestroyed(this.destroyRef))
-                .subscribe({
-                  next: (latest) => {
-                    this.isRepairing.set(false);
-                    if (
-                      !this.canEditReview() ||
-                      latest.modifiedAt !== currentJob.modifiedAt ||
-                      snapshot !== this.reviewEditSnapshot()
-                    ) {
-                      this.reviewError.set(
-                        'The draft or job changed while AI re-extraction was running. Your edits were kept; reload or re-extract again before applying it.',
-                      );
-                      return;
-                    }
-                    this.populateForm({ ...currentJob, extractedDraft: preview.draft }, true);
-                    this.form.markAsDirty();
-                    this.diagnostics.set(preview.after);
-                    this.diagnosticsStale.set(true);
-                    this.recheckReviewIssues();
-                    this.snackBar.open(
-                      'AI changes applied to the editor. Save or publish separately.',
-                      'Close',
-                      { duration: 5000 },
-                    );
-                  },
-                  error: (err) => {
-                    this.isRepairing.set(false);
-                    this.reviewError.set(
-                      err?.error?.detail ||
-                        err?.error?.title ||
-                        'Could not verify the current job. Your draft was not changed.',
-                    );
-                  },
-                });
-            });
-        },
-        error: (err) => {
-          this.isRepairing.set(false);
-          this.reviewError.set(
-            err?.error?.detail ||
-              err?.error?.title ||
-              'AI re-extraction failed. Your draft was not changed.',
           );
         },
       });

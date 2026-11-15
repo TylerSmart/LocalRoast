@@ -383,4 +383,168 @@ public sealed class StepInstructionParserTests
 
         Assert.AreEqual("Pour 1.5 cup into the bowl.", cleaned);
     }
+
+    [TestMethod]
+    public void CleanStepInstruction_StripsTrailingDuplicateTimeUnitAndNounEcho()
+    {
+        const string timerEcho =
+            "Blend for about ||{\"seconds\":30,\"label\":\"Blend mixture\",\"type\":\"Timer\"}|| seconds until coarse.";
+        Assert.AreEqual(
+            "Blend for about ||{\"seconds\":30,\"label\":\"Blend mixture\",\"type\":\"Timer\"}|| until coarse.",
+            StepInstructionParser.CleanStepInstruction(timerEcho)
+        );
+
+        const string ingEcho =
+            "Bring ||{\"ingredient\":\"cold water\",\"amount\":1,\"customUnitName\":\"inch\",\"type\":\"Ingredient\"}|| water to a boil.";
+        Assert.AreEqual(
+            "Bring ||{\"ingredient\":\"cold water\",\"amount\":1,\"customUnitName\":\"inch\",\"type\":\"Ingredient\"}|| to a boil.",
+            StepInstructionParser.CleanStepInstruction(ingEcho)
+        );
+    }
+
+    [TestMethod]
+    public void CleanStepInstruction_PreservesCompoundWordsAfterIngredientToken()
+    {
+        const string eggWhites =
+            "Beat ||{\"ingredient\":\"egg\",\"amount\":2,\"unit\":\"whole\",\"type\":\"Ingredient\"}|| whites until stiff.";
+        Assert.AreEqual(eggWhites, StepInstructionParser.CleanStepInstruction(eggWhites));
+
+        const string waterBath =
+            "Set pan in ||{\"ingredient\":\"hot water\",\"amount\":2,\"unit\":\"cup\",\"type\":\"Ingredient\"}|| water bath.";
+        Assert.AreEqual(waterBath, StepInstructionParser.CleanStepInstruction(waterBath));
+    }
+
+    [TestMethod]
+    public void CleanStepInstruction_StripsTrailingDegreesAfterTemperatureToken()
+    {
+        const string single =
+            "Bake at ||{\"type\":\"temperature\",\"fahrenheit\":375}|| degrees until golden.";
+        Assert.AreEqual(
+            "Bake at ||{\"type\":\"temperature\",\"fahrenheit\":375}|| until golden.",
+            StepInstructionParser.CleanStepInstruction(single)
+        );
+
+        const string range =
+            "Heat oven between ||{\"type\":\"temperature\",\"fahrenheit\":350}|| and ||{\"type\":\"temperature\",\"fahrenheit\":375}|| degrees F.";
+        Assert.AreEqual(
+            "Heat oven between ||{\"type\":\"temperature\",\"fahrenheit\":350}|| and ||{\"type\":\"temperature\",\"fahrenheit\":375}||.",
+            StepInstructionParser.CleanStepInstruction(range)
+        );
+    }
+
+    [TestMethod]
+    public void CleanStepInstruction_StripsRedundantParentheticals_WhilePreservingUsefulNotes()
+    {
+        const string redundantIng =
+            "Whisk ||{\"ingredient\":\"cornstarch\",\"amount\":2,\"unit\":\"tbsp\",\"type\":\"Ingredient\"}|| (2 tbsp) and ||{\"ingredient\":\"buttermilk\",\"amount\":0.25,\"unit\":\"cup\",\"type\":\"Ingredient\"}|| (1/4 cup).";
+        Assert.AreEqual(
+            "Whisk ||{\"ingredient\":\"cornstarch\",\"amount\":2,\"unit\":\"tbsp\",\"type\":\"Ingredient\"}|| and ||{\"ingredient\":\"buttermilk\",\"amount\":0.25,\"unit\":\"cup\",\"type\":\"Ingredient\"}||.",
+            StepInstructionParser.CleanStepInstruction(redundantIng)
+        );
+
+        const string distinctCanNote =
+            "Drain ||{\"ingredient\":\"chickpeas\",\"amount\":1,\"unit\":\"can\",\"type\":\"Ingredient\"}|| (15 ounces).";
+        Assert.AreEqual(
+            distinctCanNote,
+            StepInstructionParser.CleanStepInstruction(distinctCanNote)
+        );
+
+        const string redundantTimer =
+            "Simmer for ||{\"seconds\":120,\"type\":\"Timer\"}|| (2 minutes) until thickened.";
+        Assert.AreEqual(
+            "Simmer for ||{\"seconds\":120,\"type\":\"Timer\"}|| until thickened.",
+            StepInstructionParser.CleanStepInstruction(redundantTimer)
+        );
+
+        const string nonNumericTimerParen =
+            "Cook for ||{\"seconds\":120,\"type\":\"Timer\"}|| (or until golden).";
+        Assert.AreEqual(
+            nonNumericTimerParen,
+            StepInstructionParser.CleanStepInstruction(nonNumericTimerParen)
+        );
+    }
+
+    [TestMethod]
+    public void CleanStepInstruction_StripsDuplicateUnitEchoAndQualifierEcho_WithoutTouchingWholeTomatoSlices()
+    {
+        const string duplicateCustomUnit =
+            "Place ||{\"ingredient\":\"feta\",\"amount\":1,\"customUnitName\":\"block\",\"type\":\"Ingredient\"}|| block in skillet and add ||{\"ingredient\":\"tomatoes\",\"amount\":2,\"unit\":\"slice\",\"type\":\"Ingredient\"}|| slices.";
+        Assert.AreEqual(
+            "Place ||{\"ingredient\":\"feta\",\"amount\":1,\"customUnitName\":\"block\",\"type\":\"Ingredient\"}|| in skillet and add ||{\"ingredient\":\"tomatoes\",\"amount\":2,\"unit\":\"slice\",\"type\":\"Ingredient\"}||.",
+            StepInstructionParser.CleanStepInstruction(duplicateCustomUnit)
+        );
+
+        const string wholeTomatoSlices =
+            "Arrange ||{\"ingredient\":\"tomato\",\"amount\":1,\"unit\":\"whole\",\"type\":\"Ingredient\"}|| slices over feta.";
+        Assert.AreEqual(
+            wholeTomatoSlices,
+            StepInstructionParser.CleanStepInstruction(wholeTomatoSlices)
+        );
+
+        const string duplicateQualifier =
+            "Top with remaining ||{\"ingredient\":\"feta\",\"displayText\":\"remaining cheese\",\"type\":\"Ingredient\"}|| and ||{\"ingredient\":\"remaining parsley\",\"type\":\"Ingredient\"}||.";
+        var cleaned = StepInstructionParser.CleanStepInstruction(duplicateQualifier);
+        Assert.AreEqual(
+            "Top with remaining cheese and remaining parsley.",
+            StepInstructionParser.ToPlainText(cleaned)
+        );
+
+        const string unquantifiedIngredientEcho =
+            "Stir in remaining ||{\"ingredient\":\"remaining fresh parsley\",\"type\":\"Ingredient\"}||.";
+        var cleanedUnquantified = StepInstructionParser.CleanStepInstruction(
+            unquantifiedIngredientEcho
+        );
+        Assert.AreEqual(
+            "Stir in remaining ||{\"ingredient\":\"fresh parsley\",\"type\":\"Ingredient\"}||.",
+            cleanedUnquantified
+        );
+    }
+
+    [TestMethod]
+    public void CleanStepInstruction_CollapsesBetweenTimerRangeAndDuplicatePrepQualifiers()
+    {
+        const string betweenTimers =
+            "Let yeast stand between ||{\"type\":\"timer\",\"seconds\":120,\"label\":\"Rest yeast\"}|| and ||{\"type\":\"timer\",\"seconds\":300,\"label\":\"Rest yeast\"}|| until foamy.";
+        Assert.AreEqual(
+            "Let yeast stand about ||{\"seconds\":120,\"label\":\"Rest yeast\",\"type\":\"Timer\"}|| until foamy.",
+            StepInstructionParser.CleanStepInstruction(betweenTimers)
+        );
+
+        const string duplicatePrep =
+            "Add grated ||{\"ingredient\":\"grated butter\",\"displayText\":\"grated butter\",\"type\":\"Ingredient\"}|| and chilled ||{\"ingredient\":\"chilled butter\",\"type\":\"Ingredient\"}||.";
+        var cleanedPrep = StepInstructionParser.CleanStepInstruction(duplicatePrep);
+        Assert.AreEqual(
+            "Add grated butter and chilled butter.",
+            StepInstructionParser.ToPlainText(cleanedPrep)
+        );
+    }
+
+    [TestMethod]
+    public void ToPlainText_WithCustomUnitName_UsesCustomUnitInsteadOfLiteralCustom()
+    {
+        const string text =
+            "Place ||{\"ingredient\":\"Brie cheese\",\"amount\":1,\"unit\":\"custom\",\"customUnitName\":\"wheel\",\"type\":\"Ingredient\"}|| in center.";
+
+        Assert.AreEqual(
+            "Place 1 wheel Brie cheese in center.",
+            StepInstructionParser.ToPlainText(text)
+        );
+    }
+
+    [TestMethod]
+    public void CleanStepInstruction_FixesDuplicateTempPreposition_DoubleOfThe_AndRedundantLeadingMeasure()
+    {
+        const string duplicateTemp =
+            "Heat oven to at ||{\"fahrenheit\":350,\"type\":\"Temperature\"}|| and brush with 2 tablespoons beaten ||{\"ingredient\":\"large egg\",\"amount\":2,\"unit\":\"tbsp\",\"type\":\"Ingredient\"}||.";
+        var cleanedTemp = StepInstructionParser.CleanStepInstruction(duplicateTemp);
+        Assert.AreEqual(
+            "Heat oven to 350°F and brush with beaten 2 tbsp large egg.",
+            StepInstructionParser.ToPlainText(cleanedTemp)
+        );
+
+        const string duplicateOfThe =
+            "Add ||{\"ingredient\":\"ice water\",\"amount\":2,\"unit\":\"tbsp\",\"type\":\"Ingredient\"}|| of the ||{\"ingredient\":\"ice water\",\"amount\":1,\"unit\":\"tbsp\",\"type\":\"Ingredient\"}||.";
+        var cleanedOfThe = StepInstructionParser.CleanStepInstruction(duplicateOfThe);
+        Assert.AreEqual("Add 2 tbsp ice water.", StepInstructionParser.ToPlainText(cleanedOfThe));
+    }
 }

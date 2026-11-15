@@ -6,6 +6,7 @@ export const routes: Routes = [
     path: 'login',
     loadComponent: () => import('./features/auth/login.component').then((m) => m.LoginComponent),
     canActivate: [guestGuard],
+    title: 'LocalRoast | Login',
   },
   {
     path: 'share/:token',
@@ -13,12 +14,14 @@ export const routes: Routes = [
       import('./features/recipes/public-shared-recipe/public-shared-recipe.component').then(
         (m) => m.PublicSharedRecipeComponent,
       ),
+    title: 'LocalRoast | Recipe',
   },
   {
     path: 'recipes/:id/cook',
     loadComponent: () =>
       import('./features/recipes/cook-mode/cook-mode.component').then((m) => m.CookModeComponent),
     canActivate: [authGuard],
+    title: 'LocalRoast | Cook Recipe',
   },
   {
     path: '',
@@ -37,6 +40,7 @@ export const routes: Routes = [
           import('./features/recipes/recipe-list/recipe-list.component').then(
             (m) => m.RecipeListComponent,
           ),
+        title: 'LocalRoast | Cookbook',
       },
       {
         path: 'recipes/new',
@@ -44,6 +48,7 @@ export const routes: Routes = [
           import('./features/recipes/recipe-editor/recipe-editor.component').then(
             (m) => m.RecipeEditorComponent,
           ),
+        title: 'LocalRoast | New Recipe',
       },
       {
         path: 'recipes/:id',
@@ -51,6 +56,7 @@ export const routes: Routes = [
           import('./features/recipes/recipe-detail/recipe-detail.component').then(
             (m) => m.RecipeDetailComponent,
           ),
+        title: 'LocalRoast | Recipe',
       },
       {
         path: 'recipes/:id/edit',
@@ -58,6 +64,7 @@ export const routes: Routes = [
           import('./features/recipes/recipe-editor/recipe-editor.component').then(
             (m) => m.RecipeEditorComponent,
           ),
+        title: 'LocalRoast | Edit Recipe',
       },
       {
         path: 'meal-plan',
@@ -66,6 +73,7 @@ export const routes: Routes = [
           import('./features/meal-plans/meal-plan-calendar/meal-plan-calendar.component').then(
             (m) => m.MealPlanCalendarComponent,
           ),
+        title: 'LocalRoast | Meal Plan',
       },
       {
         path: 'shopping',
@@ -73,6 +81,7 @@ export const routes: Routes = [
           import('./features/shopping/shopping-workspace/shopping-workspace.component').then(
             (m) => m.ShoppingWorkspaceComponent,
           ),
+        title: 'LocalRoast | Shop',
       },
       {
         path: 'ingest',
@@ -80,6 +89,7 @@ export const routes: Routes = [
           import('./features/ingestion/ingestion-hub/ingestion-hub.component').then(
             (m) => m.IngestionHubComponent,
           ),
+        title: 'LocalRoast | Ingest',
       },
       {
         path: 'ingest/review/:id',
@@ -87,6 +97,7 @@ export const routes: Routes = [
           import('./features/ingestion/ingestion-review/ingestion-review.component').then(
             (m) => m.IngestionReviewComponent,
           ),
+        title: 'LocalRoast | Review Recipe',
       },
       {
         path: 'matcher',
@@ -94,6 +105,7 @@ export const routes: Routes = [
           import('./features/recipes/fridge-matcher/fridge-matcher.component').then(
             (m) => m.FridgeMatcherComponent,
           ),
+        title: 'LocalRoast | Matcher',
       },
       {
         path: 'catalog',
@@ -101,6 +113,7 @@ export const routes: Routes = [
           import('./features/food-catalog/food-catalog/food-catalog.component').then(
             (m) => m.FoodCatalogComponent,
           ),
+        title: 'LocalRoast | Food Catalog',
       },
       {
         path: 'dashboard',

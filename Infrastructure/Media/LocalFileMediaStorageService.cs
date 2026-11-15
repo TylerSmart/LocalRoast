@@ -690,27 +690,7 @@ public sealed class LocalFileMediaStorageService : IMediaStorageService
         CancellationToken cancellationToken = default
     )
     {
-        if (string.IsNullOrWhiteSpace(mediaUrlPath))
-        {
-            return Task.CompletedTask;
-        }
-
-        const string prefix = "/api/uploads/";
-
-        if (!mediaUrlPath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-        {
-            return Task.CompletedTask;
-        }
-
-        var relative = mediaUrlPath[prefix.Length..].TrimStart('/', '\\');
-
-        var fullPath = Path.GetFullPath(Path.Combine(_uploadsRoot, relative));
-
-        var rootWithSep = _uploadsRoot.EndsWith(Path.DirectorySeparatorChar)
-            ? _uploadsRoot
-            : _uploadsRoot + Path.DirectorySeparatorChar;
-
-        if (!fullPath.StartsWith(rootWithSep, StringComparison.OrdinalIgnoreCase))
+        if (!TryResolvePhysicalPath(mediaUrlPath, out var fullPath))
         {
             return Task.CompletedTask;
         }
@@ -728,6 +708,40 @@ public sealed class LocalFileMediaStorageService : IMediaStorageService
         }
 
         return Task.CompletedTask;
+    }
+
+    private bool TryResolvePhysicalPath(string? mediaUrlPath, out string fullPath)
+    {
+        fullPath = string.Empty;
+        if (string.IsNullOrWhiteSpace(mediaUrlPath))
+        {
+            return false;
+        }
+
+        const string prefix = "/api/uploads/";
+        if (!mediaUrlPath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var relative = mediaUrlPath[prefix.Length..].TrimStart('/', '\\');
+        if (string.IsNullOrWhiteSpace(relative))
+        {
+            return false;
+        }
+
+        var candidate = Path.GetFullPath(Path.Combine(_uploadsRoot, relative));
+        var rootWithSep = _uploadsRoot.EndsWith(Path.DirectorySeparatorChar)
+            ? _uploadsRoot
+            : _uploadsRoot + Path.DirectorySeparatorChar;
+
+        if (!candidate.StartsWith(rootWithSep, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        fullPath = candidate;
+        return true;
     }
 
     private string ResolvePhysicalPath(string mediaUrlPath)
@@ -901,6 +915,92 @@ public sealed class LocalFileMediaStorageService : IMediaStorageService
                             }
                         }
                     }
+                }
+            }
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public Task PurgeUnreferencedMediaAsync(
+        IReadOnlyCollection<string> preservedMediaUrlPaths,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(preservedMediaUrlPaths);
+
+        if (preservedMediaUrlPaths.Count == 0)
+        {
+            return PurgeAllMediaAsync(cancellationToken);
+        }
+
+        var preservedFullPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var urlPath in preservedMediaUrlPaths)
+        {
+            if (TryResolvePhysicalPath(urlPath, out var physicalPath))
+            {
+                preservedFullPaths.Add(physicalPath);
+            }
+        }
+
+        if (preservedFullPaths.Count == 0)
+        {
+            return PurgeAllMediaAsync(cancellationToken);
+        }
+
+        if (!Directory.Exists(_uploadsRoot))
+        {
+            return Task.CompletedTask;
+        }
+
+        var subDirs = new[] { "recipes", "steps", "ingestion", "attachments", "cook-logs" };
+
+        foreach (var sub in subDirs)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var dirPath = Path.Combine(_uploadsRoot, sub);
+            if (!Directory.Exists(dirPath))
+            {
+                continue;
+            }
+
+            foreach (
+                var file in Directory.EnumerateFiles(dirPath, "*", SearchOption.AllDirectories)
+            )
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var normalized = Path.GetFullPath(file);
+                if (preservedFullPaths.Contains(normalized))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    File.Delete(normalized);
+                }
+                catch
+                {
+                    // Ignore locked file
+                }
+            }
+
+            foreach (
+                var childDir in Directory
+                    .EnumerateDirectories(dirPath, "*", SearchOption.AllDirectories)
+                    .OrderByDescending(d => d.Length)
+            )
+            {
+                try
+                {
+                    if (!Directory.EnumerateFileSystemEntries(childDir).Any())
+                    {
+                        Directory.Delete(childDir);
+                    }
+                }
+                catch
+                {
+                    // Best-effort cleanup
                 }
             }
         }

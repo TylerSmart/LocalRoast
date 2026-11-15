@@ -326,17 +326,6 @@ public sealed class VisionAndPdfIngestionIntegrationTests
         );
         Assert.IsNotNull(imageReview?.ExtractedDraft);
         Assert.AreEqual("qwen2.5vl:7b → qwen2.5:14b", imageReview.ExtractedDraft.ExtractedModel);
-        var imageRepair = await client.PostAsJsonAsync(
-            $"/api/ingestion/jobs/{imageJob.Id}/repair-preview",
-            new IngestionRepairPreviewRequest(imageReview.ExtractedDraft, "Check the image.")
-        );
-        Assert.AreEqual(
-            HttpStatusCode.OK,
-            imageRepair.StatusCode,
-            await imageRepair.Content.ReadAsStringAsync()
-        );
-        Assert.IsNotNull(fakeLlm.LastRepairContext);
-        StringAssert.Contains(fakeLlm.LastRepairContext.SourceContent, "Instructions:");
 
         using var pdfForm = new MultipartFormDataContent();
         pdfForm.Add(
@@ -369,18 +358,6 @@ public sealed class VisionAndPdfIngestionIntegrationTests
         Assert.IsNull(processed.ExtractedDraft?.CoverImagePath);
         Assert.IsNull(processed.ExtractedDraft?.ThumbnailImagePath);
         Assert.IsNotNull(processed.ExtractedDraft);
-        var pdfRepair = await client.PostAsJsonAsync(
-            $"/api/ingestion/jobs/{pdfJob.Id}/repair-preview",
-            new IngestionRepairPreviewRequest(processed.ExtractedDraft, "Check the scanned page.")
-        );
-        Assert.AreEqual(
-            HttpStatusCode.OK,
-            pdfRepair.StatusCode,
-            await pdfRepair.Content.ReadAsStringAsync()
-        );
-        Assert.IsNotNull(fakeLlm.LastRepairContext);
-        StringAssert.Contains(fakeLlm.LastRepairContext.SourceContent, "Instructions:");
-        Assert.AreEqual("Check the scanned page.", fakeLlm.LastRepairContext.UserHint);
     }
 
     private sealed class FakeScannedPdfInspector : IPdfIngestionInspector
@@ -413,24 +390,6 @@ public sealed class VisionAndPdfIngestionIntegrationTests
 
     private sealed class FakeVisionLlmExtractionClient : ILlmExtractionClient
     {
-        public Task<LlmAutoRepairAndTriageResult> TriageAndRepairRecipeAsync(
-            EffectiveLlmConnectionConfig config,
-            LlmAutoRepairAndTriageContext context,
-            CancellationToken cancellationToken = default
-        ) => Task.FromResult(new LlmAutoRepairAndTriageResult(context.Draft, []));
-
-        public LlmRecipeRepairContext? LastRepairContext { get; private set; }
-
-        public Task<LlmRecipeRepairResult> RepairRecipeDraftAsync(
-            EffectiveLlmConnectionConfig config,
-            LlmRecipeRepairContext context,
-            CancellationToken cancellationToken = default
-        )
-        {
-            LastRepairContext = context;
-            return Task.FromResult(new LlmRecipeRepairResult(context.Draft, []));
-        }
-
         public Task<string> AnswerKitchenQuestionAsync(
             EffectiveLlmConnectionConfig config,
             LlmKitchenQuestionContext context,
@@ -455,12 +414,6 @@ public sealed class VisionAndPdfIngestionIntegrationTests
                 )
             );
 
-        public Task<string?> StructureRecipeSourceAsync(
-            EffectiveLlmConnectionConfig config,
-            string sourceText,
-            CancellationToken cancellationToken = default
-        ) => throw new NotImplementedException();
-
         public Task<string?> TranscribeRecipeImagesAsync(
             EffectiveLlmConnectionConfig config,
             LlmVisionExtractionContext context,
@@ -473,53 +426,58 @@ public sealed class VisionAndPdfIngestionIntegrationTests
             );
         }
 
-        public Task<LlmExtractedRecipePayload> ExtractRecipeFromTextAsync(
+        public Task<ExtractedRecipeDto> ExtractRecipeFromTextAsync(
             EffectiveLlmConnectionConfig config,
             LlmExtractionContext context,
             CancellationToken cancellationToken = default
         )
         {
             return Task.FromResult(
-                new LlmExtractedRecipePayload(
+                new ExtractedRecipeDto(
                     Title: "Grandma's Shortbread",
                     Description: "Buttery shortbread from a scanned recipe card.",
-                    BaseServings: 12m,
+                    Servings: 12m,
                     YieldDisplay: "12 cookies",
                     PrepTimeMinutes: 15,
                     CookTimeMinutes: 20,
                     TotalTimeMinutes: 35,
                     Difficulty: "Easy",
-                    SourceName: null,
-                    SourceAuthor: null,
-                    ConfidenceScore: 0.6m,
-                    SuggestedTagNames: ["Dessert"],
+                    ProposedTags: ["Dessert"],
                     Ingredients:
                     [
-                        new LlmExtractedIngredientItem(
-                            SectionName: null,
-                            Quantity: 1m,
-                            MaxQuantity: null,
-                            Unit: "cup",
-                            CanonicalFoodName: "butter",
+                        new(
+                            RefId: "ing_1",
+                            CanonicalFoodItem: "butter",
                             DisplayName: "butter",
-                            PreparationNote: "softened",
+                            Quantity: 1m,
+                            Unit: "cup",
+                            PreparationNotes: "softened",
                             IsOptional: false,
-                            OriginalRawText: "1 cup butter, softened",
-                            SuggestedIsPantryStaple: false
+                            RawText: "1 cup butter, softened"
                         ),
                     ],
                     Steps:
                     [
-                        new LlmExtractedStepItem(
-                            SectionName: null,
-                            Instruction: "Bake for 20 minutes.",
-                            IngredientIndices: [0],
-                            Timers: []
+                        new(
+                            StepNumber: 1,
+                            TemplateText: "Cream {{ing_1}} and bake for {{timer_1}}.",
+                            IngredientTokens: [new("ing_1", "ing_1")],
+                            TimerTokens: [new("timer_1", 1200, "Bake")]
                         ),
-                    ]
+                    ],
+                    QualityAudit: new RecipeQualityAuditDto(
+                        IsPlausibleRecipe: false,
+                        Warnings: ["Low-confidence scanned recipe card."]
+                    )
                 )
             );
         }
+
+        public Task<LlmEntityDisambiguationResult> DisambiguateEntitiesAsync(
+            EffectiveLlmConnectionConfig config,
+            LlmEntityDisambiguationContext context,
+            CancellationToken cancellationToken = default
+        ) => Task.FromResult(new LlmEntityDisambiguationResult());
 
         public Task<LlmSubstitutionPayload> SuggestIngredientSubstitutionsAsync(
             EffectiveLlmConnectionConfig config,

@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
+import { MatCheckboxModule } from '@angular/material/checkbox';
 import {
   MatDialogActions,
   MatDialogContent,
@@ -27,6 +28,7 @@ export interface ResetAppDataDialogResult {
     MatDialogContent,
     MatDialogActions,
     MatButtonModule,
+    MatCheckboxModule,
     MatIconModule,
     MatFormFieldModule,
     MatInputModule,
@@ -41,6 +43,7 @@ export class ResetAppDataDialogComponent {
   private readonly accountService = inject(AccountService);
 
   readonly confirmationText = signal<string>('');
+  readonly keepIngestionJobs = signal<boolean>(false);
   readonly isResetting = signal<boolean>(false);
   readonly errorMessage = signal<string | null>(null);
 
@@ -56,7 +59,7 @@ export class ResetAppDataDialogComponent {
     this.isResetting.set(true);
     this.errorMessage.set(null);
 
-    this.accountService.resetAppData().subscribe({
+    this.accountService.resetAppData({ keepIngestionJobs: this.keepIngestionJobs() }).subscribe({
       next: (result) => {
         this.isResetting.set(false);
         this.dialogRef.close({ success: true, result });

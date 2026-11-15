@@ -308,11 +308,12 @@ export class AccountSettingsDialogComponent implements OnInit {
 
     resetRef.afterClosed().subscribe((res) => {
       if (res?.success && res.result) {
-        this.snackBar.open(
-          `Application data reset successfully. ${res.result.deletedRecipesCount} recipes deleted.`,
-          'Close',
-          { duration: 5000 },
-        );
+        const resetJobsCount = res.result.resetIngestionJobsCount ?? 0;
+        const message =
+          resetJobsCount > 0
+            ? `Application data reset successfully. ${res.result.deletedRecipesCount} recipes deleted and ${resetJobsCount} ingestion jobs re-queued.`
+            : `Application data reset successfully. ${res.result.deletedRecipesCount} recipes deleted.`;
+        this.snackBar.open(message, 'Close', { duration: 5000 });
         this.dialogRef.close();
         this.router.navigate(['/recipes']).then(() => {
           window.location.reload();

@@ -96,5 +96,11 @@ public interface IIngestionService
         CancellationToken cancellationToken = default
     );
 
+    Task<IngestionReviewDiagnosticsDto?> GetReviewDiagnosticsAsync(
+        Guid id,
+        IngestionExtractedDraftDto draft,
+        CancellationToken cancellationToken = default
+    );
+
     Task<bool> DiscardJobAsync(Guid id, CancellationToken cancellationToken = default);
 }

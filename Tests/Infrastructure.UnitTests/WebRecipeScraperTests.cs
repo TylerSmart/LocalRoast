@@ -159,6 +159,11 @@ public sealed class WebRecipeScraperTests
 
         public Task PurgeAllMediaAsync(CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
+
+        public Task PurgeUnreferencedMediaAsync(
+            IReadOnlyCollection<string> preservedMediaUrlPaths,
+            CancellationToken cancellationToken = default
+        ) => Task.CompletedTask;
     }
 
     [TestMethod]

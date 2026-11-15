@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using App.Core.Common;
 using App.Core.Exceptions;
 using App.Core.FoodCatalog;
@@ -117,9 +118,35 @@ public sealed class IngestionService(
         var page = Math.Max(1, parameters.PageNumber);
         var pageSize = Math.Clamp(parameters.PageSize, 1, 200);
 
-        var jobs = await query
+        IOrderedQueryable<IngestionJob> orderedQuery = (
+            parameters.SortBy,
+            parameters.SortDirection
+        ) switch
+        {
+            (IngestionJobSortBy.Name, IngestionJobSortDirection.Asc) => query
+                .OrderBy(j => j.DisplayTitle)
+                .ThenByDescending(j => j.CreatedAt)
+                .ThenBy(j => j.Id),
+            (IngestionJobSortBy.Name, IngestionJobSortDirection.Desc) => query
+                .OrderByDescending(j => j.DisplayTitle)
+                .ThenByDescending(j => j.CreatedAt)
+                .ThenBy(j => j.Id),
+            (IngestionJobSortBy.ModifiedAt, IngestionJobSortDirection.Asc) => query
+                .OrderBy(j => j.ModifiedAt)
+                .ThenBy(j => j.CreatedAt)
+                .ThenBy(j => j.Id),
+            (IngestionJobSortBy.ModifiedAt, IngestionJobSortDirection.Desc) => query
+                .OrderByDescending(j => j.ModifiedAt)
+                .ThenByDescending(j => j.CreatedAt)
+                .ThenBy(j => j.Id),
+            (IngestionJobSortBy.CreatedAt, IngestionJobSortDirection.Asc) => query
+                .OrderBy(j => j.CreatedAt)
+                .ThenBy(j => j.Id),
+            _ => query.OrderByDescending(j => j.CreatedAt).ThenBy(j => j.Id),
+        };
+
+        var jobs = await orderedQuery
             .Include(j => j.ResultingRecipe)
-            .OrderByDescending(j => j.CreatedAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync(cancellationToken);
@@ -330,23 +357,32 @@ public sealed class IngestionService(
         {
             if (draft.Ingredients is { Count: > 0 })
             {
-                var cleanedIngs = RecipeDraftNormalizer.CleanIngredientSections(draft.Ingredients);
-                if (cleanedIngs != draft.Ingredients)
-                {
-                    draft = draft with { Ingredients = cleanedIngs };
-                }
+                var cleanedIngs = draft
+                    .Ingredients.Select(i =>
+                        RecipeUnitAndSectionHelpers.IsGenericTopLevelSection(i.SectionName)
+                            ? i with
+                            {
+                                SectionName = null,
+                            }
+                            : i
+                    )
+                    .ToList();
+                draft = draft with { Ingredients = cleanedIngs };
             }
 
             if (draft.Steps is { Count: > 0 })
             {
-                var cleanedSteps = RecipeDraftNormalizer.CleanStepSections(
-                    draft.Steps,
-                    job.NormalizedSourceText ?? job.RawText
-                );
-                if (cleanedSteps != draft.Steps)
-                {
-                    draft = draft with { Steps = cleanedSteps };
-                }
+                var cleanedSteps = draft
+                    .Steps.Select(s =>
+                        RecipeUnitAndSectionHelpers.IsGenericTopLevelSection(s.SectionName)
+                            ? s with
+                            {
+                                SectionName = null,
+                            }
+                            : s
+                    )
+                    .ToList();
+                draft = draft with { Steps = cleanedSteps };
             }
         }
 
@@ -1304,7 +1340,7 @@ public sealed class IngestionService(
                     );
                 }
 
-                var (cleanQty, cleanMaxQty) = RecipeDraftNormalizer.NormalizeQuantities(
+                var (cleanQty, cleanMaxQty) = RecipeUnitAndSectionHelpers.NormalizeQuantities(
                     ing.Quantity,
                     ing.MaxQuantity
                 );
@@ -1313,7 +1349,9 @@ public sealed class IngestionService(
                     ing.Unit == MeasurementUnit.Custom
                     && (
                         string.IsNullOrWhiteSpace(ing.CustomUnitName)
-                        || RecipeDraftNormalizer.IsDisallowedUnitPlaceholder(ing.CustomUnitName)
+                        || RecipeUnitAndSectionHelpers.IsDisallowedUnitPlaceholder(
+                            ing.CustomUnitName
+                        )
                     )
                         ? null
                         : ing.Unit;
@@ -1814,5 +1852,236 @@ public sealed class IngestionService(
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return true;
+    }
+
+    public async Task<IngestionReviewDiagnosticsDto?> GetReviewDiagnosticsAsync(
+        Guid id,
+        IngestionExtractedDraftDto draft,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var jobExists = await dbContext
+            .IngestionJobs.AsNoTracking()
+            .AnyAsync(j => j.Id == id, cancellationToken);
+        if (!jobExists)
+        {
+            return null;
+        }
+
+        var validationIssues = new List<string>();
+        var qualityWarnings = new List<string>();
+        var targeted = new List<IngestionDiagnosticTargetDto>();
+
+        if (string.IsNullOrWhiteSpace(draft.Title))
+        {
+            const string msg = "Recipe title is missing.";
+            validationIssues.Add(msg);
+            targeted.Add(new IngestionDiagnosticTargetDto(msg, "error"));
+        }
+
+        var ingredients = draft.Ingredients ?? [];
+        var steps = draft.Steps ?? [];
+
+        if (
+            ingredients.Any(i => i is null)
+            || steps.Any(s =>
+                s is null
+                || (s.Timers is not null && s.Timers.Any(t => t is null))
+                || (s.IngredientAmounts is not null && s.IngredientAmounts.Any(a => a is null))
+            )
+        )
+        {
+            throw new DomainValidationException("Draft contains malformed null entries.");
+        }
+
+        if (ingredients.Count == 0)
+        {
+            const string msg = "Recipe has no ingredients.";
+            validationIssues.Add(msg);
+            targeted.Add(new IngestionDiagnosticTargetDto(msg, "error"));
+        }
+
+        if (steps.Count == 0)
+        {
+            const string msg = "Recipe has no preparation steps.";
+            validationIssues.Add(msg);
+            targeted.Add(new IngestionDiagnosticTargetDto(msg, "error"));
+        }
+
+        for (var i = 0; i < ingredients.Count; i++)
+        {
+            var ing = ingredients[i];
+            if (ing.IsRecipeReference && !ing.MatchedRecipeId.HasValue)
+            {
+                var refTitle = !string.IsNullOrWhiteSpace(ing.ReferencedRecipeTitle)
+                    ? ing.ReferencedRecipeTitle
+                    : ing.DisplayName;
+                var msg =
+                    $"Ingredient #{i + 1} ('{ing.DisplayName}') references sub-recipe '{refTitle}' which could not be matched yet.";
+                validationIssues.Add(msg);
+                targeted.Add(new IngestionDiagnosticTargetDto(msg, "error", IngredientIndex: i));
+            }
+
+            if (
+                (ing.Quantity.HasValue && ing.Quantity.Value <= 0m)
+                || (ing.MaxQuantity.HasValue && ing.MaxQuantity.Value <= 0m)
+            )
+            {
+                var msg = $"Ingredient #{i + 1} ('{ing.DisplayName}') has a non-positive quantity.";
+                validationIssues.Add(msg);
+                targeted.Add(new IngestionDiagnosticTargetDto(msg, "error", IngredientIndex: i));
+            }
+
+            if (!ing.IsRecipeReference)
+            {
+                var candidateFoodName = !string.IsNullOrWhiteSpace(ing.ProposedFoodItemName)
+                    ? ing.ProposedFoodItemName
+                    : ing.DisplayName;
+                if (!FoodNameSanitizer.IsValidFoodName(candidateFoodName))
+                {
+                    var msg =
+                        $"Ingredient #{i + 1} ('{ing.DisplayName}') does not have a meaningful food name.";
+                    validationIssues.Add(msg);
+                    targeted.Add(
+                        new IngestionDiagnosticTargetDto(msg, "error", IngredientIndex: i)
+                    );
+                }
+            }
+        }
+
+        foreach (var existingIssue in draft.ValidationIssues ?? [])
+        {
+            if (
+                !string.IsNullOrWhiteSpace(existingIssue)
+                && !validationIssues.Contains(existingIssue, StringComparer.Ordinal)
+            )
+            {
+                validationIssues.Add(existingIssue);
+            }
+        }
+
+        var referencedIngredientIndices = new HashSet<int>();
+        var mentionedUnlinkedIngredients = new HashSet<int>();
+        for (var sIdx = 0; sIdx < steps.Count; sIdx++)
+        {
+            var step = steps[sIdx];
+            var linkedSet = new HashSet<int>();
+            foreach (var ingIdx in step.IngredientIndices ?? [])
+            {
+                if (ingIdx < 0 || ingIdx >= ingredients.Count)
+                {
+                    var msg = $"Step {sIdx + 1}: Linked ingredient index {ingIdx} is out of range.";
+                    validationIssues.Add(msg);
+                    targeted.Add(
+                        new IngestionDiagnosticTargetDto(msg, "error", StepNumber: sIdx + 1)
+                    );
+                }
+                else
+                {
+                    referencedIngredientIndices.Add(ingIdx);
+                    linkedSet.Add(ingIdx);
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(step.Instruction))
+            {
+                var msg = $"Step {sIdx + 1}: Instruction text is empty.";
+                validationIssues.Add(msg);
+                targeted.Add(new IngestionDiagnosticTargetDto(msg, "error", StepNumber: sIdx + 1));
+            }
+            else
+            {
+                for (var i = 0; i < ingredients.Count; i++)
+                {
+                    if (linkedSet.Contains(i))
+                    {
+                        continue;
+                    }
+
+                    var name = ingredients[i].DisplayName?.Trim() ?? string.Empty;
+                    if (
+                        name.Length >= 3
+                        && !name.Equals("unknown", StringComparison.OrdinalIgnoreCase)
+                        && Regex.IsMatch(
+                            step.Instruction,
+                            $@"\b{Regex.Escape(name)}\b",
+                            RegexOptions.IgnoreCase
+                        )
+                    )
+                    {
+                        mentionedUnlinkedIngredients.Add(i);
+                        var msg =
+                            $"Step {sIdx + 1}: Instruction mentions '{ingredients[i].DisplayName}' without linking it to this step.";
+                        qualityWarnings.Add(msg);
+                        targeted.Add(
+                            new IngestionDiagnosticTargetDto(msg, "warning", StepNumber: sIdx + 1)
+                        );
+                    }
+                }
+            }
+
+            foreach (var timer in step.Timers ?? [])
+            {
+                var trimmedLabel = timer.Label?.Trim() ?? string.Empty;
+                if (
+                    string.IsNullOrWhiteSpace(trimmedLabel)
+                    || trimmedLabel.Equals("Cook", StringComparison.OrdinalIgnoreCase)
+                    || trimmedLabel.Equals("Timer", StringComparison.OrdinalIgnoreCase)
+                )
+                {
+                    var msg =
+                        $"Step {sIdx + 1}: Timer '{timer.Label}' has a vague label; describe the action instead.";
+                    qualityWarnings.Add(msg);
+                    targeted.Add(
+                        new IngestionDiagnosticTargetDto(msg, "warning", StepNumber: sIdx + 1)
+                    );
+                }
+            }
+        }
+
+        for (var i = 0; i < ingredients.Count; i++)
+        {
+            var ing = ingredients[i];
+            if (
+                referencedIngredientIndices.Contains(i)
+                || mentionedUnlinkedIngredients.Contains(i)
+                || ing.IsOptional
+                || ing.IsRecipeReference
+            )
+            {
+                continue;
+            }
+
+            var normName = RecipeUnitAndSectionHelpers.NormalizeLookupKey(
+                ing.ProposedFoodItemName ?? ing.DisplayName
+            );
+            var isSeasoning =
+                normName
+                is "salt"
+                    or "kosher salt"
+                    or "sea salt"
+                    or "pepper"
+                    or "black pepper"
+                    or "water";
+            if (!isSeasoning && ingredients.Count > 0 && steps.Count > 0)
+            {
+                var msg = $"Ingredient #{i + 1} ('{ing.DisplayName}') is not linked to any step.";
+                qualityWarnings.Add(msg);
+                targeted.Add(new IngestionDiagnosticTargetDto(msg, "warning", IngredientIndex: i));
+            }
+        }
+
+        foreach (var existingWarning in draft.QualityWarnings ?? [])
+        {
+            if (
+                !string.IsNullOrWhiteSpace(existingWarning)
+                && !qualityWarnings.Contains(existingWarning, StringComparer.Ordinal)
+            )
+            {
+                qualityWarnings.Add(existingWarning);
+            }
+        }
+
+        return new IngestionReviewDiagnosticsDto(validationIssues, qualityWarnings, targeted);
     }
 }

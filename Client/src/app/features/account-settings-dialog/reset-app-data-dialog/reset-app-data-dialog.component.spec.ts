@@ -50,8 +50,9 @@ describe('ResetAppDataDialogComponent', () => {
     fixture.detectChanges();
   });
 
-  it('initializes with empty confirmation and disabled reset button', () => {
+  it('initializes with empty confirmation, keepIngestionJobs false, and disabled reset button', () => {
     expect(component.confirmationText()).toBe('');
+    expect(component.keepIngestionJobs()).toBe(false);
     expect(component.isConfirmed()).toBe(false);
     expect(component.isResetting()).toBe(false);
   });
@@ -67,16 +68,35 @@ describe('ResetAppDataDialogComponent', () => {
     expect(component.isConfirmed()).toBe(true);
   });
 
-  it('calls accountService.resetAppData and closes with success on confirmation', () => {
+  it('calls accountService.resetAppData with keepIngestionJobs false by default and closes with success on confirmation', () => {
     mockAccountService.resetAppData.mockReturnValue(of(sampleResult));
     component.confirmationText.set('DELETE');
 
     component.confirmReset();
 
-    expect(mockAccountService.resetAppData).toHaveBeenCalledTimes(1);
+    expect(mockAccountService.resetAppData).toHaveBeenCalledWith({ keepIngestionJobs: false });
     expect(mockDialogRef.close).toHaveBeenCalledWith({
       success: true,
       result: sampleResult,
+    });
+  });
+
+  it('passes keepIngestionJobs true when checkbox option is enabled', () => {
+    const keepResult: ResetAppDataResultDto = {
+      ...sampleResult,
+      deletedIngestionJobsCount: 0,
+      resetIngestionJobsCount: 15,
+    };
+    mockAccountService.resetAppData.mockReturnValue(of(keepResult));
+    component.keepIngestionJobs.set(true);
+    component.confirmationText.set('DELETE');
+
+    component.confirmReset();
+
+    expect(mockAccountService.resetAppData).toHaveBeenCalledWith({ keepIngestionJobs: true });
+    expect(mockDialogRef.close).toHaveBeenCalledWith({
+      success: true,
+      result: keepResult,
     });
   });
 

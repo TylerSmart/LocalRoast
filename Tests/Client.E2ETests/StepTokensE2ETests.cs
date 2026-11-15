@@ -155,8 +155,13 @@ public sealed class StepTokensE2ETests : E2ETestBase
         await Page.Keyboard.TypeAsync("and cook ");
         await stepCard.Locator(".add-timer-btn").ClickAsync();
         await Expect(dialog).ToBeVisibleAsync();
-        await dialog.Locator("input[formcontrolname='minutes']").FillAsync("3");
-        await dialog.Locator("input[formcontrolname='label']").FillAsync("Scramble");
+        var minutesInput = dialog.Locator("input[formcontrolname='minutes']");
+        var labelInput = dialog.Locator("input[formcontrolname='label']");
+        await Expect(minutesInput).ToBeFocusedAsync();
+        await minutesInput.FillAsync("3");
+        await labelInput.FillAsync("Scramble");
+        await Expect(minutesInput).ToHaveValueAsync("3");
+        await Expect(labelInput).ToHaveValueAsync("Scramble");
         await dialog.Locator("button", new() { HasText = "Insert Token" }).ClickAsync();
         await Expect(dialog).ToHaveCountAsync(0);
         await Expect(editable.Locator(".inline-step-chip.is-timer")).ToContainTextAsync("3m");

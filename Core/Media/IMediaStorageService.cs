@@ -74,6 +74,14 @@ public interface IMediaStorageService
 
     Task PurgeAllMediaAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Deletes all uploaded media files except those matching <paramref name="preservedMediaUrlPaths"/>.
+    /// </summary>
+    Task PurgeUnreferencedMediaAsync(
+        IReadOnlyCollection<string> preservedMediaUrlPaths,
+        CancellationToken cancellationToken = default
+    );
+
     Task<UploadedCookLogPhotoDto> SaveCookLogPhotoAsync(
         Stream content,
         string originalFileName,

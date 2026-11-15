@@ -49,8 +49,13 @@ public sealed class RecipeCookbookE2ETests : E2ETestBase
         await Page.Locator(".add-timer-btn").First.ClickAsync();
         var timerDialog = Page.Locator("app-step-token-dialog");
         await Expect(timerDialog).ToBeVisibleAsync();
-        await timerDialog.Locator("input[formcontrolname='minutes']").FillAsync("30");
-        await timerDialog.Locator("input[formcontrolname='label']").FillAsync("Low simmer");
+        var minutesInput = timerDialog.Locator("input[formcontrolname='minutes']");
+        var labelInput = timerDialog.Locator("input[formcontrolname='label']");
+        await Expect(minutesInput).ToBeFocusedAsync();
+        await minutesInput.FillAsync("30");
+        await labelInput.FillAsync("Low simmer");
+        await Expect(minutesInput).ToHaveValueAsync("30");
+        await Expect(labelInput).ToHaveValueAsync("Low simmer");
         await timerDialog.Locator("button", new() { HasText = "Insert Token" }).ClickAsync();
         await Expect(timerDialog).ToHaveCountAsync(0);
 

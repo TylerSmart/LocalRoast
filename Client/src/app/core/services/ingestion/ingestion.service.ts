@@ -8,11 +8,11 @@ import type {
   EnqueueWebUrlIngestionRequest,
   IngestionExtractedDraftDto,
   IngestionJobDetailDto,
+  IngestionJobSortBy,
+  IngestionJobSortDirection,
   IngestionJobStatus,
   IngestionJobSummaryDto,
   IngestionQueueSummaryDto,
-  IngestionRefinementDto,
-  IngestionRepairPreviewDto,
   IngestionReviewDiagnosticsDto,
   LlmModelProfile,
   RetryBatchJobsRequest,
@@ -77,8 +77,14 @@ export class IngestionService {
     page = 1,
     pageSize = 25,
     activeWaiting = false,
+    sortBy: IngestionJobSortBy = 'CreatedAt',
+    sortDirection: IngestionJobSortDirection = 'Desc',
   ): Observable<PagedResultDto<IngestionJobSummaryDto>> {
-    let params = new HttpParams().set('page', page.toString()).set('pageSize', pageSize.toString());
+    let params = new HttpParams()
+      .set('page', page.toString())
+      .set('pageSize', pageSize.toString())
+      .set('sortBy', sortBy)
+      .set('sortDirection', sortDirection);
 
     if (activeWaiting) {
       params = params.set('activeWaiting', 'true');
@@ -130,40 +136,6 @@ export class IngestionService {
   ): Observable<IngestionReviewDiagnosticsDto> {
     return this.http.post<IngestionReviewDiagnosticsDto>(
       apiUrl(`/ingestion/jobs/${id}/review-diagnostics`),
-      { draft },
-    );
-  }
-
-  previewRepair(
-    id: string,
-    draft: IngestionExtractedDraftDto,
-    hint: string | null,
-  ): Observable<IngestionRepairPreviewDto> {
-    return this.http.post<IngestionRepairPreviewDto>(
-      apiUrl(`/ingestion/jobs/${id}/repair-preview`),
-      { draft, hint },
-    );
-  }
-
-  /** Returns null when the draft has no refine pass. */
-  getRefinement(id: string): Observable<IngestionRefinementDto | null> {
-    return this.http.get<IngestionRefinementDto | null>(apiUrl(`/ingestion/jobs/${id}/refinement`));
-  }
-
-  requestRefinement(id: string): Observable<IngestionRefinementDto> {
-    return this.http.post<IngestionRefinementDto>(apiUrl(`/ingestion/jobs/${id}/refinement`), null);
-  }
-
-  dismissRefinement(id: string): Observable<void> {
-    return this.http.delete<void>(apiUrl(`/ingestion/jobs/${id}/refinement`));
-  }
-
-  previewRefinement(
-    id: string,
-    draft: IngestionExtractedDraftDto,
-  ): Observable<IngestionRepairPreviewDto> {
-    return this.http.post<IngestionRepairPreviewDto>(
-      apiUrl(`/ingestion/jobs/${id}/refinement/preview`),
       { draft },
     );
   }

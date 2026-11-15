@@ -32,21 +32,12 @@ public sealed class RecipeMeasurementTests
             preferAlternative
         );
 
-    private static IngestionExtractedDraftDto Normalize(
-        LlmExtractedRecipePayload raw,
-        string? source = null
-    ) =>
-        RecipeDraftNormalizer.Normalize(
-            raw,
-            [],
-            [],
-            null,
-            null,
-            null,
-            null,
-            null,
-            rawSourceText: source
-        );
+    private static IngestionExtractedDraftDto Compile(ExtractedRecipeDto extracted)
+    {
+        var validation = RecipeValidator.Validate(extracted);
+        var matches = EntityCandidateMatcher.Match(extracted, [], []);
+        return RecipeDraftCompiler.Compile(extracted, validation, matches);
+    }
 
     [TestMethod]
     [DataRow("5 cups (25 ounces) flour", 5, 25)]
@@ -93,99 +84,89 @@ public sealed class RecipeMeasurementTests
     }
 
     [TestMethod]
-    public void Normalize_Starter_PreservesPairsAndIndividualFlatStepAmounts()
+    public void Compile_Starter_PreservesPairsAndIndividualFlatStepAmounts()
     {
-        var raw = new LlmExtractedRecipePayload(
+        var extracted = new ExtractedRecipeDto(
             Title: "Synthetic Starter",
-            ConfidenceScore: 0.98m,
             Ingredients:
             [
-                new(null, 25, null, "oz", "flour", OriginalRawText: "5 cups (25 ounces) flour"),
+                new(
+                    RefId: "ing_1",
+                    CanonicalFoodItem: "flour",
+                    DisplayName: "flour",
+                    Quantity: 5m,
+                    Unit: "cup",
+                    AltQuantity: 25m,
+                    AltUnit: "oz",
+                    RawText: "5 cups (25 ounces) flour"
+                ),
             ],
             Steps:
             [
                 new(
-                    null,
-                    "4A. Combine the listed flour with water.",
-                    [0],
-                    IngredientAmounts: [new(0, new(1, "cup"))],
-                    OriginalRawText: "4A. Combine 1 cup flour with water."
+                    StepNumber: 1,
+                    TemplateText: "Combine {{ing_1_a}} with water.",
+                    IngredientTokens: [new("ing_1_a", "ing_1", 1m, "cup")]
                 ),
                 new(
-                    null,
-                    "4B: Feed with the listed flour.",
-                    [0],
-                    IngredientAmounts: [new(0, new(4, "cups"))],
-                    OriginalRawText: "4B: Feed with 4 cups flour."
+                    StepNumber: 2,
+                    TemplateText: "Feed with {{ing_1_b}}.",
+                    IngredientTokens: [new("ing_1_b", "ing_1", 4m, "cups")]
                 ),
             ]
         );
-        var draft = Normalize(raw);
+        var draft = Compile(extracted);
         Assert.AreEqual(5m, draft.Ingredients![0].Quantity);
         Assert.AreEqual(25m, draft.Ingredients[0].AlternativeMeasurement!.Quantity);
         Assert.AreEqual(MeasurementUnit.Cup, draft.Ingredients[0].Unit);
         Assert.AreEqual(1m, draft.Steps![0].IngredientAmounts![0].Measurement.Quantity);
         Assert.AreEqual(4m, draft.Steps[1].IngredientAmounts![0].Measurement.Quantity);
-        Assert.AreEqual("Combine the listed flour with water.", draft.Steps[0].Instruction);
-        Assert.AreEqual("Feed with the listed flour.", draft.Steps[1].Instruction);
-        Assert.IsEmpty(draft.MeasurementWarnings!);
-        Assert.AreEqual(0.98m, draft.ConfidenceScore);
+        StringAssert.Contains(
+            draft.Steps[0].Instruction,
+            "||{\"ingredient\":\"flour\",\"amount\":1,\"unit\":\"cup\",\"type\":\"Ingredient\"}||"
+        );
+        StringAssert.Contains(
+            draft.Steps[1].Instruction,
+            "||{\"ingredient\":\"flour\",\"amount\":4,\"unit\":\"cup\",\"type\":\"Ingredient\"}||"
+        );
+        Assert.IsEmpty(draft.ValidationIssues!);
+        Assert.AreEqual(0.96m, draft.ConfidenceScore);
     }
 
     [TestMethod]
-    public void Normalize_UnsupportedOrInventedAmounts_AreFlaggedAndCannotRemainHighConfidence()
+    public void Compile_OverflowingStepAmounts_AreFlaggedInValidationIssuesAndLowerConfidence()
     {
-        var raw = new LlmExtractedRecipePayload(
+        var extracted = new ExtractedRecipeDto(
             Title: "Synthetic Starter",
-            ConfidenceScore: 0.99m,
             Ingredients:
             [
-                new(null, 5, null, "cup", "flour", AlternativeMeasurement: new(25, "oz")),
+                new(
+                    RefId: "ing_1",
+                    CanonicalFoodItem: "flour",
+                    DisplayName: "flour",
+                    Quantity: 5m,
+                    Unit: "cup",
+                    AltQuantity: 25m,
+                    AltUnit: "oz",
+                    RawText: "5 cups (25 oz) flour"
+                ),
             ],
             Steps:
             [
                 new(
-                    null,
-                    "Add the listed flour.",
-                    [0],
-                    IngredientAmounts:
+                    StepNumber: 1,
+                    TemplateText: "Add {{ing_1_a}} then {{ing_1_b}}.",
+                    IngredientTokens:
                     [
-                        new(0, new(5, "cup")),
-                        new(null, new(1, "cup")),
-                        new(9, new(1, "cup")),
-                    ],
-                    OriginalRawText: "Add 1 cup flour."
+                        new("ing_1_a", "ing_1", 4m, "cup"),
+                        new("ing_1_b", "ing_1", 3m, "cup"),
+                    ]
                 ),
             ]
         );
-        var draft = Normalize(raw);
-        Assert.IsEmpty(draft.Steps![0].IngredientAmounts!);
-        Assert.HasCount(4, draft.MeasurementWarnings!);
-        Assert.AreEqual(0.87m, draft.ConfidenceScore);
-    }
-
-    [TestMethod]
-    public void Normalize_UnconfirmedSourceExcerpt_FlagsMeasurementsForReview()
-    {
-        var raw = new LlmExtractedRecipePayload(
-            Title: "Starter",
-            Ingredients:
-            [
-                new(null, 5, null, "cup", "flour", OriginalRawText: "5 cups (25 oz) flour"),
-            ],
-            Steps:
-            [
-                new(
-                    null,
-                    "Use the listed flour.",
-                    [0],
-                    IngredientAmounts: [new(0, new(1, "cup"))],
-                    OriginalRawText: "Add 1 cup flour."
-                ),
-            ]
-        );
-        var draft = Normalize(raw, "Actual source says something else.");
-        Assert.HasCount(2, draft.MeasurementWarnings!);
+        var draft = Compile(extracted);
+        Assert.IsNotEmpty(draft.ValidationIssues!);
+        Assert.IsLessThan(0.90m, draft.ConfidenceScore);
     }
 
     [TestMethod]
@@ -312,6 +293,38 @@ public sealed class RecipeMeasurementTests
         Assert.Throws<JsonException>(() =>
             JsonSerializer.Deserialize<RecipeStepIngredientAmountInput>(
                 """{"Measurement":{"Quantity":1,"Unit":1}}"""
+            )
+        );
+    }
+
+    [TestMethod]
+    public void TrySumCompoundLeadingMeasurement_SumsAcrossParentheticalWeightOrVolumeEquivalent()
+    {
+        var flour = SourceMeasurementParser.TrySumCompoundLeadingMeasurement(
+            "1 1/2 cups (7 1/2 ounces) plus 1 tablespoon all-purpose flour"
+        );
+        Assert.IsNotNull(flour);
+        Assert.AreEqual(1.5625m, flour.Quantity);
+        Assert.AreEqual(MeasurementUnit.Cup, flour.Unit);
+
+        var spans = SourceMeasurementParser.FindSpans(
+            "1 1/2 cups (7 1/2 ounces) plus 1 tablespoon all-purpose flour"
+        );
+        Assert.HasCount(1, spans);
+        Assert.AreEqual(25m, spans[0].Measurement.Quantity);
+        Assert.AreEqual(MeasurementUnit.Tbsp, spans[0].Measurement.Unit);
+        Assert.IsNull(spans[0].Alternative);
+
+        var oil = SourceMeasurementParser.TrySumCompoundLeadingMeasurement(
+            "6 tablespoons plus 1 teaspoon extra-virgin olive oil"
+        );
+        Assert.IsNotNull(oil);
+        Assert.AreEqual(6.3333m, oil.Quantity);
+        Assert.AreEqual(MeasurementUnit.Tbsp, oil.Unit);
+
+        Assert.IsNull(
+            SourceMeasurementParser.TrySumCompoundLeadingMeasurement(
+                "1 cup water plus more for rinsing"
             )
         );
     }

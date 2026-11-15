@@ -146,6 +146,11 @@ public sealed class McpCookbookServiceTests
 
         public Task PurgeAllMediaAsync(CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
+
+        public Task PurgeUnreferencedMediaAsync(
+            IReadOnlyCollection<string> preservedMediaUrlPaths,
+            CancellationToken cancellationToken = default
+        ) => Task.CompletedTask;
     }
 
     private sealed class DummyIngestionQueueSignal : IIngestionQueueSignal

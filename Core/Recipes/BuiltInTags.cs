@@ -186,6 +186,7 @@ public static class BuiltInTags
         new("Sausage", TagCategory.Protein, 140),
         new("Bacon", TagCategory.Protein, 150),
         new("Ham", TagCategory.Protein, 160),
+        new("Eggs", TagCategory.Protein, 165),
         // Seafood
         new("Salmon", TagCategory.Protein, 170),
         new("White Fish", TagCategory.Protein, 180),
@@ -276,6 +277,31 @@ public static class BuiltInTags
 
     public static IEnumerable<string> GetTagsForCategory(TagCategory category) =>
         LazyByCategory.Value[category];
+
+    /// <summary>
+    /// Builds a compact static taxonomy guide of all built-in culinary tags grouped by category
+    /// so extraction prompts stay anchored to curated tags without embedding user database lists.
+    /// </summary>
+    public static string BuildPromptTaxonomySummary()
+    {
+        var categoryGroups = new (string Label, TagCategory Category)[]
+        {
+            ("Course", TagCategory.Course),
+            ("Cuisine", TagCategory.Cuisine),
+            ("Dietary", TagCategory.Dietary),
+            ("Equipment & Method", TagCategory.Equipment),
+            ("Protein & Base", TagCategory.Protein),
+            ("Occasion & Season", TagCategory.Occasion),
+            ("Meal Prep & Timing", TagCategory.MealPrep),
+        };
+
+        return string.Join(
+            "\n",
+            categoryGroups.Select(g =>
+                $"  - {g.Label}: {string.Join(", ", GetTagsForCategory(g.Category))}"
+            )
+        );
+    }
 
     /// <summary>
     /// Grocery section / category names that should NEVER leak into recipe tags.
@@ -436,7 +462,13 @@ public static class BuiltInTags
         ["Braised"] = "Braise",
         ["Simmer"] = "Boil & Simmer",
         ["Boil"] = "Boil & Simmer",
+        ["Boiled"] = "Boil & Simmer",
+        ["Boiling"] = "Boil & Simmer",
+        ["Simmered"] = "Boil & Simmer",
+        ["Simmering"] = "Boil & Simmer",
         ["Steam"] = "Steamed",
+        ["Steaming"] = "Steamed",
+        ["Egg"] = "Eggs",
 
         // Dietary aliases
         ["Glutenfree"] = "Gluten-Free",
@@ -527,6 +559,7 @@ public static class BuiltInTags
         ["30 Minute Meal"] = "30-Minute Meal",
         ["30 Minutes"] = "30-Minute Meal",
         ["Quick And Easy"] = "Quick Prep",
+        ["Quick"] = "Quick Prep",
         ["Quick Prep"] = "Quick Prep",
         ["Slow Cook"] = "Slow-Cooked",
         ["Slow Cooked"] = "Slow-Cooked",

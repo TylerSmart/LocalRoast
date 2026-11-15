@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using App.Core.Authentication;
+using App.Core.Common;
 using App.Core.FoodCatalog;
 using App.Core.Ingestion;
 using App.Core.Recipes;
@@ -95,11 +96,6 @@ public sealed class IngestionIntegrationTests
             new IngestionDraftDiagnosticsRequest(draft)
         );
         Assert.AreEqual(HttpStatusCode.Unauthorized, diagnostics.StatusCode);
-        var repair = await _client.PostAsJsonAsync(
-            $"/api/ingestion/jobs/{Guid.NewGuid()}/repair-preview",
-            new IngestionRepairPreviewRequest(draft)
-        );
-        Assert.AreEqual(HttpStatusCode.Unauthorized, repair.StatusCode);
     }
 
     [TestMethod]
@@ -465,6 +461,108 @@ public sealed class IngestionIntegrationTests
     }
 
     [TestMethod]
+    public async Task GetJobsPaged_SupportsSortingByNameCreatedAtAndModifiedAt()
+    {
+        await AuthenticateAsync(_client);
+
+        var firstJobResp = await _client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest("Alpha Recipe", TitleHint: "Beta Soup")
+        );
+        Assert.AreEqual(HttpStatusCode.Accepted, firstJobResp.StatusCode);
+        var firstJob = await firstJobResp.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
+        Assert.IsNotNull(firstJob);
+
+        await Task.Delay(25);
+
+        var secondJobResp = await _client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest("Gamma Recipe", TitleHint: "Gamma Salad")
+        );
+        Assert.AreEqual(HttpStatusCode.Accepted, secondJobResp.StatusCode);
+        var secondJob = await secondJobResp.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
+        Assert.IsNotNull(secondJob);
+
+        await Task.Delay(25);
+
+        var thirdJobResp = await _client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest("Zeta Recipe", TitleHint: "Alpha Bread")
+        );
+        Assert.AreEqual(HttpStatusCode.Accepted, thirdJobResp.StatusCode);
+        var thirdJob = await thirdJobResp.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
+        Assert.IsNotNull(thirdJob);
+
+        // Update the first job's draft so its ModifiedAt becomes the newest
+        await Task.Delay(25);
+        var updateResp = await _client.PutAsJsonAsync(
+            $"/api/ingestion/jobs/{firstJob.Id}/draft",
+            CreateRecipeReferenceDraft("Beta Soup", "Chicken Stock")
+        );
+        Assert.AreEqual(HttpStatusCode.OK, updateResp.StatusCode);
+
+        // 1. Name Asc -> Alpha Bread, Beta Soup, Gamma Salad
+        var nameAsc = await _client.GetFromJsonAsync<PagedResultDto<IngestionJobSummaryDto>>(
+            "/api/ingestion/jobs?page=1&pageSize=10&sortBy=Name&sortDirection=Asc"
+        );
+        Assert.IsNotNull(nameAsc);
+        CollectionAssert.AreEqual(
+            new[] { "Alpha Bread", "Beta Soup", "Gamma Salad" },
+            nameAsc.Items.Select(j => j.DisplayTitle).ToArray()
+        );
+
+        // 2. Name Desc -> Gamma Salad, Beta Soup, Alpha Bread
+        var nameDesc = await _client.GetFromJsonAsync<PagedResultDto<IngestionJobSummaryDto>>(
+            "/api/ingestion/jobs?page=1&pageSize=10&sortBy=Name&sortDirection=Desc"
+        );
+        Assert.IsNotNull(nameDesc);
+        CollectionAssert.AreEqual(
+            new[] { "Gamma Salad", "Beta Soup", "Alpha Bread" },
+            nameDesc.Items.Select(j => j.DisplayTitle).ToArray()
+        );
+
+        // 3. CreatedAt Asc -> Beta Soup (1st), Gamma Salad (2nd), Alpha Bread (3rd)
+        var createdAsc = await _client.GetFromJsonAsync<PagedResultDto<IngestionJobSummaryDto>>(
+            "/api/ingestion/jobs?page=1&pageSize=10&sortBy=CreatedAt&sortDirection=Asc"
+        );
+        Assert.IsNotNull(createdAsc);
+        CollectionAssert.AreEqual(
+            new[] { firstJob.Id, secondJob.Id, thirdJob.Id },
+            createdAsc.Items.Select(j => j.Id).ToArray()
+        );
+
+        // 4. CreatedAt Desc -> Alpha Bread (3rd), Gamma Salad (2nd), Beta Soup (1st)
+        var createdDesc = await _client.GetFromJsonAsync<PagedResultDto<IngestionJobSummaryDto>>(
+            "/api/ingestion/jobs?page=1&pageSize=10&sortBy=CreatedAt&sortDirection=Desc"
+        );
+        Assert.IsNotNull(createdDesc);
+        CollectionAssert.AreEqual(
+            new[] { thirdJob.Id, secondJob.Id, firstJob.Id },
+            createdDesc.Items.Select(j => j.Id).ToArray()
+        );
+
+        // 5. ModifiedAt Desc -> Beta Soup (updated last), Alpha Bread, Gamma Salad
+        var modifiedDesc = await _client.GetFromJsonAsync<PagedResultDto<IngestionJobSummaryDto>>(
+            "/api/ingestion/jobs?page=1&pageSize=10&sortBy=ModifiedAt&sortDirection=Desc"
+        );
+        Assert.IsNotNull(modifiedDesc);
+        CollectionAssert.AreEqual(
+            new[] { firstJob.Id, thirdJob.Id, secondJob.Id },
+            modifiedDesc.Items.Select(j => j.Id).ToArray()
+        );
+
+        // 6. ModifiedAt Asc -> Gamma Salad, Alpha Bread, Beta Soup
+        var modifiedAsc = await _client.GetFromJsonAsync<PagedResultDto<IngestionJobSummaryDto>>(
+            "/api/ingestion/jobs?page=1&pageSize=10&sortBy=ModifiedAt&sortDirection=Asc"
+        );
+        Assert.IsNotNull(modifiedAsc);
+        CollectionAssert.AreEqual(
+            new[] { secondJob.Id, thirdJob.Id, firstJob.Id },
+            modifiedAsc.Items.Select(j => j.Id).ToArray()
+        );
+    }
+
+    [TestMethod]
     public async Task RetryBatchJobs_RetriesAllSpecifiedJobs_RegardlessOfStatus()
     {
         await AuthenticateAsync(_client);
@@ -684,107 +782,95 @@ public sealed class IngestionIntegrationTests
             capturedContexts.Add(ctx);
             if (ctx.SourceContent.Contains("Classic Roast Chicken", StringComparison.Ordinal))
             {
-                return new LlmExtractedRecipePayload(
+                return new ExtractedRecipeDto(
                     Title: "Classic Roast Chicken",
                     Description: "Crisp-skinned roast chicken.",
-                    BaseServings: 4m,
+                    Servings: 4m,
                     YieldDisplay: "Serves 4",
                     PrepTimeMinutes: 15,
                     CookTimeMinutes: 60,
                     TotalTimeMinutes: 75,
                     Difficulty: "Medium",
-                    SourceName: null,
-                    SourceAuthor: null,
-                    ConfidenceScore: 0.94m,
-                    SuggestedTagNames: ["Dinner", "American", "Weeknight"],
+                    ProposedTags: ["Dinner", "American", "Weeknight"],
                     Ingredients:
                     [
-                        new LlmExtractedIngredientItem(
-                            SectionName: null,
-                            Quantity: 1m,
-                            MaxQuantity: null,
-                            Unit: "whole",
-                            CanonicalFoodName: "whole chicken",
+                        new(
+                            RefId: "ing_1",
+                            CanonicalFoodItem: "Whole Chicken",
                             DisplayName: "whole broiler-fryer chicken",
-                            PreparationNote: "giblets removed",
-                            IsOptional: false,
-                            OriginalRawText: "1 (4-pound) whole chicken",
-                            SuggestedIsPantryStaple: false
-                        ),
-                        new LlmExtractedIngredientItem(
-                            SectionName: null,
                             Quantity: 1m,
-                            MaxQuantity: null,
-                            Unit: "tbsp",
-                            CanonicalFoodName: "kosher salt",
-                            DisplayName: "kosher salt",
-                            PreparationNote: null,
+                            Unit: "whole",
+                            PreparationNotes: "giblets removed",
                             IsOptional: false,
-                            OriginalRawText: "1 tablespoon kosher salt",
-                            SuggestedIsPantryStaple: true
+                            RawText: "1 (4-pound) whole chicken"
+                        ),
+                        new(
+                            RefId: "ing_2",
+                            CanonicalFoodItem: "Kosher Salt",
+                            DisplayName: "kosher salt",
+                            Category: "Spices & Seasonings",
+                            Quantity: 1m,
+                            Unit: "tbsp",
+                            IsOptional: false,
+                            RawText: "1 tablespoon kosher salt"
                         ),
                     ],
                     Steps:
                     [
-                        new LlmExtractedStepItem(
-                            SectionName: null,
-                            Instruction: "Roast chicken for 60 minutes.",
-                            IngredientIndices: [0, 1],
-                            Timers: [new LlmExtractedTimerItem(3600, "Roast")]
+                        new(
+                            StepNumber: 1,
+                            TemplateText: "Roast {{ing_1_a}} with {{ing_2_a}} for {{timer_1}}.",
+                            IngredientTokens: [new("ing_1_a", "ing_1"), new("ing_2_a", "ing_2")],
+                            TimerTokens: [new("timer_1", 3600, "Roast chicken")]
                         ),
-                    ]
+                    ],
+                    QualityAudit: new RecipeQualityAuditDto(IsPlausibleRecipe: true, Warnings: [])
                 );
             }
 
-            return new LlmExtractedRecipePayload(
+            return new ExtractedRecipeDto(
                 Title: "Skillet Lemon Chicken",
                 Description: "Bright weeknight skillet chicken.",
-                BaseServings: 4m,
+                Servings: 4m,
                 YieldDisplay: "Serves 4",
                 PrepTimeMinutes: 10,
                 CookTimeMinutes: 20,
                 TotalTimeMinutes: 30,
                 Difficulty: "Easy",
-                SourceName: null,
-                SourceAuthor: null,
-                ConfidenceScore: 0.92m,
-                SuggestedTagNames: ["Dinner", "Weeknight", "Mediterranean"],
+                ProposedTags: ["Dinner", "Weeknight", "Mediterranean"],
                 Ingredients:
                 [
-                    new LlmExtractedIngredientItem(
-                        SectionName: null,
-                        Quantity: 1m,
-                        MaxQuantity: null,
-                        Unit: "tsp",
-                        CanonicalFoodName: "Kosher Salt",
+                    new(
+                        RefId: "ing_1",
+                        CanonicalFoodItem: "Kosher Salt",
                         DisplayName: "kosher salt",
-                        PreparationNote: null,
-                        IsOptional: false,
-                        OriginalRawText: "1 teaspoon kosher salt",
-                        SuggestedIsPantryStaple: true
-                    ),
-                    new LlmExtractedIngredientItem(
-                        SectionName: null,
+                        Category: "Spices & Seasonings",
                         Quantity: 1m,
-                        MaxQuantity: null,
-                        Unit: "whole",
-                        CanonicalFoodName: "lemon",
-                        DisplayName: "lemon",
-                        PreparationNote: "sliced",
+                        Unit: "tsp",
                         IsOptional: false,
-                        OriginalRawText: "1 lemon, sliced",
-                        SuggestedIsPantryStaple: false
+                        RawText: "1 teaspoon kosher salt"
+                    ),
+                    new(
+                        RefId: "ing_2",
+                        CanonicalFoodItem: "Lemon",
+                        DisplayName: "lemon",
+                        Quantity: 1m,
+                        Unit: "whole",
+                        PreparationNotes: "sliced",
+                        IsOptional: false,
+                        RawText: "1 lemon, sliced"
                     ),
                 ],
                 Steps:
                 [
-                    new LlmExtractedStepItem(
-                        SectionName: null,
-                        Instruction: "Sear with salt and lemon for 10 minutes.",
-                        IngredientIndices: [0, 1],
-                        Timers: [new LlmExtractedTimerItem(600, "Sear")]
+                    new(
+                        StepNumber: 1,
+                        TemplateText: "Sear with {{ing_1_a}} and {{ing_2_a}} for {{timer_1}}.",
+                        IngredientTokens: [new("ing_1_a", "ing_1"), new("ing_2_a", "ing_2")],
+                        TimerTokens: [new("timer_1", 600, "Sear chicken")]
                     ),
-                ]
+                ],
+                QualityAudit: new RecipeQualityAuditDto(IsPlausibleRecipe: true, Warnings: [])
             );
         });
 
@@ -814,7 +900,7 @@ public sealed class IngestionIntegrationTests
         var job1Resp = await client.PostAsJsonAsync(
             "/api/ingestion/jobs/text",
             new EnqueueRawTextIngestionRequest(
-                RawText: "Title: Classic Roast Chicken\nIngredients:\n- 1 (4-pound) whole chicken\n- 1 tablespoon kosher salt",
+                RawText: "Title: Classic Roast Chicken\nIngredients:\n- 1 (4-pound) whole chicken\n- 1 tablespoon kosher salt\nInstructions:\nRoast whole chicken with kosher salt for 1 hour.",
                 TitleHint: "Classic Roast Chicken",
                 SourceName: "America's Test Kitchen",
                 SourceAuthor: "America's Test Kitchen",
@@ -833,7 +919,7 @@ public sealed class IngestionIntegrationTests
         var job2Resp = await client.PostAsJsonAsync(
             "/api/ingestion/jobs/text",
             new EnqueueRawTextIngestionRequest(
-                RawText: "Title: Skillet Lemon Chicken\nIngredients:\n- 1 teaspoon kosher salt\n- 1 lemon, sliced",
+                RawText: "Title: Skillet Lemon Chicken\nIngredients:\n- 1 teaspoon kosher salt\n- 1 lemon, sliced\nInstructions:\nSear with kosher salt and sliced lemon for 10 minutes.",
                 TitleHint: "Skillet Lemon Chicken",
                 SourceName: "America's Test Kitchen",
                 SourceAuthor: "America's Test Kitchen",
@@ -859,19 +945,7 @@ public sealed class IngestionIntegrationTests
             Assert.IsTrue(await processor2.ProcessNextQueuedJobAsync());
         }
 
-        // Verify Job #1 ran with empty catalogs, and Job #2 received Job #1's newly created tags & food items!
-        Assert.AreEqual(2, capturedContexts.Count);
-        Assert.AreEqual(0, capturedContexts[0].AvailableTagNames.Count);
-        Assert.AreEqual(0, capturedContexts[0].AvailableFoodNames?.Count ?? 0);
-
-        CollectionAssert.AreEquivalent(
-            new[] { "Dinner", "American", "Weeknight" },
-            capturedContexts[1].AvailableTagNames.ToArray()
-        );
-        CollectionAssert.AreEquivalent(
-            new[] { "Whole Chicken", "Kosher Salt" },
-            capturedContexts[1].AvailableFoodNames!.ToArray()
-        );
+        Assert.HasCount(2, capturedContexts);
 
         // Verify FoodItems catalog has exactly 3 deduplicated items (Kosher Salt reused, marked as pantry staple)
         var foods = await client.GetFromJsonAsync<IReadOnlyList<FoodItemDto>>("/api/food-items");
@@ -965,7 +1039,13 @@ public sealed class IngestionIntegrationTests
                 ? "Run Now Chosen Job"
                 : "Run Now Held Job";
             extractedTitles.Add(title);
-            return new LlmExtractedRecipePayload(Title: title, ConfidenceScore: 0.5m);
+            return new ExtractedRecipeDto(
+                Title: title,
+                QualityAudit: new RecipeQualityAuditDto(
+                    IsPlausibleRecipe: false,
+                    Warnings: ["Hold for review"]
+                )
+            );
         });
         await using var customFactory = _factory.WithWebHostBuilder(builder =>
         {
@@ -1076,29 +1156,35 @@ public sealed class IngestionIntegrationTests
     {
         var cups = invalidAmount ? 6 : 1;
         var mixStep = $"Mix {cups} cup bread flour.";
-        var stepInstruction =
-            $"Mix ||{{\"ingredient\": \"bread flour\", \"amount\": {cups}, \"unit\": \"cup\"}}||.";
-        var fakeLlm = new FakeSequentialLlmExtractionClient(_ => new LlmExtractedRecipePayload(
+        var fakeLlm = new FakeSequentialLlmExtractionClient(_ => new ExtractedRecipeDto(
             Title: "Synthetic Starter",
-            ConfidenceScore: 0.99m,
             Ingredients:
             [
                 new(
-                    null,
-                    25,
-                    null,
-                    "oz",
-                    "bread flour",
+                    RefId: "ing_1",
+                    CanonicalFoodItem: "bread flour",
                     DisplayName: "bread flour",
-                    OriginalRawText: "5 cups (25 ounces) bread flour",
-                    AlternativeMeasurement: new(5, "cup")
+                    Quantity: 5m,
+                    Unit: "cup",
+                    AltQuantity: 25m,
+                    AltUnit: "oz",
+                    RawText: "5 cups (25 ounces) bread flour"
                 ),
             ],
             Steps:
             [
-                new(null, stepInstruction, [0], IngredientAmounts: [new(0, new(cups, "cup"))]),
-                new(null, "Knead in the remaining flour.", [0]),
-            ]
+                new(
+                    StepNumber: 1,
+                    TemplateText: "Mix {{ing_1_a}}.",
+                    IngredientTokens: [new("ing_1_a", "ing_1", cups, "cup")]
+                ),
+                new(
+                    StepNumber: 2,
+                    TemplateText: "Knead in {{ing_1_b}}.",
+                    IngredientTokens: [new("ing_1_b", "ing_1")]
+                ),
+            ],
+            QualityAudit: new RecipeQualityAuditDto(IsPlausibleRecipe: true, Warnings: [])
         ));
         await using var customFactory = _factory.WithWebHostBuilder(builder =>
         {
@@ -1139,7 +1225,7 @@ public sealed class IngestionIntegrationTests
         Assert.AreEqual(25m, job.ExtractedDraft.Ingredients[0].AlternativeMeasurement!.Quantity);
         if (invalidAmount)
         {
-            StringAssert.Contains(job.StatusDetail, "exceed the ingredient list");
+            StringAssert.Contains(job.StatusDetail, "Quantity sum mismatch");
             Assert.IsNull(job.ResultingRecipeId);
         }
         else
@@ -1151,7 +1237,6 @@ public sealed class IngestionIntegrationTests
             var flour = recipe.Ingredients[0];
             Assert.AreEqual(25m, flour.AlternativeMeasurement!.Quantity);
             Assert.AreEqual(1m, recipe.Steps[0].IngredientAmounts![0].Measurement.Quantity);
-            Assert.AreEqual(stepInstruction, recipe.Steps[0].Instruction);
             var tokens = StepInstructionParser.ExtractTokens(recipe.Steps[0].Instruction);
             var inline = (StepIngredientToken)tokens.Single();
             Assert.AreEqual("bread flour", inline.Ingredient);
@@ -1170,33 +1255,44 @@ public sealed class IngestionIntegrationTests
         bool invalidFoodName
     )
     {
-        var fakeLlm = new FakeSequentialLlmExtractionClient(_ => new LlmExtractedRecipePayload(
+        var fakeLlm = new FakeSequentialLlmExtractionClient(_ => new ExtractedRecipeDto(
             Title: "Oil sauce",
-            ConfidenceScore: 0.99m,
             Ingredients:
             [
                 new(
-                    null,
-                    4,
-                    null,
-                    "tbsp",
-                    invalidFoodName ? "olive oil or butter" : "olive oil",
-                    "olive oil",
-                    OriginalRawText: "4 tablespoons olive oil"
+                    RefId: "ing_1",
+                    CanonicalFoodItem: "olive oil",
+                    DisplayName: "olive oil",
+                    Quantity: 4m,
+                    Unit: "tbsp",
+                    RawText: "4 tablespoons olive oil"
                 ),
-                new(null, null, null, null, "salt", "salt", OriginalRawText: "Salt"),
+                new(
+                    RefId: "ing_2",
+                    CanonicalFoodItem: "salt",
+                    DisplayName: "salt",
+                    RawText: "Salt"
+                ),
             ],
             Steps:
             [
                 invalidFoodName
-                    ? new(null, "Heat the oil and season with salt.", [0, 1])
+                    ? new(
+                        StepNumber: 1,
+                        TemplateText: "Heat {{ing_missing}} and season with {{ing_2_a}}.",
+                        IngredientTokens: [new("ing_2_a", "ing_2")]
+                    )
                     : new(
-                        null,
-                        "Heat 6 tablespoons oil and season with salt.",
-                        [0, 1],
-                        IngredientAmounts: [new(0, new(6, "tbsp"))]
+                        StepNumber: 1,
+                        TemplateText: "Heat {{ing_1_a}} and season with {{ing_2_a}}.",
+                        IngredientTokens:
+                        [
+                            new("ing_1_a", "ing_1", 6m, "tbsp"),
+                            new("ing_2_a", "ing_2"),
+                        ]
                     ),
-            ]
+            ],
+            QualityAudit: new RecipeQualityAuditDto(IsPlausibleRecipe: true, Warnings: [])
         ));
         await using var factory = _factory.WithWebHostBuilder(builder =>
         {
@@ -1231,503 +1327,12 @@ public sealed class IngestionIntegrationTests
         );
         Assert.IsNotNull(detail);
         Assert.AreEqual(IngestionJobStatus.ReadyForReview, detail.Status);
-        Assert.AreEqual(invalidFoodName ? 0.91m : 0.88m, detail.ConfidenceScore);
+        Assert.IsLessThan(0.85m, detail.ConfidenceScore!.Value);
         StringAssert.Contains(
             detail.StatusDetail,
-            invalidFoodName ? "out of food names" : "exceed the ingredient list"
+            invalidFoodName ? "missing from Step 1 token arrays" : "Quantity sum mismatch"
         );
         Assert.IsNull(detail.ResultingRecipeId);
-    }
-
-    [TestMethod]
-    public async Task TextIngestion_RunsAutoRepair_WhenExtractionHasIssues_AndPublishesWhenResolved()
-    {
-        var initialDraft = new LlmExtractedRecipePayload(
-            Title: "Carrot Soup",
-            ConfidenceScore: 0.95m,
-            Ingredients:
-            [
-                new(null, 2, null, "whole", "carrots", "carrots", OriginalRawText: "2 carrots"),
-                new(null, 1, null, "tsp", "salt", "salt", OriginalRawText: "1 tsp salt"),
-            ],
-            Steps: [new(null, "Season with salt.", [1], OriginalRawText: "Season with salt.")]
-        );
-
-        var repairedDraft = new LlmExtractedRecipePayload(
-            Title: "Carrot Soup",
-            ConfidenceScore: 0.98m,
-            Ingredients:
-            [
-                new(null, 2, null, "whole", "carrots", "carrots", OriginalRawText: "2 carrots"),
-                new(null, 1, null, "tsp", "salt", "salt", OriginalRawText: "1 tsp salt"),
-            ],
-            Steps:
-            [
-                new(
-                    null,
-                    "Chop carrots and season with salt.",
-                    [0, 1],
-                    OriginalRawText: "Chop carrots and season with salt."
-                ),
-            ]
-        );
-
-        var fakeLlm = new FakeSequentialLlmExtractionClient(_ => initialDraft)
-        {
-            TriageAndRepair = ctx => new LlmAutoRepairAndTriageResult(
-                repairedDraft,
-                [
-                    new(
-                        "carrots: not used in any step.",
-                        IngestionIssueTriageResolution.Resolved,
-                        "Linked in step"
-                    ),
-                ]
-            ),
-        };
-
-        await using var factory = _factory.WithWebHostBuilder(builder =>
-        {
-            builder.UseSetting("Llm:TextModel", "gemma4:e4b");
-            builder.UseSetting("Llm:AutoPublishHighConfidenceText", "true");
-            builder.ConfigureServices(services =>
-            {
-                services.RemoveAll<ILlmExtractionClient>();
-                services.AddSingleton<ILlmExtractionClient>(fakeLlm);
-            });
-        });
-
-        using var client = factory.CreateClient();
-        await AuthenticateAsync(client);
-        var response = await client.PostAsJsonAsync(
-            "/api/ingestion/jobs/text",
-            new EnqueueRawTextIngestionRequest(
-                "Ingredients:\n- 2 carrots\n- 1 tsp salt\nInstructions:\nChop carrots and season with salt.",
-                AutoPublish: true
-            )
-        );
-        Assert.AreEqual(HttpStatusCode.Accepted, response.StatusCode);
-        var job = await response.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
-        Assert.IsNotNull(job);
-
-        using var scope = factory.Services.CreateScope();
-        Assert.IsTrue(
-            await scope
-                .ServiceProvider.GetRequiredService<IIngestionProcessor>()
-                .ProcessNextQueuedJobAsync()
-        );
-
-        var detail = await client.GetFromJsonAsync<IngestionJobDetailDto>(
-            $"/api/ingestion/jobs/{job.Id}"
-        );
-        Assert.IsNotNull(detail);
-        Assert.AreEqual(IngestionJobStatus.Published, detail.Status);
-        Assert.IsNotNull(detail.ResultingRecipeId);
-        Assert.IsTrue(detail.ConfidenceScore >= 0.85m);
-    }
-
-    [TestMethod]
-    [DataRow(false)]
-    [DataRow(true)]
-    public async Task TextIngestion_SectionsUnstructuredSourceBeforeExtractionAndValidation(
-        bool canonical
-    )
-    {
-        const string structured =
-            "Title: Plain Toast\n\nIngredients:\n- 2 slices bread\n- 1 tbsp butter\n\nInstructions:\nToast the bread and spread the butter.";
-        var source = canonical
-            ? structured
-            : "Plain Toast\n2 slices bread\n1 tbsp butter\nToast the bread and spread the butter.";
-        var extractionSources = new List<string>();
-        var fakeLlm = new FakeSequentialLlmExtractionClient(
-            context =>
-            {
-                extractionSources.Add(context.SourceContent);
-                return new LlmExtractedRecipePayload(
-                    Title: "Plain Toast",
-                    ConfidenceScore: 0.99m,
-                    Ingredients:
-                    [
-                        new(
-                            null,
-                            2,
-                            null,
-                            "slice",
-                            "bread",
-                            "bread",
-                            OriginalRawText: "2 slices bread"
-                        ),
-                    ],
-                    Steps: [new(null, "Toast the bread and spread the butter.", [0])]
-                );
-            },
-            _ => structured
-        );
-        await using var factory = _factory.WithWebHostBuilder(builder =>
-        {
-            builder.UseSetting("Llm:TextModel", "gemma4:e4b");
-            builder.ConfigureServices(services =>
-            {
-                services.RemoveAll<ILlmExtractionClient>();
-                services.AddSingleton<ILlmExtractionClient>(fakeLlm);
-            });
-        });
-        using var client = factory.CreateClient();
-        await AuthenticateAsync(client);
-        var response = await client.PostAsJsonAsync(
-            "/api/ingestion/jobs/text",
-            new EnqueueRawTextIngestionRequest(source, AutoPublish: true)
-        );
-        Assert.AreEqual(HttpStatusCode.Accepted, response.StatusCode);
-        var job = await response.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
-        Assert.IsNotNull(job);
-        using (var scope = factory.Services.CreateScope())
-        {
-            Assert.IsTrue(
-                await scope
-                    .ServiceProvider.GetRequiredService<IIngestionProcessor>()
-                    .ProcessNextQueuedJobAsync()
-            );
-        }
-
-        if (canonical)
-        {
-            Assert.IsEmpty(fakeLlm.StructuredSources);
-        }
-        else
-        {
-            Assert.HasCount(1, fakeLlm.StructuredSources);
-            StringAssert.Contains(fakeLlm.StructuredSources[0], "1 tbsp butter");
-        }
-        Assert.HasCount(1, extractionSources);
-        Assert.AreEqual(structured, extractionSources[0].ReplaceLineEndings("\n"));
-
-        // The structured ingredient list lets validation catch the dropped butter line.
-        var detail = await client.GetFromJsonAsync<IngestionJobDetailDto>(
-            $"/api/ingestion/jobs/{job.Id}"
-        );
-        Assert.IsNotNull(detail);
-        Assert.AreEqual(IngestionJobStatus.ReadyForReview, detail.Status);
-        StringAssert.Contains(detail.StatusDetail, "Source ingredient line 2");
-        using (var scope = factory.Services.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<App.Data.AppDbContext>();
-            var entity = await db.IngestionJobs.FindAsync(job.Id);
-            Assert.IsNotNull(entity);
-            Assert.AreEqual(canonical ? null : structured, entity.StructuredSourceText);
-            StringAssert.Contains(entity.NormalizedSourceText ?? entity.RawText, "Plain Toast");
-            if (!canonical)
-            {
-                Assert.DoesNotContain("Ingredients:", entity.NormalizedSourceText ?? "");
-            }
-        }
-    }
-
-    [TestMethod]
-    public async Task TextIngestion_FallsBackToUnstructuredSourceWhenSectioningTimesOut()
-    {
-        const string source =
-            "Plain Toast\n2 slices bread\nInstructions:\nToast the bread until golden, about 3 minutes.";
-        var extractionSources = new List<string>();
-        var fakeLlm = new FakeSequentialLlmExtractionClient(
-            context =>
-            {
-                extractionSources.Add(context.SourceContent);
-                return new LlmExtractedRecipePayload(
-                    Title: "Plain Toast",
-                    ConfidenceScore: 0.99m,
-                    Ingredients:
-                    [
-                        new(
-                            null,
-                            2,
-                            null,
-                            "slice",
-                            "bread",
-                            "bread",
-                            OriginalRawText: "2 slices bread"
-                        ),
-                    ],
-                    Steps: [new(null, "Toast the bread until golden, about 3 minutes.", [0])]
-                );
-            },
-            _ => throw new LlmHostUnavailableException("The LLM request timed out.")
-        );
-        await using var factory = _factory.WithWebHostBuilder(builder =>
-        {
-            builder.UseSetting("Llm:TextModel", "gemma4:e4b");
-            builder.ConfigureServices(services =>
-            {
-                services.RemoveAll<ILlmExtractionClient>();
-                services.AddSingleton<ILlmExtractionClient>(fakeLlm);
-            });
-        });
-        using var client = factory.CreateClient();
-        await AuthenticateAsync(client);
-        var response = await client.PostAsJsonAsync(
-            "/api/ingestion/jobs/text",
-            new EnqueueRawTextIngestionRequest(source, AutoPublish: false)
-        );
-        Assert.AreEqual(HttpStatusCode.Accepted, response.StatusCode);
-        var job = await response.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
-        Assert.IsNotNull(job);
-        using (var scope = factory.Services.CreateScope())
-        {
-            Assert.IsTrue(
-                await scope
-                    .ServiceProvider.GetRequiredService<IIngestionProcessor>()
-                    .ProcessNextQueuedJobAsync()
-            );
-        }
-
-        Assert.HasCount(1, fakeLlm.StructuredSources);
-        Assert.HasCount(1, extractionSources);
-        StringAssert.Contains(extractionSources[0], "2 slices bread");
-        Assert.DoesNotContain("Ingredients:", extractionSources[0]);
-        var detail = await client.GetFromJsonAsync<IngestionJobDetailDto>(
-            $"/api/ingestion/jobs/{job.Id}"
-        );
-        Assert.IsNotNull(detail);
-        Assert.AreEqual(IngestionJobStatus.ReadyForReview, detail.Status);
-        using (var scope = factory.Services.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<App.Data.AppDbContext>();
-            var entity = await db.IngestionJobs.FindAsync(job.Id);
-            Assert.IsNotNull(entity);
-            Assert.IsNull(entity.StructuredSourceText);
-        }
-    }
-
-    [TestMethod]
-    public async Task TextIngestion_WaitsForHostWhenSectioningFailsAndSourceHasNoMethod()
-    {
-        var extractionCalls = 0;
-        var fakeLlm = new FakeSequentialLlmExtractionClient(
-            _ =>
-            {
-                extractionCalls++;
-                throw new InvalidOperationException("Extraction must not run without a method.");
-            },
-            _ => throw new LlmHostUnavailableException("LLM host connection failed.")
-        );
-        await using var factory = _factory.WithWebHostBuilder(builder =>
-        {
-            builder.UseSetting("Llm:TextModel", "gemma4:e4b");
-            builder.ConfigureServices(services =>
-            {
-                services.RemoveAll<ILlmExtractionClient>();
-                services.AddSingleton<ILlmExtractionClient>(fakeLlm);
-            });
-        });
-        using var client = factory.CreateClient();
-        await AuthenticateAsync(client);
-        var response = await client.PostAsJsonAsync(
-            "/api/ingestion/jobs/text",
-            new EnqueueRawTextIngestionRequest(
-                "Plain Toast\n2 slices bread\nToast the bread until golden.",
-                AutoPublish: false
-            )
-        );
-        var job = await response.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
-        Assert.IsNotNull(job);
-        using (var scope = factory.Services.CreateScope())
-        {
-            await scope
-                .ServiceProvider.GetRequiredService<IIngestionProcessor>()
-                .ProcessNextQueuedJobAsync();
-        }
-
-        Assert.AreEqual(0, extractionCalls);
-        var detail = await client.GetFromJsonAsync<IngestionJobDetailDto>(
-            $"/api/ingestion/jobs/{job.Id}"
-        );
-        Assert.IsNotNull(detail);
-        Assert.AreEqual(IngestionJobStatus.WaitingForLlmHost, detail.Status);
-    }
-
-    [TestMethod]
-    public async Task ReviewRepair_UsesUnsavedDraftAndStructuredSourceWithoutPersistingPreview()
-    {
-        const string structured =
-            "Title: Beans\nIngredients:\n- 1 tbsp oil\n- 1 tbsp butter\nInstructions:\nHeat oil and add butter.";
-        var original = new IngestionExtractedDraftDto(
-            Title: "Stored title",
-            Ingredients:
-            [
-                new(
-                    Quantity: 1,
-                    Unit: MeasurementUnit.Tbsp,
-                    DisplayName: "oil",
-                    OriginalRawText: "1 tbsp oil"
-                ),
-                new(
-                    Quantity: 1,
-                    Unit: MeasurementUnit.Tbsp,
-                    DisplayName: "butter",
-                    OriginalRawText: "1 tbsp butter"
-                ),
-            ],
-            Steps: [new(Instruction: "Heat oil and add butter.", IngredientIndices: [0])]
-        );
-        var fakeLlm = new FakeSequentialLlmExtractionClient(
-            _ => throw new InvalidOperationException("Extraction was not expected."),
-            repair: context => new LlmRecipeRepairResult(
-                context.Draft with
-                {
-                    Steps =
-                    [
-                        context.Draft.Steps![0] with
-                        {
-                            Instruction = "Heat oil, then add butter.",
-                            IngredientIndices = [0, 1],
-                        },
-                    ],
-                },
-                []
-            )
-        );
-        await using var factory = _factory.WithWebHostBuilder(builder =>
-        {
-            builder.UseSetting("Llm:TextModel", "test-text");
-            builder.ConfigureServices(services =>
-            {
-                services.RemoveAll<ILlmExtractionClient>();
-                services.AddSingleton<ILlmExtractionClient>(fakeLlm);
-            });
-        });
-        using var client = factory.CreateClient();
-        await AuthenticateAsync(client);
-        var id = Guid.NewGuid();
-        var storedJson = JsonSerializer.Serialize(original);
-        using (var scope = factory.Services.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<App.Data.AppDbContext>();
-            db.IngestionJobs.Add(
-                new IngestionJob
-                {
-                    Id = id,
-                    Channel = IngestionChannel.RawText,
-                    Status = IngestionJobStatus.ReadyForReview,
-                    DisplayTitle = original.Title,
-                    RawText = "unstructured original",
-                    StructuredSourceText = structured,
-                    ExtractedDraftJson = storedJson,
-                }
-            );
-            await db.SaveChangesAsync();
-        }
-
-        var edited = original with { Title = "Unsaved user title" };
-        var diagnosticsResponse = await client.PostAsJsonAsync(
-            $"/api/ingestion/jobs/{id}/review-diagnostics",
-            new IngestionDraftDiagnosticsRequest(edited)
-        );
-        Assert.AreEqual(HttpStatusCode.OK, diagnosticsResponse.StatusCode);
-        var diagnostics =
-            await diagnosticsResponse.Content.ReadFromJsonAsync<IngestionReviewDiagnosticsDto>();
-        Assert.IsNotNull(diagnostics);
-        Assert.IsTrue(diagnostics.ValidationIssues.Any(issue => issue.Contains("butter")));
-
-        var previewResponse = await client.PostAsJsonAsync(
-            $"/api/ingestion/jobs/{id}/repair-preview",
-            new IngestionRepairPreviewRequest(edited, "Link the butter.")
-        );
-        Assert.AreEqual(
-            HttpStatusCode.OK,
-            previewResponse.StatusCode,
-            await previewResponse.Content.ReadAsStringAsync()
-        );
-        var preview = await previewResponse.Content.ReadFromJsonAsync<IngestionRepairPreviewDto>();
-        Assert.IsNotNull(preview);
-        Assert.AreEqual("Unsaved user title", preview.Draft.Title);
-        CollectionAssert.AreEqual(
-            new[] { 0, 1 },
-            preview.Draft.Steps![0].IngredientIndices!.ToArray()
-        );
-        Assert.IsNotNull(fakeLlm.LastRepairContext);
-        Assert.AreEqual(structured, fakeLlm.LastRepairContext.SourceContent);
-        Assert.AreEqual("Link the butter.", fakeLlm.LastRepairContext.UserHint);
-        Assert.AreEqual("Unsaved user title", fakeLlm.LastRepairContext.Draft.Title);
-        using (var scope = factory.Services.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<App.Data.AppDbContext>();
-            var entity = await db.IngestionJobs.FindAsync(id);
-            Assert.IsNotNull(entity);
-            Assert.AreEqual(storedJson, entity.ExtractedDraftJson);
-            Assert.AreEqual(IngestionJobStatus.ReadyForReview, entity.Status);
-        }
-
-        var saved = await client.PutAsJsonAsync($"/api/ingestion/jobs/{id}/draft", preview.Draft);
-        Assert.AreEqual(HttpStatusCode.OK, saved.StatusCode);
-        var updated = await saved.Content.ReadFromJsonAsync<IngestionJobDetailDto>();
-        Assert.AreEqual("Unsaved user title", updated!.ExtractedDraft!.Title);
-    }
-
-    [TestMethod]
-    public async Task ReviewRepair_ReportsMissingJobsConflictsAndUnavailableHosts()
-    {
-        var draft = new IngestionExtractedDraftDto(
-            "Review me",
-            Ingredients: [new(Quantity: 1, Unit: MeasurementUnit.Cup, DisplayName: "rice")],
-            Steps: [new(Instruction: "Cook rice.", IngredientIndices: [0])]
-        );
-        var fakeLlm = new FakeSequentialLlmExtractionClient(
-            _ => throw new InvalidOperationException(),
-            repair: _ => throw new LlmHostUnavailableException("Test host is offline.")
-        );
-        await using var factory = _factory.WithWebHostBuilder(builder =>
-        {
-            builder.ConfigureServices(services =>
-            {
-                services.RemoveAll<ILlmExtractionClient>();
-                services.AddSingleton<ILlmExtractionClient>(fakeLlm);
-            });
-        });
-        using var client = factory.CreateClient();
-        await AuthenticateAsync(client);
-        var missing = await client.PostAsJsonAsync(
-            $"/api/ingestion/jobs/{Guid.NewGuid()}/repair-preview",
-            new IngestionRepairPreviewRequest(draft)
-        );
-        Assert.AreEqual(HttpStatusCode.NotFound, missing.StatusCode);
-
-        var id = Guid.NewGuid();
-        using (var scope = factory.Services.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<App.Data.AppDbContext>();
-            db.IngestionJobs.Add(
-                new IngestionJob
-                {
-                    Id = id,
-                    Channel = IngestionChannel.RawText,
-                    Status = IngestionJobStatus.Queued,
-                    DisplayTitle = draft.Title,
-                    RawText = "Rice\nIngredients:\n- 1 cup rice\nInstructions:\n1. Cook rice.",
-                }
-            );
-            await db.SaveChangesAsync();
-        }
-        var conflict = await client.PostAsJsonAsync(
-            $"/api/ingestion/jobs/{id}/repair-preview",
-            new IngestionRepairPreviewRequest(draft)
-        );
-        Assert.AreEqual(HttpStatusCode.Conflict, conflict.StatusCode);
-        using (var scope = factory.Services.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<App.Data.AppDbContext>();
-            var entity = await db.IngestionJobs.FindAsync(id);
-            entity!.Status = IngestionJobStatus.ReadyForReview;
-            await db.SaveChangesAsync();
-        }
-        var unavailable = await client.PostAsJsonAsync(
-            $"/api/ingestion/jobs/{id}/repair-preview",
-            new IngestionRepairPreviewRequest(draft)
-        );
-        Assert.AreEqual(HttpStatusCode.ServiceUnavailable, unavailable.StatusCode);
-        StringAssert.Contains(
-            await unavailable.Content.ReadAsStringAsync(),
-            "Test host is offline."
-        );
     }
 
     [TestMethod]
@@ -1769,109 +1374,6 @@ public sealed class IngestionIntegrationTests
         var diagnostics = await response.Content.ReadFromJsonAsync<IngestionReviewDiagnosticsDto>();
         Assert.IsNotNull(diagnostics);
         Assert.IsTrue(diagnostics.ValidationIssues.Any(issue => issue.Contains("out of range")));
-    }
-
-    [TestMethod]
-    [DataRow(true)]
-    [DataRow(false)]
-    public async Task ReviewRepair_RejectsJobsChangedDuringInference(bool changeStatus)
-    {
-        var id = Guid.NewGuid();
-        IServiceProvider? services = null;
-        var fakeLlm = new FakeSequentialLlmExtractionClient(
-            _ => throw new InvalidOperationException(),
-            repair: context =>
-            {
-                using var scope = services!.CreateScope();
-                var db = scope.ServiceProvider.GetRequiredService<App.Data.AppDbContext>();
-                var entity = db.IngestionJobs.Find(id)!;
-                if (changeStatus)
-                {
-                    entity.Status = IngestionJobStatus.Discarded;
-                }
-                else
-                {
-                    entity.DisplayTitle = "Saved elsewhere";
-                }
-                db.SaveChanges();
-                return new LlmRecipeRepairResult(context.Draft, []);
-            }
-        );
-        await using var factory = _factory.WithWebHostBuilder(builder =>
-        {
-            builder.ConfigureServices(collection =>
-            {
-                collection.RemoveAll<ILlmExtractionClient>();
-                collection.AddSingleton<ILlmExtractionClient>(fakeLlm);
-            });
-        });
-        services = factory.Services;
-        using var client = factory.CreateClient();
-        await AuthenticateAsync(client);
-        using (var scope = services.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<App.Data.AppDbContext>();
-            db.IngestionJobs.Add(
-                new IngestionJob
-                {
-                    Id = id,
-                    Channel = IngestionChannel.RawText,
-                    Status = IngestionJobStatus.ReadyForReview,
-                    DisplayTitle = "Rice",
-                    RawText = "Rice\nIngredients:\n- rice\nInstructions:\n1. Cook rice.",
-                }
-            );
-            await db.SaveChangesAsync();
-        }
-        var draft = new IngestionExtractedDraftDto(
-            "Rice",
-            Ingredients: [new(DisplayName: "rice")],
-            Steps: [new(Instruction: "Cook rice.", IngredientIndices: [0])]
-        );
-        var response = await client.PostAsJsonAsync(
-            $"/api/ingestion/jobs/{id}/repair-preview",
-            new IngestionRepairPreviewRequest(draft)
-        );
-        Assert.AreEqual(HttpStatusCode.Conflict, response.StatusCode);
-        StringAssert.Contains(await response.Content.ReadAsStringAsync(), "changed while");
-    }
-
-    [TestMethod]
-    [DataRow(IngestionChannel.Images)]
-    [DataRow(IngestionChannel.Pdf)]
-    public async Task ReviewRepair_RejectsJobsWithoutSourceText(IngestionChannel channel)
-    {
-        await AuthenticateAsync(_client);
-        var id = Guid.NewGuid();
-        using (var scope = _factory.Services.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<App.Data.AppDbContext>();
-            db.IngestionJobs.Add(
-                new IngestionJob
-                {
-                    Id = id,
-                    Channel = channel,
-                    Status = IngestionJobStatus.ReadyForReview,
-                    DisplayTitle = "Rice",
-                    SourceFilesJson = "[]",
-                }
-            );
-            await db.SaveChangesAsync();
-        }
-        var draft = new IngestionExtractedDraftDto(
-            "Rice",
-            Ingredients: [new(DisplayName: "rice")],
-            Steps: [new(Instruction: "Cook rice.", IngredientIndices: [0])]
-        );
-        var response = await _client.PostAsJsonAsync(
-            $"/api/ingestion/jobs/{id}/repair-preview",
-            new IngestionRepairPreviewRequest(draft)
-        );
-        Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
-        StringAssert.Contains(
-            await response.Content.ReadAsStringAsync(),
-            "no source text to re-extract from"
-        );
     }
 
     [TestMethod]
@@ -2027,22 +1529,28 @@ public sealed class IngestionIntegrationTests
     [TestMethod]
     public async Task PausedQueue_SingleJobRerun_SetsRunNowRequestedAndRunsWhilePaused()
     {
-        var fakeLlm = new FakeSequentialLlmExtractionClient(_ => new LlmExtractedRecipePayload(
+        var fakeLlm = new FakeSequentialLlmExtractionClient(_ => new ExtractedRecipeDto(
             Title: "Single Job Rerun Paused Test",
-            ConfidenceScore: 0.95m,
             Ingredients:
             [
-                new LlmExtractedIngredientItem(
-                    null,
-                    1m,
-                    null,
-                    "cup",
-                    "sugar",
-                    "sugar",
-                    OriginalRawText: "1 cup sugar"
+                new(
+                    RefId: "ing_1",
+                    CanonicalFoodItem: "sugar",
+                    DisplayName: "sugar",
+                    Quantity: 1m,
+                    Unit: "cup",
+                    RawText: "1 cup sugar"
                 ),
             ],
-            Steps: [new LlmExtractedStepItem(null, "Stir sugar.", [0])]
+            Steps:
+            [
+                new(
+                    StepNumber: 1,
+                    TemplateText: "Stir {{ing_1_a}}.",
+                    IngredientTokens: [new("ing_1_a", "ing_1")]
+                ),
+            ],
+            QualityAudit: new RecipeQualityAuditDto(IsPlausibleRecipe: true, Warnings: [])
         ));
 
         await using var customFactory = _factory.WithWebHostBuilder(builder =>
@@ -2313,33 +1821,38 @@ public sealed class IngestionIntegrationTests
         const string componentRecipeTitle = "Easy-Peel Hard-Cooked Eggs";
         const string compositeRecipeTitle = "Curry Deviled Eggs";
 
-        var fakeLlm = new FakeSequentialLlmExtractionClient(_ => new LlmExtractedRecipePayload(
+        var fakeLlm = new FakeSequentialLlmExtractionClient(_ => new ExtractedRecipeDto(
             Title: compositeRecipeTitle,
-            ConfidenceScore: 0.99m,
             Ingredients:
             [
                 new(
-                    null,
-                    1,
-                    null,
-                    "recipe",
-                    componentRecipeTitle,
+                    RefId: "ing_1",
+                    CanonicalFoodItem: componentRecipeTitle,
                     DisplayName: componentRecipeTitle,
-                    OriginalRawText: $"1 recipe {componentRecipeTitle}",
+                    Quantity: 1m,
+                    Unit: "recipe",
                     IsRecipeReference: true,
-                    ReferencedRecipeTitle: componentRecipeTitle
+                    ReferencedRecipeTitle: componentRecipeTitle,
+                    RawText: $"1 recipe {componentRecipeTitle}"
                 ),
                 new(
-                    null,
-                    2,
-                    null,
-                    "tablespoon",
-                    "mayonnaise",
+                    RefId: "ing_2",
+                    CanonicalFoodItem: "mayonnaise",
                     DisplayName: "mayonnaise",
-                    OriginalRawText: "2 tablespoons mayonnaise"
+                    Quantity: 2m,
+                    Unit: "tablespoon",
+                    RawText: "2 tablespoons mayonnaise"
                 ),
             ],
-            Steps: [new(null, "Halve eggs and mash yolks with mayonnaise.", [0, 1])]
+            Steps:
+            [
+                new(
+                    StepNumber: 1,
+                    TemplateText: "Halve {{ing_1_a}} and mash yolks with {{ing_2_a}}.",
+                    IngredientTokens: [new("ing_1_a", "ing_1"), new("ing_2_a", "ing_2")]
+                ),
+            ],
+            QualityAudit: new RecipeQualityAuditDto(IsPlausibleRecipe: true, Warnings: [])
         ));
 
         await using var customFactory = _factory.WithWebHostBuilder(builder =>
@@ -2438,31 +1951,151 @@ public sealed class IngestionIntegrationTests
     }
 
     [TestMethod]
-    public async Task TextIngestion_PostNormalizationSelfHealing_AutoPublishesWhenNormalizerResolvesStepIssues()
+    public async Task TextIngestion_UnflaggedOptionalSubRecipeMatchingPublishedRecipe_PromotesAndLinksWithoutCreatingFoodItem()
     {
-        var fakeLlm = new FakeSequentialLlmExtractionClient(_ => new LlmExtractedRecipePayload(
-            Title: "Skillet Flatbread",
-            ConfidenceScore: 0.99m,
+        var fakeLlm = new FakeSequentialLlmExtractionClient(_ => new ExtractedRecipeDto(
+            Title: "Spanish Tortilla",
+            Description: "Potato and onion omelet",
+            Servings: 4,
             Ingredients:
             [
                 new(
-                    null,
-                    1m,
-                    null,
-                    "cup",
-                    "flour",
-                    DisplayName: "flour",
-                    OriginalRawText: "1 cup flour"
+                    RefId: "ing_1",
+                    CanonicalFoodItem: "potato",
+                    DisplayName: "potatoes",
+                    Quantity: 1,
+                    Unit: "lb",
+                    RawText: "1 pound potatoes"
+                ),
+                new(
+                    RefId: "ing_2",
+                    CanonicalFoodItem: "garlic mayonnaise",
+                    DisplayName: "Garlic Mayonnaise",
+                    Quantity: 0.5m,
+                    Unit: "cup",
+                    IsOptional: true,
+                    IsRecipeReference: false,
+                    RawText: "1/2 cup Garlic Mayonnaise (optional; recipe follows)"
                 ),
             ],
             Steps:
             [
                 new(
-                    null,
-                    "Knead ||{\"ingredient\":\"flour\",\"amount\":1,\"unit\":\"cup\"}||, dust ||{\"ingredient\":\"flour\"}||, and shape ||{\"ingredient\":\"flour\"}||.",
-                    [0]
+                    StepNumber: 1,
+                    TemplateText: "Cook {{ing_1_a}} and serve with {{ing_2_a}}.",
+                    IngredientTokens:
+                    [
+                        new("ing_1_a", "ing_1", 1, "lb"),
+                        new("ing_2_a", "ing_2", 0.5m, "cup"),
+                    ]
                 ),
-            ]
+            ],
+            QualityAudit: new RecipeQualityAuditDto(IsPlausibleRecipe: true, Warnings: [])
+        ));
+
+        await using var customFactory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Llm:TextModel", "test-text");
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ILlmExtractionClient>();
+                services.AddSingleton<ILlmExtractionClient>(fakeLlm);
+            });
+        });
+
+        using var authClient = customFactory.CreateClient();
+        await AuthenticateAsync(authClient);
+
+        var componentRes = await authClient.PostAsJsonAsync(
+            "/api/recipes",
+            new UpsertRecipeRequest(
+                Title: "Garlic Mayonnaise",
+                Description: "Creamy roasted garlic aioli",
+                Status: RecipeStatus.Published,
+                BaseServings: 4,
+                Ingredients:
+                [
+                    new RecipeIngredientInput(
+                        DisplayName: "mayonnaise",
+                        Quantity: 1,
+                        Unit: MeasurementUnit.Cup
+                    ),
+                ],
+                Steps: [new RecipeStepInput(Instruction: "Whisk garlic with mayonnaise.")]
+            )
+        );
+        componentRes.EnsureSuccessStatusCode();
+        var mayoRecipe = await componentRes.Content.ReadFromJsonAsync<RecipeDetailDto>();
+        Assert.IsNotNull(mayoRecipe);
+
+        var enqueueRes = await authClient.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest(
+                "Spanish Tortilla\nIngredients:\n- 1 pound potatoes\n- 1/2 cup Garlic Mayonnaise (optional; recipe follows)\nInstructions:\n1. Cook potatoes and serve.",
+                AutoPublish: true
+            )
+        );
+        enqueueRes.EnsureSuccessStatusCode();
+        var queued = await enqueueRes.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
+        Assert.IsNotNull(queued);
+
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            var processed = await scope
+                .ServiceProvider.GetRequiredService<IIngestionProcessor>()
+                .ProcessNextQueuedJobAsync();
+            Assert.IsTrue(processed);
+        }
+
+        var job = await authClient.GetFromJsonAsync<IngestionJobDetailDto>(
+            $"/api/ingestion/jobs/{queued.Id}"
+        );
+        Assert.IsNotNull(job);
+        Assert.AreEqual(IngestionJobStatus.Published, job.Status);
+        Assert.IsNotNull(job.ResultingRecipeId);
+
+        var published = await authClient.GetFromJsonAsync<RecipeDetailDto>(
+            $"/api/recipes/{job.ResultingRecipeId}"
+        );
+        Assert.IsNotNull(published);
+        var linkedIng = published.Ingredients.FirstOrDefault(i =>
+            i.DisplayName == "Garlic Mayonnaise"
+        );
+        Assert.IsNotNull(linkedIng);
+        Assert.AreEqual(mayoRecipe.Id, linkedIng.LinkedRecipeId);
+        Assert.IsNull(linkedIng.FoodItemId);
+    }
+
+    [TestMethod]
+    public async Task TextIngestion_PostNormalizationSelfHealing_AutoPublishesWhenNormalizerResolvesStepIssues()
+    {
+        var fakeLlm = new FakeSequentialLlmExtractionClient(_ => new ExtractedRecipeDto(
+            Title: "Skillet Flatbread",
+            Ingredients:
+            [
+                new(
+                    RefId: "ing_1",
+                    CanonicalFoodItem: "flour",
+                    DisplayName: "flour",
+                    Quantity: 1m,
+                    Unit: "cup",
+                    RawText: "1 cup flour"
+                ),
+            ],
+            Steps:
+            [
+                new(
+                    StepNumber: 1,
+                    TemplateText: "Knead {{ing_1_a}}, dust {{ing_1_b}}, and shape {{ing_1_c}}.",
+                    IngredientTokens:
+                    [
+                        new("ing_1_a", "ing_1", 1m, "cup"),
+                        new("ing_1_b", "ing_1"),
+                        new("ing_1_c", "ing_1"),
+                    ]
+                ),
+            ],
+            QualityAudit: new RecipeQualityAuditDto(IsPlausibleRecipe: true, Warnings: [])
         ));
 
         await using var customFactory = _factory.WithWebHostBuilder(builder =>
@@ -2515,43 +2148,55 @@ public sealed class IngestionIntegrationTests
         {
             if (context.SourceContent.Contains(compositeTitle, StringComparison.Ordinal))
             {
-                return new LlmExtractedRecipePayload(
+                return new ExtractedRecipeDto(
                     Title: compositeTitle,
-                    ConfidenceScore: 0.99m,
                     Ingredients:
                     [
                         new(
-                            null,
-                            1m,
-                            null,
-                            "recipe",
-                            toppingTitle,
+                            RefId: "ing_1",
+                            CanonicalFoodItem: toppingTitle,
                             DisplayName: toppingTitle,
-                            OriginalRawText: $"1 recipe {toppingTitle}",
+                            Quantity: 1m,
+                            Unit: "recipe",
                             IsRecipeReference: true,
-                            ReferencedRecipeTitle: toppingTitle
+                            ReferencedRecipeTitle: toppingTitle,
+                            RawText: $"1 recipe {toppingTitle}"
                         ),
                     ],
-                    Steps: [new(null, "Spoon topping over tart.", [0])]
+                    Steps:
+                    [
+                        new(
+                            StepNumber: 1,
+                            TemplateText: "Spoon {{ing_1_a}} over tart.",
+                            IngredientTokens: [new("ing_1_a", "ing_1")]
+                        ),
+                    ],
+                    QualityAudit: new RecipeQualityAuditDto(IsPlausibleRecipe: true, Warnings: [])
                 );
             }
 
-            return new LlmExtractedRecipePayload(
+            return new ExtractedRecipeDto(
                 Title: toppingTitle,
-                ConfidenceScore: 0.99m,
                 Ingredients:
                 [
                     new(
-                        null,
-                        1m,
-                        null,
-                        "cup",
-                        "cranberries",
+                        RefId: "ing_1",
+                        CanonicalFoodItem: "cranberries",
                         DisplayName: "cranberries",
-                        OriginalRawText: "1 cup cranberries"
+                        Quantity: 1m,
+                        Unit: "cup",
+                        RawText: "1 cup cranberries"
                     ),
                 ],
-                Steps: [new(null, "Simmer cranberries with orange and mint.", [0])]
+                Steps:
+                [
+                    new(
+                        StepNumber: 1,
+                        TemplateText: "Simmer {{ing_1_a}} with orange and mint.",
+                        IngredientTokens: [new("ing_1_a", "ing_1")]
+                    ),
+                ],
+                QualityAudit: new RecipeQualityAuditDto(IsPlausibleRecipe: true, Warnings: [])
             );
         });
 
@@ -2641,50 +2286,502 @@ public sealed class IngestionIntegrationTests
         Assert.IsNull(linkedIngredient.UnresolvedRecipeTitle);
     }
 
+    [TestMethod]
+    public async Task AutoPublish_ResolvesAliasedBuiltInTagsAndSkipsAutoCreatingCustomTags()
+    {
+        var fakeLlm = new FakeSequentialLlmExtractionClient(_ => new ExtractedRecipeDto(
+            Title: "Soft-Boiled Eggs with Spinach",
+            Description: "Simple eggs.",
+            Servings: 2m,
+            PrepTimeMinutes: 5,
+            CookTimeMinutes: 10,
+            TotalTimeMinutes: 15,
+            ProposedTags: ["Boiled", "Egg", "Spinach", "Creamy"],
+            Ingredients:
+            [
+                new(
+                    RefId: "ing_1",
+                    CanonicalFoodItem: "egg",
+                    DisplayName: "egg",
+                    Quantity: 4m,
+                    Unit: "whole",
+                    RawText: "4 large eggs"
+                ),
+            ],
+            Steps:
+            [
+                new(
+                    StepNumber: 1,
+                    TemplateText: "Boil {{ing_1_a}} for {{timer_1}}.",
+                    IngredientTokens: [new("ing_1_a", "ing_1", 4m, "whole")],
+                    TimerTokens: [new("timer_1", 420, "Boil eggs")]
+                ),
+            ],
+            QualityAudit: new RecipeQualityAuditDto(IsPlausibleRecipe: true, Warnings: [])
+        ));
+
+        await using var customFactory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Llm:TextModel", "test-model");
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ILlmExtractionClient>();
+                services.AddSingleton<ILlmExtractionClient>(fakeLlm);
+            });
+        });
+
+        using var client = customFactory.CreateClient();
+        await AuthenticateAsync(client);
+
+        var enqueueRes = await client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest(
+                "Soft-Boiled Eggs with Spinach\nIngredients:\n- 4 large eggs\nInstructions:\n1. Boil eggs for 7 minutes.",
+                AutoPublish: true
+            )
+        );
+        enqueueRes.EnsureSuccessStatusCode();
+        var queued = await enqueueRes.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
+        Assert.IsNotNull(queued);
+
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            var processed = await scope
+                .ServiceProvider.GetRequiredService<IIngestionProcessor>()
+                .ProcessNextQueuedJobAsync();
+            Assert.IsTrue(processed);
+        }
+
+        var job = await client.GetFromJsonAsync<IngestionJobDetailDto>(
+            $"/api/ingestion/jobs/{queued.Id}"
+        );
+        Assert.IsNotNull(job);
+        Assert.AreEqual(IngestionJobStatus.Published, job.Status);
+        Assert.IsNotNull(job.ResultingRecipeId);
+
+        var recipe = await client.GetFromJsonAsync<RecipeDetailDto>(
+            $"/api/recipes/{job.ResultingRecipeId}"
+        );
+        Assert.IsNotNull(recipe);
+        Assert.IsNotNull(recipe.Tags);
+        Assert.Contains(t => t.Name == "Boil & Simmer", recipe.Tags);
+        Assert.Contains(t => t.Name == "Eggs", recipe.Tags);
+        Assert.DoesNotContain(t => t.Name == "Spinach", recipe.Tags);
+        Assert.DoesNotContain(t => t.Name == "Creamy", recipe.Tags);
+
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<App.Data.AppDbContext>();
+            Assert.IsFalse(db.Tags.Any(t => t.Name == "Spinach" || t.Name == "Creamy"));
+        }
+    }
+
+    [TestMethod]
+    public async Task ManualReviewApprove_MaterializesExplicitCustomTag()
+    {
+        var fakeLlm = new FakeSequentialLlmExtractionClient(_ => new ExtractedRecipeDto(
+            Title: "Artisan Toast",
+            Description: "Simple toast.",
+            Servings: 1m,
+            PrepTimeMinutes: 2,
+            CookTimeMinutes: 3,
+            TotalTimeMinutes: 5,
+            ProposedTags: ["Homemade Artisanal"],
+            Ingredients:
+            [
+                new(
+                    RefId: "ing_1",
+                    CanonicalFoodItem: "sourdough bread",
+                    DisplayName: "sourdough bread",
+                    Quantity: 2m,
+                    Unit: "slice",
+                    RawText: "2 slices sourdough bread"
+                ),
+            ],
+            Steps:
+            [
+                new(
+                    StepNumber: 1,
+                    TemplateText: "Toast {{ing_1_a}}.",
+                    IngredientTokens: [new("ing_1_a", "ing_1", 2m, "slice")]
+                ),
+            ],
+            QualityAudit: new RecipeQualityAuditDto(IsPlausibleRecipe: true, Warnings: [])
+        ));
+
+        await using var customFactory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Llm:TextModel", "test-model");
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ILlmExtractionClient>();
+                services.AddSingleton<ILlmExtractionClient>(fakeLlm);
+            });
+        });
+
+        using var client = customFactory.CreateClient();
+        await AuthenticateAsync(client);
+
+        var enqueueRes = await client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest(
+                "Artisan Toast\nIngredients:\n- 2 slices sourdough bread\nInstructions:\n1. Toast bread.",
+                AutoPublish: false
+            )
+        );
+        enqueueRes.EnsureSuccessStatusCode();
+        var queued = await enqueueRes.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
+        Assert.IsNotNull(queued);
+
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            var processed = await scope
+                .ServiceProvider.GetRequiredService<IIngestionProcessor>()
+                .ProcessNextQueuedJobAsync();
+            Assert.IsTrue(processed);
+        }
+
+        var job = await client.GetFromJsonAsync<IngestionJobDetailDto>(
+            $"/api/ingestion/jobs/{queued.Id}"
+        );
+        Assert.IsNotNull(job);
+        Assert.AreEqual(IngestionJobStatus.ReadyForReview, job.Status);
+        Assert.IsNotNull(job.ExtractedDraft);
+        Assert.IsNotNull(job.ExtractedDraft.ProposedTagNames);
+        Assert.Contains("Homemade Artisanal", job.ExtractedDraft.ProposedTagNames);
+
+        var approveRes = await client.PostAsJsonAsync(
+            $"/api/ingestion/jobs/{queued.Id}/approve",
+            job.ExtractedDraft
+        );
+        Assert.AreEqual(HttpStatusCode.Created, approveRes.StatusCode);
+
+        var published = await approveRes.Content.ReadFromJsonAsync<RecipeDetailDto>();
+        Assert.IsNotNull(published);
+        Assert.IsNotNull(published.Tags);
+        var customTag = published.Tags.SingleOrDefault(t => t.Name == "Homemade Artisanal");
+        Assert.IsNotNull(customTag);
+        Assert.AreEqual(TagCategory.Custom, customTag.Category);
+    }
+
+    [TestMethod]
+    public async Task AutoPublish_ValidationExceptionDuringPublish_DemotesToReadyForReviewWithSavedDraft()
+    {
+        var fakeLlm = new FakeSequentialLlmExtractionClient(_ => new ExtractedRecipeDto(
+            Title: "Easy-Peel Hard-Cooked Eggs",
+            Description: "Steamed eggs.",
+            Servings: 6m,
+            Ingredients:
+            [
+                new(
+                    RefId: "ing_1",
+                    CanonicalFoodItem: "egg",
+                    DisplayName: "large eggs",
+                    Quantity: 6m,
+                    Unit: "whole",
+                    RawText: "6 large eggs"
+                ),
+            ],
+            Steps:
+            [
+                new(
+                    StepNumber: 1,
+                    TemplateText: "Steam {{ing_1_a}} for {{timer_1}}.",
+                    IngredientTokens: [new("ing_1_a", "ing_1", 6m, "whole")],
+                    TimerTokens: [new("timer_1", 780, "Steam eggs")]
+                ),
+            ],
+            QualityAudit: new RecipeQualityAuditDto(IsPlausibleRecipe: true, Warnings: [])
+        ));
+
+        var throwingProxy = System.Reflection.DispatchProxy.Create<
+            IRecipeService,
+            ThrowingCreateRecipeServiceProxy
+        >();
+
+        await using var customFactory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Llm:TextModel", "test-model");
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ILlmExtractionClient>();
+                services.AddSingleton<ILlmExtractionClient>(fakeLlm);
+                services.RemoveAll<IRecipeService>();
+                services.AddSingleton<IRecipeService>(throwingProxy);
+            });
+        });
+
+        using var client = customFactory.CreateClient();
+        await AuthenticateAsync(client);
+
+        var enqueueRes = await client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest(
+                "Easy-Peel Hard-Cooked Eggs\nIngredients:\n- 6 large eggs\nInstructions:\n1. Steam eggs 13 minutes.",
+                AutoPublish: true
+            )
+        );
+        enqueueRes.EnsureSuccessStatusCode();
+        var queued = await enqueueRes.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
+        Assert.IsNotNull(queued);
+
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            var processed = await scope
+                .ServiceProvider.GetRequiredService<IIngestionProcessor>()
+                .ProcessNextQueuedJobAsync();
+            Assert.IsTrue(processed);
+        }
+
+        var job = await client.GetFromJsonAsync<IngestionJobDetailDto>(
+            $"/api/ingestion/jobs/{queued.Id}"
+        );
+        Assert.IsNotNull(job);
+        Assert.AreEqual(IngestionJobStatus.ReadyForReview, job.Status);
+        Assert.IsNotNull(job.ExtractedDraft);
+        StringAssert.Contains(job.StatusDetail, "Simulated recipe publish failure");
+        Assert.Contains(
+            issue => issue.Contains("Simulated recipe publish failure", StringComparison.Ordinal),
+            job.ExtractedDraft.ValidationIssues!
+        );
+    }
+
+    [TestMethod]
+    public async Task IngestionProcessor_SplitSubRecipeReferenceWithForDishPrepNote_LinksPublishedRecipeAndAutoPublishes()
+    {
+        var fakeLlm = new FakeSequentialLlmExtractionClient(_ => new ExtractedRecipeDto(
+            Title: "Bruschetta",
+            Description: "Crisp toasted bread topped with ripe tomatoes.",
+            Servings: 4,
+            CookTimeMinutes: 0,
+            ProposedTags: ["Appetizer", "Italian"],
+            Ingredients:
+            [
+                new(
+                    "ing_1",
+                    CanonicalFoodItem: "toasted bread",
+                    DisplayName: "Toasted Bread",
+                    Quantity: 1m,
+                    Unit: "recipe",
+                    PreparationNotes: "for Bruschetta",
+                    IsRecipeReference: true,
+                    ReferencedRecipeTitle: "toasted bread",
+                    RawText: "1 recipe Toasted Bread for Bruschetta"
+                ),
+                new(
+                    "ing_2",
+                    CanonicalFoodItem: "tomato",
+                    DisplayName: "ripe tomatoes",
+                    Quantity: 4m,
+                    Unit: "whole",
+                    RawText: "4 ripe tomatoes"
+                ),
+            ],
+            Steps:
+            [
+                new(
+                    1,
+                    TemplateText: "Dice {{ing_2_a}} and spoon over {{ing_1_a}}.",
+                    IngredientTokens:
+                    [
+                        new("ing_2_a", "ing_2", 4m, "whole"),
+                        new("ing_1_a", "ing_1", 1m, "recipe"),
+                    ]
+                ),
+            ],
+            QualityAudit: new RecipeQualityAuditDto(IsPlausibleRecipe: true, Warnings: [])
+        ));
+
+        await using var customFactory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Llm:TextModel", "test-model");
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ILlmExtractionClient>();
+                services.AddSingleton<ILlmExtractionClient>(fakeLlm);
+            });
+        });
+
+        using var client = customFactory.CreateClient();
+        await AuthenticateAsync(client);
+
+        var breadRes = await client.PostAsJsonAsync(
+            "/api/recipes",
+            new UpsertRecipeRequest(
+                Title: "Toasted Bread for Bruschetta",
+                Description: "Grilled bread slices.",
+                Status: RecipeStatus.Published,
+                BaseServings: 4,
+                Ingredients:
+                [
+                    new RecipeIngredientInput(
+                        DisplayName: "baguette",
+                        Quantity: 1m,
+                        Unit: MeasurementUnit.Whole
+                    ),
+                ],
+                Steps: [new RecipeStepInput(Instruction: "Slice and toast baguette.")]
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Created, breadRes.StatusCode);
+        var bread = await breadRes.Content.ReadFromJsonAsync<RecipeDetailDto>();
+        Assert.IsNotNull(bread);
+
+        var enqueueRes = await client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest(
+                "Bruschetta\nIngredients:\n- 1 recipe Toasted Bread for Bruschetta\n- 4 ripe tomatoes\nInstructions:\n1. Dice tomatoes and spoon over bread.",
+                AutoPublish: true
+            )
+        );
+        enqueueRes.EnsureSuccessStatusCode();
+        var queued = await enqueueRes.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
+        Assert.IsNotNull(queued);
+
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            var processed = await scope
+                .ServiceProvider.GetRequiredService<IIngestionProcessor>()
+                .ProcessNextQueuedJobAsync();
+            Assert.IsTrue(processed);
+        }
+
+        var job = await client.GetFromJsonAsync<IngestionJobDetailDto>(
+            $"/api/ingestion/jobs/{queued.Id}"
+        );
+        Assert.IsNotNull(job);
+        Assert.AreEqual(IngestionJobStatus.Published, job.Status, job.StatusDetail);
+        Assert.IsNotNull(job.ResultingRecipeId);
+
+        var published = await client.GetFromJsonAsync<RecipeDetailDto>(
+            $"/api/recipes/{job.ResultingRecipeId}"
+        );
+        Assert.IsNotNull(published);
+        Assert.AreEqual(bread.Id, published.Ingredients[0].LinkedRecipeId);
+        Assert.IsNull(published.Ingredients[0].UnresolvedRecipeTitle);
+        Assert.IsNull(published.Ingredients[0].PreparationNote);
+    }
+
+    [TestMethod]
+    public async Task IngestionProcessor_RawGroceryWithSeeThisPageOrFacingPage_DoesNotPromoteIntoUnresolvedReference()
+    {
+        var fakeLlm = new FakeSequentialLlmExtractionClient(_ => new ExtractedRecipeDto(
+            Title: "Gỏi Cuốn (Vietnamese Summer Rolls)",
+            Description: "Fresh rice paper rolls with shrimp.",
+            Servings: 4,
+            CookTimeMinutes: 0,
+            ProposedTags: ["Appetizer", "Vietnamese"],
+            Ingredients:
+            [
+                new(
+                    "ing_1",
+                    CanonicalFoodItem: "jumbo shrimp",
+                    DisplayName: "jumbo shrimp",
+                    Quantity: 1m,
+                    Unit: "lb",
+                    PreparationNotes: "peeled, deveined (see this page)",
+                    IsRecipeReference: false,
+                    RawText: "1 pound peeled, deveined jumbo shrimp (see this page)"
+                ),
+                new(
+                    "ing_2",
+                    CanonicalFoodItem: "rice paper wrappers",
+                    DisplayName: "rice paper wrappers",
+                    Quantity: 8m,
+                    Unit: "whole",
+                    PreparationNotes: "facing page",
+                    IsRecipeReference: false,
+                    RawText: "8 rice paper wrappers (facing page)"
+                ),
+            ],
+            Steps:
+            [
+                new(
+                    1,
+                    TemplateText: "Wrap {{ing_1_a}} inside softened {{ing_2_a}}.",
+                    IngredientTokens:
+                    [
+                        new("ing_1_a", "ing_1", 1m, "lb"),
+                        new("ing_2_a", "ing_2", 8m, "whole"),
+                    ]
+                ),
+            ],
+            QualityAudit: new RecipeQualityAuditDto(IsPlausibleRecipe: true, Warnings: [])
+        ));
+
+        await using var customFactory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Llm:TextModel", "test-model");
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ILlmExtractionClient>();
+                services.AddSingleton<ILlmExtractionClient>(fakeLlm);
+            });
+        });
+
+        using var client = customFactory.CreateClient();
+        await AuthenticateAsync(client);
+
+        var enqueueRes = await client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest(
+                "Goi Cuon\nIngredients:\n- 1 pound peeled, deveined jumbo shrimp (see this page)\n- 8 rice paper wrappers (facing page)\nInstructions:\n1. Wrap shrimp in wrappers.",
+                AutoPublish: true
+            )
+        );
+        enqueueRes.EnsureSuccessStatusCode();
+        var queued = await enqueueRes.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
+        Assert.IsNotNull(queued);
+
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            var processed = await scope
+                .ServiceProvider.GetRequiredService<IIngestionProcessor>()
+                .ProcessNextQueuedJobAsync();
+            Assert.IsTrue(processed);
+        }
+
+        var job = await client.GetFromJsonAsync<IngestionJobDetailDto>(
+            $"/api/ingestion/jobs/{queued.Id}"
+        );
+        Assert.IsNotNull(job);
+        Assert.AreEqual(IngestionJobStatus.Published, job.Status, job.StatusDetail);
+        Assert.IsNotNull(job.ResultingRecipeId);
+
+        var published = await client.GetFromJsonAsync<RecipeDetailDto>(
+            $"/api/recipes/{job.ResultingRecipeId}"
+        );
+        Assert.IsNotNull(published);
+        Assert.IsNull(published.Ingredients[0].LinkedRecipeId);
+        Assert.IsNull(published.Ingredients[0].UnresolvedRecipeTitle);
+        Assert.IsNull(published.Ingredients[1].LinkedRecipeId);
+        Assert.IsNull(published.Ingredients[1].UnresolvedRecipeTitle);
+    }
+
+    private class ThrowingCreateRecipeServiceProxy : System.Reflection.DispatchProxy
+    {
+        protected override object? Invoke(
+            System.Reflection.MethodInfo? targetMethod,
+            object?[]? args
+        )
+        {
+            if (targetMethod?.Name == nameof(IRecipeService.CreateRecipeAsync))
+            {
+                return Task.FromException<RecipeDetailDto>(
+                    new App.Core.Exceptions.DomainValidationException(
+                        "Simulated recipe publish failure."
+                    )
+                );
+            }
+
+            throw new NotSupportedException($"Unexpected call to {targetMethod?.Name}");
+        }
+    }
+
     private sealed class FakeSequentialLlmExtractionClient(
-        Func<LlmExtractionContext, LlmExtractedRecipePayload> handler,
-        Func<string, string?>? structureSource = null,
-        Func<LlmRecipeRepairContext, LlmRecipeRepairResult>? repair = null
+        Func<LlmExtractionContext, ExtractedRecipeDto> handler
     ) : ILlmExtractionClient
     {
-        public Func<
-            LlmAutoRepairAndTriageContext,
-            LlmAutoRepairAndTriageResult
-        >? TriageAndRepair { get; set; }
-
-        public Task<LlmAutoRepairAndTriageResult> TriageAndRepairRecipeAsync(
-            EffectiveLlmConnectionConfig config,
-            LlmAutoRepairAndTriageContext context,
-            CancellationToken cancellationToken = default
-        ) =>
-            Task.FromResult(
-                TriageAndRepair?.Invoke(context)
-                    ?? new LlmAutoRepairAndTriageResult(context.Draft, [])
-            );
-
-        public List<string> StructuredSources { get; } = [];
-        public LlmRecipeRepairContext? LastRepairContext { get; private set; }
-
-        public Task<LlmRecipeRepairResult> RepairRecipeDraftAsync(
-            EffectiveLlmConnectionConfig config,
-            LlmRecipeRepairContext context,
-            CancellationToken cancellationToken = default
-        )
-        {
-            LastRepairContext = context;
-            return Task.FromResult(repair?.Invoke(context) ?? throw new NotImplementedException());
-        }
-
-        public Task<string?> StructureRecipeSourceAsync(
-            EffectiveLlmConnectionConfig config,
-            string sourceText,
-            CancellationToken cancellationToken = default
-        )
-        {
-            StructuredSources.Add(sourceText);
-            return Task.FromResult(structureSource?.Invoke(sourceText));
-        }
-
         public Task<LlmConnectionTestResultDto> ProbeAndListModelsAsync(
             EffectiveLlmConnectionConfig config,
             int timeoutSeconds = 15,
@@ -2701,11 +2798,17 @@ public sealed class IngestionIntegrationTests
                 )
             );
 
-        public Task<LlmExtractedRecipePayload> ExtractRecipeFromTextAsync(
+        public Task<ExtractedRecipeDto> ExtractRecipeFromTextAsync(
             EffectiveLlmConnectionConfig config,
             LlmExtractionContext context,
             CancellationToken cancellationToken = default
         ) => Task.FromResult(handler(context));
+
+        public Task<LlmEntityDisambiguationResult> DisambiguateEntitiesAsync(
+            EffectiveLlmConnectionConfig config,
+            LlmEntityDisambiguationContext context,
+            CancellationToken cancellationToken = default
+        ) => Task.FromResult(new LlmEntityDisambiguationResult());
 
         public Task<string?> TranscribeRecipeImagesAsync(
             EffectiveLlmConnectionConfig config,
@@ -2734,24 +2837,6 @@ public sealed class IngestionIntegrationTests
 
     private sealed class BlockingLlmExtractionClient : ILlmExtractionClient
     {
-        public Task<LlmAutoRepairAndTriageResult> TriageAndRepairRecipeAsync(
-            EffectiveLlmConnectionConfig config,
-            LlmAutoRepairAndTriageContext context,
-            CancellationToken cancellationToken = default
-        ) => Task.FromResult(new LlmAutoRepairAndTriageResult(context.Draft, []));
-
-        public Task<LlmRecipeRepairResult> RepairRecipeDraftAsync(
-            EffectiveLlmConnectionConfig config,
-            LlmRecipeRepairContext context,
-            CancellationToken cancellationToken = default
-        ) => throw new NotImplementedException();
-
-        public Task<string?> StructureRecipeSourceAsync(
-            EffectiveLlmConnectionConfig config,
-            string sourceText,
-            CancellationToken cancellationToken = default
-        ) => Task.FromResult<string?>(null);
-
         public Task<string> AnswerKitchenQuestionAsync(
             EffectiveLlmConnectionConfig config,
             LlmKitchenQuestionContext context,
@@ -2790,7 +2875,7 @@ public sealed class IngestionIntegrationTests
                 )
             );
 
-        public async Task<LlmExtractedRecipePayload> ExtractRecipeFromTextAsync(
+        public async Task<ExtractedRecipeDto> ExtractRecipeFromTextAsync(
             EffectiveLlmConnectionConfig config,
             LlmExtractionContext context,
             CancellationToken cancellationToken = default
@@ -2807,27 +2892,33 @@ public sealed class IngestionIntegrationTests
                     await _releaseFirstCall.Task.WaitAsync(cancellationToken);
                 }
 
-                return new LlmExtractedRecipePayload(
+                return new ExtractedRecipeDto(
                     Title: context.SourceContent.Contains(
                         "Serialized Job One",
                         StringComparison.Ordinal
                     )
                         ? "Serialized Job One"
                         : "Serialized Job Two",
-                    ConfidenceScore: 0.8m,
                     Ingredients:
                     [
-                        new LlmExtractedIngredientItem(
-                            SectionName: null,
-                            Quantity: 1m,
-                            MaxQuantity: null,
-                            Unit: "cup",
-                            CanonicalFoodName: "flour",
+                        new(
+                            RefId: "ing_1",
+                            CanonicalFoodItem: "flour",
                             DisplayName: "flour",
-                            OriginalRawText: "1 cup flour"
+                            Quantity: 1m,
+                            Unit: "cup",
+                            RawText: "1 cup flour"
                         ),
                     ],
-                    Steps: [new LlmExtractedStepItem(null, "Mix and bake.", [0])]
+                    Steps:
+                    [
+                        new(
+                            StepNumber: 1,
+                            TemplateText: "Mix {{ing_1_a}} and bake.",
+                            IngredientTokens: [new("ing_1_a", "ing_1")]
+                        ),
+                    ],
+                    QualityAudit: new RecipeQualityAuditDto(IsPlausibleRecipe: true, Warnings: [])
                 );
             }
             finally
@@ -2835,6 +2926,12 @@ public sealed class IngestionIntegrationTests
                 Interlocked.Decrement(ref _activeRequests);
             }
         }
+
+        public Task<LlmEntityDisambiguationResult> DisambiguateEntitiesAsync(
+            EffectiveLlmConnectionConfig config,
+            LlmEntityDisambiguationContext context,
+            CancellationToken cancellationToken = default
+        ) => Task.FromResult(new LlmEntityDisambiguationResult());
 
         public Task<string?> TranscribeRecipeImagesAsync(
             EffectiveLlmConnectionConfig config,
