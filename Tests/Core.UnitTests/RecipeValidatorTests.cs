@@ -1746,4 +1746,48 @@ public sealed class RecipeValidatorTests
         var validation = RecipeValidator.Validate(repaired);
         Assert.IsTrue(validation.IsValid, string.Join("; ", validation.Errors));
     }
+
+    [TestMethod]
+    public void Validate_OneMinuteTimer_AllowedEvenWhenAnotherStepHasSixtyMinutes()
+    {
+        const string source =
+            "Sous Vide Soft-Poached Eggs\nIngredients:\n- 4 large eggs\nInstructions:\n1. Cook eggs at 167 degrees for 12 minutes.\n2. Transfer to ice bath, about 1 minute.\n3. Reheat up to 60 minutes.";
+        var dto = new ExtractedRecipeDto(
+            Title: "Sous Vide Soft-Poached Eggs",
+            Ingredients:
+            [
+                new(
+                    "ing_1",
+                    CanonicalFoodItem: "large egg",
+                    DisplayName: "large eggs",
+                    Quantity: 4m,
+                    Unit: "whole",
+                    RawText: "4 large eggs"
+                ),
+            ],
+            Steps:
+            [
+                new(
+                    1,
+                    TemplateText: "Cook {{ing_1_a}} at {{temp_1}} for {{timer_1}}.",
+                    IngredientTokens: [new("ing_1_a", "ing_1", 4m, "whole")],
+                    TimerTokens: [new("timer_1", 720, "Cook eggs")],
+                    TemperatureTokens: [new("temp_1", 167m, "F")]
+                ),
+                new(
+                    2,
+                    TemplateText: "Transfer to ice bath, about {{timer_2}}.",
+                    TimerTokens: [new("timer_2", 60, "Cool eggs")]
+                ),
+                new(
+                    3,
+                    TemplateText: "Reheat up to {{timer_3}}.",
+                    TimerTokens: [new("timer_3", 3600, "Reheat eggs")]
+                ),
+            ]
+        );
+
+        var validation = RecipeValidator.Validate(dto, source);
+        Assert.IsTrue(validation.IsValid, string.Join("; ", validation.Errors));
+    }
 }

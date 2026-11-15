@@ -1999,6 +1999,7 @@ public static partial class RecipeValidator
                     if (
                         sourceDurations.ExplicitMinuteIntegers.Contains(tok.DurationSeconds)
                         && !sourceDurations.ExplicitSecondIntegers.Contains(tok.DurationSeconds)
+                        && !sourceDurations.ConvertedSeconds.Contains(tok.DurationSeconds)
                     )
                     {
                         errors.Add(
@@ -2010,6 +2011,7 @@ public static partial class RecipeValidator
                         && sourceDurations.ExplicitHourIntegers.Contains(tok.DurationSeconds)
                         && !sourceDurations.ExplicitSecondIntegers.Contains(tok.DurationSeconds)
                         && !sourceDurations.ExplicitMinuteIntegers.Contains(tok.DurationSeconds)
+                        && !sourceDurations.ConvertedSeconds.Contains(tok.DurationSeconds)
                     )
                     {
                         errors.Add(

@@ -356,7 +356,7 @@ public sealed class LlmExtractionClient(
                             + string.Join(
                                 "\n",
                                 validation.Errors.Select(e =>
-                                    $"- {FormatValidationErrorWithStepContext(e, parsed)}"
+                                    $"- {FormatValidationErrorWithStepContext(e, parsed, context.SourceContent)}"
                                 )
                             )
                             + "\nPlease return the corrected complete JSON."
@@ -1877,7 +1877,7 @@ Household Cookbook Catalog:
            - sectionName: ONLY when the source explicitly groups ingredients under a subheading (e.g. 'Sauce', 'Filling'); NEVER use generic names like 'Ingredients' or 'Main'.
            - isRecipeReference: True ONLY for prepared sub-recipe/component dishes (e.g. '1 recipe Easy-Peel Hard-Cooked Eggs', '1 recipe Toasted Bread for Bruschetta', 'Garlic Mayonnaise (recipe follows)'); set referencedRecipeTitle to THAT sub-recipe's FULL clean title including any 'for <Dish>' phrase ('Toasted Bread for Bruschetta', NEVER split 'for Bruschetta' into preparationNotes, and NEVER use the parent/base recipe title). Set false for raw groceries even when followed by '(see this page)' or '(facing page)' prep/substitution notes (e.g. '1 lb peeled, deveined jumbo shrimp (see this page)' -> isRecipeReference: false).
         5. Steps & {{token_key}} Placeholders:
-           - Extract EVERY numbered step and action sentence in exact chronological order (stepNumber: 1..N). NEVER drop intermediate actions (e.g. rolling/shaping balls, cutting dough circles, or adding meat before a resting timer) and NEVER move a later stir-in/garnish ingredient (e.g. 'Transfer to a bowl and stir in bell pepper') into an earlier purée/processor list. Keep un-listed water amounts (e.g. '4 cups water') verbatim in templateText. Reference prepared sub-recipe components with {{ing_X_a}} on the first step that uses them when natural. Ensure EVERY non-optional master ingredient (including final garnishes like parsley) is referenced in its matching section/step with its exact ingredientRefId (never substitute a different section's sugar/salt/oil refId or bind un-listed tap water/ice/spray/drippings to another ingredient).
+           - Extract EVERY numbered step and action sentence in exact chronological order (stepNumber: 1..N). NEVER drop intermediate actions (e.g. rolling/shaping balls, cutting dough circles, or adding meat before a resting timer) and NEVER move a later stir-in/garnish ingredient (e.g. 'Transfer to a bowl and stir in bell pepper') into an earlier purée/processor list. Keep un-listed water amounts (e.g. '4 cups water') verbatim in templateText, and for lines like '1/4 tsp salt, plus salt for cooking shrimp/pasta', keep only the 1/4 tsp in the dish and write discarded cooking-water salt (e.g. '1 tablespoon salt') as plain text (do NOT divide 0.25 tsp into 0.0069 tsp). Reference prepared sub-recipe components with {{ing_X_a}} on the first step that uses them when natural. Ensure EVERY non-optional master ingredient (including final garnishes like parsley and toasted bread referenced simply as 'toast' or '4 slices of toast') is referenced in its matching section/step with its exact ingredientRefId (never substitute a different section's sugar/salt/oil refId or bind un-listed tap water/ice/spray/drippings to another ingredient).
            - In templateText, replace inline ingredient mentions (BOTH measurement AND ingredient noun/phrase), durations (number AND time unit), and real cooking temperatures (number AND 'degrees'/'°F'/'°C') with {{token_key}} placeholders:
              * Ingredients -> {{ing_1_a}}, {{ing_1_b}}, etc. NEVER reuse the exact same {{ing_1_a}} placeholder twice in a single step (use distinct keys _a, _b, _c) AND NEVER emit two items with the same tokenKey in ingredientTokens. NEVER leave duplicate nouns, leading measurements before prep words ('2 tbsp beaten {{ing_1_a}}'), duplicate connectors ('{{ing_1_a}} of the {{ing_1_b}}', '2 tbsp of the {{ing_1_a}}'), unit words ('block', 'slices'), 'or' alternatives, or redundant parenthetical amounts ('(2 tbsp)') outside '{{ing_1_a}}'. NEVER list unused constituent ingredientTokens for a composite/mixture mention like 'the sauce', 'the batter', 'shrub syrup', or 'picada', NEVER bind a prepared combined mixture/syrup/paste/sauce (e.g. '2 ounces shrub syrup', '2 tablespoons picada') to one component's refId (such as vinegar or almonds), and NEVER apportion raw master stepQuantities when spooning/drizzling a portion of an intermediate combined mixture (e.g. '1 tbsp oil-flour mixture')—leave composite prepared mixtures as plain text or stepQuantity: null. When preceding text already has 'remaining'/'reserved' (e.g. 'remaining {{ing_1_b}}'), keep fallbackDisplay clean ('cheese', NEVER 'remaining cheese'). IMPORTANT: For EVERY measured master ingredient (quantity > 0), its VERY FIRST addition in steps MUST set non-null stepQuantity and stepUnit (the amount added in that step, or full master amount if added all at once), even when the source step prose omits numbers (e.g. 'Add garlic, cumin, and salt' -> emit stepQuantity: 7, stepUnit: 'clove' for garlic, etc.). When shaping or filling a single portion ('fill 1 portion with 1 teaspoon'), emit ONLY that single-portion amount (1 tsp) or stepQuantity: null—NEVER assign the full batch quantity (8 tsp) to a per-portion step. For '2 tbsp on each of 2 baking sheets', either multiply accurately (4 tbsp on the baking sheets without trailing 'each') or tokenize each sheet separately without exceeding master quantity; for per-serving phrasing like 'Add 2 oz X to each glass' or 'Place 1 slice Y on each muffin', NEVER put the batch total right before 'to/on each' (e.g. NEVER 'Add 4 oz Champagne to each glass'—write 'divide {{ing_X_a}} evenly among the 2 glasses' or keep the per-item count as plain text with stepQuantity: null). Remember 1 stick butter = 8 tbsp (so 1/2 stick = 4 tbsp and 2 sticks = 16 tbsp, NOT 10 + 10). When an earlier step preps/cuts/grates/dredges/coats 100% of an ingredient (e.g. grating 4 tbsp + cutting 16 tbsp butter in Step 1, or tossing 1 lb squid/1 cup peppers in flour in Step 2), any later step that adds those prepared pieces or fries them in half-and-remaining batches MUST set stepQuantity: null and stepUnit: null. When one master ingredient has split preparations (e.g. '1 oz grated, 1 oz shaved'), include that specific form in fallbackDisplay ('grated Parmesan cheese' / 'shaved Parmesan cheese') with split stepQuantity (1 oz each). For whole items like 'Halve 1 avocado' from 3 avocados, emit stepQuantity: 1, stepUnit: 'whole' (NEVER divide 1/3 into 0.3333); for 'half of X' measured amounts, compute 50% of X's unit (half of 8 oz = 4 oz, NEVER 0.5) UNLESS 100% of X was already added in an earlier step (e.g. tossing all cauliflower in coating in step 2, then 'Fry half of cauliflower' in step 3 -> set stepQuantity: null and stepUnit: null). NEVER use physical length units ('inch', 'cm') as stepUnit. When a later step re-references, cooks, drains, coats with, transfers, fries in batches, reserves a portion of, or garnishes with an already-added ingredient (e.g. 'cook the beef', 'dip in the egg', 'transfer bacon to plate', 'drain chickpeas', 'set aside 2 tbsp chickpeas', 'sprinkle with remaining bacon'), set stepQuantity: null and stepUnit: null so quantities are not double-counted. NEVER use 0 for stepQuantity! Consume at most 100% of each master ingredient across primary and alternate units combined (never consume BOTH 2 cans AND 30 oz for one 2-can item).
              * Timers -> {{timer_1}}, {{timer_2}}, etc. durationSeconds MUST ALWAYS match the exact printed duration converted to SECONDS (minutes * 60, hours * 3600; e.g. '30 seconds' -> 30, NEVER multiply seconds by 6 or 10; '14 minutes' -> 840, NEVER 14; '1 hour' -> 3600). Replace the ENTIRE duration phrase including range words and time unit ('between 45 and 60 seconds' or '1 to 2 minutes' -> ONE placeholder '{{timer_1}}' with lower bound durationSeconds: 45 or 60; 'about 30 seconds' -> 'about {{timer_1}}', NEVER 'between {{timer_1}}', '{{timer_1}} seconds', or '{{timer_1}} to {{timer_2}}'). NEVER create timerTokens for food-processor pulse counts ('5 pulses') or physical measurements ('1 1/2 inches deep')—leave pulses and inches as plain text. Keep power/heat settings outside the placeholder ('for {{timer_1}} at 40 percent power'). label MUST be a short 2-4 word verb+object action (NEVER '5 minutes').
@@ -1903,9 +1903,67 @@ Household Cookbook Catalog:
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     );
 
+    private static readonly Regex TimerMismatchErrorRegex = new(
+        @"^Step\s+(?<step>\d+):\s+TimerToken\s+'\{\{(?<key>[^{}]+)\}\}'\s+has\s+durationSeconds=",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    );
+
+    private static readonly Regex SourceDurationPhraseRegex = new(
+        @"(?:\bbetween\s+\d+(?:\s+\d+/\d+|/\d+|\.\d+)?\s+and\s+|\b\d+(?:\s+\d+/\d+|/\d+|\.\d+)?\s*(?:to|or|[-\u2013\u2014])\s*)?\b\d+(?:\s+\d+/\d+|/\d+|\.\d+)?\s*(?:hours?|hrs?|hr|minutes?|mins?|min|seconds?|secs?|sec)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    );
+
+    private static string ExtractTokenSnippet(
+        IReadOnlyList<ExtractedStepDto> steps,
+        int targetStepNum,
+        string rawKey
+    )
+    {
+        var targetStep = steps
+            .Select((s, idx) => (Step: s, Num: s.StepNumber > 0 ? s.StepNumber : idx + 1))
+            .FirstOrDefault(x => x.Num == targetStepNum)
+            .Step;
+        var placeholder = $"{{{{{rawKey}}}}}";
+        var tpl = targetStep?.TemplateText ?? string.Empty;
+        var idxPos = tpl.IndexOf(placeholder, StringComparison.OrdinalIgnoreCase);
+        if (idxPos < 0)
+        {
+            return string.Empty;
+        }
+
+        var start = Math.Max(0, idxPos - 45);
+        var len = Math.Min(tpl.Length - start, placeholder.Length + 90);
+        return $" (around: \"{tpl.Substring(start, len).Trim()}\")";
+    }
+
+    private static string ExtractStepSourceDurations(string? sourceText, int targetStepNum)
+    {
+        if (string.IsNullOrWhiteSpace(sourceText))
+        {
+            return string.Empty;
+        }
+
+        var stepMatch = Regex.Match(
+            sourceText,
+            $@"(?:^|\n)\s*{targetStepNum}\.\s+(?<body>[^\r\n]+)",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+        );
+        var searchScope = stepMatch.Success ? stepMatch.Groups["body"].Value : sourceText;
+        var phrases = SourceDurationPhraseRegex
+            .Matches(searchScope)
+            .Select(m => $"'{m.Value.Trim()}'")
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(8)
+            .ToList();
+        return phrases.Count > 0
+            ? $" Source {(stepMatch.Success ? $"Step {targetStepNum} " : string.Empty)}durations: {string.Join(", ", phrases)}."
+            : string.Empty;
+    }
+
     private static string FormatValidationErrorWithStepContext(
         string error,
-        ExtractedRecipeDto extracted
+        ExtractedRecipeDto extracted,
+        string? sourceText = null
     )
     {
         var steps = extracted.Steps ?? [];
@@ -1917,22 +1975,8 @@ Household Cookbook Catalog:
                 System.Globalization.CultureInfo.InvariantCulture
             );
             var rawMissingKey = missingTokenMatch.Groups["key"].Value.Trim();
-            var targetStep = steps
-                .Select((s, idx) => (Step: s, Num: s.StepNumber > 0 ? s.StepNumber : idx + 1))
-                .FirstOrDefault(x => x.Num == targetStepNum)
-                .Step;
-
-            var snippetSuffix = string.Empty;
+            var snippetSuffix = ExtractTokenSnippet(steps, targetStepNum, rawMissingKey);
             var placeholder = $"{{{{{rawMissingKey}}}}}";
-            var tpl = targetStep?.TemplateText ?? string.Empty;
-            var idxPos = tpl.IndexOf(placeholder, StringComparison.OrdinalIgnoreCase);
-            if (idxPos >= 0)
-            {
-                var start = Math.Max(0, idxPos - 45);
-                var len = Math.Min(tpl.Length - start, placeholder.Length + 90);
-                var snippet = tpl.Substring(start, len).Trim();
-                snippetSuffix = $" (around: \"{snippet}\")";
-            }
 
             var arrayHint =
                 rawMissingKey.StartsWith("timer_", StringComparison.OrdinalIgnoreCase)
@@ -1967,10 +2011,15 @@ Household Cookbook Catalog:
             return $"{error} [Look in Step {targetStepNum}{snippetSuffix}: add '{placeholder}' to {arrayHint}, or replace '{placeholder}' with plain text if no token belongs there.{ingHint}]";
         }
 
+        var timerMatch = TimerMismatchErrorRegex.Match(error);
         if (
-            error.Contains("TimerToken", StringComparison.OrdinalIgnoreCase)
+            timerMatch.Success
             && (
                 error.Contains(
+                    "does not match any timed duration",
+                    StringComparison.OrdinalIgnoreCase
+                )
+                || error.Contains(
                     "does not match the source duration",
                     StringComparison.OrdinalIgnoreCase
                 )
@@ -1981,7 +2030,14 @@ Household Cookbook Catalog:
             )
         )
         {
-            return $"{error} [Use the exact printed duration in THAT single step converted to seconds (minutes * 60, hours * 3600; 1 minute = 60, NOT 3600). Do not copy durations from another step.]";
+            var targetStepNum = int.Parse(
+                timerMatch.Groups["step"].Value,
+                System.Globalization.CultureInfo.InvariantCulture
+            );
+            var rawKey = timerMatch.Groups["key"].Value.Trim();
+            var snippetSuffix = ExtractTokenSnippet(steps, targetStepNum, rawKey);
+            var sourceDurationsHint = ExtractStepSourceDurations(sourceText, targetStepNum);
+            return $"{error} [Look in Step {targetStepNum}{snippetSuffix}.{sourceDurationsHint} Use the exact printed duration in THAT clause converted to seconds (minutes * 60, hours * 3600; e.g. '30 to 60 seconds' -> 30, '1 minute' -> 60, NEVER multiply seconds by 6 or 10 and do not copy durations from another step).]";
         }
 
         if (

@@ -2331,7 +2331,9 @@ public sealed class LlmExtractionClientTests
         );
 
         Assert.HasCount(2, attempts);
-        StringAssert.Contains(attempts[1], "1 minute = 60, NOT 3600");
+        StringAssert.Contains(attempts[1], "Source Step 1 durations:");
+        StringAssert.Contains(attempts[1], "1 minute");
+        StringAssert.Contains(attempts[1], "around:");
         StringAssert.Contains(attempts[1], "Steps through Step 1 ALREADY consume 100% of ing_1");
         Assert.IsTrue(RecipeValidator.Validate(result).IsValid);
     }
