@@ -304,6 +304,51 @@ public static class BuiltInTags
     }
 
     /// <summary>
+    /// Static taxonomy category headings emitted by <see cref="BuildPromptTaxonomySummary"/>
+    /// that must never become recipe tags if copied literally by an extraction model.
+    /// </summary>
+    public static readonly HashSet<string> DisallowedPromptTaxonomyLabels = new(
+        StringComparer.OrdinalIgnoreCase
+    )
+    {
+        "Course",
+        "Cuisine",
+        "Dietary",
+        "Equipment & Method",
+        "Equipment",
+        "Method",
+        "Cooking Method",
+        "Cooking Method & Equipment",
+        "Protein & Base",
+        "Primary Protein",
+        "Primary Protein & Base",
+        "Protein",
+        "Base",
+        "Occasion & Season",
+        "Occasion",
+        "Meal & Course",
+        "Meal & Course Type",
+        "Meal Prep & Timing",
+        "Meal Prep & Preservation",
+    };
+
+    /// <summary>
+    /// Shared guard rejecting grocery aisle headers, generic staples, and static prompt headings.
+    /// </summary>
+    public static bool IsDisallowedTagName(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return true;
+        }
+
+        var trimmed = name.Trim();
+        return DisallowedGrocerySectionNames.Contains(trimmed)
+            || DisallowedGenericStaples.Contains(trimmed)
+            || DisallowedPromptTaxonomyLabels.Contains(trimmed);
+    }
+
+    /// <summary>
     /// Grocery section / category names that should NEVER leak into recipe tags.
     /// </summary>
     public static readonly HashSet<string> DisallowedGrocerySectionNames = new(

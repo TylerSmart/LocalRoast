@@ -1470,4 +1470,106 @@ public sealed class RecipeValidatorTests
         );
         Assert.IsEmpty(repaired.Steps![1].IngredientTokens!);
     }
+
+    [TestMethod]
+    public void Validate_TemperatureNextToSkilletDimension_DoesNotFalsePositive()
+    {
+        var extracted = new ExtractedRecipeDto(
+            Title: "Caramelized Onion, Pear, and Bacon Tart",
+            Ingredients:
+            [
+                new(
+                    "ing_1",
+                    CanonicalFoodItem: "bacon",
+                    DisplayName: "bacon",
+                    Quantity: 4m,
+                    Unit: "slice",
+                    RawText: "4 slices bacon"
+                ),
+            ],
+            Steps:
+            [
+                new(
+                    1,
+                    TemplateText: "Adjust oven rack to upper-middle position and heat oven to {{temp_1}}. Cook {{ing_1_a}} in 12-inch cast-iron skillet over medium heat until crispy.",
+                    IngredientTokens: [new("ing_1_a", "ing_1", 4m, "slice")],
+                    TemperatureTokens: [new("temp_1", 500m, "F")]
+                ),
+                new(
+                    2,
+                    TemplateText: "Heat oil in 12-inch skillet to {{temp_2}}.",
+                    TemperatureTokens: [new("temp_2", 375m, "F")]
+                ),
+            ]
+        );
+
+        var result = RecipeValidator.Validate(extracted);
+        Assert.IsTrue(result.IsValid, string.Join("; ", result.Errors));
+    }
+
+    [TestMethod]
+    public void RepairSafeStepTokenGlitches_InlinesUnlistedNullFatStripsHyphenDegreeAndHealsBatchHalfDoubleCount()
+    {
+        var dto = new ExtractedRecipeDto(
+            Title: "Crispy Cauliflower & Bacon",
+            Ingredients:
+            [
+                new(
+                    "ing_1",
+                    CanonicalFoodItem: "cauliflower florets",
+                    DisplayName: "cauliflower florets",
+                    Quantity: 1m,
+                    Unit: "lb",
+                    RawText: "1 pound cauliflower florets"
+                ),
+                new(
+                    "ing_2",
+                    CanonicalFoodItem: "bacon",
+                    DisplayName: "bacon",
+                    Quantity: 2m,
+                    Unit: "slice",
+                    RawText: "2 slices bacon"
+                ),
+            ],
+            Steps:
+            [
+                new(
+                    1,
+                    TemplateText: "Cook {{ing_2_a}} until crisp, reserve {{unlisted_fat}}. Heat oven to {{temp_1}}-degree oven and toss {{ing_1_a}}.",
+                    IngredientTokens:
+                    [
+                        new("ing_2_a", "ing_2", 2m, "slice"),
+                        new("unlisted_fat", "null", null, null, "bacon fat"),
+                        new("ing_1_a", "ing_1", 1m, "lb"),
+                    ],
+                    TemperatureTokens: [new("temp_1", 400m, "F")]
+                ),
+                new(
+                    2,
+                    TemplateText: "Fry half of {{ing_1_b}}, then sprinkle {{ing_2_b}}.",
+                    IngredientTokens:
+                    [
+                        new("ing_1_b", "ing_1", 0.5m, "lb"),
+                        new("ing_2_b", "ing_2", null, null),
+                    ]
+                ),
+            ]
+        );
+
+        var repaired = RecipeValidator.RepairSafeStepTokenGlitches(
+            dto,
+            repairBatchSplitDoubleCounts: true
+        );
+
+        Assert.AreEqual(
+            "Cook {{ing_2_a}} until crisp, reserve bacon fat. Heat oven to {{temp_1}} oven and toss {{ing_1_a}}.",
+            repaired.Steps![0].TemplateText
+        );
+        Assert.HasCount(2, repaired.Steps![0].IngredientTokens!);
+        Assert.IsNull(repaired.Steps![1].IngredientTokens![0].StepQuantity);
+        Assert.IsNull(repaired.Steps![1].IngredientTokens![0].StepUnit);
+
+        var validated = RecipeValidator.Validate(repaired);
+        Assert.IsTrue(validated.IsValid, string.Join("; ", validated.Errors));
+    }
 }

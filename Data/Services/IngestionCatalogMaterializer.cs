@@ -1138,11 +1138,7 @@ public static partial class IngestionCatalogMaterializer
                 rawTag.Trim().TrimStart('#')
             );
 
-            if (
-                string.IsNullOrWhiteSpace(cleanName)
-                || BuiltInTags.DisallowedGrocerySectionNames.Contains(cleanName)
-                || BuiltInTags.DisallowedGenericStaples.Contains(cleanName)
-            )
+            if (BuiltInTags.IsDisallowedTagName(cleanName))
             {
                 continue;
             }

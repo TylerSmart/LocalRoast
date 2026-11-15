@@ -2059,4 +2059,73 @@ public sealed class LlmExtractionClientTests
         );
         Assert.IsEmpty(result.Steps![1].IngredientTokens!);
     }
+
+    [TestMethod]
+    public async Task ExtractRecipeFromTextAsync_QuantityMismatchRetryIncludesPerStepOccurrences_AndHealsUnlistedAndHalfBatch()
+    {
+        var attempts = new List<string>();
+        const string mismatchReply = """
+            {
+                "title": "Buffalo Cauliflower",
+                "ingredients": [
+                    { "refId": "ing_1", "canonicalFoodItem": "cauliflower", "displayName": "cauliflower florets", "quantity": 1, "unit": "lb", "rawText": "1 pound cauliflower florets" }
+                ],
+                "steps": [
+                    {
+                        "stepNumber": 1,
+                        "templateText": "Toss {{ing_1_a}}, spray pan with {{unlisted_spray}}.",
+                        "ingredientTokens": [
+                            { "tokenKey": "ing_1_a", "ingredientRefId": "ing_1", "stepQuantity": 1, "stepUnit": "lb" },
+                            { "tokenKey": "unlisted_spray", "ingredientRefId": "null", "stepQuantity": null, "stepUnit": null, "fallbackDisplay": "cooking spray" }
+                        ],
+                        "timerTokens": [],
+                        "temperatureTokens": []
+                    },
+                    {
+                        "stepNumber": 2,
+                        "templateText": "Fry half of {{ing_1_b}}.",
+                        "ingredientTokens": [
+                            { "tokenKey": "ing_1_b", "ingredientRefId": "ing_1", "stepQuantity": 0.5, "stepUnit": "lb" }
+                        ],
+                        "timerTokens": [],
+                        "temperatureTokens": []
+                    }
+                ],
+                "qualityAudit": { "isPlausibleRecipe": true, "warnings": [] }
+            }
+            """;
+
+        var handler = new MockHttpMessageHandler(req =>
+        {
+            var body = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            attempts.Add(body);
+            return OllamaReply(mismatchReply);
+        });
+
+        var client = new LlmExtractionClient(new HttpClient(handler));
+        var config = new EffectiveLlmConnectionConfig(
+            Provider: LlmProvider.Ollama,
+            BaseUrl: "http://localhost:11434",
+            ApiKey: null,
+            TextModel: "gemma4:e4b",
+            VisionModel: null,
+            OllamaKeepAlive: "5m",
+            RequestTimeoutSeconds: 30,
+            AutoPublishHighConfidenceText: true
+        );
+
+        var result = await client.ExtractRecipeFromTextAsync(
+            config,
+            new LlmExtractionContext(
+                "Buffalo Cauliflower\n1 pound cauliflower florets\n1. Toss cauliflower, spray pan. 2. Fry half of cauliflower."
+            )
+        );
+
+        Assert.HasCount(3, attempts);
+        StringAssert.Contains(
+            attempts[1],
+            "Your current step quantities for ing_1: Step 1 ({{ing_1_a}}=1 lb), Step 2 ({{ing_1_b}}=0.5 lb)"
+        );
+        Assert.IsTrue(RecipeValidator.Validate(result).IsValid);
+    }
 }

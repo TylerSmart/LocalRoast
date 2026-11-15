@@ -162,6 +162,24 @@ public static partial class RecipeValidator
     private static partial Regex DistanceOrRackTempContextRegex();
 
     [GeneratedRegex(
+        @"^\s*(?:[-–—]\s*)?(?:inch(?:es)?|in\.?|cm|mm|apart|from\s+(?:the\s+)?(?:broiler|heat|element))\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex AdjacentDistanceAfterTempRegex();
+
+    [GeneratedRegex(
+        @"\b\d+(?:\s+\d+/\d+|/\d+|\.\d+)?\s*[-\u2013]?\s*(?:inch(?:es)?|in|cm|mm)\b|\b(?:upper|middle|lower|bottom|top|center)(?:[-\s]+(?:middle|third))?\s+(?:rack\s+)?position\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex ExplicitNumberedLengthOrRackPosRegex();
+
+    [GeneratedRegex(
+        @"\b(?:heat(?:ed)?|preheat(?:ed)?|bake|baking|roast(?:ing)?|broil(?:er|ing)?|set\s+(?:oven|thermometer)|oven|oil|skillet|pan|water|thermometer|registers?)\b[^.!?\n;]*?\b(?:to|at)\s*$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex ThermalVerbBeforeTempRegex();
+
+    [GeneratedRegex(
         @"\b(?:oven|preheat|heat(?:\s+oven|\s+oil|\s+skillet)?|broil(?:er)?|bake|roast|fry|skillet|oil)\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
@@ -1566,6 +1584,41 @@ public static partial class RecipeValidator
         return best;
     }
 
+    private static (int Start, int End) FindSentenceBounds(string text, int startIdx, int endIdx)
+    {
+        var s = startIdx;
+        while (s > 0)
+        {
+            var ch = text[s - 1];
+            if (ch is '\r' or '\n' or '!' or '?' or ';')
+            {
+                break;
+            }
+            if (ch == '.' && (s >= text.Length || char.IsWhiteSpace(text[s])))
+            {
+                break;
+            }
+            s--;
+        }
+
+        var e = endIdx;
+        while (e < text.Length)
+        {
+            var ch = text[e];
+            if (ch is '\r' or '\n' or '!' or '?' or ';')
+            {
+                break;
+            }
+            if (ch == '.' && (e + 1 >= text.Length || char.IsWhiteSpace(text[e + 1])))
+            {
+                break;
+            }
+            e++;
+        }
+
+        return (s, e);
+    }
+
     private static bool IsTightConnectorPrefix(string prefix)
     {
         var trimmed = prefix.TrimStart(' ', ',', ':', '-', '\u2013', '\u2014');
@@ -1967,18 +2020,52 @@ public static partial class RecipeValidator
                     var fEquiv = string.Equals(unit, "C", StringComparison.OrdinalIgnoreCase)
                         ? (tok.Value.Value * 9m / 5m) + 32m
                         : tok.Value.Value;
-                    var localContext = step.TemplateText;
+                    var isDistanceContext = false;
                     if (placeholderMatchesByKey.TryGetValue(key, out var tempMatch))
                     {
-                        var ctxStart = Math.Max(0, tempMatch.Index - 35);
-                        var ctxEnd = Math.Min(
-                            step.TemplateText.Length,
-                            tempMatch.Index + tempMatch.Length + 35
+                        var (sentStart, sentEnd) = FindSentenceBounds(
+                            step.TemplateText,
+                            tempMatch.Index,
+                            tempMatch.Index + tempMatch.Length
                         );
-                        localContext = step.TemplateText[ctxStart..ctxEnd];
+                        var beforeInSentence = step.TemplateText[sentStart..tempMatch.Index];
+                        var afterInSentence = step.TemplateText[
+                            (tempMatch.Index + tempMatch.Length)..sentEnd
+                        ];
+
+                        if (AdjacentDistanceAfterTempRegex().IsMatch(afterInSentence))
+                        {
+                            isDistanceContext = true;
+                        }
+                        else if (
+                            !(
+                                fEquiv >= 100m
+                                && ThermalVerbBeforeTempRegex().IsMatch(beforeInSentence)
+                            )
+                        )
+                        {
+                            var localLeft = beforeInSentence[
+                                Math.Max(0, beforeInSentence.Length - 35)..
+                            ];
+                            var localRight = afterInSentence[
+                                ..Math.Min(afterInSentence.Length, 35)
+                            ];
+                            var strippedWindow = ExplicitNumberedLengthOrRackPosRegex()
+                                .Replace($"{localLeft} {localRight}", " ");
+                            isDistanceContext = DistanceOrRackTempContextRegex()
+                                .IsMatch(strippedWindow);
+                        }
+                    }
+                    else
+                    {
+                        isDistanceContext = DistanceOrRackTempContextRegex()
+                            .IsMatch(
+                                ExplicitNumberedLengthOrRackPosRegex()
+                                    .Replace(step.TemplateText, " ")
+                            );
                     }
 
-                    if (DistanceOrRackTempContextRegex().IsMatch(localContext))
+                    if (isDistanceContext)
                     {
                         errors.Add(
                             $"Step {stepNum}: TemperatureToken '{{{{{key}}}}}' ({tok.Value.Value:0.###}°{unit!.ToUpperInvariant()}) appears next to a physical rack or length distance rather than a cooking temperature. Keep distances (e.g., '4 inches from broiler element') as plain text in templateText."
@@ -2174,12 +2261,87 @@ public static partial class RecipeValidator
     )]
     private static partial Regex DuplicateTempPrepositionRegex();
 
-    public static ExtractedRecipeDto RepairSafeStepTokenGlitches(ExtractedRecipeDto recipe)
+    [GeneratedRegex(
+        @"\{\{([^{}\r\n]+)\}\}(?:\s*[-–—]\s*(?:degrees?(?:\s*(?:[FC]|Fahrenheit|Celsius))?|deg\.?(?:\s*(?:[FC]|Fahrenheit|Celsius))?)|\s+(?:degrees?(?:\s*(?:[FC]|Fahrenheit|Celsius))?|deg\.?(?:\s*(?:[FC]|Fahrenheit|Celsius))?)|\s*°\s*[FC])(?=$|[\s\.,:;!\?\)\]])",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex DuplicateTempUnitSuffixRegex();
+
+    [GeneratedRegex(
+        @"\b(?:half(?:\s+of)?|other\s+half(?:\s+of)?|remaining|remainder(?:\s+of)?|rest\s+of|portion(?:\s+of)?|all\s+of|reserved)\s+$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex BatchSplitPrefixRegex();
+
+    private static bool IsNullOrUnlistedRefId(string? refId)
+    {
+        if (string.IsNullOrWhiteSpace(refId))
+        {
+            return true;
+        }
+
+        var trimmed = refId.Trim();
+        return string.Equals(trimmed, "null", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(trimmed, "none", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(trimmed, "unlisted", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(trimmed, "n/a", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(trimmed, "na", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool CanInlineExplicitUnlistedToken(
+        StepIngredientTokenDto tok,
+        Dictionary<string, ExtractedIngredientDto> ingredientsByRefId,
+        HashSet<string> unreferencedMasterWords
+    )
+    {
+        if (tok.StepQuantity is > 0m || string.IsNullOrWhiteSpace(tok.FallbackDisplay))
+        {
+            return false;
+        }
+
+        var trimmedRef = tok.IngredientRefId?.Trim() ?? string.Empty;
+        var isUnlisted =
+            IsNullOrUnlistedRefId(trimmedRef)
+            || (
+                NormalizeTokenKey(tok.TokenKey)
+                    .StartsWith("unlisted_", StringComparison.OrdinalIgnoreCase)
+                && !ingredientsByRefId.ContainsKey(trimmedRef)
+            );
+        if (!isUnlisted)
+        {
+            return false;
+        }
+
+        if (unreferencedMasterWords.Count == 0)
+        {
+            return true;
+        }
+
+        foreach (Match w in ContentWordRegex().Matches(tok.FallbackDisplay))
+        {
+            if (unreferencedMasterWords.Contains(w.Value.ToLowerInvariant()))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    public static ExtractedRecipeDto RepairSafeStepTokenGlitches(
+        ExtractedRecipeDto recipe,
+        bool repairBatchSplitDoubleCounts = false
+    )
     {
         if (recipe.Steps is null || recipe.Steps.Count == 0)
         {
             return recipe;
         }
+
+        var ingredientsByRefId = (recipe.Ingredients ?? [])
+            .Where(i => !string.IsNullOrWhiteSpace(i.RefId))
+            .GroupBy(i => i.RefId!.Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
 
         var usedTemplateIngRefIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var step in recipe.Steps)
@@ -2200,6 +2362,7 @@ public static partial class RecipeValidator
                 if (
                     stepIngByKey.TryGetValue(key, out var tok)
                     && !string.IsNullOrWhiteSpace(tok.IngredientRefId)
+                    && ingredientsByRefId.ContainsKey(tok.IngredientRefId.Trim())
                 )
                 {
                     usedTemplateIngRefIds.Add(tok.IngredientRefId.Trim());
@@ -2207,10 +2370,49 @@ public static partial class RecipeValidator
             }
         }
 
+        var unreferencedMasterWords = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var ing in recipe.Ingredients ?? [])
+        {
+            var refId = ing.RefId?.Trim() ?? string.Empty;
+            if (
+                string.IsNullOrWhiteSpace(refId)
+                || usedTemplateIngRefIds.Contains(refId)
+                || IsBenignUnreferencedIngredient(ing)
+            )
+            {
+                continue;
+            }
+
+            foreach (var src in new[] { ing.CanonicalFoodItem, ing.DisplayName })
+            {
+                if (string.IsNullOrWhiteSpace(src))
+                {
+                    continue;
+                }
+
+                foreach (Match w in ContentWordRegex().Matches(src))
+                {
+                    unreferencedMasterWords.Add(w.Value.ToLowerInvariant());
+                }
+            }
+        }
+
+        // Pre-track cumulative step quantities per ingredient (in step order) when post-retry
+        // batch-split repair is requested (e.g., Step 2 added 1 lb; Step 3 says "Fry half of {{ing_X}}").
+        var fullBatchAlreadyAdded = new Dictionary<string, decimal>(
+            StringComparer.OrdinalIgnoreCase
+        );
+
         var updatedSteps = new List<ExtractedStepDto>(recipe.Steps.Count);
         var changedAny = false;
 
-        foreach (var step in recipe.Steps)
+        foreach (
+            var step in recipe
+                .Steps.Select((s, idx) => (Step: s, Order: idx))
+                .OrderBy(x => x.Step.StepNumber > 0 ? x.Step.StepNumber : x.Order + 1)
+                .ThenBy(x => x.Order)
+                .Select(x => x.Step)
+        )
         {
             var template = step.TemplateText ?? string.Empty;
             var ingTokens = (step.IngredientTokens ?? []).ToList();
@@ -2243,6 +2445,7 @@ public static partial class RecipeValidator
 
             var seenInTemplate = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var stepChanged = false;
+            var keysToInlineRemove = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             var rewrittenTemplate = PlaceholderRegex()
                 .Replace(
@@ -2251,6 +2454,21 @@ public static partial class RecipeValidator
                     {
                         var rawKey = m.Groups[1].Value;
                         var key = NormalizeTokenKey(rawKey);
+
+                        if (
+                            ingMap.TryGetValue(key, out var maybeUnlisted)
+                            && CanInlineExplicitUnlistedToken(
+                                maybeUnlisted,
+                                ingredientsByRefId,
+                                unreferencedMasterWords
+                            )
+                        )
+                        {
+                            keysToInlineRemove.Add(key);
+                            stepChanged = true;
+                            return maybeUnlisted.FallbackDisplay!.Trim();
+                        }
+
                         if (seenInTemplate.Add(key))
                         {
                             return m.Value;
@@ -2307,6 +2525,87 @@ public static partial class RecipeValidator
                     }
                 );
 
+            if (keysToInlineRemove.Count > 0)
+            {
+                ingTokens.RemoveAll(t =>
+                    keysToInlineRemove.Contains(NormalizeTokenKey(t.TokenKey))
+                );
+            }
+
+            if (repairBatchSplitDoubleCounts && !string.IsNullOrEmpty(rewrittenTemplate))
+            {
+                var ingTokenIdxByKey = new Dictionary<string, int>(
+                    StringComparer.OrdinalIgnoreCase
+                );
+                for (var idx = 0; idx < ingTokens.Count; idx++)
+                {
+                    ingTokenIdxByKey.TryAdd(NormalizeTokenKey(ingTokens[idx].TokenKey), idx);
+                }
+
+                foreach (Match pm in PlaceholderRegex().Matches(rewrittenTemplate))
+                {
+                    var key = NormalizeTokenKey(pm.Groups[1].Value);
+                    if (!ingTokenIdxByKey.TryGetValue(key, out var tokIdx))
+                    {
+                        continue;
+                    }
+
+                    var tok = ingTokens[tokIdx];
+                    var refId = tok.IngredientRefId?.Trim() ?? string.Empty;
+                    if (
+                        string.IsNullOrWhiteSpace(refId)
+                        || !ingredientsByRefId.TryGetValue(refId, out var master)
+                        || !master.Quantity.HasValue
+                        || master.Quantity.Value <= 0m
+                        || tok.StepQuantity is not > 0m
+                    )
+                    {
+                        continue;
+                    }
+
+                    var upperLimit = Math.Max(
+                        master.Quantity.Value,
+                        master.MaxQuantity ?? master.Quantity.Value
+                    );
+                    var (mUnit, mCustom) = RecipeUnitAndSectionHelpers.NormalizeUnit(master.Unit);
+                    var (sUnit, sCustom) = RecipeUnitAndSectionHelpers.NormalizeUnit(tok.StepUnit);
+                    if (!sUnit.HasValue && string.IsNullOrWhiteSpace(sCustom))
+                    {
+                        sUnit = mUnit;
+                        sCustom = mCustom;
+                    }
+
+                    if (
+                        !TryConvertStepQuantityToTarget(
+                            tok.StepQuantity.Value,
+                            sUnit,
+                            sCustom,
+                            mUnit,
+                            mCustom,
+                            out var convertedQty
+                        )
+                    )
+                    {
+                        continue;
+                    }
+
+                    fullBatchAlreadyAdded.TryGetValue(refId, out var priorSum);
+                    var beforeMatch = rewrittenTemplate[..pm.Index];
+                    if (
+                        priorSum >= upperLimit * 0.99m
+                        && priorSum <= upperLimit * 1.01m
+                        && BatchSplitPrefixRegex().IsMatch(beforeMatch)
+                    )
+                    {
+                        ingTokens[tokIdx] = tok with { StepQuantity = null, StepUnit = null };
+                        stepChanged = true;
+                        continue;
+                    }
+
+                    fullBatchAlreadyAdded[refId] = priorSum + convertedQty;
+                }
+            }
+
             if (tempMap.Count > 0 && !string.IsNullOrEmpty(rewrittenTemplate))
             {
                 var cleanedTempPrep = DuplicateTempPrepositionRegex()
@@ -2317,9 +2616,17 @@ public static partial class RecipeValidator
                                 ? $"{m.Groups[1].Value} "
                                 : m.Value
                     );
-                if (!string.Equals(cleanedTempPrep, rewrittenTemplate, StringComparison.Ordinal))
+                var cleanedTempSuffix = DuplicateTempUnitSuffixRegex()
+                    .Replace(
+                        cleanedTempPrep,
+                        m =>
+                            tempMap.ContainsKey(NormalizeTokenKey(m.Groups[1].Value))
+                                ? $"{{{{{NormalizeTokenKey(m.Groups[1].Value)}}}}}"
+                                : m.Value
+                    );
+                if (!string.Equals(cleanedTempSuffix, rewrittenTemplate, StringComparison.Ordinal))
                 {
-                    rewrittenTemplate = cleanedTempPrep;
+                    rewrittenTemplate = cleanedTempSuffix;
                     stepChanged = true;
                 }
             }

@@ -104,7 +104,7 @@ public static partial class StepInstructionParser
     private static partial Regex DurationLabelRegex();
 
     [GeneratedRegex(
-        @"^\s*(?:°\s*(?:[FC]|Fahrenheit|Celsius)\b|degrees?(?:\s*(?:[FC]|Fahrenheit|Celsius))?|deg\.?(?:\s*(?:[FC]|Fahrenheit|Celsius))?)(?=$|[\s\.,:;!\?\)\]])",
+        @"^\s*(?:[-–—]\s*(?:degrees?(?:\s*(?:[FC]|Fahrenheit|Celsius))?|deg\.?(?:\s*(?:[FC]|Fahrenheit|Celsius))?)|°\s*(?:[FC]|Fahrenheit|Celsius)\b|degrees?(?:\s*(?:[FC]|Fahrenheit|Celsius))?|deg\.?(?:\s*(?:[FC]|Fahrenheit|Celsius))?)(?=$|[\s\.,:;!\?\)\]])",
         RegexOptions.IgnoreCase,
         matchTimeoutMilliseconds: 1000
     )]

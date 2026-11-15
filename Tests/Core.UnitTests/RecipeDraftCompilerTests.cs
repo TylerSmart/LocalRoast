@@ -923,4 +923,82 @@ public sealed class RecipeDraftCompilerTests
         Assert.DoesNotContain(dinnerId, draft.SuggestedTagIds!);
         Assert.DoesNotContain(noCookId, draft.SuggestedTagIds!);
     }
+
+    [TestMethod]
+    public void Compile_StripsUngroundedMeatTagsTaxonomyHeadersAndHyphenDegreeSuffix()
+    {
+        var frenchId = Guid.NewGuid();
+        var beefId = Guid.NewGuid();
+        var porkId = Guid.NewGuid();
+        var baconId = Guid.NewGuid();
+        var appetizerId = Guid.NewGuid();
+        IReadOnlyList<CatalogTagLookupItem> tags =
+        [
+            new(frenchId, "French", "french", "french"),
+            new(beefId, "Beef", "beef", "beef"),
+            new(porkId, "Pork", "pork", "pork"),
+            new(baconId, "Bacon", "bacon", "bacon"),
+            new(appetizerId, "Appetizer", "appetizer", "appetizer"),
+        ];
+
+        var extracted = new ExtractedRecipeDto(
+            Title: "French Onion and Bacon Tart",
+            Description: "Rich tart.",
+            Servings: 6m,
+            YieldDisplay: "Serves 6",
+            CookTimeMinutes: 45,
+            ProposedTags: ["French", "Beef", "Appetizer", "Bacon", "Protein & Base"],
+            Ingredients:
+            [
+                new(
+                    "ing_1",
+                    CanonicalFoodItem: "bacon",
+                    DisplayName: "bacon",
+                    Category: "MeatAndSeafood",
+                    Quantity: 4m,
+                    Unit: "oz",
+                    RawText: "4 ounces bacon"
+                ),
+                new(
+                    "ing_2",
+                    CanonicalFoodItem: "onion",
+                    DisplayName: "onions",
+                    Category: "Produce",
+                    Quantity: 1.5m,
+                    Unit: "lb",
+                    RawText: "1 1/2 pounds onions"
+                ),
+            ],
+            Steps:
+            [
+                new(
+                    1,
+                    TemplateText: "Cook {{ing_1_a}} and {{ing_2_a}}, then bake in a {{temp_1}}-degree oven.",
+                    IngredientTokens:
+                    [
+                        new("ing_1_a", "ing_1", 4m, "oz"),
+                        new("ing_2_a", "ing_2", 1.5m, "lb"),
+                    ],
+                    TemperatureTokens: [new("temp_1", 375m, "F")]
+                ),
+            ]
+        );
+
+        var matches = EntityCandidateMatcher.Match(extracted, [], tags);
+        var draft = RecipeDraftCompiler.Compile(
+            extracted,
+            RecipeValidator.Validate(extracted),
+            matches
+        );
+
+        Assert.Contains(frenchId, draft.SuggestedTagIds!);
+        Assert.Contains(appetizerId, draft.SuggestedTagIds!);
+        Assert.Contains(baconId, draft.SuggestedTagIds!);
+        Assert.DoesNotContain(beefId, draft.SuggestedTagIds!);
+        Assert.DoesNotContain("Protein & Base", draft.ProposedTagNames!);
+        Assert.AreEqual(
+            "Cook ||{\"ingredient\":\"bacon\",\"amount\":4,\"unit\":\"oz\",\"type\":\"Ingredient\"}|| and ||{\"ingredient\":\"onions\",\"amount\":1.5,\"unit\":\"lb\",\"type\":\"Ingredient\"}||, then bake in a ||{\"fahrenheit\":375,\"type\":\"Temperature\"}|| oven.",
+            draft.Steps![0].Instruction
+        );
+    }
 }

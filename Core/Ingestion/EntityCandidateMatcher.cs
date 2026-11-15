@@ -128,11 +128,7 @@ public static class EntityCandidateMatcher
             }
 
             var tagKey = rawTag.Trim();
-            if (
-                tagMatches.ContainsKey(tagKey)
-                || BuiltInTags.DisallowedGrocerySectionNames.Contains(tagKey)
-                || BuiltInTags.DisallowedGenericStaples.Contains(tagKey)
-            )
+            if (tagMatches.ContainsKey(tagKey) || BuiltInTags.IsDisallowedTagName(tagKey))
             {
                 continue;
             }

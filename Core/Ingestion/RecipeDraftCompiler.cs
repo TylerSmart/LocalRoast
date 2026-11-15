@@ -246,6 +246,132 @@ public static partial class RecipeDraftCompiler
         "Dessert",
     };
 
+    private static readonly (string[] TagNames, Regex EvidenceRegex)[] ProteinTagGroundingRules =
+    [
+        (
+            ["Beef"],
+            new Regex(
+                @"\b(?:beef|steak|veal|brisket|chuck|sirloin|ribeye|rib[- ]?eye|tri[- ]?tip|flank|skirt|short\s+ribs?|oxtail|corned\s+beef|pastrami|bresaola|stew\s+meat|roast\s+beef|carne\s+asada|filet\s+mignon|porterhouse|t[- ]?bone|prime\s+rib|london\s+broil|hamburgers?)\b",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+            )
+        ),
+        (
+            ["Ground Beef"],
+            new Regex(
+                @"\b(?:ground\s+(?:beef|chuck|sirloin|round)|hamburgers?)\b",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+            )
+        ),
+        (
+            ["Steak"],
+            new Regex(
+                @"\b(?:steak|ribeye|rib[- ]?eye|sirloin|filet\s+mignon|flank|skirt|porterhouse|t[- ]?bone|london\s+broil|carne\s+asada|tri[- ]?tip|strip\s+loin|hanger|bavette)\b",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+            )
+        ),
+        (
+            ["Pork", "Pork Chops", "Pork Tenderloin", "Pork Shoulder"],
+            new Regex(
+                @"\b(?:pork|bacon|pancetta|prosciutto|guanciale|lardons?|ham|sausage|chorizo|carnitas|spare\s+ribs?|baby\s+back|boston\s+butt|picnic\s+roast)\b",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+            )
+        ),
+        (
+            ["Bacon"],
+            new Regex(
+                @"\b(?:bacon|pancetta|lardons?)\b",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+            )
+        ),
+        (
+            ["Sausage"],
+            new Regex(
+                @"\b(?:sausage|chorizo|kielbasa|andouille|bratwurst|linguica|mortadella|salami|pepperoni|boudin|merguez|longaniza)\b",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+            )
+        ),
+        (
+            ["Ham"],
+            new Regex(
+                @"\b(?:ham|prosciutto|jam[oó]n)\b",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+            )
+        ),
+        (
+            ["Lamb"],
+            new Regex(
+                @"\b(?:lamb|mutton)\b",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+            )
+        ),
+        (
+            ["Chicken", "Chicken Breast", "Chicken Thighs"],
+            new Regex(
+                @"\b(?:chicken|poultry|cornish\s+hen|rotisserie)\b",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+            )
+        ),
+        (
+            ["Turkey"],
+            new Regex(@"\bturkey\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
+        ),
+        (["Duck"], new Regex(@"\bduck\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)),
+        (
+            ["Salmon"],
+            new Regex(@"\bsalmon\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
+        ),
+        (["Tuna"], new Regex(@"\btuna\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)),
+        (
+            ["Shrimp"],
+            new Regex(
+                @"\b(?:shrimp|prawns?)\b",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+            )
+        ),
+        (
+            ["Scallops"],
+            new Regex(@"\bscallops?\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
+        ),
+        (
+            ["Crab"],
+            new Regex(
+                @"\b(?:crab|crabmeat)\b",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+            )
+        ),
+        (
+            ["Lobster"],
+            new Regex(@"\blobsters?\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
+        ),
+        (
+            ["Mussels"],
+            new Regex(@"\bmussels?\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
+        ),
+        (
+            ["White Fish"],
+            new Regex(
+                @"\b(?:fish|cod|halibut|tilapia|sea\s+bass|snapper|trout|flounder|sole|haddock|mahi|catfish|pollock|branzino|barramundi|grouper|perch|swordfish|monkfish)\b",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+            )
+        ),
+        (["Tofu"], new Regex(@"\btofu\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)),
+        (
+            ["Tempeh"],
+            new Regex(@"\btempeh\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
+        ),
+        (
+            ["Chickpeas"],
+            new Regex(
+                @"\b(?:chickpeas?|garbanzo)\b",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+            )
+        ),
+        (
+            ["Lentils"],
+            new Regex(@"\blentils?\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
+        ),
+    ];
+
     private static readonly HashSet<string> EntreeCourseTagNames = new(
         StringComparer.OrdinalIgnoreCase
     )
@@ -978,10 +1104,7 @@ public static partial class RecipeDraftCompiler
             }
 
             var tagKey = rawTag.Trim();
-            if (
-                BuiltInTags.DisallowedGrocerySectionNames.Contains(tagKey)
-                || BuiltInTags.DisallowedGenericStaples.Contains(tagKey)
-            )
+            if (BuiltInTags.IsDisallowedTagName(tagKey))
             {
                 continue;
             }
@@ -1190,6 +1313,36 @@ public static partial class RecipeDraftCompiler
         {
             matchedEntries.RemoveAll(e => EntreeCourseTagNames.Contains(e.Name));
             proposedNames.RemoveAll(n => EntreeCourseTagNames.Contains(n));
+        }
+
+        // Protein / base grounding guardrail: strip concrete meat/seafood/protein tags when
+        // neither title/description nor any ingredient mentions that protein.
+        var rawProteinCorpus = string.Join(
+            " ",
+            new[] { extracted.Title, extracted.Description }
+                .Concat(
+                    compiledIngredients.SelectMany(i =>
+                        new[]
+                        {
+                            i.ProposedFoodItemName,
+                            i.MatchedFoodItemName,
+                            i.DisplayName,
+                            i.OriginalRawText,
+                        }
+                    )
+                )
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+        );
+        var cleanProteinCorpus = VeganOrProduceMeatExclusionRegex().Replace(rawProteinCorpus, " ");
+        foreach (var (tagNames, evidenceRegex) in ProteinTagGroundingRules)
+        {
+            if (tagNames.Any(HasTag) && !evidenceRegex.IsMatch(cleanProteinCorpus))
+            {
+                foreach (var tagName in tagNames)
+                {
+                    RemoveTag(tagName);
+                }
+            }
         }
 
         return (matchedEntries.Select(e => e.Id).ToList(), proposedNames);
