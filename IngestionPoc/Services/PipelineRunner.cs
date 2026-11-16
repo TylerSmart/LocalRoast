@@ -1247,8 +1247,8 @@ public sealed partial class PipelineRunner(
                     entry.Name,
                     entry.Category
                 );
-                warnings.AddRange(ValidateIngredientDecision(decision, cand));
                 decision = ReconcileStage3Decision(decision, ing, catalog);
+                warnings.AddRange(ValidateIngredientDecision(decision, cand, catalog));
             }
             else
             {
@@ -1367,8 +1367,8 @@ public sealed partial class PipelineRunner(
         var decision =
             matchResult.Parsed
             ?? new Stage3MatchDecisionDto("new_ingredient", null, ing.Name, "Other");
-        var ingWarnings = ValidateIngredientDecision(decision, dbCandidates);
         decision = ReconcileStage3Decision(decision, ing, catalog);
+        var ingWarnings = ValidateIngredientDecision(decision, dbCandidates, catalog);
         if (matchResult.ParseError is not null)
         {
             ingWarnings.Add(matchResult.ParseError);
@@ -1414,10 +1414,36 @@ public sealed partial class PipelineRunner(
         CatalogSnapshot snapshot
     )
     {
+        CatalogFoodRow? TryFindFood(string? rawName)
+        {
+            var normKey = App.Core.Recipes.RecipeUnitAndSectionHelpers.NormalizeLookupKey(
+                rawName ?? string.Empty
+            );
+            if (string.IsNullOrEmpty(normKey))
+            {
+                return null;
+            }
+
+            return snapshot.FoodItems.FirstOrDefault(f =>
+                string.Equals(f.NormalizedName, normKey, StringComparison.OrdinalIgnoreCase)
+                || f.Aliases.Any(a =>
+                    string.Equals(
+                        App.Core.Recipes.RecipeUnitAndSectionHelpers.NormalizeLookupKey(a),
+                        normKey,
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                )
+            );
+        }
+
+        string ValidCategoryOrOther(string? cat) =>
+            FoodCategories.Parse(cat) is not null ? cat!.Trim() : "Other";
+
         var looksLikeSubRecipe =
             string.Equals(ing.Unit, "recipe", StringComparison.OrdinalIgnoreCase)
             || string.Equals(ing.Unit, "batch", StringComparison.OrdinalIgnoreCase)
             || (ing.PrepNote?.Contains("recipe", StringComparison.OrdinalIgnoreCase) ?? false)
+            || (ing.PrepNote?.Contains("page ", StringComparison.OrdinalIgnoreCase) ?? false)
             || ing.Name.Contains("recipe", StringComparison.OrdinalIgnoreCase);
 
         if (
@@ -1429,17 +1455,7 @@ public sealed partial class PipelineRunner(
             )
         )
         {
-            var rawNorm = App.Core.Recipes.RecipeUnitAndSectionHelpers.NormalizeLookupKey(ing.Name);
-            var matchedFood = snapshot.FoodItems.FirstOrDefault(f =>
-                string.Equals(f.NormalizedName, rawNorm, StringComparison.OrdinalIgnoreCase)
-                || f.Aliases.Any(a =>
-                    string.Equals(
-                        App.Core.Recipes.RecipeUnitAndSectionHelpers.NormalizeLookupKey(a),
-                        rawNorm,
-                        StringComparison.OrdinalIgnoreCase
-                    )
-                )
-            );
+            var matchedFood = TryFindFood(ing.Name) ?? TryFindFood(decision.Name);
             if (matchedFood is not null)
             {
                 return new Stage3MatchDecisionDto(
@@ -1452,6 +1468,59 @@ public sealed partial class PipelineRunner(
         }
 
         if (
+            !looksLikeSubRecipe
+            && string.Equals(
+                decision.MatchType,
+                "unresolved_recipe",
+                StringComparison.OrdinalIgnoreCase
+            )
+            && !string.IsNullOrWhiteSpace(ing.Unit)
+        )
+        {
+            decision = new Stage3MatchDecisionDto(
+                "new_ingredient",
+                null,
+                string.IsNullOrWhiteSpace(decision.Name) ? ing.Name : decision.Name.Trim(),
+                ValidCategoryOrOther(decision.Category)
+            );
+        }
+
+        if (
+            string.Equals(
+                decision.MatchType,
+                "existing_ingredient",
+                StringComparison.OrdinalIgnoreCase
+            )
+        )
+        {
+            if (
+                Guid.TryParse(decision.Id, out var existingFoodId)
+                && snapshot.FoodItems.Any(f => f.Id == existingFoodId)
+            )
+            {
+                return decision;
+            }
+
+            var exactFood = TryFindFood(decision.Name) ?? TryFindFood(ing.Name);
+            if (exactFood is not null)
+            {
+                return new Stage3MatchDecisionDto(
+                    "existing_ingredient",
+                    exactFood.Id.ToString(),
+                    exactFood.Name,
+                    null
+                );
+            }
+
+            return new Stage3MatchDecisionDto(
+                "new_ingredient",
+                null,
+                string.IsNullOrWhiteSpace(decision.Name) ? ing.Name : decision.Name.Trim(),
+                ValidCategoryOrOther(decision.Category)
+            );
+        }
+
+        if (
             !string.Equals(decision.MatchType, "new_ingredient", StringComparison.OrdinalIgnoreCase)
             || string.IsNullOrWhiteSpace(decision.Name)
         )
@@ -1459,23 +1528,7 @@ public sealed partial class PipelineRunner(
             return decision;
         }
 
-        var norm = App.Core.Recipes.RecipeUnitAndSectionHelpers.NormalizeLookupKey(decision.Name);
-        if (string.IsNullOrEmpty(norm))
-        {
-            return decision;
-        }
-
-        var existing = snapshot.FoodItems.FirstOrDefault(f =>
-            string.Equals(f.NormalizedName, norm, StringComparison.OrdinalIgnoreCase)
-            || f.Aliases.Any(a =>
-                string.Equals(
-                    App.Core.Recipes.RecipeUnitAndSectionHelpers.NormalizeLookupKey(a),
-                    norm,
-                    StringComparison.OrdinalIgnoreCase
-                )
-            )
-        );
-
+        var existing = TryFindFood(decision.Name) ?? TryFindFood(ing.Name);
         return existing is not null
             ? new Stage3MatchDecisionDto(
                 "existing_ingredient",
@@ -1483,7 +1536,10 @@ public sealed partial class PipelineRunner(
                 existing.Name,
                 null
             )
-            : decision;
+            : decision with
+            {
+                Category = ValidCategoryOrOther(decision.Category),
+            };
     }
 
     private RecipeQualityScorecard ScoreAssembledState(
@@ -2189,7 +2245,8 @@ public sealed partial class PipelineRunner(
 
     private static List<string> ValidateIngredientDecision(
         Stage3MatchDecisionDto decision,
-        DbSearchCandidates candidates
+        DbSearchCandidates candidates,
+        CatalogSnapshot? snapshot = null
     )
     {
         var warnings = new List<string>();
@@ -2198,7 +2255,10 @@ public sealed partial class PipelineRunner(
             case "existing_ingredient":
                 if (
                     !Guid.TryParse(decision.Id, out var foodGuid)
-                    || !candidates.ExistingIngredients.Any(c => c.Id == foodGuid)
+                    || (
+                        !candidates.ExistingIngredients.Any(c => c.Id == foodGuid)
+                        && !(snapshot?.FoodItems.Any(f => f.Id == foodGuid) ?? false)
+                    )
                 )
                 {
                     warnings.Add(
@@ -2209,7 +2269,10 @@ public sealed partial class PipelineRunner(
             case "existing_recipe":
                 if (
                     !Guid.TryParse(decision.Id, out var recipeGuid)
-                    || !candidates.ExistingRecipes.Any(r => r.Id == recipeGuid)
+                    || (
+                        !candidates.ExistingRecipes.Any(r => r.Id == recipeGuid)
+                        && !(snapshot?.Recipes.Any(r => r.Id == recipeGuid) ?? false)
+                    )
                 )
                 {
                     warnings.Add(
