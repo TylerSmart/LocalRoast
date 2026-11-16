@@ -30,6 +30,7 @@ public sealed class PromptSet
     public required PromptFileInfo MatchIngredient { get; init; }
     public required PromptFileInfo MatchIngredientBatch { get; init; }
     public required PromptFileInfo TokenizeStep { get; init; }
+    public required PromptFileInfo TokenizeStepsBatch { get; init; }
     public required PromptFileInfo PolishFull { get; init; }
     public required PromptFileInfo PolishTargeted { get; init; }
 
@@ -41,6 +42,7 @@ public sealed class PromptSet
             MatchIngredient,
             MatchIngredientBatch,
             TokenizeStep,
+            TokenizeStepsBatch,
             PolishFull,
             PolishTargeted,
         ];
@@ -55,6 +57,7 @@ public sealed class PromptSet
             MatchIngredient = Load(directory, "03b-ingredient-match.md"),
             MatchIngredientBatch = Load(directory, "03c-ingredient-match-batch.md"),
             TokenizeStep = Load(directory, "04-tokenize-step.md"),
+            TokenizeStepsBatch = Load(directory, "04b-tokenize-steps-batch.md"),
             PolishFull = Load(directory, "05a-polish-full.md"),
             PolishTargeted = Load(directory, "05b-polish-targeted.md"),
         };
@@ -239,6 +242,16 @@ public sealed record StepTokenizeResult(
     string RenderedMetric1x,
     IReadOnlyList<string> ValidationWarnings
 );
+
+public enum Stage4Mode
+{
+    Single,
+    Batched,
+}
+
+public sealed record Stage4BatchStepDto(int StepNumber, JsonArray Tokens);
+
+public sealed record Stage4BatchResponseDto(IReadOnlyList<Stage4BatchStepDto> Steps);
 
 public enum PolishMode
 {
@@ -686,6 +699,32 @@ public static class PipelineSchemas
             additionalProperties = false,
             properties = new { tokens = StepTokenArraySchema() },
             required = new[] { "tokens" },
+        };
+
+    public static object Stage4BatchStepsSchema() =>
+        new
+        {
+            type = "object",
+            additionalProperties = false,
+            properties = new
+            {
+                steps = new
+                {
+                    type = "array",
+                    items = new
+                    {
+                        type = "object",
+                        additionalProperties = false,
+                        properties = new
+                        {
+                            stepNumber = new { type = "integer" },
+                            tokens = StepTokenArraySchema(),
+                        },
+                        required = new[] { "stepNumber", "tokens" },
+                    },
+                },
+            },
+            required = new[] { "steps" },
         };
 
     public static object Stage5PolishFullSchema() =>

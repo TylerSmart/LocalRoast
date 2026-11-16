@@ -87,7 +87,9 @@ Console.WriteLine(
 Console.WriteLine(
     $"  Model:   {effectiveConfig.TextModel} | Embed: {effectiveConfig.EmbedModel ?? "disabled"} (thinking={effectiveConfig.EnableThinking}, auxThinking={effectiveConfig.AuxThinkingOverride?.ToString() ?? "inherit"}, ctx={effectiveConfig.ContextWindowTokens})"
 );
-Console.WriteLine($"  Prompts: {promptsDir} (stage3={cli.Stage3Mode}, polish={cli.PolishMode})");
+Console.WriteLine(
+    $"  Prompts: {promptsDir} (stage3={cli.Stage3Mode}, stage4={cli.Stage4Mode}, polish={cli.PolishMode})"
+);
 
 using var httpClient = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
 var llmClient = new LlmRunnerClient(httpClient);
@@ -207,6 +209,7 @@ var runOptions = new PocRunOptions(
     SkipIngredients: cli.SkipIngredients,
     PolishMode: cli.PolishMode,
     Stage3Mode: cli.Stage3Mode,
+    Stage4Mode: cli.Stage4Mode,
     CacheDirectory: Path.Combine(pocRoot, "cache")
 );
 
@@ -235,7 +238,7 @@ foreach (var s in summaries)
         : string.Empty;
 
     Console.WriteLine(
-        $"  - {s.Title}: {(s.Stage1Success ? "OK" : "FAILED")} in {s.TotalElapsedMs / 1000.0:F1}s (S3={s.Stage3ElapsedMs / 1000.0:F1}s) | "
+        $"  - {s.Title}: {(s.Stage1Success ? "OK" : "FAILED")} in {s.TotalElapsedMs / 1000.0:F1}s (S3={s.Stage3ElapsedMs / 1000.0:F1}s, S4={s.Stage4ElapsedMs / 1000.0:F1}s) | "
             + $"Score={s.BaselineScore?.TotalScore ?? 0}/100{prodSuffix} | "
             + $"Ing: {s.ExistingIngredientMatches} db-ing, {s.ExistingRecipeMatches} db-rec, {s.NewIngredientsProposed} new, {s.UnresolvedRecipes} unres-rec | "
             + $"StepWarn: {s.StepValidationWarnings}, ProseOnly: {s.ProseOnlyIngredients.Count}{polishSuffix}"
@@ -341,6 +344,7 @@ static void PrintHelp()
           --max-description-length <n> Max description chars before Stage 2 runs (default: 2000)
           --session-catalog            Accumulate newly proposed ingredients & recipes in memory across batch
           --stage3-mode vector-batched|vector-single|llm-terms Stage 3 DB matching mode (default: vector-batched)
+          --stage4-mode single|batched Stage 4 per-step or batched step tokenization (default: single)
           --polish none|targeted|full|both Stage 5 end-to-end QA polish mode (default: none)
           --skip-ingredients           Skip Stage 3 (DB search & matching)
           --skip-steps                 Skip Stage 4 (step tokenization)
@@ -391,6 +395,7 @@ sealed class CliArgs
     public int MaxDescriptionLength { get; private set; } = 2000;
     public bool SessionCatalog { get; private set; }
     public Stage3Mode Stage3Mode { get; private set; } = Stage3Mode.VectorBatched;
+    public Stage4Mode Stage4Mode { get; private set; } = Stage4Mode.Single;
     public PolishMode PolishMode { get; private set; } = PolishMode.None;
     public bool SkipIngredients { get; private set; }
     public bool SkipSteps { get; private set; }
@@ -539,6 +544,9 @@ sealed class CliArgs
                             $"Unknown --stage3-mode: {unknown}"
                         ),
                     };
+                    break;
+                case "--stage4-mode":
+                    c.Stage4Mode = Enum.Parse<Stage4Mode>(Next(), ignoreCase: true);
                     break;
                 case "--polish":
                     c.PolishMode = Enum.Parse<PolishMode>(Next(), ignoreCase: true);

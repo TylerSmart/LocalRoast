@@ -17,6 +17,7 @@ public sealed record PocRunOptions(
     bool SkipIngredients,
     PolishMode PolishMode = PolishMode.None,
     Stage3Mode Stage3Mode = Stage3Mode.VectorBatched,
+    Stage4Mode Stage4Mode = Stage4Mode.Single,
     string? CacheDirectory = null
 );
 
@@ -44,6 +45,7 @@ public sealed record RecipeRunSummary(
     PolishSummaryMetrics? TargetedPolish = null,
     PolishSummaryMetrics? FullPolish = null,
     long Stage3ElapsedMs = 0,
+    long Stage4ElapsedMs = 0,
     RecipeQualityScorecard? BaselineScore = null,
     RecipeQualityScorecard? TargetedScore = null,
     RecipeQualityScorecard? FullScore = null,
@@ -110,6 +112,7 @@ public sealed partial class PipelineRunner(
                     options.SkipSteps,
                     polishMode = options.PolishMode.ToString(),
                     stage3Mode = effectiveStage3Mode.ToString(),
+                    stage4Mode = options.Stage4Mode.ToString(),
                     catalogLoadedFromDb = catalog.LoadedFromDatabase,
                     catalogFoodItemCount = catalog.FoodItems.Count,
                     catalogRecipeCount = catalog.Recipes.Count,
@@ -389,122 +392,16 @@ public sealed partial class PipelineRunner(
 
         // ── Stage 4: Instruction step tokenization ──────────────────────────────
         var stepResults = new List<StepTokenizeResult>();
+        long stage4ElapsedMs = 0;
         if (!options.SkipSteps && flatSteps.Count > 0)
         {
-            var stage4Dir = Path.Combine(recipeDir, "04-steps");
-            Directory.CreateDirectory(stage4Dir);
-            Console.WriteLine($"  Stage 4 (Tokenize {flatSteps.Count} instruction steps)...");
-
-            var stepIngredientsPayload = flatIngredients
-                .Select(
-                    (pair, i) =>
-                    {
-                        var resolved = resolvedIngredients.FirstOrDefault(r => r.GlobalIndex == i);
-                        return new
-                        {
-                            index = i,
-                            section = pair.Section,
-                            name = pair.Ingredient.Name,
-                            resolvedName = resolved?.Decision.Name ?? pair.Ingredient.Name,
-                            quantity = pair.Ingredient.Quantity,
-                            maxQuantity = pair.Ingredient.MaxQuantity,
-                            unit = pair.Ingredient.Unit,
-                            prepNote = pair.Ingredient.PrepNote,
-                            alternateMeasurements = pair.Ingredient.AlternateMeasurements,
-                        };
-                    }
-                )
-                .ToList();
-
-            var priorSteps = new List<object>();
-
-            for (var s = 0; s < flatSteps.Count; s++)
-            {
-                var (secName, instr) = flatSteps[s];
-                var stepNum = s + 1;
-                var stepDir = Path.Combine(stage4Dir, $"step-{stepNum:00}");
-                Directory.CreateDirectory(stepDir);
-
-                var stepUserPayload = JsonSerializer.Serialize(
-                    new
-                    {
-                        recipeTitle = recipe.Title,
-                        stepNumber = stepNum,
-                        sectionName = secName,
-                        instruction = instr,
-                        ingredients = stepIngredientsPayload,
-                        priorSteps,
-                    },
-                    PrettyJson
-                );
-
-                var stepCall = await llmClient.CompleteStructuredAsync<JsonObject>(
-                    config,
-                    "tokenize_step",
-                    PipelineSchemas.Stage4TokenizeStepSchema(),
-                    prompts.TokenizeStep.Content,
-                    stepUserPayload,
-                    isAuxiliaryStep: false,
-                    cancellationToken: cancellationToken
-                );
-
-                await WriteExchangesAsync(stepDir, stepCall.Exchanges, cancellationToken);
-
-                var rawTokensArray = stepCall.Parsed?["tokens"]?.AsArray() ?? new JsonArray();
-                var stepRes = BuildStepResult(
-                    stepNum,
-                    secName,
-                    instr,
-                    rawTokensArray,
-                    flatIngredients.Count,
-                    stepCall.ParseError
-                );
-                stepResults.Add(stepRes);
-
-                await WriteJsonAsync(
-                    Path.Combine(stepDir, "output.json"),
-                    new
-                    {
-                        stepNumber = stepNum,
-                        sectionName = secName,
-                        elapsedMs = stepCall.TotalElapsedMs,
-                        inputInstruction = instr,
-                        tokens = rawTokensArray,
-                        rendered = new
-                        {
-                            original = stepRes.RenderedOriginal,
-                            scaled2x = stepRes.RenderedScaled2x,
-                            metric1x = stepRes.RenderedMetric1x,
-                        },
-                        validationWarnings = stepRes.ValidationWarnings,
-                    },
-                    cancellationToken
-                );
-
-                priorSteps.Add(new { stepNumber = stepNum, instruction = instr });
-
-                var tokenCount = stepRes.ParsedTokens.Count(t => t is not PocTextToken);
-                Console.WriteLine(
-                    $"    Step {stepNum}/{flatSteps.Count}: {tokenCount} token(s), {stepRes.ValidationWarnings.Count} warning(s) ({stepCall.TotalElapsedMs / 1000.0:F1}s)"
-                );
-            }
-
-            await WriteJsonAsync(
-                Path.Combine(stage4Dir, "summary.json"),
-                stepResults.Select(r => new
-                {
-                    r.StepNumber,
-                    r.SectionName,
-                    r.OriginalInstruction,
-                    tokens = r.RawTokensJson,
-                    rendered = new
-                    {
-                        original = r.RenderedOriginal,
-                        scaled2x = r.RenderedScaled2x,
-                        metric1x = r.RenderedMetric1x,
-                    },
-                    r.ValidationWarnings,
-                }),
+            (stepResults, stage4ElapsedMs) = await RunStage4Async(
+                options.Stage4Mode,
+                recipeDir,
+                recipe.Title,
+                flatIngredients,
+                resolvedIngredients,
+                flatSteps,
                 cancellationToken
             );
         }
@@ -684,12 +581,331 @@ public sealed partial class PipelineRunner(
             targetedPolish,
             fullPolish,
             stage3ElapsedMs,
+            stage4ElapsedMs,
             baselineScore,
             targetedScore,
             fullScore,
             productionScore,
             input.ProductionConfidenceScore
         );
+    }
+
+    private sealed record StepIngredientPayloadItem(
+        int Index,
+        string? Section,
+        string Name,
+        string ResolvedName,
+        decimal? Quantity,
+        decimal? MaxQuantity,
+        string? Unit,
+        string? PrepNote,
+        IReadOnlyList<Stage1AlternateMeasurementDto>? AlternateMeasurements
+    );
+
+    private async Task<(List<StepTokenizeResult> Steps, long ElapsedMs)> RunStage4Async(
+        Stage4Mode mode,
+        string recipeDir,
+        string recipeTitle,
+        List<(string? Section, Stage1IngredientDto Ingredient)> flatIngredients,
+        List<ResolvedIngredientResult> resolvedIngredients,
+        List<(string? Section, string Instruction)> flatSteps,
+        CancellationToken cancellationToken
+    )
+    {
+        var swStage4 = Stopwatch.StartNew();
+        var stage4Dir = Path.Combine(recipeDir, "04-steps");
+        Directory.CreateDirectory(stage4Dir);
+        Console.WriteLine($"  Stage 4 ({mode}, tokenize {flatSteps.Count} instruction steps)...");
+
+        var stepIngredientsPayload = flatIngredients
+            .Select(
+                (pair, i) =>
+                {
+                    var resolved = resolvedIngredients.FirstOrDefault(r => r.GlobalIndex == i);
+                    return new StepIngredientPayloadItem(
+                        i,
+                        pair.Section,
+                        pair.Ingredient.Name,
+                        resolved?.Decision.Name ?? pair.Ingredient.Name,
+                        pair.Ingredient.Quantity,
+                        pair.Ingredient.MaxQuantity,
+                        pair.Ingredient.Unit,
+                        pair.Ingredient.PrepNote,
+                        pair.Ingredient.AlternateMeasurements
+                    );
+                }
+            )
+            .ToList();
+
+        var stepResults =
+            mode == Stage4Mode.Batched
+                ? await RunStage4BatchedAsync(
+                    stage4Dir,
+                    recipeTitle,
+                    stepIngredientsPayload,
+                    flatIngredients.Count,
+                    flatSteps,
+                    cancellationToken
+                )
+                : await RunStage4SingleAsync(
+                    stage4Dir,
+                    recipeTitle,
+                    stepIngredientsPayload,
+                    flatIngredients.Count,
+                    flatSteps,
+                    cancellationToken
+                );
+
+        await WriteJsonAsync(
+            Path.Combine(stage4Dir, "summary.json"),
+            stepResults.Select(r => new
+            {
+                r.StepNumber,
+                r.SectionName,
+                r.OriginalInstruction,
+                tokens = r.RawTokensJson,
+                rendered = new
+                {
+                    original = r.RenderedOriginal,
+                    scaled2x = r.RenderedScaled2x,
+                    metric1x = r.RenderedMetric1x,
+                },
+                r.ValidationWarnings,
+            }),
+            cancellationToken
+        );
+
+        swStage4.Stop();
+        return (stepResults, swStage4.ElapsedMilliseconds);
+    }
+
+    private async Task<List<StepTokenizeResult>> RunStage4SingleAsync(
+        string stage4Dir,
+        string recipeTitle,
+        IReadOnlyList<StepIngredientPayloadItem> stepIngredientsPayload,
+        int ingredientCount,
+        List<(string? Section, string Instruction)> flatSteps,
+        CancellationToken cancellationToken
+    )
+    {
+        var stepResults = new List<StepTokenizeResult>(flatSteps.Count);
+        var priorSteps = new List<object>();
+
+        for (var s = 0; s < flatSteps.Count; s++)
+        {
+            var (secName, instr) = flatSteps[s];
+            var stepNum = s + 1;
+            var stepRes = await TokenizeSingleStepAsync(
+                stage4Dir,
+                recipeTitle,
+                stepNum,
+                flatSteps.Count,
+                secName,
+                instr,
+                stepIngredientsPayload,
+                priorSteps,
+                ingredientCount,
+                cancellationToken
+            );
+            stepResults.Add(stepRes);
+            priorSteps.Add(new { stepNumber = stepNum, instruction = instr });
+        }
+
+        return stepResults;
+    }
+
+    private async Task<List<StepTokenizeResult>> RunStage4BatchedAsync(
+        string stage4Dir,
+        string recipeTitle,
+        IReadOnlyList<StepIngredientPayloadItem> stepIngredientsPayload,
+        int ingredientCount,
+        List<(string? Section, string Instruction)> flatSteps,
+        CancellationToken cancellationToken
+    )
+    {
+        var batchPayload = JsonSerializer.Serialize(
+            new
+            {
+                recipeTitle,
+                ingredients = stepIngredientsPayload,
+                steps = flatSteps.Select(
+                    (pair, idx) =>
+                        new
+                        {
+                            stepNumber = idx + 1,
+                            sectionName = pair.Section,
+                            instruction = pair.Instruction,
+                        }
+                ),
+            },
+            PrettyJson
+        );
+
+        var batchCall = await llmClient.CompleteStructuredAsync<Stage4BatchResponseDto>(
+            config,
+            "tokenize_steps_batch",
+            PipelineSchemas.Stage4BatchStepsSchema(),
+            prompts.TokenizeStepsBatch.Content,
+            batchPayload,
+            isAuxiliaryStep: false,
+            cancellationToken: cancellationToken
+        );
+
+        await WriteExchangesAsync(
+            stage4Dir,
+            batchCall.Exchanges,
+            cancellationToken,
+            prefix: "batch-"
+        );
+
+        var batchByStepNum = (batchCall.Parsed?.Steps ?? [])
+            .GroupBy(s => s.StepNumber)
+            .ToDictionary(g => g.Key, g => g.Last());
+
+        await WriteJsonAsync(
+            Path.Combine(stage4Dir, "batch-output.json"),
+            new
+            {
+                batchCall.TotalElapsedMs,
+                batchCall.ParseError,
+                stepCountReturned = batchByStepNum.Count,
+                expectedSteps = flatSteps.Count,
+            },
+            cancellationToken
+        );
+
+        Console.WriteLine(
+            $"    Batched {batchByStepNum.Count}/{flatSteps.Count} step(s) in {batchCall.TotalElapsedMs / 1000.0:F1}s"
+                + (
+                    batchCall.ParseError is not null
+                        ? $" [WARN: {batchCall.ParseError}]"
+                        : string.Empty
+                )
+        );
+
+        var stepResults = new List<StepTokenizeResult>(flatSteps.Count);
+        var priorSteps = flatSteps
+            .Select((p, idx) => (object)new { stepNumber = idx + 1, instruction = p.Instruction })
+            .ToList();
+
+        for (var s = 0; s < flatSteps.Count; s++)
+        {
+            var (secName, instr) = flatSteps[s];
+            var stepNum = s + 1;
+            StepTokenizeResult? candidate = null;
+            if (batchByStepNum.TryGetValue(stepNum, out var entry))
+            {
+                candidate = BuildStepResult(stepNum, secName, instr, entry.Tokens, ingredientCount);
+            }
+
+            // Self-healing fallback: retry single-step ONLY if batch omitted it or flagged warnings
+            if (candidate is null || candidate.ValidationWarnings.Count > 0)
+            {
+                var priorPrefix = priorSteps.Take(s).ToList();
+                var retried = await TokenizeSingleStepAsync(
+                    stage4Dir,
+                    recipeTitle,
+                    stepNum,
+                    flatSteps.Count,
+                    secName,
+                    instr,
+                    stepIngredientsPayload,
+                    priorPrefix,
+                    ingredientCount,
+                    cancellationToken
+                );
+                if (
+                    candidate is null
+                    || retried.ValidationWarnings.Count <= candidate.ValidationWarnings.Count
+                )
+                {
+                    candidate = retried;
+                }
+            }
+
+            stepResults.Add(candidate);
+        }
+
+        return stepResults;
+    }
+
+    private async Task<StepTokenizeResult> TokenizeSingleStepAsync(
+        string stage4Dir,
+        string recipeTitle,
+        int stepNum,
+        int totalSteps,
+        string? secName,
+        string instr,
+        IReadOnlyList<StepIngredientPayloadItem> stepIngredientsPayload,
+        IReadOnlyList<object> priorSteps,
+        int ingredientCount,
+        CancellationToken cancellationToken
+    )
+    {
+        var stepDir = Path.Combine(stage4Dir, $"step-{stepNum:00}");
+        Directory.CreateDirectory(stepDir);
+
+        var stepUserPayload = JsonSerializer.Serialize(
+            new
+            {
+                recipeTitle,
+                stepNumber = stepNum,
+                sectionName = secName,
+                instruction = instr,
+                ingredients = stepIngredientsPayload,
+                priorSteps,
+            },
+            PrettyJson
+        );
+
+        var stepCall = await llmClient.CompleteStructuredAsync<JsonObject>(
+            config,
+            "tokenize_step",
+            PipelineSchemas.Stage4TokenizeStepSchema(),
+            prompts.TokenizeStep.Content,
+            stepUserPayload,
+            isAuxiliaryStep: false,
+            cancellationToken: cancellationToken
+        );
+
+        await WriteExchangesAsync(stepDir, stepCall.Exchanges, cancellationToken);
+
+        var rawTokensArray = stepCall.Parsed?["tokens"]?.AsArray() ?? new JsonArray();
+        var stepRes = BuildStepResult(
+            stepNum,
+            secName,
+            instr,
+            rawTokensArray,
+            ingredientCount,
+            stepCall.ParseError
+        );
+
+        await WriteJsonAsync(
+            Path.Combine(stepDir, "output.json"),
+            new
+            {
+                stepNumber = stepNum,
+                sectionName = secName,
+                elapsedMs = stepCall.TotalElapsedMs,
+                inputInstruction = instr,
+                tokens = rawTokensArray,
+                rendered = new
+                {
+                    original = stepRes.RenderedOriginal,
+                    scaled2x = stepRes.RenderedScaled2x,
+                    metric1x = stepRes.RenderedMetric1x,
+                },
+                validationWarnings = stepRes.ValidationWarnings,
+            },
+            cancellationToken
+        );
+
+        var tokenCount = stepRes.ParsedTokens.Count(t => t is not PocTextToken);
+        Console.WriteLine(
+            $"    Step {stepNum}/{totalSteps}: {tokenCount} token(s), {stepRes.ValidationWarnings.Count} warning(s) ({stepCall.TotalElapsedMs / 1000.0:F1}s)"
+        );
+
+        return stepRes;
     }
 
     private async Task<(List<ResolvedIngredientResult> Results, long ElapsedMs)> RunStage3Async(
@@ -2054,14 +2270,14 @@ public sealed partial class PipelineRunner(
             $"- **Models:** text=`{config.TextModel}`, embed=`{config.EmbedModel ?? "disabled"}` (thinking: `{config.EnableThinking}`, auxThinking: `{config.AuxThinkingOverride?.ToString() ?? "inherit"}`, context: `{config.ContextWindowTokens}`)"
         );
         sb.AppendLine(
-            $"- **Stages:** Stage3=`{options.Stage3Mode}`, Polish=`{options.PolishMode}`, SessionCatalog=`{options.SessionCatalog}`"
+            $"- **Stages:** Stage3=`{options.Stage3Mode}`, Stage4=`{options.Stage4Mode}`, Polish=`{options.PolishMode}`, SessionCatalog=`{options.SessionCatalog}`"
         );
         sb.AppendLine(
             $"- **Database Catalog:** {(catalog.LoadedFromDatabase ? $"{catalog.FoodItems.Count} food items, {catalog.Recipes.Count} recipes" : "Offline / Disabled")}"
         );
         sb.AppendLine();
         sb.AppendLine(
-            "| Recipe | Time (S3) | Stage 1 | DB Ing/Rec/New | Step Warn | Prose-Only | PoC Score | Targeted | Full | Prod Score |"
+            "| Recipe | Time (S3 / S4) | Stage 1 | DB Ing/Rec/New | Step Warn | Prose-Only | PoC Score | Targeted | Full | Prod Score |"
         );
         sb.AppendLine("| --- | ---: | --- | --- | ---: | ---: | ---: | --- | --- | ---: |");
 
@@ -2078,7 +2294,7 @@ public sealed partial class PipelineRunner(
                 ? $"{s.ProductionScore.TotalScore}/100"
                 : "—";
             sb.AppendLine(
-                $"| {s.Title} | {s.TotalElapsedMs / 1000.0:F1}s ({s.Stage3ElapsedMs / 1000.0:F1}s) | {s1} | {s.ExistingIngredientMatches}/{s.ExistingRecipeMatches}/{s.NewIngredientsProposed} | {s.StepValidationWarnings} | {s.ProseOnlyIngredients.Count} | {s.BaselineScore?.TotalScore ?? 0}/100 | {FormatPolishCell(s.TargetedPolish, s.TargetedScore)} | {FormatPolishCell(s.FullPolish, s.FullScore)} | {prodCol} |"
+                $"| {s.Title} | {s.TotalElapsedMs / 1000.0:F1}s ({s.Stage3ElapsedMs / 1000.0:F1}s / {s.Stage4ElapsedMs / 1000.0:F1}s) | {s1} | {s.ExistingIngredientMatches}/{s.ExistingRecipeMatches}/{s.NewIngredientsProposed} | {s.StepValidationWarnings} | {s.ProseOnlyIngredients.Count} | {s.BaselineScore?.TotalScore ?? 0}/100 | {FormatPolishCell(s.TargetedPolish, s.TargetedScore)} | {FormatPolishCell(s.FullPolish, s.FullScore)} | {prodCol} |"
             );
         }
 
