@@ -937,6 +937,60 @@ public static partial class StepTokenParserAndRenderer
     )]
     private static partial Regex DuplicateTempUnitPrefixRegex();
 
+    public static JsonArray SanitizeRawTokens(JsonArray tokensArray)
+    {
+        var sanitized = (JsonArray)tokensArray.DeepClone();
+        for (var i = 0; i + 1 < sanitized.Count; i++)
+        {
+            if (
+                sanitized[i] is not JsonObject timerObj
+                || !string.Equals(
+                    timerObj["type"]?.GetValue<string>()?.Trim(),
+                    "timer",
+                    StringComparison.OrdinalIgnoreCase
+                )
+            )
+            {
+                continue;
+            }
+
+            if (
+                sanitized[i + 1] is not JsonValue textVal
+                || !textVal.TryGetValue<string>(out var nextText)
+            )
+            {
+                continue;
+            }
+
+            var unit = (GetNullableString(timerObj["unit"]) ?? "minute").Trim().ToLowerInvariant();
+            var match = DuplicateTimeUnitPrefixRegex().Match(nextText);
+            if (!match.Success)
+            {
+                continue;
+            }
+
+            var word = match.Value.Trim().ToLowerInvariant();
+            if (!TimerUnitMatchesWord(unit, word))
+            {
+                continue;
+            }
+
+            sanitized[i + 1] = JsonValue.Create(nextText[match.Length..]);
+        }
+
+        return sanitized;
+    }
+
+    private static bool TimerUnitMatchesWord(string unit, string word) =>
+        unit switch
+        {
+            "second" or "seconds" => word is "second" or "seconds" or "sec" or "secs",
+            "minute" or "minutes" => word is "minute" or "minutes" or "min" or "mins",
+            "hour" or "hours" => word is "hour" or "hours" or "hr" or "hrs",
+            "day" or "days" => word is "day" or "days",
+            _ => string.Equals(unit, word, StringComparison.OrdinalIgnoreCase),
+        };
+
     public static List<PocStepToken> ParseTokens(
         JsonArray tokensArray,
         out List<string> parseErrors

@@ -95,7 +95,11 @@ using var httpClient = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
 var llmClient = new LlmRunnerClient(httpClient);
 
 var catalog = new CatalogSnapshot { LoadedFromDatabase = false };
-if (!string.IsNullOrWhiteSpace(connectionString))
+if (cli.EmptyCatalog)
+{
+    Console.WriteLine("  Catalog: Empty baseline (--empty-catalog)");
+}
+else if (!string.IsNullOrWhiteSpace(connectionString))
 {
     try
     {
@@ -349,6 +353,7 @@ static void PrintHelp()
           --skip-ingredients           Skip Stage 3 (DB search & matching)
           --skip-steps                 Skip Stage 4 (step tokenization)
           --no-db                      Do not connect to SQL Server
+          --empty-catalog              Start with 0 FoodItems and 0 Recipes (while still reading --from-db-jobs)
           --connection-string <cs>     Custom SQL Server connection string
           --help                       Show this help
         """
@@ -400,6 +405,7 @@ sealed class CliArgs
     public bool SkipIngredients { get; private set; }
     public bool SkipSteps { get; private set; }
     public bool NoDb { get; private set; }
+    public bool EmptyCatalog { get; private set; }
     public string? ConnectionString { get; private set; }
 
     public static CliArgs Parse(string[] args)
@@ -559,6 +565,9 @@ sealed class CliArgs
                     break;
                 case "--no-db":
                     c.NoDb = true;
+                    break;
+                case "--empty-catalog":
+                    c.EmptyCatalog = true;
                     break;
                 case "--connection-string":
                     c.ConnectionString = Next();

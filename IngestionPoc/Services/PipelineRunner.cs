@@ -1589,8 +1589,9 @@ public sealed partial class PipelineRunner(
         string? extraParseError = null
     )
     {
+        var sanitizedTokensJson = StepTokenParserAndRenderer.SanitizeRawTokens(rawTokensJson);
         var parsedTokens = StepTokenParserAndRenderer.ParseTokens(
-            rawTokensJson,
+            sanitizedTokensJson,
             out var parseErrors
         );
         if (extraParseError is not null)
@@ -1624,7 +1625,7 @@ public sealed partial class PipelineRunner(
             stepNumber,
             sectionName,
             originalInstruction,
-            (JsonArray)rawTokensJson.DeepClone(),
+            sanitizedTokensJson,
             parsedTokens,
             rendered1x,
             rendered2x,
