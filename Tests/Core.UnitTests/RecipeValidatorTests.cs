@@ -2329,4 +2329,122 @@ public sealed class RecipeValidatorTests
         Assert.IsFalse(res.IsValid);
         Assert.IsTrue(res.Errors.Count >= 3, string.Join("; ", res.Errors));
     }
+
+    [TestMethod]
+    public void Validate_RejectsModifierOnlyTruncatedDisplayName()
+    {
+        var dto = new ExtractedRecipeDto(
+            Title: "Albondigas",
+            Ingredients:
+            [
+                new(
+                    "ing_1",
+                    CanonicalFoodItem: "cumin",
+                    DisplayName: "ground",
+                    Quantity: 0.25m,
+                    Unit: "tsp",
+                    RawText: "1/4 teaspoon ground cumin"
+                ),
+                new(
+                    "ing_2",
+                    CanonicalFoodItem: "milk",
+                    DisplayName: "whole",
+                    Quantity: 0.5m,
+                    Unit: "cup",
+                    RawText: "1/2 cup whole milk"
+                ),
+                new(
+                    "ing_3",
+                    CanonicalFoodItem: "lemon",
+                    DisplayName: "twist",
+                    Quantity: 1m,
+                    Unit: "whole",
+                    RawText: "1 lemon twist"
+                ),
+            ],
+            Steps:
+            [
+                new(
+                    1,
+                    TemplateText: "Stir {{ing_1_a}} into {{ing_2_a}} and garnish with {{ing_3_a}}.",
+                    IngredientTokens:
+                    [
+                        new("ing_1_a", "ing_1", 0.25m, "tsp"),
+                        new("ing_2_a", "ing_2", 0.5m, "cup"),
+                        new("ing_3_a", "ing_3", 1m, "whole"),
+                    ]
+                ),
+            ]
+        );
+
+        var res = RecipeValidator.Validate(dto);
+        Assert.IsFalse(res.IsValid);
+        Assert.IsTrue(res.Errors.Any(e => e.Contains("ing_1")), string.Join("; ", res.Errors));
+        Assert.IsTrue(res.Errors.Any(e => e.Contains("ing_2")), string.Join("; ", res.Errors));
+        Assert.IsFalse(res.Errors.Any(e => e.Contains("ing_3")), string.Join("; ", res.Errors));
+    }
+
+    [TestMethod]
+    public void RepairSafeStepTokenGlitches_RepairsSameClauseUsingAndReReferenceVerbDoubleCounts()
+    {
+        var dto = new ExtractedRecipeDto(
+            Title: "Breakfast Strata & Gravlax",
+            Ingredients:
+            [
+                new(
+                    "ing_1",
+                    CanonicalFoodItem: "unsalted butter",
+                    DisplayName: "unsalted butter",
+                    Quantity: 5m,
+                    Unit: "tbsp",
+                    RawText: "5 tablespoons unsalted butter, softened, divided"
+                ),
+                new(
+                    "ing_2",
+                    CanonicalFoodItem: "salmon",
+                    DisplayName: "skin-on salmon fillet",
+                    Quantity: 1m,
+                    Unit: "lb",
+                    RawText: "1 (1-pound) skin-on salmon fillet"
+                ),
+            ],
+            Steps:
+            [
+                new(
+                    1,
+                    TemplateText: "Spread {{ing_1_a}} evenly on bread, using {{ing_1_b}}. Place {{ing_2_a}} in dish.",
+                    IngredientTokens:
+                    [
+                        new("ing_1_a", "ing_1", 2m, "tbsp"),
+                        new("ing_1_b", "ing_1", 2m, "tbsp"),
+                        new("ing_2_a", "ing_2", 1m, "lb"),
+                    ]
+                ),
+                new(
+                    2,
+                    TemplateText: "Melt {{ing_1_c}} in skillet. Cover {{ing_2_b}} with plastic wrap.",
+                    IngredientTokens:
+                    [
+                        new("ing_1_c", "ing_1", 2m, "tbsp"),
+                        new("ing_2_b", "ing_2", 1m, "lb"),
+                    ]
+                ),
+                new(
+                    3,
+                    TemplateText: "Grease dish with remaining {{ing_1_d}}.",
+                    IngredientTokens: [new("ing_1_d", "ing_1", 1m, "tbsp")]
+                ),
+            ]
+        );
+
+        Assert.IsFalse(RecipeValidator.Validate(dto).IsValid);
+        var repaired = RecipeValidator.RepairSafeStepTokenGlitches(
+            dto,
+            repairBatchSplitDoubleCounts: true
+        );
+        Assert.IsNull(repaired.Steps![0].IngredientTokens![0].StepQuantity);
+        Assert.AreEqual(2m, repaired.Steps![0].IngredientTokens![1].StepQuantity);
+        Assert.IsNull(repaired.Steps![1].IngredientTokens![1].StepQuantity);
+        Assert.IsTrue(RecipeValidator.Validate(repaired).IsValid);
+    }
 }

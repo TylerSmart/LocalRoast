@@ -403,6 +403,24 @@ public static partial class RecipeValidator
     )]
     private static partial Regex PurePrepOnlyDisplayNameRegex();
 
+    [GeneratedRegex(@"[a-z]{3,}", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex AlphaWordRegex();
+
+    [GeneratedRegex(@"\bseparated\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex SeparatedMasterWordRegex();
+
+    [GeneratedRegex(
+        @"\b(?:cover|wrap|unwrap|bake|roast|broil|grill|simmer|boil|poach|steam|cook|braise|chill|refrigerate|freeze|rest|cool|transfer|drain|rinse|pat|dry|remove|return|flip|turn|baste|slice|carve|cut|chop|shred|serve|top|garnish|brush|sprinkle|whisk|beat|fold|stir|rub|season|coat|dredge|mash|press)\s+(?:the\s+|each\s+|all\s+(?:of\s+)?(?:the\s+)?)?$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex ReReferenceVerbPrefixRegex();
+
+    [GeneratedRegex(
+        @"^[^.;!\?\r\n\d]*\busing\s+$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex SameClauseUsingBetweenRegex();
+
     [GeneratedRegex(@"\bor\s+$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex TrailingOrWordRegex();
 
@@ -929,6 +947,12 @@ public static partial class RecipeValidator
             {
                 errors.Add(
                     $"Ingredient '{ing.CanonicalFoodItem}' ({refKey}) has preparation text '{ing.DisplayName.Trim()}' in displayName instead of the food name. Put the food name (e.g., '{ing.CanonicalFoodItem}') in displayName and move preparation words to preparationNotes."
+                );
+            }
+            else if (HasModifierOnlyTruncatedDisplayName(ing))
+            {
+                errors.Add(
+                    $"Ingredient '{ing.CanonicalFoodItem}' ({refKey}) has truncated adjective-only displayName '{ing.DisplayName!.Trim()}' that omits the food noun from rawText '{ing.RawText}'. Include the full ingredient noun in displayName (e.g., '{ing.DisplayName.Trim()} {ing.CanonicalFoodItem}')."
                 );
             }
 
@@ -2775,6 +2799,9 @@ public static partial class RecipeValidator
         var fullBatchAlreadyAdded = new Dictionary<string, decimal>(
             StringComparer.OrdinalIgnoreCase
         );
+        var totalQuantifiedByRef = repairBatchSplitDoubleCounts
+            ? ComputeConvertedStepSumsByRefId(recipe.Steps, ingredientsByRefId)
+            : null;
 
         var updatedSteps = new List<ExtractedStepDto>(recipe.Steps.Count);
         var changedAny = false;
@@ -2948,6 +2975,18 @@ public static partial class RecipeValidator
 
             if (repairBatchSplitDoubleCounts && !string.IsNullOrEmpty(rewrittenTemplate))
             {
+                if (
+                    TryRepairSameClauseUsingDoubleCount(
+                        rewrittenTemplate,
+                        ingTokens,
+                        ingredientsByRefId,
+                        totalQuantifiedByRef!
+                    )
+                )
+                {
+                    stepChanged = true;
+                }
+
                 var ingTokenIdxByKey = new Dictionary<string, int>(
                     StringComparer.OrdinalIgnoreCase
                 );
@@ -3005,10 +3044,16 @@ public static partial class RecipeValidator
 
                     fullBatchAlreadyAdded.TryGetValue(refId, out var priorSum);
                     var beforeMatch = rewrittenTemplate[..pm.Index];
+                    var masterRaw = master.RawText ?? string.Empty;
+                    var isReReferenceAfterFull =
+                        !DividedWordRegex().IsMatch(masterRaw)
+                        && !SeparatedMasterWordRegex().IsMatch(masterRaw)
+                        && convertedQty >= upperLimit * 0.95m
+                        && ReReferenceVerbPrefixRegex().IsMatch(beforeMatch);
                     if (
                         priorSum >= upperLimit * 0.99m
                         && priorSum <= upperLimit * 1.01m
-                        && BatchSplitPrefixRegex().IsMatch(beforeMatch)
+                        && (BatchSplitPrefixRegex().IsMatch(beforeMatch) || isReReferenceAfterFull)
                     )
                     {
                         ingTokens[tokIdx] = tok with { StepQuantity = null, StepUnit = null };
@@ -3533,5 +3578,239 @@ public static partial class RecipeValidator
         return !ing.Quantity.HasValue
             && !string.IsNullOrWhiteSpace(ing.CanonicalFoodItem)
             && BasicSeasoningsAndWater.Contains(ing.CanonicalFoodItem.Trim());
+    }
+
+    private static bool HasModifierOnlyTruncatedDisplayName(ExtractedIngredientDto ing)
+    {
+        if (
+            ing.IsRecipeReference
+            || string.IsNullOrWhiteSpace(ing.DisplayName)
+            || string.IsNullOrWhiteSpace(ing.CanonicalFoodItem)
+            || string.IsNullOrWhiteSpace(ing.RawText)
+        )
+        {
+            return false;
+        }
+
+        var display = ing.DisplayName.Trim();
+        var canonical = ing.CanonicalFoodItem.Trim();
+        var dnWords = AlphaWordRegex()
+            .Matches(display)
+            .Select(m => m.Value.ToLowerInvariant())
+            .ToList();
+        var fnWords = AlphaWordRegex()
+            .Matches(canonical)
+            .Select(m => m.Value.ToLowerInvariant())
+            .ToList();
+        if (dnWords.Count == 0 || fnWords.Count == 0)
+        {
+            return false;
+        }
+
+        foreach (var dw in dnWords)
+        {
+            foreach (var fw in fnWords)
+            {
+                if (
+                    string.Equals(dw, fw, StringComparison.OrdinalIgnoreCase)
+                    || (dw.Length >= 4 && fw.Length >= 4 && dw[..4] == fw[..4])
+                    || (
+                        Math.Min(dw.Length, fw.Length) >= 3
+                        && (
+                            dw.StartsWith(fw, StringComparison.OrdinalIgnoreCase)
+                            || fw.StartsWith(dw, StringComparison.OrdinalIgnoreCase)
+                        )
+                    )
+                )
+                {
+                    return false;
+                }
+            }
+        }
+
+        var raw = ing.RawText;
+        var dnIdx = raw.IndexOf(display, StringComparison.OrdinalIgnoreCase);
+        if (dnIdx < 0)
+        {
+            return false;
+        }
+
+        var afterRaw = raw[(dnIdx + display.Length)..];
+        return fnWords.Any(fw =>
+        {
+            var prefix = fw.Length >= 4 ? fw[..4] : fw;
+            return Regex.IsMatch(
+                afterRaw,
+                $@"\b{Regex.Escape(prefix)}",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+            );
+        });
+    }
+
+    private static Dictionary<string, decimal> ComputeConvertedStepSumsByRefId(
+        IReadOnlyList<ExtractedStepDto> steps,
+        Dictionary<string, ExtractedIngredientDto> ingredientsByRefId
+    )
+    {
+        var sums = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+        foreach (var step in steps)
+        {
+            foreach (var tok in step.IngredientTokens ?? [])
+            {
+                if (tok.StepQuantity is not > 0m || string.IsNullOrWhiteSpace(tok.IngredientRefId))
+                {
+                    continue;
+                }
+
+                var refId = tok.IngredientRefId.Trim();
+                if (!ingredientsByRefId.TryGetValue(refId, out var master))
+                {
+                    continue;
+                }
+
+                var (mUnit, mCustom) = RecipeUnitAndSectionHelpers.NormalizeUnit(master.Unit);
+                var (sUnit, sCustom) = RecipeUnitAndSectionHelpers.NormalizeUnit(tok.StepUnit);
+                if (!sUnit.HasValue && string.IsNullOrWhiteSpace(sCustom))
+                {
+                    sUnit = mUnit;
+                    sCustom = mCustom;
+                }
+
+                if (
+                    TryConvertStepQuantityToTarget(
+                        tok.StepQuantity.Value,
+                        sUnit,
+                        sCustom,
+                        mUnit,
+                        mCustom,
+                        out var converted
+                    )
+                )
+                {
+                    sums[refId] = sums.GetValueOrDefault(refId) + converted;
+                }
+            }
+        }
+
+        return sums;
+    }
+
+    private static bool TryRepairSameClauseUsingDoubleCount(
+        string template,
+        List<StepIngredientTokenDto> ingTokens,
+        Dictionary<string, ExtractedIngredientDto> ingredientsByRefId,
+        Dictionary<string, decimal> totalQuantifiedByRef
+    )
+    {
+        var idxByKey = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        for (var i = 0; i < ingTokens.Count; i++)
+        {
+            idxByKey.TryAdd(NormalizeTokenKey(ingTokens[i].TokenKey), i);
+        }
+
+        var occurrences = new List<(int MatchIndex, int MatchLength, int TokIdx, string RefId)>();
+        foreach (Match pm in PlaceholderRegex().Matches(template))
+        {
+            var key = NormalizeTokenKey(pm.Groups[1].Value);
+            if (!idxByKey.TryGetValue(key, out var tokIdx))
+            {
+                continue;
+            }
+
+            var refId = ingTokens[tokIdx].IngredientRefId?.Trim() ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(refId))
+            {
+                occurrences.Add((pm.Index, pm.Length, tokIdx, refId));
+            }
+        }
+
+        var changed = false;
+        for (var i = 0; i + 1 < occurrences.Count; i++)
+        {
+            var first = occurrences[i];
+            var second = occurrences[i + 1];
+            if (!string.Equals(first.RefId, second.RefId, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var tokA = ingTokens[first.TokIdx];
+            var tokB = ingTokens[second.TokIdx];
+            if (tokA.StepQuantity is not > 0m || tokB.StepQuantity is not > 0m)
+            {
+                continue;
+            }
+
+            if (
+                !ingredientsByRefId.TryGetValue(first.RefId, out var master)
+                || master.Quantity is not > 0m
+            )
+            {
+                continue;
+            }
+
+            var upperLimit = Math.Max(
+                master.Quantity.Value,
+                master.MaxQuantity ?? master.Quantity.Value
+            );
+            if (
+                !totalQuantifiedByRef.TryGetValue(first.RefId, out var totalSum)
+                || totalSum <= upperLimit * 1.01m
+            )
+            {
+                continue;
+            }
+
+            var (mUnit, mCustom) = RecipeUnitAndSectionHelpers.NormalizeUnit(master.Unit);
+            var (sUnitA, sCustomA) = RecipeUnitAndSectionHelpers.NormalizeUnit(tokA.StepUnit);
+            if (!sUnitA.HasValue && string.IsNullOrWhiteSpace(sCustomA))
+            {
+                sUnitA = mUnit;
+                sCustomA = mCustom;
+            }
+
+            var (sUnitB, sCustomB) = RecipeUnitAndSectionHelpers.NormalizeUnit(tokB.StepUnit);
+            if (!sUnitB.HasValue && string.IsNullOrWhiteSpace(sCustomB))
+            {
+                sUnitB = mUnit;
+                sCustomB = mCustom;
+            }
+
+            if (
+                !TryConvertStepQuantityToTarget(
+                    tokA.StepQuantity.Value,
+                    sUnitA,
+                    sCustomA,
+                    mUnit,
+                    mCustom,
+                    out var convA
+                )
+                || !TryConvertStepQuantityToTarget(
+                    tokB.StepQuantity.Value,
+                    sUnitB,
+                    sCustomB,
+                    mUnit,
+                    mCustom,
+                    out var convB
+                )
+                || Math.Abs(convA - convB) > 0.01m
+                || totalSum - convA > upperLimit * 1.01m
+            )
+            {
+                continue;
+            }
+
+            var between = template[(first.MatchIndex + first.MatchLength)..second.MatchIndex];
+            if (!SameClauseUsingBetweenRegex().IsMatch(between))
+            {
+                continue;
+            }
+
+            ingTokens[first.TokIdx] = tokA with { StepQuantity = null, StepUnit = null };
+            totalQuantifiedByRef[first.RefId] = totalSum - convA;
+            changed = true;
+        }
+
+        return changed;
     }
 }

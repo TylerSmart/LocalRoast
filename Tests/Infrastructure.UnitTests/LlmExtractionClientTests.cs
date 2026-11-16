@@ -2991,4 +2991,202 @@ public sealed class LlmExtractionClientTests
         StringAssert.Contains(attempts[1], "3 {{ing_1_b}} halves");
         Assert.IsTrue(RecipeValidator.Validate(result).IsValid);
     }
+
+    [TestMethod]
+    public async Task ExtractRecipeFromTextAsync_AddsSameClauseUsingHintInsteadOfNullingLaterDividedStep()
+    {
+        var attempts = new List<string>();
+        var attemptNum = 0;
+
+        const string invalidReply = """
+            {
+                "title": "Breakfast Strata",
+                "ingredients": [
+                    { "refId": "ing_1", "canonicalFoodItem": "unsalted butter", "displayName": "unsalted butter", "quantity": 5, "unit": "tbsp", "rawText": "5 tablespoons unsalted butter, softened, divided" }
+                ],
+                "steps": [
+                    {
+                        "stepNumber": 1,
+                        "templateText": "Spread {{ing_1_a}} on bread, using {{ing_1_b}}.",
+                        "ingredientTokens": [
+                            { "tokenKey": "ing_1_a", "ingredientRefId": "ing_1", "stepQuantity": 2, "stepUnit": "tbsp" },
+                            { "tokenKey": "ing_1_b", "ingredientRefId": "ing_1", "stepQuantity": 2, "stepUnit": "tbsp" }
+                        ],
+                        "timerTokens": [],
+                        "temperatureTokens": []
+                    },
+                    {
+                        "stepNumber": 2,
+                        "templateText": "Melt {{ing_1_c}} in skillet.",
+                        "ingredientTokens": [
+                            { "tokenKey": "ing_1_c", "ingredientRefId": "ing_1", "stepQuantity": 2, "stepUnit": "tbsp" }
+                        ],
+                        "timerTokens": [],
+                        "temperatureTokens": []
+                    },
+                    {
+                        "stepNumber": 3,
+                        "templateText": "Grease dish with remaining {{ing_1_d}}.",
+                        "ingredientTokens": [
+                            { "tokenKey": "ing_1_d", "ingredientRefId": "ing_1", "stepQuantity": 1, "stepUnit": "tbsp" }
+                        ],
+                        "timerTokens": [],
+                        "temperatureTokens": []
+                    }
+                ],
+                "qualityAudit": { "isPlausibleRecipe": true, "warnings": [] }
+            }
+            """;
+
+        const string fixedReply = """
+            {
+                "title": "Breakfast Strata",
+                "ingredients": [
+                    { "refId": "ing_1", "canonicalFoodItem": "unsalted butter", "displayName": "unsalted butter", "quantity": 5, "unit": "tbsp", "rawText": "5 tablespoons unsalted butter, softened, divided" }
+                ],
+                "steps": [
+                    {
+                        "stepNumber": 1,
+                        "templateText": "Spread {{ing_1_a}} on bread, using {{ing_1_b}}.",
+                        "ingredientTokens": [
+                            { "tokenKey": "ing_1_a", "ingredientRefId": "ing_1", "stepQuantity": null, "stepUnit": null },
+                            { "tokenKey": "ing_1_b", "ingredientRefId": "ing_1", "stepQuantity": 2, "stepUnit": "tbsp" }
+                        ],
+                        "timerTokens": [],
+                        "temperatureTokens": []
+                    },
+                    {
+                        "stepNumber": 2,
+                        "templateText": "Melt {{ing_1_c}} in skillet.",
+                        "ingredientTokens": [
+                            { "tokenKey": "ing_1_c", "ingredientRefId": "ing_1", "stepQuantity": 2, "stepUnit": "tbsp" }
+                        ],
+                        "timerTokens": [],
+                        "temperatureTokens": []
+                    },
+                    {
+                        "stepNumber": 3,
+                        "templateText": "Grease dish with remaining {{ing_1_d}}.",
+                        "ingredientTokens": [
+                            { "tokenKey": "ing_1_d", "ingredientRefId": "ing_1", "stepQuantity": 1, "stepUnit": "tbsp" }
+                        ],
+                        "timerTokens": [],
+                        "temperatureTokens": []
+                    }
+                ],
+                "qualityAudit": { "isPlausibleRecipe": true, "warnings": [] }
+            }
+            """;
+
+        var handler = new MockHttpMessageHandler(req =>
+        {
+            attemptNum++;
+            attempts.Add(req.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+            return OllamaReply(attemptNum == 1 ? invalidReply : fixedReply);
+        });
+
+        var client = new LlmExtractionClient(new HttpClient(handler));
+        var config = new EffectiveLlmConnectionConfig(
+            Provider: LlmProvider.Ollama,
+            BaseUrl: "http://localhost:11434",
+            ApiKey: null,
+            TextModel: "gemma4:e4b",
+            VisionModel: null,
+            OllamaKeepAlive: "5m",
+            RequestTimeoutSeconds: 30,
+            AutoPublishHighConfidenceText: true
+        );
+
+        var result = await client.ExtractRecipeFromTextAsync(
+            config,
+            new LlmExtractionContext(
+                "Breakfast Strata\n- 5 tablespoons unsalted butter, softened, divided\n1. Spread butter on bread, using 2 tablespoons butter.\n2. Melt 2 tablespoons butter.\n3. Grease dish with remaining 1 tablespoon butter."
+            )
+        );
+
+        Assert.HasCount(2, attempts);
+        StringAssert.Contains(attempts[1], "instead of dropping later divided additions");
+        Assert.IsTrue(RecipeValidator.Validate(result).IsValid);
+    }
+
+    [TestMethod]
+    public async Task ExtractRecipeFromTextAsync_AddsSeparatedEggsHintOnRetry()
+    {
+        var attempts = new List<string>();
+        var attemptNum = 0;
+
+        const string invalidReply = """
+            {
+                "title": "Fluffy Omelets",
+                "ingredients": [
+                    { "refId": "ing_1", "canonicalFoodItem": "egg", "displayName": "large eggs", "quantity": 4, "unit": "whole", "rawText": "4 large eggs, separated" }
+                ],
+                "steps": [
+                    {
+                        "stepNumber": 1,
+                        "templateText": "Whisk {{ing_1_a}} yolks. Whip {{ing_1_b}} whites.",
+                        "ingredientTokens": [
+                            { "tokenKey": "ing_1_a", "ingredientRefId": "ing_1", "stepQuantity": 4, "stepUnit": "whole" },
+                            { "tokenKey": "ing_1_b", "ingredientRefId": "ing_1", "stepQuantity": 4, "stepUnit": "whole" }
+                        ],
+                        "timerTokens": [],
+                        "temperatureTokens": []
+                    }
+                ],
+                "qualityAudit": { "isPlausibleRecipe": true, "warnings": [] }
+            }
+            """;
+
+        const string fixedReply = """
+            {
+                "title": "Fluffy Omelets",
+                "ingredients": [
+                    { "refId": "ing_1", "canonicalFoodItem": "egg", "displayName": "large eggs", "quantity": 4, "unit": "whole", "rawText": "4 large eggs, separated" }
+                ],
+                "steps": [
+                    {
+                        "stepNumber": 1,
+                        "templateText": "Whisk {{ing_1_a}} yolks. Whip {{ing_1_b}} whites.",
+                        "ingredientTokens": [
+                            { "tokenKey": "ing_1_a", "ingredientRefId": "ing_1", "stepQuantity": 4, "stepUnit": "whole" },
+                            { "tokenKey": "ing_1_b", "ingredientRefId": "ing_1", "stepQuantity": null, "stepUnit": null }
+                        ],
+                        "timerTokens": [],
+                        "temperatureTokens": []
+                    }
+                ],
+                "qualityAudit": { "isPlausibleRecipe": true, "warnings": [] }
+            }
+            """;
+
+        var handler = new MockHttpMessageHandler(req =>
+        {
+            attemptNum++;
+            attempts.Add(req.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+            return OllamaReply(attemptNum == 1 ? invalidReply : fixedReply);
+        });
+
+        var client = new LlmExtractionClient(new HttpClient(handler));
+        var config = new EffectiveLlmConnectionConfig(
+            Provider: LlmProvider.Ollama,
+            BaseUrl: "http://localhost:11434",
+            ApiKey: null,
+            TextModel: "gemma4:e4b",
+            VisionModel: null,
+            OllamaKeepAlive: "5m",
+            RequestTimeoutSeconds: 30,
+            AutoPublishHighConfidenceText: true
+        );
+
+        var result = await client.ExtractRecipeFromTextAsync(
+            config,
+            new LlmExtractionContext(
+                "Fluffy Omelets\n- 4 large eggs, separated\n1. Whisk egg yolks. Whip egg whites."
+            )
+        );
+
+        Assert.HasCount(2, attempts);
+        StringAssert.Contains(attempts[1], "separates ONE batch into paired parts");
+        Assert.IsTrue(RecipeValidator.Validate(result).IsValid);
+    }
 }

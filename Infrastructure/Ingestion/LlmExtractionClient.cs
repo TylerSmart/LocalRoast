@@ -1883,7 +1883,7 @@ Household Cookbook Catalog:
         5. Steps & {{token_key}} Placeholders:
            - Extract EVERY numbered step and action sentence in exact chronological order (stepNumber: 1..N). NEVER drop intermediate actions (e.g. rolling/shaping balls, cutting dough circles, or adding meat before a resting timer) and NEVER move a later stir-in/garnish ingredient (e.g. 'Transfer to a bowl and stir in bell pepper') into an earlier purée/processor list. Keep un-listed water amounts (e.g. '4 cups water') verbatim in templateText, and for lines like '1/4 tsp salt, plus salt for cooking shrimp/pasta', keep only the 1/4 tsp in the dish and write discarded cooking-water salt (e.g. '1 tablespoon salt') as plain text (do NOT divide 0.25 tsp into 0.0069 tsp). Reference prepared sub-recipe components with {{ing_X_a}} on the first step that uses them when natural. Ensure EVERY non-optional master ingredient (including final garnishes like parsley and toasted bread referenced simply as 'toast' or '4 slices of toast') is referenced in its matching section/step with its exact ingredientRefId (never substitute a different section's sugar/salt/oil refId or bind un-listed tap water/ice/spray/drippings to another ingredient), and ALWAYS expand collective phrases like 'remaining ingredients (except X)', 'remaining spices/herbs', or 'all ingredients' into explicit individual {{ing_X_a}} placeholders in that step (omit 'except X' and do NOT put X's placeholder in that step).
            - In templateText, replace inline ingredient mentions (BOTH measurement AND ingredient noun/phrase), durations (number AND time unit), and real cooking temperatures (number AND 'degrees'/'°F'/'°C') with {{token_key}} placeholders:
-             * Ingredients -> {{ing_1_a}}, {{ing_1_b}}, etc. NEVER reuse the exact same {{ing_1_a}} placeholder twice in a single step (use distinct keys _a, _b, _c) AND NEVER emit two items with the same tokenKey in ingredientTokens. NEVER leave duplicate nouns, leading measurements before prep words ('2 tbsp beaten {{ing_1_a}}'), duplicate connectors ('{{ing_1_a}} of the {{ing_1_b}}', '2 tbsp of the {{ing_1_a}}'), unit words ('block', 'slices'), 'or' alternatives, or redundant parenthetical amounts ('(2 tbsp)') outside '{{ing_1_a}}'. NEVER list unused constituent ingredientTokens for a composite/mixture mention like 'the sauce', 'the batter', 'shrub syrup', or 'picada', NEVER bind a prepared combined mixture/syrup/paste/sauce (e.g. '2 ounces shrub syrup', '2 tablespoons picada') to one component's refId (such as vinegar or almonds), and NEVER apportion raw master stepQuantities when spooning/drizzling a portion of an intermediate combined mixture (e.g. '1 tbsp oil-flour mixture')—leave composite prepared mixtures as plain text or stepQuantity: null. When preceding text already has 'remaining'/'reserved' (e.g. 'remaining {{ing_1_b}}'), keep fallbackDisplay clean ('cheese', NEVER 'remaining cheese'). IMPORTANT: For EVERY measured master ingredient (quantity > 0), its VERY FIRST addition in steps MUST set non-null stepQuantity and stepUnit (the amount added in that step, or full master amount if added all at once), even when the source step prose omits numbers (e.g. 'Add garlic, cumin, and salt' -> emit stepQuantity: 7, stepUnit: 'clove' for garlic, etc.). For 'divided' ingredients, preserve EACH printed step measurement ('3 tbsp' in Step 1, 'remaining 1 tbsp' in Step 2) on its respective step token—NEVER dump 100% into one token and null remaining divided additions. When shaping or filling a single portion ('fill 1 portion with 1 teaspoon'), emit ONLY that single-portion amount (1 tsp) or stepQuantity: null—NEVER assign the full batch quantity (8 tsp) to a per-portion step. For '2 tbsp on each of 2 baking sheets', either multiply accurately (4 tbsp on the baking sheets without trailing 'each') or tokenize each sheet separately without exceeding master quantity (NEVER strip '2 tablespoons' into bare '{{oil}} each'); for per-serving phrasing like 'Add 2 oz X to each glass' or 'Place 1 slice Y on each muffin', NEVER put the batch total right before 'to/on each' (e.g. NEVER 'Add 4 oz Champagne to each glass'—write 'divide {{ing_X_a}} evenly among the 2 glasses' or keep the per-item count as plain text with stepQuantity: null). Remember 1 stick butter = 8 tbsp (so 1/2 stick = 4 tbsp and 2 sticks = 16 tbsp, NOT 10 + 10). When an earlier step or earlier sentence in the SAME step preps/adds/coats 100% of an ingredient (e.g. grating 4 tbsp + cutting 16 tbsp butter in Step 1, or 'Add squid ...; remove half of squid ...; place coated squid ...; repeat with remaining squid' -> put full 1 lb on 'Add squid' and stepQuantity: null on 'remove half', 'coated', and 'remaining'), any later mention that takes a post-prep/cooked subset ('Measure out 1 tablespoon garlic' after mincing 4 cloves, 'Spread 1/3 cup vermicelli' after boiling 6 oz) or fries in half-and-remaining batches MUST set stepQuantity: null and stepUnit: null (keep any subset measurement like '1 tablespoon ' or '1/3 cup ' as plain text before '{{ing_...}}' so the amount stays readable; for per-item cooked subsets like 'Arrange 3 shrimp halves' or 'Place 2 slices pork' after 100% of shrimp/pork was cooked earlier, keep '3 ' / '2 slices ' as plain text before '{{ing_...}}' with stepQuantity: null, stepUnit: null). For cut-piece phrases before 'from' ('Slice two 1/4-inch rounds from tomato', 'cut 4 wedges from lemon'), the number counts the slices/wedges, NEVER whole items—use the true whole ingredient quantity (1 whole, NOT 2 whole) or null. For whole items like 'Halve 1 avocado' from 3 avocados, emit stepQuantity: 1, stepUnit: 'whole' (NEVER divide 1/3 into 0.3333); for 'half of X' measured amounts, compute 50% of X's unit (half of 8 oz = 4 oz, NEVER 0.5) UNLESS 100% of X was already added earlier in the same or prior step. NEVER use physical length units ('inch', 'cm') as stepUnit, and NEVER turn piece-size descriptors ('into 1/2-tablespoon pieces', 'into 1-inch cubes') into {{ing_...}} tokens. When a later step re-references, cooks, drains, coats with, transfers, fries in batches, reserves a portion of, or garnishes with an already-added ingredient (e.g. 'cook the beef', 'dip in the egg', 'transfer bacon to plate', 'drain chickpeas', 'set aside 2 tbsp chickpeas', 'sprinkle with remaining bacon'), set stepQuantity: null and stepUnit: null so quantities are not double-counted. NEVER use 0 for stepQuantity! Consume at most 100% of each master ingredient across primary and alternate units combined (never consume BOTH 2 cans AND 30 oz for one 2-can item).
+             * Ingredients -> {{ing_1_a}}, {{ing_1_b}}, etc. NEVER reuse the exact same {{ing_1_a}} placeholder twice in a single step (use distinct keys _a, _b, _c) AND NEVER emit two items with the same tokenKey in ingredientTokens. NEVER leave duplicate nouns, leading measurements before prep words ('2 tbsp beaten {{ing_1_a}}'), duplicate connectors ('{{ing_1_a}} of the {{ing_1_b}}', '2 tbsp of the {{ing_1_a}}'), unit words ('block', 'slices'), 'or' alternatives, or redundant parenthetical amounts ('(2 tbsp)') outside '{{ing_1_a}}'. NEVER list unused constituent ingredientTokens for a composite/mixture mention like 'the sauce', 'the batter', 'shrub syrup', or 'picada', NEVER bind a prepared combined mixture/syrup/paste/sauce (e.g. '2 ounces shrub syrup', '2 tablespoons picada') to one component's refId (such as vinegar or almonds), and NEVER apportion raw master stepQuantities when spooning/drizzling a portion of an intermediate combined mixture (e.g. '1 tbsp oil-flour mixture')—leave composite prepared mixtures as plain text or stepQuantity: null. When preceding text already has 'remaining'/'reserved' (e.g. 'remaining {{ing_1_b}}'), keep fallbackDisplay clean ('cheese', NEVER 'remaining cheese'). IMPORTANT: For EVERY measured master ingredient (quantity > 0), its VERY FIRST addition in steps MUST set non-null stepQuantity and stepUnit (the amount added in that step, or full master amount if added all at once), even when the source step prose omits numbers (e.g. 'Add garlic, cumin, and salt' -> emit stepQuantity: 7, stepUnit: 'clove' for garlic, etc.). For 'divided' ingredients, preserve EACH printed step measurement ('3 tbsp' in Step 1, 'remaining 1 tbsp' in Step 2) on its respective step token—NEVER dump 100% into one token and null remaining divided additions. When shaping or filling a single portion ('fill 1 portion with 1 teaspoon'), emit ONLY that single-portion amount (1 tsp) or stepQuantity: null—NEVER assign the full batch quantity (8 tsp) to a per-portion step. For '2 tbsp on each of 2 baking sheets', either multiply accurately (4 tbsp on the baking sheets without trailing 'each') or tokenize each sheet separately without exceeding master quantity (NEVER strip '2 tablespoons' into bare '{{oil}} each'); for per-serving phrasing like 'Add 2 oz X to each glass' or 'Place 1 slice Y on each muffin', NEVER put the batch total right before 'to/on each' (e.g. NEVER 'Add 4 oz Champagne to each glass'—write 'divide {{ing_X_a}} evenly among the 2 glasses' or keep the per-item count as plain text with stepQuantity: null). Remember 1 stick butter = 8 tbsp (so 1/2 stick = 4 tbsp and 2 sticks = 16 tbsp, NOT 10 + 10). When an earlier step or earlier sentence in the SAME step preps/adds/coats 100% of an ingredient (e.g. grating 4 tbsp + cutting 16 tbsp butter in Step 1, or 'Add squid ...; remove half of squid ...; place coated squid ...; repeat with remaining squid' -> put full 1 lb on 'Add squid' and stepQuantity: null on 'remove half', 'coated', and 'remaining'), any later mention that takes a post-prep/cooked subset ('Measure out 1 tablespoon garlic' after mincing 4 cloves, 'Spread 1/3 cup vermicelli' after boiling 6 oz) or fries in half-and-remaining batches MUST set stepQuantity: null and stepUnit: null (keep any subset measurement like '1 tablespoon ' or '1/3 cup ' as plain text before '{{ing_...}}' so the amount stays readable; for per-item cooked subsets like 'Arrange 3 shrimp halves' or 'Place 2 slices pork' after 100% of shrimp/pork was cooked earlier, keep '3 ' / '2 slices ' as plain text before '{{ing_...}}' with stepQuantity: null, stepUnit: null; when one clause mentions an ingredient bare and specifies its amount right after 'using' (e.g. 'spread butter ..., using 2 tbsp butter'), put stepQuantity: null on the bare first mention and 2 tbsp ONLY on the 'using' mention; for separated eggs ('4 large eggs, separated'), put 4 whole on the FIRST part ('Whisk {{ing_1_a}} yolks') and ALWAYS set stepQuantity: null, stepUnit: null on the paired second part ('Place {{ing_1_b}} whites'—ALWAYS keep 'whites' or 'yolks' visible in templateText!) so yolks + whites never count as 8). For cut-piece phrases before 'from' ('Slice two 1/4-inch rounds from tomato', 'cut 4 wedges from lemon'), the number counts the slices/wedges, NEVER whole items—use the true whole ingredient quantity (1 whole, NOT 2 whole) or null. For whole items like 'Halve 1 avocado' from 3 avocados, emit stepQuantity: 1, stepUnit: 'whole' (NEVER divide 1/3 into 0.3333); for 'half of X' measured amounts, compute 50% of X's unit (half of 8 oz = 4 oz, NEVER 0.5) UNLESS 100% of X was already added earlier in the same or prior step. NEVER use physical length units ('inch', 'cm') as stepUnit, and NEVER turn piece-size descriptors ('into 1/2-tablespoon pieces', 'into 1-inch cubes') into {{ing_...}} tokens. When a later step re-references, cooks, drains, coats with, transfers, fries in batches, reserves a portion of, or garnishes with an already-added ingredient (e.g. 'cook the beef', 'dip in the egg', 'transfer bacon to plate', 'drain chickpeas', 'set aside 2 tbsp chickpeas', 'sprinkle with remaining bacon'), set stepQuantity: null and stepUnit: null so quantities are not double-counted. NEVER use 0 for stepQuantity! Consume at most 100% of each master ingredient across primary and alternate units combined (never consume BOTH 2 cans AND 30 oz for one 2-can item).
              * Timers -> {{timer_1}}, {{timer_2}}, etc. durationSeconds MUST ALWAYS match the exact printed duration converted to SECONDS (minutes * 60, hours * 3600; e.g. '20 to 30 seconds' -> 20 NEVER 300, '30 seconds' -> 30, NEVER multiply seconds by 6 or 10; '14 minutes' -> 840, NEVER 14; '1 hour' -> 3600). Replace the ENTIRE duration phrase including range words and time unit ('between 45 and 60 seconds' or '1 to 2 minutes' -> ONE placeholder '{{timer_1}}' with lower bound durationSeconds: 45 or 60; 'about 30 seconds' -> 'about {{timer_1}}', NEVER 'between {{timer_1}}', '{{timer_1}} seconds', or '{{timer_1}} to {{timer_2}}'). NEVER create timerTokens for food-processor pulse counts ('5 pulses') or physical measurements ('1 1/2 inches deep')—leave pulses and inches as plain text. Keep power/heat settings outside the placeholder ('for {{timer_1}} at 40 percent power'). label MUST be a short 2-4 word verb+object action (NEVER '5 minutes').
              * Temperatures -> {{temp_1}}, {{temp_2}}, etc. Replace number AND 'degrees'/'°F'/'°C' AND any '-degree' hyphenation without duplicating prepositions ('heat oven to {{temp_1}}', 'bake at {{temp_1}}', 'in a {{temp_1}} oven', NEVER 'to at {{temp_1}}', '{{temp_1}} degrees', or '{{temp_1}}-degree oven'). Add matching StepTemperatureTokenDto ONLY for real thermal cooking/proofing temperatures (°F or °C; for dual '350F/175C', emit ONLY F 350). NEVER extract rack distances ('4 inches from broiler element') or microwave power percentages ('40 percent power', '50% power') into temperatureTokens!
            - Keep punctuation OUTSIDE placeholders (e.g. '{{timer_1}}.').
@@ -1924,6 +1924,16 @@ Household Cookbook Catalog:
 
     private static readonly Regex DividedMasterWordRegex = new(
         @"\bdivided\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    );
+
+    private static readonly Regex SeparatedMasterWordRegex = new(
+        @"\bseparated\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    );
+
+    private static readonly Regex SameClauseUsingBetweenRegex = new(
+        @"^[^.;!\?\r\n\d]*\busing\s+$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     );
 
@@ -2639,6 +2649,7 @@ Household Cookbook Catalog:
             var fullReachedToken = string.Empty;
             var tokensUpToFullCount = 0;
             var cutPieceHints = new List<string>();
+            var sameClauseUsingHints = new List<string>();
             var excessTokens = new List<string>();
             for (var i = 0; i < steps.Count; i++)
             {
@@ -2659,7 +2670,46 @@ Household Cookbook Catalog:
                         var ph = $"{{{{{tok.TokenKey?.Trim()}}}}}";
                         var pos = templateText.IndexOf(ph, StringComparison.OrdinalIgnoreCase);
                         return pos >= 0 ? pos : int.MaxValue;
-                    });
+                    })
+                    .ToList();
+
+                for (var mi = 0; mi + 1 < matchingTokens.Count; mi++)
+                {
+                    var prevTok = matchingTokens[mi];
+                    var currTok = matchingTokens[mi + 1];
+                    if (
+                        prevTok.StepQuantity is > 0m
+                        && currTok.StepQuantity is > 0m
+                        && Math.Abs(prevTok.StepQuantity.Value - currTok.StepQuantity.Value)
+                            <= 0.01m
+                        && string.Equals(
+                            prevTok.StepUnit?.Trim(),
+                            currTok.StepUnit?.Trim(),
+                            StringComparison.OrdinalIgnoreCase
+                        )
+                    )
+                    {
+                        var k1 = prevTok.TokenKey?.Trim() ?? string.Empty;
+                        var k2 = currTok.TokenKey?.Trim() ?? string.Empty;
+                        var ph1 = $"{{{{{k1}}}}}";
+                        var ph2 = $"{{{{{k2}}}}}";
+                        var p1 = templateText.IndexOf(ph1, StringComparison.OrdinalIgnoreCase);
+                        var p2 = templateText.IndexOf(ph2, StringComparison.OrdinalIgnoreCase);
+                        if (p1 >= 0 && p2 > p1 + ph1.Length)
+                        {
+                            var between = templateText[(p1 + ph1.Length)..p2];
+                            if (SameClauseUsingBetweenRegex.IsMatch(between))
+                            {
+                                var uTxt = string.IsNullOrWhiteSpace(currTok.StepUnit)
+                                    ? string.Empty
+                                    : $" {currTok.StepUnit.Trim()}";
+                                sameClauseUsingHints.Add(
+                                    $"Step {stepNum} assigns the same amount ({currTok.StepQuantity.Value:0.###}{uTxt}) to BOTH '{{{{{k1}}}}}' and '{{{{{k2}}}}}' in one ', using ' clause; keep ONLY ONE quantified amount by setting stepQuantity: null, stepUnit: null on the bare first mention '{{{{{k1}}}}}' (instead of dropping later divided additions)."
+                                );
+                            }
+                        }
+                    }
+                }
 
                 foreach (var tok in matchingTokens)
                 {
@@ -2755,7 +2805,11 @@ Household Cookbook Catalog:
                 earlyFullStepHint += $" {string.Join(" ", cutPieceHints)}";
             }
 
-            if (excessTokens.Count > 0)
+            if (sameClauseUsingHints.Count > 0)
+            {
+                earlyFullStepHint += $" {string.Join(" ", sameClauseUsingHints)}";
+            }
+            else if (excessTokens.Count > 0)
             {
                 var unitDesc = !string.IsNullOrWhiteSpace(master.Unit)
                     ? $" {master.Unit.Trim()}"
@@ -2764,10 +2818,18 @@ Household Cookbook Catalog:
                     !string.IsNullOrWhiteSpace(master.RawText)
                     && DividedMasterWordRegex.IsMatch(master.RawText)
                     && tokensUpToFullCount == 1;
+                var isSeparatedMaster =
+                    !string.IsNullOrWhiteSpace(master.RawText)
+                    && SeparatedMasterWordRegex.IsMatch(master.RawText);
                 if (isDividedSingleFull)
                 {
                     earlyFullStepHint +=
                         $" Master rawText ('{master.RawText}') is marked 'divided', yet a single token ('{fullReachedToken}') assigned 100% in Step {fullReachedStep}. Do NOT null later additions; check the source steps so Step {fullReachedStep} uses its smaller printed split amount and all divided steps sum to {master.Quantity.Value:0.###}{unitDesc}.";
+                }
+                else if (isSeparatedMaster)
+                {
+                    earlyFullStepHint +=
+                        $" Master rawText ('{master.RawText}') separates ONE batch into paired parts (e.g., yolks + whites); separating {master.Quantity.Value:0.###}{unitDesc} does NOT create double the eggs. Keep {master.Quantity.Value:0.###}{unitDesc} on the first mention ('{fullReachedToken}') and set stepQuantity: null, stepUnit: null on subsequent paired mentions [{string.Join(", ", excessTokens)}], making sure 'whites' or 'yolks' remains visible in templateText right after '{{{{...}}}}'.";
                 }
                 else
                 {
@@ -2828,7 +2890,7 @@ Household Cookbook Catalog:
                             displayName = new
                             {
                                 type = new[] { "string", "null" },
-                                description = "Human-readable ingredient name ONLY without quantity, unit, or prep modifiers (e.g. 'table salt', 'Bosc pear', 'goat cheese'—NEVER put prep words like 'chopped fine', 'crumbled', or 'table' alone here).",
+                                description = "Full human-readable ingredient name INCLUDING its food noun, without quantity, unit, or comma-prep (e.g. 'ground cumin', 'whole milk', 'extra-virgin olive oil', 'table salt', 'Bosc pear'—NEVER drop the noun to leave only modifiers like 'ground', 'whole', 'canned', 'extra-virgin', 'Mexican-style', 'chopped fine', or 'table').",
                             },
                             category = new { type = new[] { "string", "null" } },
                             quantity = new { type = new[] { "number", "null" } },
