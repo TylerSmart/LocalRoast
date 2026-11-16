@@ -14,7 +14,8 @@ public sealed record PocRunOptions(
     int MaxDescriptionLength,
     bool SessionCatalog,
     bool SkipSteps,
-    bool SkipIngredients
+    bool SkipIngredients,
+    PolishMode PolishMode = PolishMode.None
 );
 
 public sealed record RecipeRunSummary(
@@ -36,8 +37,10 @@ public sealed record RecipeRunSummary(
     int IngredientValidationWarnings,
     int StepCount,
     int StepValidationWarnings,
-    IReadOnlyList<string> UnreferencedIngredients,
-    string? FatalError
+    IReadOnlyList<string> ProseOnlyIngredients,
+    string? FatalError,
+    PolishSummaryMetrics? TargetedPolish = null,
+    PolishSummaryMetrics? FullPolish = null
 );
 
 public sealed partial class PipelineRunner(
@@ -72,6 +75,7 @@ public sealed partial class PipelineRunner(
                 llm = new
                 {
                     provider = config.Provider.ToString(),
+                    endpointStyle = config.EndpointStyle.ToString(),
                     config.BaseUrl,
                     config.TextModel,
                     config.VisionModel,
@@ -91,6 +95,7 @@ public sealed partial class PipelineRunner(
                     options.SessionCatalog,
                     options.SkipIngredients,
                     options.SkipSteps,
+                    polishMode = options.PolishMode.ToString(),
                     catalogLoadedFromDb = catalog.LoadedFromDatabase,
                     catalogFoodItemCount = catalog.FoodItems.Count,
                     catalogRecipeCount = catalog.Recipes.Count,
@@ -557,47 +562,13 @@ public sealed partial class PipelineRunner(
                 await WriteExchangesAsync(stepDir, stepCall.Exchanges, cancellationToken);
 
                 var rawTokensArray = stepCall.Parsed?["tokens"]?.AsArray() ?? new JsonArray();
-                var parsedTokens = StepTokenParserAndRenderer.ParseTokens(
-                    rawTokensArray,
-                    out var parseErrors
-                );
-                if (stepCall.ParseError is not null)
-                {
-                    parseErrors.Add(stepCall.ParseError);
-                }
-
-                var rendered1x = StepTokenParserAndRenderer.Render(
-                    parsedTokens,
-                    scaleFactor: 1m,
-                    convertToMetric: false
-                );
-                var rendered2x = StepTokenParserAndRenderer.Render(
-                    parsedTokens,
-                    scaleFactor: 2m,
-                    convertToMetric: false
-                );
-                var renderedMetric = StepTokenParserAndRenderer.Render(
-                    parsedTokens,
-                    scaleFactor: 1m,
-                    convertToMetric: true
-                );
-                var warnings = StepTokenParserAndRenderer.ValidateStepTokens(
-                    instr,
-                    parsedTokens,
-                    flatIngredients.Count,
-                    parseErrors
-                );
-
-                var stepRes = new StepTokenizeResult(
+                var stepRes = BuildStepResult(
                     stepNum,
                     secName,
                     instr,
-                    (JsonArray)rawTokensArray.DeepClone(),
-                    parsedTokens,
-                    rendered1x,
-                    rendered2x,
-                    renderedMetric,
-                    warnings
+                    rawTokensArray,
+                    flatIngredients.Count,
+                    stepCall.ParseError
                 );
                 stepResults.Add(stepRes);
 
@@ -612,20 +583,20 @@ public sealed partial class PipelineRunner(
                         tokens = rawTokensArray,
                         rendered = new
                         {
-                            original = rendered1x,
-                            scaled2x = rendered2x,
-                            metric1x = renderedMetric,
+                            original = stepRes.RenderedOriginal,
+                            scaled2x = stepRes.RenderedScaled2x,
+                            metric1x = stepRes.RenderedMetric1x,
                         },
-                        validationWarnings = warnings,
+                        validationWarnings = stepRes.ValidationWarnings,
                     },
                     cancellationToken
                 );
 
                 priorSteps.Add(new { stepNumber = stepNum, instruction = instr });
 
-                var tokenCount = parsedTokens.Count(t => t is not PocTextToken);
+                var tokenCount = stepRes.ParsedTokens.Count(t => t is not PocTextToken);
                 Console.WriteLine(
-                    $"    Step {stepNum}/{flatSteps.Count}: {tokenCount} token(s), {warnings.Count} warning(s) ({stepCall.TotalElapsedMs / 1000.0:F1}s)"
+                    $"    Step {stepNum}/{flatSteps.Count}: {tokenCount} token(s), {stepRes.ValidationWarnings.Count} warning(s) ({stepCall.TotalElapsedMs / 1000.0:F1}s)"
                 );
             }
 
@@ -649,67 +620,82 @@ public sealed partial class PipelineRunner(
             );
         }
 
-        // Compute unreferenced non-optional ingredients across tokenized steps
-        var referencedIndices = stepResults
-            .SelectMany(s => s.ParsedTokens)
-            .OfType<PocIngredientToken>()
-            .Where(t => t.IngredientIndex.HasValue)
-            .Select(t => t.IngredientIndex!.Value)
-            .ToHashSet();
-
-        var unreferenced = new List<string>();
-        if (!options.SkipSteps && flatSteps.Count > 0)
-        {
-            for (var idx = 0; idx < flatIngredients.Count; idx++)
-            {
-                if (!flatIngredients[idx].Ingredient.IsOptional && !referencedIndices.Contains(idx))
+        var baselineIngredients = flatIngredients
+            .Select(
+                (pair, i) =>
                 {
-                    unreferenced.Add($"[{idx}] {flatIngredients[idx].Ingredient.Name}");
+                    var res = resolvedIngredients.FirstOrDefault(r => r.GlobalIndex == i);
+                    return new AssembledIngredient(i, pair.Section, pair.Ingredient, res?.Decision);
                 }
-            }
-        }
+            )
+            .ToList();
 
-        await WriteJsonAsync(
+        var proseOnlyBaseline =
+            !options.SkipSteps && flatSteps.Count > 0
+                ? ComputeProseOnlyIngredients(baselineIngredients, stepResults)
+                : [];
+
+        var baseline = new AssembledRecipeState(
+            recipe.Title,
+            finalDescription,
+            recipe.Servings,
+            recipe.Yield,
+            recipe.Timing,
+            recipe.Tags,
+            baselineIngredients,
+            stepResults,
+            proseOnlyBaseline
+        );
+
+        await WriteAssembledRecipeJsonAsync(
             Path.Combine(recipeDir, "final-recipe.json"),
-            new
-            {
-                recipe.Title,
-                description = finalDescription,
-                recipe.Servings,
-                recipe.Yield,
-                recipe.Timing,
-                recipe.Tags,
-                ingredients = flatIngredients.Select(
-                    (pair, i) =>
-                    {
-                        var res = resolvedIngredients.FirstOrDefault(r => r.GlobalIndex == i);
-                        return new
-                        {
-                            index = i,
-                            section = pair.Section,
-                            extracted = pair.Ingredient,
-                            resolution = res?.Decision,
-                        };
-                    }
-                ),
-                steps = stepResults.Select(s => new
-                {
-                    s.StepNumber,
-                    s.SectionName,
-                    s.OriginalInstruction,
-                    tokens = s.RawTokensJson,
-                    rendered = new
-                    {
-                        original = s.RenderedOriginal,
-                        scaled2x = s.RenderedScaled2x,
-                        metric1x = s.RenderedMetric1x,
-                    },
-                    s.ValidationWarnings,
-                }),
-                unreferencedIngredients = unreferenced,
-            },
+            baseline,
+            polishNotes: null,
             cancellationToken
         );
+
+        PolishSummaryMetrics? targetedPolish = null;
+        PolishSummaryMetrics? fullPolish = null;
+        AssembledRecipeState? targetedState = null;
+        AssembledRecipeState? fullState = null;
+
+        if (options.PolishMode is not PolishMode.None && !options.SkipSteps && flatSteps.Count > 0)
+        {
+            var stage5Payload = BuildStage5UserPayload(input, baseline);
+
+            if (options.PolishMode is PolishMode.Targeted or PolishMode.Both)
+            {
+                (targetedPolish, targetedState) = await RunTargetedPolishAsync(
+                    recipeDir,
+                    stage5Payload,
+                    baseline,
+                    cancellationToken
+                );
+            }
+
+            if (options.PolishMode is PolishMode.Full or PolishMode.Both)
+            {
+                (fullPolish, fullState) = await RunFullPolishAsync(
+                    recipeDir,
+                    stage5Payload,
+                    baseline,
+                    cancellationToken
+                );
+            }
+
+            if (options.PolishMode == PolishMode.Both)
+            {
+                await WritePolishComparisonMarkdownAsync(
+                    Path.Combine(recipeDir, "polish-comparison.md"),
+                    baseline,
+                    targetedPolish,
+                    targetedState,
+                    fullPolish,
+                    fullState,
+                    cancellationToken
+                );
+            }
+        }
 
         sw.Stop();
         return new RecipeRunSummary(
@@ -755,9 +741,614 @@ public sealed partial class PipelineRunner(
             resolvedIngredients.Sum(r => r.ValidationWarnings.Count),
             stepResults.Count,
             stepResults.Sum(s => s.ValidationWarnings.Count),
-            unreferenced,
-            null
+            proseOnlyBaseline,
+            null,
+            targetedPolish,
+            fullPolish
         );
+    }
+
+    private sealed record AssembledIngredient(
+        int Index,
+        string? Section,
+        Stage1IngredientDto Extracted,
+        Stage3MatchDecisionDto? Resolution
+    );
+
+    private sealed record AssembledRecipeState(
+        string Title,
+        string? Description,
+        decimal? Servings,
+        string? Yield,
+        Stage1TimingDto? Timing,
+        IReadOnlyList<string> Tags,
+        IReadOnlyList<AssembledIngredient> Ingredients,
+        IReadOnlyList<StepTokenizeResult> Steps,
+        IReadOnlyList<string> ProseOnlyIngredients
+    );
+
+    private static StepTokenizeResult BuildStepResult(
+        int stepNumber,
+        string? sectionName,
+        string originalInstruction,
+        JsonArray rawTokensJson,
+        int ingredientCount,
+        string? extraParseError = null
+    )
+    {
+        var parsedTokens = StepTokenParserAndRenderer.ParseTokens(
+            rawTokensJson,
+            out var parseErrors
+        );
+        if (extraParseError is not null)
+        {
+            parseErrors.Add(extraParseError);
+        }
+
+        var rendered1x = StepTokenParserAndRenderer.Render(
+            parsedTokens,
+            scaleFactor: 1m,
+            convertToMetric: false
+        );
+        var rendered2x = StepTokenParserAndRenderer.Render(
+            parsedTokens,
+            scaleFactor: 2m,
+            convertToMetric: false
+        );
+        var renderedMetric = StepTokenParserAndRenderer.Render(
+            parsedTokens,
+            scaleFactor: 1m,
+            convertToMetric: true
+        );
+        var warnings = StepTokenParserAndRenderer.ValidateStepTokens(
+            originalInstruction,
+            parsedTokens,
+            ingredientCount,
+            parseErrors
+        );
+
+        return new StepTokenizeResult(
+            stepNumber,
+            sectionName,
+            originalInstruction,
+            (JsonArray)rawTokensJson.DeepClone(),
+            parsedTokens,
+            rendered1x,
+            rendered2x,
+            renderedMetric,
+            warnings
+        );
+    }
+
+    private static List<string> ComputeProseOnlyIngredients(
+        IReadOnlyList<AssembledIngredient> ingredients,
+        IReadOnlyList<StepTokenizeResult> steps
+    )
+    {
+        var referencedIndices = steps
+            .SelectMany(s => s.ParsedTokens)
+            .OfType<PocIngredientToken>()
+            .Where(t => t.IngredientIndex.HasValue)
+            .Select(t => t.IngredientIndex!.Value)
+            .ToHashSet();
+
+        var proseOnly = new List<string>();
+        foreach (var ing in ingredients)
+        {
+            if (!ing.Extracted.IsOptional && !referencedIndices.Contains(ing.Index))
+            {
+                proseOnly.Add($"[{ing.Index}] {ing.Extracted.Name}");
+            }
+        }
+        return proseOnly;
+    }
+
+    private string BuildStage5UserPayload(RecipeInputItem input, AssembledRecipeState baseline)
+    {
+        return JsonSerializer.Serialize(
+            new
+            {
+                originalSourceText = input.NormalizedText,
+                currentRecipe = new
+                {
+                    baseline.Title,
+                    baseline.Description,
+                    baseline.Servings,
+                    baseline.Yield,
+                    baseline.Timing,
+                    baseline.Tags,
+                    ingredients = baseline.Ingredients.Select(i => new
+                    {
+                        i.Index,
+                        i.Section,
+                        i.Extracted.Name,
+                        i.Extracted.Quantity,
+                        i.Extracted.MaxQuantity,
+                        i.Extracted.Unit,
+                        i.Extracted.PrepNote,
+                        i.Extracted.IsOptional,
+                        i.Extracted.Replacements,
+                        i.Extracted.AlternateMeasurements,
+                        dbMatch = i.Resolution,
+                    }),
+                    steps = baseline.Steps.Select(s => new
+                    {
+                        s.StepNumber,
+                        s.SectionName,
+                        s.OriginalInstruction,
+                        renderedOriginal = s.RenderedOriginal,
+                        tokens = s.RawTokensJson,
+                    }),
+                },
+            },
+            PrettyJson
+        );
+    }
+
+    private async Task<(
+        PolishSummaryMetrics Metrics,
+        AssembledRecipeState? State
+    )> RunTargetedPolishAsync(
+        string recipeDir,
+        string userPayload,
+        AssembledRecipeState baseline,
+        CancellationToken cancellationToken
+    )
+    {
+        var dir = Path.Combine(recipeDir, "05-polish-targeted");
+        Directory.CreateDirectory(dir);
+        Console.Write("  Stage 5a (Targeted polish)... ");
+
+        var call = await llmClient.CompleteStructuredAsync<PolishTargetedResponseDto>(
+            config,
+            "polish_targeted",
+            PipelineSchemas.Stage5PolishTargetedSchema(),
+            prompts.PolishTargeted.Content,
+            userPayload,
+            isAuxiliaryStep: false,
+            cancellationToken: cancellationToken
+        );
+
+        await WriteExchangesAsync(dir, call.Exchanges, cancellationToken);
+        await WriteJsonAsync(
+            Path.Combine(dir, "output.json"),
+            new
+            {
+                call.TotalElapsedMs,
+                call.ParseError,
+                patches = call.Parsed,
+            },
+            cancellationToken
+        );
+
+        if (call.Parsed is null)
+        {
+            Console.WriteLine($"FAILED ({call.ParseError})");
+            return (
+                new PolishSummaryMetrics(
+                    "targeted",
+                    Success: false,
+                    call.TotalElapsedMs,
+                    0,
+                    0,
+                    0,
+                    [],
+                    call.ParseError
+                ),
+                null
+            );
+        }
+
+        var polished = ApplyTargetedPatches(baseline, call.Parsed);
+        await WriteAssembledRecipeJsonAsync(
+            Path.Combine(dir, "final-recipe.json"),
+            polished,
+            call.Parsed.PolishNotes,
+            cancellationToken
+        );
+
+        var stepWarnings = polished.Steps.Sum(s => s.ValidationWarnings.Count);
+        Console.WriteLine(
+            $"OK ({call.TotalElapsedMs / 1000.0:F1}s | ingPatches={call.Parsed.IngredientPatches.Count}, stepPatches={call.Parsed.StepPatches.Count}, stepWarn={stepWarnings})"
+        );
+
+        return (
+            new PolishSummaryMetrics(
+                "targeted",
+                Success: true,
+                call.TotalElapsedMs,
+                call.Parsed.PolishNotes.Count,
+                stepWarnings,
+                polished.ProseOnlyIngredients.Count,
+                call.Parsed.PolishNotes,
+                call.ParseError
+            ),
+            polished
+        );
+    }
+
+    private static AssembledRecipeState ApplyTargetedPatches(
+        AssembledRecipeState baseline,
+        PolishTargetedResponseDto patch
+    )
+    {
+        var patchedIngredients = baseline.Ingredients.ToList();
+        foreach (var ingPatch in patch.IngredientPatches)
+        {
+            var idx = patchedIngredients.FindIndex(i => i.Index == ingPatch.Index);
+            if (idx < 0)
+            {
+                continue;
+            }
+
+            var current = patchedIngredients[idx];
+            var ext = current.Extracted;
+            var updatedExt = ext with
+            {
+                Name = ingPatch.Name ?? ext.Name,
+                Quantity = ingPatch.Quantity ?? ext.Quantity,
+                MaxQuantity = ingPatch.MaxQuantity ?? ext.MaxQuantity,
+                Unit = ingPatch.Unit ?? ext.Unit,
+                PrepNote = ingPatch.PrepNote ?? ext.PrepNote,
+                IsOptional = ingPatch.IsOptional ?? ext.IsOptional,
+            };
+            patchedIngredients[idx] = current with { Extracted = updatedExt };
+        }
+
+        var stepPatchByNum = patch
+            .StepPatches.GroupBy(s => s.StepNumber)
+            .ToDictionary(g => g.Key, g => g.Last());
+
+        var patchedSteps = baseline
+            .Steps.Select(s =>
+            {
+                if (!stepPatchByNum.TryGetValue(s.StepNumber, out var stepPatch))
+                {
+                    return s;
+                }
+
+                return BuildStepResult(
+                    s.StepNumber,
+                    s.SectionName,
+                    s.OriginalInstruction,
+                    stepPatch.Tokens,
+                    patchedIngredients.Count
+                );
+            })
+            .ToList();
+
+        var proseOnly = ComputeProseOnlyIngredients(patchedIngredients, patchedSteps);
+        return new AssembledRecipeState(
+            patch.Title ?? baseline.Title,
+            patch.Description ?? baseline.Description,
+            patch.Servings ?? baseline.Servings,
+            patch.Yield ?? baseline.Yield,
+            patch.Timing ?? baseline.Timing,
+            patch.Tags ?? baseline.Tags,
+            patchedIngredients,
+            patchedSteps,
+            proseOnly
+        );
+    }
+
+    private async Task<(
+        PolishSummaryMetrics Metrics,
+        AssembledRecipeState? State
+    )> RunFullPolishAsync(
+        string recipeDir,
+        string userPayload,
+        AssembledRecipeState baseline,
+        CancellationToken cancellationToken
+    )
+    {
+        var dir = Path.Combine(recipeDir, "05-polish-full");
+        Directory.CreateDirectory(dir);
+        Console.Write("  Stage 5b (Full polish)... ");
+
+        var call = await llmClient.CompleteStructuredAsync<PolishFullResponseDto>(
+            config,
+            "polish_full",
+            PipelineSchemas.Stage5PolishFullSchema(),
+            prompts.PolishFull.Content,
+            userPayload,
+            isAuxiliaryStep: false,
+            cancellationToken: cancellationToken
+        );
+
+        await WriteExchangesAsync(dir, call.Exchanges, cancellationToken);
+        await WriteJsonAsync(
+            Path.Combine(dir, "output.json"),
+            new
+            {
+                call.TotalElapsedMs,
+                call.ParseError,
+                polished = call.Parsed,
+            },
+            cancellationToken
+        );
+
+        if (call.Parsed is null)
+        {
+            Console.WriteLine($"FAILED ({call.ParseError})");
+            return (
+                new PolishSummaryMetrics(
+                    "full",
+                    Success: false,
+                    call.TotalElapsedMs,
+                    0,
+                    0,
+                    0,
+                    [],
+                    call.ParseError
+                ),
+                null
+            );
+        }
+
+        var polished = MapFullPolishState(baseline, call.Parsed);
+        await WriteAssembledRecipeJsonAsync(
+            Path.Combine(dir, "final-recipe.json"),
+            polished,
+            call.Parsed.PolishNotes,
+            cancellationToken
+        );
+
+        var stepWarnings = polished.Steps.Sum(s => s.ValidationWarnings.Count);
+        Console.WriteLine(
+            $"OK ({call.TotalElapsedMs / 1000.0:F1}s | ings={polished.Ingredients.Count}, steps={polished.Steps.Count}, stepWarn={stepWarnings})"
+        );
+
+        return (
+            new PolishSummaryMetrics(
+                "full",
+                Success: true,
+                call.TotalElapsedMs,
+                call.Parsed.PolishNotes.Count,
+                stepWarnings,
+                polished.ProseOnlyIngredients.Count,
+                call.Parsed.PolishNotes,
+                call.ParseError
+            ),
+            polished
+        );
+    }
+
+    private static AssembledRecipeState MapFullPolishState(
+        AssembledRecipeState baseline,
+        PolishFullResponseDto full
+    )
+    {
+        var baselineByIdx = baseline.Ingredients.ToDictionary(i => i.Index);
+        var mappedIngredients = full
+            .Ingredients.Select(ing =>
+            {
+                Stage3MatchDecisionDto? resolution = null;
+                if (
+                    baselineByIdx.TryGetValue(ing.Index, out var orig)
+                    && string.Equals(
+                        orig.Extracted.Name.Trim(),
+                        ing.Name.Trim(),
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                )
+                {
+                    resolution = orig.Resolution;
+                }
+
+                return new AssembledIngredient(
+                    ing.Index,
+                    ing.Section,
+                    new Stage1IngredientDto(
+                        ing.Name,
+                        ing.Quantity,
+                        ing.MaxQuantity,
+                        ing.Unit,
+                        ing.PrepNote,
+                        ing.IsOptional,
+                        ing.Replacements,
+                        ing.AlternateMeasurements
+                    ),
+                    resolution
+                );
+            })
+            .ToList();
+
+        var baselineStepsByNum = baseline.Steps.ToDictionary(s => s.StepNumber);
+        var mappedSteps = full
+            .Steps.Select(step =>
+            {
+                baselineStepsByNum.TryGetValue(step.StepNumber, out var origStep);
+                return BuildStepResult(
+                    step.StepNumber,
+                    step.SectionName ?? origStep?.SectionName,
+                    origStep?.OriginalInstruction ?? string.Empty,
+                    step.Tokens,
+                    mappedIngredients.Count
+                );
+            })
+            .ToList();
+
+        var proseOnly = ComputeProseOnlyIngredients(mappedIngredients, mappedSteps);
+        return new AssembledRecipeState(
+            full.Title,
+            full.Description,
+            full.Servings,
+            full.Yield,
+            full.Timing,
+            full.Tags,
+            mappedIngredients,
+            mappedSteps,
+            proseOnly
+        );
+    }
+
+    private static Task WriteAssembledRecipeJsonAsync(
+        string path,
+        AssembledRecipeState state,
+        IReadOnlyList<string>? polishNotes,
+        CancellationToken cancellationToken
+    )
+    {
+        return WriteJsonAsync(
+            path,
+            new
+            {
+                state.Title,
+                state.Description,
+                state.Servings,
+                state.Yield,
+                state.Timing,
+                state.Tags,
+                ingredients = state.Ingredients.Select(i => new
+                {
+                    i.Index,
+                    i.Section,
+                    extracted = i.Extracted,
+                    resolution = i.Resolution,
+                }),
+                steps = state.Steps.Select(s => new
+                {
+                    s.StepNumber,
+                    s.SectionName,
+                    s.OriginalInstruction,
+                    tokens = s.RawTokensJson,
+                    rendered = new
+                    {
+                        original = s.RenderedOriginal,
+                        scaled2x = s.RenderedScaled2x,
+                        metric1x = s.RenderedMetric1x,
+                    },
+                    s.ValidationWarnings,
+                }),
+                proseOnlyIngredients = state.ProseOnlyIngredients,
+                polishNotes,
+            },
+            cancellationToken
+        );
+    }
+
+    private static Task WritePolishComparisonMarkdownAsync(
+        string path,
+        AssembledRecipeState baseline,
+        PolishSummaryMetrics? targetedMetrics,
+        AssembledRecipeState? targetedState,
+        PolishSummaryMetrics? fullMetrics,
+        AssembledRecipeState? fullState,
+        CancellationToken cancellationToken
+    )
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine($"# Stage 5 Polish Comparison: {baseline.Title}");
+        sb.AppendLine();
+        sb.AppendLine("| Metric | Baseline (Stages 1-4) | Targeted Polish | Full Polish |");
+        sb.AppendLine("| --- | --- | --- | --- |");
+
+        var baseWarn = baseline.Steps.Sum(s => s.ValidationWarnings.Count);
+        var tgtTime = targetedMetrics is not null
+            ? $"{targetedMetrics.ElapsedMs / 1000.0:F1}s"
+            : "n/a";
+        var fullTime = fullMetrics is not null ? $"{fullMetrics.ElapsedMs / 1000.0:F1}s" : "n/a";
+        sb.AppendLine($"| Polish Time | — | {tgtTime} | {fullTime} |");
+        sb.AppendLine(
+            $"| Ingredients Count | {baseline.Ingredients.Count} | {targetedState?.Ingredients.Count.ToString() ?? "failed"} | {fullState?.Ingredients.Count.ToString() ?? "failed"} |"
+        );
+        sb.AppendLine(
+            $"| Step Validation Warnings | {baseWarn} | {targetedMetrics?.StepWarningsAfterPolish.ToString() ?? "failed"} | {fullMetrics?.StepWarningsAfterPolish.ToString() ?? "failed"} |"
+        );
+        sb.AppendLine(
+            $"| Prose-Only Master Ingredients | {baseline.ProseOnlyIngredients.Count} | {targetedState?.ProseOnlyIngredients.Count.ToString() ?? "failed"} | {fullState?.ProseOnlyIngredients.Count.ToString() ?? "failed"} |"
+        );
+        sb.AppendLine(
+            $"| Tags | {string.Join(", ", baseline.Tags)} | {(targetedState is not null ? string.Join(", ", targetedState.Tags) : "failed")} | {(fullState is not null ? string.Join(", ", fullState.Tags) : "failed")} |"
+        );
+
+        sb.AppendLine();
+        sb.AppendLine("## Polish Notes");
+        sb.AppendLine();
+        sb.AppendLine("### Targeted Polish");
+        if (targetedMetrics?.PolishNotes.Count > 0)
+        {
+            foreach (var note in targetedMetrics.PolishNotes)
+            {
+                sb.AppendLine($"- {note}");
+            }
+        }
+        else
+        {
+            sb.AppendLine($"- *(none / parse error: {targetedMetrics?.ParseError})*");
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("### Full Polish");
+        if (fullMetrics?.PolishNotes.Count > 0)
+        {
+            foreach (var note in fullMetrics.PolishNotes)
+            {
+                sb.AppendLine($"- {note}");
+            }
+        }
+        else
+        {
+            sb.AppendLine($"- *(none / parse error: {fullMetrics?.ParseError})*");
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("## Step-by-Step Rendered Changes");
+        foreach (var baseStep in baseline.Steps)
+        {
+            var tgtStep = targetedState?.Steps.FirstOrDefault(s =>
+                s.StepNumber == baseStep.StepNumber
+            );
+            var fullStep = fullState?.Steps.FirstOrDefault(s =>
+                s.StepNumber == baseStep.StepNumber
+            );
+
+            var baseTokensJson = baseStep.RawTokensJson.ToJsonString();
+            var changed =
+                (
+                    tgtStep is not null
+                    && (
+                        tgtStep.RenderedOriginal != baseStep.RenderedOriginal
+                        || tgtStep.RawTokensJson.ToJsonString() != baseTokensJson
+                    )
+                )
+                || (
+                    fullStep is not null
+                    && (
+                        fullStep.RenderedOriginal != baseStep.RenderedOriginal
+                        || fullStep.RawTokensJson.ToJsonString() != baseTokensJson
+                    )
+                );
+
+            if (!changed)
+            {
+                continue;
+            }
+
+            static int CountNonText(StepTokenizeResult s) =>
+                s.ParsedTokens.Count(t => t is not PocTextToken);
+
+            sb.AppendLine();
+            sb.AppendLine($"### Step {baseStep.StepNumber}");
+            sb.AppendLine($"- **Source:** {baseStep.OriginalInstruction}");
+            sb.AppendLine(
+                $"- **Baseline ({CountNonText(baseStep)} tokens, {baseStep.ValidationWarnings.Count} warn):** {baseStep.RenderedOriginal}"
+            );
+            if (tgtStep is not null)
+            {
+                sb.AppendLine(
+                    $"- **Targeted ({CountNonText(tgtStep)} tokens, {tgtStep.ValidationWarnings.Count} warn):** {tgtStep.RenderedOriginal}"
+                );
+            }
+            if (fullStep is not null)
+            {
+                sb.AppendLine(
+                    $"- **Full ({CountNonText(fullStep)} tokens, {fullStep.ValidationWarnings.Count} warn):** {fullStep.RenderedOriginal}"
+                );
+            }
+        }
+
+        return File.WriteAllTextAsync(path, sb.ToString(), Encoding.UTF8, cancellationToken);
     }
 
     private static List<string> ValidateIngredientDecision(
@@ -887,22 +1478,31 @@ public sealed partial class PipelineRunner(
     private string BuildMarkdownSummary(IReadOnlyList<RecipeRunSummary> summaries)
     {
         var sb = new StringBuilder();
-        sb.AppendLine($"# Ingestion PoC Run Summary");
+        sb.AppendLine("# Ingestion PoC Run Summary");
         sb.AppendLine();
-        sb.AppendLine($"- **Provider / Base URL:** `{config.Provider}` @ `{config.BaseUrl}`");
+        sb.AppendLine(
+            $"- **Provider / Endpoint / Base URL:** `{config.Provider}` (`{config.EndpointStyle}`) @ `{config.BaseUrl}`"
+        );
         sb.AppendLine(
             $"- **Model:** `{config.TextModel}` (thinking: `{config.EnableThinking}`, auxThinking: `{config.AuxThinkingOverride?.ToString() ?? "inherit"}`, context: `{config.ContextWindowTokens}`)"
         );
+        sb.AppendLine($"- **Polish Mode:** `{options.PolishMode}`");
         sb.AppendLine(
             $"- **Database Catalog:** {(catalog.LoadedFromDatabase ? $"{catalog.FoodItems.Count} food items, {catalog.Recipes.Count} recipes" : "Offline / Disabled")}"
         );
         sb.AppendLine();
         sb.AppendLine(
-            "| Recipe | Time | Stage 1 | Stage 2 | DB Ing | DB Rec | New Ing | Unres Rec | Ing Warn | Step Warn | Unref Ing |"
+            "| Recipe | Time | Stage 1 | Stage 2 | DB Ing | DB Rec | New Ing | Unres Rec | Ing Warn | Step Warn | Prose-Only Ing | Targeted Polish | Full Polish |"
         );
         sb.AppendLine(
-            "| --- | ---: | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"
+            "| --- | ---: | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |"
         );
+
+        static string FormatPolishCell(PolishSummaryMetrics? m) =>
+            m is null ? "—"
+            : m.Success
+                ? $"{m.ElapsedMs / 1000.0:F1}s ({m.StepWarningsAfterPolish}w / {m.PolishNotesCount}n)"
+            : "FAILED";
 
         foreach (var s in summaries)
         {
@@ -911,13 +1511,16 @@ public sealed partial class PipelineRunner(
                 ? $"{s.OriginalDescriptionLength}->{s.FinalDescriptionLength}"
                 : "skip";
             sb.AppendLine(
-                $"| {s.Title} | {s.TotalElapsedMs / 1000.0:F1}s | {s1} | {s2} | {s.ExistingIngredientMatches} | {s.ExistingRecipeMatches} | {s.NewIngredientsProposed} | {s.UnresolvedRecipes} | {s.IngredientValidationWarnings} | {s.StepValidationWarnings} | {s.UnreferencedIngredients.Count} |"
+                $"| {s.Title} | {s.TotalElapsedMs / 1000.0:F1}s | {s1} | {s2} | {s.ExistingIngredientMatches} | {s.ExistingRecipeMatches} | {s.NewIngredientsProposed} | {s.UnresolvedRecipes} | {s.IngredientValidationWarnings} | {s.StepValidationWarnings} | {s.ProseOnlyIngredients.Count} | {FormatPolishCell(s.TargetedPolish)} | {FormatPolishCell(s.FullPolish)} |"
             );
         }
 
         foreach (
             var s in summaries.Where(x =>
-                x.FatalError is not null || x.UnreferencedIngredients.Count > 0
+                x.FatalError is not null
+                || x.ProseOnlyIngredients.Count > 0
+                || x.TargetedPolish is not null
+                || x.FullPolish is not null
             )
         )
         {
@@ -927,10 +1530,22 @@ public sealed partial class PipelineRunner(
             {
                 sb.AppendLine($"- **Fatal Error:** {s.FatalError}");
             }
-            if (s.UnreferencedIngredients.Count > 0)
+            if (s.ProseOnlyIngredients.Count > 0)
             {
                 sb.AppendLine(
-                    $"- **Unreferenced Master Ingredients:** {string.Join(", ", s.UnreferencedIngredients)}"
+                    $"- **Prose-Only Master Ingredients (no quantitative quantity in steps):** {string.Join(", ", s.ProseOnlyIngredients)}"
+                );
+            }
+            if (s.TargetedPolish is { } tgt)
+            {
+                sb.AppendLine(
+                    $"- **Targeted Polish Notes ({tgt.ElapsedMs / 1000.0:F1}s):** {(tgt.PolishNotes.Count > 0 ? string.Join(" | ", tgt.PolishNotes) : tgt.ParseError ?? "none")}"
+                );
+            }
+            if (s.FullPolish is { } full)
+            {
+                sb.AppendLine(
+                    $"- **Full Polish Notes ({full.ElapsedMs / 1000.0:F1}s):** {(full.PolishNotes.Count > 0 ? string.Join(" | ", full.PolishNotes) : full.ParseError ?? "none")}"
                 );
             }
         }

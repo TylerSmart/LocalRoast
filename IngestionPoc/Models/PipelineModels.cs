@@ -26,9 +26,19 @@ public sealed class PromptSet
     public required PromptFileInfo SearchTerms { get; init; }
     public required PromptFileInfo MatchIngredient { get; init; }
     public required PromptFileInfo TokenizeStep { get; init; }
+    public required PromptFileInfo PolishFull { get; init; }
+    public required PromptFileInfo PolishTargeted { get; init; }
 
     public IReadOnlyList<PromptFileInfo> All =>
-        [ExtractRecipe, ShortenDescription, SearchTerms, MatchIngredient, TokenizeStep];
+        [
+            ExtractRecipe,
+            ShortenDescription,
+            SearchTerms,
+            MatchIngredient,
+            TokenizeStep,
+            PolishFull,
+            PolishTargeted,
+        ];
 
     public static PromptSet LoadFromDirectory(string directory)
     {
@@ -39,6 +49,8 @@ public sealed class PromptSet
             SearchTerms = Load(directory, "03a-ingredient-search-terms.md"),
             MatchIngredient = Load(directory, "03b-ingredient-match.md"),
             TokenizeStep = Load(directory, "04-tokenize-step.md"),
+            PolishFull = Load(directory, "05a-polish-full.md"),
+            PolishTargeted = Load(directory, "05b-polish-targeted.md"),
         };
     }
 
@@ -196,8 +208,299 @@ public sealed record StepTokenizeResult(
     IReadOnlyList<string> ValidationWarnings
 );
 
+public enum PolishMode
+{
+    None,
+    Targeted,
+    Full,
+    Both,
+}
+
+// Stage 5 DTOs
+public sealed record PolishFullIngredientDto(
+    int Index,
+    string? Section,
+    string Name,
+    decimal? Quantity,
+    decimal? MaxQuantity,
+    string? Unit,
+    string? PrepNote,
+    bool IsOptional,
+    IReadOnlyList<Stage1ReplacementDto>? Replacements,
+    IReadOnlyList<Stage1AlternateMeasurementDto>? AlternateMeasurements
+);
+
+public sealed record PolishFullStepDto(int StepNumber, string? SectionName, JsonArray Tokens);
+
+public sealed record PolishFullResponseDto(
+    string Title,
+    string? Description,
+    decimal? Servings,
+    string? Yield,
+    Stage1TimingDto? Timing,
+    IReadOnlyList<string> Tags,
+    IReadOnlyList<PolishFullIngredientDto> Ingredients,
+    IReadOnlyList<PolishFullStepDto> Steps,
+    IReadOnlyList<string> PolishNotes
+);
+
+public sealed record PolishIngredientPatchDto(
+    int Index,
+    string? Name,
+    decimal? Quantity,
+    decimal? MaxQuantity,
+    string? Unit,
+    string? PrepNote,
+    bool? IsOptional
+);
+
+public sealed record PolishStepPatchDto(int StepNumber, JsonArray Tokens);
+
+public sealed record PolishTargetedResponseDto(
+    string? Title,
+    string? Description,
+    decimal? Servings,
+    string? Yield,
+    Stage1TimingDto? Timing,
+    IReadOnlyList<string>? Tags,
+    IReadOnlyList<PolishIngredientPatchDto> IngredientPatches,
+    IReadOnlyList<PolishStepPatchDto> StepPatches,
+    IReadOnlyList<string> PolishNotes
+);
+
+public sealed record PolishSummaryMetrics(
+    string Variant,
+    bool Success,
+    long ElapsedMs,
+    int PolishNotesCount,
+    int StepWarningsAfterPolish,
+    int ProseOnlyIngredientsAfterPolish,
+    IReadOnlyList<string> PolishNotes,
+    string? ParseError
+);
+
 public static class PipelineSchemas
 {
+    private static object TimingSchema() =>
+        new
+        {
+            type = "object",
+            additionalProperties = false,
+            properties = new
+            {
+                prep = new { type = new[] { "integer", "null" } },
+                cook = new { type = new[] { "integer", "null" } },
+                total = new { type = new[] { "integer", "null" } },
+            },
+            required = new[] { "prep", "cook", "total" },
+        };
+
+    private static object IngredientObjectSchema(bool includeIndexAndSection)
+    {
+        var properties = new Dictionary<string, object>();
+        var required = new List<string>();
+
+        if (includeIndexAndSection)
+        {
+            properties["index"] = new { type = "integer" };
+            properties["section"] = new { type = new[] { "string", "null" } };
+            required.Add("index");
+            required.Add("section");
+        }
+
+        properties["name"] = new { type = "string" };
+        properties["quantity"] = new { type = new[] { "number", "null" } };
+        properties["maxQuantity"] = new { type = new[] { "number", "null" } };
+        properties["unit"] = new { type = new[] { "string", "null" } };
+        properties["prepNote"] = new { type = new[] { "string", "null" } };
+        properties["isOptional"] = new { type = "boolean" };
+        properties["replacements"] = new
+        {
+            type = "array",
+            items = new
+            {
+                type = "object",
+                additionalProperties = false,
+                properties = new
+                {
+                    name = new { type = "string" },
+                    quantity = new { type = new[] { "number", "null" } },
+                    unit = new { type = new[] { "string", "null" } },
+                    prepNote = new { type = new[] { "string", "null" } },
+                },
+                required = new[] { "name", "quantity", "unit", "prepNote" },
+            },
+        };
+        properties["alternateMeasurements"] = new
+        {
+            type = "array",
+            items = new
+            {
+                type = "object",
+                additionalProperties = false,
+                properties = new
+                {
+                    quantity = new { type = "number" },
+                    unit = new { type = new[] { "string", "null" } },
+                },
+                required = new[] { "quantity", "unit" },
+            },
+        };
+
+        required.AddRange([
+            "name",
+            "quantity",
+            "maxQuantity",
+            "unit",
+            "prepNote",
+            "isOptional",
+            "replacements",
+            "alternateMeasurements",
+        ]);
+
+        return new
+        {
+            type = "object",
+            additionalProperties = false,
+            properties,
+            required = required.ToArray(),
+        };
+    }
+
+    private static object StepTokenArraySchema() =>
+        new
+        {
+            type = "array",
+            items = new
+            {
+                anyOf = new object[]
+                {
+                    new { type = "string" },
+                    new
+                    {
+                        type = "object",
+                        additionalProperties = false,
+                        properties = new
+                        {
+                            type = new { type = "string", @enum = new[] { "ingredient" } },
+                            ingredientIndex = new { type = new[] { "integer", "null" } },
+                            name = new { type = "string" },
+                            quantity = new { type = "number" },
+                            maxQuantity = new { type = new[] { "number", "null" } },
+                            unit = new { type = new[] { "string", "null" } },
+                        },
+                        required = new[]
+                        {
+                            "type",
+                            "ingredientIndex",
+                            "name",
+                            "quantity",
+                            "maxQuantity",
+                            "unit",
+                        },
+                    },
+                    new
+                    {
+                        type = "object",
+                        additionalProperties = false,
+                        properties = new
+                        {
+                            type = new { type = "string", @enum = new[] { "mixture" } },
+                            name = new { type = "string" },
+                            quantity = new { type = "number" },
+                            maxQuantity = new { type = new[] { "number", "null" } },
+                            unit = new { type = new[] { "string", "null" } },
+                        },
+                        required = new[] { "type", "name", "quantity", "maxQuantity", "unit" },
+                    },
+                    new
+                    {
+                        type = "object",
+                        additionalProperties = false,
+                        properties = new
+                        {
+                            type = new { type = "string", @enum = new[] { "timer" } },
+                            amount = new { type = "number" },
+                            maxAmount = new { type = new[] { "number", "null" } },
+                            unit = new
+                            {
+                                type = "string",
+                                @enum = new[] { "second", "minute", "hour", "day" },
+                            },
+                            label = new { type = "string" },
+                        },
+                        required = new[] { "type", "amount", "maxAmount", "unit", "label" },
+                    },
+                    new
+                    {
+                        type = "object",
+                        additionalProperties = false,
+                        properties = new
+                        {
+                            type = new { type = "string", @enum = new[] { "temperature" } },
+                            amount = new { type = "number" },
+                            maxAmount = new { type = new[] { "number", "null" } },
+                            unit = new
+                            {
+                                type = "string",
+                                @enum = new[] { "fahrenheit", "celsius" },
+                            },
+                        },
+                        required = new[] { "type", "amount", "maxAmount", "unit" },
+                    },
+                    new
+                    {
+                        type = "object",
+                        additionalProperties = false,
+                        properties = new
+                        {
+                            type = new { type = "string", @enum = new[] { "dimension" } },
+                            amount = new { type = "number" },
+                            maxAmount = new { type = new[] { "number", "null" } },
+                            unit = new
+                            {
+                                type = "string",
+                                @enum = new[]
+                                {
+                                    "inch",
+                                    "foot",
+                                    "yard",
+                                    "millimeter",
+                                    "centimeter",
+                                    "meter",
+                                },
+                            },
+                            hyphenated = new { type = "boolean" },
+                        },
+                        required = new[] { "type", "amount", "maxAmount", "unit", "hyphenated" },
+                    },
+                    new
+                    {
+                        type = "object",
+                        additionalProperties = false,
+                        properties = new
+                        {
+                            type = new { type = "string", @enum = new[] { "fixed" } },
+                            name = new { type = "string" },
+                            amount = new { type = "number" },
+                            maxAmount = new { type = new[] { "number", "null" } },
+                            unit = new { type = new[] { "string", "null" } },
+                            hyphenated = new { type = "boolean" },
+                        },
+                        required = new[]
+                        {
+                            "type",
+                            "name",
+                            "amount",
+                            "maxAmount",
+                            "unit",
+                            "hyphenated",
+                        },
+                    },
+                },
+            },
+        };
+
     public static object Stage1ExtractRecipeSchema() =>
         new
         {
@@ -222,99 +525,14 @@ public static class PipelineSchemas
                             ingredients = new
                             {
                                 type = "array",
-                                items = new
-                                {
-                                    type = "object",
-                                    additionalProperties = false,
-                                    properties = new
-                                    {
-                                        name = new { type = "string" },
-                                        quantity = new { type = new[] { "number", "null" } },
-                                        maxQuantity = new { type = new[] { "number", "null" } },
-                                        unit = new { type = new[] { "string", "null" } },
-                                        prepNote = new { type = new[] { "string", "null" } },
-                                        isOptional = new { type = "boolean" },
-                                        replacements = new
-                                        {
-                                            type = "array",
-                                            items = new
-                                            {
-                                                type = "object",
-                                                additionalProperties = false,
-                                                properties = new
-                                                {
-                                                    name = new { type = "string" },
-                                                    quantity = new
-                                                    {
-                                                        type = new[] { "number", "null" },
-                                                    },
-                                                    unit = new
-                                                    {
-                                                        type = new[] { "string", "null" },
-                                                    },
-                                                    prepNote = new
-                                                    {
-                                                        type = new[] { "string", "null" },
-                                                    },
-                                                },
-                                                required = new[]
-                                                {
-                                                    "name",
-                                                    "quantity",
-                                                    "unit",
-                                                    "prepNote",
-                                                },
-                                            },
-                                        },
-                                        alternateMeasurements = new
-                                        {
-                                            type = "array",
-                                            items = new
-                                            {
-                                                type = "object",
-                                                additionalProperties = false,
-                                                properties = new
-                                                {
-                                                    quantity = new { type = "number" },
-                                                    unit = new
-                                                    {
-                                                        type = new[] { "string", "null" },
-                                                    },
-                                                },
-                                                required = new[] { "quantity", "unit" },
-                                            },
-                                        },
-                                    },
-                                    required = new[]
-                                    {
-                                        "name",
-                                        "quantity",
-                                        "maxQuantity",
-                                        "unit",
-                                        "prepNote",
-                                        "isOptional",
-                                        "replacements",
-                                        "alternateMeasurements",
-                                    },
-                                },
+                                items = IngredientObjectSchema(includeIndexAndSection: false),
                             },
                             instructions = new { type = "array", items = new { type = "string" } },
                         },
                         required = new[] { "name", "ingredients", "instructions" },
                     },
                 },
-                timing = new
-                {
-                    type = "object",
-                    additionalProperties = false,
-                    properties = new
-                    {
-                        prep = new { type = new[] { "integer", "null" } },
-                        cook = new { type = new[] { "integer", "null" } },
-                        total = new { type = new[] { "integer", "null" } },
-                    },
-                    required = new[] { "prep", "cook", "total" },
-                },
+                timing = TimingSchema(),
                 tags = new { type = "array", items = new { type = "string" } },
             },
             required = new[]
@@ -401,156 +619,138 @@ public static class PipelineSchemas
         {
             type = "object",
             additionalProperties = false,
+            properties = new { tokens = StepTokenArraySchema() },
+            required = new[] { "tokens" },
+        };
+
+    public static object Stage5PolishFullSchema() =>
+        new
+        {
+            type = "object",
+            additionalProperties = false,
             properties = new
             {
-                tokens = new
+                title = new { type = "string" },
+                description = new { type = new[] { "string", "null" } },
+                servings = new { type = new[] { "number", "null" } },
+                yield = new { type = new[] { "string", "null" } },
+                timing = TimingSchema(),
+                tags = new { type = "array", items = new { type = "string" } },
+                ingredients = new
+                {
+                    type = "array",
+                    items = IngredientObjectSchema(includeIndexAndSection: true),
+                },
+                steps = new
                 {
                     type = "array",
                     items = new
                     {
-                        anyOf = new object[]
+                        type = "object",
+                        additionalProperties = false,
+                        properties = new
                         {
-                            new { type = "string" },
-                            new
-                            {
-                                type = "object",
-                                additionalProperties = false,
-                                properties = new
-                                {
-                                    type = new { type = "string", @enum = new[] { "ingredient" } },
-                                    ingredientIndex = new { type = new[] { "integer", "null" } },
-                                    name = new { type = "string" },
-                                    quantity = new { type = new[] { "number", "null" } },
-                                    maxQuantity = new { type = new[] { "number", "null" } },
-                                    unit = new { type = new[] { "string", "null" } },
-                                },
-                                required = new[]
-                                {
-                                    "type",
-                                    "ingredientIndex",
-                                    "name",
-                                    "quantity",
-                                    "maxQuantity",
-                                    "unit",
-                                },
-                            },
-                            new
-                            {
-                                type = "object",
-                                additionalProperties = false,
-                                properties = new
-                                {
-                                    type = new { type = "string", @enum = new[] { "mixture" } },
-                                    name = new { type = "string" },
-                                    quantity = new { type = "number" },
-                                    maxQuantity = new { type = new[] { "number", "null" } },
-                                    unit = new { type = new[] { "string", "null" } },
-                                },
-                                required = new[]
-                                {
-                                    "type",
-                                    "name",
-                                    "quantity",
-                                    "maxQuantity",
-                                    "unit",
-                                },
-                            },
-                            new
-                            {
-                                type = "object",
-                                additionalProperties = false,
-                                properties = new
-                                {
-                                    type = new { type = "string", @enum = new[] { "timer" } },
-                                    amount = new { type = "number" },
-                                    maxAmount = new { type = new[] { "number", "null" } },
-                                    unit = new
-                                    {
-                                        type = "string",
-                                        @enum = new[] { "second", "minute", "hour", "day" },
-                                    },
-                                    label = new { type = "string" },
-                                },
-                                required = new[] { "type", "amount", "maxAmount", "unit", "label" },
-                            },
-                            new
-                            {
-                                type = "object",
-                                additionalProperties = false,
-                                properties = new
-                                {
-                                    type = new { type = "string", @enum = new[] { "temperature" } },
-                                    amount = new { type = "number" },
-                                    maxAmount = new { type = new[] { "number", "null" } },
-                                    unit = new
-                                    {
-                                        type = "string",
-                                        @enum = new[] { "fahrenheit", "celsius" },
-                                    },
-                                },
-                                required = new[] { "type", "amount", "maxAmount", "unit" },
-                            },
-                            new
-                            {
-                                type = "object",
-                                additionalProperties = false,
-                                properties = new
-                                {
-                                    type = new { type = "string", @enum = new[] { "dimension" } },
-                                    amount = new { type = "number" },
-                                    maxAmount = new { type = new[] { "number", "null" } },
-                                    unit = new
-                                    {
-                                        type = "string",
-                                        @enum = new[]
-                                        {
-                                            "inch",
-                                            "foot",
-                                            "yard",
-                                            "millimeter",
-                                            "centimeter",
-                                            "meter",
-                                        },
-                                    },
-                                    hyphenated = new { type = "boolean" },
-                                },
-                                required = new[]
-                                {
-                                    "type",
-                                    "amount",
-                                    "maxAmount",
-                                    "unit",
-                                    "hyphenated",
-                                },
-                            },
-                            new
-                            {
-                                type = "object",
-                                additionalProperties = false,
-                                properties = new
-                                {
-                                    type = new { type = "string", @enum = new[] { "fixed" } },
-                                    name = new { type = "string" },
-                                    amount = new { type = "number" },
-                                    maxAmount = new { type = new[] { "number", "null" } },
-                                    unit = new { type = new[] { "string", "null" } },
-                                    hyphenated = new { type = "boolean" },
-                                },
-                                required = new[]
-                                {
-                                    "type",
-                                    "name",
-                                    "amount",
-                                    "maxAmount",
-                                    "unit",
-                                    "hyphenated",
-                                },
-                            },
+                            stepNumber = new { type = "integer" },
+                            sectionName = new { type = new[] { "string", "null" } },
+                            tokens = StepTokenArraySchema(),
+                        },
+                        required = new[] { "stepNumber", "sectionName", "tokens" },
+                    },
+                },
+                polishNotes = new { type = "array", items = new { type = "string" } },
+            },
+            required = new[]
+            {
+                "title",
+                "description",
+                "servings",
+                "yield",
+                "timing",
+                "tags",
+                "ingredients",
+                "steps",
+                "polishNotes",
+            },
+        };
+
+    public static object Stage5PolishTargetedSchema() =>
+        new
+        {
+            type = "object",
+            additionalProperties = false,
+            properties = new
+            {
+                title = new { type = new[] { "string", "null" } },
+                description = new { type = new[] { "string", "null" } },
+                servings = new { type = new[] { "number", "null" } },
+                yield = new { type = new[] { "string", "null" } },
+                timing = new { anyOf = new object[] { TimingSchema(), new { type = "null" } } },
+                tags = new
+                {
+                    anyOf = new object[]
+                    {
+                        new { type = "array", items = new { type = "string" } },
+                        new { type = "null" },
+                    },
+                },
+                ingredientPatches = new
+                {
+                    type = "array",
+                    items = new
+                    {
+                        type = "object",
+                        additionalProperties = false,
+                        properties = new
+                        {
+                            index = new { type = "integer" },
+                            name = new { type = new[] { "string", "null" } },
+                            quantity = new { type = new[] { "number", "null" } },
+                            maxQuantity = new { type = new[] { "number", "null" } },
+                            unit = new { type = new[] { "string", "null" } },
+                            prepNote = new { type = new[] { "string", "null" } },
+                            isOptional = new { type = new[] { "boolean", "null" } },
+                        },
+                        required = new[]
+                        {
+                            "index",
+                            "name",
+                            "quantity",
+                            "maxQuantity",
+                            "unit",
+                            "prepNote",
+                            "isOptional",
                         },
                     },
                 },
+                stepPatches = new
+                {
+                    type = "array",
+                    items = new
+                    {
+                        type = "object",
+                        additionalProperties = false,
+                        properties = new
+                        {
+                            stepNumber = new { type = "integer" },
+                            tokens = StepTokenArraySchema(),
+                        },
+                        required = new[] { "stepNumber", "tokens" },
+                    },
+                },
+                polishNotes = new { type = "array", items = new { type = "string" } },
             },
-            required = new[] { "tokens" },
+            required = new[]
+            {
+                "title",
+                "description",
+                "servings",
+                "yield",
+                "timing",
+                "tags",
+                "ingredientPatches",
+                "stepPatches",
+                "polishNotes",
+            },
         };
 }
 
@@ -849,6 +1049,30 @@ public static partial class StepTokenParserAndRenderer
                     $"Adjacent non-text tokens [{i}] ({tokens[i].Type}) and [{i + 1}] ({tokens[i + 1].Type}) with no separator string."
                 );
             }
+            else if (
+                i + 1 < tokens.Count
+                && tokens[i] is PocTextToken prevTxt
+                && tokens[i + 1] is not PocTextToken
+                && prevTxt.Text.Length > 0
+                && char.IsLetterOrDigit(prevTxt.Text[^1])
+            )
+            {
+                warnings.Add(
+                    $"Missing space between text ending with '{prevTxt.Text[^1]}' and [{i + 1}] ({tokens[i + 1].Type})."
+                );
+            }
+            else if (
+                i + 1 < tokens.Count
+                && tokens[i] is not PocTextToken
+                && tokens[i + 1] is PocTextToken nextTxt
+                && nextTxt.Text.Length > 0
+                && char.IsLetterOrDigit(nextTxt.Text[0])
+            )
+            {
+                warnings.Add(
+                    $"Missing space between [{i}] ({tokens[i].Type}) and text starting with '{nextTxt.Text[0]}'."
+                );
+            }
 
             switch (tokens[i])
             {
@@ -874,10 +1098,10 @@ public static partial class StepTokenParserAndRenderer
                             $"Ingredient token '{ing.Name}' has out-of-range ingredientIndex={ing.IngredientIndex} (count={ingredientCount})."
                         );
                     }
-                    if (!ing.Quantity.HasValue && !string.IsNullOrWhiteSpace(ing.Unit))
+                    if (!ing.Quantity.HasValue)
                     {
                         warnings.Add(
-                            $"Ingredient token '{ing.Name}' has quantity=null with non-null unit '{ing.Unit}'."
+                            $"Ingredient token '{ing.Name}' has quantity=null; unquantified ingredient mentions should remain plain text."
                         );
                     }
                     if (

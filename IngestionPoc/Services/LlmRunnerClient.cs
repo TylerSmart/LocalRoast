@@ -9,6 +9,12 @@ using App.Core.Ingestion;
 
 namespace IngestionPoc.Services;
 
+public enum EndpointStyle
+{
+    Native,
+    OpenAi,
+}
+
 public sealed record PocLlmConfig(
     LlmProvider Provider,
     string BaseUrl,
@@ -24,7 +30,8 @@ public sealed record PocLlmConfig(
     int RequestTimeoutSeconds,
     int? OllamaGpuLayers,
     bool OllamaCpuOnly,
-    string OllamaKeepAlive = "5m"
+    string OllamaKeepAlive = "5m",
+    EndpointStyle EndpointStyle = EndpointStyle.Native
 );
 
 public sealed record LlmExchangeRecord(
@@ -262,7 +269,10 @@ public sealed class LlmRunnerClient(HttpClient httpClient)
                 cts.Token
             );
 
-            if (config.Provider == LlmProvider.Ollama)
+            if (
+                config.Provider == LlmProvider.Ollama
+                && config.EndpointStyle == EndpointStyle.Native
+            )
             {
                 var baseUrl = config.BaseUrl.Trim().TrimEnd('/');
                 var fullMessages = new List<object>(messages.Count + 1)
@@ -365,8 +375,8 @@ public sealed class LlmRunnerClient(HttpClient httpClient)
                     stream = false,
                     temperature = config.Temperature ?? 0.0,
                     top_p = config.TopP,
-                    top_k = config.TopK,
-                    max_tokens = 16384,
+                    top_k = config.EndpointStyle == EndpointStyle.OpenAi ? null : config.TopK,
+                    max_tokens = config.EndpointStyle == EndpointStyle.OpenAi ? (int?)null : 16384,
                     response_format = new
                     {
                         type = "json_schema",
@@ -532,6 +542,7 @@ public sealed class LlmRunnerClient(HttpClient httpClient)
         using var doc = JsonDocument.Parse(rawBody);
         var root = doc.RootElement;
         string? content = null;
+        string? reasoning = null;
         string? finishReason = null;
         int? promptTokens = null;
         int? completionTokens = null;
@@ -543,13 +554,29 @@ public sealed class LlmRunnerClient(HttpClient httpClient)
         )
         {
             var first = choices[0];
-            if (
-                first.TryGetProperty("message", out var msg)
-                && msg.TryGetProperty("content", out var cp)
-                && cp.ValueKind == JsonValueKind.String
-            )
+            if (first.TryGetProperty("message", out var msg))
             {
-                content = cp.GetString();
+                if (
+                    msg.TryGetProperty("content", out var cp)
+                    && cp.ValueKind == JsonValueKind.String
+                )
+                {
+                    content = cp.GetString();
+                }
+                if (
+                    msg.TryGetProperty("reasoning", out var rp)
+                    && rp.ValueKind == JsonValueKind.String
+                )
+                {
+                    reasoning = rp.GetString();
+                }
+                else if (
+                    msg.TryGetProperty("reasoning_content", out var rcp)
+                    && rcp.ValueKind == JsonValueKind.String
+                )
+                {
+                    reasoning = rcp.GetString();
+                }
             }
             if (
                 first.TryGetProperty("finish_reason", out var fp)
@@ -592,7 +619,7 @@ public sealed class LlmRunnerClient(HttpClient httpClient)
             requestNode,
             rawBody,
             content,
-            null,
+            reasoning,
             promptTokens,
             completionTokens,
             finishReason,

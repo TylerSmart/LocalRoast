@@ -76,14 +76,17 @@ var effectiveConfig = baseConfig with
     RequestTimeoutSeconds = cli.TimeoutSeconds ?? baseConfig.RequestTimeoutSeconds,
     OllamaGpuLayers = cli.GpuLayers ?? baseConfig.OllamaGpuLayers,
     OllamaCpuOnly = cli.CpuOnly ?? baseConfig.OllamaCpuOnly,
+    EndpointStyle = cli.EndpointStyle ?? baseConfig.EndpointStyle,
 };
 
 Console.WriteLine("LocalRoast Ingestion PoC");
-Console.WriteLine($"  Server:  {effectiveConfig.Provider} @ {effectiveConfig.BaseUrl}");
+Console.WriteLine(
+    $"  Server:  {effectiveConfig.Provider} ({effectiveConfig.EndpointStyle}) @ {effectiveConfig.BaseUrl}"
+);
 Console.WriteLine(
     $"  Model:   {effectiveConfig.TextModel} (thinking={effectiveConfig.EnableThinking}, auxThinking={effectiveConfig.AuxThinkingOverride?.ToString() ?? "inherit"}, ctx={effectiveConfig.ContextWindowTokens})"
 );
-Console.WriteLine($"  Prompts: {promptsDir}");
+Console.WriteLine($"  Prompts: {promptsDir} (polish={cli.PolishMode})");
 
 using var httpClient = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
 var llmClient = new LlmRunnerClient(httpClient);
@@ -170,7 +173,8 @@ var runOptions = new PocRunOptions(
     MaxDescriptionLength: cli.MaxDescriptionLength,
     SessionCatalog: cli.SessionCatalog,
     SkipSteps: cli.SkipSteps,
-    SkipIngredients: cli.SkipIngredients
+    SkipIngredients: cli.SkipIngredients,
+    PolishMode: cli.PolishMode
 );
 
 Console.WriteLine($"  Output:  {runDir}");
@@ -182,10 +186,22 @@ Console.WriteLine("\n=== Run Complete ===");
 Console.WriteLine($"Saved results and summary to: {runDir}");
 foreach (var s in summaries)
 {
+    var polishSuffix = string.Empty;
+    if (s.TargetedPolish is { } tgt)
+    {
+        polishSuffix +=
+            $" | Targeted: {(tgt.Success ? $"{tgt.StepWarningsAfterPolish}w/{tgt.PolishNotesCount}n" : "FAILED")} ({tgt.ElapsedMs / 1000.0:F1}s)";
+    }
+    if (s.FullPolish is { } full)
+    {
+        polishSuffix +=
+            $" | Full: {(full.Success ? $"{full.StepWarningsAfterPolish}w/{full.PolishNotesCount}n" : "FAILED")} ({full.ElapsedMs / 1000.0:F1}s)";
+    }
+
     Console.WriteLine(
         $"  - {s.Title}: {(s.Stage1Success ? "OK" : "FAILED")} in {s.TotalElapsedMs / 1000.0:F1}s | "
             + $"Ing: {s.ExistingIngredientMatches} db-ing, {s.ExistingRecipeMatches} db-rec, {s.NewIngredientsProposed} new, {s.UnresolvedRecipes} unres-rec | "
-            + $"StepWarn: {s.StepValidationWarnings}, UnrefIng: {s.UnreferencedIngredients.Count}"
+            + $"StepWarn: {s.StepValidationWarnings}, ProseOnly: {s.ProseOnlyIngredients.Count}{polishSuffix}"
     );
 }
 
@@ -266,6 +282,7 @@ static void PrintHelp()
           --model <tag>                Override model (also looks up saved LlmModelConfiguration in DB)
           --vision-model <tag>         Vision model override for scanned PDFs
           --provider Ollama|OpenAiCompatible
+          --endpoint-style native|openai Call Ollama native /api/chat (default) or /v1/chat/completions
           --base-url <url>             Override LLM server URL (e.g. http://ThinkStationP3:11434)
           --api-key <key>              API key (or set INGESTION_POC_API_KEY)
           --thinking true|false        Override EnableThinking
@@ -277,12 +294,13 @@ static void PrintHelp()
           --timeout <sec>              Per-request HTTP timeout in seconds
           --gpu-layers <int>           Ollama num_gpu override
           --cpu-only true|false        Force Ollama CPU only
-          --prompts-dir <dir>          Directory holding 01..04 prompt markdown files
+          --prompts-dir <dir>          Directory holding 01..05 prompt markdown files
 
         PIPELINE & OUTPUT OPTIONS:
           --output <dir>               Custom run output directory (default: IngestionPoc/runs/<timestamp>_<model>)
           --max-description-length <n> Max description chars before Stage 2 runs (default: 2000)
           --session-catalog            Accumulate newly proposed ingredients in memory across recipes in one batch
+          --polish none|targeted|full|both Stage 5 end-to-end QA polish mode (default: none)
           --skip-ingredients           Skip Stage 3 (DB search & matching)
           --skip-steps                 Skip Stage 4 (step tokenization)
           --no-db                      Do not connect to SQL Server
@@ -311,6 +329,7 @@ sealed class CliArgs
     public string? Model { get; private set; }
     public string? VisionModel { get; private set; }
     public LlmProvider? Provider { get; private set; }
+    public EndpointStyle? EndpointStyle { get; private set; }
     public string? BaseUrl { get; private set; }
     public string? ApiKey { get; private set; }
     public bool? Thinking { get; private set; }
@@ -326,6 +345,7 @@ sealed class CliArgs
     public string? OutputDir { get; private set; }
     public int MaxDescriptionLength { get; private set; } = 2000;
     public bool SessionCatalog { get; private set; }
+    public PolishMode PolishMode { get; private set; } = PolishMode.None;
     public bool SkipIngredients { get; private set; }
     public bool SkipSteps { get; private set; }
     public bool NoDb { get; private set; }
@@ -398,6 +418,9 @@ sealed class CliArgs
                 case "--provider":
                     c.Provider = Enum.Parse<LlmProvider>(Next(), ignoreCase: true);
                     break;
+                case "--endpoint-style":
+                    c.EndpointStyle = Enum.Parse<EndpointStyle>(Next(), ignoreCase: true);
+                    break;
                 case "--base-url":
                     c.BaseUrl = Next();
                     break;
@@ -442,6 +465,9 @@ sealed class CliArgs
                     break;
                 case "--session-catalog":
                     c.SessionCatalog = true;
+                    break;
+                case "--polish":
+                    c.PolishMode = Enum.Parse<PolishMode>(Next(), ignoreCase: true);
                     break;
                 case "--skip-ingredients":
                     c.SkipIngredients = true;
