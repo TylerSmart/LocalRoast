@@ -36,6 +36,22 @@ public static class SourceMeasurementParser
         @"^\s+plus\s+$",
         RegexOptions.IgnoreCase | RegexOptions.Compiled
     );
+    private static readonly Regex InterveningCommaPlusJoin = new(
+        @"^[^()\r\n;]{1,60},\s*plus\s+$",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled
+    );
+    private static readonly Regex DisqualifyingSplitPartWords = new(
+        @"\b(?:zest|juice|yolks?|whites?|leaves?|stems?|seeds?|rinds?|peels?|cooking|brining|rinsing|more|extra|serving)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled
+    );
+    private static readonly Regex PrepStatePrefix = new(
+        @"^(?:melted|softened|divided|chilled|beaten|lightly|whisked|minced|chopped|sliced|diced|grated|shredded|crumbled|crushed|toasted|roasted|cooled|strained|sifted|packed|browned|more|extra|remaining|reserved)\b(?:\s*(?:,|;|\band\b|\bfinely\b|\bcoarsely\b|\bthinly\b|\bdivided\b|\bslightly\b))*(?:\s*$|\s*[,\(])",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled
+    );
+    private static readonly Regex AlphaWordMin3 = new(
+        @"[a-z]{3,}",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled
+    );
     private static readonly Regex LeadingParentheticalGroup = new(
         @"^\s*\([^()]+\)",
         RegexOptions.Compiled
@@ -98,7 +114,8 @@ public static class SourceMeasurementParser
                 m => m,
                 end,
                 currentIndex,
-                out var nextIndex
+                out var nextIndex,
+                allowInterveningCommaPlus: true
             )
         )
         {
@@ -151,7 +168,8 @@ public static class SourceMeasurementParser
         Func<T, Match> matchSelector,
         int currentEnd,
         int currentIndex,
-        out int nextIndex
+        out int nextIndex,
+        bool allowInterveningCommaPlus = false
     )
     {
         nextIndex = currentIndex + 1;
@@ -161,7 +179,22 @@ public static class SourceMeasurementParser
         }
 
         var immediateMatch = matchSelector(items[nextIndex]);
-        if (PlusJoin.IsMatch(text[currentEnd..immediateMatch.Index]))
+        var gap = text[currentEnd..immediateMatch.Index];
+        if (PlusJoin.IsMatch(gap))
+        {
+            return true;
+        }
+
+        if (
+            allowInterveningCommaPlus
+            && InterveningCommaPlusJoin.IsMatch(gap)
+            && IsCompatibleCommaPlusContinuation(
+                text,
+                matchSelector(items[currentIndex]),
+                immediateMatch,
+                gap
+            )
+        )
         {
             return true;
         }
@@ -194,6 +227,52 @@ public static class SourceMeasurementParser
         }
 
         return false;
+    }
+
+    private static bool IsCompatibleCommaPlusContinuation(
+        string text,
+        Match currentMatch,
+        Match nextMatch,
+        string gap
+    )
+    {
+        if (DisqualifyingSplitPartWords.IsMatch(text))
+        {
+            return false;
+        }
+
+        var currentParsed = ParseMatch(currentMatch);
+        var nextParsed = ParseMatch(nextMatch);
+        if (
+            currentParsed?.Unit is not { } u1
+            || nextParsed?.Unit is not { } u2
+            || !CulinaryMath.TryConvertQuantity(1m, u2, u1, out _)
+        )
+        {
+            return false;
+        }
+
+        var afterSecond = text[(nextMatch.Index + nextMatch.Length)..].TrimStart(' ', '\t', ',');
+        if (string.IsNullOrWhiteSpace(afterSecond) || PrepStatePrefix.IsMatch(afterSecond))
+        {
+            return true;
+        }
+
+        var gapWords = AlphaWordMin3
+            .Matches(gap)
+            .Select(m => m.Value.ToLowerInvariant())
+            .Where(w => w != "plus")
+            .ToList();
+        var afterWords = AlphaWordMin3
+            .Matches(afterSecond)
+            .Take(3)
+            .Select(m => m.Value.ToLowerInvariant())
+            .ToList();
+        return gapWords.Any(gw =>
+            afterWords.Any(aw =>
+                gw == aw || (gw.Length >= 4 && aw.Length >= 4 && gw[..4] == aw[..4])
+            )
+        );
     }
 
     public static LlmExtractedIngredientItem? TryParseSourceIngredientLine(

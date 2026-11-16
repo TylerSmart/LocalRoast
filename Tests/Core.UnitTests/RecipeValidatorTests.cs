@@ -2447,4 +2447,88 @@ public sealed class RecipeValidatorTests
         Assert.IsNull(repaired.Steps![1].IngredientTokens![1].StepQuantity);
         Assert.IsTrue(RecipeValidator.Validate(repaired).IsValid);
     }
+
+    [TestMethod]
+    public void RepairSafeStepTokenGlitches_RepairsSeparatedEggSecondHalfWhenPartWordExplicitlyFollows()
+    {
+        var dto = new ExtractedRecipeDto(
+            Title: "Fluffy Omelets",
+            Ingredients:
+            [
+                new(
+                    "ing_1",
+                    CanonicalFoodItem: "egg",
+                    DisplayName: "large egg",
+                    Quantity: 4m,
+                    Unit: "whole",
+                    RawText: "4 large eggs, separated"
+                ),
+            ],
+            Steps:
+            [
+                new(
+                    1,
+                    TemplateText: "Whisk {{ing_1_a}} yolks. Place {{ing_1_b}} whites in bowl.",
+                    IngredientTokens:
+                    [
+                        new("ing_1_a", "ing_1", 4m, "whole"),
+                        new("ing_1_b", "ing_1", 4m, "whole"),
+                    ]
+                ),
+            ]
+        );
+
+        Assert.IsFalse(RecipeValidator.Validate(dto).IsValid);
+        var repaired = RecipeValidator.RepairSafeStepTokenGlitches(
+            dto,
+            repairBatchSplitDoubleCounts: true
+        );
+        Assert.AreEqual(4m, repaired.Steps![0].IngredientTokens![0].StepQuantity);
+        Assert.IsNull(repaired.Steps![0].IngredientTokens![1].StepQuantity);
+        Assert.IsTrue(RecipeValidator.Validate(repaired).IsValid);
+    }
+
+    [TestMethod]
+    public void NormalizeAndValidate_ResolvesCommaPlusButterWithWrongAltSumToFiveTbsp()
+    {
+        var dto = new ExtractedRecipeDto(
+            Title: "French Toast Casserole",
+            Ingredients:
+            [
+                new(
+                    "ing_1",
+                    CanonicalFoodItem: "butter",
+                    DisplayName: "unsalted butter",
+                    Quantity: 1m,
+                    Unit: "tbsp",
+                    AltQuantity: 5m,
+                    AltUnit: "tbsp",
+                    RawText: "1 tablespoon unsalted butter, softened, plus 4 tablespoons melted, divided"
+                ),
+            ],
+            Steps:
+            [
+                new(
+                    1,
+                    TemplateText: "Grease pan with {{ing_1_a}}.",
+                    IngredientTokens: [new("ing_1_a", "ing_1", 1m, "tbsp")]
+                ),
+                new(
+                    2,
+                    TemplateText: "Drizzle with {{ing_1_b}} and remaining {{ing_1_c}}.",
+                    IngredientTokens:
+                    [
+                        new("ing_1_b", "ing_1", 3m, "tbsp"),
+                        new("ing_1_c", "ing_1", 1m, "tbsp"),
+                    ]
+                ),
+            ]
+        );
+
+        var normalized = RecipeValidator.NormalizeCompoundIngredients(dto);
+        var validation = RecipeValidator.Validate(normalized);
+        Assert.IsTrue(validation.IsValid, string.Join("; ", validation.Errors));
+        Assert.AreEqual(5m, normalized.Ingredients![0].Quantity);
+        Assert.IsNull(normalized.Ingredients![0].AltQuantity);
+    }
 }

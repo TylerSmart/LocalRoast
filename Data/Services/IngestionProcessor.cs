@@ -591,9 +591,14 @@ public sealed class IngestionProcessor(
                     .Where(s => !string.IsNullOrWhiteSpace(s))
                     .Distinct(StringComparer.Ordinal)
                     .ToList();
-                var warningCount = resolvedDraft.QualityWarnings?.Count ?? 0;
+                var filteredWarnings = FilterBenignSubRecipeQualityWarnings(
+                    resolvedDraft.QualityWarnings,
+                    resolvedDraft.Ingredients
+                );
+                var warningCount = filteredWarnings.Count;
                 draft = resolvedDraft with
                 {
+                    QualityWarnings = filteredWarnings,
                     ValidationIssues = distinctIssues,
                     ConfidenceScore = Math.Clamp(
                         0.96m - (distinctIssues.Count * 0.15m) - (warningCount * 0.10m),
@@ -1177,5 +1182,35 @@ public sealed class IngestionProcessor(
         }
 
         return sb.ToString();
+    }
+
+    internal static IReadOnlyList<string> FilterBenignSubRecipeQualityWarnings(
+        IReadOnlyList<string>? qualityWarnings,
+        IReadOnlyList<IngestionDraftIngredientDto>? ingredients
+    )
+    {
+        if (qualityWarnings is null or { Count: 0 })
+        {
+            return [];
+        }
+
+        var refs = (ingredients ?? []).Where(i => i.IsRecipeReference).ToList();
+        var allReferencedSubRecipesResolved =
+            refs.Count > 0 && refs.All(i => i.MatchedRecipeId.HasValue);
+        if (!allReferencedSubRecipesResolved)
+        {
+            return qualityWarnings;
+        }
+
+        return qualityWarnings
+            .Where(w =>
+                !System.Text.RegularExpressions.Regex.IsMatch(
+                    w,
+                    @"(?:relies\s+on|requires|uses|references?)\s+(?:a\s+|the\s+)?(?:referenced\s+)?sub[- ]?recipe|sub[- ]?recipe\b.*\b(?:not\s+provided|missing|omitted|unavailable|incomplete)",
+                    System.Text.RegularExpressions.RegexOptions.IgnoreCase
+                        | System.Text.RegularExpressions.RegexOptions.CultureInvariant
+                )
+            )
+            .ToList();
     }
 }

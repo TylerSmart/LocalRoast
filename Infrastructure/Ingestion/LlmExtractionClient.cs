@@ -233,9 +233,14 @@ public sealed class LlmExtractionClient(
         ExtractedRecipeDto? lastExtracted = null;
         ExtractedRecipeDto? lastValidWithWarnings = null;
         var hasTriedUnreferencedFix = false;
+        var extraAttachmentTurn = 0;
         string? lastJsonError = null;
 
-        for (var attempt = 0; attempt <= MaxExtractionValidationRetries; attempt++)
+        for (
+            var attempt = 0;
+            attempt <= MaxExtractionValidationRetries + extraAttachmentTurn;
+            attempt++
+        )
         {
             var rawResponse = await SendStructuredMultiTurnTextChatAsync(
                 config,
@@ -313,13 +318,14 @@ public sealed class LlmExtractionClient(
                     )
                     .ToList();
 
-                if (
-                    unreferencedWarnings.Count == 0
-                    || hasTriedUnreferencedFix
-                    || attempt >= MaxExtractionValidationRetries
-                )
+                if (unreferencedWarnings.Count == 0 || hasTriedUnreferencedFix)
                 {
                     return parsed;
+                }
+
+                if (attempt >= MaxExtractionValidationRetries)
+                {
+                    extraAttachmentTurn = 1;
                 }
 
                 lastValidWithWarnings = parsed;
@@ -1890,7 +1896,7 @@ Household Cookbook Catalog:
            - Every {{...}} placeholder in templateText MUST appear exactly once and have a matching entry in ingredientTokens, timerTokens, or temperatureTokens, and every entry in those arrays MUST appear in templateText. NEVER output ||{...}|| syntax.
         6. QualityAudit:
            - isPlausibleRecipe: false if the text is not a real recipe or is missing ingredients/method due to scraping truncation; otherwise true.
-           - warnings: Flag ONLY suspicious OCR fraction errors (e.g. '14 tsp salt instead of 1/4 tsp'), raw protein/baking missing heat/cooking time, or suspiciously truncated steps—NEVER flag valid step portions, 'to taste' seasonings, cooked-mixture transfers (e.g. '1 1/2 cups greens mixture'), or step water. Empty array [] if clean.
+           - warnings: Flag ONLY suspicious OCR fraction errors (e.g. '14 tsp salt instead of 1/4 tsp'), raw protein/baking missing heat/cooking time, or suspiciously truncated steps—NEVER flag valid step portions, 'to taste' seasonings, cooked-mixture transfers (e.g. '1 1/2 cups greens mixture'), step water, or referenced sub-recipes ('(recipe follows)' / '(see this page)' / '1 recipe ...' are valid cross-references, NOT missing instructions). Empty array [] if clean.
         """.Replace(
         "<<BUILT_IN_TAXONOMY>>",
         BuiltInTags.BuildPromptTaxonomySummary(),
@@ -2779,6 +2785,32 @@ Household Cookbook Catalog:
                                 var piece = pieceMatch.Groups["piece"].Value;
                                 rewriteNote =
                                     $" — rewrite '{{{{{keyTrim}}}}} {piece}' as '{tok.StepQuantity.Value:0.###} {{{{{keyTrim}}}}} {piece}' with stepQuantity: null, stepUnit: null";
+                            }
+                        }
+
+                        if (
+                            string.IsNullOrEmpty(rewriteNote)
+                            && !string.IsNullOrWhiteSpace(sourceText)
+                        )
+                        {
+                            var srcStepMatch = Regex.Match(
+                                sourceText,
+                                $@"(?:^|\n)\s*{stepNum}\.\s+(?<body>[^\r\n]+)",
+                                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+                            );
+                            if (srcStepMatch.Success)
+                            {
+                                var srcBody = srcStepMatch.Groups["body"].Value;
+                                var mixMatch = Regex.Match(
+                                    srcBody,
+                                    $@"\b{Regex.Escape(tok.StepQuantity.Value.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture))}\s+(?:tablespoons?|tbsp|teaspoons?|tsp|cups?|ounces?|oz)\s+[^.,;]*\b(?:mixture|puree|batter|paste|glaze|sauce)\b",
+                                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+                                );
+                                if (mixMatch.Success)
+                                {
+                                    rewriteNote =
+                                        $" — Source Step {stepNum} says '{mixMatch.Value.Trim()}' (a portion of a previously combined mixture), NOT raw '{masterLabel}'; keep '{mixMatch.Value.Trim()}' as plain text or use stepQuantity: null, stepUnit: null";
+                                }
                             }
                         }
 

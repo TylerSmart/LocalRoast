@@ -1951,6 +1951,116 @@ public sealed class IngestionIntegrationTests
     }
 
     [TestMethod]
+    public async Task TextIngestion_ResolvedSubRecipeWarning_SuppressesFalseSubRecipeWarningAndAutoPublishes()
+    {
+        const string componentRecipeTitle = "Filling for Denver Omelets";
+        const string compositeRecipeTitle = "Denver Omelets";
+
+        var fakeLlm = new FakeSequentialLlmExtractionClient(_ => new ExtractedRecipeDto(
+            Title: compositeRecipeTitle,
+            Ingredients:
+            [
+                new(
+                    RefId: "ing_1",
+                    CanonicalFoodItem: componentRecipeTitle,
+                    DisplayName: componentRecipeTitle,
+                    Quantity: 1m,
+                    Unit: "recipe",
+                    IsRecipeReference: true,
+                    ReferencedRecipeTitle: componentRecipeTitle,
+                    RawText: $"1 recipe {componentRecipeTitle} (recipe follows)"
+                ),
+                new(
+                    RefId: "ing_2",
+                    CanonicalFoodItem: "egg",
+                    DisplayName: "large eggs",
+                    Quantity: 6m,
+                    Unit: "whole",
+                    RawText: "6 large eggs"
+                ),
+            ],
+            Steps:
+            [
+                new(
+                    StepNumber: 1,
+                    TemplateText: "Cook {{ing_2_a}} and spoon {{ing_1_a}} over center.",
+                    IngredientTokens:
+                    [
+                        new("ing_2_a", "ing_2", 6m, "whole"),
+                        new("ing_1_a", "ing_1"),
+                    ]
+                ),
+            ],
+            QualityAudit: new RecipeQualityAuditDto(
+                IsPlausibleRecipe: true,
+                Warnings:
+                [
+                    "The recipe relies on a referenced sub-recipe ('Filling for Denver Omelets') which is not provided, making the instructions incomplete for a standalone execution.",
+                ]
+            )
+        ));
+
+        await using var customFactory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Llm:TextModel", "test-text");
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ILlmExtractionClient>();
+                services.AddSingleton<ILlmExtractionClient>(fakeLlm);
+            });
+        });
+
+        using var client = customFactory.CreateClient();
+        await AuthenticateAsync(client);
+
+        var createPrereqRes = await client.PostAsJsonAsync(
+            "/api/recipes",
+            new UpsertRecipeRequest(
+                Title: componentRecipeTitle,
+                Description: "Bell pepper and ham filling",
+                Status: RecipeStatus.Published,
+                BaseServings: 2,
+                Ingredients:
+                [
+                    new RecipeIngredientInput(
+                        DisplayName: "ham steak",
+                        Quantity: 4,
+                        Unit: MeasurementUnit.Oz
+                    ),
+                ],
+                Steps: [new RecipeStepInput(Instruction: "Sauté ham and peppers.")]
+            )
+        );
+        createPrereqRes.EnsureSuccessStatusCode();
+
+        var queuedResponse = await client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest(
+                $"{compositeRecipeTitle}\nIngredients:\n- 1 recipe {componentRecipeTitle} (recipe follows)\n- 6 large eggs\nInstructions:\n1. Cook eggs and spoon filling over center.",
+                AutoPublish: true
+            )
+        );
+        queuedResponse.EnsureSuccessStatusCode();
+        var queued = await queuedResponse.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
+        Assert.IsNotNull(queued);
+
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            var processed = await scope
+                .ServiceProvider.GetRequiredService<IIngestionProcessor>()
+                .ProcessNextQueuedJobAsync();
+            Assert.IsTrue(processed);
+        }
+
+        var job = await client.GetFromJsonAsync<IngestionJobDetailDto>(
+            $"/api/ingestion/jobs/{queued.Id}"
+        );
+        Assert.IsNotNull(job);
+        Assert.AreEqual(IngestionJobStatus.Published, job.Status);
+        Assert.IsNotNull(job.ResultingRecipeId);
+    }
+
+    [TestMethod]
     public async Task TextIngestion_UnflaggedOptionalSubRecipeMatchingPublishedRecipe_PromotesAndLinksWithoutCreatingFoodItem()
     {
         var fakeLlm = new FakeSequentialLlmExtractionClient(_ => new ExtractedRecipeDto(

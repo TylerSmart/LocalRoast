@@ -3189,4 +3189,210 @@ public sealed class LlmExtractionClientTests
         StringAssert.Contains(attempts[1], "separates ONE batch into paired parts");
         Assert.IsTrue(RecipeValidator.Validate(result).IsValid);
     }
+
+    [TestMethod]
+    public async Task ExtractRecipeFromTextAsync_RunsAttachmentRetryEvenWhenThirdValidationAttemptSucceedsWithWarnings()
+    {
+        var attempts = new List<string>();
+        var attemptNum = 0;
+
+        const string invalidReply = """
+            {
+                "title": "Quiche",
+                "ingredients": [
+                    { "refId": "ing_1", "canonicalFoodItem": "egg", "displayName": "eggs", "quantity": 2, "unit": "whole", "rawText": "2 eggs" },
+                    { "refId": "ing_2", "canonicalFoodItem": "milk", "displayName": "milk", "quantity": 1, "unit": "cup", "rawText": "1 cup milk" }
+                ],
+                "steps": [
+                    {
+                        "stepNumber": 1,
+                        "templateText": "Whisk {{ing_1_a}} with {{ing_2_a}}.",
+                        "ingredientTokens": [
+                            { "tokenKey": "ing_1_a", "ingredientRefId": "ing_1", "stepQuantity": 5, "stepUnit": "whole" },
+                            { "tokenKey": "ing_2_a", "ingredientRefId": "ing_2", "stepQuantity": 1, "stepUnit": "cup" }
+                        ],
+                        "timerTokens": [],
+                        "temperatureTokens": []
+                    }
+                ],
+                "qualityAudit": { "isPlausibleRecipe": true, "warnings": [] }
+            }
+            """;
+
+        const string validButUnreferencedReply = """
+            {
+                "title": "Quiche",
+                "ingredients": [
+                    { "refId": "ing_1", "canonicalFoodItem": "egg", "displayName": "eggs", "quantity": 2, "unit": "whole", "rawText": "2 eggs" },
+                    { "refId": "ing_2", "canonicalFoodItem": "milk", "displayName": "milk", "quantity": 1, "unit": "cup", "rawText": "1 cup milk" }
+                ],
+                "steps": [
+                    {
+                        "stepNumber": 1,
+                        "templateText": "Whisk {{ing_1_a}} with the remaining ingredients.",
+                        "ingredientTokens": [
+                            { "tokenKey": "ing_1_a", "ingredientRefId": "ing_1", "stepQuantity": 2, "stepUnit": "whole" }
+                        ],
+                        "timerTokens": [],
+                        "temperatureTokens": []
+                    }
+                ],
+                "qualityAudit": { "isPlausibleRecipe": true, "warnings": [] }
+            }
+            """;
+
+        const string attachedReply = """
+            {
+                "title": "Quiche",
+                "ingredients": [
+                    { "refId": "ing_1", "canonicalFoodItem": "egg", "displayName": "eggs", "quantity": 2, "unit": "whole", "rawText": "2 eggs" },
+                    { "refId": "ing_2", "canonicalFoodItem": "milk", "displayName": "milk", "quantity": 1, "unit": "cup", "rawText": "1 cup milk" }
+                ],
+                "steps": [
+                    {
+                        "stepNumber": 1,
+                        "templateText": "Whisk {{ing_1_a}} with {{ing_2_a}}.",
+                        "ingredientTokens": [
+                            { "tokenKey": "ing_1_a", "ingredientRefId": "ing_1", "stepQuantity": 2, "stepUnit": "whole" },
+                            { "tokenKey": "ing_2_a", "ingredientRefId": "ing_2", "stepQuantity": 1, "stepUnit": "cup" }
+                        ],
+                        "timerTokens": [],
+                        "temperatureTokens": []
+                    }
+                ],
+                "qualityAudit": { "isPlausibleRecipe": true, "warnings": [] }
+            }
+            """;
+
+        var handler = new MockHttpMessageHandler(req =>
+        {
+            attemptNum++;
+            attempts.Add(req.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+            return OllamaReply(
+                attemptNum switch
+                {
+                    1 or 2 => invalidReply,
+                    3 => validButUnreferencedReply,
+                    _ => attachedReply,
+                }
+            );
+        });
+
+        var client = new LlmExtractionClient(new HttpClient(handler));
+        var config = new EffectiveLlmConnectionConfig(
+            Provider: LlmProvider.Ollama,
+            BaseUrl: "http://localhost:11434",
+            ApiKey: null,
+            TextModel: "gemma4:e4b",
+            VisionModel: null,
+            OllamaKeepAlive: "5m",
+            RequestTimeoutSeconds: 30,
+            AutoPublishHighConfidenceText: true
+        );
+
+        var result = await client.ExtractRecipeFromTextAsync(
+            config,
+            new LlmExtractionContext("Quiche\n- 2 eggs\n- 1 cup milk\n1. Whisk eggs with milk.")
+        );
+
+        Assert.HasCount(4, attempts);
+        var validation = RecipeValidator.Validate(result);
+        Assert.IsTrue(validation.IsValid);
+        Assert.IsEmpty(validation.Warnings);
+    }
+
+    [TestMethod]
+    public async Task ExtractRecipeFromTextAsync_AddsSourceMixtureHintOnExcessTokenRetry()
+    {
+        var attempts = new List<string>();
+        var attemptNum = 0;
+
+        const string invalidReply = """
+            {
+                "title": "French Toast Casserole",
+                "ingredients": [
+                    { "refId": "ing_1", "canonicalFoodItem": "brown sugar", "displayName": "brown sugar", "quantity": 6, "unit": "tbsp", "rawText": "6 tablespoons packed brown sugar" }
+                ],
+                "steps": [
+                    {
+                        "stepNumber": 1,
+                        "templateText": "Mix {{ing_1_a}} with spices.",
+                        "ingredientTokens": [
+                            { "tokenKey": "ing_1_a", "ingredientRefId": "ing_1", "stepQuantity": 6, "stepUnit": "tbsp" }
+                        ],
+                        "timerTokens": [],
+                        "temperatureTokens": []
+                    },
+                    {
+                        "stepNumber": 2,
+                        "templateText": "Sprinkle {{ing_1_b}} over skillet.",
+                        "ingredientTokens": [
+                            { "tokenKey": "ing_1_b", "ingredientRefId": "ing_1", "stepQuantity": 2, "stepUnit": "tbsp" }
+                        ],
+                        "timerTokens": [],
+                        "temperatureTokens": []
+                    }
+                ],
+                "qualityAudit": { "isPlausibleRecipe": true, "warnings": [] }
+            }
+            """;
+
+        const string fixedReply = """
+            {
+                "title": "French Toast Casserole",
+                "ingredients": [
+                    { "refId": "ing_1", "canonicalFoodItem": "brown sugar", "displayName": "brown sugar", "quantity": 6, "unit": "tbsp", "rawText": "6 tablespoons packed brown sugar" }
+                ],
+                "steps": [
+                    {
+                        "stepNumber": 1,
+                        "templateText": "Mix {{ing_1_a}} with spices.",
+                        "ingredientTokens": [
+                            { "tokenKey": "ing_1_a", "ingredientRefId": "ing_1", "stepQuantity": 6, "stepUnit": "tbsp" }
+                        ],
+                        "timerTokens": [],
+                        "temperatureTokens": []
+                    },
+                    {
+                        "stepNumber": 2,
+                        "templateText": "Sprinkle 2 tablespoons brown sugar mixture over skillet.",
+                        "ingredientTokens": [],
+                        "timerTokens": [],
+                        "temperatureTokens": []
+                    }
+                ],
+                "qualityAudit": { "isPlausibleRecipe": true, "warnings": [] }
+            }
+            """;
+
+        var handler = new MockHttpMessageHandler(req =>
+        {
+            attemptNum++;
+            attempts.Add(req.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+            return OllamaReply(attemptNum == 1 ? invalidReply : fixedReply);
+        });
+
+        var client = new LlmExtractionClient(new HttpClient(handler));
+        var config = new EffectiveLlmConnectionConfig(
+            Provider: LlmProvider.Ollama,
+            BaseUrl: "http://localhost:11434",
+            ApiKey: null,
+            TextModel: "gemma4:e4b",
+            VisionModel: null,
+            OllamaKeepAlive: "5m",
+            RequestTimeoutSeconds: 30,
+            AutoPublishHighConfidenceText: true
+        );
+
+        var result = await client.ExtractRecipeFromTextAsync(
+            config,
+            new LlmExtractionContext(
+                "French Toast Casserole\n- 6 tablespoons packed brown sugar\n1. Mix brown sugar with spices.\n2. Sprinkle 2 tablespoons brown sugar mixture over skillet."
+            )
+        );
+
+        Assert.HasCount(2, attempts);
+        StringAssert.Contains(attempts[1], "2 tablespoons brown sugar mixture");
+        Assert.IsTrue(RecipeValidator.Validate(result).IsValid);
+    }
 }

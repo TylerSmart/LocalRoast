@@ -328,4 +328,33 @@ public sealed class RecipeMeasurementTests
             )
         );
     }
+
+    [TestMethod]
+    public void TrySumCompoundLeadingMeasurement_SumsAcrossInterveningCommaPlusPrepWithoutMergingDistinctParts()
+    {
+        var butter = SourceMeasurementParser.TrySumCompoundLeadingMeasurement(
+            "1 tablespoon unsalted butter, softened, plus 4 tablespoons melted, divided"
+        );
+        Assert.IsNotNull(butter);
+        Assert.AreEqual(5m, butter.Quantity);
+        Assert.AreEqual(MeasurementUnit.Tbsp, butter.Unit);
+
+        var repeatedButter = SourceMeasurementParser.TrySumCompoundLeadingMeasurement(
+            "1 tablespoon unsalted butter, melted, plus 1 tablespoon unsalted butter"
+        );
+        Assert.IsNotNull(repeatedButter);
+        Assert.AreEqual(2m, repeatedButter.Quantity);
+        Assert.AreEqual(MeasurementUnit.Tbsp, repeatedButter.Unit);
+
+        Assert.IsNull(
+            SourceMeasurementParser.TrySumCompoundLeadingMeasurement(
+                "2 large whole eggs, plus 2 large egg yolks"
+            )
+        );
+        Assert.IsNull(
+            SourceMeasurementParser.TrySumCompoundLeadingMeasurement(
+                "1 tablespoon vegetable oil, plus 1 tablespoon unsalted butter"
+            )
+        );
+    }
 }

@@ -410,6 +410,12 @@ public static partial class RecipeValidator
     private static partial Regex SeparatedMasterWordRegex();
 
     [GeneratedRegex(
+        @"^\s*(?:whites?|yolks?)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex SeparatedPartSuffixRegex();
+
+    [GeneratedRegex(
         @"\b(?:cover|wrap|unwrap|bake|roast|broil|grill|simmer|boil|poach|steam|cook|braise|chill|refrigerate|freeze|rest|cool|transfer|drain|rinse|pat|dry|remove|return|flip|turn|baste|slice|carve|cut|chop|shred|serve|top|garnish|brush|sprinkle|whisk|beat|fold|stir|rub|season|coat|dredge|mash|press)\s+(?:the\s+|each\s+|all\s+(?:of\s+)?(?:the\s+)?)?$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
@@ -3044,16 +3050,36 @@ public static partial class RecipeValidator
 
                     fullBatchAlreadyAdded.TryGetValue(refId, out var priorSum);
                     var beforeMatch = rewrittenTemplate[..pm.Index];
+                    var afterMatch = rewrittenTemplate[(pm.Index + pm.Length)..];
                     var masterRaw = master.RawText ?? string.Empty;
+                    var isSeparated = SeparatedMasterWordRegex().IsMatch(masterRaw);
                     var isReReferenceAfterFull =
                         !DividedWordRegex().IsMatch(masterRaw)
-                        && !SeparatedMasterWordRegex().IsMatch(masterRaw)
+                        && !isSeparated
                         && convertedQty >= upperLimit * 0.95m
                         && ReReferenceVerbPrefixRegex().IsMatch(beforeMatch);
+                    var isSeparatedSecondHalfWithExplicitPart =
+                        isSeparated
+                        && convertedQty >= upperLimit * 0.95m
+                        && (
+                            SeparatedPartSuffixRegex().IsMatch(afterMatch)
+                            || tok.FallbackDisplay?.Contains(
+                                "white",
+                                StringComparison.OrdinalIgnoreCase
+                            ) == true
+                            || tok.FallbackDisplay?.Contains(
+                                "yolk",
+                                StringComparison.OrdinalIgnoreCase
+                            ) == true
+                        );
                     if (
                         priorSum >= upperLimit * 0.99m
                         && priorSum <= upperLimit * 1.01m
-                        && (BatchSplitPrefixRegex().IsMatch(beforeMatch) || isReReferenceAfterFull)
+                        && (
+                            BatchSplitPrefixRegex().IsMatch(beforeMatch)
+                            || isReReferenceAfterFull
+                            || isSeparatedSecondHalfWithExplicitPart
+                        )
                     )
                     {
                         ingTokens[tokIdx] = tok with { StepQuantity = null, StepUnit = null };
