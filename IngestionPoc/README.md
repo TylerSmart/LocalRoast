@@ -46,7 +46,17 @@ dotnet run --project IngestionPoc/IngestionPoc.csproj -- --text "C:\path\to\reci
 
 # 8. Force-test Stage 2 (description shortening) on an ATK recipe:
 dotnet run --project IngestionPoc/IngestionPoc.csproj -- --titles "Chunky Guacamole" --max-description-length 450 --skip-ingredients --skip-steps
+
+# 9. Clean-DB head-to-head Production vs. IngestionPoc benchmark against saved DB jobs:
+dotnet run --project IngestionPoc/IngestionPoc.csproj -- --from-db-jobs all --limit 8 --empty-catalog --session-catalog --compare-prod --aux-thinking false --polish targeted
 ```
+
+## Overnight Benchmark Findings (8-Recipe Clean-DB Run on `gemma4:e4b` + `embeddinggemma-2:270m`)
+
+Both pipelines ran serially against `http://ThinkStationP3:11434` starting from an empty database (`0 FoodItems`, `0 Recipes`) across the same 8 ATK `IngestionJobs` (`Classic Guacamole`, `Ultracreamy Hummus`, `Easy-Peel Hard-Cooked Eggs`, `Curry Deviled Eggs with Easy-Peel Hard-Cooked Eggs`, `Lemon Ricotta Pancakes`, `Chicken Piccata`, `Beef Wellington`, `Lemon Bundt Cake`):
+
+- **Current Production (`App.API`):** `6/8 Published`, **`2/8 ReadyForReview` failures** (`Chicken Piccata` failed 3/3 retries on duplicate `{{timer_4_A}}` / `{{timer_4_B}}` keys; `Beef Wellington` failed 3/3 retries on divided-ingredient `cremini mushroom` quantity sum `4 > 2` + missing `{{timer_7}}`). Objective rubric average: **`85.2 / 100`** in **~19m 00s** wall-clock (`08:26:06Z` → `08:45:06Z`), auto-publishing flaws such as `water`/`ice cube` pulled from `Easy-Peel Hard-Cooked Eggs` prose, dropped parentheticals in `Ultracreamy Hummus` (`66/100`), duplicate prep strings (`finely chopped onion`), and unscaled prose measurements.
+- **`IngestionPoc` (commit `7efbae8`, Stages 1–5 Targeted + Session Catalog):** **`8/8` succeeded with `0` step validation warnings (`0w`) across all recipes**, averaging **`98.8 / 100`** (`+13.5` points over Production; `6/8` scored `100/100`, `Lemon Bundt Cake` `97/100`, `Chicken Piccata` `93/100`) in **~16m 04s** total including Stage 5 Targeted Polish (~`11m 23s` for Stages 1–4 baseline alone). Stage 3 embedding lookups (`embeddinggemma-2:270m`) completed in **`14–158 ms`** per recipe.
 
 ## Saved Run Layout (`IngestionPoc/runs/<timestamp>_<model>/`)
 
