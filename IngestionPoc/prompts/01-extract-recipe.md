@@ -33,9 +33,10 @@ For each ingredient line in the source:
 
 ### Splitting vs. Combining `"plus"` Lines
 
-- Split a single source line into multiple sequential ingredient objects ONLY when it lists two distinct ingredient forms or uses with separate measurements:
+- Split a single source line into multiple sequential ingredient objects ONLY when it contains `"plus"` joining **two distinct ingredient forms with separate measurements**:
   - `"1/4 teaspoon grated lime zest plus 1 1/2–2 tablespoons juice"` -> (1) `name: "grated lime zest"`, `quantity: 0.25`, `unit: "teaspoon"`; (2) `name: "lime juice"`, `quantity: 1.5`, `maxQuantity: 2`, `unit: "tablespoon"`.
   - `"1 tablespoon minced fresh parsley, plus 12 small whole parsley leaves for garnishing"` -> (1) `name: "fresh parsley"`, `quantity: 1`, `unit: "tablespoon"`, `prepNote: "minced"`; (2) `name: "parsley leaves"`, `quantity: 12`, `unit: null`, `prepNote: "small whole, for garnishing"`.
+- **NEVER split or duplicate ONE single-measurement line whose prep note treats different parts of the same ingredient** (e.g. `"2 scallions, white parts minced, green parts sliced thin"` MUST stay **ONE** ingredient object: `name: "scallions", quantity: 2, unit: null, prepNote: "white parts minced, green parts sliced thin"` — NEVER split it into two scallion rows!).
 - Combine compatible measurements of the **same ingredient** onto one row by adding them together in a single unit (convert smaller US units accurately: `1 tablespoon = 3 teaspoons`, `1 cup = 16 tablespoons`):
   - `"6 tablespoons plus 1 teaspoon extra-virgin olive oil"` -> `quantity: 6.3333`, `unit: "tablespoon"`.
   - `"1 tablespoon plus 2 teaspoons soy sauce"` -> `quantity: 1.6667`, `unit: "tablespoon"`.
@@ -59,7 +60,7 @@ For each ingredient line in the source:
   - `"2 (15-ounce) cans chickpeas"` -> main `2 can`, `alternateMeasurements: [{ "quantity": 30, "unit": "ounce" }]` (multiply container count by per-container weight/volume so the alternate total matches the full ingredient amount).
   - `"1 medium garlic clove, minced (about 1 teaspoon)"` -> main `1 clove`, `alternateMeasurements: [{ "quantity": 1, "unit": "teaspoon" }]`.
   - `"1/4 cup fresh lemon juice (from 2 lemons)"` -> main `0.25 cup`, `alternateMeasurements: [{ "quantity": 2, "unit": null }]`.
-- Never place physical dimensions, widths, or cut sizes (`"(1-inch) cauliflower florets"`, `"1/4-inch-wide flat rice noodles"`, `"1/2-inch pieces"`) or temperatures (`"110 degrees"`) into `alternateMeasurements` — put cut/width dimensions in `prepNote`.
+- Never place physical dimensions, roast lengths/diameters, widths, or cut sizes (`"(1-inch) cauliflower florets"`, `"1/4-inch-wide flat rice noodles"`, `"1/2-inch pieces"`, `"12 to 13 inches long and 4 to 4 1/2 inches in diameter"`) or temperatures (`"110 degrees"`) into `alternateMeasurements` — put all physical dimensions in `prepNote`.
 
 ---
 

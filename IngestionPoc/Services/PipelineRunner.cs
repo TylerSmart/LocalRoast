@@ -236,22 +236,23 @@ public sealed partial class PipelineRunner(
                 {
                     return "Your previous JSON had ZERO ingredients. Extract EVERY ingredient line from the source text into sections[].ingredients.";
                 }
+                var combinedFeedback = new List<string>();
                 var missingStepsFeedback = FindMissingSourceInstructionFeedback(
                     input.NormalizedText,
                     dto
                 );
                 if (missingStepsFeedback is not null)
                 {
-                    return missingStepsFeedback;
+                    combinedFeedback.Add(missingStepsFeedback);
                 }
                 var stage1IngFeedback = ValidateStage1IngredientsFeedback(dto);
                 if (stage1IngFeedback is not null)
                 {
-                    return stage1IngFeedback;
+                    combinedFeedback.Add(stage1IngFeedback);
                 }
-                return null;
+                return combinedFeedback.Count > 0 ? string.Join(" ", combinedFeedback) : null;
             },
-            maxCorrectionTurns: 1,
+            maxCorrectionTurns: 2,
             cancellationToken: cancellationToken
         );
 
@@ -2614,37 +2615,55 @@ public sealed partial class PipelineRunner(
     private static string? ValidateStage1IngredientsFeedback(Stage1RecipeDto dto)
     {
         var issues = new List<string>();
-        foreach (var ing in dto.Sections.SelectMany(s => s.Ingredients))
+        foreach (var sec in dto.Sections)
         {
-            if (
-                ing.MaxQuantity.HasValue
-                && (!ing.Quantity.HasValue || ing.MaxQuantity.Value < ing.Quantity.Value)
-            )
+            var seenInSection =
+                new HashSet<(string Name, decimal? Qty, decimal? Max, string Unit)>();
+            foreach (var ing in sec.Ingredients)
             {
-                issues.Add(
-                    $"'{ing.Name}' has invalid range quantity={ing.Quantity}..maxQuantity={ing.MaxQuantity} (put parenthetical weight/stick conversions in alternateMeasurements and leave maxQuantity=null)."
+                var dupKey = (
+                    ing.Name.Trim().ToLowerInvariant(),
+                    ing.Quantity,
+                    ing.MaxQuantity,
+                    (ing.Unit ?? string.Empty).Trim().ToLowerInvariant()
                 );
-            }
+                if (!seenInSection.Add(dupKey))
+                {
+                    issues.Add(
+                        $"Duplicate '{ing.Name}' row (quantity={ing.Quantity} {ing.Unit}) in same section; keep a single-measurement line with multi-part prep as ONE ingredient row."
+                    );
+                }
 
-            if (OrAlternativeRegex().IsMatch(ing.Name))
-            {
-                issues.Add(
-                    ing.Replacements is { Count: > 0 }
-                        ? $"'{ing.Name}' has replacements populated; strip ' or ...' so name holds ONLY option A."
-                        : $"'{ing.Name}' contains an 'A or B' alternative; put ONLY option A in name and move option B into replacements[]."
-                );
-            }
+                if (
+                    ing.MaxQuantity.HasValue
+                    && (!ing.Quantity.HasValue || ing.MaxQuantity.Value < ing.Quantity.Value)
+                )
+                {
+                    issues.Add(
+                        $"'{ing.Name}' has invalid range quantity={ing.Quantity}..maxQuantity={ing.MaxQuantity} (put parenthetical weight/stick conversions in alternateMeasurements and leave maxQuantity=null)."
+                    );
+                }
 
-            if (
-                ing.AlternateMeasurements?.Any(a =>
-                    !string.IsNullOrWhiteSpace(a.Unit)
-                    && DimensionOrTempUnits.Contains(a.Unit.Trim())
-                ) == true
-            )
-            {
-                issues.Add(
-                    $"'{ing.Name}' placed a physical dimension/temperature unit in alternateMeasurements; put cut/width dimensions in prepNote instead."
-                );
+                if (OrAlternativeRegex().IsMatch(ing.Name))
+                {
+                    issues.Add(
+                        ing.Replacements is { Count: > 0 }
+                            ? $"'{ing.Name}' has replacements populated; strip ' or ...' so name holds ONLY option A."
+                            : $"'{ing.Name}' contains an 'A or B' alternative; put ONLY option A in name and move option B into replacements[]."
+                    );
+                }
+
+                if (
+                    ing.AlternateMeasurements?.Any(a =>
+                        !string.IsNullOrWhiteSpace(a.Unit)
+                        && DimensionOrTempUnits.Contains(a.Unit.Trim())
+                    ) == true
+                )
+                {
+                    issues.Add(
+                        $"'{ing.Name}' placed a physical dimension/temperature unit in alternateMeasurements; put cut/width dimensions in prepNote instead."
+                    );
+                }
             }
         }
 
