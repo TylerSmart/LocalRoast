@@ -18,7 +18,8 @@ public sealed record PocRunOptions(
     PolishMode PolishMode = PolishMode.None,
     Stage3Mode Stage3Mode = Stage3Mode.VectorBatched,
     Stage4Mode Stage4Mode = Stage4Mode.Batched,
-    string? CacheDirectory = null
+    string? CacheDirectory = null,
+    CatalogSnapshot? ProductionCatalog = null
 );
 
 public sealed record RecipeRunSummary(
@@ -234,6 +235,14 @@ public sealed partial class PipelineRunner(
                 if (ingCount == 0)
                 {
                     return "Your previous JSON had ZERO ingredients. Extract EVERY ingredient line from the source text into sections[].ingredients.";
+                }
+                var missingStepsFeedback = FindMissingSourceInstructionFeedback(
+                    input.NormalizedText,
+                    dto
+                );
+                if (missingStepsFeedback is not null)
+                {
+                    return missingStepsFeedback;
                 }
                 return null;
             },
@@ -516,7 +525,7 @@ public sealed partial class PipelineRunner(
         var productionScore = PipelineScorer.TryScoreProductionDraft(
             input.NormalizedText,
             input.ProductionExtractedDraftJson,
-            catalog
+            options.ProductionCatalog ?? catalog
         );
 
         await WriteJsonAsync(
@@ -2405,29 +2414,143 @@ public sealed partial class PipelineRunner(
         return sb.ToString();
     }
 
+    private static string? FindMissingSourceInstructionFeedback(
+        string normalizedText,
+        Stage1RecipeDto dto
+    )
+    {
+        var lines = normalizedText.Replace("\r\n", "\n").Split('\n');
+        var inInstructions = false;
+        var numberedSteps = new List<(int Num, string Text)>();
+
+        foreach (var raw in lines)
+        {
+            var trimmed = raw.Trim();
+            if (!inInstructions)
+            {
+                if (InstructionsHeaderRegex().IsMatch(trimmed))
+                {
+                    inInstructions = true;
+                }
+                continue;
+            }
+
+            if (NonInstructionSectionHeaderRegex().IsMatch(trimmed))
+            {
+                break;
+            }
+
+            var match = NumberedInstructionLineRegex().Match(trimmed);
+            if (match.Success && int.TryParse(match.Groups[1].Value, out var num))
+            {
+                var expectedNext = numberedSteps.Count == 0 ? 1 : numberedSteps[^1].Num + 1;
+                if (num == expectedNext)
+                {
+                    numberedSteps.Add((num, match.Groups[2].Value.Trim()));
+                }
+            }
+        }
+
+        if (numberedSteps.Count < 3)
+        {
+            return null;
+        }
+
+        var extractedLower = StepWordNonAlnumRegex()
+            .Replace(
+                string.Join(" ", dto.Sections.SelectMany(s => s.Instructions)).ToLowerInvariant(),
+                " "
+            );
+        var extractedTokens = extractedLower
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .ToHashSet(StringComparer.Ordinal);
+
+        var omitted = new List<string>();
+        foreach (var (num, text) in numberedSteps)
+        {
+            if (text.Length < 30)
+            {
+                continue;
+            }
+
+            var sigWords = StepWordNonAlnumRegex()
+                .Replace(text.ToLowerInvariant(), " ")
+                .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                .Where(w => w.Length >= 5)
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+
+            if (sigWords.Count < 3)
+            {
+                continue;
+            }
+
+            var hits = sigWords.Count(w => extractedTokens.Contains(w));
+            if (hits == 0 || (hits < 2 && hits * 4 < sigWords.Count))
+            {
+                var snippet = text.Length > 60 ? text[..60] + "..." : text;
+                omitted.Add($"Step {num} ('{snippet}')");
+            }
+        }
+
+        return omitted.Count > 0
+            ? $"You omitted source instruction step(s): {string.Join("; ", omitted.Take(3))}. Extract EVERY numbered instruction step 1-to-1 verbatim without skipping any step."
+            : null;
+    }
+
+    [GeneratedRegex(
+        @"^(?:Instructions?|Directions?|Method)\s*:\s*$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex InstructionsHeaderRegex();
+
+    [GeneratedRegex(
+        @"^(?:Variation|Variations|Nutrition|Tips?|Notes?)\s*:\s*$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex NonInstructionSectionHeaderRegex();
+
+    [GeneratedRegex(@"^(\d+)\.\s+(.+)$", RegexOptions.CultureInvariant)]
+    private static partial Regex NumberedInstructionLineRegex();
+
+    [GeneratedRegex(@"[^a-z0-9]+", RegexOptions.CultureInvariant)]
+    private static partial Regex StepWordNonAlnumRegex();
+
     private static string BuildProdComparisonMarkdown(IReadOnlyList<RecipeRunSummary> summaries)
     {
         var sb = new StringBuilder();
         sb.AppendLine("# Production vs. Ingestion PoC Objective Scorecard");
         sb.AppendLine();
         sb.AppendLine(
-            "| Recipe | Prod Conf | Prod Score (Ing/Step/Res/Time) | PoC Score (Ing/Step/Res/Time) | Delta |"
+            "| Recipe | Prod Conf | Prod Score (Ing/Step/Res/Time) | PoC Base (Ing/Step/Res/Time) | PoC Final | Delta |"
         );
-        sb.AppendLine("| --- | ---: | --- | --- | ---: |");
-        foreach (
-            var s in summaries.Where(s =>
-                s.ProductionScore is not null && s.BaselineScore is not null
-            )
-        )
+        sb.AppendLine("| --- | ---: | --- | --- | ---: | ---: |");
+        var paired = summaries
+            .Where(s => s.ProductionScore is not null && s.BaselineScore is not null)
+            .ToList();
+        foreach (var s in paired)
         {
             var p = s.ProductionScore!;
             var b = s.BaselineScore!;
-            var delta = b.TotalScore - p.TotalScore;
+            var f = s.TargetedScore ?? b;
+            var delta = f.TotalScore - p.TotalScore;
             var deltaStr = delta >= 0 ? $"+{delta}" : delta.ToString();
             sb.AppendLine(
-                $"| {s.Title} | {s.ProductionConfidence?.ToString("F2") ?? "—"} | **{p.TotalScore}** ({p.IngredientScore}/{p.StepScore}/{p.ResolutionScore}/{p.TimingScore}) | **{b.TotalScore}** ({b.IngredientScore}/{b.StepScore}/{b.ResolutionScore}/{b.TimingScore}) | {deltaStr} |"
+                $"| {s.Title} | {s.ProductionConfidence?.ToString("F2") ?? "—"} | **{p.TotalScore}** ({p.IngredientScore}/{p.StepScore}/{p.ResolutionScore}/{p.TimingScore}) | **{b.TotalScore}** ({b.IngredientScore}/{b.StepScore}/{b.ResolutionScore}/{b.TimingScore}) | **{f.TotalScore}** | {deltaStr} |"
             );
         }
+
+        if (paired.Count > 0)
+        {
+            var prodAvg = paired.Average(s => s.ProductionScore!.TotalScore);
+            var baseAvg = paired.Average(s => s.BaselineScore!.TotalScore);
+            var finalAvg = paired.Average(s => (s.TargetedScore ?? s.BaselineScore!).TotalScore);
+            sb.AppendLine();
+            sb.AppendLine(
+                $"**Averages ({paired.Count} recipe(s)):** Production `{prodAvg:F1}/100` | PoC Baseline `{baseAvg:F1}/100` | PoC Final `{finalAvg:F1}/100` (`+{finalAvg - prodAvg:F1}`)"
+            );
+        }
+
         return sb.ToString();
     }
 }

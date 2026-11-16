@@ -95,9 +95,23 @@ using var httpClient = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
 var llmClient = new LlmRunnerClient(httpClient);
 
 var catalog = new CatalogSnapshot { LoadedFromDatabase = false };
+CatalogSnapshot? productionCatalog = null;
 if (cli.EmptyCatalog)
 {
     Console.WriteLine("  Catalog: Empty baseline (--empty-catalog)");
+    if (cli.CompareProdDb && !string.IsNullOrWhiteSpace(connectionString))
+    {
+        try
+        {
+            productionCatalog = await CatalogSearchService.LoadSnapshotAsync(connectionString);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine(
+                $"[Warn] Could not load production catalog for scoring ({ex.Message})."
+            );
+        }
+    }
 }
 else if (!string.IsNullOrWhiteSpace(connectionString))
 {
@@ -214,7 +228,8 @@ var runOptions = new PocRunOptions(
     PolishMode: cli.PolishMode,
     Stage3Mode: cli.Stage3Mode,
     Stage4Mode: cli.Stage4Mode,
-    CacheDirectory: Path.Combine(pocRoot, "cache")
+    CacheDirectory: Path.Combine(pocRoot, "cache"),
+    ProductionCatalog: productionCatalog
 );
 
 Console.WriteLine($"  Output:  {runDir}");
