@@ -344,7 +344,7 @@ static void PrintHelp()
           --max-description-length <n> Max description chars before Stage 2 runs (default: 2000)
           --session-catalog            Accumulate newly proposed ingredients & recipes in memory across batch
           --stage3-mode vector-batched|vector-single|llm-terms Stage 3 DB matching mode (default: vector-batched)
-          --stage4-mode single|batched Stage 4 per-step or batched step tokenization (default: single)
+          --stage4-mode batched|single Stage 4 batched or per-step tokenization (default: batched)
           --polish none|targeted|full|both Stage 5 end-to-end QA polish mode (default: none)
           --skip-ingredients           Skip Stage 3 (DB search & matching)
           --skip-steps                 Skip Stage 4 (step tokenization)
@@ -395,7 +395,7 @@ sealed class CliArgs
     public int MaxDescriptionLength { get; private set; } = 2000;
     public bool SessionCatalog { get; private set; }
     public Stage3Mode Stage3Mode { get; private set; } = Stage3Mode.VectorBatched;
-    public Stage4Mode Stage4Mode { get; private set; } = Stage4Mode.Single;
+    public Stage4Mode Stage4Mode { get; private set; } = Stage4Mode.Batched;
     public PolishMode PolishMode { get; private set; } = PolishMode.None;
     public bool SkipIngredients { get; private set; }
     public bool SkipSteps { get; private set; }

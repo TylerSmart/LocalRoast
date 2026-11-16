@@ -15,7 +15,7 @@ At this stage, try your best NOT to rewrite ingredient names, custom units, prep
 - Organize ingredients and instructions into `sections`.
 - When the recipe has no named sub-sections, emit a single section with `"name": null`. Never invent generic section names like `"Ingredients"`, `"Instructions"`, `"Directions"`, `"Method"`, or `"Main"`.
 - When the source explicitly groups components under subheadings (e.g., `"For the Sauce"`, `"For the Crust"`, `"For the Topping"`, `"Day One"`), preserve each section's `name` and place its ingredients and instructions together. If ingredient sections do not match step blocks 1-to-1, put matching steps under their section and never omit steps — **NEVER return `"instructions": []` across all sections when the source contains instructions!**
-- **instructions**: Copy each instruction step verbatim in chronological order, stripping only leading step numbers (`"1."`, `"2)"`) or bullets (`"-"`, `"•"`). Do NOT insert placeholders or rewrite prose at this stage.
+- **instructions**: Copy EVERY instruction step and sentence verbatim in chronological order, stripping only leading step numbers (`"1."`, `"2)"`) or bullets (`"-"`, `"•"`). NEVER summarize, condense, or drop sentences/clauses (even on long multi-stage methods) and do NOT insert placeholders or rewrite prose at this stage.
 - If `description` / notes contain a `Variation:` for a differently named dish (e.g., `"**Variation: Bacon and Chive Deviled Eggs**"`), keep it inside `description` — do NOT extract a separate variation's ingredients or instructions into `sections`.
 
 ## Ingredients (`ingredients`)

@@ -62,7 +62,7 @@ Concatenating all strings and rendered tokens in order MUST reconstruct the comp
   "label": "Simmer chickpeas"
 }
 ```
-- `amount`: numeric duration (lower bound when a range is printed in the same unit; keep exact value in the printed unit, e.g. `1.5` for `"1 1/2 hours"`, `20` for `"20 to 25 minutes"`, `45` for `"45 seconds"`).
+- `amount`: numeric duration (strictly `> 0`; NEVER use `amount: 0` — e.g., `"for up to 24 hours"` → `"for up to "` + `{type:"timer", amount:24, maxAmount:null, unit:"hour"}`; keep exact value in the printed unit, e.g. `1.5` for `"1 1/2 hours"`, `20` for `"20 to 25 minutes"`, `45` for `"45 seconds"`).
 - `maxAmount`: upper bound ONLY if a range shares the same unit (`25` for `"20 to 25 minutes"`, `60` for `"between 45 and 60 seconds"`), otherwise `null`. `maxAmount` MUST NEVER be smaller than `amount` (`maxAmount >= amount`).
 - **Mixed-unit time ranges**: If a range switches units (e.g. `"at least 8 hours or up to 2 days"`, `"for at least 30 minutes or up to 2 days"`, `"15 minutes or up to overnight"`), emit **separate `timer` tokens** cleanly (`timer(8 hour)` + `" or up to "` + `timer(2 day)`, or `timer(15 minute)` + `" or up to overnight"`) — NEVER merge different units into one token!
 - `unit`: **strictly** `"second"`, `"minute"`, `"hour"`, or `"day"`.

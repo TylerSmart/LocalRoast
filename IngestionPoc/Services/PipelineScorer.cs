@@ -203,8 +203,11 @@ public static partial class PipelineScorer
             if (sourceIngLines.Count > 0)
             {
                 var splitGrace = sourceIngLines.Count(l =>
-                    l.Contains("salt and pepper", StringComparison.OrdinalIgnoreCase)
-                    || l.Contains("salt and black pepper", StringComparison.OrdinalIgnoreCase)
+                    Regex.IsMatch(
+                        l,
+                        @"\bsalt\s+and\s+(?:(?:freshly\s+)?ground\s+)?(?:black\s+)?pepper\b",
+                        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+                    )
                     || Regex.IsMatch(
                         l,
                         @"\bplus\s+(?:\d|a\s+pinch|a\s+dash)",

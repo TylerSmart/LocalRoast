@@ -17,7 +17,7 @@ public sealed record PocRunOptions(
     bool SkipIngredients,
     PolishMode PolishMode = PolishMode.None,
     Stage3Mode Stage3Mode = Stage3Mode.VectorBatched,
-    Stage4Mode Stage4Mode = Stage4Mode.Single,
+    Stage4Mode Stage4Mode = Stage4Mode.Batched,
     string? CacheDirectory = null
 );
 
@@ -884,6 +884,30 @@ public sealed partial class PipelineRunner(
             prompts.TokenizeStep.Content,
             stepUserPayload,
             isAuxiliaryStep: false,
+            validateRetryFeedback: obj =>
+            {
+                var arr = obj["tokens"]?.AsArray();
+                if (arr is null || arr.Count == 0)
+                {
+                    return "Tokens array was empty. Return complete tokens for the instruction.";
+                }
+
+                var res = BuildStepResult(stepNum, secName, instr, arr, ingredientCount);
+                if (res.ValidationWarnings.Count == 0)
+                {
+                    return null;
+                }
+
+                var structural = res
+                    .ValidationWarnings.Where(w =>
+                        !w.StartsWith("Untokenized amount/unit", StringComparison.Ordinal)
+                    )
+                    .ToList();
+                return structural.Count > 0
+                    ? $"Fix these token issues and return the complete fixed tokens array: {string.Join("; ", structural)}"
+                    : null;
+            },
+            maxCorrectionTurns: 1,
             cancellationToken: cancellationToken
         );
 
