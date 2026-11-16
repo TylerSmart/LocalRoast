@@ -1217,7 +1217,7 @@ public sealed partial class PipelineRunner(
             PipelineSchemas.Stage3MatchBatchSchema(),
             prompts.MatchIngredientBatch.Content,
             batchPayload,
-            isAuxiliaryStep: true,
+            isAuxiliaryStep: false,
             cancellationToken: cancellationToken
         );
 
@@ -1353,7 +1353,7 @@ public sealed partial class PipelineRunner(
             PipelineSchemas.Stage3MatchIngredientSchema(),
             prompts.MatchIngredient.Content,
             matchPayload,
-            isAuxiliaryStep: true,
+            isAuxiliaryStep: false,
             cancellationToken: cancellationToken
         );
 
