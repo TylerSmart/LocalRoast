@@ -219,6 +219,25 @@ public sealed partial class PipelineRunner(
             prompts.ExtractRecipe.Content,
             input.NormalizedText,
             isAuxiliaryStep: false,
+            validateRetryFeedback: dto =>
+            {
+                var ingCount = dto.Sections.Sum(s => s.Ingredients.Count);
+                var stepCount = dto.Sections.Sum(s => s.Instructions.Count);
+                if (ingCount == 0 && stepCount == 0)
+                {
+                    return "Your previous JSON had ZERO ingredients and ZERO instructions. Extract ALL ingredients and ALL instructions from the source text.";
+                }
+                if (stepCount == 0)
+                {
+                    return "Your previous JSON had ZERO instructions (every section had instructions=[]). Preserve EVERY section's ingredients AND extract ALL instruction steps from Instructions: into sections[].instructions!";
+                }
+                if (ingCount == 0)
+                {
+                    return "Your previous JSON had ZERO ingredients. Extract EVERY ingredient line from the source text into sections[].ingredients.";
+                }
+                return null;
+            },
+            maxCorrectionTurns: 1,
             cancellationToken: cancellationToken
         );
 

@@ -281,7 +281,11 @@ public static partial class PipelineScorer
         }
         else
         {
-            var droppedWords = CountDroppedStepWords(normalizedSourceText, recipe.RenderedSteps);
+            var droppedWords = CountDroppedStepWords(
+                normalizedSourceText,
+                recipe.RenderedSteps,
+                recipe.Description
+            );
             if (droppedWords.Count >= 3)
             {
                 var pen = Math.Min(16, droppedWords.Count * 2);
@@ -654,7 +658,8 @@ public static partial class PipelineScorer
 
     private static List<string> CountDroppedStepWords(
         string normalizedSource,
-        IReadOnlyList<string> renderedSteps
+        IReadOnlyList<string> renderedSteps,
+        string? description
     )
     {
         var match = CanonicalInstructionsBlockRegex().Match(normalizedSource.Replace("\r\n", "\n"));
@@ -670,7 +675,8 @@ public static partial class PipelineScorer
             .Where(w => !IsUnitOrStopWord(w))
             .ToHashSet();
 
-        var combinedRendered = string.Join(" ", renderedSteps);
+        var combinedRendered =
+            string.Join(" ", renderedSteps) + " " + (description ?? string.Empty);
         var rendWords = WordTokenRegex()
             .Matches(combinedRendered)
             .Select(m => m.Value.ToLowerInvariant())

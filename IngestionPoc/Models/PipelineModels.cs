@@ -1289,6 +1289,10 @@ public static partial class StepTokenParserAndRenderer
                     }
                     break;
                 case PocTimerToken timer:
+                    if (string.IsNullOrWhiteSpace(timer.Label))
+                    {
+                        warnings.Add($"Timer token [{i}] has an empty label.");
+                    }
                     if (timer.MaxAmount.HasValue && timer.MaxAmount.Value < timer.Amount)
                     {
                         warnings.Add(
