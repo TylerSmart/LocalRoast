@@ -926,10 +926,25 @@ public static partial class StepTokenParserAndRenderer
     private static partial Regex DuplicateTimeUnitPrefixRegex();
 
     [GeneratedRegex(
-        @"^\s*(?:inch(?:es)?|feet|foot|yards?|millimeters?|centimeters?|meters?|mm\b|cm\b)\b",
+        @"^\s*-?\s*(?:inch(?:es)?|feet|foot|yards?|millimeters?|centimeters?|meters?|mm\b|cm\b)\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex DuplicateDimUnitPrefixRegex();
+
+    [GeneratedRegex(
+        @"^\s+-(?:wide|thick|long|deep|diameter|round|square)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex LeadingSpaceHyphenSuffixRegex();
+
+    [GeneratedRegex(@"\bup to\s*$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex TrailingUpToRegex();
+
+    [GeneratedRegex(
+        @"\b([a-zA-Z]{3,})\s+\1\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex RepeatedAdjacentWordRegex();
 
     [GeneratedRegex(
         @"^\s*(?:°\s*[FC]|degrees?(?:\s+(?:F|C|Fahrenheit|Celsius))?\b|fahrenheit\b|celsius\b|[FC]\b)",
@@ -1360,6 +1375,18 @@ public static partial class StepTokenParserAndRenderer
                         );
                     }
                     if (
+                        i > 0
+                        && tokens[i - 1] is PocTextToken prevTimerTxt
+                        && TrailingUpToRegex().IsMatch(prevTimerTxt.Text)
+                        && timer.MaxAmount.HasValue
+                        && timer.MaxAmount.Value > timer.Amount
+                    )
+                    {
+                        warnings.Add(
+                            $"Preceding text ends with 'up to', so set amount={timer.MaxAmount.Value} and maxAmount=null instead of fabricated range {timer.Amount}..{timer.MaxAmount.Value}."
+                        );
+                    }
+                    if (
                         i + 1 < tokens.Count
                         && tokens[i + 1] is PocTextToken trailingTimerTxt
                         && DuplicateTimeUnitPrefixRegex().IsMatch(trailingTimerTxt.Text)
@@ -1378,14 +1405,34 @@ public static partial class StepTokenParserAndRenderer
                         );
                     }
                     if (
-                        i + 1 < tokens.Count
-                        && tokens[i + 1] is PocTextToken trailingDimTxt
-                        && DuplicateDimUnitPrefixRegex().IsMatch(trailingDimTxt.Text)
+                        i > 0
+                        && tokens[i - 1] is PocTextToken prevDimTxt
+                        && TrailingUpToRegex().IsMatch(prevDimTxt.Text)
+                        && dim.MaxAmount.HasValue
+                        && dim.MaxAmount.Value > dim.Amount
                     )
                     {
                         warnings.Add(
-                            $"Duplicate dimension unit '{DuplicateDimUnitPrefixRegex().Match(trailingDimTxt.Text).Value.Trim()}' after dimension token [{i}]."
+                            $"Preceding text ends with 'up to', so set amount={dim.MaxAmount.Value} and maxAmount=null instead of fabricated range {dim.Amount}..{dim.MaxAmount.Value}."
                         );
+                    }
+                    if (i + 1 < tokens.Count && tokens[i + 1] is PocTextToken trailingDimTxt)
+                    {
+                        if (DuplicateDimUnitPrefixRegex().IsMatch(trailingDimTxt.Text))
+                        {
+                            warnings.Add(
+                                $"Duplicate dimension unit '{DuplicateDimUnitPrefixRegex().Match(trailingDimTxt.Text).Value.Trim()}' after dimension token [{i}] (hyphenated dimension already renders '-inch')."
+                            );
+                        }
+                        else if (
+                            dim.Hyphenated
+                            && LeadingSpaceHyphenSuffixRegex().IsMatch(trailingDimTxt.Text)
+                        )
+                        {
+                            warnings.Add(
+                                $"Extra space before hyphenated dimension suffix '{trailingDimTxt.Text.TrimStart().Split(' ')[0]}' after dimension token [{i}]; attach '-wide'/'-thick' with no leading space."
+                            );
+                        }
                     }
                     break;
                 case PocTemperatureToken temp:
@@ -1406,6 +1453,20 @@ public static partial class StepTokenParserAndRenderer
                         );
                     }
                     break;
+            }
+        }
+
+        foreach (Match dup in RepeatedAdjacentWordRegex().Matches(rendered))
+        {
+            var word = dup.Groups[1].Value;
+            if (
+                !word.Equals("that", StringComparison.OrdinalIgnoreCase)
+                && !word.Equals("had", StringComparison.OrdinalIgnoreCase)
+            )
+            {
+                warnings.Add(
+                    $"Duplicate adjacent word '{dup.Value}' in rendered step; consume noun/unit cleanly inside token."
+                );
             }
         }
 

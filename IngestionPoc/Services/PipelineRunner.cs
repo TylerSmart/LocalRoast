@@ -244,6 +244,11 @@ public sealed partial class PipelineRunner(
                 {
                     return missingStepsFeedback;
                 }
+                var stage1IngFeedback = ValidateStage1IngredientsFeedback(dto);
+                if (stage1IngFeedback is not null)
+                {
+                    return stage1IngFeedback;
+                }
                 return null;
             },
             maxCorrectionTurns: 1,
@@ -840,7 +845,8 @@ public sealed partial class PipelineRunner(
                     stepIngredientsPayload,
                     priorPrefix,
                     ingredientCount,
-                    cancellationToken
+                    cancellationToken,
+                    candidate?.ValidationWarnings
                 );
                 if (
                     candidate is null
@@ -867,7 +873,8 @@ public sealed partial class PipelineRunner(
         IReadOnlyList<StepIngredientPayloadItem> stepIngredientsPayload,
         IReadOnlyList<object> priorSteps,
         int ingredientCount,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        IReadOnlyList<string>? priorValidationWarnings = null
     )
     {
         var stepDir = Path.Combine(stage4Dir, $"step-{stepNum:00}");
@@ -882,6 +889,9 @@ public sealed partial class PipelineRunner(
                 instruction = instr,
                 ingredients = stepIngredientsPayload,
                 priorSteps,
+                previousAttemptWarnings = priorValidationWarnings is { Count: > 0 }
+                    ? priorValidationWarnings
+                    : null,
             },
             PrettyJson
         );
@@ -902,18 +912,8 @@ public sealed partial class PipelineRunner(
                 }
 
                 var res = BuildStepResult(stepNum, secName, instr, arr, ingredientCount);
-                if (res.ValidationWarnings.Count == 0)
-                {
-                    return null;
-                }
-
-                var structural = res
-                    .ValidationWarnings.Where(w =>
-                        !w.StartsWith("Untokenized amount/unit", StringComparison.Ordinal)
-                    )
-                    .ToList();
-                return structural.Count > 0
-                    ? $"Fix these token issues and return the complete fixed tokens array: {string.Join("; ", structural)}"
+                return res.ValidationWarnings.Count > 0
+                    ? $"Fix these token issues and return the complete fixed tokens array: {string.Join("; ", res.ValidationWarnings)}"
                     : null;
             },
             maxCorrectionTurns: 1,
@@ -1756,6 +1756,7 @@ public sealed partial class PipelineRunner(
                         s.SectionName,
                         s.OriginalInstruction,
                         renderedOriginal = s.RenderedOriginal,
+                        validationWarnings = s.ValidationWarnings,
                         tokens = s.RawTokensJson,
                     }),
                 },
@@ -2549,17 +2550,92 @@ public sealed partial class PipelineRunner(
             }
 
             var hits = sigWords.Count(w => extractedTokens.Contains(w));
-            if (hits == 0 || (hits < 2 && hits * 4 < sigWords.Count))
+            if (hits * 10 < sigWords.Count * 7)
             {
                 var snippet = text.Length > 60 ? text[..60] + "..." : text;
                 omitted.Add($"Step {num} ('{snippet}')");
             }
         }
 
-        return omitted.Count > 0
-            ? $"You omitted source instruction step(s): {string.Join("; ", omitted.Take(3))}. Extract EVERY numbered instruction step 1-to-1 verbatim without skipping any step."
+        if (omitted.Count > 0)
+        {
+            return $"You omitted source instruction step(s): {string.Join("; ", omitted.Take(3))}. Extract EVERY numbered instruction step 1-to-1 verbatim without skipping any step.";
+        }
+
+        var extractedStepCount = dto.Sections.Sum(s => s.Instructions.Count);
+        if (extractedStepCount < numberedSteps.Count)
+        {
+            return $"Source has {numberedSteps.Count} numbered instruction steps, but you extracted {extractedStepCount}. Map EVERY source numbered step 1-to-1 into sections[].instructions without skipping or merging steps.";
+        }
+
+        return null;
+    }
+
+    private static string? ValidateStage1IngredientsFeedback(Stage1RecipeDto dto)
+    {
+        var issues = new List<string>();
+        foreach (var ing in dto.Sections.SelectMany(s => s.Ingredients))
+        {
+            if (
+                ing.MaxQuantity.HasValue
+                && (!ing.Quantity.HasValue || ing.MaxQuantity.Value < ing.Quantity.Value)
+            )
+            {
+                issues.Add(
+                    $"'{ing.Name}' has invalid range quantity={ing.Quantity}..maxQuantity={ing.MaxQuantity} (put parenthetical weight/stick conversions in alternateMeasurements and leave maxQuantity=null)."
+                );
+            }
+
+            if (
+                ing.Replacements is { Count: > 0 }
+                && ing.Name.Contains(" or ", StringComparison.OrdinalIgnoreCase)
+            )
+            {
+                issues.Add(
+                    $"'{ing.Name}' has replacements populated; strip ' or ...' so name holds ONLY option A."
+                );
+            }
+
+            if (
+                ing.AlternateMeasurements?.Any(a =>
+                    !string.IsNullOrWhiteSpace(a.Unit)
+                    && DimensionOrTempUnits.Contains(a.Unit.Trim())
+                ) == true
+            )
+            {
+                issues.Add(
+                    $"'{ing.Name}' placed a physical dimension/temperature unit in alternateMeasurements; put cut/width dimensions in prepNote instead."
+                );
+            }
+        }
+
+        return issues.Count > 0
+            ? $"Fix these ingredient extraction errors cleanly: {string.Join(" | ", issues.Take(4))}"
             : null;
     }
+
+    private static readonly HashSet<string> DimensionOrTempUnits = new(
+        StringComparer.OrdinalIgnoreCase
+    )
+    {
+        "inch",
+        "inches",
+        "foot",
+        "feet",
+        "yard",
+        "yards",
+        "mm",
+        "millimeter",
+        "millimeters",
+        "cm",
+        "centimeter",
+        "centimeters",
+        "m",
+        "meter",
+        "meters",
+        "fahrenheit",
+        "celsius",
+    };
 
     [GeneratedRegex(
         @"^(?:Instructions?|Directions?|Method)\s*:\s*$",

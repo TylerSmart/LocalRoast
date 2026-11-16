@@ -8,7 +8,7 @@ At this stage, try your best NOT to rewrite ingredient names, custom units, prep
 - **description**: Copy any recipe introduction, headnote, "Why This Recipe Works" explanation (strip a redundant leading `"WHY THIS RECIPE WORKS"` heading if present), serving suggestions, variations, or make-ahead/storage notes as plain text. Set to `null` if the source has none. Never invent descriptions or summarize the ingredient list.
 - **servings**: Numeric base serving count as a number (if a range like `"Serves 4 to 6"`, use the lower number `4`), or `null` if unknown.
 - **yield**: Concise printed yield label when given (e.g., `"Serves 4"`, `"Makes 2 cups"`, `"Makes 12 muffins"`), or `null` if not stated.
-- **timing**: Integer minutes (`prep`, `cook`, `total`). Convert hours/days to integer minutes (e.g., `1 hr 30 min` -> `90`). Use `0` for `cook` only when the recipe is clearly no-cook; use `null` for any value not explicitly stated in the source.
+- **timing**: Integer minutes (`prep`, `cook`, `total`). Convert hours/days to integer minutes (e.g., `1 hr 30 min` -> `90`). Use `0` for `cook` only when the recipe is clearly no-cook; **set `prep`/`cook`/`total` ONLY from an explicit timing header/summary line (e.g., `"Prep Time: 15 min"`, `"Total Time: 1 hour"`) — ALWAYS use `null` whenever no explicit timing line is stated (NEVER guess or sum instructions' cook/chill durations!)**.
 
 ## Sections (`sections`)
 
@@ -59,7 +59,7 @@ For each ingredient line in the source:
   - `"2 (15-ounce) cans chickpeas"` -> main `2 can`, `alternateMeasurements: [{ "quantity": 30, "unit": "ounce" }]` (multiply container count by per-container weight/volume so the alternate total matches the full ingredient amount).
   - `"1 medium garlic clove, minced (about 1 teaspoon)"` -> main `1 clove`, `alternateMeasurements: [{ "quantity": 1, "unit": "teaspoon" }]`.
   - `"1/4 cup fresh lemon juice (from 2 lemons)"` -> main `0.25 cup`, `alternateMeasurements: [{ "quantity": 2, "unit": null }]`.
-- Never place physical dimensions/cut sizes (`"(1-inch) cauliflower florets"`, `"1/2-inch pieces"`) or temperatures (`"110 degrees"`) into `alternateMeasurements` — put cut sizes in `prepNote`.
+- Never place physical dimensions, widths, or cut sizes (`"(1-inch) cauliflower florets"`, `"1/4-inch-wide flat rice noodles"`, `"1/2-inch pieces"`) or temperatures (`"110 degrees"`) into `alternateMeasurements` — put cut/width dimensions in `prepNote`.
 
 ---
 
