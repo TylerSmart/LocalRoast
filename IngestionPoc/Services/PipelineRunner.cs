@@ -1865,15 +1865,55 @@ public sealed partial class PipelineRunner(
 
             var current = patchedIngredients[idx];
             var ext = current.Extracted;
+
+            var proposedQty = ingPatch.Quantity ?? ext.Quantity;
+            var proposedMax = ingPatch.MaxQuantity ?? ext.MaxQuantity;
+            if (
+                ingPatch.MaxQuantity.HasValue
+                && (!proposedQty.HasValue || proposedMax!.Value < proposedQty.Value)
+            )
+            {
+                skippedNotes.Add(
+                    $"[Guardrail] Rejected invalid range in ingredientPatch [{ingPatch.Index}] ({proposedQty}..{proposedMax})."
+                );
+                proposedMax = ext.MaxQuantity;
+            }
+
+            var proposedAlt = ingPatch.AlternateMeasurements ?? ext.AlternateMeasurements;
+            if (
+                ingPatch.AlternateMeasurements?.Any(a =>
+                    !string.IsNullOrWhiteSpace(a.Unit)
+                    && DimensionOrTempUnits.Contains(a.Unit.Trim())
+                ) == true
+            )
+            {
+                skippedNotes.Add(
+                    $"[Guardrail] Rejected dimension/temperature units in alternateMeasurements for ingredientPatch [{ingPatch.Index}]."
+                );
+                proposedAlt = ext.AlternateMeasurements;
+            }
+
+            var proposedName = ingPatch.Name ?? ext.Name;
+            if (
+                !string.IsNullOrWhiteSpace(ingPatch.Name)
+                && OrAlternativeRegex().IsMatch(ingPatch.Name)
+            )
+            {
+                skippedNotes.Add(
+                    $"[Guardrail] Rejected unsplit 'or' alternative in ingredientPatch [{ingPatch.Index}] name='{ingPatch.Name}'."
+                );
+                proposedName = ext.Name;
+            }
+
             var updatedExt = ext with
             {
-                Name = ingPatch.Name ?? ext.Name,
-                Quantity = ingPatch.Quantity ?? ext.Quantity,
-                MaxQuantity = ingPatch.MaxQuantity ?? ext.MaxQuantity,
+                Name = proposedName,
+                Quantity = proposedQty,
+                MaxQuantity = proposedMax,
                 Unit = ingPatch.Unit ?? ext.Unit,
                 PrepNote = ingPatch.PrepNote ?? ext.PrepNote,
                 IsOptional = ingPatch.IsOptional ?? ext.IsOptional,
-                AlternateMeasurements = ingPatch.AlternateMeasurements ?? ext.AlternateMeasurements,
+                AlternateMeasurements = proposedAlt,
             };
             patchedIngredients[idx] = current with { Extracted = updatedExt };
         }
@@ -2586,13 +2626,12 @@ public sealed partial class PipelineRunner(
                 );
             }
 
-            if (
-                ing.Replacements is { Count: > 0 }
-                && ing.Name.Contains(" or ", StringComparison.OrdinalIgnoreCase)
-            )
+            if (OrAlternativeRegex().IsMatch(ing.Name))
             {
                 issues.Add(
-                    $"'{ing.Name}' has replacements populated; strip ' or ...' so name holds ONLY option A."
+                    ing.Replacements is { Count: > 0 }
+                        ? $"'{ing.Name}' has replacements populated; strip ' or ...' so name holds ONLY option A."
+                        : $"'{ing.Name}' contains an 'A or B' alternative; put ONLY option A in name and move option B into replacements[]."
                 );
             }
 
@@ -2651,6 +2690,9 @@ public sealed partial class PipelineRunner(
 
     [GeneratedRegex(@"^(\d+)\.\s+(.+)$", RegexOptions.CultureInvariant)]
     private static partial Regex NumberedInstructionLineRegex();
+
+    [GeneratedRegex(@"\s+or\s+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex OrAlternativeRegex();
 
     [GeneratedRegex(@"[^a-z0-9]+", RegexOptions.CultureInvariant)]
     private static partial Regex StepWordNonAlnumRegex();

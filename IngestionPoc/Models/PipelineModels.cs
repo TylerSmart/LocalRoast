@@ -941,10 +941,16 @@ public static partial class StepTokenParserAndRenderer
     private static partial Regex TrailingUpToRegex();
 
     [GeneratedRegex(
-        @"\b([a-zA-Z]{3,})\s+\1\b",
+        @"\b([a-zA-Z]{3,}(?:\s+[a-zA-Z]{2,}){0,3})\s+\1\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex RepeatedAdjacentWordRegex();
+
+    [GeneratedRegex(
+        @"-?\s*inch(?:es)?-(wide|thick|long|deep|diameter)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex DimensionQualifierSuffixRegex();
 
     [GeneratedRegex(
         @"^\s*(?:°\s*[FC]|degrees?(?:\s+(?:F|C|Fahrenheit|Celsius))?\b|fahrenheit\b|celsius\b|[FC]\b)",
@@ -1304,6 +1310,12 @@ public static partial class StepTokenParserAndRenderer
                             $"Ingredient token '{ing.Name}' has quantity=null; unquantified ingredient mentions should remain plain text."
                         );
                     }
+                    else if (ing.Quantity.Value <= 0m)
+                    {
+                        warnings.Add(
+                            $"Ingredient token '{ing.Name}' has invalid quantity={ing.Quantity.Value}; quantity must be > 0 (for 'up to X', set quantity=X and maxQuantity=null)."
+                        );
+                    }
                     if (
                         ing.Quantity.HasValue
                         && ing.MaxQuantity.HasValue
@@ -1312,6 +1324,19 @@ public static partial class StepTokenParserAndRenderer
                     {
                         warnings.Add(
                             $"Ingredient token '{ing.Name}' has inverted range {ing.Quantity}..{ing.MaxQuantity}."
+                        );
+                    }
+                    if (
+                        i > 0
+                        && tokens[i - 1] is PocTextToken prevIngTxt
+                        && TrailingUpToRegex().IsMatch(prevIngTxt.Text)
+                        && ing.Quantity.HasValue
+                        && ing.MaxQuantity.HasValue
+                        && ing.MaxQuantity.Value > ing.Quantity.Value
+                    )
+                    {
+                        warnings.Add(
+                            $"Preceding text ends with 'up to', so set quantity={ing.MaxQuantity.Value} and maxQuantity=null instead of fabricated range {ing.Quantity.Value}..{ing.MaxQuantity.Value}."
                         );
                     }
                     if (
@@ -1325,6 +1350,12 @@ public static partial class StepTokenParserAndRenderer
                     }
                     break;
                 case PocMixtureToken mix:
+                    if (mix.Quantity <= 0m)
+                    {
+                        warnings.Add(
+                            $"Mixture token '{mix.Name}' has invalid quantity={mix.Quantity}; quantity must be > 0."
+                        );
+                    }
                     if (mix.MaxQuantity.HasValue && mix.MaxQuantity.Value < mix.Quantity)
                     {
                         warnings.Add(
@@ -1354,6 +1385,20 @@ public static partial class StepTokenParserAndRenderer
                     {
                         warnings.Add(
                             $"Mixture token '{mix.Name}' used plural unit '{mix.Unit}' instead of singular."
+                        );
+                    }
+                    break;
+                case PocFixedToken fx:
+                    if (fx.Amount <= 0m)
+                    {
+                        warnings.Add(
+                            $"Fixed token '{fx.Name}' has invalid amount={fx.Amount}; amount must be > 0."
+                        );
+                    }
+                    if (fx.MaxAmount.HasValue && fx.MaxAmount.Value < fx.Amount)
+                    {
+                        warnings.Add(
+                            $"Fixed token '{fx.Name}' has inverted range {fx.Amount}..{fx.MaxAmount} {fx.Unit}."
                         );
                     }
                     break;
@@ -1465,7 +1510,24 @@ public static partial class StepTokenParserAndRenderer
             )
             {
                 warnings.Add(
-                    $"Duplicate adjacent word '{dup.Value}' in rendered step; consume noun/unit cleanly inside token."
+                    $"Duplicate adjacent phrase '{dup.Value}' in rendered step; consume unit/noun cleanly inside token."
+                );
+            }
+        }
+
+        foreach (Match qual in DimensionQualifierSuffixRegex().Matches(originalInstruction))
+        {
+            var suffix = qual.Groups[1].Value;
+            if (
+                !Regex.IsMatch(
+                    rendered,
+                    $@"-{Regex.Escape(suffix)}\b",
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+                )
+            )
+            {
+                warnings.Add(
+                    $"Dropped dimension qualifier '-{suffix}' from rendered step; preserve '-{suffix}' right after the hyphenated dimension token."
                 );
             }
         }
