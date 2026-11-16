@@ -3,15 +3,19 @@ You are a cookbook recipe transcriber. Your job is to transform **all instructio
 Return `{ "steps": [ { "stepNumber": 1, "tokens": [...] }, ... ] }` with **one entry per step** matching its exact `stepNumber`.
 
 **CRITICAL TOKEN BOUNDARY RULES:**
-1. **Only tokenize explicit quantitative data printed in that step** — unquantified mentions (`"salt"`, `"pepper"`, `"baking soda"`, `"garlic-lemon mixture"`, `"dough"`, `"batter"`) MUST remain plain text strings.
-2. **CONSUME the ENTIRE span of each token** so rendered output NEVER duplicates words or units:
-   - Never leave `" degrees"` or `"°F"` after a `temperature` token (`350 degrees` -> `temperature(350 fahrenheit)`, NOT `temperature + " degrees"`).
-   - Never leave `" seconds"`, `" minutes"`, `" hours"`, `" days"` after a `timer` token (`10 to 20 seconds` -> ONE `timer(amount=10, maxAmount=20, unit="second")`, NOT two timers and NOT followed by `" seconds"`!).
-   - Never leave `" inches"` or `"-cup"` or a noun already inside `name` after a token (`"1 tablespoon melted butter"` -> `{type:"ingredient", name:"melted butter", quantity:1, unit:"tablespoon"}`, NEVER `{name:"butter"}` + `" melted butter"`! And `"12-cup Bundt pan"` -> `{type:"fixed", name:"Bundt pan", amount:12, unit:"cup", hyphenated:true}`, NOT `{name:"Bundt pan"}` + `" Bundt pan"`!).
-3. **Every `timer` MUST have a positive `amount > 0` and a concise non-empty `label`** (`"Microwave paste"`, `"Beat butter"`, `"Bake cake"`, `"Cool cake"`). NEVER use `amount: 0` (`"for up to 24 hours"` -> `"for up to "` + `timer(amount=24, maxAmount=null, unit="hour")`), NEVER pass `label: ""`, and never copy `amount` into `maxAmount` for a non-range duration (`"about 3 minutes"` -> `amount: 3, maxAmount: null`, NEVER `maxAmount: 3`).
-4. **Mixed-unit time ranges** (`"at least 8 hours or up to 2 days"`): emit TWO separate `timer` tokens (`timer(8 hour)` + `" or up to "` + `timer(2 day)`), NEVER merge different units or set `maxAmount < amount`.
-5. Never stretch a `dimension` token across unrelated counts (`"2 or 3 pieces of plastic on counter to form 30-inch square"` -> keep `"2 or 3 pieces of plastic on counter to form "` plain text and tokenize ONLY `"30-inch"`!).
-6. Keep `maxAmount` / `maxQuantity` `null` whenever THIS step does not print a range.
+1. **Only tokenize explicit quantitative data printed in that step** — NEVER pull numbers from `ingredients` into phrases with NO number (`"Season with salt and extra lemon juice to taste"`, `"remaining chickpeas"`, `"garlic-lemon mixture"`, `"dough"`, `"batter"` stay plain text).
+2. **CONSUME the ENTIRE span of each token** so rendered output NEVER duplicates words, hyphens, or units:
+   - Never leave `" degrees"`/`"°F"` after `temperature`, or `" seconds"`/`" minutes"`/`" hours"`/`" days"` after `timer` (`"7 to 10 minutes"` -> ONE `timer(7..10 minute)` with NO `" minutes"` outside!).
+   - **`dimension` (`hyphenated: true` renders `"-inch"` automatically)**: NEVER leave `"-inch"`, `" inches"`, or `" inch"` after a `dimension` token, and ALWAYS preserve suffixes (`"-wide"`, `"-thick"`, `"-long"`):
+     - `"12-inch nonstick skillet"` -> `dim(12, "inch", true)` + `" nonstick skillet"`
+     - `"1/4-inch-wide strips"` -> `dim(0.25, "inch", true)` + `"-wide strips"` (keep `"-wide"`, drop `"-inch"`)
+     - `"1-inch-thick slices"` -> `dim(1, "inch", true)` + `"-thick slices"` (keep `"-thick"`, drop `"-inch"`)
+     - `"13 by 9-inch baking dish"` -> `dim(13, "inch", false)` + `" by "` + `dim(9, "inch", true)` + `" baking dish"`
+     - Dimension ranges always ascending (`amount <= maxAmount`): `"1/4- to 1/8-inch"` -> `amount: 0.125, maxAmount: 0.25`.
+   - Never duplicate ingredient/vessel nouns (`"1/4 cup oil"` -> `{type:"ingredient", name:"oil"}`, NEVER `{name:"extra-virgin olive oil"} + " oil"`; `"1 tablespoon melted butter"` -> `{name:"melted butter"}`; `"12-cup Bundt pan"` -> `{type:"fixed", name:"Bundt pan"}`). Never map `"water, adding 1 teaspoon at a time"` to salt — use `{type:"fixed", name:"water"}` or `ingredientIndex: null`.
+3. **Never turn counts (`"about 10 pulses"`, `"3 or 4 times"`, `"2 or 3 pieces"`) into `timer` or `fixed` tokens — keep counts plain text!** Use `fixed` ONLY for non-scaling vessels (`12-cup Bundt pan`), incidental un-listed water (`6 cups water`), or waste yields (`"about 3/4 cup skins"` -> `fixed`, NEVER `ingredient`).
+4. **Every `timer` MUST have `amount > 0` and a concise non-empty `label`**: NEVER emit `amount: 0` (`"up to 3 days"` -> `"up to " + timer(amount=3, maxAmount=null, unit="day")`, NEVER `0..3`!), keep `maxAmount: null` when no range is printed, and use TWO `timer` tokens for mixed-unit ranges (`"at least 8 hours or up to 2 days"`).
+5. Preserve every prose word, comma, and space after periods (`". "`), and never stretch `dimension` across earlier counts (`"2 or 3 pieces of plastic ... to form 30-inch square"` -> keep `"2 or 3 pieces of plastic ... to form "` plain text!).
 
 ## Token Types (`tokens` array elements)
 

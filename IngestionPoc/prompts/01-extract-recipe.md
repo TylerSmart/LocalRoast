@@ -24,9 +24,9 @@ At this stage, try your best NOT to rewrite ingredient names, custom units, prep
 
 For each ingredient line in the source:
 
-- **name**: The ingredient name from the source without leading quantity/unit and without leading/trailing preparation adjectives (e.g., `"2 tablespoons finely chopped onion"` -> `name: "onion"`, `prepNote: "finely chopped"`; `"1 teaspoon grated lemon zest"` -> `name: "lemon zest"`, `prepNote: "grated"`; `"1 pound 85% lean ground beef"` -> `name: "85% lean ground beef"`). Preserve meaningful grocery qualifiers (`"unsalted butter"`, `"kosher salt"`, `"extra-virgin olive oil"`, `"lime zest"`, `"lime juice"`, `"frozen spinach"`).
-- **quantity**: Decimal number (`1/2` -> `0.5`, `1/4` -> `0.25`, `1/8` -> `0.125`, `1/3` -> `0.3333`, `2/3` -> `0.6667`). Set to `null` when unmeasured (`"Table salt"`, `"Freshly ground black pepper"`, `"Cooking spray"`). When an informal singular unit is stated without a digit (`"Pinch cayenne pepper"`, `"A dash of hot sauce"`), set `quantity: 1`.
-- **maxQuantity**: Decimal number ONLY when the primary amount is explicitly printed as a range (e.g., `"1 1/2–2 tablespoons lime juice"` -> `quantity: 1.5, maxQuantity: 2`), otherwise `null`. Do NOT copy parenthetical item-count ranges (e.g., `"1 1/2 pounds potatoes (3 to 4 medium)"`) into `maxQuantity`.
+- **name**: The ingredient name from the source without leading quantity/unit and without leading/trailing preparation adjectives (e.g., `"2 tablespoons finely chopped onion"` -> `name: "onion"`, `prepNote: "finely chopped"`; `"1 teaspoon grated lemon zest"` -> `name: "lemon zest"`, `prepNote: "grated"`; `"1 pound 85% lean ground beef"` -> `name: "85% lean ground beef"`). Preserve meaningful grocery qualifiers (`"unsalted butter"`, `"kosher salt"`, `"extra-virgin olive oil"`, `"lime zest"`, `"lime juice"`, `"frozen spinach"`). When an ingredient offers an `"A or B"` choice (e.g., `"1 cup pecans or walnuts"`), put **only `A`** (`"pecans"`) in `name` — NEVER keep `"A or B"` in `name` when populating `replacements`.
+- **quantity**: Decimal number (`1/2` -> `0.5`, `1/4` -> `0.25`, `1/8` -> `0.125`, `1/3` -> `0.3333`, `2/3` -> `0.6667`). ONLY set `quantity: null` when the source line genuinely prints NO leading number (e.g., `"Table salt"`, `"Freshly ground black pepper"`, `"Cooking spray"`) — NEVER omit an explicit printed number like `6 ounces` (`quantity: 6`). When an informal singular unit is stated without a digit (`"Pinch cayenne pepper"`, `"A dash of hot sauce"`), set `quantity: 1`.
+- **maxQuantity**: Decimal number ONLY when the primary measurement is an explicit numeric range in the **same unit** (`"1 1/2–2 tablespoons lime juice"` -> `quantity: 1.5, maxQuantity: 2, unit: "tablespoon"`, with `maxQuantity >= quantity`), otherwise `null`. **NEVER place parenthetical weight/volume conversions (`"1 1/4 cups (5 ounces)"`, `"12 tablespoons (1 1/2 sticks)"`, `"2 1/4 cups (15 3/4 ounces)"`), pack sizes (`"1 (1 1/2- to 2-pound) salmon fillet"`), item counts (`"1 1/2 pounds potatoes (3 to 4 medium)"`), or the second term of an `"A plus B"` addition (`"6 tablespoons plus 1 teaspoon"` -> sum into `quantity: 6.3333, maxQuantity: null`, NEVER `quantity: 6, maxQuantity: 1`!) into `maxQuantity`** — parenthetical conversions and pack/count equivalents ALWAYS belong in `alternateMeasurements`!
 - **unit**: Either a **standardized unit string** from the list below, a **singular lowercase custom unit string**, or `null` when count-only (`"3 ripe avocados"`, `"2 large eggs"`).
 - **prepNote**: Preparation actions, size/state modifiers, divided/optional notes, or serving notes from the source (e.g., `"stemmed, seeded, and minced"`, `"halved, pitted, and cut into 1/2-inch pieces"`, `"divided"`, `"softened"`, `"for serving"`), or `null` if none.
 - **isOptional**: `true` if explicitly marked optional (e.g., `"(optional)"`), otherwise `false`.
@@ -36,8 +36,11 @@ For each ingredient line in the source:
 - Split a single source line into multiple sequential ingredient objects ONLY when it lists two distinct ingredient forms or uses with separate measurements:
   - `"1/4 teaspoon grated lime zest plus 1 1/2–2 tablespoons juice"` -> (1) `name: "grated lime zest"`, `quantity: 0.25`, `unit: "teaspoon"`; (2) `name: "lime juice"`, `quantity: 1.5`, `maxQuantity: 2`, `unit: "tablespoon"`.
   - `"1 tablespoon minced fresh parsley, plus 12 small whole parsley leaves for garnishing"` -> (1) `name: "fresh parsley"`, `quantity: 1`, `unit: "tablespoon"`, `prepNote: "minced"`; (2) `name: "parsley leaves"`, `quantity: 12`, `unit: null`, `prepNote: "small whole, for garnishing"`.
-- Combine compatible measurements of the SAME ingredient onto one row:
-  - `"6 tablespoons plus 1 teaspoon all-purpose flour"` -> `quantity: 6.3333`, `unit: "tablespoon"`.
+- Combine compatible measurements of the **same ingredient** onto one row by adding them together in a single unit (convert smaller US units accurately: `1 tablespoon = 3 teaspoons`, `1 cup = 16 tablespoons`):
+  - `"6 tablespoons plus 1 teaspoon extra-virgin olive oil"` -> `quantity: 6.3333`, `unit: "tablespoon"`.
+  - `"1 tablespoon plus 2 teaspoons soy sauce"` -> `quantity: 1.6667`, `unit: "tablespoon"`.
+  - `"1/2 teaspoon plus 2 tablespoons olive oil"` -> `quantity: 2.1667`, `unit: "tablespoon"`.
+  - `"1/2 cup plus 1 tablespoon ice water"` -> `quantity: 0.5625`, `unit: "cup"` (or `quantity: 9`, `unit: "tablespoon"`). Never ignore the second addend or move it into `alternateMeasurements`.
 - Keep `"1/2 teaspoon table salt, plus salt for cooking pasta"` as primary `0.5 teaspoon table salt` with `"plus salt for cooking pasta"` in `prepNote`.
 
 ### Sub-Recipe Ingredients
@@ -56,7 +59,7 @@ For each ingredient line in the source:
   - `"2 (15-ounce) cans chickpeas"` -> main `2 can`, `alternateMeasurements: [{ "quantity": 30, "unit": "ounce" }]` (multiply container count by per-container weight/volume so the alternate total matches the full ingredient amount).
   - `"1 medium garlic clove, minced (about 1 teaspoon)"` -> main `1 clove`, `alternateMeasurements: [{ "quantity": 1, "unit": "teaspoon" }]`.
   - `"1/4 cup fresh lemon juice (from 2 lemons)"` -> main `0.25 cup`, `alternateMeasurements: [{ "quantity": 2, "unit": null }]`.
-- Never place physical dimensions (`"1/2-inch pieces"`) or temperatures (`"110 degrees"`) into `alternateMeasurements`.
+- Never place physical dimensions/cut sizes (`"(1-inch) cauliflower florets"`, `"1/2-inch pieces"`) or temperatures (`"110 degrees"`) into `alternateMeasurements` — put cut sizes in `prepNote`.
 
 ---
 
