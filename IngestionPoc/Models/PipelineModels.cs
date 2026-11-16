@@ -14,7 +14,10 @@ public sealed record RecipeInputItem(
     string Title,
     string SourceKind,
     string NormalizedText,
-    string? SourceReference = null
+    string? SourceReference = null,
+    string? ProductionExtractedDraftJson = null,
+    decimal? ProductionConfidenceScore = null,
+    string? ProductionJobStatus = null
 );
 
 public sealed record PromptFileInfo(string Name, string FilePath, string Content, string Sha256);
@@ -25,6 +28,7 @@ public sealed class PromptSet
     public required PromptFileInfo ShortenDescription { get; init; }
     public required PromptFileInfo SearchTerms { get; init; }
     public required PromptFileInfo MatchIngredient { get; init; }
+    public required PromptFileInfo MatchIngredientBatch { get; init; }
     public required PromptFileInfo TokenizeStep { get; init; }
     public required PromptFileInfo PolishFull { get; init; }
     public required PromptFileInfo PolishTargeted { get; init; }
@@ -35,6 +39,7 @@ public sealed class PromptSet
             ShortenDescription,
             SearchTerms,
             MatchIngredient,
+            MatchIngredientBatch,
             TokenizeStep,
             PolishFull,
             PolishTargeted,
@@ -48,6 +53,7 @@ public sealed class PromptSet
             ShortenDescription = Load(directory, "02-shorten-description.md"),
             SearchTerms = Load(directory, "03a-ingredient-search-terms.md"),
             MatchIngredient = Load(directory, "03b-ingredient-match.md"),
+            MatchIngredientBatch = Load(directory, "03c-ingredient-match-batch.md"),
             TokenizeStep = Load(directory, "04-tokenize-step.md"),
             PolishFull = Load(directory, "05a-polish-full.md"),
             PolishTargeted = Load(directory, "05b-polish-targeted.md"),
@@ -143,6 +149,32 @@ public sealed record Stage3MatchDecisionDto(
     string? Id,
     string? Name,
     string? Category
+);
+
+public sealed record Stage3BatchMatchEntryDto(
+    int IngredientIndex,
+    string MatchType,
+    string? Id,
+    string? Name,
+    string? Category
+);
+
+public sealed record Stage3BatchMatchResponseDto(IReadOnlyList<Stage3BatchMatchEntryDto> Matches);
+
+public enum Stage3Mode
+{
+    LlmTerms,
+    VectorSingle,
+    VectorBatched,
+}
+
+public sealed record RecipeQualityScorecard(
+    int TotalScore,
+    int IngredientScore,
+    int StepScore,
+    int ResolutionScore,
+    int TimingScore,
+    IReadOnlyList<string> Deductions
 );
 
 public sealed record ResolvedIngredientResult(
@@ -251,7 +283,8 @@ public sealed record PolishIngredientPatchDto(
     decimal? MaxQuantity,
     string? Unit,
     string? PrepNote,
-    bool? IsOptional
+    bool? IsOptional,
+    IReadOnlyList<Stage1AlternateMeasurementDto>? AlternateMeasurements = null
 );
 
 public sealed record PolishStepPatchDto(int StepNumber, JsonArray Tokens);
@@ -295,6 +328,23 @@ public static class PipelineSchemas
             required = new[] { "prep", "cook", "total" },
         };
 
+    private static object AlternateMeasurementsArraySchema() =>
+        new
+        {
+            type = "array",
+            items = new
+            {
+                type = "object",
+                additionalProperties = false,
+                properties = new
+                {
+                    quantity = new { type = "number" },
+                    unit = new { type = new[] { "string", "null" } },
+                },
+                required = new[] { "quantity", "unit" },
+            },
+        };
+
     private static object IngredientObjectSchema(bool includeIndexAndSection)
     {
         var properties = new Dictionary<string, object>();
@@ -331,21 +381,7 @@ public static class PipelineSchemas
                 required = new[] { "name", "quantity", "unit", "prepNote" },
             },
         };
-        properties["alternateMeasurements"] = new
-        {
-            type = "array",
-            items = new
-            {
-                type = "object",
-                additionalProperties = false,
-                properties = new
-                {
-                    quantity = new { type = "number" },
-                    unit = new { type = new[] { "string", "null" } },
-                },
-                required = new[] { "quantity", "unit" },
-            },
-        };
+        properties["alternateMeasurements"] = AlternateMeasurementsArraySchema();
 
         required.AddRange([
             "name",
@@ -568,50 +604,79 @@ public static class PipelineSchemas
             required = new[] { "searchTerms" },
         };
 
+    private static object Stage3MatchObjectSchema(bool includeIngredientIndex)
+    {
+        var props = new Dictionary<string, object>();
+        var req = new List<string>();
+        if (includeIngredientIndex)
+        {
+            props["ingredientIndex"] = new { type = "integer" };
+            req.Add("ingredientIndex");
+        }
+
+        props["matchType"] = new
+        {
+            type = "string",
+            @enum = new[]
+            {
+                "existing_ingredient",
+                "existing_recipe",
+                "new_ingredient",
+                "unresolved_recipe",
+            },
+        };
+        props["id"] = new { type = new[] { "string", "null" } };
+        props["name"] = new { type = new[] { "string", "null" } };
+        props["category"] = new
+        {
+            type = new object[] { "string", "null" },
+            @enum = new object?[]
+            {
+                "Produce",
+                "MeatAndSeafood",
+                "DairyAndEggs",
+                "Refrigerated",
+                "Bakery",
+                "PantryDryGoods",
+                "CannedAndJarred",
+                "CondimentsAndSauces",
+                "SpicesAndSeasonings",
+                "Baking",
+                "Snacks",
+                "Beverages",
+                "Frozen",
+                "Other",
+                null,
+            },
+        };
+
+        req.AddRange(["matchType", "id", "name", "category"]);
+        return new
+        {
+            type = "object",
+            additionalProperties = false,
+            properties = props,
+            required = req.ToArray(),
+        };
+    }
+
     public static object Stage3MatchIngredientSchema() =>
+        Stage3MatchObjectSchema(includeIngredientIndex: false);
+
+    public static object Stage3MatchBatchSchema() =>
         new
         {
             type = "object",
             additionalProperties = false,
             properties = new
             {
-                matchType = new
+                matches = new
                 {
-                    type = "string",
-                    @enum = new[]
-                    {
-                        "existing_ingredient",
-                        "existing_recipe",
-                        "new_ingredient",
-                        "unresolved_recipe",
-                    },
-                },
-                id = new { type = new[] { "string", "null" } },
-                name = new { type = new[] { "string", "null" } },
-                category = new
-                {
-                    type = new object[] { "string", "null" },
-                    @enum = new object?[]
-                    {
-                        "Produce",
-                        "MeatAndSeafood",
-                        "DairyAndEggs",
-                        "Refrigerated",
-                        "Bakery",
-                        "PantryDryGoods",
-                        "CannedAndJarred",
-                        "CondimentsAndSauces",
-                        "SpicesAndSeasonings",
-                        "Baking",
-                        "Snacks",
-                        "Beverages",
-                        "Frozen",
-                        "Other",
-                        null,
-                    },
+                    type = "array",
+                    items = Stage3MatchObjectSchema(includeIngredientIndex: true),
                 },
             },
-            required = new[] { "matchType", "id", "name", "category" },
+            required = new[] { "matches" },
         };
 
     public static object Stage4TokenizeStepSchema() =>
@@ -709,6 +774,14 @@ public static class PipelineSchemas
                             unit = new { type = new[] { "string", "null" } },
                             prepNote = new { type = new[] { "string", "null" } },
                             isOptional = new { type = new[] { "boolean", "null" } },
+                            alternateMeasurements = new
+                            {
+                                anyOf = new object[]
+                                {
+                                    AlternateMeasurementsArraySchema(),
+                                    new { type = "null" },
+                                },
+                            },
                         },
                         required = new[]
                         {
@@ -719,6 +792,7 @@ public static class PipelineSchemas
                             "unit",
                             "prepNote",
                             "isOptional",
+                            "alternateMeasurements",
                         },
                     },
                 },
@@ -805,6 +879,24 @@ public static partial class StepTokenParserAndRenderer
 
     [GeneratedRegex(@"[a-zA-Z]{4,}", RegexOptions.CultureInvariant)]
     private static partial Regex WordRegex();
+
+    [GeneratedRegex(
+        @"^\s*(?:seconds?|minutes?|hours?|days?|secs?|mins?|hrs?)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex DuplicateTimeUnitPrefixRegex();
+
+    [GeneratedRegex(
+        @"^\s*(?:inch(?:es)?|feet|foot|yards?|millimeters?|centimeters?|meters?|mm\b|cm\b)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex DuplicateDimUnitPrefixRegex();
+
+    [GeneratedRegex(
+        @"^\s*(?:°\s*[FC]|degrees?(?:\s+(?:F|C|Fahrenheit|Celsius))?\b|fahrenheit\b|celsius\b|[FC]\b)",
+        RegexOptions.CultureInvariant
+    )]
+    private static partial Regex DuplicateTempUnitPrefixRegex();
 
     public static List<PocStepToken> ParseTokens(
         JsonArray tokensArray,
@@ -1105,6 +1197,16 @@ public static partial class StepTokenParserAndRenderer
                         );
                     }
                     if (
+                        ing.Quantity.HasValue
+                        && ing.MaxQuantity.HasValue
+                        && ing.MaxQuantity.Value < ing.Quantity.Value
+                    )
+                    {
+                        warnings.Add(
+                            $"Ingredient token '{ing.Name}' has inverted range {ing.Quantity}..{ing.MaxQuantity}."
+                        );
+                    }
+                    if (
                         !string.IsNullOrWhiteSpace(ing.Unit)
                         && PluralUnitNames.Contains(ing.Unit.Trim())
                     )
@@ -1115,6 +1217,12 @@ public static partial class StepTokenParserAndRenderer
                     }
                     break;
                 case PocMixtureToken mix:
+                    if (mix.MaxQuantity.HasValue && mix.MaxQuantity.Value < mix.Quantity)
+                    {
+                        warnings.Add(
+                            $"Mixture token '{mix.Name}' has inverted range {mix.Quantity}..{mix.MaxQuantity}."
+                        );
+                    }
                     if (
                         (
                             string.IsNullOrWhiteSpace(mix.Unit)
@@ -1138,6 +1246,60 @@ public static partial class StepTokenParserAndRenderer
                     {
                         warnings.Add(
                             $"Mixture token '{mix.Name}' used plural unit '{mix.Unit}' instead of singular."
+                        );
+                    }
+                    break;
+                case PocTimerToken timer:
+                    if (timer.MaxAmount.HasValue && timer.MaxAmount.Value < timer.Amount)
+                    {
+                        warnings.Add(
+                            $"Timer token '{timer.Label}' has inverted range {timer.Amount}..{timer.MaxAmount} {timer.Unit}."
+                        );
+                    }
+                    if (
+                        i + 1 < tokens.Count
+                        && tokens[i + 1] is PocTextToken trailingTimerTxt
+                        && DuplicateTimeUnitPrefixRegex().IsMatch(trailingTimerTxt.Text)
+                    )
+                    {
+                        warnings.Add(
+                            $"Duplicate time unit '{DuplicateTimeUnitPrefixRegex().Match(trailingTimerTxt.Text).Value.Trim()}' after timer token [{i}]."
+                        );
+                    }
+                    break;
+                case PocDimensionToken dim:
+                    if (dim.MaxAmount.HasValue && dim.MaxAmount.Value < dim.Amount)
+                    {
+                        warnings.Add(
+                            $"Dimension token has inverted range {dim.Amount}..{dim.MaxAmount} {dim.Unit}."
+                        );
+                    }
+                    if (
+                        i + 1 < tokens.Count
+                        && tokens[i + 1] is PocTextToken trailingDimTxt
+                        && DuplicateDimUnitPrefixRegex().IsMatch(trailingDimTxt.Text)
+                    )
+                    {
+                        warnings.Add(
+                            $"Duplicate dimension unit '{DuplicateDimUnitPrefixRegex().Match(trailingDimTxt.Text).Value.Trim()}' after dimension token [{i}]."
+                        );
+                    }
+                    break;
+                case PocTemperatureToken temp:
+                    if (temp.MaxAmount.HasValue && temp.MaxAmount.Value < temp.Amount)
+                    {
+                        warnings.Add(
+                            $"Temperature token has inverted range {temp.Amount}..{temp.MaxAmount} {temp.Unit}."
+                        );
+                    }
+                    if (
+                        i + 1 < tokens.Count
+                        && tokens[i + 1] is PocTextToken trailingTempTxt
+                        && DuplicateTempUnitPrefixRegex().IsMatch(trailingTempTxt.Text)
+                    )
+                    {
+                        warnings.Add(
+                            $"Duplicate temperature unit '{DuplicateTempUnitPrefixRegex().Match(trailingTempTxt.Text).Value.Trim()}' after temperature token [{i}]."
                         );
                     }
                     break;

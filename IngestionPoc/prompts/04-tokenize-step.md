@@ -61,12 +61,13 @@ Concatenating all strings and rendered tokens in order MUST reconstruct the comp
   "label": "Simmer chickpeas"
 }
 ```
-- `amount`: numeric duration (lower bound when a range is printed; keep exact value in the printed unit, e.g. `1.5` for `"1 1/2 hours"`, `20` for `"20 to 25 minutes"`, `45` for `"45 seconds"`).
-- `maxAmount`: upper bound if a range is stated (`25` for `"20 to 25 minutes"`, `60` for `"between 45 and 60 seconds"`), otherwise `null`.
+- `amount`: numeric duration (lower bound when a range is printed in the same unit; keep exact value in the printed unit, e.g. `1.5` for `"1 1/2 hours"`, `20` for `"20 to 25 minutes"`, `45` for `"45 seconds"`).
+- `maxAmount`: upper bound ONLY if a range shares the same unit (`25` for `"20 to 25 minutes"`, `60` for `"between 45 and 60 seconds"`), otherwise `null`. `maxAmount` MUST NEVER be smaller than `amount` (`maxAmount >= amount`).
+- **Mixed-unit time ranges**: If a range switches units (e.g. `"at least 8 hours or up to 2 days"`, `"for at least 30 minutes or up to 2 days"`, `"15 minutes or up to overnight"`), emit **separate `timer` tokens** cleanly (`timer(8 hour)` + `" or up to "` + `timer(2 day)`, or `timer(15 minute)` + `" or up to overnight"`) — NEVER merge different units into one token!
 - `unit`: **strictly** `"second"`, `"minute"`, `"hour"`, or `"day"`.
 - `label`: short 2–4 word verb+object label describing what is being timed.
-- Replace the ENTIRE duration phrase including range connectors (`"20 to 25 minutes"`, `"between 45 and 60 seconds"`) with one `timer` token. Keep approximation words like `"about "` in the preceding string.
-- **NOT timers**: food processor pulses (`"5 pulses"`), repetition counts (`"3 or 4 times"`), or vague non-numeric cues (`"until tender"`).
+- Replace the ENTIRE duration phrase **including its unit word** (`"minutes"`, `"hours"`, `"days"`, `"seconds"`): `{type:"timer", amount:15, unit:"minute"}` renders `"15 minutes"` automatically — NEVER leave `" minutes"` or `" days"` in the trailing text after the token (or it will render `"15 minutes minutes"`!). Keep approximation words like `"about "` or `"at least "` in the preceding string.
+- **NOT timers**: food processor pulses (`"5 pulses"`), repetition counts (`"3 or 4 times"`), `"overnight"`, or vague non-numeric cues (`"until tender"`).
 
 ### 4. `temperature` (Oven, skillet, oil, proofing, chilling, or internal temperatures)
 ```json
@@ -94,6 +95,7 @@ Concatenating all strings and rendered tokens in order MUST reconstruct the comp
 ```
 - `unit`: **strictly** `"inch"`, `"foot"`, `"yard"`, `"millimeter"`, `"centimeter"`, or `"meter"`.
 - `hyphenated`: `true` when hyphenated (`"1/2-inch pieces"`, `"12-inch skillet"`, `"1/4- to 1/2-inch chunks"`), `false` otherwise (`"2 inches between portions"`, `"snip 1/2 inch off corner"`).
+- Consume the entire dimension phrase **including `"inch"` / `"inches"` / `"-inch"`** inside the token so `" inches"` is NEVER duplicated outside. NEVER stretch a dimension token across unrelated counts or text (`"2 or 3 pieces of plastic on counter to form 30-inch square"` -> leave `"2 or 3 pieces of plastic on counter to form "` as plain text and tokenize ONLY `"30-inch"`!).
 - Converts US ↔ Metric; NEVER scales when servings are multiplied.
 
 ### 6. `fixed` (Non-scaling tool capacities, portioning scoops, or informational yields)

@@ -20,6 +20,8 @@ At this stage, try your best NOT to rewrite ingredient names, custom units, prep
 
 ## Ingredients (`ingredients`)
 
+- **Strict Source-List Boundary**: When the source contains an explicit `Ingredients:` list/block, extract **ONLY items from that ingredient list**. **NEVER pull incidental items mentioned only in `Instructions:`** (such as boiling/steaming/ice-bath water like `"1 inch water"`, `"6 cups water"`, `"2 cups ice cubes and 2 cups cold water"`, pasta cooking water, or pan spray) into the master `ingredients` array. (Only include water/ice/oil when it actually appears as an entry in the ingredient list or when the source has no ingredient list.)
+
 For each ingredient line in the source:
 
 - **name**: The ingredient name from the source without leading quantity/unit and without trailing preparation notes (e.g., `"2 tablespoons finely chopped onion"` -> `name: "onion"`, `prepNote: "finely chopped"`; `"1 pound 85% lean ground beef"` -> `name: "85% lean ground beef"`). Preserve meaningful grocery qualifiers (`"unsalted butter"`, `"kosher salt"`, `"extra-virgin olive oil"`, `"lime zest"`, `"lime juice"`, `"frozen spinach"`).

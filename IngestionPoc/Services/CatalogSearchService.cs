@@ -1,3 +1,4 @@
+using System.Text.Json;
 using App.Core.FoodCatalog;
 using App.Core.Ingestion;
 using App.Core.Recipes;
@@ -12,6 +13,9 @@ public sealed class CatalogSnapshot
     public List<CatalogFoodRow> FoodItems { get; } = [];
     public List<CatalogRecipeRow> Recipes { get; } = [];
     public bool LoadedFromDatabase { get; init; }
+    public Dictionary<Guid, List<float[]>> FoodVectors { get; } = [];
+    public Dictionary<Guid, float[]> RecipeVectors { get; } = [];
+    public Dictionary<string, float[]> VectorCache { get; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
 public sealed record CatalogFoodRow(
@@ -222,9 +226,324 @@ public sealed class CatalogSearchService
         return new DbSearchCandidates(expandedTerms, topFoods, topRecipes);
     }
 
-    public static void RegisterSessionDecision(
+    public static async Task<(
+        int EmbeddedCount,
+        long ElapsedMs,
+        string? Error
+    )> EnsureCatalogEmbeddingsAsync(
         CatalogSnapshot catalog,
-        Stage3MatchDecisionDto decision
+        LlmRunnerClient llmClient,
+        PocLlmConfig config,
+        string? cacheDirectory,
+        CancellationToken cancellationToken = default
+    )
+    {
+        if (string.IsNullOrWhiteSpace(config.EmbedModel))
+        {
+            return (0, 0, null);
+        }
+
+        string? cachePath = null;
+        if (!string.IsNullOrWhiteSpace(cacheDirectory))
+        {
+            Directory.CreateDirectory(cacheDirectory);
+            var safeModel = string.Concat(
+                config
+                    .EmbedModel.Trim()
+                    .Select(c =>
+                        Path.GetInvalidFileNameChars().Contains(c) || c == ':' || c == '/' ? '-' : c
+                    )
+            );
+            cachePath = Path.Combine(cacheDirectory, $"catalog-embeddings_{safeModel}.json");
+            if (File.Exists(cachePath))
+            {
+                try
+                {
+                    var cached = JsonSerializer.Deserialize<Dictionary<string, float[]>>(
+                        await File.ReadAllTextAsync(cachePath, cancellationToken)
+                    );
+                    if (cached is not null)
+                    {
+                        foreach (var (k, v) in cached)
+                        {
+                            catalog.VectorCache[k] = v;
+                        }
+                    }
+                }
+                catch
+                {
+                    // Ignore corrupt cache file and rebuild cleanly
+                }
+            }
+        }
+
+        var missing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var food in catalog.FoodItems)
+        {
+            if (!catalog.VectorCache.ContainsKey(food.Name))
+            {
+                missing.Add(food.Name);
+            }
+            foreach (var alias in food.Aliases)
+            {
+                if (!string.IsNullOrWhiteSpace(alias) && !catalog.VectorCache.ContainsKey(alias))
+                {
+                    missing.Add(alias);
+                }
+            }
+        }
+
+        foreach (var recipe in catalog.Recipes)
+        {
+            if (!catalog.VectorCache.ContainsKey(recipe.Title))
+            {
+                missing.Add(recipe.Title);
+            }
+        }
+
+        long totalElapsedMs = 0;
+        var embeddedCount = 0;
+        string? lastError = null;
+        var missingList = missing.ToList();
+
+        const int batchSize = 64;
+        for (var i = 0; i < missingList.Count; i += batchSize)
+        {
+            var chunk = missingList.Skip(i).Take(batchSize).ToList();
+            var res = await llmClient.GenerateEmbeddingsAsync(config, chunk, cancellationToken);
+            totalElapsedMs += res.ElapsedMs;
+            if (res.Error is not null)
+            {
+                lastError = res.Error;
+                break;
+            }
+
+            for (var j = 0; j < chunk.Count && j < res.Vectors.Count; j++)
+            {
+                catalog.VectorCache[chunk[j]] = res.Vectors[j];
+                embeddedCount++;
+            }
+        }
+
+        PopulateCatalogVectorMaps(catalog);
+
+        if (cachePath is not null && embeddedCount > 0)
+        {
+            try
+            {
+                await File.WriteAllTextAsync(
+                    cachePath,
+                    JsonSerializer.Serialize(catalog.VectorCache),
+                    cancellationToken
+                );
+            }
+            catch
+            {
+                // Ignore non-fatal cache persistence errors
+            }
+        }
+
+        return (embeddedCount, totalElapsedMs, lastError);
+    }
+
+    private static void PopulateCatalogVectorMaps(CatalogSnapshot catalog)
+    {
+        foreach (var food in catalog.FoodItems)
+        {
+            var list = new List<float[]>();
+            if (catalog.VectorCache.TryGetValue(food.Name, out var mainVec))
+            {
+                list.Add(mainVec);
+            }
+            foreach (var alias in food.Aliases)
+            {
+                if (catalog.VectorCache.TryGetValue(alias, out var aliasVec))
+                {
+                    list.Add(aliasVec);
+                }
+            }
+            if (list.Count > 0)
+            {
+                catalog.FoodVectors[food.Id] = list;
+            }
+        }
+
+        foreach (var recipe in catalog.Recipes)
+        {
+            if (catalog.VectorCache.TryGetValue(recipe.Title, out var titleVec))
+            {
+                catalog.RecipeVectors[recipe.Id] = titleVec;
+            }
+        }
+    }
+
+    public static DbSearchCandidates SearchHybrid(
+        CatalogSnapshot catalog,
+        string ingredientName,
+        float[]? queryVector,
+        string currentRecipeTitle,
+        string? ingredientUnit = null,
+        string? ingredientPrepNote = null,
+        int maxFoodCandidates = 10,
+        int maxRecipeCandidates = 5
+    )
+    {
+        var expandedTerms = BuildExpandedTerms([ingredientName]);
+        var currentTitleKey = RecipeUnitAndSectionHelpers.NormalizeRecipeLookupKey(
+            currentRecipeTitle
+        );
+
+        var scoredFoods = new List<FoodItemCandidate>();
+        foreach (var food in catalog.FoodItems)
+        {
+            var (lexScore, lexReason) = ScoreFoodItem(food, expandedTerms);
+            var vecScore = 0.0;
+            if (
+                queryVector is not null
+                && catalog.FoodVectors.TryGetValue(food.Id, out var candVecs)
+            )
+            {
+                vecScore = candVecs.Max(v => CosineDot(queryVector, v));
+            }
+
+            double finalScore;
+            string reason;
+            if (lexScore >= 0.98)
+            {
+                finalScore = lexScore;
+                reason = vecScore > 0 ? $"{lexReason},vec={vecScore:F2}" : lexReason;
+            }
+            else if (queryVector is not null && vecScore > 0)
+            {
+                finalScore = 0.68 * vecScore + 0.32 * lexScore;
+                reason =
+                    lexScore > 0
+                        ? $"hybrid(v={vecScore:F2},{lexReason}={lexScore:F2})"
+                        : $"vec={vecScore:F2}";
+            }
+            else
+            {
+                finalScore = lexScore;
+                reason = lexReason;
+            }
+
+            if (finalScore >= 0.42 || lexScore >= 0.35)
+            {
+                scoredFoods.Add(
+                    new FoodItemCandidate(
+                        food.Id,
+                        food.Name,
+                        food.NormalizedName,
+                        food.Category,
+                        food.IsPantryStaple,
+                        food.Aliases,
+                        Math.Round(finalScore, 4),
+                        reason
+                    )
+                );
+            }
+        }
+
+        var topFoods = scoredFoods
+            .OrderByDescending(f => f.Score)
+            .ThenBy(f => f.Name.Length)
+            .ThenBy(f => f.Name, StringComparer.OrdinalIgnoreCase)
+            .Take(maxFoodCandidates)
+            .ToList();
+
+        var looksLikeSubRecipe =
+            string.Equals(ingredientUnit, "recipe", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(ingredientUnit, "batch", StringComparison.OrdinalIgnoreCase)
+            || (ingredientPrepNote?.Contains("recipe", StringComparison.OrdinalIgnoreCase) ?? false)
+            || ingredientName.Contains("recipe", StringComparison.OrdinalIgnoreCase);
+
+        var scoredRecipes = new List<RecipeCandidate>();
+        foreach (var recipe in catalog.Recipes)
+        {
+            var recipeKey = RecipeUnitAndSectionHelpers.NormalizeRecipeLookupKey(recipe.Title);
+            if (
+                !string.IsNullOrEmpty(currentTitleKey)
+                && string.Equals(recipeKey, currentTitleKey, StringComparison.OrdinalIgnoreCase)
+            )
+            {
+                continue;
+            }
+
+            var (lexScore, lexReason) = ScoreRecipe(recipe, expandedTerms);
+            var vecScore =
+                queryVector is not null
+                && catalog.RecipeVectors.TryGetValue(recipe.Id, out var rVec)
+                    ? CosineDot(queryVector, rVec)
+                    : 0.0;
+
+            double finalScore;
+            string reason;
+            if (lexScore >= 0.95)
+            {
+                finalScore = lexScore;
+                reason = vecScore > 0 ? $"{lexReason},vec={vecScore:F2}" : lexReason;
+            }
+            else if (queryVector is not null && vecScore > 0)
+            {
+                finalScore = 0.65 * vecScore + 0.35 * lexScore;
+                reason =
+                    lexScore > 0
+                        ? $"hybrid-rec(v={vecScore:F2},{lexReason}={lexScore:F2})"
+                        : $"vec-rec={vecScore:F2}";
+            }
+            else
+            {
+                finalScore = lexScore;
+                reason = lexReason;
+            }
+
+            var includeRecipe = looksLikeSubRecipe
+                ? (finalScore >= 0.48 || lexScore >= 0.45)
+                : (
+                    lexScore >= 0.85
+                    || (
+                        ingredientName.Trim().Length >= 10 && finalScore >= 0.68 && lexScore >= 0.55
+                    )
+                );
+
+            if (includeRecipe)
+            {
+                scoredRecipes.Add(
+                    new RecipeCandidate(
+                        recipe.Id,
+                        recipe.Title,
+                        recipe.Slug,
+                        Math.Round(finalScore, 4),
+                        reason
+                    )
+                );
+            }
+        }
+
+        var topRecipes = scoredRecipes
+            .OrderByDescending(r => r.Score)
+            .ThenBy(r => r.Title.Length)
+            .Take(maxRecipeCandidates)
+            .ToList();
+
+        return new DbSearchCandidates(expandedTerms, topFoods, topRecipes);
+    }
+
+    private static double CosineDot(float[] a, float[] b)
+    {
+        var len = Math.Min(a.Length, b.Length);
+        double sum = 0;
+        for (var i = 0; i < len; i++)
+        {
+            sum += a[i] * b[i];
+        }
+        return sum;
+    }
+
+    public static CatalogFoodRow? RegisterSessionDecision(
+        CatalogSnapshot catalog,
+        Stage3MatchDecisionDto decision,
+        float[]? vector = null
     )
     {
         if (
@@ -232,7 +551,7 @@ public sealed class CatalogSearchService
             || string.IsNullOrWhiteSpace(decision.Name)
         )
         {
-            return;
+            return null;
         }
 
         var cleanName = decision.Name.Trim();
@@ -243,20 +562,64 @@ public sealed class CatalogSearchService
             )
         )
         {
-            return;
+            return null;
         }
 
         var category = FoodCategories.Parse(decision.Category) ?? FoodCategory.Other;
-        catalog.FoodItems.Add(
-            new CatalogFoodRow(
-                Guid.NewGuid(),
-                cleanName,
-                norm,
-                category,
-                IsPantryStaple: false,
-                Aliases: []
-            )
+        var row = new CatalogFoodRow(
+            Guid.NewGuid(),
+            cleanName,
+            norm,
+            category,
+            IsPantryStaple: false,
+            Aliases: []
         );
+        catalog.FoodItems.Add(row);
+        if (vector is not null)
+        {
+            catalog.VectorCache[cleanName] = vector;
+            catalog.FoodVectors[row.Id] = [vector];
+        }
+        return row;
+    }
+
+    public static CatalogRecipeRow? RegisterSessionRecipe(
+        CatalogSnapshot catalog,
+        string title,
+        float[]? vector = null
+    )
+    {
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            return null;
+        }
+
+        var cleanTitle = title.Trim();
+        var key = RecipeUnitAndSectionHelpers.NormalizeRecipeLookupKey(cleanTitle);
+        if (
+            catalog.Recipes.Any(r =>
+                string.Equals(
+                    RecipeUnitAndSectionHelpers.NormalizeRecipeLookupKey(r.Title),
+                    key,
+                    StringComparison.OrdinalIgnoreCase
+                )
+            )
+        )
+        {
+            return null;
+        }
+
+        var slug = RecipeUnitAndSectionHelpers
+            .NormalizeRecipeLookupKey(cleanTitle)
+            .Replace(' ', '-');
+        var row = new CatalogRecipeRow(Guid.NewGuid(), cleanTitle, slug);
+        catalog.Recipes.Add(row);
+        if (vector is not null)
+        {
+            catalog.VectorCache[cleanTitle] = vector;
+            catalog.RecipeVectors[row.Id] = vector;
+        }
+        return row;
     }
 
     private static List<string> BuildExpandedTerms(IReadOnlyList<string> rawTerms)

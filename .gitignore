@@ -385,3 +385,4 @@ test-results/
 .agents/mcp.json
 atk_recipes.json
 IngestionPoc/runs/
+IngestionPoc/cache/

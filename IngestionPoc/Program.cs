@@ -77,6 +77,7 @@ var effectiveConfig = baseConfig with
     OllamaGpuLayers = cli.GpuLayers ?? baseConfig.OllamaGpuLayers,
     OllamaCpuOnly = cli.CpuOnly ?? baseConfig.OllamaCpuOnly,
     EndpointStyle = cli.EndpointStyle ?? baseConfig.EndpointStyle,
+    EmbedModel = cli.DisableEmbeddings ? null : (cli.EmbedModel ?? baseConfig.EmbedModel),
 };
 
 Console.WriteLine("LocalRoast Ingestion PoC");
@@ -84,9 +85,9 @@ Console.WriteLine(
     $"  Server:  {effectiveConfig.Provider} ({effectiveConfig.EndpointStyle}) @ {effectiveConfig.BaseUrl}"
 );
 Console.WriteLine(
-    $"  Model:   {effectiveConfig.TextModel} (thinking={effectiveConfig.EnableThinking}, auxThinking={effectiveConfig.AuxThinkingOverride?.ToString() ?? "inherit"}, ctx={effectiveConfig.ContextWindowTokens})"
+    $"  Model:   {effectiveConfig.TextModel} | Embed: {effectiveConfig.EmbedModel ?? "disabled"} (thinking={effectiveConfig.EnableThinking}, auxThinking={effectiveConfig.AuxThinkingOverride?.ToString() ?? "inherit"}, ctx={effectiveConfig.ContextWindowTokens})"
 );
-Console.WriteLine($"  Prompts: {promptsDir} (polish={cli.PolishMode})");
+Console.WriteLine($"  Prompts: {promptsDir} (stage3={cli.Stage3Mode}, polish={cli.PolishMode})");
 
 using var httpClient = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
 var llmClient = new LlmRunnerClient(httpClient);
@@ -135,6 +136,27 @@ else if (!string.IsNullOrWhiteSpace(cli.RawText))
         new RecipeInputItem("raw-1", "Inline Recipe", "raw-text", cli.RawText.Trim(), "cli:--raw")
     );
 }
+else if (!string.IsNullOrWhiteSpace(cli.FromDbJobsStatus))
+{
+    if (string.IsNullOrWhiteSpace(connectionString))
+    {
+        Console.Error.WriteLine("--from-db-jobs requires a SQL Server connection.");
+        return 1;
+    }
+
+    inputs.AddRange(
+        await InputLoaderService.LoadFromDbJobsAsync(
+            connectionString,
+            cli.FromDbJobsStatus,
+            cli.Titles,
+            cli.Offset,
+            cli.Limit ?? 10
+        )
+    );
+    Console.WriteLine(
+        $"  Input:   Loaded {inputs.Count} IngestionJob(s) from SQL Server (status={cli.FromDbJobsStatus})"
+    );
+}
 else
 {
     var atkPath = cli.AtkPath ?? Path.Combine(repoRoot, "atk_recipes.json");
@@ -155,6 +177,15 @@ else
         )
     );
     Console.WriteLine($"  Input:   Loaded {inputs.Count} ATK recipe(s) ({cli.AtkFormat} format)");
+
+    if (cli.CompareProdDb && !string.IsNullOrWhiteSpace(connectionString))
+    {
+        inputs = await InputLoaderService.AttachProductionDraftsAsync(connectionString, inputs);
+        var matchedCount = inputs.Count(x => x.ProductionExtractedDraftJson is not null);
+        Console.WriteLine(
+            $"  Compare: Attached {matchedCount}/{inputs.Count} stored production IngestionJob draft(s)"
+        );
+    }
 }
 
 if (inputs.Count == 0)
@@ -174,7 +205,9 @@ var runOptions = new PocRunOptions(
     SessionCatalog: cli.SessionCatalog,
     SkipSteps: cli.SkipSteps,
     SkipIngredients: cli.SkipIngredients,
-    PolishMode: cli.PolishMode
+    PolishMode: cli.PolishMode,
+    Stage3Mode: cli.Stage3Mode,
+    CacheDirectory: Path.Combine(pocRoot, "cache")
 );
 
 Console.WriteLine($"  Output:  {runDir}");
@@ -190,16 +223,20 @@ foreach (var s in summaries)
     if (s.TargetedPolish is { } tgt)
     {
         polishSuffix +=
-            $" | Targeted: {(tgt.Success ? $"{tgt.StepWarningsAfterPolish}w/{tgt.PolishNotesCount}n" : "FAILED")} ({tgt.ElapsedMs / 1000.0:F1}s)";
+            $" | Targeted: {(tgt.Success ? $"{s.TargetedScore?.TotalScore ?? 0}/100 ({tgt.StepWarningsAfterPolish}w)" : "FAILED")} ({tgt.ElapsedMs / 1000.0:F1}s)";
     }
     if (s.FullPolish is { } full)
     {
         polishSuffix +=
-            $" | Full: {(full.Success ? $"{full.StepWarningsAfterPolish}w/{full.PolishNotesCount}n" : "FAILED")} ({full.ElapsedMs / 1000.0:F1}s)";
+            $" | Full: {(full.Success ? $"{s.FullScore?.TotalScore ?? 0}/100 ({full.StepWarningsAfterPolish}w)" : "FAILED")} ({full.ElapsedMs / 1000.0:F1}s)";
     }
+    var prodSuffix = s.ProductionScore is not null
+        ? $" | Prod={s.ProductionScore.TotalScore}/100"
+        : string.Empty;
 
     Console.WriteLine(
-        $"  - {s.Title}: {(s.Stage1Success ? "OK" : "FAILED")} in {s.TotalElapsedMs / 1000.0:F1}s | "
+        $"  - {s.Title}: {(s.Stage1Success ? "OK" : "FAILED")} in {s.TotalElapsedMs / 1000.0:F1}s (S3={s.Stage3ElapsedMs / 1000.0:F1}s) | "
+            + $"Score={s.BaselineScore?.TotalScore ?? 0}/100{prodSuffix} | "
             + $"Ing: {s.ExistingIngredientMatches} db-ing, {s.ExistingRecipeMatches} db-rec, {s.NewIngredientsProposed} new, {s.UnresolvedRecipes} unres-rec | "
             + $"StepWarn: {s.StepValidationWarnings}, ProseOnly: {s.ProseOnlyIngredients.Count}{polishSuffix}"
     );
@@ -277,9 +314,12 @@ static void PrintHelp()
           --pdf <path>                 Read digital text PDF or transcribe scanned PDF via vision model
           --text <path>                Read raw recipe text from a file
           --raw "<text>"               Provide inline raw recipe text
+          --from-db-jobs <status>      Load inputs directly from SQL Server IngestionJobs (published|queued|needsreview|failed|all)
+          --compare-prod               Attach matching stored production drafts from IngestionJobs for side-by-side scoring
 
         LLM & PROMPT OPTIONS (auto-loads HouseholdLlmSettings from local SQL Server when available):
-          --model <tag>                Override model (also looks up saved LlmModelConfiguration in DB)
+          --model <tag>                Override text model (also looks up saved LlmModelConfiguration in DB)
+          --embed-model <tag|none>     Embedding model for Stage 3 vector search (default: embeddinggemma-2:270m)
           --vision-model <tag>         Vision model override for scanned PDFs
           --provider Ollama|OpenAiCompatible
           --endpoint-style native|openai Call Ollama native /api/chat (default) or /v1/chat/completions
@@ -299,7 +339,8 @@ static void PrintHelp()
         PIPELINE & OUTPUT OPTIONS:
           --output <dir>               Custom run output directory (default: IngestionPoc/runs/<timestamp>_<model>)
           --max-description-length <n> Max description chars before Stage 2 runs (default: 2000)
-          --session-catalog            Accumulate newly proposed ingredients in memory across recipes in one batch
+          --session-catalog            Accumulate newly proposed ingredients & recipes in memory across batch
+          --stage3-mode vector-batched|vector-single|llm-terms Stage 3 DB matching mode (default: vector-batched)
           --polish none|targeted|full|both Stage 5 end-to-end QA polish mode (default: none)
           --skip-ingredients           Skip Stage 3 (DB search & matching)
           --skip-steps                 Skip Stage 4 (step tokenization)
@@ -325,8 +366,12 @@ sealed class CliArgs
     public string? PdfPath { get; private set; }
     public string? TextPath { get; private set; }
     public string? RawText { get; private set; }
+    public string? FromDbJobsStatus { get; private set; }
+    public bool CompareProdDb { get; private set; }
 
     public string? Model { get; private set; }
+    public string? EmbedModel { get; private set; }
+    public bool DisableEmbeddings { get; private set; }
     public string? VisionModel { get; private set; }
     public LlmProvider? Provider { get; private set; }
     public EndpointStyle? EndpointStyle { get; private set; }
@@ -345,6 +390,7 @@ sealed class CliArgs
     public string? OutputDir { get; private set; }
     public int MaxDescriptionLength { get; private set; } = 2000;
     public bool SessionCatalog { get; private set; }
+    public Stage3Mode Stage3Mode { get; private set; } = Stage3Mode.VectorBatched;
     public PolishMode PolishMode { get; private set; } = PolishMode.None;
     public bool SkipIngredients { get; private set; }
     public bool SkipSteps { get; private set; }
@@ -409,8 +455,25 @@ sealed class CliArgs
                 case "--raw":
                     c.RawText = Next();
                     break;
+                case "--from-db-jobs":
+                    c.FromDbJobsStatus = Next();
+                    break;
+                case "--compare-prod":
+                    c.CompareProdDb = true;
+                    break;
                 case "--model":
                     c.Model = Next();
+                    break;
+                case "--embed-model":
+                    var em = Next();
+                    if (string.Equals(em, "none", StringComparison.OrdinalIgnoreCase))
+                    {
+                        c.DisableEmbeddings = true;
+                    }
+                    else
+                    {
+                        c.EmbedModel = em;
+                    }
                     break;
                 case "--vision-model":
                     c.VisionModel = Next();
@@ -465,6 +528,17 @@ sealed class CliArgs
                     break;
                 case "--session-catalog":
                     c.SessionCatalog = true;
+                    break;
+                case "--stage3-mode":
+                    c.Stage3Mode = Next().Trim().ToLowerInvariant() switch
+                    {
+                        "vector-batched" or "vectorbatched" => Stage3Mode.VectorBatched,
+                        "vector-single" or "vectorsingle" => Stage3Mode.VectorSingle,
+                        "llm-terms" or "llmterms" => Stage3Mode.LlmTerms,
+                        var unknown => throw new ArgumentException(
+                            $"Unknown --stage3-mode: {unknown}"
+                        ),
+                    };
                     break;
                 case "--polish":
                     c.PolishMode = Enum.Parse<PolishMode>(Next(), ignoreCase: true);

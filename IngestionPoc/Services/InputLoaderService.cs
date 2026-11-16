@@ -6,6 +6,7 @@ using App.Data.Services;
 using App.Infrastructure.Ingestion;
 using App.Infrastructure.Media;
 using IngestionPoc.Models;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
@@ -295,6 +296,143 @@ public sealed class InputLoaderService
             NormalizedText: text,
             SourceReference: Path.GetFullPath(path)
         );
+    }
+
+    public static async Task<List<RecipeInputItem>> LoadFromDbJobsAsync(
+        string connectionString,
+        string? statusFilter,
+        IReadOnlyList<string>? titleFilters,
+        int offset,
+        int limit,
+        CancellationToken cancellationToken = default
+    )
+    {
+        await using var db = CatalogSearchService.CreateReadOnlyDbContext(connectionString);
+        var query = db.IngestionJobs.AsQueryable();
+
+        if (
+            !string.IsNullOrWhiteSpace(statusFilter)
+            && !string.Equals(statusFilter, "all", StringComparison.OrdinalIgnoreCase)
+        )
+        {
+            if (
+                Enum.TryParse<IngestionJobStatus>(statusFilter.Trim(), ignoreCase: true, out var st)
+            )
+            {
+                query = query.Where(j => j.Status == st);
+            }
+        }
+
+        var rows = await query
+            .OrderByDescending(j => j.ProcessedAt.HasValue)
+            .ThenBy(j => j.CreatedAt)
+            .Select(j => new
+            {
+                j.Id,
+                j.DisplayTitle,
+                j.Channel,
+                j.Status,
+                j.SourceUrl,
+                j.RawText,
+                j.NormalizedSourceText,
+                j.ExtractedDraftJson,
+                j.ConfidenceScore,
+            })
+            .ToListAsync(cancellationToken);
+
+        var filtered = rows.AsEnumerable();
+        if (titleFilters is { Count: > 0 })
+        {
+            filtered = rows.Where(r =>
+                !string.IsNullOrWhiteSpace(r.DisplayTitle)
+                && titleFilters.Any(f =>
+                    r.DisplayTitle.Contains(f.Trim(), StringComparison.OrdinalIgnoreCase)
+                )
+            );
+        }
+
+        filtered = filtered.Skip(Math.Max(0, offset));
+        if (limit > 0)
+        {
+            filtered = filtered.Take(limit);
+        }
+
+        var results = new List<RecipeInputItem>();
+        foreach (var r in filtered)
+        {
+            string normalized = !string.IsNullOrWhiteSpace(r.NormalizedSourceText)
+                ? r.NormalizedSourceText
+                : r.RawText ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(normalized))
+            {
+                continue;
+            }
+
+            results.Add(
+                new RecipeInputItem(
+                    Id: $"job-{r.Id.ToString()[..8]}",
+                    Title: r.DisplayTitle ?? r.SourceUrl ?? $"Job {r.Id}",
+                    SourceKind: $"db-{r.Channel}",
+                    NormalizedText: normalized,
+                    SourceReference: r.SourceUrl ?? $"IngestionJobs/{r.Id}",
+                    ProductionExtractedDraftJson: r.ExtractedDraftJson,
+                    ProductionConfidenceScore: r.ConfidenceScore,
+                    ProductionJobStatus: r.Status.ToString()
+                )
+            );
+        }
+
+        return results;
+    }
+
+    public static async Task<List<RecipeInputItem>> AttachProductionDraftsAsync(
+        string connectionString,
+        IReadOnlyList<RecipeInputItem> items,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var titles = items.Select(i => i.Title).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        await using var db = CatalogSearchService.CreateReadOnlyDbContext(connectionString);
+        var jobDrafts = await db
+            .IngestionJobs.Where(j =>
+                j.DisplayTitle != null
+                && titles.Contains(j.DisplayTitle)
+                && j.ExtractedDraftJson != null
+            )
+            .OrderByDescending(j => j.ProcessedAt)
+            .Select(j => new
+            {
+                j.DisplayTitle,
+                j.ExtractedDraftJson,
+                j.ConfidenceScore,
+                Status = j.Status.ToString(),
+            })
+            .ToListAsync(cancellationToken);
+
+        var byTitle = new Dictionary<string, (string DraftJson, decimal? Conf, string Status)>(
+            StringComparer.OrdinalIgnoreCase
+        );
+        foreach (var j in jobDrafts)
+        {
+            if (j.DisplayTitle is not null && !byTitle.ContainsKey(j.DisplayTitle))
+            {
+                byTitle[j.DisplayTitle] = (j.ExtractedDraftJson!, j.ConfidenceScore, j.Status);
+            }
+        }
+
+        return items
+            .Select(item =>
+                item.ProductionExtractedDraftJson is null
+                && byTitle.TryGetValue(item.Title, out var match)
+                    ? item with
+                    {
+                        ProductionExtractedDraftJson = match.DraftJson,
+                        ProductionConfidenceScore = match.Conf,
+                        ProductionJobStatus = match.Status,
+                    }
+                    : item
+            )
+            .ToList();
     }
 
     private static string FormatAtkAsCanonicalText(AtkJsonRecipe r)

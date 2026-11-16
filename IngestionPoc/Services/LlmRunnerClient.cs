@@ -31,7 +31,15 @@ public sealed record PocLlmConfig(
     int? OllamaGpuLayers,
     bool OllamaCpuOnly,
     string OllamaKeepAlive = "5m",
-    EndpointStyle EndpointStyle = EndpointStyle.Native
+    EndpointStyle EndpointStyle = EndpointStyle.Native,
+    string? EmbedModel = "embeddinggemma-2:270m"
+);
+
+public sealed record EmbeddingCallResult(
+    IReadOnlyList<float[]> Vectors,
+    long ElapsedMs,
+    int? PromptTokens,
+    string? Error
 );
 
 public sealed record LlmExchangeRecord(
@@ -625,6 +633,132 @@ public sealed class LlmRunnerClient(HttpClient httpClient)
             finishReason,
             err
         );
+    }
+
+    public async Task<EmbeddingCallResult> GenerateEmbeddingsAsync(
+        PocLlmConfig config,
+        IReadOnlyList<string> inputs,
+        CancellationToken cancellationToken = default
+    )
+    {
+        if (inputs.Count == 0 || string.IsNullOrWhiteSpace(config.EmbedModel))
+        {
+            return new EmbeddingCallResult([], 0, null, null);
+        }
+
+        await SerialGate.WaitAsync(cancellationToken);
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            using var cts = new CancellationTokenSource(
+                TimeSpan.FromSeconds(Math.Max(15, config.RequestTimeoutSeconds))
+            );
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
+                cancellationToken,
+                cts.Token
+            );
+
+            var baseUrl = NormalizeOpenAiBaseUrl(config.BaseUrl);
+            var payload = new { model = config.EmbedModel.Trim(), input = inputs };
+            var requestJson = JsonSerializer.Serialize(payload, RequestJsonOptions);
+
+            using var req = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/embeddings")
+            {
+                Content = new StringContent(requestJson, Encoding.UTF8, "application/json"),
+            };
+            if (!string.IsNullOrWhiteSpace(config.ApiKey))
+            {
+                req.Headers.Authorization = new AuthenticationHeaderValue(
+                    "Bearer",
+                    config.ApiKey.Trim()
+                );
+            }
+
+            using var resp = await httpClient.SendAsync(req, linkedCts.Token);
+            var body = await resp.Content.ReadAsStringAsync(linkedCts.Token);
+            sw.Stop();
+
+            if (!resp.IsSuccessStatusCode)
+            {
+                return new EmbeddingCallResult(
+                    [],
+                    sw.ElapsedMilliseconds,
+                    null,
+                    $"HTTP {(int)resp.StatusCode} {resp.ReasonPhrase}: {Truncate(body, 300)}"
+                );
+            }
+
+            using var doc = JsonDocument.Parse(body);
+            var root = doc.RootElement;
+            int? promptTokens =
+                root.TryGetProperty("usage", out var usage)
+                && usage.TryGetProperty("prompt_tokens", out var pt)
+                && pt.TryGetInt32(out var pti)
+                    ? pti
+                    : null;
+
+            var indexed = new List<(int Index, float[] Vector)>(inputs.Count);
+            if (root.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var entry in data.EnumerateArray())
+                {
+                    var idx =
+                        entry.TryGetProperty("index", out var ip) && ip.TryGetInt32(out var iv)
+                            ? iv
+                            : indexed.Count;
+                    if (
+                        !entry.TryGetProperty("embedding", out var ep)
+                        || ep.ValueKind != JsonValueKind.Array
+                    )
+                    {
+                        continue;
+                    }
+
+                    var rawVec = new float[ep.GetArrayLength()];
+                    var k = 0;
+                    double normSq = 0;
+                    foreach (var v in ep.EnumerateArray())
+                    {
+                        var fv = v.GetSingle();
+                        rawVec[k++] = fv;
+                        normSq += fv * fv;
+                    }
+
+                    if (normSq > 1e-12)
+                    {
+                        var invNorm = (float)(1.0 / Math.Sqrt(normSq));
+                        for (var j = 0; j < rawVec.Length; j++)
+                        {
+                            rawVec[j] *= invNorm;
+                        }
+                    }
+
+                    indexed.Add((idx, rawVec));
+                }
+            }
+
+            var vectors = indexed.OrderBy(x => x.Index).Select(x => x.Vector).ToList();
+            var err =
+                vectors.Count != inputs.Count
+                    ? $"Expected {inputs.Count} embeddings, received {vectors.Count}."
+                    : null;
+
+            return new EmbeddingCallResult(vectors, sw.ElapsedMilliseconds, promptTokens, err);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            sw.Stop();
+            return new EmbeddingCallResult(
+                [],
+                sw.ElapsedMilliseconds,
+                null,
+                $"Embedding request timed out after {config.RequestTimeoutSeconds}s"
+            );
+        }
+        finally
+        {
+            SerialGate.Release();
+        }
     }
 
     private static string NormalizeOpenAiBaseUrl(string baseUrl)

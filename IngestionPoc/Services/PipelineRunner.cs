@@ -15,7 +15,9 @@ public sealed record PocRunOptions(
     bool SessionCatalog,
     bool SkipSteps,
     bool SkipIngredients,
-    PolishMode PolishMode = PolishMode.None
+    PolishMode PolishMode = PolishMode.None,
+    Stage3Mode Stage3Mode = Stage3Mode.VectorBatched,
+    string? CacheDirectory = null
 );
 
 public sealed record RecipeRunSummary(
@@ -40,7 +42,13 @@ public sealed record RecipeRunSummary(
     IReadOnlyList<string> ProseOnlyIngredients,
     string? FatalError,
     PolishSummaryMetrics? TargetedPolish = null,
-    PolishSummaryMetrics? FullPolish = null
+    PolishSummaryMetrics? FullPolish = null,
+    long Stage3ElapsedMs = 0,
+    RecipeQualityScorecard? BaselineScore = null,
+    RecipeQualityScorecard? TargetedScore = null,
+    RecipeQualityScorecard? FullScore = null,
+    RecipeQualityScorecard? ProductionScore = null,
+    decimal? ProductionConfidence = null
 );
 
 public sealed partial class PipelineRunner(
@@ -66,6 +74,10 @@ public sealed partial class PipelineRunner(
         CancellationToken cancellationToken = default
     )
     {
+        var effectiveStage3Mode = string.IsNullOrWhiteSpace(config.EmbedModel)
+            ? Stage3Mode.LlmTerms
+            : options.Stage3Mode;
+
         Directory.CreateDirectory(options.RunDirectory);
         await WriteJsonAsync(
             Path.Combine(options.RunDirectory, "run-config.json"),
@@ -79,6 +91,7 @@ public sealed partial class PipelineRunner(
                     config.BaseUrl,
                     config.TextModel,
                     config.VisionModel,
+                    config.EmbedModel,
                     config.EnableThinking,
                     config.AuxThinkingOverride,
                     config.Temperature,
@@ -96,6 +109,7 @@ public sealed partial class PipelineRunner(
                     options.SkipIngredients,
                     options.SkipSteps,
                     polishMode = options.PolishMode.ToString(),
+                    stage3Mode = effectiveStage3Mode.ToString(),
                     catalogLoadedFromDb = catalog.LoadedFromDatabase,
                     catalogFoodItemCount = catalog.FoodItems.Count,
                     catalogRecipeCount = catalog.Recipes.Count,
@@ -116,6 +130,25 @@ public sealed partial class PipelineRunner(
             },
             cancellationToken
         );
+
+        if (
+            !options.SkipIngredients
+            && effectiveStage3Mode != Stage3Mode.LlmTerms
+            && (catalog.FoodItems.Count > 0 || catalog.Recipes.Count > 0)
+        )
+        {
+            var (embedded, embMs, embErr) = await CatalogSearchService.EnsureCatalogEmbeddingsAsync(
+                catalog,
+                llmClient,
+                config,
+                options.CacheDirectory,
+                cancellationToken
+            );
+            Console.WriteLine(
+                $"  Embeddings ({config.EmbedModel}): indexed {embedded} uncached catalog text(s) in {embMs}ms (foods={catalog.FoodVectors.Count}, recipes={catalog.RecipeVectors.Count})"
+                    + (embErr is not null ? $" [WARN: {embErr}]" : string.Empty)
+            );
+        }
 
         var summaries = new List<RecipeRunSummary>(inputs.Count);
         for (var i = 0; i < inputs.Count; i++)
@@ -141,6 +174,16 @@ public sealed partial class PipelineRunner(
             Encoding.UTF8,
             cancellationToken
         );
+
+        if (summaries.Any(s => s.ProductionScore is not null))
+        {
+            await File.WriteAllTextAsync(
+                Path.Combine(options.RunDirectory, "prod-vs-poc-comparison.md"),
+                BuildProdComparisonMarkdown(summaries),
+                Encoding.UTF8,
+                cancellationToken
+            );
+        }
 
         return summaries;
     }
@@ -328,172 +371,18 @@ public sealed partial class PipelineRunner(
 
         // ── Stage 3: Ingredient & sub-recipe search + DB matching ───────────────
         var resolvedIngredients = new List<ResolvedIngredientResult>();
+        long stage3ElapsedMs = 0;
+        var effectiveStage3Mode = string.IsNullOrWhiteSpace(config.EmbedModel)
+            ? Stage3Mode.LlmTerms
+            : options.Stage3Mode;
+
         if (!options.SkipIngredients && flatIngredients.Count > 0)
         {
-            var stage3Dir = Path.Combine(recipeDir, "03-ingredients");
-            Directory.CreateDirectory(stage3Dir);
-            Console.WriteLine($"  Stage 3 (Resolve {flatIngredients.Count} ingredients)...");
-
-            for (var idx = 0; idx < flatIngredients.Count; idx++)
-            {
-                var (secName, ing) = flatIngredients[idx];
-                var ingSlug = Slugify(ing.Name);
-                var ingDir = Path.Combine(stage3Dir, $"{idx + 1:00}_{ingSlug}");
-                Directory.CreateDirectory(ingDir);
-
-                var searchInputJson = JsonSerializer.Serialize(
-                    new
-                    {
-                        name = ing.Name,
-                        quantity = ing.Quantity,
-                        maxQuantity = ing.MaxQuantity,
-                        unit = ing.Unit,
-                        prepNote = ing.PrepNote,
-                    },
-                    PrettyJson
-                );
-
-                var searchResult = await llmClient.CompleteStructuredAsync<Stage3SearchTermsDto>(
-                    config,
-                    "ingredient_search_terms",
-                    PipelineSchemas.Stage3SearchTermsSchema(),
-                    prompts.SearchTerms.Content,
-                    searchInputJson,
-                    isAuxiliaryStep: true,
-                    cancellationToken: cancellationToken
-                );
-
-                await WriteExchangesAsync(
-                    ingDir,
-                    searchResult.Exchanges,
-                    cancellationToken,
-                    prefix: "03a-search-"
-                );
-                var rawTerms = searchResult.Parsed?.SearchTerms is { Count: > 0 }
-                    ? searchResult.Parsed.SearchTerms
-                    : [ing.Name];
-                await WriteJsonAsync(
-                    Path.Combine(ingDir, "03a-search-output.json"),
-                    new
-                    {
-                        searchResult.TotalElapsedMs,
-                        searchResult.ParseError,
-                        searchTerms = rawTerms,
-                    },
-                    cancellationToken
-                );
-
-                var dbCandidates = CatalogSearchService.Search(catalog, rawTerms, recipe.Title);
-                await WriteJsonAsync(
-                    Path.Combine(ingDir, "db-candidates.json"),
-                    dbCandidates,
-                    cancellationToken
-                );
-
-                var matchPayload = JsonSerializer.Serialize(
-                    new
-                    {
-                        ingredient = new
-                        {
-                            ing.Name,
-                            ing.Quantity,
-                            ing.MaxQuantity,
-                            ing.Unit,
-                            ing.PrepNote,
-                        },
-                        existingIngredients = dbCandidates.ExistingIngredients.Select(c => new
-                        {
-                            id = c.Id.ToString(),
-                            c.Name,
-                            category = c.Category.ToString(),
-                            c.Aliases,
-                        }),
-                        existingRecipes = dbCandidates.ExistingRecipes.Select(r => new
-                        {
-                            id = r.Id.ToString(),
-                            r.Title,
-                        }),
-                    },
-                    PrettyJson
-                );
-
-                var matchResult = await llmClient.CompleteStructuredAsync<Stage3MatchDecisionDto>(
-                    config,
-                    "ingredient_match",
-                    PipelineSchemas.Stage3MatchIngredientSchema(),
-                    prompts.MatchIngredient.Content,
-                    matchPayload,
-                    isAuxiliaryStep: true,
-                    cancellationToken: cancellationToken
-                );
-
-                await WriteExchangesAsync(
-                    ingDir,
-                    matchResult.Exchanges,
-                    cancellationToken,
-                    prefix: "03b-match-"
-                );
-
-                var decision =
-                    matchResult.Parsed
-                    ?? new Stage3MatchDecisionDto("new_ingredient", null, ing.Name, "Other");
-                var ingWarnings = ValidateIngredientDecision(decision, dbCandidates);
-                if (matchResult.ParseError is not null)
-                {
-                    ingWarnings.Add(matchResult.ParseError);
-                }
-
-                await WriteJsonAsync(
-                    Path.Combine(ingDir, "03b-match-output.json"),
-                    new
-                    {
-                        matchResult.TotalElapsedMs,
-                        matchResult.ParseError,
-                        decision,
-                        validationWarnings = ingWarnings,
-                    },
-                    cancellationToken
-                );
-
-                if (options.SessionCatalog)
-                {
-                    CatalogSearchService.RegisterSessionDecision(catalog, decision);
-                }
-
-                resolvedIngredients.Add(
-                    new ResolvedIngredientResult(
-                        idx,
-                        secName,
-                        ing,
-                        rawTerms,
-                        dbCandidates,
-                        decision,
-                        ingWarnings
-                    )
-                );
-
-                Console.WriteLine(
-                    $"    [{idx + 1}/{flatIngredients.Count}] {ing.Name} -> [{string.Join(", ", rawTerms)}] => {decision.MatchType}: {decision.Name}"
-                        + (decision.Category is not null ? $" ({decision.Category})" : string.Empty)
-                        + $" ({(searchResult.TotalElapsedMs + matchResult.TotalElapsedMs) / 1000.0:F1}s)"
-                );
-            }
-
-            await WriteJsonAsync(
-                Path.Combine(stage3Dir, "summary.json"),
-                resolvedIngredients.Select(r => new
-                {
-                    r.GlobalIndex,
-                    r.SectionName,
-                    inputName = r.Extracted.Name,
-                    r.Extracted.Quantity,
-                    r.Extracted.Unit,
-                    r.SearchTerms,
-                    foodCandidateCount = r.DbCandidates.ExistingIngredients.Count,
-                    recipeCandidateCount = r.DbCandidates.ExistingRecipes.Count,
-                    r.Decision,
-                    r.ValidationWarnings,
-                }),
+            (resolvedIngredients, stage3ElapsedMs) = await RunStage3Async(
+                effectiveStage3Mode,
+                recipeDir,
+                recipe.Title,
+                flatIngredients,
                 cancellationToken
             );
         }
@@ -697,6 +586,55 @@ public sealed partial class PipelineRunner(
             }
         }
 
+        var baselineScore = ScoreAssembledState(
+            input.NormalizedText,
+            baseline,
+            resolvedIngredients
+        );
+        var targetedScore = targetedState is not null
+            ? ScoreAssembledState(input.NormalizedText, targetedState, resolvedIngredients)
+            : null;
+        var fullScore = fullState is not null
+            ? ScoreAssembledState(input.NormalizedText, fullState, resolvedIngredients)
+            : null;
+        var productionScore = PipelineScorer.TryScoreProductionDraft(
+            input.NormalizedText,
+            input.ProductionExtractedDraftJson,
+            catalog
+        );
+
+        await WriteJsonAsync(
+            Path.Combine(recipeDir, "quality-scorecard.json"),
+            new
+            {
+                baseline = baselineScore,
+                targeted = targetedScore,
+                full = fullScore,
+                production = productionScore,
+                input.ProductionConfidenceScore,
+                input.ProductionJobStatus,
+            },
+            cancellationToken
+        );
+
+        if (options.SessionCatalog)
+        {
+            float[]? titleVec = null;
+            if (effectiveStage3Mode != Stage3Mode.LlmTerms)
+            {
+                var titleEmb = await llmClient.GenerateEmbeddingsAsync(
+                    config,
+                    [recipe.Title],
+                    cancellationToken
+                );
+                if (titleEmb.Vectors.Count > 0)
+                {
+                    titleVec = titleEmb.Vectors[0];
+                }
+            }
+            CatalogSearchService.RegisterSessionRecipe(catalog, recipe.Title, titleVec);
+        }
+
         sw.Stop();
         return new RecipeRunSummary(
             input.Id,
@@ -744,7 +682,623 @@ public sealed partial class PipelineRunner(
             proseOnlyBaseline,
             null,
             targetedPolish,
-            fullPolish
+            fullPolish,
+            stage3ElapsedMs,
+            baselineScore,
+            targetedScore,
+            fullScore,
+            productionScore,
+            input.ProductionConfidenceScore
+        );
+    }
+
+    private async Task<(List<ResolvedIngredientResult> Results, long ElapsedMs)> RunStage3Async(
+        Stage3Mode mode,
+        string recipeDir,
+        string recipeTitle,
+        List<(string? Section, Stage1IngredientDto Ingredient)> flatIngredients,
+        CancellationToken cancellationToken
+    )
+    {
+        var swStage3 = Stopwatch.StartNew();
+        var stage3Dir = Path.Combine(recipeDir, "03-ingredients");
+        Directory.CreateDirectory(stage3Dir);
+        Console.WriteLine($"  Stage 3 ({mode}, resolve {flatIngredients.Count} ingredients)...");
+
+        var results =
+            mode == Stage3Mode.LlmTerms
+                ? await RunStage3LlmTermsAsync(
+                    stage3Dir,
+                    recipeTitle,
+                    flatIngredients,
+                    cancellationToken
+                )
+                : await RunStage3VectorAsync(
+                    mode,
+                    stage3Dir,
+                    recipeTitle,
+                    flatIngredients,
+                    cancellationToken
+                );
+
+        await WriteJsonAsync(
+            Path.Combine(stage3Dir, "summary.json"),
+            results.Select(r => new
+            {
+                r.GlobalIndex,
+                r.SectionName,
+                inputName = r.Extracted.Name,
+                r.Extracted.Quantity,
+                r.Extracted.Unit,
+                r.SearchTerms,
+                foodCandidateCount = r.DbCandidates.ExistingIngredients.Count,
+                recipeCandidateCount = r.DbCandidates.ExistingRecipes.Count,
+                r.Decision,
+                r.ValidationWarnings,
+            }),
+            cancellationToken
+        );
+
+        swStage3.Stop();
+        return (results, swStage3.ElapsedMilliseconds);
+    }
+
+    private async Task<List<ResolvedIngredientResult>> RunStage3LlmTermsAsync(
+        string stage3Dir,
+        string recipeTitle,
+        List<(string? Section, Stage1IngredientDto Ingredient)> flatIngredients,
+        CancellationToken cancellationToken
+    )
+    {
+        var resolved = new List<ResolvedIngredientResult>(flatIngredients.Count);
+        for (var idx = 0; idx < flatIngredients.Count; idx++)
+        {
+            var (secName, ing) = flatIngredients[idx];
+            var ingDir = Path.Combine(stage3Dir, $"{idx + 1:00}_{Slugify(ing.Name)}");
+            Directory.CreateDirectory(ingDir);
+
+            var searchInputJson = JsonSerializer.Serialize(
+                new
+                {
+                    name = ing.Name,
+                    quantity = ing.Quantity,
+                    maxQuantity = ing.MaxQuantity,
+                    unit = ing.Unit,
+                    prepNote = ing.PrepNote,
+                },
+                PrettyJson
+            );
+
+            var searchResult = await llmClient.CompleteStructuredAsync<Stage3SearchTermsDto>(
+                config,
+                "ingredient_search_terms",
+                PipelineSchemas.Stage3SearchTermsSchema(),
+                prompts.SearchTerms.Content,
+                searchInputJson,
+                isAuxiliaryStep: true,
+                cancellationToken: cancellationToken
+            );
+
+            await WriteExchangesAsync(
+                ingDir,
+                searchResult.Exchanges,
+                cancellationToken,
+                prefix: "03a-search-"
+            );
+            var rawTerms = searchResult.Parsed?.SearchTerms is { Count: > 0 }
+                ? searchResult.Parsed.SearchTerms
+                : [ing.Name];
+            await WriteJsonAsync(
+                Path.Combine(ingDir, "03a-search-output.json"),
+                new
+                {
+                    searchResult.TotalElapsedMs,
+                    searchResult.ParseError,
+                    searchTerms = rawTerms,
+                },
+                cancellationToken
+            );
+
+            var dbCandidates = CatalogSearchService.Search(catalog, rawTerms, recipeTitle);
+            await WriteJsonAsync(
+                Path.Combine(ingDir, "db-candidates.json"),
+                dbCandidates,
+                cancellationToken
+            );
+
+            var itemResult = await ResolveSingleIngredientAgainstCandidatesAsync(
+                idx,
+                secName,
+                ing,
+                rawTerms,
+                dbCandidates,
+                vec: null,
+                ingDir,
+                extraElapsedMs: searchResult.TotalElapsedMs,
+                cancellationToken
+            );
+            resolved.Add(itemResult);
+        }
+
+        return resolved;
+    }
+
+    private async Task<List<ResolvedIngredientResult>> RunStage3VectorAsync(
+        Stage3Mode mode,
+        string stage3Dir,
+        string recipeTitle,
+        List<(string? Section, Stage1IngredientDto Ingredient)> flatIngredients,
+        CancellationToken cancellationToken
+    )
+    {
+        var ingNames = flatIngredients.Select(p => p.Ingredient.Name).ToList();
+        var embCall = await llmClient.GenerateEmbeddingsAsync(config, ingNames, cancellationToken);
+        await WriteJsonAsync(
+            Path.Combine(stage3Dir, "03-batch-embeddings.json"),
+            new
+            {
+                embedModel = config.EmbedModel,
+                count = embCall.Vectors.Count,
+                dimensions = embCall.Vectors.Count > 0 ? embCall.Vectors[0].Length : 0,
+                embCall.ElapsedMs,
+                embCall.PromptTokens,
+                embCall.Error,
+            },
+            cancellationToken
+        );
+
+        Console.WriteLine(
+            $"    Embedded {embCall.Vectors.Count} ingredient(s) in {embCall.ElapsedMs}ms"
+                + (embCall.Error is not null ? $" [WARN: {embCall.Error}]" : string.Empty)
+        );
+
+        var vectors = new List<float[]?>(flatIngredients.Count);
+        var candidatesPerIng = new List<DbSearchCandidates>(flatIngredients.Count);
+        for (var idx = 0; idx < flatIngredients.Count; idx++)
+        {
+            var (_, ing) = flatIngredients[idx];
+            var vec = idx < embCall.Vectors.Count ? embCall.Vectors[idx] : null;
+            vectors.Add(vec);
+            candidatesPerIng.Add(
+                CatalogSearchService.SearchHybrid(
+                    catalog,
+                    ing.Name,
+                    vec,
+                    recipeTitle,
+                    ing.Unit,
+                    ing.PrepNote
+                )
+            );
+        }
+
+        if (mode == Stage3Mode.VectorSingle)
+        {
+            var resolved = new List<ResolvedIngredientResult>(flatIngredients.Count);
+            for (var idx = 0; idx < flatIngredients.Count; idx++)
+            {
+                var (secName, ing) = flatIngredients[idx];
+                var ingDir = Path.Combine(stage3Dir, $"{idx + 1:00}_{Slugify(ing.Name)}");
+                Directory.CreateDirectory(ingDir);
+                await WriteJsonAsync(
+                    Path.Combine(ingDir, "db-candidates.json"),
+                    candidatesPerIng[idx],
+                    cancellationToken
+                );
+
+                var itemResult = await ResolveSingleIngredientAgainstCandidatesAsync(
+                    idx,
+                    secName,
+                    ing,
+                    [ing.Name],
+                    candidatesPerIng[idx],
+                    vectors[idx],
+                    ingDir,
+                    extraElapsedMs: 0,
+                    cancellationToken
+                );
+                resolved.Add(itemResult);
+            }
+            return resolved;
+        }
+
+        // VectorBatched: 1 batched LLM call over all ingredients & hybrid candidates
+        var batchPayload = JsonSerializer.Serialize(
+            new
+            {
+                recipeTitle,
+                items = flatIngredients.Select(
+                    (pair, idx) =>
+                    {
+                        var cand = candidatesPerIng[idx];
+                        return new
+                        {
+                            ingredientIndex = idx,
+                            section = pair.Section,
+                            ingredient = new
+                            {
+                                pair.Ingredient.Name,
+                                pair.Ingredient.Quantity,
+                                pair.Ingredient.MaxQuantity,
+                                pair.Ingredient.Unit,
+                                pair.Ingredient.PrepNote,
+                            },
+                            existingIngredients = cand.ExistingIngredients.Select(c => new
+                            {
+                                id = c.Id.ToString(),
+                                c.Name,
+                                category = c.Category.ToString(),
+                                c.Aliases,
+                                c.Score,
+                            }),
+                            existingRecipes = cand.ExistingRecipes.Select(r => new
+                            {
+                                id = r.Id.ToString(),
+                                r.Title,
+                                r.Score,
+                            }),
+                        };
+                    }
+                ),
+            },
+            PrettyJson
+        );
+
+        var batchCall = await llmClient.CompleteStructuredAsync<Stage3BatchMatchResponseDto>(
+            config,
+            "ingredient_match_batch",
+            PipelineSchemas.Stage3MatchBatchSchema(),
+            prompts.MatchIngredientBatch.Content,
+            batchPayload,
+            isAuxiliaryStep: true,
+            cancellationToken: cancellationToken
+        );
+
+        await WriteExchangesAsync(
+            stage3Dir,
+            batchCall.Exchanges,
+            cancellationToken,
+            prefix: "03-batch-match-"
+        );
+
+        var matchByIdx = (batchCall.Parsed?.Matches ?? [])
+            .GroupBy(m => m.IngredientIndex)
+            .ToDictionary(g => g.Key, g => g.Last());
+
+        var batchResolved = new List<ResolvedIngredientResult>(flatIngredients.Count);
+        for (var idx = 0; idx < flatIngredients.Count; idx++)
+        {
+            var (secName, ing) = flatIngredients[idx];
+            var cand = candidatesPerIng[idx];
+            Stage3MatchDecisionDto decision;
+            var warnings = new List<string>();
+            if (matchByIdx.TryGetValue(idx, out var entry))
+            {
+                decision = new Stage3MatchDecisionDto(
+                    entry.MatchType,
+                    entry.Id,
+                    entry.Name,
+                    entry.Category
+                );
+                warnings.AddRange(ValidateIngredientDecision(decision, cand));
+                decision = ReconcileStage3Decision(decision, ing, catalog);
+            }
+            else
+            {
+                decision = new Stage3MatchDecisionDto("new_ingredient", null, ing.Name, "Other");
+                decision = ReconcileStage3Decision(decision, ing, catalog);
+                warnings.Add(
+                    $"Batch matcher omitted ingredientIndex={idx}; fell back to new_ingredient."
+                );
+            }
+
+            if (batchCall.ParseError is not null)
+            {
+                warnings.Add(batchCall.ParseError);
+            }
+
+            if (options.SessionCatalog)
+            {
+                CatalogSearchService.RegisterSessionDecision(catalog, decision, vectors[idx]);
+            }
+
+            batchResolved.Add(
+                new ResolvedIngredientResult(
+                    idx,
+                    secName,
+                    ing,
+                    [ing.Name],
+                    cand,
+                    decision,
+                    warnings
+                )
+            );
+            Console.WriteLine(
+                $"    [{idx + 1}/{flatIngredients.Count}] {ing.Name} => {decision.MatchType}: {decision.Name}"
+                    + (decision.Category is not null ? $" ({decision.Category})" : string.Empty)
+            );
+        }
+
+        await WriteJsonAsync(
+            Path.Combine(stage3Dir, "03-batch-match-output.json"),
+            new
+            {
+                batchCall.TotalElapsedMs,
+                batchCall.ParseError,
+                candidates = candidatesPerIng,
+                matches = batchResolved.Select(r => new
+                {
+                    r.GlobalIndex,
+                    r.Extracted.Name,
+                    r.Decision,
+                    r.ValidationWarnings,
+                }),
+            },
+            cancellationToken
+        );
+
+        Console.WriteLine($"    Batched match complete in {batchCall.TotalElapsedMs / 1000.0:F1}s");
+        return batchResolved;
+    }
+
+    private async Task<ResolvedIngredientResult> ResolveSingleIngredientAgainstCandidatesAsync(
+        int idx,
+        string? secName,
+        Stage1IngredientDto ing,
+        IReadOnlyList<string> rawTerms,
+        DbSearchCandidates dbCandidates,
+        float[]? vec,
+        string ingDir,
+        long extraElapsedMs,
+        CancellationToken cancellationToken
+    )
+    {
+        var matchPayload = JsonSerializer.Serialize(
+            new
+            {
+                ingredient = new
+                {
+                    ing.Name,
+                    ing.Quantity,
+                    ing.MaxQuantity,
+                    ing.Unit,
+                    ing.PrepNote,
+                },
+                existingIngredients = dbCandidates.ExistingIngredients.Select(c => new
+                {
+                    id = c.Id.ToString(),
+                    c.Name,
+                    category = c.Category.ToString(),
+                    c.Aliases,
+                }),
+                existingRecipes = dbCandidates.ExistingRecipes.Select(r => new
+                {
+                    id = r.Id.ToString(),
+                    r.Title,
+                }),
+            },
+            PrettyJson
+        );
+
+        var matchResult = await llmClient.CompleteStructuredAsync<Stage3MatchDecisionDto>(
+            config,
+            "ingredient_match",
+            PipelineSchemas.Stage3MatchIngredientSchema(),
+            prompts.MatchIngredient.Content,
+            matchPayload,
+            isAuxiliaryStep: true,
+            cancellationToken: cancellationToken
+        );
+
+        await WriteExchangesAsync(
+            ingDir,
+            matchResult.Exchanges,
+            cancellationToken,
+            prefix: "03b-match-"
+        );
+
+        var decision =
+            matchResult.Parsed
+            ?? new Stage3MatchDecisionDto("new_ingredient", null, ing.Name, "Other");
+        var ingWarnings = ValidateIngredientDecision(decision, dbCandidates);
+        decision = ReconcileStage3Decision(decision, ing, catalog);
+        if (matchResult.ParseError is not null)
+        {
+            ingWarnings.Add(matchResult.ParseError);
+        }
+
+        await WriteJsonAsync(
+            Path.Combine(ingDir, "03b-match-output.json"),
+            new
+            {
+                matchResult.TotalElapsedMs,
+                matchResult.ParseError,
+                decision,
+                validationWarnings = ingWarnings,
+            },
+            cancellationToken
+        );
+
+        if (options.SessionCatalog)
+        {
+            CatalogSearchService.RegisterSessionDecision(catalog, decision, vec);
+        }
+
+        Console.WriteLine(
+            $"    [{idx + 1}] {ing.Name} => {decision.MatchType}: {decision.Name}"
+                + (decision.Category is not null ? $" ({decision.Category})" : string.Empty)
+                + $" ({(extraElapsedMs + matchResult.TotalElapsedMs) / 1000.0:F1}s)"
+        );
+
+        return new ResolvedIngredientResult(
+            idx,
+            secName,
+            ing,
+            rawTerms,
+            dbCandidates,
+            decision,
+            ingWarnings
+        );
+    }
+
+    private static Stage3MatchDecisionDto ReconcileStage3Decision(
+        Stage3MatchDecisionDto decision,
+        Stage1IngredientDto ing,
+        CatalogSnapshot snapshot
+    )
+    {
+        var looksLikeSubRecipe =
+            string.Equals(ing.Unit, "recipe", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(ing.Unit, "batch", StringComparison.OrdinalIgnoreCase)
+            || (ing.PrepNote?.Contains("recipe", StringComparison.OrdinalIgnoreCase) ?? false)
+            || ing.Name.Contains("recipe", StringComparison.OrdinalIgnoreCase);
+
+        if (
+            !looksLikeSubRecipe
+            && string.Equals(
+                decision.MatchType,
+                "existing_recipe",
+                StringComparison.OrdinalIgnoreCase
+            )
+        )
+        {
+            var rawNorm = App.Core.Recipes.RecipeUnitAndSectionHelpers.NormalizeLookupKey(ing.Name);
+            var matchedFood = snapshot.FoodItems.FirstOrDefault(f =>
+                string.Equals(f.NormalizedName, rawNorm, StringComparison.OrdinalIgnoreCase)
+                || f.Aliases.Any(a =>
+                    string.Equals(
+                        App.Core.Recipes.RecipeUnitAndSectionHelpers.NormalizeLookupKey(a),
+                        rawNorm,
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                )
+            );
+            if (matchedFood is not null)
+            {
+                return new Stage3MatchDecisionDto(
+                    "existing_ingredient",
+                    matchedFood.Id.ToString(),
+                    matchedFood.Name,
+                    null
+                );
+            }
+        }
+
+        if (
+            !string.Equals(decision.MatchType, "new_ingredient", StringComparison.OrdinalIgnoreCase)
+            || string.IsNullOrWhiteSpace(decision.Name)
+        )
+        {
+            return decision;
+        }
+
+        var norm = App.Core.Recipes.RecipeUnitAndSectionHelpers.NormalizeLookupKey(decision.Name);
+        if (string.IsNullOrEmpty(norm))
+        {
+            return decision;
+        }
+
+        var existing = snapshot.FoodItems.FirstOrDefault(f =>
+            string.Equals(f.NormalizedName, norm, StringComparison.OrdinalIgnoreCase)
+            || f.Aliases.Any(a =>
+                string.Equals(
+                    App.Core.Recipes.RecipeUnitAndSectionHelpers.NormalizeLookupKey(a),
+                    norm,
+                    StringComparison.OrdinalIgnoreCase
+                )
+            )
+        );
+
+        return existing is not null
+            ? new Stage3MatchDecisionDto(
+                "existing_ingredient",
+                existing.Id.ToString(),
+                existing.Name,
+                null
+            )
+            : decision;
+    }
+
+    private RecipeQualityScorecard ScoreAssembledState(
+        string normalizedText,
+        AssembledRecipeState state,
+        IReadOnlyList<ResolvedIngredientResult> resolvedIngredients
+    )
+    {
+        var warnByIndex = resolvedIngredients.ToDictionary(
+            r => r.GlobalIndex,
+            r => r.ValidationWarnings.Count > 0
+        );
+
+        var scoreIngs = state
+            .Ingredients.Select(i =>
+            {
+                Guid? matchedFoodId = null;
+                string? matchedFoodName = null;
+                Guid? matchedRecipeId = null;
+                string? matchedRecipeTitle = null;
+                var matchType = i.Resolution?.MatchType;
+                if (
+                    string.Equals(
+                        matchType,
+                        "existing_ingredient",
+                        StringComparison.OrdinalIgnoreCase
+                    ) && Guid.TryParse(i.Resolution?.Id, out var fid)
+                )
+                {
+                    matchedFoodId = fid;
+                    matchedFoodName = i.Resolution?.Name;
+                }
+                else if (
+                    string.Equals(matchType, "existing_recipe", StringComparison.OrdinalIgnoreCase)
+                    && Guid.TryParse(i.Resolution?.Id, out var rid)
+                )
+                {
+                    matchedRecipeId = rid;
+                    matchedRecipeTitle = i.Resolution?.Name;
+                }
+
+                return new PipelineScorer.ScoreableIngredient(
+                    i.Extracted.Name,
+                    i.Extracted.Quantity,
+                    i.Extracted.MaxQuantity,
+                    i.Extracted.Unit,
+                    i.Extracted.PrepNote,
+                    matchType,
+                    matchedFoodId,
+                    matchedFoodName,
+                    matchedRecipeId,
+                    matchedRecipeTitle,
+                    warnByIndex.GetValueOrDefault(i.Index, false)
+                );
+            })
+            .ToList();
+
+        var untokHits = state.Steps.Sum(s =>
+            s.ValidationWarnings.Count(w =>
+                w.StartsWith("Untokenized amount/unit", StringComparison.Ordinal)
+            )
+        );
+        var otherStepWarnings = state.Steps.Sum(s =>
+            s.ValidationWarnings.Count(w =>
+                !w.StartsWith("Untokenized amount/unit", StringComparison.Ordinal)
+            )
+        );
+
+        return PipelineScorer.ScoreRecipe(
+            normalizedText,
+            new PipelineScorer.ScoreableRecipe(
+                state.Title,
+                state.Description,
+                state.Timing?.Prep,
+                state.Timing?.Cook,
+                state.Timing?.Total,
+                state.Tags,
+                scoreIngs,
+                state.Steps.Select(s => s.RenderedOriginal).ToList(),
+                untokHits,
+                otherStepWarnings
+            ),
+            catalog
         );
     }
 
@@ -939,11 +1493,12 @@ public sealed partial class PipelineRunner(
             );
         }
 
-        var polished = ApplyTargetedPatches(baseline, call.Parsed);
+        var (polished, skippedNotes) = ApplyTargetedPatches(baseline, call.Parsed);
+        var effectiveNotes = call.Parsed.PolishNotes.Concat(skippedNotes).ToList();
         await WriteAssembledRecipeJsonAsync(
             Path.Combine(dir, "final-recipe.json"),
             polished,
-            call.Parsed.PolishNotes,
+            effectiveNotes,
             cancellationToken
         );
 
@@ -957,21 +1512,22 @@ public sealed partial class PipelineRunner(
                 "targeted",
                 Success: true,
                 call.TotalElapsedMs,
-                call.Parsed.PolishNotes.Count,
+                effectiveNotes.Count,
                 stepWarnings,
                 polished.ProseOnlyIngredients.Count,
-                call.Parsed.PolishNotes,
+                effectiveNotes,
                 call.ParseError
             ),
             polished
         );
     }
 
-    private static AssembledRecipeState ApplyTargetedPatches(
-        AssembledRecipeState baseline,
-        PolishTargetedResponseDto patch
-    )
+    private static (
+        AssembledRecipeState State,
+        List<string> SkippedPatchNotes
+    ) ApplyTargetedPatches(AssembledRecipeState baseline, PolishTargetedResponseDto patch)
     {
+        var skippedNotes = new List<string>();
         var patchedIngredients = baseline.Ingredients.ToList();
         foreach (var ingPatch in patch.IngredientPatches)
         {
@@ -991,6 +1547,7 @@ public sealed partial class PipelineRunner(
                 Unit = ingPatch.Unit ?? ext.Unit,
                 PrepNote = ingPatch.PrepNote ?? ext.PrepNote,
                 IsOptional = ingPatch.IsOptional ?? ext.IsOptional,
+                AlternateMeasurements = ingPatch.AlternateMeasurements ?? ext.AlternateMeasurements,
             };
             patchedIngredients[idx] = current with { Extracted = updatedExt };
         }
@@ -1007,18 +1564,27 @@ public sealed partial class PipelineRunner(
                     return s;
                 }
 
-                return BuildStepResult(
+                var candidate = BuildStepResult(
                     s.StepNumber,
                     s.SectionName,
                     s.OriginalInstruction,
                     stepPatch.Tokens,
                     patchedIngredients.Count
                 );
+                if (candidate.ValidationWarnings.Count > s.ValidationWarnings.Count)
+                {
+                    skippedNotes.Add(
+                        $"[Guardrail] Rejected stepPatch for Step {s.StepNumber} (warnings {s.ValidationWarnings.Count}->{candidate.ValidationWarnings.Count})."
+                    );
+                    return s;
+                }
+
+                return candidate;
             })
             .ToList();
 
         var proseOnly = ComputeProseOnlyIngredients(patchedIngredients, patchedSteps);
-        return new AssembledRecipeState(
+        var state = new AssembledRecipeState(
             patch.Title ?? baseline.Title,
             patch.Description ?? baseline.Description,
             patch.Servings ?? baseline.Servings,
@@ -1029,6 +1595,7 @@ public sealed partial class PipelineRunner(
             patchedSteps,
             proseOnly
         );
+        return (state, skippedNotes);
     }
 
     private async Task<(
@@ -1484,41 +2051,60 @@ public sealed partial class PipelineRunner(
             $"- **Provider / Endpoint / Base URL:** `{config.Provider}` (`{config.EndpointStyle}`) @ `{config.BaseUrl}`"
         );
         sb.AppendLine(
-            $"- **Model:** `{config.TextModel}` (thinking: `{config.EnableThinking}`, auxThinking: `{config.AuxThinkingOverride?.ToString() ?? "inherit"}`, context: `{config.ContextWindowTokens}`)"
+            $"- **Models:** text=`{config.TextModel}`, embed=`{config.EmbedModel ?? "disabled"}` (thinking: `{config.EnableThinking}`, auxThinking: `{config.AuxThinkingOverride?.ToString() ?? "inherit"}`, context: `{config.ContextWindowTokens}`)"
         );
-        sb.AppendLine($"- **Polish Mode:** `{options.PolishMode}`");
+        sb.AppendLine(
+            $"- **Stages:** Stage3=`{options.Stage3Mode}`, Polish=`{options.PolishMode}`, SessionCatalog=`{options.SessionCatalog}`"
+        );
         sb.AppendLine(
             $"- **Database Catalog:** {(catalog.LoadedFromDatabase ? $"{catalog.FoodItems.Count} food items, {catalog.Recipes.Count} recipes" : "Offline / Disabled")}"
         );
         sb.AppendLine();
         sb.AppendLine(
-            "| Recipe | Time | Stage 1 | Stage 2 | DB Ing | DB Rec | New Ing | Unres Rec | Ing Warn | Step Warn | Prose-Only Ing | Targeted Polish | Full Polish |"
+            "| Recipe | Time (S3) | Stage 1 | DB Ing/Rec/New | Step Warn | Prose-Only | PoC Score | Targeted | Full | Prod Score |"
         );
-        sb.AppendLine(
-            "| --- | ---: | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |"
-        );
+        sb.AppendLine("| --- | ---: | --- | --- | ---: | ---: | ---: | --- | --- | ---: |");
 
-        static string FormatPolishCell(PolishSummaryMetrics? m) =>
+        static string FormatPolishCell(PolishSummaryMetrics? m, RecipeQualityScorecard? sc) =>
             m is null ? "—"
             : m.Success
-                ? $"{m.ElapsedMs / 1000.0:F1}s ({m.StepWarningsAfterPolish}w / {m.PolishNotesCount}n)"
+                ? $"{m.ElapsedMs / 1000.0:F1}s ({sc?.TotalScore ?? 0}/100, {m.StepWarningsAfterPolish}w)"
             : "FAILED";
 
         foreach (var s in summaries)
         {
             var s1 = s.Stage1Success ? $"{s.Stage1Ingredients}i / {s.Stage1Steps}s" : "FAILED";
-            var s2 = s.Stage2Ran
-                ? $"{s.OriginalDescriptionLength}->{s.FinalDescriptionLength}"
-                : "skip";
+            var prodCol = s.ProductionScore is not null
+                ? $"{s.ProductionScore.TotalScore}/100"
+                : "—";
             sb.AppendLine(
-                $"| {s.Title} | {s.TotalElapsedMs / 1000.0:F1}s | {s1} | {s2} | {s.ExistingIngredientMatches} | {s.ExistingRecipeMatches} | {s.NewIngredientsProposed} | {s.UnresolvedRecipes} | {s.IngredientValidationWarnings} | {s.StepValidationWarnings} | {s.ProseOnlyIngredients.Count} | {FormatPolishCell(s.TargetedPolish)} | {FormatPolishCell(s.FullPolish)} |"
+                $"| {s.Title} | {s.TotalElapsedMs / 1000.0:F1}s ({s.Stage3ElapsedMs / 1000.0:F1}s) | {s1} | {s.ExistingIngredientMatches}/{s.ExistingRecipeMatches}/{s.NewIngredientsProposed} | {s.StepValidationWarnings} | {s.ProseOnlyIngredients.Count} | {s.BaselineScore?.TotalScore ?? 0}/100 | {FormatPolishCell(s.TargetedPolish, s.TargetedScore)} | {FormatPolishCell(s.FullPolish, s.FullScore)} | {prodCol} |"
             );
+        }
+
+        if (summaries.Any(s => s.BaselineScore is not null))
+        {
+            var ok = summaries.Where(s => s.BaselineScore is not null).ToList();
+            var avgPoc = ok.Average(s => s.BaselineScore!.TotalScore);
+            sb.AppendLine();
+            sb.AppendLine(
+                $"**Average PoC Baseline Score:** `{avgPoc:F1}/100` across {ok.Count} recipe(s)."
+            );
+            var withProd = ok.Where(s => s.ProductionScore is not null).ToList();
+            if (withProd.Count > 0)
+            {
+                var avgProd = withProd.Average(s => s.ProductionScore!.TotalScore);
+                sb.AppendLine(
+                    $"**Matched Production Average ({withProd.Count} recipe(s)):** PoC `{withProd.Average(s => s.BaselineScore!.TotalScore):F1}/100` vs Production `{avgProd:F1}/100`."
+                );
+            }
         }
 
         foreach (
             var s in summaries.Where(x =>
                 x.FatalError is not null
-                || x.ProseOnlyIngredients.Count > 0
+                || x.BaselineScore?.Deductions.Count > 0
+                || x.ProductionScore?.Deductions.Count > 0
                 || x.TargetedPolish is not null
                 || x.FullPolish is not null
             )
@@ -1530,26 +2116,58 @@ public sealed partial class PipelineRunner(
             {
                 sb.AppendLine($"- **Fatal Error:** {s.FatalError}");
             }
-            if (s.ProseOnlyIngredients.Count > 0)
+            if (s.BaselineScore is { Deductions.Count: > 0 } bs)
             {
                 sb.AppendLine(
-                    $"- **Prose-Only Master Ingredients (no quantitative quantity in steps):** {string.Join(", ", s.ProseOnlyIngredients)}"
+                    $"- **PoC Deductions ({bs.TotalScore}/100):** {string.Join(" | ", bs.Deductions)}"
+                );
+            }
+            if (s.ProductionScore is { Deductions.Count: > 0 } ps)
+            {
+                sb.AppendLine(
+                    $"- **Production Deductions ({ps.TotalScore}/100, conf={s.ProductionConfidence}):** {string.Join(" | ", ps.Deductions)}"
                 );
             }
             if (s.TargetedPolish is { } tgt)
             {
                 sb.AppendLine(
-                    $"- **Targeted Polish Notes ({tgt.ElapsedMs / 1000.0:F1}s):** {(tgt.PolishNotes.Count > 0 ? string.Join(" | ", tgt.PolishNotes) : tgt.ParseError ?? "none")}"
+                    $"- **Targeted Polish ({tgt.ElapsedMs / 1000.0:F1}s, {s.TargetedScore?.TotalScore}/100):** {(tgt.PolishNotes.Count > 0 ? string.Join(" | ", tgt.PolishNotes) : tgt.ParseError ?? "none")}"
                 );
             }
             if (s.FullPolish is { } full)
             {
                 sb.AppendLine(
-                    $"- **Full Polish Notes ({full.ElapsedMs / 1000.0:F1}s):** {(full.PolishNotes.Count > 0 ? string.Join(" | ", full.PolishNotes) : full.ParseError ?? "none")}"
+                    $"- **Full Polish ({full.ElapsedMs / 1000.0:F1}s, {s.FullScore?.TotalScore}/100):** {(full.PolishNotes.Count > 0 ? string.Join(" | ", full.PolishNotes) : full.ParseError ?? "none")}"
                 );
             }
         }
 
+        return sb.ToString();
+    }
+
+    private static string BuildProdComparisonMarkdown(IReadOnlyList<RecipeRunSummary> summaries)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("# Production vs. Ingestion PoC Objective Scorecard");
+        sb.AppendLine();
+        sb.AppendLine(
+            "| Recipe | Prod Conf | Prod Score (Ing/Step/Res/Time) | PoC Score (Ing/Step/Res/Time) | Delta |"
+        );
+        sb.AppendLine("| --- | ---: | --- | --- | ---: |");
+        foreach (
+            var s in summaries.Where(s =>
+                s.ProductionScore is not null && s.BaselineScore is not null
+            )
+        )
+        {
+            var p = s.ProductionScore!;
+            var b = s.BaselineScore!;
+            var delta = b.TotalScore - p.TotalScore;
+            var deltaStr = delta >= 0 ? $"+{delta}" : delta.ToString();
+            sb.AppendLine(
+                $"| {s.Title} | {s.ProductionConfidence?.ToString("F2") ?? "—"} | **{p.TotalScore}** ({p.IngredientScore}/{p.StepScore}/{p.ResolutionScore}/{p.TimingScore}) | **{b.TotalScore}** ({b.IngredientScore}/{b.StepScore}/{b.ResolutionScore}/{b.TimingScore}) | {deltaStr} |"
+            );
+        }
         return sb.ToString();
     }
 }

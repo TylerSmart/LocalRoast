@@ -6,12 +6,13 @@ Standalone experimentation harness for the multi-stage LLM recipe ingestion pipe
 
 1. **Stage 1 (`prompts/01-extract-recipe.md`)**: Transforms normalized raw recipe text (ATK JSON, website scrapes, digital PDFs, or vision-transcribed scanned PDFs) into a uniform JSON recipe structure with standardized singular units and curated LocalRoast tags.
 2. **Stage 2 (`prompts/02-shorten-description.md`)**: If `description.Length > 2000` (matching `Recipes.Description` varchar bounds), condenses the description iteratively until it fits cleanly.
-3. **Stage 3 (`prompts/03a-ingredient-search-terms.md` & `prompts/03b-ingredient-match.md`)**:
-   - Generates candidate search terms per ingredient.
-   - Queries the live `LocalRoast` SQL Server database (read-only) for matching `FoodItems` (and aliases) and `Recipes` (sub-recipes).
-   - Matches each ingredient to an existing DB `FoodItem`, an existing DB `Recipe`, an unresolved sub-recipe, or proposes a new canonical `FoodItem` with a `FoodCategory`.
+3. **Stage 3 (`--stage3-mode vector-batched|vector-single|llm-terms`)**:
+   - **`vector-batched` (default when `--embed-model` is set, default `embeddinggemma-2:270m`)**: Embeds all recipe ingredients in a single batched `POST /v1/embeddings` call, ranks `FoodItems` (including aliases) and `Recipes` by hybrid cosine + lexical score, and resolves all ingredients in one batched Stage 3b call (`prompts/03c-ingredient-match-batch.md`).
+   - **`vector-single`**: Uses the same single batched embedding lookup, then runs per-ingredient Stage 3b matching (`prompts/03b-ingredient-match.md`).
+   - **`llm-terms`**: Classic per-ingredient Stage 3a search-term generation (`prompts/03a-ingredient-search-terms.md`) + Stage 3b matching.
 4. **Stage 4 (`prompts/04-tokenize-step.md`)**: Transforms each instruction step into an ordered array of prose strings and typed tokens (`ingredient`, `mixture`, `timer`, `temperature`, `dimension`, `fixed`) strictly for explicit quantitative data, and previews `1x`, `2x`, and `1x Metric` rendering.
 5. **Stage 5 (`prompts/05a-polish-full.md` & `prompts/05b-polish-targeted.md`, optional via `--polish`)**: End-to-end QA pass comparing `currentRecipe` against `originalSourceText` (`none`, `targeted`, `full`, or `both` for side-by-side comparison).
+6. **Objective Quality Scorer & Prod Comparison (`--from-db-jobs`, `--compare-prod`)**: Scores both PoC outputs and stored production `IngestionJobs` on a shared `0–100` rubric (`summary.md` & `prod-vs-poc-comparison.md`).
 
 ## Quick Start
 

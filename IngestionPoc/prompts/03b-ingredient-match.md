@@ -15,7 +15,8 @@ Choose exactly one of these four `matchType` values:
    - Set `id` to the exact `id` from `existingRecipes`, `name` to that recipe's exact `title`, and `category` to `null`.
 
 3. **`"unresolved_recipe"`**:
-   - Use ONLY when the input ingredient clearly refers to a prepared sub-recipe / component dish (e.g., `"1 recipe Toasted Bread for Bruschetta"`, `"Quick Tomato Sauce (this page)"`) AND no matching recipe exists in `existingRecipes`.
+   - Use ONLY when the input ingredient explicitly refers to a prepared sub-recipe / component dish (for example `unit: "recipe"`, `"1 recipe Toasted Bread for Bruschetta"`, `"Quick Tomato Sauce (this page)"`, or `"(recipe follows)"`) AND no matching recipe exists in `existingRecipes`.
+   - **NEVER use `"unresolved_recipe"` for standard grocery/dairy/bakery items** such as `buttermilk`, `ricotta cheese`, `chicken broth`, `puff pastry`, `tomato paste`, or `tahini` — those belong in `"new_ingredient"`.
    - Set `id` to `null`, `name` to the clean sub-recipe title, and `category` to `null`.
 
 4. **`"new_ingredient"`**:
