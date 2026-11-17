@@ -920,10 +920,172 @@ public static partial class StepTokenParserAndRenderer
     private static partial Regex WordRegex();
 
     [GeneratedRegex(
-        @"^\s*(?:seconds?|minutes?|hours?|days?|secs?|mins?|hrs?)\b",
+        @"^\s*(?:to\s+)?(?:seconds?|minutes?|hours?|days?|weeks?|months?|years?|secs?|mins?|hrs?|wks?|mos?)\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex DuplicateTimeUnitPrefixRegex();
+
+    [GeneratedRegex(@"^\s*\d+\.\s+", RegexOptions.CultureInvariant)]
+    private static partial Regex LeadStepNumberRegex();
+
+    [GeneratedRegex(@"\b(?:each|both)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex DistributiveQuantifierRegex();
+
+    [GeneratedRegex(
+        @"\b(?:between\s+)?(?:\d+(?:\s+\d+/\d+|\.\d+|/\d+)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|twenty|thirty|forty|fifty|sixty|half|halves|third|thirds|quarter|quarters|dozen|couple)(?:\s*-?\s*(?:to|or|and|–|-)\s*(?:\d+(?:\s+\d+/\d+|\.\d+|/\d+)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|twenty|thirty|forty|fifty|sixty|half|halves|third|thirds|quarter|quarters|dozen|couple))?\b|\b(?:a|an)\s+(?:[a-z]+\s+)?(?:pinch|dash|smidgen|drop|handful|splash|drizzle|second|minute|hour|day|inch|foot|cup|clove|can|sprig|slice|sheet|bunch|leaf|stalk|stick)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex ExplicitQuantityCueRegex();
+
+    [GeneratedRegex(@"[a-zA-Z]{3,}", RegexOptions.CultureInvariant)]
+    private static partial Regex NormalizedWordRegex();
+
+    [GeneratedRegex(@"^\s+([a-zA-Z]{2,}(?:\s+[a-zA-Z]{2,}){0,3})", RegexOptions.CultureInvariant)]
+    private static partial Regex TrailingWordsPrefixRegex();
+
+    [GeneratedRegex(
+        @"\b\d+(?:\s+\d+/\d+|\.\d+|/\d+)?\s+by\s+\d+",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex MultiAxisByDimensionRegex();
+
+    [GeneratedRegex(@"\bby\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex WordByRegex();
+
+    [GeneratedRegex(
+        @"\b(one|two|three|four|five|six|seven|eight|nine|ten|half)\s+$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex TrailingSpelledNumberRegex();
+
+    private static readonly (string CanonicalUnit, Regex Pattern)[] UnitMeasurementPatterns =
+    [
+        (
+            "teaspoon",
+            new Regex(
+                @"(?:\b|\d)(?:teaspoons?|tsps?\.?)\b",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+            )
+        ),
+        (
+            "tablespoon",
+            new Regex(
+                @"(?:\b|\d)(?:tablespoons?|tbsps?\.?|tbs\.?)\b",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+            )
+        ),
+        (
+            "fluid ounce",
+            new Regex(
+                @"(?:\b|\d)fl(?:uid)?\s+oz\.?\b|\bfluid\s+ounces?\b",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+            )
+        ),
+        (
+            "cup",
+            new Regex(@"\b(?:cups?|c\.)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
+        ),
+        (
+            "pint",
+            new Regex(
+                @"(?:\b|\d)(?:pints?|pts?\.?)\b",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+            )
+        ),
+        (
+            "quart",
+            new Regex(
+                @"(?:\b|\d)(?:quarts?|qts?\.?)\b",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+            )
+        ),
+        (
+            "gallon",
+            new Regex(
+                @"(?:\b|\d)(?:gallons?|gals?\.?)\b",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+            )
+        ),
+        (
+            "ounce",
+            new Regex(
+                @"(?:\b|\d)(?:ounces?|ozs?\.?)\b",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+            )
+        ),
+        (
+            "pound",
+            new Regex(
+                @"(?:\b|\d)(?:pounds?|lbs?\.?)\b",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+            )
+        ),
+        (
+            "milligram",
+            new Regex(
+                @"(?:\b|\d)(?:milligrams?|mg)\b",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+            )
+        ),
+        (
+            "gram",
+            new Regex(
+                @"(?:\b|\d)(?:grams?|g)\b",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+            )
+        ),
+        (
+            "kilogram",
+            new Regex(
+                @"(?:\b|\d)(?:kilograms?|kgs?)\b",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+            )
+        ),
+        (
+            "milliliter",
+            new Regex(
+                @"(?:\b|\d)(?:milliliters?|millilitres?|ml)\b",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+            )
+        ),
+        (
+            "liter",
+            new Regex(
+                @"\b(?:liters?|litres?)\b",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+            )
+        ),
+        (
+            "clove",
+            new Regex(@"\bcloves?\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
+        ),
+        ("can", new Regex(@"\bcans?\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)),
+        (
+            "pinch",
+            new Regex(@"\bpinch(?:es)?\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
+        ),
+        (
+            "dash",
+            new Regex(@"\bdash(?:es)?\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
+        ),
+        (
+            "stick",
+            new Regex(@"\bsticks?\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
+        ),
+        (
+            "sprig",
+            new Regex(@"\bsprigs?\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
+        ),
+        (
+            "slice",
+            new Regex(@"\bslices?\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
+        ),
+        (
+            "bunch",
+            new Regex(@"\bbunch(?:es)?\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
+        ),
+        ("head", new Regex(@"\bheads?\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)),
+    ];
 
     [GeneratedRegex(
         @"^\s*-?\s*(?:inch(?:es)?|feet|foot|yards?|millimeters?|centimeters?|meters?|mm\b|cm\b)\b",
@@ -1243,8 +1405,116 @@ public static partial class StepTokenParserAndRenderer
             );
         }
 
+        var origTrimmed = originalInstruction.TrimEnd();
+        var rendTrimmed = rendered.TrimEnd();
+        if (
+            origTrimmed.EndsWith(".)", StringComparison.Ordinal)
+            && !rendTrimmed.EndsWith(".)", StringComparison.Ordinal)
+        )
+        {
+            warnings.Add("Rendered step dropped or altered trailing '.)' closing punctuation.");
+        }
+        else if (origTrimmed.EndsWith('.') && !rendTrimmed.EndsWith('.'))
+        {
+            warnings.Add("Rendered step dropped trailing period '.'.");
+        }
+
+        var origClean = LeadStepNumberRegex().Replace(originalInstruction, string.Empty);
+        var hasDistributive = DistributiveQuantifierRegex().IsMatch(origClean);
+        var origCueCount = ExplicitQuantityCueRegex().Matches(origClean).Count;
+        var quantifiedTokenCount = tokens.Count(t =>
+            t
+                is PocIngredientToken
+                    or PocMixtureToken
+                    or PocFixedToken
+                    or PocTimerToken
+                    or PocDimensionToken
+                    or PocTemperatureToken
+        );
+        if (!hasDistributive && quantifiedTokenCount > origCueCount)
+        {
+            warnings.Add(
+                $"Invented unprinted quantities: step emitted {quantifiedTokenCount} quantitative tokens but original instruction only contains {origCueCount} explicit numeric cues; leave unquantified mentions as plain text without pulling numbers from the ingredient list."
+            );
+        }
+
+        foreach (var (unitName, unitPattern) in UnitMeasurementPatterns)
+        {
+            var tokenUnitCount = tokens.Count(t =>
+                t switch
+                {
+                    PocIngredientToken ing => string.Equals(
+                        ing.Unit?.Trim(),
+                        unitName,
+                        StringComparison.OrdinalIgnoreCase
+                    ),
+                    PocMixtureToken mix => string.Equals(
+                        mix.Unit?.Trim(),
+                        unitName,
+                        StringComparison.OrdinalIgnoreCase
+                    ),
+                    PocFixedToken fx => string.Equals(
+                        fx.Unit?.Trim(),
+                        unitName,
+                        StringComparison.OrdinalIgnoreCase
+                    ),
+                    _ => false,
+                }
+            );
+            if (tokenUnitCount == 0)
+            {
+                continue;
+            }
+
+            var origUnitCount = unitPattern.Matches(origClean).Count;
+            if (tokenUnitCount > origUnitCount && (origUnitCount == 0 || !hasDistributive))
+            {
+                warnings.Add(
+                    $"Invented unit '{unitName}' ({tokenUnitCount} token(s) vs {origUnitCount} in original instruction); unquantified mentions must stay plain text."
+                );
+            }
+        }
+
+        var origNormWordCounts = CountNormalizedWords(originalInstruction);
+        var renderedNormWordCounts = CountNormalizedWords(rendered);
+
+        if (
+            MultiAxisByDimensionRegex().IsMatch(originalInstruction)
+            && WordByRegex().Matches(originalInstruction).Count
+                > WordByRegex().Matches(rendered).Count
+        )
+        {
+            warnings.Add(
+                "Dropped 'by' between multi-axis dimensions ('A by B'); emit TWO separate dimension tokens separated by ' by ' instead of collapsing into a 'to' range."
+            );
+        }
+
         for (var i = 0; i < tokens.Count; i++)
         {
+            decimal? tokenPrimaryVal = tokens[i] switch
+            {
+                PocIngredientToken ing => ing.Quantity,
+                PocMixtureToken mix => mix.Quantity,
+                PocFixedToken fx => fx.Amount,
+                PocTimerToken tm => tm.Amount,
+                PocDimensionToken dm => dm.Amount,
+                _ => null,
+            };
+            if (
+                i > 0
+                && tokens[i - 1] is PocTextToken prevSpelledTxt
+                && tokenPrimaryVal.HasValue
+                && TryMatchSpelledNumber(
+                    prevSpelledTxt.Text,
+                    tokenPrimaryVal.Value,
+                    out var wordNum
+                )
+            )
+            {
+                warnings.Add(
+                    $"Duplicate spelled number '{wordNum}' right before [{i}]; consume '{wordNum}' inside the token so output does not read '{wordNum} {tokenPrimaryVal.Value}'."
+                );
+            }
             if (
                 i + 1 < tokens.Count
                 && tokens[i] is not PocTextToken
@@ -1348,6 +1618,14 @@ public static partial class StepTokenParserAndRenderer
                             $"Ingredient token '{ing.Name}' used plural unit '{ing.Unit}' instead of singular."
                         );
                     }
+                    CheckBoundaryWordDuplication(
+                        i,
+                        ing.Name,
+                        tokens,
+                        origNormWordCounts,
+                        renderedNormWordCounts,
+                        warnings
+                    );
                     break;
                 case PocMixtureToken mix:
                     if (mix.Quantity <= 0m)
@@ -1387,6 +1665,14 @@ public static partial class StepTokenParserAndRenderer
                             $"Mixture token '{mix.Name}' used plural unit '{mix.Unit}' instead of singular."
                         );
                     }
+                    CheckBoundaryWordDuplication(
+                        i,
+                        mix.Name,
+                        tokens,
+                        origNormWordCounts,
+                        renderedNormWordCounts,
+                        warnings
+                    );
                     break;
                 case PocFixedToken fx:
                     if (fx.Amount <= 0m)
@@ -1401,6 +1687,14 @@ public static partial class StepTokenParserAndRenderer
                             $"Fixed token '{fx.Name}' has inverted range {fx.Amount}..{fx.MaxAmount} {fx.Unit}."
                         );
                     }
+                    CheckBoundaryWordDuplication(
+                        i,
+                        fx.Name,
+                        tokens,
+                        origNormWordCounts,
+                        renderedNormWordCounts,
+                        warnings
+                    );
                     break;
                 case PocTimerToken timer:
                     if (timer.Amount <= 0m)
@@ -1438,7 +1732,7 @@ public static partial class StepTokenParserAndRenderer
                     )
                     {
                         warnings.Add(
-                            $"Duplicate time unit '{DuplicateTimeUnitPrefixRegex().Match(trailingTimerTxt.Text).Value.Trim()}' after timer token [{i}]."
+                            $"Duplicate or leftover time unit '{DuplicateTimeUnitPrefixRegex().Match(trailingTimerTxt.Text).Value.Trim()}' after timer token [{i}] (if 'to minutes'/'to hours', absorb into maxAmount and remove trailing fragment; if source says 'weeks'/'months', delete the timer token and merge into one plain text phrase without repeating 'weeks')."
                         );
                     }
                     break;
@@ -1460,6 +1754,35 @@ public static partial class StepTokenParserAndRenderer
                         warnings.Add(
                             $"Preceding text ends with 'up to', so set amount={dim.MaxAmount.Value} and maxAmount=null instead of fabricated range {dim.Amount}..{dim.MaxAmount.Value}."
                         );
+                    }
+                    if (dim.Hyphenated)
+                    {
+                        var checkVal = dim.MaxAmount ?? dim.Amount;
+                        var isMetricDim =
+                            dim.Unit.Trim().ToLowerInvariant()
+                            is "millimeter"
+                                or "centimeter"
+                                or "meter";
+                        var checkStr = FormatNum(checkVal, isMetricDim);
+                        var unitPat = GetDimensionUnitPattern(dim.Unit);
+                        var esc = Regex.Escape(checkStr);
+                        if (
+                            Regex.IsMatch(
+                                originalInstruction,
+                                $@"(?:^|\W){esc}\s+{unitPat}",
+                                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+                            )
+                            && !Regex.IsMatch(
+                                originalInstruction,
+                                $@"(?:^|\W){esc}(?:\s+to\s+[^-]+)?-",
+                                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+                            )
+                        )
+                        {
+                            warnings.Add(
+                                $"Dimension token [{i}] set hyphenated=true, but source '{checkStr} {dim.Unit}' is unhyphenated; set hyphenated=false."
+                            );
+                        }
                     }
                     if (i + 1 < tokens.Count && tokens[i + 1] is PocTextToken trailingDimTxt)
                     {
@@ -1611,6 +1934,145 @@ public static partial class StepTokenParserAndRenderer
         return string.IsNullOrWhiteSpace(suffix) ? combined : $"{combined} {suffix}";
     }
 
+    public static bool TryFindIncompatibleAlternateMeasurement(
+        decimal? primaryQty,
+        decimal? primaryMaxQty,
+        string? primaryUnit,
+        IReadOnlyList<Stage1AlternateMeasurementDto>? alternates,
+        out string? reason
+    )
+    {
+        reason = null;
+        if (
+            !primaryQty.HasValue
+            || primaryQty.Value <= 0m
+            || alternates is not { Count: > 0 }
+            || !TryGetVolumeOrWeightFactor(primaryUnit, out var primaryDim, out var primaryFactor)
+        )
+        {
+            return false;
+        }
+
+        var minPrimaryBase = primaryQty.Value * primaryFactor;
+        var maxPrimaryBase = (primaryMaxQty ?? primaryQty.Value) * primaryFactor;
+        foreach (var alt in alternates)
+        {
+            if (
+                alt.Quantity <= 0m
+                || !TryGetVolumeOrWeightFactor(alt.Unit, out var altDim, out var altFactor)
+                || !string.Equals(altDim, primaryDim, StringComparison.Ordinal)
+            )
+            {
+                continue;
+            }
+
+            var altBase = alt.Quantity * altFactor;
+            if (altBase < minPrimaryBase * 0.70m || altBase > maxPrimaryBase * 1.45m)
+            {
+                reason =
+                    $"{alt.Quantity} {alt.Unit} is not equivalent to {primaryQty.Value} {primaryUnit} (sum 'A plus B' ingredients into primary quantity instead of splitting into alternateMeasurements).";
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryGetVolumeOrWeightFactor(
+        string? rawUnit,
+        out string dimension,
+        out decimal baseFactor
+    )
+    {
+        switch (rawUnit?.Trim().ToLowerInvariant())
+        {
+            case "drop" or "drops":
+                dimension = "volume";
+                baseFactor = 0.05m;
+                return true;
+            case "smidgen" or "smidgens":
+                dimension = "volume";
+                baseFactor = 0.15m;
+                return true;
+            case "pinch" or "pinches":
+                dimension = "volume";
+                baseFactor = 0.308m;
+                return true;
+            case "dash" or "dashes":
+                dimension = "volume";
+                baseFactor = 0.616m;
+                return true;
+            case "teaspoon" or "teaspoons":
+                dimension = "volume";
+                baseFactor = 4.92892m;
+                return true;
+            case "tablespoon" or "tablespoons":
+                dimension = "volume";
+                baseFactor = 14.7868m;
+                return true;
+            case "fluid ounce" or "fluid ounces":
+                dimension = "volume";
+                baseFactor = 29.5735m;
+                return true;
+            case "cup" or "cups":
+                dimension = "volume";
+                baseFactor = 236.588m;
+                return true;
+            case "pint" or "pints":
+                dimension = "volume";
+                baseFactor = 473.176m;
+                return true;
+            case "quart" or "quarts":
+                dimension = "volume";
+                baseFactor = 946.353m;
+                return true;
+            case "gallon" or "gallons":
+                dimension = "volume";
+                baseFactor = 3785.41m;
+                return true;
+            case "milliliter" or "milliliters":
+                dimension = "volume";
+                baseFactor = 1m;
+                return true;
+            case "centiliter" or "centiliters":
+                dimension = "volume";
+                baseFactor = 10m;
+                return true;
+            case "deciliter" or "deciliters":
+                dimension = "volume";
+                baseFactor = 100m;
+                return true;
+            case "liter" or "liters":
+                dimension = "volume";
+                baseFactor = 1000m;
+                return true;
+            case "milligram" or "milligrams":
+                dimension = "weight";
+                baseFactor = 0.001m;
+                return true;
+            case "gram" or "grams":
+                dimension = "weight";
+                baseFactor = 1m;
+                return true;
+            case "kilogram" or "kilograms":
+                dimension = "weight";
+                baseFactor = 1000m;
+                return true;
+            case "ounce" or "ounces":
+                dimension = "weight";
+                baseFactor = 28.3495m;
+                return true;
+            case "pound" or "pounds":
+                dimension = "weight";
+                baseFactor = 453.592m;
+                return true;
+            default:
+                dimension = string.Empty;
+                baseFactor = 0m;
+                return false;
+        }
+    }
+
     private static (decimal Q, decimal? M, string Unit, bool IsMetric) ConvertUnitToMetric(
         decimal q,
         decimal? m,
@@ -1622,23 +2084,21 @@ public static partial class StepTokenParserAndRenderer
         switch (u)
         {
             case "teaspoon":
-                return ConvertMl(q * 4.92892m, Scale(4.92892m));
             case "tablespoon":
-                return ConvertMl(q * 14.7868m, Scale(14.7868m));
             case "fluid ounce":
-                return ConvertMl(q * 29.5735m, Scale(29.5735m));
             case "cup":
-                return ConvertMl(q * 236.588m, Scale(236.588m));
             case "pint":
-                return ConvertMl(q * 473.176m, Scale(473.176m));
             case "quart":
-                return ConvertMl(q * 946.353m, Scale(946.353m));
             case "gallon":
-                return ConvertMl(q * 3785.41m, Scale(3785.41m));
             case "ounce":
-                return ConvertGrams(q * 28.3495m, Scale(28.3495m));
             case "pound":
-                return ConvertGrams(q * 453.592m, Scale(453.592m));
+                if (TryGetVolumeOrWeightFactor(u, out var dim, out var factor))
+                {
+                    return dim == "volume"
+                        ? ConvertMl(q * factor, Scale(factor))
+                        : ConvertGrams(q * factor, Scale(factor));
+                }
+                return (q, m, u, false);
             case "inch":
                 var cm = q * 2.54m;
                 if (cm < 1m)
@@ -1839,8 +2299,143 @@ public static partial class StepTokenParserAndRenderer
         return null;
     }
 
-    private static string? GetNullableString(JsonNode? node) =>
-        node is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
+    private static void CheckBoundaryWordDuplication(
+        int tokenIndex,
+        string tokenName,
+        IReadOnlyList<PocStepToken> tokens,
+        Dictionary<string, int> origWordCounts,
+        Dictionary<string, int> renderedWordCounts,
+        List<string> warnings
+    )
+    {
+        if (
+            tokenIndex + 1 >= tokens.Count
+            || tokens[tokenIndex + 1] is not PocTextToken trailingTxt
+            || string.IsNullOrWhiteSpace(tokenName)
+        )
+        {
+            return;
+        }
+
+        var prefixMatch = TrailingWordsPrefixRegex().Match(trailingTxt.Text);
+        if (!prefixMatch.Success)
+        {
+            return;
+        }
+
+        var tokenWords = NormalizedWordRegex()
+            .Matches(tokenName)
+            .Select(m => SimpleSingular(m.Value))
+            .ToList();
+        if (tokenWords.Count == 0)
+        {
+            return;
+        }
+
+        var lastTokWord = tokenWords[^1];
+        if (
+            origWordCounts.GetValueOrDefault(lastTokWord)
+            >= renderedWordCounts.GetValueOrDefault(lastTokWord)
+        )
+        {
+            return;
+        }
+
+        foreach (Match wMatch in NormalizedWordRegex().Matches(prefixMatch.Groups[1].Value))
+        {
+            if (SimpleSingular(wMatch.Value) == lastTokWord)
+            {
+                warnings.Add(
+                    $"Duplicate/split noun '{lastTokWord}' after token [{tokenIndex}] ('{tokenName}' followed by '{prefixMatch.Groups[1].Value}'); remove the trailing duplicate or absorb leading qualifier like 'more {lastTokWord}' INTO token.name (do not leave ' more {lastTokWord}' or ' of the {lastTokWord}' after the token)."
+                );
+                return;
+            }
+        }
+    }
+
+    private static Dictionary<string, int> CountNormalizedWords(string text)
+    {
+        var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (Match m in NormalizedWordRegex().Matches(text))
+        {
+            var s = SimpleSingular(m.Value);
+            counts[s] = counts.GetValueOrDefault(s) + 1;
+        }
+        return counts;
+    }
+
+    private static string SimpleSingular(string word)
+    {
+        var lower = word.ToLowerInvariant();
+        return lower switch
+        {
+            "leaves" => "leaf",
+            "inches" => "inch",
+            "feet" => "foot",
+            _ when lower.EndsWith("ies", StringComparison.Ordinal) && lower.Length > 4 =>
+                string.Concat(lower.AsSpan(0, lower.Length - 3), "y"),
+            _ when lower.EndsWith('s')
+                    && lower.Length > 3
+                    && !lower.EndsWith("ss", StringComparison.Ordinal) => lower[..^1],
+            _ => lower,
+        };
+    }
+
+    private static bool TryMatchSpelledNumber(string prevText, decimal val, out string word)
+    {
+        word = string.Empty;
+        var m = TrailingSpelledNumberRegex().Match(prevText);
+        if (!m.Success)
+        {
+            return false;
+        }
+
+        word = m.Groups[1].Value;
+        decimal? spelledVal = word.ToLowerInvariant() switch
+        {
+            "half" => 0.5m,
+            "one" => 1m,
+            "two" => 2m,
+            "three" => 3m,
+            "four" => 4m,
+            "five" => 5m,
+            "six" => 6m,
+            "seven" => 7m,
+            "eight" => 8m,
+            "nine" => 9m,
+            "ten" => 10m,
+            _ => null,
+        };
+        return spelledVal.HasValue && spelledVal.Value == val;
+    }
+
+    private static string GetDimensionUnitPattern(string unit) =>
+        unit.Trim().ToLowerInvariant() switch
+        {
+            "inch" => @"inch(?:es)?\b",
+            "foot" => @"(?:feet|foot)\b",
+            "yard" => @"yards?\b",
+            "millimeter" => @"(?:millimeters?|millimetres?|mm)\b",
+            "centimeter" => @"(?:centimeters?|centimetres?|cm)\b",
+            "meter" => @"(?:meters?|metres?)\b",
+            _ => Regex.Escape(unit.Trim()) + @"\b",
+        };
+
+    private static string? GetNullableString(JsonNode? node)
+    {
+        if (node is not JsonValue v || !v.TryGetValue<string>(out var s))
+        {
+            return null;
+        }
+
+        var trimmed = s.Trim();
+        return
+            trimmed.Length == 0
+            || trimmed.Equals("null", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Equals("n/a", StringComparison.OrdinalIgnoreCase)
+            ? null
+            : s;
+    }
 
     private static bool GetBool(JsonNode? node) =>
         node is JsonValue v && v.TryGetValue<bool>(out var b) && b;

@@ -37,10 +37,11 @@ For each ingredient line in the source:
   - `"1/4 teaspoon grated lime zest plus 1 1/2–2 tablespoons juice"` -> (1) `name: "grated lime zest"`, `quantity: 0.25`, `unit: "teaspoon"`; (2) `name: "lime juice"`, `quantity: 1.5`, `maxQuantity: 2`, `unit: "tablespoon"`.
   - `"1 tablespoon minced fresh parsley, plus 12 small whole parsley leaves for garnishing"` -> (1) `name: "fresh parsley"`, `quantity: 1`, `unit: "tablespoon"`, `prepNote: "minced"`; (2) `name: "parsley leaves"`, `quantity: 12`, `unit: null`, `prepNote: "small whole, for garnishing"`.
 - **NEVER split or duplicate ONE single-measurement line whose prep note treats different parts of the same ingredient** (e.g. `"2 scallions, white parts minced, green parts sliced thin"` MUST stay **ONE** ingredient object: `name: "scallions", quantity: 2, unit: null, prepNote: "white parts minced, green parts sliced thin"` — NEVER split it into two scallion rows!).
-- Combine compatible measurements of the **same ingredient** onto one row by adding them together in a single unit (convert smaller US units accurately: `1 tablespoon = 3 teaspoons`, `1 cup = 16 tablespoons`):
+- Combine compatible measurements of the **same ingredient** onto one row by adding them together in a single unit (convert smaller US units accurately: `1 tablespoon = 3 teaspoons`, `1 cup = 16 tablespoons = 48 teaspoons`, so `1 tablespoon = 0.0625 cup` and `1 teaspoon = 0.0208 cup`):
   - `"6 tablespoons plus 1 teaspoon extra-virgin olive oil"` -> `quantity: 6.3333`, `unit: "tablespoon"`.
   - `"1 tablespoon plus 2 teaspoons soy sauce"` -> `quantity: 1.6667`, `unit: "tablespoon"`.
   - `"1/2 teaspoon plus 2 tablespoons olive oil"` -> `quantity: 2.1667`, `unit: "tablespoon"`.
+  - `"1/4 cup plus 1 teaspoon vegetable oil"` -> `quantity: 0.2708`, `unit: "cup"` (`1/4 + 1/48 = 13/48`, NEVER `0.3125` and NEVER put `1 teaspoon` in `alternateMeasurements`!).
   - `"1/2 cup plus 1 tablespoon ice water"` -> `quantity: 0.5625`, `unit: "cup"` (or `quantity: 9`, `unit: "tablespoon"`). Never ignore the second addend or move it into `alternateMeasurements`.
 - Keep `"1/2 teaspoon table salt, plus salt for cooking pasta"` as primary `0.5 teaspoon table salt` with `"plus salt for cooking pasta"` in `prepNote`.
 

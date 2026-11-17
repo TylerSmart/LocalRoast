@@ -1893,6 +1893,21 @@ public sealed partial class PipelineRunner(
                 );
                 proposedAlt = ext.AlternateMeasurements;
             }
+            else if (
+                StepTokenParserAndRenderer.TryFindIncompatibleAlternateMeasurement(
+                    proposedQty,
+                    proposedMax,
+                    ingPatch.Unit ?? ext.Unit,
+                    proposedAlt,
+                    out var incompatReason
+                )
+            )
+            {
+                skippedNotes.Add(
+                    $"[Guardrail] Rejected non-equivalent alternateMeasurements in ingredientPatch [{ingPatch.Index}]: {incompatReason}"
+                );
+                proposedAlt = ext.AlternateMeasurements;
+            }
 
             var proposedName = ingPatch.Name ?? ext.Name;
             if (
@@ -2663,6 +2678,18 @@ public sealed partial class PipelineRunner(
                     issues.Add(
                         $"'{ing.Name}' placed a physical dimension/temperature unit in alternateMeasurements; put cut/width dimensions in prepNote instead."
                     );
+                }
+                else if (
+                    StepTokenParserAndRenderer.TryFindIncompatibleAlternateMeasurement(
+                        ing.Quantity,
+                        ing.MaxQuantity,
+                        ing.Unit,
+                        ing.AlternateMeasurements,
+                        out var incompatReason
+                    )
+                )
+                {
+                    issues.Add($"'{ing.Name}': {incompatReason}");
                 }
             }
         }
