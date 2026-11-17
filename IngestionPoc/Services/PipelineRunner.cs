@@ -930,7 +930,7 @@ public sealed partial class PipelineRunner(
             instr,
             rawTokensArray,
             ingredientCount,
-            stepCall.ParseError
+            stepCall.Parsed is null ? stepCall.ParseError : null
         );
 
         await WriteJsonAsync(

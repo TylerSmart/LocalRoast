@@ -958,6 +958,12 @@ public static partial class StepTokenParserAndRenderer
     )]
     private static partial Regex TrailingSpelledNumberRegex();
 
+    [GeneratedRegex(
+        @"\b(?:rotate|rotated|rotating)\b[^.\n]{0,80}(?:90|180)\s+degrees?\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex RotationAngleRegex();
+
     private static readonly (string CanonicalUnit, Regex Pattern)[] UnitMeasurementPatterns =
     [
         (
@@ -1116,7 +1122,7 @@ public static partial class StepTokenParserAndRenderer
 
     [GeneratedRegex(
         @"^\s*(?:°\s*[FC]|degrees?(?:\s+(?:F|C|Fahrenheit|Celsius))?\b|fahrenheit\b|celsius\b|[FC]\b)",
-        RegexOptions.CultureInvariant
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex DuplicateTempUnitPrefixRegex();
 
@@ -1126,42 +1132,78 @@ public static partial class StepTokenParserAndRenderer
         for (var i = 0; i + 1 < sanitized.Count; i++)
         {
             if (
-                sanitized[i] is not JsonObject timerObj
-                || !string.Equals(
-                    timerObj["type"]?.GetValue<string>()?.Trim(),
-                    "timer",
-                    StringComparison.OrdinalIgnoreCase
-                )
-            )
-            {
-                continue;
-            }
-
-            if (
-                sanitized[i + 1] is not JsonValue textVal
+                sanitized[i] is not JsonObject tokObj
+                || sanitized[i + 1] is not JsonValue textVal
                 || !textVal.TryGetValue<string>(out var nextText)
             )
             {
                 continue;
             }
 
-            var unit = (GetNullableString(timerObj["unit"]) ?? "minute").Trim().ToLowerInvariant();
-            var match = DuplicateTimeUnitPrefixRegex().Match(nextText);
-            if (!match.Success)
+            var tokType = tokObj["type"]?.GetValue<string>()?.Trim().ToLowerInvariant();
+            if (tokType == "timer")
             {
-                continue;
+                var unit = (GetNullableString(tokObj["unit"]) ?? "minute")
+                    .Trim()
+                    .ToLowerInvariant();
+                var match = DuplicateTimeUnitPrefixRegex().Match(nextText);
+                if (
+                    match.Success
+                    && TimerUnitMatchesWord(unit, match.Value.Trim().ToLowerInvariant())
+                )
+                {
+                    sanitized[i + 1] = JsonValue.Create(nextText[match.Length..]);
+                }
             }
-
-            var word = match.Value.Trim().ToLowerInvariant();
-            if (!TimerUnitMatchesWord(unit, word))
+            else if (tokType == "temperature" && !nextText.TrimStart().StartsWith('-'))
             {
-                continue;
+                var unit = (GetNullableString(tokObj["unit"]) ?? "fahrenheit")
+                    .Trim()
+                    .ToLowerInvariant();
+                var match = DuplicateTempUnitPrefixRegex().Match(nextText);
+                if (
+                    match.Success
+                    && TempUnitMatchesWord(unit, match.Value.Trim().ToLowerInvariant())
+                )
+                {
+                    sanitized[i + 1] = JsonValue.Create(nextText[match.Length..]);
+                }
             }
-
-            sanitized[i + 1] = JsonValue.Create(nextText[match.Length..]);
         }
 
         return sanitized;
+    }
+
+    private static bool TempUnitMatchesWord(string unit, string phrase)
+    {
+        var compact = phrase
+            .Replace(" ", string.Empty, StringComparison.Ordinal)
+            .ToLowerInvariant();
+        if (compact is "degree" or "degrees")
+        {
+            return true;
+        }
+
+        return unit switch
+        {
+            "fahrenheit" => compact
+                is "°f"
+                    or "f"
+                    or "fahrenheit"
+                    or "degreef"
+                    or "degreesf"
+                    or "degreefahrenheit"
+                    or "degreesfahrenheit",
+            "celsius" => compact
+                is "°c"
+                    or "c"
+                    or "celsius"
+                    or "degreec"
+                    or "degreesc"
+                    or "degreecelsius"
+                    or "degreescelsius",
+            _ => false,
+        };
     }
 
     private static bool TimerUnitMatchesWord(string unit, string word) =>
@@ -1412,7 +1454,9 @@ public static partial class StepTokenParserAndRenderer
             && !rendTrimmed.EndsWith(".)", StringComparison.Ordinal)
         )
         {
-            warnings.Add("Rendered step dropped or altered trailing '.)' closing punctuation.");
+            warnings.Add(
+                "Rendered step swapped or dropped trailing '.)' closing punctuation (source ends with '.)', not ').')."
+            );
         }
         else if (origTrimmed.EndsWith('.') && !rendTrimmed.EndsWith('.'))
         {
@@ -1553,12 +1597,28 @@ public static partial class StepTokenParserAndRenderer
             switch (tokens[i])
             {
                 case PocTextToken txt:
-                    var untok = UntokenizedQuantityRegex().Match(txt.Text);
-                    if (untok.Success)
+                    foreach (Match untok in UntokenizedQuantityRegex().Matches(txt.Text))
                     {
-                        warnings.Add(
-                            $"Untokenized amount/unit '{untok.Value}' left in plain text segment."
-                        );
+                        var isRotationAngle = false;
+                        foreach (Match rot in RotationAngleRegex().Matches(txt.Text))
+                        {
+                            if (
+                                untok.Index >= rot.Index
+                                && untok.Index + untok.Length <= rot.Index + rot.Length
+                            )
+                            {
+                                isRotationAngle = true;
+                                break;
+                            }
+                        }
+
+                        if (!isRotationAngle)
+                        {
+                            warnings.Add(
+                                $"Untokenized amount/unit '{untok.Value}' left in plain text segment."
+                            );
+                            break;
+                        }
                     }
                     break;
                 case PocIngredientToken ing:
@@ -1618,6 +1678,7 @@ public static partial class StepTokenParserAndRenderer
                             $"Ingredient token '{ing.Name}' used plural unit '{ing.Unit}' instead of singular."
                         );
                     }
+                    CheckUnitRepeatedInName(ing.Unit, ing.Name, warnings);
                     CheckBoundaryWordDuplication(
                         i,
                         ing.Name,
@@ -1665,6 +1726,7 @@ public static partial class StepTokenParserAndRenderer
                             $"Mixture token '{mix.Name}' used plural unit '{mix.Unit}' instead of singular."
                         );
                     }
+                    CheckUnitRepeatedInName(mix.Unit, mix.Name, warnings);
                     CheckBoundaryWordDuplication(
                         i,
                         mix.Name,
@@ -1687,6 +1749,7 @@ public static partial class StepTokenParserAndRenderer
                             $"Fixed token '{fx.Name}' has inverted range {fx.Amount}..{fx.MaxAmount} {fx.Unit}."
                         );
                     }
+                    CheckUnitRepeatedInName(fx.Unit, fx.Name, warnings);
                     CheckBoundaryWordDuplication(
                         i,
                         fx.Name,
@@ -2297,6 +2360,28 @@ public static partial class StepTokenParserAndRenderer
             return (decimal)dbl;
         }
         return null;
+    }
+
+    private static void CheckUnitRepeatedInName(string? unit, string name, List<string> warnings)
+    {
+        var u = unit?.Trim();
+        if (string.IsNullOrWhiteSpace(u) || string.IsNullOrWhiteSpace(name))
+        {
+            return;
+        }
+
+        if (
+            Regex.IsMatch(
+                name,
+                $@"\b{Regex.Escape(u)}(?:e?s)?\b",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+            )
+        )
+        {
+            warnings.Add(
+                $"Token '{name}' repeats unit '{u}' inside its name (renders '{u} {name}'); keep unit ONLY in `unit` or set unit=null."
+            );
+        }
     }
 
     private static void CheckBoundaryWordDuplication(

@@ -42,8 +42,8 @@ For each ingredient line in the source:
   - `"1 tablespoon plus 2 teaspoons soy sauce"` -> `quantity: 1.6667`, `unit: "tablespoon"`.
   - `"1/2 teaspoon plus 2 tablespoons olive oil"` -> `quantity: 2.1667`, `unit: "tablespoon"`.
   - `"1/4 cup plus 1 teaspoon vegetable oil"` -> `quantity: 0.2708`, `unit: "cup"` (`1/4 + 1/48 = 13/48`, NEVER `0.3125` and NEVER put `1 teaspoon` in `alternateMeasurements`!).
-  - `"1/2 cup plus 1 tablespoon ice water"` -> `quantity: 0.5625`, `unit: "cup"` (or `quantity: 9`, `unit: "tablespoon"`). Never ignore the second addend or move it into `alternateMeasurements`.
-- Keep `"1/2 teaspoon table salt, plus salt for cooking pasta"` as primary `0.5 teaspoon table salt` with `"plus salt for cooking pasta"` in `prepNote`.
+  - `"1/2 cup plus 1 tablespoon ice water"` -> `quantity: 0.5625`, `unit: "cup"` (or `quantity: 9`, `unit: "tablespoon"`). Never ignore the second addend or move it into `alternateMeasurements`. If combined with an `"or"` replacement (e.g. `"3 quarts plus 1/4 cup peanut oil or canola oil"`), sum into primary (`quantity: 3.0625, unit: "quart", name: "peanut oil"`) and keep `replacements: [{ "name": "canola oil", "quantity": null, "unit": null }]` (NEVER put `"1/4 cup"` on `canola oil`!).
+- Keep `"1/2 teaspoon table salt, plus salt for cooking pasta"` or `"1 tablespoon minced fresh dill, plus extra for serving"` as **ONE** ingredient object (`"plus extra for serving"` in `prepNote`, NEVER splitting `"plus extra ..."` into a second quantityless row!).
 
 ### Sub-Recipe Ingredients
 
