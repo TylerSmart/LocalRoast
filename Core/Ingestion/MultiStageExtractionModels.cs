@@ -391,7 +391,7 @@ public static class MultiStageSchemas
                         properties = new
                         {
                             type = new { type = "string", @enum = new[] { "fixed" } },
-                            name = new { type = "string" },
+                            name = new { type = new[] { "string", "null" } },
                             amount = new { type = "number" },
                             maxAmount = new { type = new[] { "number", "null" } },
                             unit = new { type = new[] { "string", "null" } },

@@ -479,4 +479,162 @@ public sealed class StepTokenValidatorTests
             FoodNameSanitizer.NormalizeCanonicalFoodName("large egg yolks")
         );
     }
+
+    [TestMethod]
+    public void SanitizeRawTokens_DuplicateRangeUpperBoundAndSplitTimer_HandlesCleanly()
+    {
+        var dupTrailingBound = new JsonArray
+        {
+            "Bake until set, ",
+            new JsonObject
+            {
+                ["type"] = "timer",
+                ["amount"] = 6,
+                ["maxAmount"] = 8,
+                ["unit"] = "minute",
+                ["label"] = "bake",
+            },
+            " to 8 minutes.",
+        };
+        var res1 = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 4,
+            sectionName: null,
+            originalInstruction: "Bake until set, 6 to 8 minutes.",
+            rawTokensJson: dupTrailingBound,
+            ingredientCount: 0
+        );
+        Assert.IsEmpty(res1.ValidationWarnings, string.Join(" | ", res1.ValidationWarnings));
+        Assert.AreEqual(
+            "Bake until set, 6 to 8 minutes.",
+            StepTokenValidator.RenderForValidation(res1.ParsedTokens)
+        );
+
+        var splitRangeWithRedundantMax = new JsonArray
+        {
+            "Cook ",
+            new JsonObject
+            {
+                ["type"] = "timer",
+                ["amount"] = 8,
+                ["maxAmount"] = 10,
+                ["unit"] = "minute",
+                ["label"] = "cook",
+            },
+            " to ",
+            new JsonObject
+            {
+                ["type"] = "timer",
+                ["amount"] = 10,
+                ["maxAmount"] = null,
+                ["unit"] = "minute",
+                ["label"] = "cook",
+            },
+            ".",
+        };
+        var res2 = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 2,
+            sectionName: null,
+            originalInstruction: "Cook 8 to 10 minutes.",
+            rawTokensJson: splitRangeWithRedundantMax,
+            ingredientCount: 0
+        );
+        Assert.IsEmpty(res2.ValidationWarnings, string.Join(" | ", res2.ValidationWarnings));
+        Assert.AreEqual(
+            "Cook 8 to 10 minutes.",
+            StepTokenValidator.RenderForValidation(res2.ParsedTokens)
+        );
+
+        var trueSplitTimers = new JsonArray
+        {
+            "Cook ",
+            new JsonObject
+            {
+                ["type"] = "timer",
+                ["amount"] = 8,
+                ["maxAmount"] = null,
+                ["unit"] = "minute",
+                ["label"] = "cook",
+            },
+            " to ",
+            new JsonObject
+            {
+                ["type"] = "timer",
+                ["amount"] = 10,
+                ["maxAmount"] = null,
+                ["unit"] = "minute",
+                ["label"] = "cook",
+            },
+            ".",
+        };
+        var res3 = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 2,
+            sectionName: null,
+            originalInstruction: "Cook 8 to 10 minutes.",
+            rawTokensJson: trueSplitTimers,
+            ingredientCount: 0
+        );
+        Assert.IsTrue(
+            res3.ValidationWarnings.Any(w =>
+                w.Contains("Split single-unit time range", StringComparison.OrdinalIgnoreCase)
+            ),
+            string.Join(" | ", res3.ValidationWarnings)
+        );
+    }
+
+    [TestMethod]
+    public void BuildAndValidateStep_SwappedClosingParenDotAndNullNameFixedYield_WorkCleanly()
+    {
+        var swappedPunct = new JsonArray
+        {
+            "Serve warm. (Stew can be refrigerated for up to ",
+            new JsonObject
+            {
+                ["type"] = "timer",
+                ["amount"] = 3,
+                ["maxAmount"] = null,
+                ["unit"] = "day",
+                ["label"] = "Refrigerate",
+            },
+            " days).",
+        };
+        var res1 = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 5,
+            sectionName: null,
+            originalInstruction: "Serve warm. (Stew can be refrigerated for up to 3 days.)",
+            rawTokensJson: swappedPunct,
+            ingredientCount: 0
+        );
+        Assert.IsEmpty(res1.ValidationWarnings, string.Join(" | ", res1.ValidationWarnings));
+        Assert.AreEqual(
+            "Serve warm. (Stew can be refrigerated for up to 3 days.)",
+            StepTokenValidator.RenderForValidation(res1.ParsedTokens)
+        );
+
+        var nounlessFixed = new JsonArray
+        {
+            "Set aside (you should have ",
+            new JsonObject
+            {
+                ["type"] = "fixed",
+                ["name"] = null,
+                ["amount"] = 5,
+                ["maxAmount"] = 6,
+                ["unit"] = "cup",
+                ["hyphenated"] = false,
+            },
+            ").",
+        };
+        var res2 = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 1,
+            sectionName: null,
+            originalInstruction: "Set aside (you should have 5 to 6 cups).",
+            rawTokensJson: nounlessFixed,
+            ingredientCount: 0
+        );
+        Assert.IsEmpty(res2.ValidationWarnings, string.Join(" | ", res2.ValidationWarnings));
+        Assert.AreEqual(
+            "Set aside (you should have 5 to 6 cups).",
+            StepTokenValidator.RenderForValidation(res2.ParsedTokens)
+        );
+    }
 }

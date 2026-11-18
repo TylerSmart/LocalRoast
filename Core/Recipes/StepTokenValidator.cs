@@ -267,6 +267,15 @@ public static partial class StepTokenValidator
     private static partial Regex DimensionQualifierSuffixRegex();
 
     [GeneratedRegex(
+        @"^\s*(?:to|–|-)\s*(?<dupMax>\d+(?:\s+\d+/\d+|/\d+|\.\d+)?)\s*(?<uword>seconds?|minutes?|hours?|days?|secs?|mins?|hrs?)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex DuplicateRangeMaxAfterTimerRegex();
+
+    [GeneratedRegex(@"^\s*(?:to|–|-)\s*$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex RangeConnectorOnlyRegex();
+
+    [GeneratedRegex(
         @"^\s*(?:°\s*[FC]|degrees?(?:\s+(?:F|C|Fahrenheit|Celsius))?\b|fahrenheit\b|celsius\b|[FC]\b)",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
@@ -274,24 +283,72 @@ public static partial class StepTokenValidator
 
     public static JsonArray SanitizeRawTokens(JsonArray tokensArray)
     {
-        var sanitized = new JsonArray();
-        foreach (var node in tokensArray)
+        static JsonArray MergeAdjacentStrings(JsonArray source)
+        {
+            var merged = new JsonArray();
+            foreach (var node in source)
+            {
+                if (
+                    node is JsonValue val
+                    && val.TryGetValue<string>(out var s)
+                    && merged.Count > 0
+                    && merged[^1] is JsonValue prevVal
+                    && prevVal.TryGetValue<string>(out var prevStr)
+                )
+                {
+                    merged[^1] = JsonValue.Create(prevStr + s);
+                }
+                else
+                {
+                    merged.Add(node?.DeepClone());
+                }
+            }
+            return merged;
+        }
+
+        var sanitized = MergeAdjacentStrings(tokensArray);
+
+        // Collapse duplicated range upper-bound timer: [timer(min..max), " to ", timer(max)] -> [timer(min..max)]
+        for (var i = 0; i + 2 < sanitized.Count; i++)
         {
             if (
-                node is JsonValue val
-                && val.TryGetValue<string>(out var s)
-                && sanitized.Count > 0
-                && sanitized[^1] is JsonValue prevVal
-                && prevVal.TryGetValue<string>(out var prevStr)
+                sanitized[i] is JsonObject t1
+                && string.Equals(
+                    GetNullableString(t1["type"]),
+                    "timer",
+                    StringComparison.OrdinalIgnoreCase
+                )
+                && GetNullableDecimal(t1["amount"]) is decimal min1
+                && GetNullableDecimal(t1["maxAmount"]) is decimal max1
+                && max1 > min1
+                && sanitized[i + 1] is JsonValue midVal
+                && midVal.TryGetValue<string>(out var midStr)
+                && RangeConnectorOnlyRegex().IsMatch(midStr)
+                && sanitized[i + 2] is JsonObject t2
+                && string.Equals(
+                    GetNullableString(t2["type"]),
+                    "timer",
+                    StringComparison.OrdinalIgnoreCase
+                )
+                && GetNullableDecimal(t2["maxAmount"]) is null
+                && GetNullableDecimal(t2["amount"]) is decimal amt2
+                && amt2 > 0m
+                && ConvertTimerToSeconds(
+                    max1,
+                    NormalizeTimerUnitWord(GetNullableString(t1["unit"]) ?? "minute")
+                )
+                    == ConvertTimerToSeconds(
+                        amt2,
+                        NormalizeTimerUnitWord(GetNullableString(t2["unit"]) ?? "minute")
+                    )
             )
             {
-                sanitized[^1] = JsonValue.Create(prevStr + s);
-            }
-            else
-            {
-                sanitized.Add(node?.DeepClone());
+                sanitized.RemoveAt(i + 2);
+                sanitized.RemoveAt(i + 1);
             }
         }
+
+        sanitized = MergeAdjacentStrings(sanitized);
 
         for (var i = 0; i + 1 < sanitized.Count; i++)
         {
@@ -307,17 +364,45 @@ public static partial class StepTokenValidator
             var tokType = tokObj["type"]?.GetValue<string>()?.Trim().ToLowerInvariant();
             if (tokType == "timer")
             {
-                var unit = (GetNullableString(tokObj["unit"]) ?? "minute")
-                    .Trim()
-                    .ToLowerInvariant();
+                var unit = NormalizeTimerUnitWord(GetNullableString(tokObj["unit"]) ?? "minute");
+                var maxA = GetNullableDecimal(tokObj["maxAmount"]);
+                var minA = GetNullableDecimal(tokObj["amount"]);
+                var hasRange = maxA.HasValue && minA.HasValue && maxA.Value > minA.Value;
+
+                if (hasRange)
+                {
+                    var dupRangeMatch = DuplicateRangeMaxAfterTimerRegex().Match(nextText);
+                    if (
+                        dupRangeMatch.Success
+                        && TryParseSimpleAmount(
+                            dupRangeMatch.Groups["dupMax"].Value,
+                            out var dupVal
+                        )
+                    )
+                    {
+                        var dupUnit = NormalizeTimerUnitWord(dupRangeMatch.Groups["uword"].Value);
+                        if (
+                            ConvertTimerToSeconds(dupVal, dupUnit)
+                                == ConvertTimerToSeconds(maxA!.Value, unit)
+                            || (
+                                dupVal == maxA.Value
+                                && TimerUnitMatchesWord(
+                                    unit,
+                                    dupRangeMatch.Groups["uword"].Value.Trim().ToLowerInvariant()
+                                )
+                            )
+                        )
+                        {
+                            nextText = nextText[dupRangeMatch.Length..];
+                            sanitized[i + 1] = JsonValue.Create(nextText);
+                        }
+                    }
+                }
+
                 var match = DuplicateTimeUnitPrefixRegex().Match(nextText);
                 if (match.Success)
                 {
                     var candidateWord = match.Value.Trim().ToLowerInvariant();
-                    var hasRange =
-                        GetNullableDecimal(tokObj["maxAmount"]) is decimal maxA
-                        && GetNullableDecimal(tokObj["amount"]) is decimal minA
-                        && maxA > minA;
                     if (hasRange && candidateWord.StartsWith("to ", StringComparison.Ordinal))
                     {
                         candidateWord = candidateWord[3..].TrimStart();
@@ -358,6 +443,21 @@ public static partial class StepTokenValidator
     )
     {
         var sanitized = SanitizeRawTokens(rawTokensJson);
+        if (
+            originalInstruction.TrimEnd().EndsWith(".)", StringComparison.Ordinal)
+            && sanitized.Count > 0
+            && sanitized[^1] is JsonValue lastTextVal
+            && lastTextVal.TryGetValue<string>(out var lastTextStr)
+        )
+        {
+            var trimmedEnd = lastTextStr.TrimEnd();
+            if (trimmedEnd.EndsWith(").", StringComparison.Ordinal))
+            {
+                var trailingWs = lastTextStr[trimmedEnd.Length..];
+                sanitized[^1] = JsonValue.Create(trimmedEnd[..^2] + ".)" + trailingWs);
+            }
+        }
+
         var parsedTokens = ParseRawTokens(sanitized, out var parseErrors);
         if (!string.IsNullOrWhiteSpace(extraParseError))
         {
@@ -702,7 +802,7 @@ public static partial class StepTokenValidator
                 case "fixed":
                     result.Add(
                         new Stage4FixedToken(
-                            obj["name"]?.GetValue<string>() ?? string.Empty,
+                            GetNullableString(obj["name"]) ?? string.Empty,
                             GetNullableDecimal(obj["amount"]) ?? 0m,
                             GetNullableDecimal(obj["maxAmount"]),
                             GetNullableString(obj["unit"]),
@@ -1070,6 +1170,7 @@ public static partial class StepTokenValidator
             switch (tokens[i])
             {
                 case Stage4TextToken txt:
+                    var untokCount = 0;
                     foreach (Match untok in UntokenizedQuantityRegex().Matches(txt.Text))
                     {
                         var isRotationAngle = false;
@@ -1088,9 +1189,13 @@ public static partial class StepTokenValidator
                         if (!isRotationAngle)
                         {
                             warnings.Add(
-                                $"Untokenized amount/unit '{untok.Value}' left in plain text segment."
+                                $"Untokenized amount/unit '{untok.Value}' left in plain text segment (for parenthetical/informational yields like '(you should have 5 to 6 cups)' or '(about 2/3 cup of juice)', emit type='fixed' with name=null or the yielded noun)."
                             );
-                            break;
+                            untokCount++;
+                            if (untokCount >= 3)
+                            {
+                                break;
+                            }
                         }
                     }
                     break;
@@ -1273,6 +1378,22 @@ public static partial class StepTokenValidator
                     {
                         warnings.Add(
                             $"Preceding text ends with 'up to', so set amount={timer.MaxAmount.Value} and maxAmount=null instead of fabricated range {timer.Amount}..{timer.MaxAmount.Value}."
+                        );
+                    }
+                    if (
+                        i + 2 < tokens.Count
+                        && tokens[i + 1] is Stage4TextToken midRangeTxt
+                        && RangeConnectorOnlyRegex().IsMatch(midRangeTxt.Text)
+                        && tokens[i + 2] is Stage4TimerToken nextTimer
+                        && string.Equals(
+                            SimpleSingular(NormalizeTimerUnitWord(timer.Unit)),
+                            SimpleSingular(NormalizeTimerUnitWord(nextTimer.Unit)),
+                            StringComparison.OrdinalIgnoreCase
+                        )
+                    )
+                    {
+                        warnings.Add(
+                            $"Split single-unit time range across two timer tokens [{i}] and [{i + 2}]; combine into ONE timer token (amount={timer.Amount}, maxAmount={nextTimer.MaxAmount ?? nextTimer.Amount}, unit='{timer.Unit}') and remove '{midRangeTxt.Text}' and [{i + 2}]."
                         );
                     }
                     if (
@@ -2112,6 +2233,72 @@ public static partial class StepTokenValidator
             _ => null,
         };
         return spelledVal.HasValue && spelledVal.Value == val;
+    }
+
+    private static string NormalizeTimerUnitWord(string unit) =>
+        unit.Trim().ToLowerInvariant() switch
+        {
+            "sec" or "secs" or "second" or "seconds" => "second",
+            "min" or "mins" or "minute" or "minutes" => "minute",
+            "hr" or "hrs" or "hour" or "hours" => "hour",
+            "day" or "days" => "day",
+            _ => unit.Trim().ToLowerInvariant(),
+        };
+
+    private static bool TryParseSimpleAmount(string raw, out decimal value)
+    {
+        value = 0m;
+        var s = raw.Trim();
+        if (string.IsNullOrEmpty(s))
+        {
+            return false;
+        }
+
+        if (decimal.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture, out value))
+        {
+            return true;
+        }
+
+        var parts = s.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (
+            parts.Length == 2
+            && decimal.TryParse(
+                parts[0],
+                NumberStyles.Any,
+                CultureInfo.InvariantCulture,
+                out var whole
+            )
+            && TryParseSimpleAmount(parts[1], out var frac)
+        )
+        {
+            value = whole + frac;
+            return true;
+        }
+
+        var slash = s.IndexOf('/');
+        if (
+            slash > 0
+            && slash < s.Length - 1
+            && decimal.TryParse(
+                s[..slash],
+                NumberStyles.Any,
+                CultureInfo.InvariantCulture,
+                out var num
+            )
+            && decimal.TryParse(
+                s[(slash + 1)..],
+                NumberStyles.Any,
+                CultureInfo.InvariantCulture,
+                out var den
+            )
+            && den != 0m
+        )
+        {
+            value = num / den;
+            return true;
+        }
+
+        return false;
     }
 
     private static string? GetTimerUnitPattern(string? unit) =>

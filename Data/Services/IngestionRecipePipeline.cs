@@ -51,7 +51,7 @@ public sealed partial class IngestionRecipePipeline(
 
         var stage1 = await RunStage1Async(request.Config, request.SourceText, cancellationToken);
 
-        var workIngredients = FlattenIngredients(stage1);
+        var workIngredients = FlattenIngredients(stage1, request.SourceText);
         var workSteps = FlattenSteps(stage1);
         var incompatibleAlts = FindAllIncompatibleAlts(workIngredients);
 
@@ -431,7 +431,7 @@ public sealed partial class IngestionRecipePipeline(
                     sourceText,
                     parsed!
                 );
-                var ingredientFeedback = ValidateStage1IngredientsFeedback(parsed!);
+                var ingredientFeedback = ValidateStage1IngredientsFeedback(parsed!, sourceText);
                 var combinedFeedback = string.Join(
                     " ",
                     new[] { missingStepsFeedback, ingredientFeedback }.Where(f =>
@@ -1767,7 +1767,10 @@ public sealed partial class IngestionRecipePipeline(
         );
     }
 
-    private static List<WorkIngredient> FlattenIngredients(Stage1RecipeDto stage1)
+    private static List<WorkIngredient> FlattenIngredients(
+        Stage1RecipeDto stage1,
+        string sourceText
+    )
     {
         var list = new List<WorkIngredient>();
         var idx = 0;
@@ -1777,6 +1780,7 @@ public sealed partial class IngestionRecipePipeline(
             foreach (var ing in section.Ingredients ?? [])
             {
                 var ingName = ing.Name?.Trim() ?? string.Empty;
+                var ingQty = ing.Quantity;
                 var ingUnit = ing.Unit;
                 var (uKind, uCustom) = RecipeUnitAndSectionHelpers.NormalizeUnit(ingUnit);
                 if (
@@ -1787,13 +1791,38 @@ public sealed partial class IngestionRecipePipeline(
                     ingUnit = null;
                 }
 
+                if (
+                    (
+                        string.Equals(ingUnit?.Trim(), "recipe", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(
+                            ingUnit?.Trim(),
+                            "batch",
+                            StringComparison.OrdinalIgnoreCase
+                        )
+                    ) && !HasSourceRecipeCueForIngredient(sourceText, ingName)
+                )
+                {
+                    ingUnit = null;
+                }
+
+                if (
+                    ingQty == 1m
+                    && ing.MaxQuantity is null
+                    && string.IsNullOrWhiteSpace(ingUnit)
+                    && (ing.AlternateMeasurements is null || ing.AlternateMeasurements.Count == 0)
+                    && UnquantifiedSeasoningOrSprayRegex().IsMatch(ingName)
+                )
+                {
+                    ingQty = null;
+                }
+
                 list.Add(
                     new WorkIngredient
                     {
                         Index = idx++,
                         SectionName = secName,
                         Name = ingName,
-                        Quantity = ing.Quantity,
+                        Quantity = ingQty,
                         MaxQuantity = ing.MaxQuantity,
                         Unit = ingUnit,
                         PrepNote = ing.PrepNote,
@@ -2059,52 +2088,55 @@ public sealed partial class IngestionRecipePipeline(
             }
         }
 
-        if (numberedSteps.Count < 3)
+        if (numberedSteps.Count == 0)
         {
             return null;
         }
 
-        var extractedLower = StepWordNonAlnumRegex()
-            .Replace(
-                string.Join(" ", (dto.Sections ?? []).SelectMany(s => s.Instructions ?? []))
-                    .ToLowerInvariant(),
-                " "
-            );
-        var extractedTokens = extractedLower
-            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
-            .ToHashSet(StringComparer.Ordinal);
-
-        var omitted = new List<string>();
-        foreach (var (num, text) in numberedSteps)
+        if (numberedSteps.Count >= 3)
         {
-            if (text.Length < 30)
-            {
-                continue;
-            }
-
-            var sigWords = StepWordNonAlnumRegex()
-                .Replace(text.ToLowerInvariant(), " ")
+            var extractedLower = StepWordNonAlnumRegex()
+                .Replace(
+                    string.Join(" ", (dto.Sections ?? []).SelectMany(s => s.Instructions ?? []))
+                        .ToLowerInvariant(),
+                    " "
+                );
+            var extractedTokens = extractedLower
                 .Split(' ', StringSplitOptions.RemoveEmptyEntries)
-                .Where(w => w.Length >= 5)
-                .Distinct(StringComparer.Ordinal)
-                .ToList();
+                .ToHashSet(StringComparer.Ordinal);
 
-            if (sigWords.Count < 3)
+            var omitted = new List<string>();
+            foreach (var (num, text) in numberedSteps)
             {
-                continue;
+                if (text.Length < 30)
+                {
+                    continue;
+                }
+
+                var sigWords = StepWordNonAlnumRegex()
+                    .Replace(text.ToLowerInvariant(), " ")
+                    .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                    .Where(w => w.Length >= 5)
+                    .Distinct(StringComparer.Ordinal)
+                    .ToList();
+
+                if (sigWords.Count < 3)
+                {
+                    continue;
+                }
+
+                var hits = sigWords.Count(w => extractedTokens.Contains(w));
+                if (hits * 10 < sigWords.Count * 7)
+                {
+                    var snippet = text.Length > 60 ? text[..60] + "..." : text;
+                    omitted.Add($"Step {num} ('{snippet}')");
+                }
             }
 
-            var hits = sigWords.Count(w => extractedTokens.Contains(w));
-            if (hits * 10 < sigWords.Count * 7)
+            if (omitted.Count > 0)
             {
-                var snippet = text.Length > 60 ? text[..60] + "..." : text;
-                omitted.Add($"Step {num} ('{snippet}')");
+                return $"You omitted source instruction step(s): {string.Join("; ", omitted.Take(3))}. Extract EVERY numbered instruction step 1-to-1 verbatim without skipping any step.";
             }
-        }
-
-        if (omitted.Count > 0)
-        {
-            return $"You omitted source instruction step(s): {string.Join("; ", omitted.Take(3))}. Extract EVERY numbered instruction step 1-to-1 verbatim without skipping any step.";
         }
 
         var extractedInstructions = (dto.Sections ?? [])
@@ -2147,7 +2179,7 @@ public sealed partial class IngestionRecipePipeline(
         return null;
     }
 
-    private static string? ValidateStage1IngredientsFeedback(Stage1RecipeDto dto)
+    private static string? ValidateStage1IngredientsFeedback(Stage1RecipeDto dto, string sourceText)
     {
         var issues = new List<string>();
         foreach (var sec in dto.Sections ?? [])
@@ -2223,6 +2255,39 @@ public sealed partial class IngestionRecipePipeline(
                 }
 
                 if (
+                    (
+                        string.Equals(
+                            ing.Unit?.Trim(),
+                            "recipe",
+                            StringComparison.OrdinalIgnoreCase
+                        )
+                        || string.Equals(
+                            ing.Unit?.Trim(),
+                            "batch",
+                            StringComparison.OrdinalIgnoreCase
+                        )
+                    ) && !HasSourceRecipeCueForIngredient(sourceText, ingName)
+                )
+                {
+                    issues.Add(
+                        $"'{ingName}' set unit='{ing.Unit}', but the source ingredient line does not reference a sub-recipe; set unit=null for whole items like roasts."
+                    );
+                }
+
+                if (
+                    ing.Quantity == 1m
+                    && ing.MaxQuantity is null
+                    && string.IsNullOrWhiteSpace(ing.Unit)
+                    && (ing.AlternateMeasurements is null || ing.AlternateMeasurements.Count == 0)
+                    && UnquantifiedSeasoningOrSprayRegex().IsMatch(ingName)
+                )
+                {
+                    issues.Add(
+                        $"'{ingName}' is an unquantified seasoning/condiment line with no printed number; set quantity=null instead of 1."
+                    );
+                }
+
+                if (
                     ing.AlternateMeasurements?.Any(a =>
                         !string.IsNullOrWhiteSpace(a.Unit)
                         && DimensionOrTempUnits.Contains(a.Unit.Trim())
@@ -2253,6 +2318,69 @@ public sealed partial class IngestionRecipePipeline(
             : null;
     }
 
+    private static bool HasSourceRecipeCueForIngredient(string sourceText, string ingName)
+    {
+        var lines = sourceText.Replace("\r\n", "\n").Split('\n');
+        var inIngredients = false;
+        var foundIngredientsHeader = false;
+        var ingLines = new List<string>();
+        foreach (var raw in lines)
+        {
+            var trimmed = raw.Trim();
+            if (!inIngredients)
+            {
+                if (IngredientsHeaderRegex().IsMatch(trimmed))
+                {
+                    inIngredients = true;
+                    foundIngredientsHeader = true;
+                }
+                continue;
+            }
+
+            if (
+                InstructionsHeaderRegex().IsMatch(trimmed)
+                || NonInstructionSectionHeaderRegex().IsMatch(trimmed)
+            )
+            {
+                break;
+            }
+
+            if (!string.IsNullOrWhiteSpace(trimmed))
+            {
+                ingLines.Add(trimmed);
+            }
+        }
+
+        if (!foundIngredientsHeader)
+        {
+            return RecipeCueRegex().IsMatch(sourceText);
+        }
+
+        if (ingLines.Count == 0)
+        {
+            return false;
+        }
+
+        var ingWords = StepWordNonAlnumRegex()
+            .Replace(ingName.ToLowerInvariant(), " ")
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Where(w => w.Length >= 4)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        if (ingWords.Count == 0)
+        {
+            return ingLines.Any(line =>
+                RecipeCueRegex().IsMatch(line) || PageReferenceCueRegex().IsMatch(line)
+            );
+        }
+
+        return ingLines.Any(line =>
+            (RecipeCueRegex().IsMatch(line) || PageReferenceCueRegex().IsMatch(line))
+            && ingWords.Any(w => line.Contains(w, StringComparison.OrdinalIgnoreCase))
+        );
+    }
+
     private static readonly HashSet<string> DimensionOrTempUnits = new(
         StringComparer.OrdinalIgnoreCase
     )
@@ -2275,6 +2403,12 @@ public sealed partial class IngestionRecipePipeline(
         "fahrenheit",
         "celsius",
     };
+
+    [GeneratedRegex(
+        @"^Ingredients?\s*:\s*$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex IngredientsHeaderRegex();
 
     [GeneratedRegex(
         @"^(?:Instructions?|Directions?|Method)\s*:\s*$",
@@ -2323,6 +2457,18 @@ public sealed partial class IngestionRecipePipeline(
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex RecipeCueRegex();
+
+    [GeneratedRegex(
+        @"\b(?:this|facing)\s+page\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex PageReferenceCueRegex();
+
+    [GeneratedRegex(
+        @"^(?:(?:table|kosher|flake|flaky|sea|coarse|fine)\s+)?salt(?:\s+and\s+(?:(?:ground|black|freshly\s+ground)\s+)?pepper)?$|^(?:(?:freshly\s+)?(?:ground|cracked)\s+)?(?:black\s+|white\s+)?pepper$|^hot\s+sauce$|^(?:vegetable\s+|nonstick\s+|olive\s+)?(?:oil|cooking)\s+spray$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex UnquantifiedSeasoningOrSprayRegex();
 
     [GeneratedRegex(
         @"\b(?:ground|cracked|coarse(?:ly)?|freshly\s+ground|black|white|cayenne|red\s+pepper)\b",
