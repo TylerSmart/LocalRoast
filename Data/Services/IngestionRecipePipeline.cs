@@ -79,31 +79,12 @@ public sealed partial class IngestionRecipePipeline(
                 "Stage 2/5: Condensing recipe summary..."
             );
 
-            var stage2Prompt = IngestionPromptLoader.LoadShortenDescriptionPrompt(
-                DescriptionMaxLength
+            description = await RunStage2ShortenDescriptionAsync(
+                request.Config,
+                title,
+                description,
+                cancellationToken
             );
-            var stage2Res =
-                await llmClient.ExecuteStructuredStageAsync<Stage2ShortenedDescriptionDto>(
-                    request.Config,
-                    stageName: "stage2_shorten_description",
-                    messages: [new("system", stage2Prompt), new("user", description)],
-                    jsonSchema: MultiStageSchemas.Stage2ShortenDescriptionSchema,
-                    overrideThinking: false,
-                    maxTokens: 1024,
-                    cancellationToken: cancellationToken
-                );
-
-            if (
-                stage2Res.Parsed is not null
-                && !string.IsNullOrWhiteSpace(stage2Res.Parsed.Description)
-            )
-            {
-                var shortened = stage2Res.Parsed.Description.Trim();
-                if (shortened.Length <= description.Length || shortened.Length <= 280)
-                {
-                    description = shortened;
-                }
-            }
         }
 
         // ============================================================
@@ -194,6 +175,7 @@ public sealed partial class IngestionRecipePipeline(
 
             var polishRes = await RunStage5PolishAsync(
                 polishConfig,
+                request.SourceText,
                 title,
                 description,
                 servings,
@@ -261,16 +243,77 @@ public sealed partial class IngestionRecipePipeline(
                     }
 
                     var target = workIngredients[patch.Index];
-                    if (!string.IsNullOrWhiteSpace(patch.Name))
+                    var proposedName = !string.IsNullOrWhiteSpace(patch.Name)
+                        ? patch.Name.Trim()
+                        : target.Name;
+                    if (
+                        !string.IsNullOrWhiteSpace(patch.Name)
+                        && OrAlternativeRegex().IsMatch(patch.Name)
+                    )
                     {
-                        target.Name = patch.Name.Trim();
+                        logger?.LogInformation(
+                            "Stage 5b guardrail rejected unsplit 'or' alternative in ingredientPatch [{Index}] name='{Name}'.",
+                            patch.Index,
+                            patch.Name
+                        );
+                        proposedName = target.Name;
                     }
-                    if (patch.Quantity.HasValue || patch.Unit is not null)
+
+                    var proposedQty = patch.Quantity ?? target.Quantity;
+                    var proposedMax = patch.MaxQuantity ?? target.MaxQuantity;
+                    if (
+                        patch.MaxQuantity.HasValue
+                        && (!proposedQty.HasValue || proposedMax!.Value < proposedQty.Value)
+                    )
                     {
-                        target.Quantity = patch.Quantity;
-                        target.MaxQuantity = patch.MaxQuantity;
-                        target.Unit = patch.Unit;
+                        logger?.LogInformation(
+                            "Stage 5b guardrail rejected invalid range in ingredientPatch [{Index}] ({Qty}..{Max}).",
+                            patch.Index,
+                            proposedQty,
+                            proposedMax
+                        );
+                        proposedMax = target.MaxQuantity;
                     }
+
+                    var proposedUnit = patch.Unit ?? target.Unit;
+                    var proposedAlt = patch.AlternateMeasurements ?? target.AlternateMeasurements;
+                    if (
+                        patch.AlternateMeasurements?.Any(a =>
+                            !string.IsNullOrWhiteSpace(a.Unit)
+                            && DimensionOrTempUnits.Contains(a.Unit.Trim())
+                        ) == true
+                    )
+                    {
+                        logger?.LogInformation(
+                            "Stage 5b guardrail rejected dimension/temperature unit in alternateMeasurements for ingredientPatch [{Index}].",
+                            patch.Index
+                        );
+                        proposedAlt = target.AlternateMeasurements;
+                    }
+                    else if (
+                        StepTokenValidator.TryFindIncompatibleAlternateMeasurement(
+                            proposedQty,
+                            proposedMax,
+                            proposedUnit,
+                            proposedAlt,
+                            out var incompatReason
+                        )
+                    )
+                    {
+                        logger?.LogInformation(
+                            "Stage 5b guardrail rejected non-equivalent alternateMeasurements in ingredientPatch [{Index}]: {Reason}",
+                            patch.Index,
+                            incompatReason
+                        );
+                        proposedAlt = target.AlternateMeasurements;
+                    }
+
+                    target.Name = proposedName;
+                    target.Quantity = proposedQty;
+                    target.MaxQuantity = proposedMax;
+                    target.Unit = proposedUnit;
+                    target.AlternateMeasurements = proposedAlt;
+
                     if (patch.PrepNote is not null)
                     {
                         target.PrepNote = string.IsNullOrWhiteSpace(patch.PrepNote)
@@ -280,10 +323,6 @@ public sealed partial class IngestionRecipePipeline(
                     if (patch.IsOptional.HasValue)
                     {
                         target.IsOptional = patch.IsOptional.Value;
-                    }
-                    if (patch.AlternateMeasurements is not null)
-                    {
-                        target.AlternateMeasurements = patch.AlternateMeasurements;
                     }
                 }
 
@@ -363,7 +402,7 @@ public sealed partial class IngestionRecipePipeline(
         };
 
         string? lastError = null;
-        for (var attempt = 1; attempt <= 2; attempt++)
+        for (var attempt = 1; attempt <= 3; attempt++)
         {
             var res = await llmClient.ExecuteStructuredStageAsync<Stage1RecipeDto>(
                 config,
@@ -379,26 +418,49 @@ public sealed partial class IngestionRecipePipeline(
             var ingCount = parsed?.Sections?.Sum(s => s.Ingredients?.Count ?? 0) ?? 0;
             var stepCount = parsed?.Sections?.Sum(s => s.Instructions?.Count ?? 0) ?? 0;
 
-            if (
+            var hasMinimumStructure =
                 string.IsNullOrWhiteSpace(res.Error)
                 && parsed is not null
                 && !string.IsNullOrWhiteSpace(parsed.Title)
                 && ingCount > 0
-                && stepCount > 0
-            )
-            {
-                return parsed;
-            }
+                && stepCount > 0;
 
-            lastError =
-                res.Error
-                ?? (
-                    parsed is null
-                        ? "Stage 1 returned null recipe payload."
-                        : $"Stage 1 returned incomplete recipe (title='{parsed.Title}', ingredients={ingCount}, steps={stepCount})."
+            if (hasMinimumStructure)
+            {
+                var missingStepsFeedback = FindMissingSourceInstructionFeedback(
+                    sourceText,
+                    parsed!
+                );
+                var ingredientFeedback = ValidateStage1IngredientsFeedback(parsed!);
+                var combinedFeedback = string.Join(
+                    " ",
+                    new[] { missingStepsFeedback, ingredientFeedback }.Where(f =>
+                        !string.IsNullOrWhiteSpace(f)
+                    )
                 );
 
-            if (attempt < 2)
+                if (string.IsNullOrWhiteSpace(combinedFeedback) || attempt == 3)
+                {
+                    return parsed!;
+                }
+
+                lastError = combinedFeedback;
+            }
+            else
+            {
+                lastError =
+                    res.Error
+                    ?? (
+                        parsed is null ? "Stage 1 returned null recipe payload."
+                        : ingCount == 0 && stepCount == 0
+                            ? "Stage 1 returned ZERO ingredients and ZERO instructions."
+                        : stepCount == 0
+                            ? "Stage 1 returned ZERO instructions (preserve EVERY section's ingredients AND extract ALL instruction steps)."
+                        : $"Stage 1 returned incomplete recipe (title='{parsed.Title}', ingredients={ingCount}, steps={stepCount})."
+                    );
+            }
+
+            if (attempt < 3)
             {
                 logger?.LogWarning(
                     "Stage 1 attempt {Attempt} incomplete or invalid ({Error}); retrying.",
@@ -414,7 +476,9 @@ public sealed partial class IngestionRecipePipeline(
                 messages.Add(
                     new(
                         "user",
-                        $"The previous extraction failed validation: {lastError}. Please return a complete valid JSON recipe with title, sections containing all ingredients and all instruction steps, timing, and tags."
+                        hasMinimumStructure
+                            ? lastError
+                            : $"The previous extraction failed validation: {lastError}. Please return a complete valid JSON recipe with title, sections containing all ingredients and all instruction steps, timing, and tags."
                     )
                 );
             }
@@ -423,6 +487,109 @@ public sealed partial class IngestionRecipePipeline(
         throw new InvalidOperationException(
             $"Multi-stage recipe extraction failed at Stage 1: {lastError}"
         );
+    }
+
+    private async Task<string> RunStage2ShortenDescriptionAsync(
+        EffectiveLlmConnectionConfig config,
+        string title,
+        string originalDescription,
+        CancellationToken cancellationToken
+    )
+    {
+        var targetLength = Math.Max(100, (int)Math.Floor(DescriptionMaxLength * 0.75));
+        var stage2Prompt = IngestionPromptLoader.LoadShortenDescriptionPrompt(DescriptionMaxLength);
+        var stage2User = JsonSerializer.Serialize(
+            new
+            {
+                title,
+                maxLength = DescriptionMaxLength,
+                targetLength,
+                currentLength = originalDescription.Length,
+                description = originalDescription,
+            }
+        );
+
+        var messages = new List<LlmStageChatMessage>
+        {
+            new("system", stage2Prompt),
+            new("user", stage2User),
+        };
+
+        string? bestShortened = null;
+        for (var attempt = 1; attempt <= 3; attempt++)
+        {
+            var stage2Res =
+                await llmClient.ExecuteStructuredStageAsync<Stage2ShortenedDescriptionDto>(
+                    config,
+                    stageName: "stage2_shorten_description",
+                    messages: messages,
+                    jsonSchema: MultiStageSchemas.Stage2ShortenDescriptionSchema,
+                    overrideThinking: false,
+                    maxTokens: 1024,
+                    cancellationToken: cancellationToken
+                );
+
+            if (stage2Res.Parsed is null || string.IsNullOrWhiteSpace(stage2Res.Parsed.Description))
+            {
+                if (attempt < 3)
+                {
+                    messages.Add(
+                        new(
+                            "assistant",
+                            string.IsNullOrWhiteSpace(stage2Res.RawContent)
+                                ? "{}"
+                                : stage2Res.RawContent
+                        )
+                    );
+                    messages.Add(
+                        new(
+                            "user",
+                            $"Return valid JSON with a concise non-empty description strictly <= {DescriptionMaxLength} characters."
+                        )
+                    );
+                }
+                continue;
+            }
+
+            var candidate = stage2Res.Parsed.Description.Trim();
+            if (bestShortened is null || candidate.Length < bestShortened.Length)
+            {
+                bestShortened = candidate;
+            }
+
+            if (candidate.Length <= DescriptionMaxLength)
+            {
+                return candidate;
+            }
+
+            if (attempt < 3)
+            {
+                messages.Add(
+                    new(
+                        "assistant",
+                        string.IsNullOrWhiteSpace(stage2Res.RawContent)
+                            ? "{}"
+                            : stage2Res.RawContent
+                    )
+                );
+                messages.Add(
+                    new(
+                        "user",
+                        $"Your shortened description is {candidate.Length} characters, which still exceeds the {DescriptionMaxLength}-character limit by {candidate.Length - DescriptionMaxLength} characters. Trim it down to roughly {targetLength} characters (strictly <= {DescriptionMaxLength})."
+                    )
+                );
+            }
+        }
+
+        if (
+            bestShortened is not null
+            && (bestShortened.Length <= originalDescription.Length || bestShortened.Length <= 280)
+        )
+        {
+            return bestShortened;
+        }
+
+        return originalDescription;
     }
 
     private async Task<(
@@ -875,6 +1042,7 @@ public sealed partial class IngestionRecipePipeline(
 
     private async Task<Stage5TargetedPolishResponseDto?> RunStage5PolishAsync(
         EffectiveLlmConnectionConfig polishConfig,
+        string sourceText,
         string title,
         string? description,
         decimal? servings,
@@ -895,7 +1063,8 @@ public sealed partial class IngestionRecipePipeline(
         var payloadJson = JsonSerializer.Serialize(
             new
             {
-                recipe = new
+                originalSourceText = sourceText,
+                currentRecipe = new
                 {
                     title,
                     description,
@@ -906,20 +1075,24 @@ public sealed partial class IngestionRecipePipeline(
                     ingredients = ingredients.Select(i => new
                     {
                         index = i.Index,
+                        section = i.SectionName,
                         name = i.Name,
                         quantity = i.Quantity,
                         maxQuantity = i.MaxQuantity,
                         unit = i.Unit,
                         prepNote = i.PrepNote,
                         isOptional = i.IsOptional,
+                        replacements = i.Replacements,
                         alternateMeasurements = i.AlternateMeasurements,
                     }),
                     steps = steps.Select(s => new
                     {
                         stepNumber = s.StepNumber,
+                        sectionName = s.SectionName,
                         originalInstruction = s.OriginalInstruction,
-                        tokens = s.SanitizedTokensJson,
+                        renderedOriginal = StepTokenValidator.RenderForValidation(s.ParsedTokens),
                         validationWarnings = s.ValidationWarnings,
+                        tokens = s.SanitizedTokensJson,
                     }),
                 },
                 flaggedIssues = new
@@ -1772,6 +1945,217 @@ public sealed partial class IngestionRecipePipeline(
         Guid? MatchedRecipeId,
         string? MatchedRecipeTitle
     );
+
+    private static string? FindMissingSourceInstructionFeedback(
+        string normalizedText,
+        Stage1RecipeDto dto
+    )
+    {
+        var lines = normalizedText.Replace("\r\n", "\n").Split('\n');
+        var inInstructions = false;
+        var numberedSteps = new List<(int Num, string Text)>();
+
+        foreach (var raw in lines)
+        {
+            var trimmed = raw.Trim();
+            if (!inInstructions)
+            {
+                if (InstructionsHeaderRegex().IsMatch(trimmed))
+                {
+                    inInstructions = true;
+                }
+                continue;
+            }
+
+            if (NonInstructionSectionHeaderRegex().IsMatch(trimmed))
+            {
+                break;
+            }
+
+            var match = NumberedInstructionLineRegex().Match(trimmed);
+            if (match.Success && int.TryParse(match.Groups[1].Value, out var num))
+            {
+                var expectedNext = numberedSteps.Count == 0 ? 1 : numberedSteps[^1].Num + 1;
+                if (num == expectedNext)
+                {
+                    numberedSteps.Add((num, match.Groups[2].Value.Trim()));
+                }
+            }
+        }
+
+        if (numberedSteps.Count < 3)
+        {
+            return null;
+        }
+
+        var extractedLower = StepWordNonAlnumRegex()
+            .Replace(
+                string.Join(" ", (dto.Sections ?? []).SelectMany(s => s.Instructions ?? []))
+                    .ToLowerInvariant(),
+                " "
+            );
+        var extractedTokens = extractedLower
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .ToHashSet(StringComparer.Ordinal);
+
+        var omitted = new List<string>();
+        foreach (var (num, text) in numberedSteps)
+        {
+            if (text.Length < 30)
+            {
+                continue;
+            }
+
+            var sigWords = StepWordNonAlnumRegex()
+                .Replace(text.ToLowerInvariant(), " ")
+                .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                .Where(w => w.Length >= 5)
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+
+            if (sigWords.Count < 3)
+            {
+                continue;
+            }
+
+            var hits = sigWords.Count(w => extractedTokens.Contains(w));
+            if (hits * 10 < sigWords.Count * 7)
+            {
+                var snippet = text.Length > 60 ? text[..60] + "..." : text;
+                omitted.Add($"Step {num} ('{snippet}')");
+            }
+        }
+
+        if (omitted.Count > 0)
+        {
+            return $"You omitted source instruction step(s): {string.Join("; ", omitted.Take(3))}. Extract EVERY numbered instruction step 1-to-1 verbatim without skipping any step.";
+        }
+
+        var extractedStepCount = (dto.Sections ?? []).Sum(s => s.Instructions?.Count ?? 0);
+        if (extractedStepCount < numberedSteps.Count)
+        {
+            return $"Source has {numberedSteps.Count} numbered instruction steps, but you extracted {extractedStepCount}. Map EVERY source numbered step 1-to-1 into sections[].instructions without skipping or merging steps.";
+        }
+
+        return null;
+    }
+
+    private static string? ValidateStage1IngredientsFeedback(Stage1RecipeDto dto)
+    {
+        var issues = new List<string>();
+        foreach (var sec in dto.Sections ?? [])
+        {
+            var seenInSection =
+                new HashSet<(string Name, decimal? Qty, decimal? Max, string Unit)>();
+            foreach (var ing in sec.Ingredients ?? [])
+            {
+                var ingName = ing.Name?.Trim() ?? string.Empty;
+                var dupKey = (
+                    ingName.ToLowerInvariant(),
+                    ing.Quantity,
+                    ing.MaxQuantity,
+                    (ing.Unit ?? string.Empty).Trim().ToLowerInvariant()
+                );
+                if (!seenInSection.Add(dupKey))
+                {
+                    issues.Add(
+                        $"Duplicate '{ingName}' row (quantity={ing.Quantity} {ing.Unit}) in same section; keep a single-measurement line with multi-part prep as ONE ingredient row."
+                    );
+                }
+
+                if (
+                    ing.MaxQuantity.HasValue
+                    && (!ing.Quantity.HasValue || ing.MaxQuantity.Value < ing.Quantity.Value)
+                )
+                {
+                    issues.Add(
+                        $"'{ingName}' has invalid range quantity={ing.Quantity}..maxQuantity={ing.MaxQuantity} (put parenthetical weight/stick conversions in alternateMeasurements and leave maxQuantity=null)."
+                    );
+                }
+
+                if (OrAlternativeRegex().IsMatch(ingName))
+                {
+                    issues.Add(
+                        ing.Replacements is { Count: > 0 }
+                            ? $"'{ingName}' has replacements populated; strip ' or ...' so name holds ONLY option A."
+                            : $"'{ingName}' contains an 'A or B' alternative; put ONLY option A in name and move option B into replacements[]."
+                    );
+                }
+
+                if (
+                    ing.AlternateMeasurements?.Any(a =>
+                        !string.IsNullOrWhiteSpace(a.Unit)
+                        && DimensionOrTempUnits.Contains(a.Unit.Trim())
+                    ) == true
+                )
+                {
+                    issues.Add(
+                        $"'{ingName}' placed a physical dimension/temperature unit in alternateMeasurements; put cut/width dimensions in prepNote instead."
+                    );
+                }
+                else if (
+                    StepTokenValidator.TryFindIncompatibleAlternateMeasurement(
+                        ing.Quantity,
+                        ing.MaxQuantity,
+                        ing.Unit,
+                        ing.AlternateMeasurements,
+                        out var incompatReason
+                    )
+                )
+                {
+                    issues.Add($"'{ingName}': {incompatReason}");
+                }
+            }
+        }
+
+        return issues.Count > 0
+            ? $"Fix these ingredient extraction errors cleanly: {string.Join(" | ", issues.Take(4))}"
+            : null;
+    }
+
+    private static readonly HashSet<string> DimensionOrTempUnits = new(
+        StringComparer.OrdinalIgnoreCase
+    )
+    {
+        "inch",
+        "inches",
+        "foot",
+        "feet",
+        "yard",
+        "yards",
+        "mm",
+        "millimeter",
+        "millimeters",
+        "cm",
+        "centimeter",
+        "centimeters",
+        "m",
+        "meter",
+        "meters",
+        "fahrenheit",
+        "celsius",
+    };
+
+    [GeneratedRegex(
+        @"^(?:Instructions?|Directions?|Method)\s*:\s*$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex InstructionsHeaderRegex();
+
+    [GeneratedRegex(
+        @"^(?:Variation|Variations|Nutrition|Tips?|Notes?)\s*:\s*$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex NonInstructionSectionHeaderRegex();
+
+    [GeneratedRegex(@"^(\d+)\.\s+(.+)$", RegexOptions.CultureInvariant)]
+    private static partial Regex NumberedInstructionLineRegex();
+
+    [GeneratedRegex(@"\s+or\s+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex OrAlternativeRegex();
+
+    [GeneratedRegex(@"[^a-z0-9]+", RegexOptions.CultureInvariant)]
+    private static partial Regex StepWordNonAlnumRegex();
 
     [GeneratedRegex(@"[.!?](?:\s+|$)", RegexOptions.CultureInvariant)]
     private static partial Regex SentenceEndRegex();
