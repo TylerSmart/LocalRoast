@@ -1178,7 +1178,11 @@ public sealed partial class IngestionRecipePipeline(
             }
 
             RecipeMeasurement? altMeasurement = null;
-            if (!incompatibleSet.Contains(i) && ing.AlternateMeasurements is { Count: > 0 })
+            if (
+                !incompatibleSet.Contains(i)
+                && cleanQty is > 0m
+                && ing.AlternateMeasurements is { Count: > 0 }
+            )
             {
                 var firstAlt = ing.AlternateMeasurements[0];
                 if (firstAlt.Quantity is > 0m)
@@ -1202,6 +1206,10 @@ public sealed partial class IngestionRecipePipeline(
                                 ? IngestionMetadataAndTagHelper.CleanOptionalText(altCustom, 50)
                                 : null
                         );
+                        if (cleanUnit is null)
+                        {
+                            cleanUnit = MeasurementUnit.Whole;
+                        }
                     }
                 }
             }
@@ -2079,6 +2087,16 @@ public sealed partial class IngestionRecipePipeline(
                         ing.Replacements is { Count: > 0 }
                             ? $"'{ingName}' has replacements populated; strip ' or ...' so name holds ONLY option A."
                             : $"'{ingName}' contains an 'A or B' alternative; put ONLY option A in name and move option B into replacements[]."
+                    );
+                }
+
+                if (
+                    ingName.Equals("juice", StringComparison.OrdinalIgnoreCase)
+                    || ingName.Equals("zest", StringComparison.OrdinalIgnoreCase)
+                )
+                {
+                    issues.Add(
+                        $"'{ingName}' is missing its source fruit/ingredient qualifier; include the specific name (e.g., 'lime juice', 'lemon juice', 'lemon zest')."
                     );
                 }
 

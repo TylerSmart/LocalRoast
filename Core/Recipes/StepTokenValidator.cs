@@ -1137,6 +1137,18 @@ public static partial class StepTokenValidator
                     }
                     break;
                 case Stage4DimensionToken dim:
+                    if (
+                        !Regex.IsMatch(
+                            originalInstruction,
+                            $@"(?:^|[^a-zA-Z]){GetDimensionUnitPattern(dim.Unit)}",
+                            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+                        )
+                    )
+                    {
+                        warnings.Add(
+                            $"Dimension token [{i}] used length unit '{dim.Unit}', which does not appear in original instruction (for volume/weight container capacities like '1-quart pitcher' or '12-cup Bundt pan', use 'fixed' instead of 'dimension')."
+                        );
+                    }
                     if (dim.MaxAmount.HasValue && dim.MaxAmount.Value < dim.Amount)
                     {
                         warnings.Add(
@@ -1267,12 +1279,32 @@ public static partial class StepTokenValidator
     )
     {
         reason = null;
-        if (
-            !primaryQty.HasValue
-            || primaryQty.Value <= 0m
-            || alternates is not { Count: > 0 }
-            || !TryGetVolumeOrWeightFactor(primaryUnit, out var primaryDim, out var primaryFactor)
-        )
+        if (!primaryQty.HasValue || primaryQty.Value <= 0m || alternates is not { Count: > 0 })
+        {
+            return false;
+        }
+
+        foreach (var alt in alternates)
+        {
+            var rawAltUnit = alt.Unit?.Trim();
+            if (
+                !string.IsNullOrWhiteSpace(rawAltUnit)
+                && (
+                    Regex.IsMatch(
+                        rawAltUnit,
+                        @"\bper\s+",
+                        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+                    ) || rawAltUnit.Equals("each", StringComparison.OrdinalIgnoreCase)
+                )
+            )
+            {
+                reason =
+                    $"Alternate measurement unit '{rawAltUnit}' is a per-unit rate or size grade, not a total equivalent measurement; put size/count grades like '(26 to 30 per pound)' in prepNote and set alternateMeasurements=[].";
+                return true;
+            }
+        }
+
+        if (!TryGetVolumeOrWeightFactor(primaryUnit, out var primaryDim, out var primaryFactor))
         {
             return false;
         }

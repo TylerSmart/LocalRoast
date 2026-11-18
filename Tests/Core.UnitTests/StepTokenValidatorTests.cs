@@ -161,4 +161,62 @@ public sealed class StepTokenValidatorTests
         );
         Assert.IsFalse(compatible);
     }
+
+    [TestMethod]
+    public void ValidateStepTokens_DimensionWithUnitAbsentFromSource_EmitsWarning()
+    {
+        var rawTokens = new JsonArray
+        {
+            "Strain juice mixture into ",
+            new JsonObject
+            {
+                ["type"] = "dimension",
+                ["amount"] = 1,
+                ["maxAmount"] = null,
+                ["unit"] = "yard",
+                ["hyphenated"] = true,
+            },
+            " pitcher.",
+        };
+
+        var result = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 1,
+            sectionName: null,
+            originalInstruction: "Strain juice mixture into 1-quart pitcher.",
+            rawTokensJson: rawTokens,
+            ingredientCount: 0
+        );
+
+        Assert.IsTrue(
+            result.ValidationWarnings.Any(w =>
+                w.Contains("yard", StringComparison.OrdinalIgnoreCase)
+                && w.Contains("does not appear", StringComparison.OrdinalIgnoreCase)
+            ),
+            string.Join(" | ", result.ValidationWarnings)
+        );
+    }
+
+    [TestMethod]
+    public void TryFindIncompatibleAlternateMeasurement_RateUnitPerPound_ReturnsTrue()
+    {
+        var invalidWithPound = StepTokenValidator.TryFindIncompatibleAlternateMeasurement(
+            primaryQty: 1.25m,
+            primaryMaxQty: null,
+            primaryUnit: "pound",
+            alternates: [new Stage1AlternateMeasurementDto(26m, "per pound")],
+            out var reason1
+        );
+        Assert.IsTrue(invalidWithPound);
+        StringAssert.Contains(reason1, "per-unit rate");
+
+        var invalidCountOnly = StepTokenValidator.TryFindIncompatibleAlternateMeasurement(
+            primaryQty: 18m,
+            primaryMaxQty: null,
+            primaryUnit: null,
+            alternates: [new Stage1AlternateMeasurementDto(31m, "per pound")],
+            out var reason2
+        );
+        Assert.IsTrue(invalidCountOnly);
+        StringAssert.Contains(reason2, "per-unit rate");
+    }
 }
