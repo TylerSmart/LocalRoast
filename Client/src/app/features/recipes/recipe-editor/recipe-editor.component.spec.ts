@@ -427,4 +427,83 @@ describe('RecipeEditorComponent', () => {
       }),
     );
   });
+
+  it('adds, removes, and saves structured ingredient replacements', () => {
+    mockRecipeService.createRecipe.mockReturnValue(
+      of({
+        id: 'new-rep-rec',
+        title: 'Tacos',
+        slug: 'tacos',
+        description: null,
+        status: 'Published',
+        baseServings: 4,
+        yieldDisplay: null,
+        prepTimeMinutes: null,
+        cookTimeMinutes: null,
+        totalTimeMinutes: null,
+        difficulty: null,
+        sourceUrl: null,
+        sourceName: null,
+        sourceAuthor: null,
+        sourceBookTitle: null,
+        sourceBookPage: null,
+        extractedModel: null,
+        ingestionJobId: null,
+        coverImagePath: null,
+        thumbnailImagePath: null,
+        timesCooked: 0,
+        lastCookedAt: null,
+        averageRating: null,
+        ingredients: [],
+        steps: [],
+        linkedSubRecipes: [],
+        collections: [],
+        tags: [],
+        createdAt: '2026-01-01T00:00:00Z',
+        createdBy: 'user',
+        modifiedAt: '2026-01-01T00:00:00Z',
+        modifiedBy: 'user',
+      } as RecipeDetailDto),
+    );
+
+    mockRecipeService.createRecipe.mockClear();
+    component['form'].patchValue({ title: 'Tacos', baseServings: 4 });
+    component.ingredientsArray.at(0).patchValue({
+      displayName: 'ground beef',
+      quantity: 1,
+      unit: 'Lb',
+    });
+    component.stepsArray.at(0).patchValue({ instruction: 'Brown ground beef in a skillet.' });
+    component.addIngredientReplacement(0, {
+      displayName: 'ground turkey',
+      quantity: 1,
+      maxQuantity: 1.5,
+      unit: 'Lb',
+      preparationNote: 'lean',
+    });
+    component.addIngredientReplacement(0, { displayName: 'tofu' });
+    expect(component.getReplacementsArray(0).length).toBe(2);
+    component.removeIngredientReplacement(0, 1);
+    expect(component.getReplacementsArray(0).length).toBe(1);
+
+    component.onSave();
+
+    expect(mockRecipeService.createRecipe).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ingredients: [
+          expect.objectContaining({
+            replacements: [
+              expect.objectContaining({
+                displayName: 'ground turkey',
+                quantity: 1,
+                maxQuantity: 1.5,
+                unit: 'Lb',
+                preparationNote: 'lean',
+              }),
+            ],
+          }),
+        ],
+      }),
+    );
+  });
 });

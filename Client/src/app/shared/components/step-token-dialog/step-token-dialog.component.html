@@ -1,19 +1,41 @@
 <h2 mat-dialog-title>
-  @if (mode() === 'ingredient') {
-    <span class="dialog-title-content">
-      <mat-icon>nutrition</mat-icon>
-      <span>{{ data?.token ? 'Edit Ingredient Token' : 'Insert Ingredient Token' }}</span>
-    </span>
-  } @else if (mode() === 'timer') {
-    <span class="dialog-title-content">
-      <mat-icon>timer</mat-icon>
-      <span>{{ data?.token ? 'Edit Timer Token' : 'Insert Timer Token' }}</span>
-    </span>
-  } @else {
-    <span class="dialog-title-content">
-      <mat-icon>device_thermostat</mat-icon>
-      <span>{{ data?.token ? 'Edit Temperature Token' : 'Insert Temperature Token' }}</span>
-    </span>
+  @switch (mode()) {
+    @case ('ingredient') {
+      <span class="dialog-title-content">
+        <mat-icon>nutrition</mat-icon>
+        <span>{{ data?.token ? 'Edit Ingredient Token' : 'Insert Ingredient Token' }}</span>
+      </span>
+    }
+    @case ('mixture') {
+      <span class="dialog-title-content">
+        <mat-icon>blender</mat-icon>
+        <span>{{ data?.token ? 'Edit Mixture Token' : 'Insert Mixture Token' }}</span>
+      </span>
+    }
+    @case ('fixed') {
+      <span class="dialog-title-content">
+        <mat-icon>inventory_2</mat-icon>
+        <span>{{ data?.token ? 'Edit Fixed Measurement' : 'Insert Fixed Measurement' }}</span>
+      </span>
+    }
+    @case ('dimension') {
+      <span class="dialog-title-content">
+        <mat-icon>straighten</mat-icon>
+        <span>{{ data?.token ? 'Edit Dimension Token' : 'Insert Dimension Token' }}</span>
+      </span>
+    }
+    @case ('timer') {
+      <span class="dialog-title-content">
+        <mat-icon>timer</mat-icon>
+        <span>{{ data?.token ? 'Edit Timer Token' : 'Insert Timer Token' }}</span>
+      </span>
+    }
+    @default {
+      <span class="dialog-title-content">
+        <mat-icon>device_thermostat</mat-icon>
+        <span>{{ data?.token ? 'Edit Temperature Token' : 'Insert Temperature Token' }}</span>
+      </span>
+    }
   }
 </h2>
 
@@ -68,6 +90,17 @@
               Amount used in this step (blank for name-only mention)
             }
           </mat-hint>
+        </mat-form-field>
+
+        <mat-form-field appearance="outline" class="flex-1">
+          <mat-label>Max Range (optional)</mat-label>
+          <input
+            matInput
+            type="number"
+            step="any"
+            formControlName="maxAmount"
+            placeholder="e.g. 6"
+          />
         </mat-form-field>
 
         <mat-form-field appearance="outline" class="flex-1">
@@ -130,6 +163,115 @@
         <input matInput formControlName="notes" placeholder="e.g. room temperature, softened" />
       </mat-form-field>
     </form>
+  } @else if (mode() === 'mixture') {
+    <form [formGroup]="mixtureForm" class="dialog-form">
+      <mat-form-field appearance="outline" class="full-width">
+        <mat-label>Mixture / Sub-portion Name</mat-label>
+        <input matInput formControlName="name" placeholder="e.g. garlic-lemon mixture, batter" />
+        <mat-hint>Scales with servings and converts US ↔ Metric</mat-hint>
+      </mat-form-field>
+      <div class="form-row">
+        <mat-form-field appearance="outline" class="flex-1">
+          <mat-label>Amount</mat-label>
+          <input matInput type="number" step="any" formControlName="amount" placeholder="e.g. 2" />
+        </mat-form-field>
+        <mat-form-field appearance="outline" class="flex-1">
+          <mat-label>Max Range (optional)</mat-label>
+          <input
+            matInput
+            type="number"
+            step="any"
+            formControlName="maxAmount"
+            placeholder="optional"
+          />
+        </mat-form-field>
+        <mat-form-field appearance="outline" class="flex-1">
+          <mat-label>Unit</mat-label>
+          <input
+            matInput
+            formControlName="unit"
+            [matAutocomplete]="mixUnitAuto"
+            placeholder="e.g. tbsp, cup"
+          />
+          <mat-autocomplete #mixUnitAuto="matAutocomplete">
+            @for (u of getFilteredUnits(mixtureForm.get('unit')?.value); track u) {
+              <mat-option [value]="u">{{ u }}</mat-option>
+            }
+          </mat-autocomplete>
+        </mat-form-field>
+      </div>
+    </form>
+  } @else if (mode() === 'fixed') {
+    <form [formGroup]="fixedForm" class="dialog-form">
+      <mat-form-field appearance="outline" class="full-width">
+        <mat-label>Vessel / Item Name (optional)</mat-label>
+        <input matInput formControlName="name" placeholder="e.g. Bundt pan, water, brine" />
+        <mat-hint>Converts US ↔ Metric without multiplying by servings</mat-hint>
+      </mat-form-field>
+      <div class="form-row">
+        <mat-form-field appearance="outline" class="flex-1">
+          <mat-label>Amount</mat-label>
+          <input matInput type="number" step="any" formControlName="amount" placeholder="e.g. 2" />
+        </mat-form-field>
+        <mat-form-field appearance="outline" class="flex-1">
+          <mat-label>Max Range (optional)</mat-label>
+          <input
+            matInput
+            type="number"
+            step="any"
+            formControlName="maxAmount"
+            placeholder="optional"
+          />
+        </mat-form-field>
+        <mat-form-field appearance="outline" class="flex-1">
+          <mat-label>Unit</mat-label>
+          <input
+            matInput
+            formControlName="unit"
+            [matAutocomplete]="fixedUnitAuto"
+            placeholder="e.g. qt, cup"
+          />
+          <mat-autocomplete #fixedUnitAuto="matAutocomplete">
+            @for (u of getFilteredUnits(fixedForm.get('unit')?.value); track u) {
+              <mat-option [value]="u">{{ u }}</mat-option>
+            }
+          </mat-autocomplete>
+        </mat-form-field>
+      </div>
+      <mat-checkbox formControlName="hyphenated">
+        Hyphenated modifier (e.g. "12-cup Bundt pan")
+      </mat-checkbox>
+    </form>
+  } @else if (mode() === 'dimension') {
+    <form [formGroup]="dimensionForm" class="dialog-form">
+      <div class="form-row">
+        <mat-form-field appearance="outline" class="flex-1">
+          <mat-label>Size / Distance</mat-label>
+          <input matInput type="number" step="any" formControlName="value" placeholder="e.g. 12" />
+        </mat-form-field>
+        <mat-form-field appearance="outline" class="flex-1">
+          <mat-label>Max Range (optional)</mat-label>
+          <input
+            matInput
+            type="number"
+            step="any"
+            formControlName="maxValue"
+            placeholder="optional"
+          />
+        </mat-form-field>
+        <mat-form-field appearance="outline" class="flex-1">
+          <mat-label>Unit</mat-label>
+          <mat-select formControlName="unit">
+            @for (u of dimensionUnits; track u.value) {
+              <mat-option [value]="u.value">{{ u.label }}</mat-option>
+            }
+          </mat-select>
+        </mat-form-field>
+      </div>
+      <mat-checkbox formControlName="hyphenated">
+        Hyphenated (e.g. "12-inch skillet" vs "2 inches apart")
+      </mat-checkbox>
+    </form>
   } @else if (mode() === 'timer') {
     <form [formGroup]="timerForm" class="dialog-form">
       <div class="form-row">
@@ -147,6 +289,31 @@
             max="59"
             formControlName="seconds"
             placeholder="0"
+          />
+        </mat-form-field>
+      </div>
+
+      <div class="form-row">
+        <mat-form-field appearance="outline" class="flex-1">
+          <mat-label>Max Range Minutes (opt.)</mat-label>
+          <input
+            matInput
+            type="number"
+            min="0"
+            formControlName="maxMinutes"
+            placeholder="optional"
+          />
+        </mat-form-field>
+
+        <mat-form-field appearance="outline" class="flex-1">
+          <mat-label>Max Range Seconds (opt.)</mat-label>
+          <input
+            matInput
+            type="number"
+            min="0"
+            max="59"
+            formControlName="maxSeconds"
+            placeholder="optional"
           />
         </mat-form-field>
       </div>
@@ -182,6 +349,33 @@
             formControlName="celsius"
             placeholder="e.g. 175"
             (input)="onCelsiusInput($event)"
+          />
+        </mat-form-field>
+      </div>
+      <div class="form-row">
+        <mat-form-field appearance="outline" class="flex-1">
+          <mat-label>Max °F (optional)</mat-label>
+          <input
+            matInput
+            type="number"
+            min="0"
+            max="1000"
+            formControlName="maxFahrenheit"
+            placeholder="optional"
+            (input)="onMaxFahrenheitInput($event)"
+          />
+        </mat-form-field>
+
+        <mat-form-field appearance="outline" class="flex-1">
+          <mat-label>Max °C (optional)</mat-label>
+          <input
+            matInput
+            type="number"
+            min="0"
+            max="600"
+            formControlName="maxCelsius"
+            placeholder="optional"
+            (input)="onMaxCelsiusInput($event)"
           />
         </mat-form-field>
       </div>

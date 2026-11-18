@@ -1,6 +1,7 @@
 @for (segment of segments(); track $index) {
   @if (
     segment.amount?.kind === 'Fixed' ||
+    segment.amount?.kind === 'Dimension' ||
     segment.amount?.kind === 'Temperature' ||
     segment.amount?.kind === 'Timer'
   ) {
@@ -8,13 +9,17 @@
       class="fixed-amount"
       [class.is-temperature]="segment.amount?.kind === 'Temperature'"
       [class.is-timer]="segment.amount?.kind === 'Timer'"
+      [class.is-dimension]="segment.amount?.kind === 'Dimension'"
+      [class.is-fixed]="segment.amount?.kind === 'Fixed'"
       [class.is-scaled]="segment.amount?.scaled"
       [attr.data-kind]="segment.amount?.kind"
+      [attr.title]="segment.amount?.ingredientName"
       >{{ segment.text }}</span
     >
   } @else if (segment.amount; as amount) {
     <span
       class="inline-amount"
+      [class.is-mixture]="amount.kind === 'Mixture'"
       [class.is-scaled]="amount.scaled"
       [attr.data-kind]="amount.kind"
       [attr.title]="amount.ingredientName ?? (amount.kind === 'Mixture' ? 'Mixture' : null)"

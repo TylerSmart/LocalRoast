@@ -138,9 +138,11 @@ export interface LlmSettingsDto {
   textModelConfigurationId?: string | null;
   visionModelConfigurationId?: string | null;
   refineModelConfigurationId?: string | null;
+  embeddingModel?: string | null;
+  embeddingModelConfigurationId?: string | null;
 }
 
-export type LlmWorkflow = 'Text' | 'Vision' | 'Refinement';
+export type LlmWorkflow = 'Text' | 'Vision' | 'Refinement' | 'Embedding';
 
 /** A saved machine or provider: where requests go, how to authenticate and its limits. */
 export interface LlmConnectionDto {
@@ -216,6 +218,7 @@ export interface UpdateLlmWorkflowsRequest {
   textModelConfigurationId: string | null;
   visionModelConfigurationId: string | null;
   refineModelConfigurationId: string | null;
+  embeddingModelConfigurationId?: string | null;
   autoPublishHighConfidenceText: boolean;
   maxIngestionRetries: number;
   enableIngestion: boolean;
@@ -291,6 +294,22 @@ export interface ScrapedWebRecipePayload {
   cleanedBodyText: string | null;
 }
 
+export interface IngestionDraftReplacementDto {
+  displayName: string;
+  quantity?: number | null;
+  maxQuantity?: number | null;
+  unit?: MeasurementUnit | null;
+  customUnitName?: string | null;
+  preparationNote?: string | null;
+  matchedFoodItemId?: string | null;
+  matchedFoodItemName?: string | null;
+  isNewFoodItem?: boolean;
+  createNewFoodItem?: boolean;
+  proposedFoodItemName?: string | null;
+  suggestedCategory?: FoodCategory | null;
+  suggestedIsPantryStaple?: boolean;
+}
+
 export interface IngestionDraftIngredientDto {
   sortOrder: number;
   sectionName: string | null;
@@ -316,6 +335,7 @@ export interface IngestionDraftIngredientDto {
   matchedRecipeId?: string | null;
   matchedRecipeTitle?: string | null;
   matchedRecipeSlug?: string | null;
+  replacements?: IngestionDraftReplacementDto[] | null;
 }
 
 export interface IngestionDraftStepDto {

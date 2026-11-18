@@ -23,6 +23,7 @@ import { ThemeService } from '../../../core/services/theme/theme.service';
 import {
   FormattedQuantityResult,
   formatDuration,
+  formatIngredientReplacement,
   formatMinutes,
   scaleIngredient,
 } from '../../../core/utils/culinary-math';
@@ -94,6 +95,7 @@ export class PublicSharedRecipeComponent implements OnInit {
   protected readonly targetSystem = signal<UnitSystem>('Original');
   protected readonly checkedIngredients = signal<Record<string, boolean>>({});
   protected readonly formatMinutes = formatMinutes;
+  protected readonly formatReplacement = formatIngredientReplacement;
 
   protected readonly scaleFactor = computed(() => {
     const r = this.recipe();

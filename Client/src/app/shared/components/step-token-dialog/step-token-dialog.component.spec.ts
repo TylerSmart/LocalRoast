@@ -50,7 +50,7 @@ describe('StepTokenDialogComponent', () => {
 
       expect(mockDialogRef.close).toHaveBeenCalledWith(
         expect.objectContaining({
-          rawToken: '||{"ingredient":"Eggs","amount":4,"unit":"whole"}||',
+          rawToken: '||{"type":"ingredient","ingredient":"Eggs","amount":4,"unit":"whole"}||',
         }),
       );
     });
@@ -90,7 +90,7 @@ describe('StepTokenDialogComponent', () => {
       expect(mockDialogRef.close).toHaveBeenCalledWith(
         expect.objectContaining({
           rawToken:
-            '||{"ingredient":"Unsalted Butter","ingredientId":"ing-1","amount":4,"unit":"tbsp"}||',
+            '||{"type":"ingredient","ingredient":"Unsalted Butter","ingredientId":"ing-1","amount":4,"unit":"tbsp"}||',
         }),
       );
     });
@@ -139,6 +139,78 @@ describe('StepTokenDialogComponent', () => {
         token: {
           type: 'temperature',
           fahrenheit: 325,
+        },
+      });
+    });
+  });
+
+  describe('mixture, dimension, and fixed modes', () => {
+    it('serializes mixture token on save', async () => {
+      await createComponent({ mode: 'mixture' });
+      component['mixtureForm'].patchValue({
+        name: 'herb butter',
+        amount: 1,
+        maxAmount: 2,
+        unit: 'tbsp',
+      });
+      component['onSave']();
+
+      expect(mockDialogRef.close).toHaveBeenCalledWith({
+        rawToken:
+          '||{"type":"mixture","name":"herb butter","amount":1,"maxAmount":2,"unit":"tbsp"}||',
+        token: {
+          type: 'mixture',
+          name: 'herb butter',
+          amount: 1,
+          maxAmount: 2,
+          unit: 'tbsp',
+        },
+      });
+    });
+
+    it('serializes dimension token with hyphenated flag and range on save', async () => {
+      await createComponent({ mode: 'dimension' });
+      component['dimensionForm'].patchValue({
+        value: 9,
+        maxValue: 13,
+        unit: 'inch',
+        hyphenated: true,
+      });
+      component['onSave']();
+
+      expect(mockDialogRef.close).toHaveBeenCalledWith({
+        rawToken:
+          '||{"type":"dimension","value":9,"maxValue":13,"unit":"inch","hyphenated":true}||',
+        token: {
+          type: 'dimension',
+          value: 9,
+          maxValue: 13,
+          unit: 'inch',
+          hyphenated: true,
+        },
+      });
+    });
+
+    it('serializes fixed token on save', async () => {
+      await createComponent({ mode: 'fixed' });
+      component['fixedForm'].patchValue({
+        amount: 12,
+        maxAmount: null,
+        unit: 'cup',
+        name: 'Bundt pan',
+        hyphenated: true,
+      });
+      component['onSave']();
+
+      expect(mockDialogRef.close).toHaveBeenCalledWith({
+        rawToken:
+          '||{"type":"fixed","amount":12,"unit":"cup","name":"Bundt pan","hyphenated":true}||',
+        token: {
+          type: 'fixed',
+          amount: 12,
+          unit: 'cup',
+          name: 'Bundt pan',
+          hyphenated: true,
         },
       });
     });

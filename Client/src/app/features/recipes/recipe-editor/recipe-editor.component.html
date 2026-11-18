@@ -569,6 +569,106 @@
                   Prefer this alternative when displaying this ingredient
                 </mat-checkbox>
               }
+              @if (!ingGroup.get('isSubRecipe')?.value) {
+                @let ingIdx = $index;
+                <div class="ingredient-replacements-editor" formArrayName="replacements">
+                  <div class="replacements-header">
+                    <span class="sub-label">
+                      Replacements ({{ getReplacementsArray(ingIdx).length }})
+                    </span>
+                    <button
+                      mat-button
+                      type="button"
+                      class="add-replacement-btn"
+                      (click)="addIngredientReplacement(ingIdx)"
+                    >
+                      <mat-icon>add</mat-icon>
+                      <span>Add Replacement</span>
+                    </button>
+                  </div>
+                  @for (repGroup of getReplacementsArray(ingIdx).controls; track $index) {
+                    <div [formGroupName]="$index" class="replacement-sub-row">
+                      <mat-form-field
+                        appearance="outline"
+                        class="rep-field rep-qty"
+                        subscriptSizing="dynamic"
+                      >
+                        <mat-label>Qty</mat-label>
+                        <input matInput type="number" step="any" formControlName="quantity" />
+                      </mat-form-field>
+                      <mat-form-field
+                        appearance="outline"
+                        class="rep-field rep-unit"
+                        subscriptSizing="dynamic"
+                      >
+                        <mat-label>Unit</mat-label>
+                        <mat-select formControlName="unit">
+                          <mat-option [value]="null">None</mat-option>
+                          @for (u of measurementUnits; track u.value) {
+                            <mat-option [value]="u.value">{{ u.label }}</mat-option>
+                          }
+                        </mat-select>
+                      </mat-form-field>
+                      @if (repGroup.get('unit')?.value === 'Custom') {
+                        <mat-form-field
+                          appearance="outline"
+                          class="rep-field rep-custom-unit"
+                          subscriptSizing="dynamic"
+                        >
+                          <mat-label>Custom Unit</mat-label>
+                          <input matInput formControlName="customUnitName" />
+                        </mat-form-field>
+                      }
+                      <mat-form-field
+                        appearance="outline"
+                        class="rep-field rep-name"
+                        subscriptSizing="dynamic"
+                      >
+                        <mat-label>Replacement Ingredient</mat-label>
+                        <input
+                          matInput
+                          formControlName="displayName"
+                          placeholder="e.g. lime juice"
+                          required
+                        />
+                      </mat-form-field>
+                      <mat-form-field
+                        appearance="outline"
+                        class="rep-field rep-food"
+                        subscriptSizing="dynamic"
+                      >
+                        <mat-label>Catalog Match (optional)</mat-label>
+                        <mat-select formControlName="foodItemId">
+                          <mat-option [value]="null">Auto / Text Only</mat-option>
+                          @for (item of foodItems(); track item.id) {
+                            <mat-option [value]="item.id">{{ item.name }}</mat-option>
+                          }
+                        </mat-select>
+                      </mat-form-field>
+                      <mat-form-field
+                        appearance="outline"
+                        class="rep-field rep-prep"
+                        subscriptSizing="dynamic"
+                      >
+                        <mat-label>Prep Note</mat-label>
+                        <input
+                          matInput
+                          formControlName="preparationNote"
+                          placeholder="e.g. freshly squeezed"
+                        />
+                      </mat-form-field>
+                      <button
+                        mat-icon-button
+                        type="button"
+                        (click)="removeIngredientReplacement(ingIdx, $index)"
+                        aria-label="Remove replacement"
+                      >
+                        <mat-icon>close</mat-icon>
+                      </button>
+                    </div>
+                  }
+                </div>
+              }
             </div>
           }
         </div>

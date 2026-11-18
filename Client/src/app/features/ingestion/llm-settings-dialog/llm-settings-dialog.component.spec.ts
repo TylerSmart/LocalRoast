@@ -199,6 +199,7 @@ describe('LlmSettingsDialogComponent', () => {
       textModelConfigurationId: 'cfg-text',
       visionModelConfigurationId: null,
       refineModelConfigurationId: 'cfg-refine',
+      embeddingModelConfigurationId: null,
       autoPublishHighConfidenceText: true,
       maxIngestionRetries: 5,
       enableIngestion: true,
@@ -206,6 +207,22 @@ describe('LlmSettingsDialogComponent', () => {
     });
     expect(mockIngestionService.refreshSummary).toHaveBeenCalled();
     expect(mockDialogRef.close).toHaveBeenCalledWith(true);
+  });
+
+  it('persists selected embeddingModelConfigurationId when assigned', async () => {
+    service['getModelConfigurations'].mockReturnValue(
+      of([...configurations, configuration('cfg-embed', 'desk', 'embeddinggemma')]),
+    );
+    await create();
+    component.workflowForm.controls.embeddingModelConfigurationId.setValue('cfg-embed');
+
+    component.onSave();
+
+    expect(service['updateWorkflows']).toHaveBeenCalledWith(
+      expect.objectContaining({
+        embeddingModelConfigurationId: 'cfg-embed',
+      }),
+    );
   });
 
   it('keeps the dialog open and shows the API error when saving fails', async () => {

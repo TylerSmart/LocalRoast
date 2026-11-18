@@ -93,6 +93,7 @@ export class LlmSettingsDialogComponent implements OnInit {
     textModelConfigurationId: this.fb.nonNullable.control(''),
     visionModelConfigurationId: this.fb.nonNullable.control(''),
     refineModelConfigurationId: this.fb.nonNullable.control(''),
+    embeddingModelConfigurationId: this.fb.nonNullable.control(''),
     enableIngestion: this.fb.nonNullable.control(true),
     autoPublishHighConfidenceText: this.fb.nonNullable.control(false),
     autoResumeQueue: this.fb.nonNullable.control(true),
@@ -124,6 +125,9 @@ export class LlmSettingsDialogComponent implements OnInit {
   );
   readonly refineConfiguration = computed(() =>
     this.findConfiguration(this.workflowValues().refineModelConfigurationId),
+  );
+  readonly embeddingConfiguration = computed(() =>
+    this.findConfiguration(this.workflowValues().embeddingModelConfigurationId),
   );
   readonly refineMatchesText = computed(() => {
     const text = this.textConfiguration();
@@ -158,6 +162,7 @@ export class LlmSettingsDialogComponent implements OnInit {
             textModelConfigurationId: settings.textModelConfigurationId ?? '',
             visionModelConfigurationId: settings.visionModelConfigurationId ?? '',
             refineModelConfigurationId: settings.refineModelConfigurationId ?? '',
+            embeddingModelConfigurationId: settings.embeddingModelConfigurationId ?? '',
             enableIngestion: settings.enableIngestion ?? true,
             autoPublishHighConfidenceText: settings.autoPublishHighConfidenceText,
             autoResumeQueue: settings.autoResumeQueue ?? true,
@@ -206,6 +211,7 @@ export class LlmSettingsDialogComponent implements OnInit {
         textModelConfigurationId: values.textModelConfigurationId || null,
         visionModelConfigurationId: values.visionModelConfigurationId || null,
         refineModelConfigurationId: values.refineModelConfigurationId || null,
+        embeddingModelConfigurationId: values.embeddingModelConfigurationId || null,
         autoPublishHighConfidenceText: values.autoPublishHighConfidenceText,
         maxIngestionRetries: values.maxIngestionRetries,
         enableIngestion: values.enableIngestion,
@@ -344,6 +350,7 @@ export class LlmSettingsDialogComponent implements OnInit {
       controls.textModelConfigurationId,
       controls.visionModelConfigurationId,
       controls.refineModelConfigurationId,
+      controls.embeddingModelConfigurationId,
     ]) {
       if (control.value && !ids.has(control.value)) {
         control.setValue('');

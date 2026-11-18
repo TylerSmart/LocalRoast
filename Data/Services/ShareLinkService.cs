@@ -230,6 +230,9 @@ public sealed class ShareLinkService(AppDbContext dbContext, TimeProvider? timeP
                 .ThenInclude(i => i.FoodItem)
             .Include(r => r.Ingredients)
                 .ThenInclude(i => i.LinkedRecipe)
+            .Include(r => r.Ingredients)
+                .ThenInclude(i => i.Replacements)
+                    .ThenInclude(rep => rep.FoodItem)
             .Include(r => r.Steps)
                 .ThenInclude(s => s.IngredientReferences)
             .Include(r => r.Steps)
@@ -264,6 +267,9 @@ public sealed class ShareLinkService(AppDbContext dbContext, TimeProvider? timeP
                 .Where(r => linkedRecipeIds.Contains(r.Id) && r.Status == RecipeStatus.Published)
                 .Include(r => r.Ingredients)
                     .ThenInclude(i => i.FoodItem)
+                .Include(r => r.Ingredients)
+                    .ThenInclude(i => i.Replacements)
+                        .ThenInclude(rep => rep.FoodItem)
                 .Include(r => r.Steps)
                     .ThenInclude(s => s.IngredientReferences)
                 .Include(r => r.Steps)
@@ -366,6 +372,25 @@ public sealed class ShareLinkService(AppDbContext dbContext, TimeProvider? timeP
     {
         var isPublishedSubRecipe =
             i.LinkedRecipe != null && i.LinkedRecipe.Status == RecipeStatus.Published;
+        var replacements =
+            i.Replacements.Count > 0
+                ? i
+                    .Replacements.OrderBy(r => r.SortOrder)
+                    .Select(r => new RecipeIngredientReplacementDto(
+                        r.Id,
+                        r.SortOrder,
+                        r.DisplayName,
+                        r.Quantity,
+                        r.MaxQuantity,
+                        r.Unit,
+                        r.CustomUnitName,
+                        r.FoodItemId,
+                        r.FoodItem?.Name,
+                        r.FoodItem?.IsPantryStaple ?? false,
+                        r.PreparationNote
+                    ))
+                    .ToList()
+                : null;
         return new PublicRecipeIngredientDto(
             i.Id,
             i.SortOrder,
@@ -389,7 +414,8 @@ public sealed class ShareLinkService(AppDbContext dbContext, TimeProvider? timeP
                 )
                 : null,
             i.PreferAlternativeMeasurement,
-            i.UnresolvedRecipeTitle
+            i.UnresolvedRecipeTitle,
+            replacements
         );
     }
 

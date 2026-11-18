@@ -22,6 +22,8 @@ import {
   RecipeDetailDto,
   RecipeDifficulty,
   RecipeIngredientInput,
+  RecipeIngredientReplacementDto,
+  RecipeIngredientReplacementInput,
   RecipeMeasurement,
   RecipeStatus,
   RecipeStepInput,
@@ -71,6 +73,16 @@ import {
 import { TagDialogComponent, TagDialogData } from '../tag-dialog/tag-dialog.component';
 import { Title } from '@angular/platform-browser';
 
+interface IngredientReplacementFormValue {
+  displayName: string;
+  quantity?: number | string | null;
+  maxQuantity?: number | string | null;
+  unit?: MeasurementUnit | null;
+  customUnitName?: string | null;
+  foodItemId?: string | null;
+  preparationNote?: string | null;
+}
+
 interface IngredientFormValue {
   id?: string | null;
   isSubRecipe?: boolean;
@@ -88,6 +100,7 @@ interface IngredientFormValue {
   originalRawText?: string | null;
   alternativeMeasurement?: RecipeMeasurement | null;
   preferAlternativeMeasurement?: boolean;
+  replacements?: IngredientReplacementFormValue[];
 }
 
 interface TimerFormValue {
@@ -374,6 +387,9 @@ export class RecipeEditorComponent implements OnInit {
             ing.alternativeMeasurement ?? null,
           ),
           preferAlternativeMeasurement: [ing.preferAlternativeMeasurement ?? false],
+          replacements: this.fb.array<FormGroup>(
+            (ing.replacements ?? []).map((rep) => this.createReplacementGroup(rep)),
+          ),
         },
         { validators: ingredientMeasurementValidator },
       );
@@ -649,6 +665,33 @@ export class RecipeEditorComponent implements OnInit {
     });
   }
 
+  private createReplacementGroup(rep?: Partial<RecipeIngredientReplacementDto>): FormGroup {
+    return this.fb.group({
+      displayName: [rep?.displayName ?? '', [Validators.required, Validators.maxLength(200)]],
+      quantity: [rep?.quantity ?? null],
+      maxQuantity: [rep?.maxQuantity ?? null],
+      unit: [rep?.unit ?? null],
+      customUnitName: [rep?.customUnitName ?? '', Validators.maxLength(64)],
+      foodItemId: [rep?.foodItemId ?? null],
+      preparationNote: [rep?.preparationNote ?? '', Validators.maxLength(300)],
+    });
+  }
+
+  getReplacementsArray(ingredientIndex: number): FormArray<FormGroup> {
+    return this.ingredientsArray.at(ingredientIndex).get('replacements') as FormArray<FormGroup>;
+  }
+
+  addIngredientReplacement(
+    ingredientIndex: number,
+    rep?: Partial<RecipeIngredientReplacementDto>,
+  ): void {
+    this.getReplacementsArray(ingredientIndex).push(this.createReplacementGroup(rep));
+  }
+
+  removeIngredientReplacement(ingredientIndex: number, repIndex: number): void {
+    this.getReplacementsArray(ingredientIndex).removeAt(repIndex);
+  }
+
   // --- Ingredient Methods ---
   addIngredient(): void {
     const group = this.fb.group(
@@ -669,6 +712,7 @@ export class RecipeEditorComponent implements OnInit {
         originalRawText: [null],
         alternativeMeasurement: this.fb.control<RecipeMeasurement | null>(null),
         preferAlternativeMeasurement: [false],
+        replacements: this.fb.array<FormGroup>([]),
       },
       { validators: ingredientMeasurementValidator },
     );
@@ -863,6 +907,26 @@ export class RecipeEditorComponent implements OnInit {
       alternativeMeasurement: ing.alternativeMeasurement ?? null,
       preferAlternativeMeasurement:
         !!ing.alternativeMeasurement && !!ing.preferAlternativeMeasurement,
+      replacements:
+        !ing.isSubRecipe && ing.replacements?.length
+          ? ing.replacements
+              .filter((r) => !!r.displayName?.trim())
+              .map((r): RecipeIngredientReplacementInput => ({
+                displayName: r.displayName.trim(),
+                quantity:
+                  r.quantity !== null && r.quantity !== undefined && r.quantity !== ''
+                    ? Number(r.quantity)
+                    : null,
+                maxQuantity:
+                  r.maxQuantity !== null && r.maxQuantity !== undefined && r.maxQuantity !== ''
+                    ? Number(r.maxQuantity)
+                    : null,
+                unit: r.unit || null,
+                customUnitName: r.unit === 'Custom' ? r.customUnitName?.trim() || null : null,
+                foodItemId: r.foodItemId || null,
+                preparationNote: r.preparationNote?.trim() || null,
+              }))
+          : null,
     }));
 
     // Map steps

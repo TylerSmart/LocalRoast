@@ -16,6 +16,8 @@ public sealed class LlmModelProfilesTests
     [DataRow("google/gemini-2.5-flash", "gemini-flash")]
     [DataRow("gemini-4-argon", "gemini-argon")]
     [DataRow("gemini-2.5-pro", "gemini-argon")]
+    [DataRow("embeddinggemma", "embeddinggemma")]
+    [DataRow("embeddinggemma:latest", "embeddinggemma")]
     [DataRow("gemma4-26b-gpu24", null)]
     [DataRow("qwen2.5:14b", null)]
     [DataRow("", null)]
@@ -74,5 +76,46 @@ public sealed class LlmModelProfilesTests
         Assert.AreEqual(1200, refine.RequestTimeoutSeconds);
         Assert.AreEqual(32768, refine.ContextWindowTokens);
         Assert.AreEqual(config.BaseUrl, refine.BaseUrl);
+    }
+
+    [TestMethod]
+    public void ForEmbedding_ReturnsNullWhenUnsetAndUsesEmbeddingOverrideWhenConfigured()
+    {
+        var baseConfig = new EffectiveLlmConnectionConfig(
+            Provider: LlmProvider.Ollama,
+            BaseUrl: "http://localhost:11434",
+            ApiKey: null,
+            TextModel: "qwen2.5:14b",
+            VisionModel: null,
+            OllamaKeepAlive: "5m",
+            RequestTimeoutSeconds: 120,
+            AutoPublishHighConfidenceText: false
+        );
+
+        Assert.IsNull(baseConfig.ForEmbedding());
+
+        var withModelName = baseConfig with { EmbeddingModel = "embeddinggemma" };
+        var fallbackResolved = withModelName.ForEmbedding();
+        Assert.IsNotNull(fallbackResolved);
+        Assert.AreEqual("embeddinggemma", fallbackResolved.TextModel);
+
+        var dedicatedConfig = baseConfig with
+        {
+            BaseUrl = "http://embed-host:11434",
+            TextModel = "nomic-embed-text",
+        };
+        var withEmbeddingConfig = withModelName with { EmbeddingConfig = dedicatedConfig };
+        var overrideResolved = withEmbeddingConfig.ForEmbedding();
+        Assert.IsNotNull(overrideResolved);
+        Assert.AreEqual("nomic-embed-text", overrideResolved.TextModel);
+        Assert.AreEqual("http://embed-host:11434", overrideResolved.BaseUrl);
+    }
+
+    [TestMethod]
+    public void BuiltInProfiles_IncludeEmbeddingGemmaAndEmbeddingWorkflow()
+    {
+        var profile = LlmModelProfiles.Match("embeddinggemma");
+        Assert.IsNotNull(profile);
+        Assert.IsTrue(Enum.IsDefined(LlmWorkflow.Embedding));
     }
 }

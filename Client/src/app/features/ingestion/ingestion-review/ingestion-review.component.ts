@@ -38,6 +38,7 @@ import {
 } from '../../../core/models/food-catalog.models';
 import type {
   IngestionDraftIngredientDto,
+  IngestionDraftReplacementDto,
   IngestionDraftStepDto,
   IngestionExtractedDraftDto,
   IngestionJobDetailDto,
@@ -551,6 +552,9 @@ export class IngestionReviewComponent implements OnInit {
           item?.alternativeMeasurement ?? null,
         ),
         preferAlternativeMeasurement: [item?.preferAlternativeMeasurement ?? false],
+        replacements: this.fb.array<FormGroup>(
+          (item?.replacements ?? []).map((rep) => this.createReplacementGroup(rep)),
+        ),
       },
       { validators: ingredientMeasurementValidator },
     );
@@ -574,6 +578,39 @@ export class IngestionReviewComponent implements OnInit {
       });
 
     this.ingredientsArray.push(fg);
+  }
+
+  private createReplacementGroup(rep?: Partial<IngestionDraftReplacementDto>): FormGroup {
+    return this.fb.group({
+      displayName: [rep?.displayName ?? '', [Validators.required, Validators.maxLength(200)]],
+      quantity: [rep?.quantity ?? null],
+      maxQuantity: [rep?.maxQuantity ?? null],
+      unit: [rep?.unit ?? null],
+      customUnitName: [rep?.customUnitName ?? null],
+      preparationNote: [rep?.preparationNote ?? null],
+      matchedFoodItemId: [rep?.matchedFoodItemId ?? null],
+      matchedFoodItemName: [rep?.matchedFoodItemName ?? null],
+      isNewFoodItem: [rep?.isNewFoodItem ?? !rep?.matchedFoodItemId],
+      createNewFoodItem: [rep?.createNewFoodItem ?? true],
+      proposedFoodItemName: [rep?.proposedFoodItemName ?? rep?.displayName ?? ''],
+      suggestedCategory: this.fb.control<FoodCategory | null>(rep?.suggestedCategory ?? null),
+      suggestedIsPantryStaple: [rep?.suggestedIsPantryStaple ?? false],
+    });
+  }
+
+  getReplacementsArray(ingredientIndex: number): FormArray<FormGroup> {
+    return this.ingredientsArray.at(ingredientIndex).get('replacements') as FormArray<FormGroup>;
+  }
+
+  addIngredientReplacement(
+    ingredientIndex: number,
+    rep?: Partial<IngestionDraftReplacementDto>,
+  ): void {
+    this.getReplacementsArray(ingredientIndex).push(this.createReplacementGroup(rep));
+  }
+
+  removeIngredientReplacement(ingredientIndex: number, repIndex: number): void {
+    this.getReplacementsArray(ingredientIndex).removeAt(repIndex);
   }
 
   removeIngredient(index: number): void {
@@ -821,6 +858,21 @@ export class IngestionReviewComponent implements OnInit {
         matchedFoodItemName: ing.matchedFoodItemName || ing.proposedFoodItemName,
         alternativeMeasurement: ing.alternativeMeasurement,
         preferAlternativeMeasurement: ing.preferAlternativeMeasurement,
+        replacements: ing.replacements?.length
+          ? ing.replacements.map((rep, rIdx) => ({
+              id: `rep-${i}-${rIdx}`,
+              sortOrder: rIdx,
+              displayName: rep.displayName,
+              quantity: rep.quantity ?? null,
+              maxQuantity: rep.maxQuantity ?? null,
+              unit: rep.unit ?? null,
+              customUnitName: rep.customUnitName ?? null,
+              foodItemId: rep.matchedFoodItemId ?? null,
+              foodItemName: rep.matchedFoodItemName ?? rep.proposedFoodItemName ?? null,
+              isPantryStaple: Boolean(rep.suggestedIsPantryStaple),
+              preparationNote: rep.preparationNote ?? null,
+            }))
+          : null,
         linkedRecipeId: ing.isRecipeReference ? (ing.matchedRecipeId ?? null) : null,
         linkedRecipeTitle: ing.isRecipeReference ? (ing.matchedRecipeTitle ?? null) : null,
         linkedRecipeSlug: ing.isRecipeReference ? (ing.matchedRecipeSlug ?? null) : null,
@@ -906,6 +958,57 @@ export class IngestionReviewComponent implements OnInit {
             ? null
             : val.proposedFoodItemName?.trim() || val.displayName.trim(),
           suggestedIsPantryStaple: !val.isRecipeReference && Boolean(val.suggestedIsPantryStaple),
+          replacements:
+            !val.isRecipeReference && Array.isArray(val.replacements) && val.replacements.length > 0
+              ? val.replacements
+                  .filter((r: { displayName?: string | null }) => !!r?.displayName?.trim())
+                  .map(
+                    (r: {
+                      displayName: string;
+                      quantity?: number | string | null;
+                      maxQuantity?: number | string | null;
+                      unit?: string | null;
+                      customUnitName?: string | null;
+                      preparationNote?: string | null;
+                      matchedFoodItemId?: string | null;
+                      matchedFoodItemName?: string | null;
+                      createNewFoodItem?: boolean;
+                      proposedFoodItemName?: string | null;
+                      suggestedCategory?: FoodCategory | null;
+                      suggestedIsPantryStaple?: boolean;
+                    }): IngestionDraftReplacementDto => {
+                      const matchedFood = r.matchedFoodItemId
+                        ? this.foodItems().find((f) => f.id === r.matchedFoodItemId)
+                        : null;
+                      return {
+                        displayName: r.displayName.trim(),
+                        quantity:
+                          r.quantity !== null && r.quantity !== undefined && r.quantity !== ''
+                            ? Number(r.quantity)
+                            : null,
+                        maxQuantity:
+                          r.maxQuantity !== null &&
+                          r.maxQuantity !== undefined &&
+                          r.maxQuantity !== ''
+                            ? Number(r.maxQuantity)
+                            : null,
+                        unit: (r.unit as IngestionDraftReplacementDto['unit']) || null,
+                        customUnitName:
+                          r.unit === 'Custom' ? r.customUnitName?.trim() || null : null,
+                        preparationNote: r.preparationNote?.trim() || null,
+                        matchedFoodItemId: r.matchedFoodItemId || null,
+                        matchedFoodItemName:
+                          matchedFood?.name ?? r.matchedFoodItemName?.trim() ?? null,
+                        isNewFoodItem: !r.matchedFoodItemId,
+                        createNewFoodItem: !r.matchedFoodItemId && (r.createNewFoodItem ?? true),
+                        proposedFoodItemName:
+                          r.proposedFoodItemName?.trim() || r.displayName.trim(),
+                        suggestedCategory: r.suggestedCategory ?? null,
+                        suggestedIsPantryStaple: Boolean(r.suggestedIsPantryStaple),
+                      };
+                    },
+                  )
+              : null,
         };
       },
     );

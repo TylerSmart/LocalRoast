@@ -135,7 +135,7 @@ public sealed class StepTokensE2ETests : E2ETestBase
         var val = await editor.GetAttributeAsync("data-serialized-value");
         Assert.IsNotNull(val);
         Assert.Contains(
-            "||{\"ingredient\":\"Eggs\",\"amount\":4,\"unit\":\"whole\",\"displayAmount\":2,\"displayUnit\":\"whole\"}||",
+            "||{\"type\":\"ingredient\",\"ingredient\":\"Eggs\",\"amount\":4,\"unit\":\"whole\",\"displayAmount\":2,\"displayUnit\":\"whole\"}||",
             val
         );
 

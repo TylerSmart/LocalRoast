@@ -108,6 +108,22 @@ public record LlmExtractedRecipePayload(
     public bool IsRepaired { get; init; }
 }
 
+public record IngestionDraftReplacementDto(
+    [Required, MaxLength(200)] string DisplayName = "",
+    decimal? Quantity = null,
+    decimal? MaxQuantity = null,
+    MeasurementUnit? Unit = null,
+    [MaxLength(64)] string? CustomUnitName = null,
+    [MaxLength(300)] string? PreparationNote = null,
+    Guid? MatchedFoodItemId = null,
+    string? MatchedFoodItemName = null,
+    bool IsNewFoodItem = false,
+    bool CreateNewFoodItem = true,
+    [MaxLength(150)] string? ProposedFoodItemName = null,
+    FoodCategory? SuggestedCategory = null,
+    bool SuggestedIsPantryStaple = false
+);
+
 // Normalized structured draft stored in IngestionJob.ExtractedDraftJson & edited in Review Inbox
 public record IngestionDraftIngredientDto(
     string? SectionName = null,
@@ -132,7 +148,8 @@ public record IngestionDraftIngredientDto(
     [MaxLength(200)] string? ReferencedRecipeTitle = null,
     Guid? MatchedRecipeId = null,
     [MaxLength(200)] string? MatchedRecipeTitle = null,
-    [MaxLength(250)] string? MatchedRecipeSlug = null
+    [MaxLength(250)] string? MatchedRecipeSlug = null,
+    IReadOnlyList<IngestionDraftReplacementDto>? Replacements = null
 );
 
 public record IngestionDraftStepDto(

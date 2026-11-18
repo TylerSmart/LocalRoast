@@ -21,6 +21,7 @@ public sealed class HouseholdLlmSettingsConfiguration
         builder.Property(s => s.ApiKey).HasMaxLength(500);
         builder.Property(s => s.TextModel).HasMaxLength(200);
         builder.Property(s => s.VisionModel).HasMaxLength(200);
+        builder.Property(s => s.EmbeddingModel).HasMaxLength(200);
         builder.Property(s => s.OllamaKeepAlive).IsRequired().HasMaxLength(32);
         builder.Property(s => s.ContextWindowTokens).HasDefaultValue(8192);
         builder.Property(s => s.RefineModel).HasMaxLength(200);
@@ -48,6 +49,11 @@ public sealed class HouseholdLlmSettingsConfiguration
             .HasOne(s => s.RefineModelConfiguration)
             .WithMany()
             .HasForeignKey(s => s.RefineModelConfigurationId)
+            .OnDelete(DeleteBehavior.Restrict);
+        builder
+            .HasOne(s => s.EmbeddingModelConfiguration)
+            .WithMany()
+            .HasForeignKey(s => s.EmbeddingModelConfigurationId)
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.Property(s => s.CreatedBy).IsRequired().HasMaxLength(256);

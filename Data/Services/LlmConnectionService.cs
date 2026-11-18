@@ -417,6 +417,10 @@ public sealed class LlmConnectionService(
         {
             workflows.Add(LlmWorkflow.Refinement);
         }
+        if (settings.EmbeddingModelConfigurationId == configurationId)
+        {
+            workflows.Add(LlmWorkflow.Embedding);
+        }
         return workflows;
     }
 

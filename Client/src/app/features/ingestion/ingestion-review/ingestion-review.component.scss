@@ -944,3 +944,57 @@
     }
   }
 }
+
+.ingredient-replacements-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 8px;
+  border: 1px dashed var(--mat-sys-outline-variant, #cac4d0);
+  background: var(--mat-sys-surface-container-low);
+
+  .replacements-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+
+    .sub-label {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--mat-sys-outline, #79747e);
+      text-transform: uppercase;
+    }
+
+    .add-replacement-btn {
+      font-size: 0.8rem;
+    }
+  }
+
+  .replacement-sub-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+
+    .rep-qty {
+      flex: 0 1 82px;
+      min-width: 72px;
+    }
+
+    .rep-unit {
+      flex: 0 1 120px;
+      min-width: 96px;
+    }
+
+    .rep-name,
+    .rep-food,
+    .rep-prep {
+      flex: 1 1 150px;
+      min-width: 120px;
+    }
+  }
+}

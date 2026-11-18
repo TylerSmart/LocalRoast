@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using App.Core.Ingestion;
@@ -10,6 +11,258 @@ public enum StepTokenType
     Ingredient = 1,
     Timer = 2,
     Temperature = 3,
+    Mixture = 4,
+    Dimension = 5,
+    Fixed = 6,
+}
+
+[JsonConverter(typeof(FlexibleDimensionUnitJsonConverter))]
+public enum DimensionUnit
+{
+    Inch = 1,
+    Foot = 2,
+    Yard = 3,
+    Mm = 4,
+    Cm = 5,
+    M = 6,
+}
+
+public static class DimensionUnitHelper
+{
+    public static bool TryParse(string? raw, out DimensionUnit unit)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            unit = default;
+            return false;
+        }
+
+        switch (raw.Trim().ToLowerInvariant())
+        {
+            case "inch" or "inches" or "in" or "in.":
+                unit = DimensionUnit.Inch;
+                return true;
+            case "foot" or "feet" or "ft" or "ft.":
+                unit = DimensionUnit.Foot;
+                return true;
+            case "yard" or "yards" or "yd" or "yds" or "yd.":
+                unit = DimensionUnit.Yard;
+                return true;
+            case "mm" or "millimeter" or "millimeters" or "millimetre" or "millimetres":
+                unit = DimensionUnit.Mm;
+                return true;
+            case "cm" or "centimeter" or "centimeters" or "centimetre" or "centimetres":
+                unit = DimensionUnit.Cm;
+                return true;
+            case "m" or "meter" or "meters" or "metre" or "metres":
+                unit = DimensionUnit.M;
+                return true;
+            default:
+                unit = default;
+                return false;
+        }
+    }
+
+    public static string ToJsonString(DimensionUnit unit) =>
+        unit switch
+        {
+            DimensionUnit.Inch => "inch",
+            DimensionUnit.Foot => "foot",
+            DimensionUnit.Yard => "yard",
+            DimensionUnit.Mm => "mm",
+            DimensionUnit.Cm => "cm",
+            DimensionUnit.M => "m",
+            _ => "inch",
+        };
+
+    public static bool IsMetric(DimensionUnit unit) =>
+        unit is DimensionUnit.Mm or DimensionUnit.Cm or DimensionUnit.M;
+
+    public static string GetDisplayLabel(
+        DimensionUnit unit,
+        decimal effectiveValue,
+        bool hyphenated
+    )
+    {
+        if (hyphenated || effectiveValue <= 1.05m)
+        {
+            return unit switch
+            {
+                DimensionUnit.Inch => "inch",
+                DimensionUnit.Foot => "foot",
+                DimensionUnit.Yard => "yard",
+                DimensionUnit.Mm => "mm",
+                DimensionUnit.Cm => "cm",
+                DimensionUnit.M => "m",
+                _ => "inch",
+            };
+        }
+
+        return unit switch
+        {
+            DimensionUnit.Inch => "inches",
+            DimensionUnit.Foot => "feet",
+            DimensionUnit.Yard => "yards",
+            DimensionUnit.Mm => "mm",
+            DimensionUnit.Cm => "cm",
+            DimensionUnit.M => "m",
+            _ => "inches",
+        };
+    }
+
+    public static (decimal Value, decimal? MaxValue, DimensionUnit Unit) ConvertDimension(
+        decimal value,
+        decimal? maxValue,
+        DimensionUnit unit,
+        UnitSystem targetSystem
+    )
+    {
+        if (targetSystem == UnitSystem.Original)
+        {
+            return (value, maxValue, unit);
+        }
+
+        if (targetSystem == UnitSystem.Metric)
+        {
+            switch (unit)
+            {
+                case DimensionUnit.Inch:
+                    var cm = value * 2.54m;
+                    if (cm < 1m)
+                    {
+                        return (
+                            Math.Round(value * 25.4m, 0, MidpointRounding.AwayFromZero),
+                            maxValue.HasValue
+                                ? Math.Round(
+                                    maxValue.Value * 25.4m,
+                                    0,
+                                    MidpointRounding.AwayFromZero
+                                )
+                                : null,
+                            DimensionUnit.Mm
+                        );
+                    }
+                    return (
+                        Math.Round(cm, 1, MidpointRounding.AwayFromZero),
+                        maxValue.HasValue
+                            ? Math.Round(maxValue.Value * 2.54m, 1, MidpointRounding.AwayFromZero)
+                            : null,
+                        DimensionUnit.Cm
+                    );
+                case DimensionUnit.Foot:
+                    return (
+                        Math.Round(value * 30.48m, 0, MidpointRounding.AwayFromZero),
+                        maxValue.HasValue
+                            ? Math.Round(maxValue.Value * 30.48m, 0, MidpointRounding.AwayFromZero)
+                            : null,
+                        DimensionUnit.Cm
+                    );
+                case DimensionUnit.Yard:
+                    return (
+                        Math.Round(value * 0.9144m, 2, MidpointRounding.AwayFromZero),
+                        maxValue.HasValue
+                            ? Math.Round(maxValue.Value * 0.9144m, 2, MidpointRounding.AwayFromZero)
+                            : null,
+                        DimensionUnit.M
+                    );
+                default:
+                    return (value, maxValue, unit);
+            }
+        }
+
+        if (targetSystem == UnitSystem.UsCustomary)
+        {
+            switch (unit)
+            {
+                case DimensionUnit.Mm:
+                    return (
+                        Math.Round(value / 25.4m, 2, MidpointRounding.AwayFromZero),
+                        maxValue.HasValue
+                            ? Math.Round(maxValue.Value / 25.4m, 2, MidpointRounding.AwayFromZero)
+                            : null,
+                        DimensionUnit.Inch
+                    );
+                case DimensionUnit.Cm:
+                    var inches = value / 2.54m;
+                    if (inches >= 24m)
+                    {
+                        return (
+                            Math.Round(inches / 12m, 2, MidpointRounding.AwayFromZero),
+                            maxValue.HasValue
+                                ? Math.Round(
+                                    maxValue.Value / 30.48m,
+                                    2,
+                                    MidpointRounding.AwayFromZero
+                                )
+                                : null,
+                            DimensionUnit.Foot
+                        );
+                    }
+                    return (
+                        Math.Round(inches, 2, MidpointRounding.AwayFromZero),
+                        maxValue.HasValue
+                            ? Math.Round(maxValue.Value / 2.54m, 2, MidpointRounding.AwayFromZero)
+                            : null,
+                        DimensionUnit.Inch
+                    );
+                case DimensionUnit.M:
+                    return (
+                        Math.Round(value * 3.28084m, 2, MidpointRounding.AwayFromZero),
+                        maxValue.HasValue
+                            ? Math.Round(
+                                maxValue.Value * 3.28084m,
+                                2,
+                                MidpointRounding.AwayFromZero
+                            )
+                            : null,
+                        DimensionUnit.Foot
+                    );
+                default:
+                    return (value, maxValue, unit);
+            }
+        }
+
+        return (value, maxValue, unit);
+    }
+}
+
+public sealed class FlexibleDimensionUnitJsonConverter : JsonConverter<DimensionUnit>
+{
+    public override DimensionUnit Read(
+        ref Utf8JsonReader reader,
+        Type typeToConvert,
+        JsonSerializerOptions options
+    )
+    {
+        if (reader.TokenType == JsonTokenType.String)
+        {
+            var raw = reader.GetString();
+            if (DimensionUnitHelper.TryParse(raw, out var unit))
+            {
+                return unit;
+            }
+            if (Enum.TryParse<DimensionUnit>(raw, ignoreCase: true, out var enumParsed))
+            {
+                return enumParsed;
+            }
+        }
+        else if (
+            reader.TokenType == JsonTokenType.Number
+            && reader.TryGetInt32(out var intVal)
+            && Enum.IsDefined(typeof(DimensionUnit), intVal)
+        )
+        {
+            return (DimensionUnit)intVal;
+        }
+
+        return DimensionUnit.Inch;
+    }
+
+    public override void Write(
+        Utf8JsonWriter writer,
+        DimensionUnit value,
+        JsonSerializerOptions options
+    ) => writer.WriteStringValue(DimensionUnitHelper.ToJsonString(value));
 }
 
 public sealed class FlexibleMeasurementUnitJsonConverter : JsonConverter<MeasurementUnit?>
@@ -119,17 +372,97 @@ public sealed record StepIngredientToken(
         MeasurementUnit? DisplayUnit = null,
     [property: JsonPropertyName("displayCustomUnitName")] string? DisplayCustomUnitName = null,
     [property: JsonPropertyName("displayText")] string? DisplayText = null,
-    [property: JsonPropertyName("notes")] string? Notes = null
+    [property: JsonPropertyName("notes")] string? Notes = null,
+    [property:
+        JsonPropertyName("maxAmount"),
+        JsonConverter(typeof(FlexibleNullableDecimalJsonConverter))
+    ]
+        decimal? MaxAmount = null
 ) : StepToken(StepTokenType.Ingredient);
+
+public sealed record StepMixtureToken(
+    [property: JsonPropertyName("name")] string Name,
+    [property:
+        JsonPropertyName("amount"),
+        JsonConverter(typeof(FlexibleNullableDecimalJsonConverter))
+    ]
+        decimal? Amount = null,
+    [property:
+        JsonPropertyName("unit"),
+        JsonConverter(typeof(FlexibleMeasurementUnitJsonConverter))
+    ]
+        MeasurementUnit? Unit = null,
+    [property: JsonPropertyName("customUnitName")] string? CustomUnitName = null,
+    [property:
+        JsonPropertyName("maxAmount"),
+        JsonConverter(typeof(FlexibleNullableDecimalJsonConverter))
+    ]
+        decimal? MaxAmount = null
+) : StepToken(StepTokenType.Mixture);
+
+public sealed record StepFixedToken(
+    [property:
+        JsonPropertyName("amount"),
+        JsonConverter(typeof(FlexibleNullableDecimalJsonConverter))
+    ]
+        decimal? Amount = null,
+    [property:
+        JsonPropertyName("unit"),
+        JsonConverter(typeof(FlexibleMeasurementUnitJsonConverter))
+    ]
+        MeasurementUnit? Unit = null,
+    [property: JsonPropertyName("customUnitName")] string? CustomUnitName = null,
+    [property:
+        JsonPropertyName("maxAmount"),
+        JsonConverter(typeof(FlexibleNullableDecimalJsonConverter))
+    ]
+        decimal? MaxAmount = null,
+    [property: JsonPropertyName("name")] string? Name = null,
+    [property: JsonPropertyName("hyphenated")] bool Hyphenated = false
+) : StepToken(StepTokenType.Fixed);
+
+public sealed record StepDimensionToken(
+    [property: JsonPropertyName("value")] decimal Value,
+    [property: JsonPropertyName("unit")] DimensionUnit Unit,
+    [property:
+        JsonPropertyName("maxValue"),
+        JsonConverter(typeof(FlexibleNullableDecimalJsonConverter))
+    ]
+        decimal? MaxValue = null,
+    [property: JsonPropertyName("hyphenated")] bool Hyphenated = false
+) : StepToken(StepTokenType.Dimension);
 
 public sealed record StepTimerToken(
     [property: JsonPropertyName("seconds")] int Seconds,
-    [property: JsonPropertyName("label")] string? Label = null
+    [property: JsonPropertyName("label")] string? Label = null,
+    [property:
+        JsonPropertyName("maxSeconds"),
+        JsonConverter(typeof(FlexibleNullableIntJsonConverter))
+    ]
+        int? MaxSeconds = null
 ) : StepToken(StepTokenType.Timer);
 
 public sealed record StepTemperatureToken(
-    [property: JsonPropertyName("fahrenheit")] int? Fahrenheit = null,
-    [property: JsonPropertyName("celsius")] int? Celsius = null
+    [property:
+        JsonPropertyName("fahrenheit"),
+        JsonConverter(typeof(FlexibleNullableDecimalJsonConverter))
+    ]
+        decimal? Fahrenheit = null,
+    [property:
+        JsonPropertyName("celsius"),
+        JsonConverter(typeof(FlexibleNullableDecimalJsonConverter))
+    ]
+        decimal? Celsius = null,
+    [property:
+        JsonPropertyName("maxFahrenheit"),
+        JsonConverter(typeof(FlexibleNullableDecimalJsonConverter))
+    ]
+        decimal? MaxFahrenheit = null,
+    [property:
+        JsonPropertyName("maxCelsius"),
+        JsonConverter(typeof(FlexibleNullableDecimalJsonConverter))
+    ]
+        decimal? MaxCelsius = null
 ) : StepToken(StepTokenType.Temperature);
 
 public sealed record StepInstructionSegment(string Text, StepToken? Token = null)

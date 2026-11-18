@@ -1,10 +1,6 @@
-namespace App.Core.Ingestion;
+using System.Text.Json.Nodes;
 
-public record LlmExtractionContext(
-    string SourceContent,
-    string? SourceUrl = null,
-    string? TitleHint = null
-);
+namespace App.Core.Ingestion;
 
 public record LlmVisionImageInput(int PageNumber, string MimeType, string Base64Data);
 
@@ -91,19 +87,27 @@ public interface ILlmExtractionClient
         CancellationToken cancellationToken = default
     );
 
-    Task<ExtractedRecipeDto> ExtractRecipeFromTextAsync(
+    /// <summary>
+    /// Executes one structured JSON stage of the multi-stage recipe ingestion pipeline and
+    /// deserializes the response into <typeparamref name="T" />.
+    /// </summary>
+    Task<LlmStructuredStageResult<T>> ExecuteStructuredStageAsync<T>(
         EffectiveLlmConnectionConfig config,
-        LlmExtractionContext context,
+        string stageName,
+        IReadOnlyList<LlmStageChatMessage> messages,
+        JsonNode? jsonSchema,
+        bool? overrideThinking = null,
+        int maxTokens = 16384,
         CancellationToken cancellationToken = default
     );
 
     /// <summary>
-    /// Targeted micro-disambiguation call for unresolved ingredients and proposed tags that have
-    /// medium-confidence fuzzy catalog candidates.
+    /// Generates L2-normalized embedding vectors for the supplied texts via the configured
+    /// OpenAI-compatible <c>/v1/embeddings</c> endpoint.
     /// </summary>
-    Task<LlmEntityDisambiguationResult> DisambiguateEntitiesAsync(
+    Task<float[][]> GenerateEmbeddingsAsync(
         EffectiveLlmConnectionConfig config,
-        LlmEntityDisambiguationContext context,
+        IReadOnlyList<string> inputs,
         CancellationToken cancellationToken = default
     );
 

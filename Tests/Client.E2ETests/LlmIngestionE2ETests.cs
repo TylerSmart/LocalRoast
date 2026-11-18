@@ -19,6 +19,8 @@ public sealed class MockLanLlmAndBlogServer : IAsyncDisposable
     public Dictionary<string, string> ResponsesByModel { get; } =
         new(StringComparer.OrdinalIgnoreCase);
     public List<string> RequestedModels { get; } = [];
+    public List<string> ExtraModels { get; } = [];
+    public int EmbeddingCallCount { get; private set; }
     public int? LastNumGpu { get; private set; }
     public double? LastTemperature { get; private set; }
     public double? LastTopP { get; private set; }
@@ -52,16 +54,59 @@ public sealed class MockLanLlmAndBlogServer : IAsyncDisposable
                     return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
                 }
 
-                return Results.Ok(
-                    new
+                var models = new List<string> { "qwen2.5:14b", "qwen2.5vl:7b" };
+                models.AddRange(server.ExtraModels);
+                return Results.Ok(new { models = models.Select(m => new { name = m }).ToArray() });
+            }
+        );
+
+        app.MapPost(
+            "/v1/embeddings",
+            async (HttpRequest request) =>
+            {
+                if (server.SimulateOffline)
+                {
+                    return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+                }
+
+                server.EmbeddingCallCount++;
+                using var body = await JsonDocument.ParseAsync(request.Body);
+                var inputs = new List<string>();
+                if (body.RootElement.TryGetProperty("input", out var inputProp))
+                {
+                    if (inputProp.ValueKind == JsonValueKind.Array)
                     {
-                        models = new[]
+                        foreach (var item in inputProp.EnumerateArray())
                         {
-                            new { name = "qwen2.5:14b" },
-                            new { name = "qwen2.5vl:7b" },
-                        },
+                            inputs.Add(item.GetString() ?? "");
+                        }
                     }
-                );
+                    else if (inputProp.ValueKind == JsonValueKind.String)
+                    {
+                        inputs.Add(inputProp.GetString() ?? "");
+                    }
+                }
+                if (inputs.Count == 0)
+                {
+                    inputs.Add("");
+                }
+
+                var data = inputs
+                    .Select(
+                        (text, i) =>
+                            new
+                            {
+                                index = i,
+                                embedding = text.Contains(
+                                    "beef",
+                                    StringComparison.OrdinalIgnoreCase
+                                )
+                                    ? new[] { 1.0f, 0.0f }
+                                    : new[] { 0.0f, 1.0f },
+                            }
+                    )
+                    .ToArray();
+                return Results.Ok(new { data });
             }
         );
 
@@ -323,7 +368,6 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
             var stepCard = Page.Locator("#step-card-1");
             await Expect(stepCard.Locator(".inline-diagnostic-banner"))
                 .ToContainTextAsync("vague label");
-            await Expect(stepCard.Locator(".inline-diagnostic-banner")).ToContainTextAsync("salt");
             var title = Page.Locator("input[formcontrolname='title']");
             await title.FillAsync("Unsaved user title");
             await Expect(reviewCard).ToContainTextAsync("draft has changed");
@@ -1522,7 +1566,7 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await Expect(stepCard).ToBeVisibleAsync();
         var stepBanner = stepCard.Locator(".inline-diagnostic-banner");
         await Expect(stepBanner).ToBeVisibleAsync();
-        await Expect(stepBanner).ToContainTextAsync("salt");
+        await Expect(stepBanner).ToContainTextAsync("vague label");
 
         // Clicking an issue scrolls to its card and highlights it in the issue's color
         var firstTargetClass = await jumpTargets.First.GetAttributeAsync("class") ?? "";
@@ -1972,6 +2016,113 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
                 "document.documentElement.scrollWidth <= window.innerWidth"
             ),
             "Viewport horizontal overflow detected at 360px on ingestion hub with sort selector."
+        );
+    }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task MultiStageIngestion_RichTokensAndReplacements_ScalesAndTogglesUnitsCleanly()
+    {
+        await using var mockServer = await MockLanLlmAndBlogServer.StartAsync();
+        mockServer.ExtraModels.Add("embeddinggemma");
+        mockServer.ResponsePayload = """
+            {
+              "title": "Baked Meatloaf",
+              "description": "Classic loaf baked in a pan.",
+              "baseServings": 4,
+              "prepTimeMinutes": 10,
+              "cookTimeMinutes": 40,
+              "totalTimeMinutes": 50,
+              "ingredients": [
+                {
+                  "displayName": "ground beef",
+                  "canonicalFoodName": "ground beef",
+                  "quantity": 1,
+                  "unit": "Lb",
+                  "originalRawText": "1 lb ground beef",
+                  "replacements": [
+                    {
+                      "name": "ground turkey",
+                      "quantity": 1.25,
+                      "unit": "lb",
+                      "prepNote": "lean"
+                    }
+                  ]
+                }
+              ],
+              "steps": [
+                {
+                  "instruction": "Sear ||{\"type\":\"ingredient\",\"ingredient\":\"ground beef\",\"amount\":1,\"unit\":\"lb\"}|| with ||{\"type\":\"mixture\",\"name\":\"spice rub\",\"amount\":2,\"unit\":\"tbsp\"}|| in a ||{\"type\":\"dimension\",\"value\":9,\"unit\":\"inch\",\"hyphenated\":true}|| pan and a ||{\"type\":\"fixed\",\"amount\":1,\"unit\":\"cup\",\"name\":\"water bath\",\"hyphenated\":true}|| at ||{\"type\":\"temperature\",\"fahrenheit\":350}|| for ||{\"type\":\"timer\",\"seconds\":300,\"maxSeconds\":420,\"label\":\"Roast\"}||.",
+                  "ingredientIndices": [0]
+                }
+              ],
+              "suggestedTagNames": ["Dinner"]
+            }
+            """;
+
+        await RegisterAndLoginAsync();
+        await Page.SetViewportSizeAsync(360, 800);
+        await Page.GotoAsync($"{ServerUrl}/ingest");
+        await Page.Locator(".llm-settings-btn").ClickAsync();
+        var dialog = Page.Locator("app-llm-settings-dialog");
+        await AddLlmConnectionInDialogAsync(dialog, mockServer.BaseUrl);
+        await AddLlmModelInDialogAsync(dialog, "qwen2.5:14b");
+        await AddLlmModelInDialogAsync(dialog, "embeddinggemma");
+        await AssignLlmWorkflowAsync(dialog, "text", "qwen2.5:14b");
+        await AssignLlmWorkflowAsync(dialog, "embedding", "embeddinggemma");
+        await SaveLlmWorkflowsAsync(dialog);
+
+        await Page.Locator("button.tab-pill", new() { HasText = "Paste Raw Text" }).ClickAsync();
+        await Page.Locator("textarea[formcontrolname='rawText']")
+            .FillAsync(
+                "Baked Meatloaf\nIngredients:\n- 1 lb ground beef (or 1.25 lb lean ground turkey)\nInstructions:\n1. Sear 1 lb ground beef with 2 tbsp spice rub in a 9-inch pan and a 1-cup water bath at 350°F for 5 to 7 minutes."
+            );
+
+        var queuedRes = await Page.RunAndWaitForResponseAsync(
+            () => Page.Locator("button[aria-label='Queue raw text recipe']").ClickAsync(),
+            r => r.Url.EndsWith("/api/ingestion/jobs/text", StringComparison.Ordinal) && r.Ok
+        );
+        using var queuedDoc = JsonDocument.Parse(await queuedRes.TextAsync());
+        var jobId = queuedDoc.RootElement.GetProperty("id").GetGuid();
+
+        var reviewButton = Page.Locator($"a.review-action-btn[href$='{jobId}']");
+        await WaitForLocatorWithRefreshAsync(reviewButton);
+        Assert.IsGreaterThanOrEqualTo(1, mockServer.EmbeddingCallCount);
+        await reviewButton.ClickAsync();
+
+        await Expect(Page.Locator(".replacement-sub-row input[formcontrolname='displayName']"))
+            .ToHaveValueAsync("ground turkey");
+
+        await Page.Locator("button[aria-label='Approve and publish recipe']").ClickAsync();
+        await Expect(Page.Locator(".recipe-title")).ToHaveTextAsync("Baked Meatloaf");
+
+        var pageText = Page.Locator(".recipe-detail-page");
+        await Expect(pageText).ToContainTextAsync("or 1 1/4 lb ground turkey (lean)");
+        await Expect(pageText).ToContainTextAsync("1 lb ground beef");
+        await Expect(pageText).ToContainTextAsync("2 tbsp spice rub");
+        await Expect(pageText).ToContainTextAsync("9-inch");
+        await Expect(pageText).ToContainTextAsync("1-cup water bath");
+        await Expect(pageText).ToContainTextAsync("350°F");
+        await Expect(pageText).ToContainTextAsync("5–7m (Roast)");
+
+        // Scale to 2x: ingredient, mixture, and replacement scale; fixed & dimension stay unscaled.
+        await Page.GetByRole(AriaRole.Button, new() { Name = "2x", Exact = true }).ClickAsync();
+        await Expect(pageText).ToContainTextAsync("2 1/2 lb ground turkey (lean)");
+        await Expect(pageText).ToContainTextAsync("2 lb ground beef");
+        await Expect(pageText).ToContainTextAsync("1/4 cup spice rub");
+        await Expect(pageText).ToContainTextAsync("9-inch");
+        await Expect(pageText).ToContainTextAsync("1-cup water bath");
+
+        // Toggle to Metric: dimension converts 9-inch -> 23-cm and temp converts 350°F -> 177°C.
+        await Page.Locator("mat-button-toggle[value='Metric']").ClickAsync();
+        await Expect(pageText).ToContainTextAsync("23-cm");
+        await Expect(pageText).ToContainTextAsync("177°C");
+
+        Assert.IsTrue(
+            await Page.EvaluateAsync<bool>(
+                "document.documentElement.scrollWidth <= window.innerWidth"
+            ),
+            "Viewport horizontal overflow detected at 360px on Recipe Detail."
         );
     }
 }

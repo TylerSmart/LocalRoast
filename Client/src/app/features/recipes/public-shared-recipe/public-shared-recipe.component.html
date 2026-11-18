@@ -300,6 +300,15 @@
                         @if (ingredientUsesMap().get(item.ingredient.id); as uses) {
                           <span class="ingredient-uses">{{ uses }}</span>
                         }
+                        @if (item.ingredient.replacements?.length) {
+                          <span class="ingredient-replacements">
+                            @for (rep of item.ingredient.replacements; track $index) {
+                              <span class="ingredient-replacement-item">
+                                or {{ formatReplacement(rep, scaleFactor(), targetSystem()) }}
+                              </span>
+                            }
+                          </span>
+                        }
                       </span>
                     </mat-checkbox>
                     @if (item.ingredient.alternativeMeasurement) {

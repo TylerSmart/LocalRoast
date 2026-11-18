@@ -48,7 +48,7 @@ public static partial class StepInstructionParser
     private static partial Regex DuplicateAtBeforeTempRegex();
 
     [GeneratedRegex(
-        @"(?<!\|)(\{\s*""(?:type|ingredient|displayName|canonicalFoodName|name|amount|displayAmount|displayText|unit|seconds|fahrenheit|celsius)""\s*:[^}\r\n]*?\})(?!\|)",
+        @"(?<!\|)(\{\s*""(?:type|ingredient|displayName|canonicalFoodName|name|amount|maxAmount|displayAmount|displayText|unit|seconds|maxSeconds|fahrenheit|celsius|maxFahrenheit|maxCelsius|value|maxValue|hyphenated)""\s*:[^}\r\n]*?\})(?!\|)",
         RegexOptions.Singleline,
         matchTimeoutMilliseconds: 1000
     )]
@@ -83,7 +83,7 @@ public static partial class StepInstructionParser
     private static partial Regex DelimitedBodyRegex();
 
     [GeneratedRegex(
-        @"(?<prefix>(?:^|,)\s*)""(?<key>type|ingredient|displayName|canonicalFoodName|name|amount|unit|displayAmount|displayUnit|customUnitName|displayCustomUnitName|displayText|notes|ingredientId|seconds|label|fahrenheit|celsius|value|temperature)""\s*(?=[0-9""\-]|true\b|false\b|null\b)",
+        @"(?<prefix>(?:^|,)\s*)""(?<key>type|ingredient|displayName|canonicalFoodName|name|amount|maxAmount|unit|displayAmount|displayUnit|customUnitName|displayCustomUnitName|displayText|notes|ingredientId|seconds|maxSeconds|label|fahrenheit|celsius|maxFahrenheit|maxCelsius|value|maxValue|hyphenated|temperature)""\s*(?=[0-9""\-]|true\b|false\b|null\b)",
         RegexOptions.IgnoreCase,
         matchTimeoutMilliseconds: 1000
     )]
@@ -309,6 +309,7 @@ public static partial class StepInstructionParser
                     else
                     {
                         var amt = ing.DisplayAmount ?? ing.Amount;
+                        var maxAmt = ing.DisplayAmount.HasValue ? null : ing.MaxAmount;
                         var unit = ing.DisplayUnit ?? ing.Unit;
                         var customUnitName = !string.IsNullOrEmpty(ing.DisplayCustomUnitName)
                             ? ing.DisplayCustomUnitName
@@ -326,21 +327,22 @@ public static partial class StepInstructionParser
                                     ? null
                                     : unit?.ToString()?.ToLowerInvariant()
                             );
+                        var amtText = FormatPlainRange(amt, maxAmt);
 
-                        if (amt.HasValue && !string.IsNullOrEmpty(unitStr))
+                        if (!string.IsNullOrEmpty(amtText) && !string.IsNullOrEmpty(unitStr))
                         {
                             builder.Append(
                                 string.IsNullOrWhiteSpace(ing.Ingredient)
-                                    ? $"{amt} {unitStr}"
-                                    : $"{amt} {unitStr} {ing.Ingredient}"
+                                    ? $"{amtText} {unitStr}"
+                                    : $"{amtText} {unitStr} {ing.Ingredient}"
                             );
                         }
-                        else if (amt.HasValue)
+                        else if (!string.IsNullOrEmpty(amtText))
                         {
                             builder.Append(
                                 string.IsNullOrWhiteSpace(ing.Ingredient)
-                                    ? $"{amt}"
-                                    : $"{amt} {ing.Ingredient}"
+                                    ? amtText
+                                    : $"{amtText} {ing.Ingredient}"
                             );
                         }
                         else
@@ -350,10 +352,72 @@ public static partial class StepInstructionParser
                     }
                     break;
 
+                case StepMixtureToken mix:
+                {
+                    var unitStr =
+                        mix.Unit == MeasurementUnit.Custom
+                            ? mix.CustomUnitName
+                            : mix.Unit?.ToString()?.ToLowerInvariant();
+                    var amtText = FormatPlainRange(mix.Amount, mix.MaxAmount);
+                    var parts = new List<string>(3);
+                    if (!string.IsNullOrEmpty(amtText))
+                        parts.Add(amtText);
+                    if (!string.IsNullOrEmpty(unitStr))
+                        parts.Add(unitStr);
+                    if (!string.IsNullOrWhiteSpace(mix.Name))
+                        parts.Add(mix.Name);
+                    builder.Append(string.Join(' ', parts));
+                    break;
+                }
+
+                case StepFixedToken fx:
+                {
+                    var unitStr =
+                        fx.Unit == MeasurementUnit.Custom
+                            ? fx.CustomUnitName
+                            : fx.Unit?.ToString()?.ToLowerInvariant();
+                    var amtText = FormatPlainRange(fx.Amount, fx.MaxAmount);
+                    var measure =
+                        string.IsNullOrEmpty(unitStr) ? amtText
+                        : fx.Hyphenated ? $"{amtText}-{unitStr}"
+                        : $"{amtText} {unitStr}".Trim();
+                    if (!string.IsNullOrWhiteSpace(fx.Name))
+                    {
+                        builder.Append(
+                            string.IsNullOrEmpty(measure) ? fx.Name : $"{measure} {fx.Name}"
+                        );
+                    }
+                    else
+                    {
+                        builder.Append(measure);
+                    }
+                    break;
+                }
+
+                case StepDimensionToken dim:
+                {
+                    var valText = FormatPlainRange(dim.Value, dim.MaxValue);
+                    var unitLabel = DimensionUnitHelper.GetDisplayLabel(
+                        dim.Unit,
+                        dim.MaxValue ?? dim.Value,
+                        dim.Hyphenated
+                    );
+                    builder.Append(
+                        dim.Hyphenated ? $"{valText}-{unitLabel}" : $"{valText} {unitLabel}"
+                    );
+                    break;
+                }
+
                 case StepTimerToken timer:
                     if (!string.IsNullOrWhiteSpace(timer.Label) && !IsDurationLabel(timer.Label))
                     {
                         builder.Append(timer.Label);
+                    }
+                    else if (timer.MaxSeconds.HasValue && timer.MaxSeconds.Value > timer.Seconds)
+                    {
+                        builder.Append(
+                            FormatPlainTimerRange(timer.Seconds, timer.MaxSeconds.Value)
+                        );
                     }
                     else
                     {
@@ -370,9 +434,22 @@ public static partial class StepInstructionParser
 
                 case StepTemperatureToken temp:
                     if (temp.Fahrenheit.HasValue)
-                        builder.Append($"{temp.Fahrenheit}°F");
+                    {
+                        var maxSuffix =
+                            temp.MaxFahrenheit.HasValue
+                            && temp.MaxFahrenheit.Value > temp.Fahrenheit.Value
+                                ? $"–{FormatTempNumber(temp.MaxFahrenheit.Value)}"
+                                : string.Empty;
+                        builder.Append($"{FormatTempNumber(temp.Fahrenheit.Value)}{maxSuffix}°F");
+                    }
                     else if (temp.Celsius.HasValue)
-                        builder.Append($"{temp.Celsius}°C");
+                    {
+                        var maxSuffix =
+                            temp.MaxCelsius.HasValue && temp.MaxCelsius.Value > temp.Celsius.Value
+                                ? $"–{FormatTempNumber(temp.MaxCelsius.Value)}"
+                                : string.Empty;
+                        builder.Append($"{FormatTempNumber(temp.Celsius.Value)}{maxSuffix}°C");
+                    }
                     break;
 
                 default:
@@ -384,11 +461,46 @@ public static partial class StepInstructionParser
         return builder.ToString();
     }
 
+    private static string FormatPlainRange(decimal? min, decimal? max)
+    {
+        if (!min.HasValue)
+        {
+            return string.Empty;
+        }
+        var minStr = min.Value.ToString(CultureInfo.InvariantCulture);
+        if (max.HasValue && max.Value > min.Value)
+        {
+            return $"{minStr}–{max.Value.ToString(CultureInfo.InvariantCulture)}";
+        }
+        return minStr;
+    }
+
+    private static string FormatTempNumber(decimal value) =>
+        value == Math.Truncate(value)
+            ? ((int)value).ToString(CultureInfo.InvariantCulture)
+            : value.ToString("0.##", CultureInfo.InvariantCulture);
+
+    private static string FormatPlainTimerRange(int minSeconds, int maxSeconds)
+    {
+        if (minSeconds % 3600 == 0 && maxSeconds % 3600 == 0)
+        {
+            return $"{minSeconds / 3600} to {maxSeconds / 3600} hours";
+        }
+        if (minSeconds % 60 == 0 && maxSeconds % 60 == 0)
+        {
+            return $"{minSeconds / 60} to {maxSeconds / 60} minutes";
+        }
+        return $"{minSeconds} to {maxSeconds} seconds";
+    }
+
     public static string FormatToken(StepToken token)
     {
         return token switch
         {
             StepIngredientToken ing => $"||{JsonSerializer.Serialize(ing, JsonOptions)}||",
+            StepMixtureToken mix => $"||{JsonSerializer.Serialize(mix, JsonOptions)}||",
+            StepFixedToken fx => $"||{JsonSerializer.Serialize(fx, JsonOptions)}||",
+            StepDimensionToken dim => $"||{JsonSerializer.Serialize(dim, JsonOptions)}||",
             StepTimerToken timer => $"||{JsonSerializer.Serialize(timer, JsonOptions)}||",
             StepTemperatureToken temp => $"||{JsonSerializer.Serialize(temp, JsonOptions)}||",
             _ => string.Empty,
@@ -422,6 +534,27 @@ public static partial class StepInstructionParser
                 {
                     return JsonSerializer.Deserialize<StepTemperatureToken>(json, JsonOptions);
                 }
+                if (string.Equals(typeStr, "mixture", StringComparison.OrdinalIgnoreCase))
+                {
+                    var mix = JsonSerializer.Deserialize<StepMixtureToken>(json, JsonOptions);
+                    if (mix is not null && string.IsNullOrWhiteSpace(mix.Name))
+                    {
+                        var fallback = TryGetFallbackIngredientName(root);
+                        if (fallback is not null)
+                        {
+                            return mix with { Name = fallback };
+                        }
+                    }
+                    return mix;
+                }
+                if (string.Equals(typeStr, "fixed", StringComparison.OrdinalIgnoreCase))
+                {
+                    return JsonSerializer.Deserialize<StepFixedToken>(json, JsonOptions);
+                }
+                if (string.Equals(typeStr, "dimension", StringComparison.OrdinalIgnoreCase))
+                {
+                    return JsonSerializer.Deserialize<StepDimensionToken>(json, JsonOptions);
+                }
                 if (string.Equals(typeStr, "ingredient", StringComparison.OrdinalIgnoreCase))
                 {
                     var typedIng = JsonSerializer.Deserialize<StepIngredientToken>(
@@ -449,6 +582,11 @@ public static partial class StepInstructionParser
             if (root.TryGetProperty("fahrenheit", out _) || root.TryGetProperty("celsius", out _))
             {
                 return JsonSerializer.Deserialize<StepTemperatureToken>(json, JsonOptions);
+            }
+
+            if (root.TryGetProperty("value", out _))
+            {
+                return JsonSerializer.Deserialize<StepDimensionToken>(json, JsonOptions);
             }
 
             var inferredIngredientName = TryGetFallbackIngredientName(root);

@@ -201,6 +201,25 @@ public static class LlmModelProfiles
             DailyQuotaResetTimezone: LlmQuotaSchedule.PacificTimezone,
             DailyQuotaResetTime: LlmQuotaSchedule.DefaultResetTime
         ),
+        new(
+            Id: "embeddinggemma",
+            DisplayName: "EmbeddingGemma (300M)",
+            ModelTag: "embeddinggemma:latest",
+            MatchPrefixes: ["embeddinggemma", "nomic-embed-text", "mxbai-embed"],
+            Summary: "Compact embedding model for fast hybrid vector + lexical ingredient & sub-recipe matching.",
+            EnableThinking: false,
+            Temperature: null,
+            TopP: null,
+            TopK: null,
+            ContextWindowTokens: 2048,
+            RequestTimeoutSeconds: 60,
+            RecommendedAsRefineModel: false,
+            Notes:
+            [
+                "Assign this model to the Embedding workflow in LLM Settings.",
+                "Falls back to LLM search terms automatically when unassigned.",
+            ]
+        ),
     ];
 
     /// <summary>Returns the profile whose longest match prefix starts the model tag, or null.</summary>

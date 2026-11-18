@@ -47,6 +47,20 @@ public record SubRecipePreviewDto(
     IReadOnlyList<RecipeStepDto> Steps
 );
 
+public record RecipeIngredientReplacementDto(
+    Guid Id,
+    int SortOrder,
+    string DisplayName,
+    decimal? Quantity,
+    decimal? MaxQuantity,
+    MeasurementUnit? Unit,
+    string? CustomUnitName,
+    Guid? FoodItemId,
+    string? FoodItemName,
+    bool IsPantryStaple,
+    string? PreparationNote
+);
+
 public record RecipeIngredientDto(
     Guid Id,
     int SortOrder,
@@ -67,7 +81,8 @@ public record RecipeIngredientDto(
     string? OriginalRawText,
     RecipeMeasurement? AlternativeMeasurement = null,
     bool PreferAlternativeMeasurement = false,
-    string? UnresolvedRecipeTitle = null
+    string? UnresolvedRecipeTitle = null,
+    IReadOnlyList<RecipeIngredientReplacementDto>? Replacements = null
 );
 
 public record RecipeStepTimerDto(Guid Id, int SortOrder, int DurationSeconds, string Label);
@@ -184,6 +199,16 @@ public record RecipePagedResultDto(
     public bool HasNextPage => HasMore;
 }
 
+public record RecipeIngredientReplacementInput(
+    [Required, MaxLength(200)] string DisplayName = "",
+    decimal? Quantity = null,
+    decimal? MaxQuantity = null,
+    MeasurementUnit? Unit = null,
+    [MaxLength(64)] string? CustomUnitName = null,
+    Guid? FoodItemId = null,
+    [MaxLength(300)] string? PreparationNote = null
+);
+
 public record RecipeIngredientInput(
     [MaxLength(150)] string? SectionName = null,
     decimal? Quantity = null,
@@ -198,7 +223,8 @@ public record RecipeIngredientInput(
     [MaxLength(500)] string? OriginalRawText = null,
     RecipeMeasurement? AlternativeMeasurement = null,
     bool PreferAlternativeMeasurement = false,
-    [MaxLength(200)] string? UnresolvedRecipeTitle = null
+    [MaxLength(200)] string? UnresolvedRecipeTitle = null,
+    IReadOnlyList<RecipeIngredientReplacementInput>? Replacements = null
 );
 
 public record RecipeStepTimerInput(

@@ -155,4 +155,28 @@ describe('step-instruction utils', () => {
     const callouts = stepIngredientCallouts(steps[1], multiIngs);
     expect(callouts).toEqual([{ id: 'sauce-2', label: '1 tbsp hot sauce' }]);
   });
+
+  it('scales mixture, keeps fixed unscaled, and converts dimension units without scaling', () => {
+    const step = {
+      instruction:
+        'Spread ||{"type":"mixture","name":"herb oil","amount":2,"unit":"tbsp"}|| in a ||{"type":"dimension","value":9,"unit":"inch","hyphenated":true}|| pan using ||{"type":"fixed","name":"scoop","amount":2,"unit":"tbsp"}||.',
+    };
+
+    const scaled = buildInstructionSegments(step, ingredients, 2, 'Original');
+    const mixSeg = scaled.find((s) => s.amount?.kind === 'Mixture');
+    const dimSeg = scaled.find((s) => s.amount?.kind === 'Dimension');
+    const fixSeg = scaled.find((s) => s.amount?.kind === 'Fixed');
+
+    expect(mixSeg?.text).toBe('1/4 cup herb oil');
+    expect(mixSeg?.amount?.scaled).toBe(true);
+    expect(dimSeg?.text).toBe('9-inch');
+    expect(dimSeg?.amount?.scaled).toBe(false);
+    expect(fixSeg?.text).toBe('2 tbsp scoop');
+    expect(fixSeg?.amount?.scaled).toBe(false);
+
+    const metric = buildInstructionSegments(step, ingredients, 2, 'Metric');
+    const metricDim = metric.find((s) => s.amount?.kind === 'Dimension');
+    expect(metricDim?.text).toContain('cm');
+    expect(metricDim?.amount?.scaled).toBe(true);
+  });
 });

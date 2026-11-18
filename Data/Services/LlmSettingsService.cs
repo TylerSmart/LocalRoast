@@ -67,7 +67,9 @@ public sealed class LlmSettingsService(
                 PauseReason: entity.PauseReason,
                 TextModelConfigurationId: entity.TextModelConfigurationId,
                 VisionModelConfigurationId: entity.VisionModelConfigurationId,
-                RefineModelConfigurationId: entity.RefineModelConfigurationId
+                RefineModelConfigurationId: entity.RefineModelConfigurationId,
+                EmbeddingModelConfigurationId: entity.EmbeddingModelConfigurationId,
+                EmbeddingModel: effective.EmbeddingModel
             );
         }
 
@@ -105,7 +107,8 @@ public sealed class LlmSettingsService(
             DailyQuotaResetTime: opt.DailyQuotaResetTime ?? "00:00",
             AutoResumeQueue: opt.AutoResumeQueue,
             PausedUntilUtc: opt.PausedUntilUtc,
-            PauseReason: opt.PauseReason
+            PauseReason: opt.PauseReason,
+            EmbeddingModel: opt.EmbeddingModel
         );
     }
 
@@ -157,7 +160,8 @@ public sealed class LlmSettingsService(
             DailyQuotaResetTime: opt.DailyQuotaResetTime ?? "00:00",
             AutoResumeQueue: opt.AutoResumeQueue,
             PausedUntilUtc: opt.PausedUntilUtc,
-            PauseReason: opt.PauseReason
+            PauseReason: opt.PauseReason,
+            EmbeddingModel: opt.EmbeddingModel
         );
     }
 
@@ -200,6 +204,9 @@ public sealed class LlmSettingsService(
         entity.VisionModel = string.IsNullOrWhiteSpace(request.VisionModel)
             ? null
             : request.VisionModel.Trim();
+        entity.EmbeddingModel = string.IsNullOrWhiteSpace(request.EmbeddingModel)
+            ? null
+            : request.EmbeddingModel.Trim();
         entity.OllamaKeepAlive = string.IsNullOrWhiteSpace(request.OllamaKeepAlive)
             ? "5m"
             : request.OllamaKeepAlive.Trim();
@@ -262,6 +269,7 @@ public sealed class LlmSettingsService(
             request.TextModelConfigurationId,
             request.VisionModelConfigurationId,
             request.RefineModelConfigurationId,
+            request.EmbeddingModelConfigurationId,
         }
             .OfType<Guid>()
             .Distinct()
@@ -291,6 +299,7 @@ public sealed class LlmSettingsService(
         entity.TextModelConfigurationId = request.TextModelConfigurationId;
         entity.VisionModelConfigurationId = request.VisionModelConfigurationId;
         entity.RefineModelConfigurationId = request.RefineModelConfigurationId;
+        entity.EmbeddingModelConfigurationId = request.EmbeddingModelConfigurationId;
 
         // An unassigned workflow is off; never fall back to the old single-host models.
         if (request.TextModelConfigurationId is null)
@@ -304,6 +313,10 @@ public sealed class LlmSettingsService(
         if (request.RefineModelConfigurationId is null)
         {
             entity.RefineModel = null;
+        }
+        if (request.EmbeddingModelConfigurationId is null)
+        {
+            entity.EmbeddingModel = null;
         }
 
         var wasIngestionEnabled = entity.EnableIngestion;
@@ -401,6 +414,8 @@ public sealed class LlmSettingsService(
             .Include(s => s.VisionModelConfiguration)
                 .ThenInclude(c => c!.Connection)
             .Include(s => s.RefineModelConfiguration)
+                .ThenInclude(c => c!.Connection)
+            .Include(s => s.EmbeddingModelConfiguration)
                 .ThenInclude(c => c!.Connection);
 
     private static EffectiveLlmConnectionConfig BuildLegacyConfig(HouseholdLlmSettings entity) =>
@@ -435,12 +450,13 @@ public sealed class LlmSettingsService(
             DailyQuotaResetTime: entity.DailyQuotaResetTime ?? "00:00",
             AutoResumeQueue: entity.AutoResumeQueue,
             PausedUntilUtc: entity.PausedUntilUtc,
-            PauseReason: entity.PauseReason
+            PauseReason: entity.PauseReason,
+            EmbeddingModel: entity.EmbeddingModel
         );
 
     /// <summary>
     /// Replaces the old single-host values with each workflow's assigned model configuration so
-    /// text, vision and refinement can run on different machines or providers.
+    /// text, vision, refinement, and embedding can run on different machines or providers.
     /// </summary>
     private static EffectiveLlmConnectionConfig ApplyWorkflowAssignments(
         EffectiveLlmConnectionConfig legacy,
@@ -469,13 +485,26 @@ public sealed class LlmSettingsService(
             }
             : null;
 
+        var embedding = entity.EmbeddingModelConfiguration
+            is { Connection: not null } embeddingConfiguration
+            ? WithModelConfiguration(legacy, embeddingConfiguration) with
+            {
+                TextModel = embeddingConfiguration.Model,
+                VisionModel = null,
+                RefineModel = null,
+                EmbeddingModel = embeddingConfiguration.Model,
+            }
+            : null;
+
         return text with
         {
             TextModel = entity.TextModelConfiguration?.Model ?? legacy.TextModel,
             VisionModel = vision?.VisionModel ?? legacy.VisionModel,
             RefineModel = refine?.RefineModel ?? legacy.RefineModel,
+            EmbeddingModel = embedding?.EmbeddingModel ?? legacy.EmbeddingModel,
             VisionConfig = vision,
             RefineConfig = refine,
+            EmbeddingConfig = embedding,
         };
     }
 
@@ -515,6 +544,7 @@ public sealed class LlmSettingsService(
             OllamaGpuLayers = configuration.OllamaGpuLayers,
             VisionConfig = null,
             RefineConfig = null,
+            EmbeddingConfig = null,
         };
 
     public async Task<LlmConnectionTestResultDto> TestConnectionAsync(
@@ -650,6 +680,7 @@ public sealed class LlmSettingsService(
             ApiKey = opt.ApiKey,
             TextModel = opt.TextModel,
             VisionModel = opt.VisionModel,
+            EmbeddingModel = opt.EmbeddingModel,
             OllamaKeepAlive = opt.OllamaKeepAlive,
             RequestTimeoutSeconds = opt.RequestTimeoutSeconds,
             AutoPublishHighConfidenceText = opt.AutoPublishHighConfidenceText,

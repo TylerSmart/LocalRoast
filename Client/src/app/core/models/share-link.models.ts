@@ -1,6 +1,7 @@
 import {
   MeasurementUnit,
   RecipeDifficulty,
+  RecipeIngredientReplacementDto,
   RecipeMeasurement,
   RecipeStepDto,
 } from './recipe.models';
@@ -49,6 +50,7 @@ export interface PublicRecipeIngredientDto {
   alternativeMeasurement?: RecipeMeasurement | null;
   preferAlternativeMeasurement?: boolean;
   unresolvedRecipeTitle?: string | null;
+  replacements?: RecipeIngredientReplacementDto[] | null;
 }
 
 export interface PublicSubRecipeDto {

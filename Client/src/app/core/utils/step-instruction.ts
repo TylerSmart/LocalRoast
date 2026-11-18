@@ -1,6 +1,9 @@
 import { RecipeMeasurement, UnitSystem } from '../models/recipe.models';
 import { formatStepIngredient, IngredientMeasurements } from './culinary-math';
 import {
+  formatDimensionDisplay,
+  formatFixedDisplay,
+  formatMixtureDisplay,
   formatTemperatureDisplay,
   formatTimerToken,
   formatTokenDisplay,
@@ -8,7 +11,10 @@ import {
   shouldShowTimerLabel,
 } from './step-token-parser';
 import {
+  StepDimensionToken,
+  StepFixedToken,
   StepIngredientToken,
+  StepMixtureToken,
   StepTemperatureToken,
   StepTimerToken,
 } from '../models/step-token.models';
@@ -16,7 +22,7 @@ import {
 export interface InstructionSegment {
   text: string;
   amount?: {
-    kind: string;
+    kind: 'Ingredient' | 'Mixture' | 'Timer' | 'Temperature' | 'Dimension' | 'Fixed' | string;
     ingredientId: string | null;
     ingredientName: string | null;
     scaled: boolean;
@@ -81,6 +87,42 @@ export function buildInstructionSegments(
           kind: 'Temperature',
           ingredientId: null,
           ingredientName: null,
+          scaled: isScaled,
+        },
+      });
+    } else if (seg.token.type === 'dimension') {
+      const dim = seg.token as StepDimensionToken;
+      const { text: dimText, scaled: isScaled } = formatDimensionDisplay(dim, system);
+      segments.push({
+        text: dimText,
+        amount: {
+          kind: 'Dimension',
+          ingredientId: null,
+          ingredientName: null,
+          scaled: isScaled,
+        },
+      });
+    } else if (seg.token.type === 'fixed') {
+      const fx = seg.token as StepFixedToken;
+      const { text: fxText, scaled: isScaled } = formatFixedDisplay(fx, system);
+      segments.push({
+        text: fxText,
+        amount: {
+          kind: 'Fixed',
+          ingredientId: null,
+          ingredientName: fx.name ?? null,
+          scaled: isScaled,
+        },
+      });
+    } else if (seg.token.type === 'mixture') {
+      const mix = seg.token as StepMixtureToken;
+      const { text: mixText, scaled: isScaled } = formatMixtureDisplay(mix, factor, system);
+      segments.push({
+        text: mixText,
+        amount: {
+          kind: 'Mixture',
+          ingredientId: null,
+          ingredientName: mix.name,
           scaled: isScaled,
         },
       });

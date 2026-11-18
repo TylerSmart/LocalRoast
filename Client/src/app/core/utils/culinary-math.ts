@@ -1,4 +1,11 @@
-import { MeasurementUnit, RecipeMeasurement, UnitSystem } from '../models/recipe.models';
+import {
+  MeasurementUnit,
+  RecipeIngredientReplacementDto,
+  RecipeMeasurement,
+  UnitSystem,
+} from '../models/recipe.models';
+import { IngestionDraftReplacementDto } from '../models/ingestion.models';
+import { DimensionUnit } from '../models/step-token.models';
 
 export interface IngredientMeasurements extends Partial<RecipeMeasurement> {
   alternativeMeasurement?: RecipeMeasurement | null;
@@ -766,4 +773,163 @@ export function formatCountdown(totalSeconds: number): string {
     return `${hours}:${pad(minutes)}:${pad(seconds)}`;
   }
   return `${pad(minutes)}:${pad(seconds)}`;
+}
+
+export function getDimensionUnitLabel(
+  unit: DimensionUnit,
+  value: number,
+  hyphenated = false,
+): string {
+  const singular = hyphenated || Math.abs(value - 1) < 1e-6;
+  switch (unit) {
+    case 'inch':
+      return singular ? 'inch' : 'inches';
+    case 'foot':
+      return singular ? 'foot' : 'feet';
+    case 'yard':
+      return singular ? 'yard' : 'yards';
+    case 'mm':
+      return 'mm';
+    case 'cm':
+      return 'cm';
+    case 'm':
+      return 'm';
+    default:
+      return singular ? 'inch' : 'inches';
+  }
+}
+
+function roundTo(val: number, decimals: number): number {
+  const factor = Math.pow(10, decimals);
+  return Math.round(val * factor) / factor;
+}
+
+export function convertDimension(
+  value: number,
+  maxValue: number | null | undefined,
+  unit: DimensionUnit,
+  targetSystem: UnitSystem,
+): { value: number; maxValue: number | null; unit: DimensionUnit; converted: boolean } {
+  const cleanMax = maxValue != null && maxValue > value ? maxValue : null;
+  if (targetSystem === 'Original') {
+    return { value, maxValue: cleanMax, unit, converted: false };
+  }
+
+  if (targetSystem === 'Metric') {
+    switch (unit) {
+      case 'inch': {
+        const cm = value * 2.54;
+        if (cm < 1) {
+          return {
+            value: roundTo(value * 25.4, 0),
+            maxValue: cleanMax != null ? roundTo(cleanMax * 25.4, 0) : null,
+            unit: 'mm',
+            converted: true,
+          };
+        }
+        return {
+          value: roundTo(cm, 1),
+          maxValue: cleanMax != null ? roundTo(cleanMax * 2.54, 1) : null,
+          unit: 'cm',
+          converted: true,
+        };
+      }
+      case 'foot':
+        return {
+          value: roundTo(value * 30.48, 0),
+          maxValue: cleanMax != null ? roundTo(cleanMax * 30.48, 0) : null,
+          unit: 'cm',
+          converted: true,
+        };
+      case 'yard':
+        return {
+          value: roundTo(value * 0.9144, 2),
+          maxValue: cleanMax != null ? roundTo(cleanMax * 0.9144, 2) : null,
+          unit: 'm',
+          converted: true,
+        };
+      default:
+        return { value, maxValue: cleanMax, unit, converted: false };
+    }
+  }
+
+  if (targetSystem === 'UsCustomary') {
+    switch (unit) {
+      case 'mm':
+        return {
+          value: roundTo(value / 25.4, 2),
+          maxValue: cleanMax != null ? roundTo(cleanMax / 25.4, 2) : null,
+          unit: 'inch',
+          converted: true,
+        };
+      case 'cm': {
+        const inches = value / 2.54;
+        if (inches >= 24) {
+          return {
+            value: roundTo(value / 30.48, 1),
+            maxValue: cleanMax != null ? roundTo(cleanMax / 30.48, 1) : null,
+            unit: 'foot',
+            converted: true,
+          };
+        }
+        return {
+          value: roundTo(inches, 1),
+          maxValue: cleanMax != null ? roundTo(cleanMax / 2.54, 1) : null,
+          unit: 'inch',
+          converted: true,
+        };
+      }
+      case 'm':
+        return {
+          value: roundTo(value / 0.9144, 2),
+          maxValue: cleanMax != null ? roundTo(cleanMax / 0.9144, 2) : null,
+          unit: 'yard',
+          converted: true,
+        };
+      default:
+        return { value, maxValue: cleanMax, unit, converted: false };
+    }
+  }
+
+  return { value, maxValue: cleanMax, unit, converted: false };
+}
+
+export function formatDimensionToken(
+  value: number,
+  maxValue: number | null | undefined,
+  unit: DimensionUnit,
+  hyphenated = false,
+  targetSystem: UnitSystem = 'Original',
+): { text: string; scaled: boolean } {
+  const conv = convertDimension(value, maxValue, unit, targetSystem);
+  const isMetric = conv.unit === 'mm' || conv.unit === 'cm' || conv.unit === 'm';
+  const valText = formatAmount(conv.value, conv.maxValue, isMetric);
+  const label = getDimensionUnitLabel(conv.unit, conv.maxValue ?? conv.value, hyphenated);
+  return {
+    text: hyphenated ? `${valText}-${label}` : `${valText} ${label}`,
+    scaled: conv.converted,
+  };
+}
+
+export function formatIngredientReplacement(
+  rep: Pick<
+    RecipeIngredientReplacementDto | IngestionDraftReplacementDto,
+    'displayName' | 'quantity' | 'maxQuantity' | 'unit' | 'customUnitName' | 'preparationNote'
+  >,
+  scaleFactor = 1,
+  targetSystem: UnitSystem = 'Original',
+): string {
+  const scaled =
+    rep.quantity != null
+      ? scaleAndConvert(
+          rep.quantity,
+          rep.maxQuantity ?? null,
+          rep.unit ?? null,
+          rep.customUnitName ?? null,
+          scaleFactor,
+          targetSystem,
+        ).formattedMeasurement.trim()
+      : '';
+  const prep = rep.preparationNote?.trim() ? ` (${rep.preparationNote.trim()})` : '';
+  return [scaled, rep.displayName].filter(Boolean).join(' ') + prep;
 }

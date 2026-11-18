@@ -1364,6 +1364,13 @@ public sealed class IngestionService(
                     cleanQty = 1m;
                 }
 
+                var replacementsInput =
+                    await IngestionCatalogMaterializer.MaterializeReplacementsAsync(
+                        dbContext,
+                        ing.Replacements,
+                        cancellationToken
+                    );
+
                 ingredientsInput.Add(
                     new RecipeIngredientInput(
                         SectionName: ing.SectionName,
@@ -1383,7 +1390,8 @@ public sealed class IngestionService(
                         OriginalRawText: ing.OriginalRawText,
                         AlternativeMeasurement: ing.AlternativeMeasurement,
                         PreferAlternativeMeasurement: ing.PreferAlternativeMeasurement,
-                        UnresolvedRecipeTitle: linkedRecipeId.HasValue ? null : recipeTitle
+                        UnresolvedRecipeTitle: linkedRecipeId.HasValue ? null : recipeTitle,
+                        Replacements: replacementsInput
                     )
                 );
             }
@@ -1883,7 +1891,9 @@ public sealed class IngestionService(
         var steps = draft.Steps ?? [];
 
         if (
-            ingredients.Any(i => i is null)
+            ingredients.Any(i =>
+                i is null || (i.Replacements is not null && i.Replacements.Any(r => r is null))
+            )
             || steps.Any(s =>
                 s is null
                 || (s.Timers is not null && s.Timers.Any(t => t is null))
@@ -1947,6 +1957,35 @@ public sealed class IngestionService(
                     );
                 }
             }
+
+            foreach (var rep in ing.Replacements ?? [])
+            {
+                if (
+                    (rep.Quantity.HasValue && rep.Quantity.Value <= 0m)
+                    || (rep.MaxQuantity.HasValue && rep.MaxQuantity.Value <= 0m)
+                )
+                {
+                    var msg =
+                        $"Ingredient #{i + 1} replacement ('{rep.DisplayName}') has a non-positive quantity.";
+                    validationIssues.Add(msg);
+                    targeted.Add(
+                        new IngestionDiagnosticTargetDto(msg, "error", IngredientIndex: i)
+                    );
+                }
+
+                var candidateRepFoodName = !string.IsNullOrWhiteSpace(rep.ProposedFoodItemName)
+                    ? rep.ProposedFoodItemName
+                    : rep.DisplayName;
+                if (!FoodNameSanitizer.IsValidFoodName(candidateRepFoodName))
+                {
+                    var msg =
+                        $"Ingredient #{i + 1} replacement ('{rep.DisplayName}') does not have a meaningful food name.";
+                    validationIssues.Add(msg);
+                    targeted.Add(
+                        new IngestionDiagnosticTargetDto(msg, "error", IngredientIndex: i)
+                    );
+                }
+            }
         }
 
         foreach (var existingIssue in draft.ValidationIssues ?? [])
@@ -1991,6 +2030,54 @@ public sealed class IngestionService(
             }
             else
             {
+                var extractedTokens = StepInstructionParser.ExtractTokens(step.Instruction);
+                foreach (var token in extractedTokens)
+                {
+                    if (token is StepIngredientToken ingTok)
+                    {
+                        if (
+                            string.IsNullOrWhiteSpace(ingTok.Ingredient)
+                            || (ingTok.Amount.HasValue && ingTok.Amount.Value <= 0m)
+                        )
+                        {
+                            var msg =
+                                $"Step {sIdx + 1}: Step ingredient token has a missing name or non-positive amount.";
+                            validationIssues.Add(msg);
+                            targeted.Add(
+                                new IngestionDiagnosticTargetDto(msg, "error", StepNumber: sIdx + 1)
+                            );
+                        }
+                    }
+                    else if (token is StepTimerToken timerTok && timerTok.Seconds <= 0)
+                    {
+                        var msg = $"Step {sIdx + 1}: Timer token has a non-positive duration.";
+                        validationIssues.Add(msg);
+                        targeted.Add(
+                            new IngestionDiagnosticTargetDto(msg, "error", StepNumber: sIdx + 1)
+                        );
+                    }
+                    else if (
+                        token is StepTemperatureToken tempTok
+                        && !tempTok.Fahrenheit.HasValue
+                        && !tempTok.Celsius.HasValue
+                    )
+                    {
+                        var msg = $"Step {sIdx + 1}: Temperature token has no numeric value.";
+                        validationIssues.Add(msg);
+                        targeted.Add(
+                            new IngestionDiagnosticTargetDto(msg, "error", StepNumber: sIdx + 1)
+                        );
+                    }
+                    else if (token is StepDimensionToken dimTok && dimTok.Value <= 0m)
+                    {
+                        var msg = $"Step {sIdx + 1}: Dimension token has a non-positive value.";
+                        validationIssues.Add(msg);
+                        targeted.Add(
+                            new IngestionDiagnosticTargetDto(msg, "error", StepNumber: sIdx + 1)
+                        );
+                    }
+                }
+
                 for (var i = 0; i < ingredients.Count; i++)
                 {
                     if (linkedSet.Contains(i))

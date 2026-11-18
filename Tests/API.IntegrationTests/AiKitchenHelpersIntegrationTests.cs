@@ -106,17 +106,21 @@ public sealed class AiKitchenHelpersIntegrationTests
             );
         }
 
-        public Task<ExtractedRecipeDto> ExtractRecipeFromTextAsync(
+        public Task<LlmStructuredStageResult<T>> ExecuteStructuredStageAsync<T>(
             EffectiveLlmConnectionConfig config,
-            LlmExtractionContext context,
+            string stageName,
+            IReadOnlyList<LlmStageChatMessage> messages,
+            System.Text.Json.Nodes.JsonNode? jsonSchema,
+            bool? overrideThinking = null,
+            int maxTokens = 16384,
             CancellationToken cancellationToken = default
         ) => throw new NotImplementedException();
 
-        public Task<LlmEntityDisambiguationResult> DisambiguateEntitiesAsync(
+        public Task<float[][]> GenerateEmbeddingsAsync(
             EffectiveLlmConnectionConfig config,
-            LlmEntityDisambiguationContext context,
+            IReadOnlyList<string> inputs,
             CancellationToken cancellationToken = default
-        ) => Task.FromResult(new LlmEntityDisambiguationResult());
+        ) => Task.FromResult(Array.Empty<float[]>());
 
         public Task<string?> TranscribeRecipeImagesAsync(
             EffectiveLlmConnectionConfig config,

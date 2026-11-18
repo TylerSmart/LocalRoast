@@ -25,6 +25,7 @@ import {
 } from '../../../core/models/recipe.models';
 import {
   FormattedQuantityResult,
+  formatIngredientReplacement,
   formatMinutes,
   scaleIngredient,
 } from '../../../core/utils/culinary-math';
@@ -89,6 +90,7 @@ export class RecipeDetailPreviewComponent {
 
   readonly targetServings = linkedSignal(() => this.recipe().baseServings || 4);
   readonly targetSystem = signal<UnitSystem>('Original');
+  readonly formatReplacement = formatIngredientReplacement;
 
   readonly scaleFactor = computed(() => {
     const base = this.recipe().baseServings;

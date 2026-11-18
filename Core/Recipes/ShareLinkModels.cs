@@ -41,7 +41,8 @@ public record PublicRecipeIngredientDto(
     bool IsOptional,
     RecipeMeasurement? AlternativeMeasurement = null,
     bool PreferAlternativeMeasurement = false,
-    string? UnresolvedRecipeTitle = null
+    string? UnresolvedRecipeTitle = null,
+    IReadOnlyList<RecipeIngredientReplacementDto>? Replacements = null
 );
 
 public record PublicSubRecipeDto(

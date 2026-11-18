@@ -15,6 +15,11 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
 
     public DbSet<RecipeIngredient> RecipeIngredients => Set<RecipeIngredient>();
 
+    public DbSet<RecipeIngredientReplacement> RecipeIngredientReplacements =>
+        Set<RecipeIngredientReplacement>();
+
+    public DbSet<CatalogEmbedding> CatalogEmbeddings => Set<CatalogEmbedding>();
+
     public DbSet<RecipeStep> RecipeSteps => Set<RecipeStep>();
 
     public DbSet<RecipeStepIngredient> RecipeStepIngredients => Set<RecipeStepIngredient>();

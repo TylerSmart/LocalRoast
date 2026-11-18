@@ -22,6 +22,53 @@ namespace App.Data.Migrations
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
 
+            modelBuilder.Entity("App.Data.Entities.CatalogEmbedding", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<int>("Dimensions")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ModelTag")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTimeOffset>("ModifiedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("ModifiedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("NormalizedText")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)");
+
+                    b.Property<byte[]>("VectorBytes")
+                        .IsRequired()
+                        .HasColumnType("varbinary(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ModelTag", "NormalizedText")
+                        .IsUnique();
+
+                    b.ToTable("CatalogEmbeddings", (string)null);
+                });
+
             modelBuilder.Entity("App.Data.Entities.Collection", b =>
                 {
                     b.Property<Guid>("Id")
@@ -292,6 +339,13 @@ namespace App.Data.Migrations
                     b.Property<int?>("DailyRequestQuota")
                         .HasColumnType("int");
 
+                    b.Property<string>("EmbeddingModel")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<Guid?>("EmbeddingModelConfigurationId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<bool>("EnableIngestion")
                         .HasColumnType("bit");
 
@@ -401,6 +455,8 @@ namespace App.Data.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("EmbeddingModelConfigurationId");
 
                     b.HasIndex("RefineModelConfigurationId");
 
@@ -1369,6 +1425,71 @@ namespace App.Data.Migrations
                     b.ToTable("RecipeIngredients", (string)null);
                 });
 
+            modelBuilder.Entity("App.Data.Entities.RecipeIngredientReplacement", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("CustomUnitName")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<Guid?>("FoodItemId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("MaxQuantity")
+                        .HasPrecision(10, 4)
+                        .HasColumnType("decimal(10,4)");
+
+                    b.Property<DateTimeOffset>("ModifiedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("ModifiedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("PreparationNote")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<decimal?>("Quantity")
+                        .HasPrecision(10, 4)
+                        .HasColumnType("decimal(10,4)");
+
+                    b.Property<Guid>("RecipeIngredientId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Unit")
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FoodItemId");
+
+                    b.HasIndex("RecipeIngredientId", "SortOrder");
+
+                    b.ToTable("RecipeIngredientReplacements", (string)null);
+                });
+
             modelBuilder.Entity("App.Data.Entities.RecipeStep", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1963,6 +2084,11 @@ namespace App.Data.Migrations
 
             modelBuilder.Entity("App.Data.Entities.HouseholdLlmSettings", b =>
                 {
+                    b.HasOne("App.Data.Entities.LlmModelConfiguration", "EmbeddingModelConfiguration")
+                        .WithMany()
+                        .HasForeignKey("EmbeddingModelConfigurationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("App.Data.Entities.LlmModelConfiguration", "RefineModelConfiguration")
                         .WithMany()
                         .HasForeignKey("RefineModelConfigurationId")
@@ -1977,6 +2103,8 @@ namespace App.Data.Migrations
                         .WithMany()
                         .HasForeignKey("VisionModelConfigurationId")
                         .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("EmbeddingModelConfiguration");
 
                     b.Navigation("RefineModelConfiguration");
 
@@ -2105,6 +2233,24 @@ namespace App.Data.Migrations
                     b.Navigation("LinkedRecipe");
 
                     b.Navigation("Recipe");
+                });
+
+            modelBuilder.Entity("App.Data.Entities.RecipeIngredientReplacement", b =>
+                {
+                    b.HasOne("App.Data.Entities.FoodItem", "FoodItem")
+                        .WithMany()
+                        .HasForeignKey("FoodItemId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("App.Data.Entities.RecipeIngredient", "RecipeIngredient")
+                        .WithMany("Replacements")
+                        .HasForeignKey("RecipeIngredientId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("FoodItem");
+
+                    b.Navigation("RecipeIngredient");
                 });
 
             modelBuilder.Entity("App.Data.Entities.RecipeStep", b =>
@@ -2263,6 +2409,8 @@ namespace App.Data.Migrations
 
             modelBuilder.Entity("App.Data.Entities.RecipeIngredient", b =>
                 {
+                    b.Navigation("Replacements");
+
                     b.Navigation("StepReferences");
                 });
 

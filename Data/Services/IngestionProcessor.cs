@@ -14,6 +14,7 @@ public sealed class IngestionProcessor(
     AppDbContext dbContext,
     ILlmSettingsService llmSettingsService,
     ILlmExtractionClient llmClient,
+    IIngestionRecipePipeline recipePipeline,
     IWebRecipeScraper scraper,
     IRecipeService recipeService,
     IMediaStorageService mediaStorageService,
@@ -288,23 +289,6 @@ public sealed class IngestionProcessor(
 
             var config = await llmSettingsService.GetEffectiveConfigAsync(jobCt);
 
-            var tags = await dbContext
-                .Tags.AsNoTracking()
-                .Select(t => new CatalogTagLookupItem(t.Id, t.Name, t.NormalizedName, t.Slug))
-                .ToListAsync(jobCt);
-
-            var catalogFoods = await dbContext
-                .FoodItems.AsNoTracking()
-                .Select(f => new CatalogFoodLookupItem(
-                    f.Id,
-                    f.Name,
-                    f.NormalizedName,
-                    f.IsPantryStaple,
-                    f.Aliases.Select(a => a.NormalizedAlias).ToList(),
-                    f.Category
-                ))
-                .ToListAsync(jobCt);
-
             // Stage 1b: Transcribe images if Vision pipeline is required
 
             var requiresVision = job.Channel == IngestionChannel.Images;
@@ -456,52 +440,6 @@ public sealed class IngestionProcessor(
                 sourceText = job.NormalizedSourceText ?? job.RawText ?? "";
             }
 
-            // Stage 2: Extract + Deterministic Validate (with multi-turn self-correction)
-
-            var extracted = await llmClient.ExtractRecipeFromTextAsync(
-                config,
-                new LlmExtractionContext(
-                    SourceContent: sourceText,
-                    SourceUrl: job.SourceUrl,
-                    TitleHint: job.DisplayTitle
-                ),
-                jobCt
-            );
-
-            if (await IsJobDiscardedInDbAsync(job.Id, jobCt))
-            {
-                return false;
-            }
-
-            extracted = RecipeValidator.NormalizeCompoundIngredients(extracted);
-            var validation = RecipeValidator.Validate(extracted, sourceText);
-
-            // Stage 3: Deterministic Candidate Matching + Targeted Micro-Disambiguation
-
-            var matchResult = EntityCandidateMatcher.Match(extracted, catalogFoods, tags);
-            if (matchResult.AmbiguousIngredients.Count > 0 || matchResult.AmbiguousTags.Count > 0)
-            {
-                job.StatusDetail = "Disambiguating catalog items via local LLM...";
-                await dbContext.SaveChangesAsync(jobCt);
-
-                var disambiguation = await llmClient.DisambiguateEntitiesAsync(
-                    config,
-                    new LlmEntityDisambiguationContext(
-                        RecipeTitle: extracted.Title,
-                        AmbiguousIngredients: matchResult.AmbiguousIngredients,
-                        AmbiguousTags: matchResult.AmbiguousTags
-                    ),
-                    jobCt
-                );
-
-                matchResult = EntityCandidateMatcher.ApplyDisambiguation(
-                    matchResult,
-                    disambiguation,
-                    catalogFoods,
-                    tags
-                );
-            }
-
             string? fallbackSourceName = job.SourceName;
 
             string? fallbackSourceAuthor = job.SourceAuthor;
@@ -553,27 +491,43 @@ public sealed class IngestionProcessor(
                 }
             }
 
-            // Stage 4: Deterministic Compiler -> IngestionExtractedDraftDto
+            // Stage 1-5: Multi-Stage Pipeline -> IngestionExtractedDraftDto
 
-            var draft = RecipeDraftCompiler.Compile(
-                extracted: extracted,
-                validation: validation,
-                matches: matchResult,
-                sourceUrl: job.SourceUrl,
-                fallbackSourceName: fallbackSourceName,
-                fallbackSourceAuthor: fallbackSourceAuthor,
-                coverImagePath: job.DownloadedCoverImagePath,
-                thumbnailImagePath: job.DownloadedThumbnailImagePath,
-                sourceBookTitle: job.SourceBookTitle,
-                sourceBookPage: job.SourceBookPage,
-                retainSourceAttachments: job.Channel
-                    is IngestionChannel.Images
-                        or IngestionChannel.Pdf
-                        or IngestionChannel.RawText,
-                extractedModel: modelUsed,
-                suggestedCollectionIds: fallbackCollectionIds,
-                sourceText: sourceText
+            var pipelineResult = await recipePipeline.RunAsync(
+                new IngestionPipelineRequest(
+                    SourceText: sourceText,
+                    Config: config,
+                    ExcludeRecipeId: job.ResultingRecipeId,
+                    SourceUrl: job.SourceUrl,
+                    SourceName: fallbackSourceName,
+                    SourceAuthor: fallbackSourceAuthor,
+                    SourceBookTitle: job.SourceBookTitle,
+                    SourceBookPage: job.SourceBookPage,
+                    CoverImagePath: job.DownloadedCoverImagePath,
+                    ThumbnailImagePath: job.DownloadedThumbnailImagePath,
+                    RetainSourceAttachments: job.Channel
+                        is IngestionChannel.Images
+                            or IngestionChannel.Pdf
+                            or IngestionChannel.RawText,
+                    SuggestedCollectionIds: fallbackCollectionIds,
+                    OnStageProgress: async statusDetail =>
+                    {
+                        job.StatusDetail = statusDetail;
+                        await dbContext.SaveChangesAsync(jobCt);
+                    }
+                ),
+                jobCt
             );
+
+            if (await IsJobDiscardedInDbAsync(job.Id, jobCt))
+            {
+                return false;
+            }
+
+            var draft = pipelineResult.Draft with
+            {
+                ExtractedModel = IngestionMetadataAndTagHelper.CleanOptionalText(modelUsed, 200),
+            };
 
             var allValidationIssues = new List<string>(draft.ValidationIssues ?? []);
 
@@ -586,6 +540,10 @@ public sealed class IngestionProcessor(
                         job.ResultingRecipeId,
                         jobCt
                     );
+                // Pipeline placeholder sub-recipe errors are superseded by catalog resolution above.
+                allValidationIssues.RemoveAll(s =>
+                    s.Contains("references sub-recipe", StringComparison.OrdinalIgnoreCase)
+                );
                 allValidationIssues.AddRange(referenceIssues);
                 var distinctIssues = allValidationIssues
                     .Where(s => !string.IsNullOrWhiteSpace(s))
@@ -639,9 +597,8 @@ public sealed class IngestionProcessor(
                 == true;
 
             var canAutoPublish =
-                validation.IsValid
+                pipelineResult.IsPlausibleRecipe
                 && (draft.ValidationIssues?.Count ?? 0) == 0
-                && extracted.QualityAudit?.IsPlausibleRecipe != false
                 && (draft.QualityWarnings?.Count ?? 0) == 0
                 && !hasUnresolvedRecipeReferences
                 && (config.AutoPublishHighConfidenceText || job.AutoPublish)

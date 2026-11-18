@@ -16,6 +16,8 @@ public sealed class LlmDefaultsOptions
 
     public string? VisionModel { get; set; }
 
+    public string? EmbeddingModel { get; set; }
+
     public string OllamaKeepAlive { get; set; } = "5m";
 
     public int ContextWindowTokens { get; set; } = 8192;
@@ -115,7 +117,9 @@ public record LlmSettingsDto(
     string? PauseReason = null,
     Guid? TextModelConfigurationId = null,
     Guid? VisionModelConfigurationId = null,
-    Guid? RefineModelConfigurationId = null
+    Guid? RefineModelConfigurationId = null,
+    Guid? EmbeddingModelConfigurationId = null,
+    string? EmbeddingModel = null
 );
 
 public record EffectiveLlmConnectionConfig(
@@ -153,7 +157,9 @@ public record EffectiveLlmConnectionConfig(
     string? ConnectionKey = null,
     EffectiveLlmConnectionConfig? VisionConfig = null,
     EffectiveLlmConnectionConfig? RefineConfig = null,
-    int? OllamaGpuLayers = null
+    int? OllamaGpuLayers = null,
+    string? EmbeddingModel = null,
+    EffectiveLlmConnectionConfig? EmbeddingConfig = null
 )
 {
     /// <summary>
@@ -161,6 +167,22 @@ public record EffectiveLlmConnectionConfig(
     /// connection supplies its host, credentials, limits and tuning.
     /// </summary>
     public EffectiveLlmConnectionConfig ForVision() => VisionConfig ?? this;
+
+    /// <summary>The connection settings for embedding requests, or null when no embedding model is assigned.</summary>
+    public EffectiveLlmConnectionConfig? ForEmbedding()
+    {
+        if (EmbeddingConfig is not null && !string.IsNullOrWhiteSpace(EmbeddingConfig.TextModel))
+        {
+            return EmbeddingConfig;
+        }
+
+        return !string.IsNullOrWhiteSpace(EmbeddingModel)
+            ? this with
+            {
+                TextModel = EmbeddingModel.Trim(),
+            }
+            : null;
+    }
 
     /// <summary>The connection settings for refine requests: the Refine Model with its own thinking, sampling and timeout.</summary>
     public EffectiveLlmConnectionConfig ForRefinement() =>
@@ -222,7 +244,8 @@ public record UpdateLlmSettingsRequest(
     [Range(1, 100000)] int? DailyRequestQuota = null,
     [MaxLength(64)] string DailyQuotaResetTimezone = "UTC",
     [MaxLength(10)] string DailyQuotaResetTime = "00:00",
-    bool AutoResumeQueue = true
+    bool AutoResumeQueue = true,
+    [MaxLength(200)] string? EmbeddingModel = null
 );
 
 public record TestLlmConnectionRequest(

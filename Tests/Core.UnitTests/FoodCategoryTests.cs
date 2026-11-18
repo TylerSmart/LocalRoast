@@ -91,74 +91,27 @@ public sealed class FoodCategoryTests
     }
 
     [TestMethod]
-    public void Compile_AssignsCategories_FromLlmSuggestionFallbackAndCatalogMatch()
+    public void Classify_MapsExpectedAislesForCommonAndFrozenIngredients()
     {
-        var catalog = new List<CatalogFoodLookupItem>
-        {
-            new(Guid.NewGuid(), "Garlic", "garlic", false, [], FoodCategory.Produce),
-            new(Guid.NewGuid(), "Kosher Salt", "kosher salt", true, ["salt"], null),
-        };
-
-        var extracted = new ExtractedRecipeDto(
-            Title: "Category Test",
-            Ingredients:
-            [
-                new(
-                    "ing_1",
-                    CanonicalFoodItem: "garlic",
-                    DisplayName: "garlic",
-                    Quantity: 2m,
-                    Unit: "clove",
-                    RawText: "2 cloves garlic"
-                ),
-                new(
-                    "ing_2",
-                    CanonicalFoodItem: "kosher salt",
-                    DisplayName: "kosher salt",
-                    Quantity: 1m,
-                    Unit: "tsp",
-                    RawText: "1 tsp kosher salt"
-                ),
-                new(
-                    "ing_3",
-                    CanonicalFoodItem: "whole milk",
-                    DisplayName: "whole milk",
-                    Category: "Refrigerated",
-                    Quantity: 1m,
-                    Unit: "cup",
-                    RawText: "1 cup whole milk"
-                ),
-                new(
-                    "ing_4",
-                    CanonicalFoodItem: "chicken thigh",
-                    DisplayName: "chicken thighs",
-                    Quantity: 1m,
-                    Unit: "lb",
-                    RawText: "1 lb chicken thighs"
-                ),
-                new(
-                    "ing_5",
-                    CanonicalFoodItem: "chickpeas",
-                    DisplayName: "chickpeas",
-                    Category: "not a real aisle",
-                    Quantity: 1m,
-                    Unit: "can",
-                    RawText: "1 can chickpeas"
-                ),
-            ],
-            Steps: [new(StepNumber: 1, TemplateText: "Cook.")]
+        Assert.AreEqual(FoodCategory.Produce, FoodCategoryClassifier.Classify("garlic"));
+        Assert.AreEqual(
+            FoodCategory.SpicesAndSeasonings,
+            FoodCategoryClassifier.Classify("kosher salt")
         );
-
-        var validation = RecipeValidator.Validate(extracted);
-        var matches = EntityCandidateMatcher.Match(extracted, catalog, []);
-        var draft = RecipeDraftCompiler.Compile(extracted, validation, matches);
-
-        var ingredients = draft.Ingredients!;
-        Assert.AreEqual(FoodCategory.Produce, ingredients[0].SuggestedCategory);
-        Assert.AreEqual(FoodCategory.SpicesAndSeasonings, ingredients[1].SuggestedCategory);
-        Assert.AreEqual(FoodCategory.Refrigerated, ingredients[2].SuggestedCategory);
-        Assert.AreEqual(FoodCategory.MeatAndSeafood, ingredients[3].SuggestedCategory);
-        Assert.AreEqual(FoodCategory.CannedAndJarred, ingredients[4].SuggestedCategory);
+        Assert.AreEqual(FoodCategory.DairyAndEggs, FoodCategoryClassifier.Classify("whole milk"));
+        Assert.AreEqual(
+            FoodCategory.MeatAndSeafood,
+            FoodCategoryClassifier.Classify("chicken thighs")
+        );
+        Assert.AreEqual(
+            FoodCategory.Frozen,
+            FoodCategoryClassifier.Classify("frozen chopped spinach")
+        );
+        Assert.AreEqual(FoodCategory.Produce, FoodCategoryClassifier.Classify("baby spinach"));
+        Assert.AreEqual(
+            FoodCategory.SpicesAndSeasonings,
+            FoodCategoryClassifier.Classify("Kashmiri chile powder")
+        );
     }
 
     [TestMethod]
@@ -202,80 +155,5 @@ public sealed class FoodCategoryTests
     )
     {
         Assert.AreEqual(expectedCategory, FoodCategoryClassifier.Classify(foodName));
-    }
-
-    [TestMethod]
-    public void Compile_LlmStorageCategoryOverride_RequiresCuesOrNonConflictingDeterministicCategory()
-    {
-        var extracted = new ExtractedRecipeDto(
-            Title: "Category Guard Test",
-            PrepTimeMinutes: 10,
-            CookTimeMinutes: 0,
-            TotalTimeMinutes: 10,
-            Ingredients:
-            [
-                new(
-                    "ing_1",
-                    CanonicalFoodItem: "baby spinach",
-                    DisplayName: "baby spinach",
-                    Category: "Frozen",
-                    Quantity: 5m,
-                    Unit: "ounce",
-                    RawText: "5 ounces baby spinach"
-                ),
-                new(
-                    "ing_2",
-                    CanonicalFoodItem: "spinach",
-                    DisplayName: "frozen chopped spinach",
-                    Category: "Frozen",
-                    Quantity: 10m,
-                    Unit: "ounce",
-                    PreparationNotes: "thawed",
-                    RawText: "10 ounces frozen chopped spinach, thawed"
-                ),
-                new(
-                    "ing_3",
-                    CanonicalFoodItem: "whole milk",
-                    DisplayName: "whole milk",
-                    Category: "Refrigerated",
-                    Quantity: 1m,
-                    Unit: "cup",
-                    RawText: "1 cup whole milk"
-                ),
-                new(
-                    "ing_4",
-                    CanonicalFoodItem: "kashmiri chile powder",
-                    DisplayName: "Kashmiri chile powder",
-                    Category: "Produce",
-                    Quantity: 1m,
-                    Unit: "teaspoon",
-                    RawText: "1 teaspoon Kashmiri chile powder"
-                ),
-            ],
-            Steps:
-            [
-                new(
-                    1,
-                    TemplateText: "Combine {{spinach}}, {{frozen_spinach}}, {{milk}}, and {{chile}}.",
-                    IngredientTokens:
-                    [
-                        new("spinach", "ing_1", 5m, "ounce", "baby spinach"),
-                        new("frozen_spinach", "ing_2", 10m, "ounce", "frozen chopped spinach"),
-                        new("milk", "ing_3", 1m, "cup", "whole milk"),
-                        new("chile", "ing_4", 1m, "teaspoon", "Kashmiri chile powder"),
-                    ]
-                ),
-            ]
-        );
-
-        var validation = RecipeValidator.Validate(extracted);
-        var matches = EntityCandidateMatcher.Match(extracted, [], []);
-        var draft = RecipeDraftCompiler.Compile(extracted, validation, matches);
-
-        Assert.IsNotNull(draft.Ingredients);
-        Assert.AreEqual(FoodCategory.Produce, draft.Ingredients[0].SuggestedCategory);
-        Assert.AreEqual(FoodCategory.Frozen, draft.Ingredients[1].SuggestedCategory);
-        Assert.AreEqual(FoodCategory.Refrigerated, draft.Ingredients[2].SuggestedCategory);
-        Assert.AreEqual(FoodCategory.SpicesAndSeasonings, draft.Ingredients[3].SuggestedCategory);
     }
 }

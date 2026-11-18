@@ -339,6 +339,15 @@
                       @if (item.ingredient.preparationNote) {
                         <span class="item-prep">({{ item.ingredient.preparationNote }})</span>
                       }
+                      @if (item.ingredient.replacements?.length) {
+                        <span class="ingredient-replacements">
+                          @for (rep of item.ingredient.replacements; track $index) {
+                            <span class="ingredient-replacement-item">
+                              or {{ formatReplacement(rep, scaleFactor(), targetSystem()) }}
+                            </span>
+                          }
+                        </span>
+                      }
                     </span>
                     @if (aiHelper.isAvailable() && !item.ingredient.linkedRecipeId) {
                       <button
@@ -785,6 +794,15 @@
                       }
                       @if (item.ingredient.preparationNote) {
                         <span class="item-prep">({{ item.ingredient.preparationNote }})</span>
+                      }
+                      @if (item.ingredient.replacements?.length) {
+                        <span class="ingredient-replacements">
+                          @for (rep of item.ingredient.replacements; track $index) {
+                            <span class="ingredient-replacement-item">
+                              or {{ formatReplacement(rep, scaleFactor(), targetSystem()) }}
+                            </span>
+                          }
+                        </span>
                       }
                     </span>
                     @if (aiHelper.isAvailable() && !item.ingredient.linkedRecipeId) {

@@ -444,6 +444,9 @@ public sealed partial class RecipeService(
                 .ThenInclude(i => i.FoodItem)
             .Include(r => r.Ingredients)
                 .ThenInclude(i => i.LinkedRecipe)
+            .Include(r => r.Ingredients)
+                .ThenInclude(i => i.Replacements)
+                    .ThenInclude(rep => rep.FoodItem)
             .Include(r => r.Steps)
                 .ThenInclude(s => s.IngredientReferences)
             .Include(r => r.Steps)
@@ -478,6 +481,9 @@ public sealed partial class RecipeService(
                     .ThenInclude(i => i.FoodItem)
                 .Include(r => r.Ingredients)
                     .ThenInclude(i => i.LinkedRecipe)
+                .Include(r => r.Ingredients)
+                    .ThenInclude(i => i.Replacements)
+                        .ThenInclude(rep => rep.FoodItem)
                 .Include(r => r.Steps)
                     .ThenInclude(s => s.IngredientReferences)
                 .Include(r => r.Steps)
@@ -606,6 +612,26 @@ public sealed partial class RecipeService(
 
     private static RecipeIngredientDto MapIngredientDto(RecipeIngredient i)
     {
+        var replacements =
+            i.Replacements.Count > 0
+                ? i
+                    .Replacements.OrderBy(r => r.SortOrder)
+                    .Select(r => new RecipeIngredientReplacementDto(
+                        r.Id,
+                        r.SortOrder,
+                        r.DisplayName,
+                        r.Quantity,
+                        r.MaxQuantity,
+                        r.Unit,
+                        r.CustomUnitName,
+                        r.FoodItemId,
+                        r.FoodItem?.Name,
+                        r.FoodItem?.IsPantryStaple ?? false,
+                        r.PreparationNote
+                    ))
+                    .ToList()
+                : null;
+
         return new RecipeIngredientDto(
             i.Id,
             i.SortOrder,
@@ -633,7 +659,8 @@ public sealed partial class RecipeService(
                 )
                 : null,
             i.PreferAlternativeMeasurement,
-            i.UnresolvedRecipeTitle
+            i.UnresolvedRecipeTitle,
+            replacements
         );
     }
 
@@ -727,6 +754,7 @@ public sealed partial class RecipeService(
 
         var recipe = await dbContext
             .Recipes.Include(r => r.Ingredients)
+                .ThenInclude(i => i.Replacements)
             .Include(r => r.Steps)
                 .ThenInclude(s => s.IngredientReferences)
             .Include(r => r.Steps)
@@ -766,6 +794,9 @@ public sealed partial class RecipeService(
         );
         dbContext.RecipeStepTimers.RemoveRange(recipe.Steps.SelectMany(s => s.Timers).ToList());
         dbContext.RecipeSteps.RemoveRange(recipe.Steps.ToList());
+        dbContext.RecipeIngredientReplacements.RemoveRange(
+            recipe.Ingredients.SelectMany(i => i.Replacements).ToList()
+        );
         dbContext.RecipeIngredients.RemoveRange(recipe.Ingredients.ToList());
 
         recipe.Title = request.Title.Trim();
@@ -1253,6 +1284,49 @@ public sealed partial class RecipeService(
                         "An unresolved recipe reference cannot also be linked to a FoodItem or recipe."
                     );
                 }
+
+                if (ing.Replacements is not null)
+                {
+                    foreach (var rep in ing.Replacements)
+                    {
+                        if (string.IsNullOrWhiteSpace(rep.DisplayName))
+                        {
+                            throw new DomainValidationException(
+                                "Ingredient replacement display name is required."
+                            );
+                        }
+                        if (rep.Quantity.HasValue && rep.Quantity.Value <= 0m)
+                        {
+                            throw new DomainValidationException(
+                                "Ingredient replacement quantity must be greater than zero."
+                            );
+                        }
+                        if (rep.MaxQuantity.HasValue)
+                        {
+                            if (!rep.Quantity.HasValue)
+                            {
+                                throw new DomainValidationException(
+                                    "Ingredient replacement maximum quantity requires a base quantity."
+                                );
+                            }
+                            if (rep.MaxQuantity.Value < rep.Quantity.Value)
+                            {
+                                throw new DomainValidationException(
+                                    "Ingredient replacement maximum quantity cannot be less than base quantity."
+                                );
+                            }
+                        }
+                        if (
+                            rep.Unit == MeasurementUnit.Custom
+                            && string.IsNullOrWhiteSpace(rep.CustomUnitName)
+                        )
+                        {
+                            throw new DomainValidationException(
+                                "Custom unit name is required when replacement unit is Custom."
+                            );
+                        }
+                    }
+                }
             }
         }
 
@@ -1293,19 +1367,24 @@ public sealed partial class RecipeService(
                         }
                     }
                 }
-                var amountIndices = new HashSet<int>();
+                var seenAmountIndices = new HashSet<int>();
                 foreach (var amount in step.IngredientAmounts ?? [])
                 {
                     if (
                         amount is null
                         || amount.IngredientIndex < 0
                         || amount.IngredientIndex >= ingCount
-                        || !amountIndices.Add(amount.IngredientIndex)
                         || amount.Measurement is null
                     )
                     {
                         throw new DomainValidationException(
-                            "Each step measurement must reference a different valid ingredient index."
+                            "Each step measurement must reference a valid ingredient index."
+                        );
+                    }
+                    if (!seenAmountIndices.Add(amount.IngredientIndex))
+                    {
+                        throw new DomainValidationException(
+                            "Duplicate step measurement for the same ingredient index."
                         );
                     }
                     RecipeMeasurementValidation.Validate(amount.Measurement);
@@ -1341,6 +1420,12 @@ public sealed partial class RecipeService(
         var foodItemIds = ingredientsInput
             .Where(i => i.FoodItemId.HasValue)
             .Select(i => i.FoodItemId!.Value)
+            .Concat(
+                ingredientsInput
+                    .SelectMany(i => i.Replacements ?? [])
+                    .Where(r => r.FoodItemId.HasValue)
+                    .Select(r => r.FoodItemId!.Value)
+            )
             .Distinct()
             .ToList();
 
@@ -1470,6 +1555,56 @@ public sealed partial class RecipeService(
                 IsOptional = input.IsOptional,
                 OriginalRawText = input.OriginalRawText?.Trim(),
             };
+            if (input.Replacements is { Count: > 0 })
+            {
+                for (var repIdx = 0; repIdx < input.Replacements.Count; repIdx++)
+                {
+                    var repInput = input.Replacements[repIdx];
+                    var repUnit = repInput.Unit;
+                    var repCustomUnit =
+                        repUnit == MeasurementUnit.Custom ? repInput.CustomUnitName?.Trim() : null;
+                    if (
+                        repUnit == MeasurementUnit.Custom
+                        && (
+                            string.IsNullOrWhiteSpace(repCustomUnit)
+                            || RecipeUnitAndSectionHelpers.IsDisallowedUnitPlaceholder(
+                                repCustomUnit
+                            )
+                        )
+                    )
+                    {
+                        repUnit = null;
+                        repCustomUnit = null;
+                    }
+
+                    var repQty = repInput.Quantity;
+                    if (
+                        (repUnit is MeasurementUnit.Pinch or MeasurementUnit.Dash)
+                        && (repQty is null or <= 0.1m)
+                    )
+                    {
+                        repQty = 1m;
+                    }
+
+                    entity.Replacements.Add(
+                        new RecipeIngredientReplacement
+                        {
+                            RecipeIngredient = entity,
+                            SortOrder = repIdx,
+                            DisplayName = repInput.DisplayName.Trim(),
+                            Quantity = repQty,
+                            MaxQuantity = repInput.MaxQuantity,
+                            Unit = repUnit,
+                            CustomUnitName = repCustomUnit,
+                            FoodItemId = repInput.FoodItemId,
+                            PreparationNote = string.IsNullOrWhiteSpace(repInput.PreparationNote)
+                                ? null
+                                : repInput.PreparationNote.Trim(),
+                        }
+                    );
+                }
+            }
+
             dbContext.RecipeIngredients.Add(entity);
             createdIngredients.Add(entity);
         }
@@ -1490,10 +1625,9 @@ public sealed partial class RecipeService(
                 ImagePath = ValidateAndNormalizeMediaPath(sInput.ImagePath),
             };
 
-            var amounts = (sInput.IngredientAmounts ?? []).ToDictionary(
-                a => a.IngredientIndex,
-                a => (RecipeMeasurement?)a.Measurement
-            );
+            var amounts = (sInput.IngredientAmounts ?? [])
+                .GroupBy(a => a.IngredientIndex)
+                .ToDictionary(g => g.Key, g => (RecipeMeasurement?)g.First().Measurement);
             var indices = (sInput.IngredientIndices ?? []).Concat(amounts.Keys).ToList();
 
             var tokens = StepInstructionParser.ExtractTokens(sInput.Instruction);

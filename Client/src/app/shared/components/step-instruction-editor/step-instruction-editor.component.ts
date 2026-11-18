@@ -15,12 +15,19 @@ import { MatDialog } from '@angular/material/dialog';
 import { MatIconModule } from '@angular/material/icon';
 import {
   StepDialogIngredientOption,
+  StepDimensionToken,
+  StepFixedToken,
   StepIngredientToken,
+  StepMixtureToken,
   StepTemperatureToken,
   StepTimerToken,
   StepToken,
+  StepTokenType,
 } from '../../../core/models/step-token.models';
 import {
+  formatDimensionDisplay,
+  formatFixedDisplay,
+  formatMixtureDisplay,
   formatTemperatureToken,
   formatTimerToken,
   formatTokenDisplay,
@@ -225,7 +232,7 @@ export class StepInstructionEditorComponent implements ControlValueAccessor, Aft
     this.captureCaretOffset();
   }
 
-  openInsertTokenDialog(mode: 'ingredient' | 'timer' | 'temperature'): void {
+  openInsertTokenDialog(mode: StepTokenType): void {
     if (this.disabled()) return;
     this.captureCaretOffset();
     const insertOffset = this.lastCaretOffset ?? this.serializedValue().length;
@@ -269,12 +276,18 @@ export class StepInstructionEditorComponent implements ControlValueAccessor, Aft
     if (!token) return;
 
     const options = this.mergedIngredientOptions();
-    const mode: 'ingredient' | 'timer' | 'temperature' =
+    const mode: StepTokenType =
       token.type === 'timer' || 'seconds' in token
         ? 'timer'
         : token.type === 'temperature' || 'fahrenheit' in token || 'celsius' in token
           ? 'temperature'
-          : 'ingredient';
+          : token.type === 'dimension'
+            ? 'dimension'
+            : token.type === 'mixture'
+              ? 'mixture'
+              : token.type === 'fixed'
+                ? 'fixed'
+                : 'ingredient';
 
     const dialogRef = this.dialog.open<
       StepTokenDialogComponent,
@@ -374,6 +387,21 @@ export class StepInstructionEditorComponent implements ControlValueAccessor, Aft
       iconName = 'device_thermostat';
       labelText = formatTemperatureToken(token as StepTemperatureToken, 'Original');
       editPrefix = 'Edit temperature';
+    } else if (token.type === 'dimension') {
+      kindClass = 'is-dimension';
+      iconName = 'straighten';
+      labelText = formatDimensionDisplay(token as StepDimensionToken, 'Original').text;
+      editPrefix = 'Edit dimension';
+    } else if (token.type === 'fixed') {
+      kindClass = 'is-fixed';
+      iconName = 'inventory_2';
+      labelText = formatFixedDisplay(token as StepFixedToken, 'Original').text;
+      editPrefix = 'Edit fixed measurement';
+    } else if (token.type === 'mixture') {
+      kindClass = 'is-mixture';
+      iconName = 'blender';
+      labelText = formatMixtureDisplay(token as StepMixtureToken, 1, 'Original').text;
+      editPrefix = 'Edit mixture';
     } else {
       labelText = formatTokenDisplay(token as StepIngredientToken, 1, 'Original');
     }

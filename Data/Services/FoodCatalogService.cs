@@ -367,7 +367,11 @@ public sealed class FoodCatalogService(
             .RecipeIngredients.Where(ri => ri.FoodItemId == id)
             .ToListAsync(cancellationToken);
 
-        if (linkedIngredients.Count > 0)
+        var linkedReplacements = await dbContext
+            .RecipeIngredientReplacements.Where(r => r.FoodItemId == id)
+            .ToListAsync(cancellationToken);
+
+        if (linkedIngredients.Count > 0 || linkedReplacements.Count > 0)
         {
             if (!unlinkFromRecipes)
             {
@@ -379,6 +383,10 @@ public sealed class FoodCatalogService(
             foreach (var ri in linkedIngredients)
             {
                 ri.FoodItemId = null;
+            }
+            foreach (var rep in linkedReplacements)
+            {
+                rep.FoodItemId = null;
             }
         }
 
@@ -480,11 +488,19 @@ public sealed class FoodCatalogService(
             .RecipeIngredients.Where(ri => ri.FoodItemId == foodItemId)
             .ToListAsync(cancellationToken);
 
+        var linkedReplacements = await dbContext
+            .RecipeIngredientReplacements.Where(r => r.FoodItemId == foodItemId)
+            .ToListAsync(cancellationToken);
+
         var distinctRecipeCount = linkedIngredients.Select(ri => ri.RecipeId).Distinct().Count();
 
         foreach (var ri in linkedIngredients)
         {
             ri.FoodItemId = null;
+        }
+        foreach (var rep in linkedReplacements)
+        {
+            rep.FoodItemId = null;
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -548,7 +564,7 @@ public sealed class FoodCatalogService(
             ? await dbContext.Database.BeginTransactionAsync(cancellationToken)
             : null;
 
-        // Re-point RecipeIngredients
+        // Re-point RecipeIngredients & RecipeIngredientReplacements
         var repointedRecipeIngredients = await dbContext
             .RecipeIngredients.Where(ri =>
                 ri.FoodItemId.HasValue && distinctSourceIds.Contains(ri.FoodItemId.Value)
@@ -558,6 +574,17 @@ public sealed class FoodCatalogService(
         foreach (var ri in repointedRecipeIngredients)
         {
             ri.FoodItemId = target.Id;
+        }
+
+        var repointedReplacements = await dbContext
+            .RecipeIngredientReplacements.Where(r =>
+                r.FoodItemId.HasValue && distinctSourceIds.Contains(r.FoodItemId.Value)
+            )
+            .ToListAsync(cancellationToken);
+
+        foreach (var rep in repointedReplacements)
+        {
+            rep.FoodItemId = target.Id;
         }
 
         var repointedRecipeIngredientCount = repointedRecipeIngredients.Count;

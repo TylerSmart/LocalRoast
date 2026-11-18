@@ -355,4 +355,34 @@ describe('step-token-parser', () => {
     ]);
     expect(meta.timers).toEqual([{ durationSeconds: 300, label: 'Simmer' }]);
   });
+
+  it('parses, formats, and derives metadata cleanly for mixture, fixed, dimension, and range tokens', () => {
+    const raw =
+      'Spread ||{"type":"mixture","name":"garlic oil","amount":1,"maxAmount":2,"unit":"tbsp"}|| in a ||{"type":"dimension","value":9,"unit":"inch","hyphenated":true}|| pan with ||{"type":"fixed","name":"cupcake pan","amount":12,"unit":"cup","hyphenated":true}|| at ||{"type":"temperature","fahrenheit":350,"maxFahrenheit":375}|| for ||{"type":"timer","seconds":300,"maxSeconds":420}||.';
+    const segments = parseStepInstruction(raw);
+    const tokens = segments.map((s) => s.token).filter((t) => !!t);
+    expect(tokens.length).toBe(5);
+    expect(tokens.map((t) => t?.type)).toEqual([
+      'mixture',
+      'dimension',
+      'fixed',
+      'temperature',
+      'timer',
+    ]);
+
+    const plain = stepInstructionToPlainText(raw);
+    expect(plain).toContain('garlic oil');
+    expect(plain).toContain('9-inch');
+    expect(plain).toContain('12-cup');
+    expect(plain).toContain('350–375°F');
+    expect(plain).toContain('5–7m');
+
+    const meta = deriveStepMetadataFromInstruction(raw, [
+      { index: 0, id: 'ing-oil', displayName: 'Olive Oil', sectionName: null },
+    ]);
+    // mixture/fixed/dimension do not pollute ingredientIndices or ingredientAmounts
+    expect(meta.ingredientIndices).toEqual([]);
+    expect(meta.ingredientAmounts).toEqual([]);
+    expect(meta.timers).toEqual([{ durationSeconds: 300, label: 'Timer' }]);
+  });
 });

@@ -6,14 +6,23 @@ import {
   UnitSystem,
 } from '../models/recipe.models';
 import {
+  DimensionUnit,
   StepDialogIngredientOption,
+  StepDimensionToken,
+  StepFixedToken,
   StepIngredientToken,
+  StepMixtureToken,
   StepSegment,
   StepTemperatureToken,
   StepTimerToken,
   StepToken,
 } from '../models/step-token.models';
-import { IngredientMeasurements, scaleAndConvert, scaleStepIngredient } from './culinary-math';
+import {
+  IngredientMeasurements,
+  formatDimensionToken,
+  scaleAndConvert,
+  scaleStepIngredient,
+} from './culinary-math';
 
 const TOKEN_REGEX = /\|\|(\{.*?\})([.,:;!?]*)\|\|/g;
 
@@ -133,9 +142,16 @@ export function parseStepInstruction(instruction: string | null | undefined): St
         token = {
           type: 'timer',
           seconds: Number(parsed['seconds']) || 0,
+          maxSeconds: parsed['maxSeconds'] != null ? Number(parsed['maxSeconds']) : null,
           label: (parsed['label'] as string) ?? null,
         } as StepTimerToken;
-      } else if (typeStr === 'temperature' || 'fahrenheit' in parsed || 'celsius' in parsed) {
+      } else if (
+        typeStr === 'temperature' ||
+        'fahrenheit' in parsed ||
+        'celsius' in parsed ||
+        'maxFahrenheit' in parsed ||
+        'maxCelsius' in parsed
+      ) {
         const tempToken: StepTemperatureToken = {
           type: 'temperature',
         };
@@ -145,10 +161,48 @@ export function parseStepInstruction(instruction: string | null | undefined): St
         if (parsed['celsius'] != null) {
           tempToken.celsius = Number(parsed['celsius']);
         }
+        if (parsed['maxFahrenheit'] != null) {
+          tempToken.maxFahrenheit = Number(parsed['maxFahrenheit']);
+        }
+        if (parsed['maxCelsius'] != null) {
+          tempToken.maxCelsius = Number(parsed['maxCelsius']);
+        }
         token = tempToken;
+      } else if (typeStr === 'dimension') {
+        const rawUnit = typeof parsed['unit'] === 'string' ? parsed['unit'].toLowerCase() : 'inch';
+        const validUnits: readonly DimensionUnit[] = ['inch', 'foot', 'yard', 'mm', 'cm', 'm'];
+        const dimUnit: DimensionUnit = validUnits.includes(rawUnit as DimensionUnit)
+          ? (rawUnit as DimensionUnit)
+          : 'inch';
+        token = {
+          type: 'dimension',
+          value: Number(parsed['value']) || 0,
+          maxValue: parsed['maxValue'] != null ? Number(parsed['maxValue']) : null,
+          unit: dimUnit,
+          hyphenated: Boolean(parsed['hyphenated']),
+        } as StepDimensionToken;
+      } else if (typeStr === 'mixture') {
+        token = {
+          type: 'mixture',
+          name: String(parsed['name'] ?? '').trim(),
+          amount: parsed['amount'] != null ? Number(parsed['amount']) : null,
+          maxAmount: parsed['maxAmount'] != null ? Number(parsed['maxAmount']) : null,
+          unit: (parsed['unit'] as string) ?? null,
+          customUnitName: (parsed['customUnitName'] as string) ?? null,
+        } as StepMixtureToken;
+      } else if (typeStr === 'fixed') {
+        token = {
+          type: 'fixed',
+          amount: parsed['amount'] != null ? Number(parsed['amount']) : null,
+          maxAmount: parsed['maxAmount'] != null ? Number(parsed['maxAmount']) : null,
+          unit: (parsed['unit'] as string) ?? null,
+          customUnitName: (parsed['customUnitName'] as string) ?? null,
+          name: (parsed['name'] as string) ?? null,
+          hyphenated: Boolean(parsed['hyphenated']),
+        } as StepFixedToken;
       } else if (
         'ingredient' in parsed ||
-        parsed['type'] === 'ingredient' ||
+        typeStr === 'ingredient' ||
         'amount' in parsed ||
         'unit' in parsed ||
         'displayAmount' in parsed ||
@@ -159,9 +213,13 @@ export function parseStepInstruction(instruction: string | null | undefined): St
           ingredient: String(parsed['ingredient'] ?? '').trim(),
           ingredientId: (parsed['ingredientId'] as string) ?? null,
           amount: parsed['amount'] != null ? Number(parsed['amount']) : null,
+          maxAmount: parsed['maxAmount'] != null ? Number(parsed['maxAmount']) : null,
           unit: (parsed['unit'] as string) ?? null,
+          customUnitName: (parsed['customUnitName'] as string) ?? null,
           displayAmount: parsed['displayAmount'] != null ? Number(parsed['displayAmount']) : null,
           displayUnit: (parsed['displayUnit'] as string) ?? null,
+          displayCustomUnitName: (parsed['displayCustomUnitName'] as string) ?? null,
+          displayText: (parsed['displayText'] as string) ?? null,
           notes: (parsed['notes'] as string) ?? null,
         } as StepIngredientToken;
       }
@@ -217,7 +275,12 @@ export function formatTokenDisplay(
   system: UnitSystem = 'Original',
   matchedIngredient?: IngredientMeasurements | null,
 ): string {
+  if (token.displayText) {
+    return token.displayText;
+  }
+
   const qty = token.displayAmount ?? token.amount;
+  const maxQty = token.displayAmount != null ? null : (token.maxAmount ?? null);
   const unitStr = token.displayUnit ?? token.unit;
   const normalizedUnit = normalizeMeasurementUnit(unitStr);
 
@@ -226,15 +289,21 @@ export function formatTokenDisplay(
   }
 
   const customUnitName =
-    normalizedUnit === 'Custom' && typeof unitStr === 'string' ? unitStr : null;
+    token.displayAmount != null && token.displayCustomUnitName
+      ? token.displayCustomUnitName
+      : token.customUnitName
+        ? token.customUnitName
+        : normalizedUnit === 'Custom' && typeof unitStr === 'string'
+          ? unitStr
+          : null;
   const formatted = matchedIngredient?.alternativeMeasurement?.quantity
     ? scaleStepIngredient(
         matchedIngredient,
-        { quantity: qty, unit: normalizedUnit, customUnitName },
+        { quantity: qty, maxQuantity: maxQty, unit: normalizedUnit, customUnitName },
         factor,
         system,
       )
-    : scaleAndConvert(qty, null, normalizedUnit, customUnitName, factor, system);
+    : scaleAndConvert(qty, maxQty, normalizedUnit, customUnitName, factor, system);
   const measurementStr = formatted.formattedMeasurement.trim();
 
   return measurementStr
@@ -242,6 +311,78 @@ export function formatTokenDisplay(
       ? `${measurementStr} ${token.ingredient}`
       : measurementStr
     : token.ingredient;
+}
+
+export function formatMixtureDisplay(
+  token: StepMixtureToken,
+  factor = 1,
+  system: UnitSystem = 'Original',
+): { text: string; scaled: boolean } {
+  const qty = token.amount;
+  const maxQty = token.maxAmount ?? null;
+  const normalizedUnit = normalizeMeasurementUnit(token.unit);
+  if (qty == null || isNaN(qty)) {
+    return { text: token.name, scaled: false };
+  }
+
+  const customUnitName =
+    token.customUnitName ??
+    (normalizedUnit === 'Custom' && typeof token.unit === 'string' ? token.unit : null);
+  const formatted = scaleAndConvert(qty, maxQty, normalizedUnit, customUnitName, factor, system);
+  const measurementStr = formatted.formattedMeasurement.trim();
+  const text = measurementStr
+    ? token.name
+      ? `${measurementStr} ${token.name}`
+      : measurementStr
+    : token.name;
+
+  return {
+    text,
+    scaled: factor !== 1 || (system !== 'Original' && formatted.unit !== normalizedUnit),
+  };
+}
+
+export function formatFixedDisplay(
+  token: StepFixedToken,
+  system: UnitSystem = 'Original',
+): { text: string; scaled: boolean } {
+  const qty = token.amount;
+  const maxQty = token.maxAmount ?? null;
+  const normalizedUnit = normalizeMeasurementUnit(token.unit);
+  if (qty == null || isNaN(qty)) {
+    return { text: token.name ?? '', scaled: false };
+  }
+
+  const customUnitName =
+    token.customUnitName ??
+    (normalizedUnit === 'Custom' && typeof token.unit === 'string' ? token.unit : null);
+  const formatted = scaleAndConvert(qty, maxQty, normalizedUnit, customUnitName, 1, system);
+  const measureStr = token.hyphenated
+    ? [formatted.formattedAmount, formatted.unitLabel].filter(Boolean).join('-')
+    : formatted.formattedMeasurement.trim();
+  const text = measureStr
+    ? token.name
+      ? `${measureStr} ${token.name}`
+      : measureStr
+    : (token.name ?? '');
+
+  return {
+    text,
+    scaled: system !== 'Original' && formatted.unit !== normalizedUnit,
+  };
+}
+
+export function formatDimensionDisplay(
+  token: StepDimensionToken,
+  system: UnitSystem = 'Original',
+): { text: string; scaled: boolean } {
+  return formatDimensionToken(
+    token.value,
+    token.maxValue ?? null,
+    token.unit,
+    token.hyphenated ?? false,
+    system,
+  );
 }
 
 export function fahrenheitToCelsius(f: number): number {
@@ -252,12 +393,31 @@ export function celsiusToFahrenheit(c: number): number {
   return Math.round(c * (9 / 5) + 32);
 }
 
+function formatTemperatureRangeValue(
+  minVal: number,
+  maxVal: number | null,
+  suffix: '°F' | '°C',
+): string {
+  if (maxVal != null && maxVal > minVal) {
+    return `${minVal}–${maxVal}${suffix}`;
+  }
+  return `${minVal}${suffix}`;
+}
+
 export function formatTemperatureDisplay(
   temp: StepTemperatureToken,
   system: UnitSystem = 'Original',
 ): { text: string; scaled: boolean } {
   const f = temp.fahrenheit != null && !isNaN(temp.fahrenheit) ? temp.fahrenheit : null;
   const c = temp.celsius != null && !isNaN(temp.celsius) ? temp.celsius : null;
+  const maxF =
+    temp.maxFahrenheit != null && !isNaN(temp.maxFahrenheit) && f != null && temp.maxFahrenheit > f
+      ? temp.maxFahrenheit
+      : null;
+  const maxC =
+    temp.maxCelsius != null && !isNaN(temp.maxCelsius) && c != null && temp.maxCelsius > c
+      ? temp.maxCelsius
+      : null;
 
   if (f == null && c == null) {
     return { text: '', scaled: false };
@@ -265,31 +425,48 @@ export function formatTemperatureDisplay(
 
   if (system === 'Metric') {
     if (c != null) {
-      return { text: `${c}°C`, scaled: false };
+      return { text: formatTemperatureRangeValue(c, maxC, '°C'), scaled: false };
     }
     if (f != null) {
-      return { text: `${fahrenheitToCelsius(f)}°C`, scaled: true };
+      return {
+        text: formatTemperatureRangeValue(
+          fahrenheitToCelsius(f),
+          maxF != null ? fahrenheitToCelsius(maxF) : null,
+          '°C',
+        ),
+        scaled: true,
+      };
     }
   }
 
   if (system === 'UsCustomary') {
     if (f != null) {
-      return { text: `${f}°F`, scaled: false };
+      return { text: formatTemperatureRangeValue(f, maxF, '°F'), scaled: false };
     }
     if (c != null) {
-      return { text: `${celsiusToFahrenheit(c)}°F`, scaled: true };
+      return {
+        text: formatTemperatureRangeValue(
+          celsiusToFahrenheit(c),
+          maxC != null ? celsiusToFahrenheit(maxC) : null,
+          '°F',
+        ),
+        scaled: true,
+      };
     }
   }
 
   // Original
   if (f != null && c != null) {
-    return { text: `${f}°F (${c}°C)`, scaled: false };
+    return {
+      text: `${formatTemperatureRangeValue(f, maxF, '°F')} (${formatTemperatureRangeValue(c, maxC, '°C')})`,
+      scaled: false,
+    };
   }
   if (f != null) {
-    return { text: `${f}°F`, scaled: false };
+    return { text: formatTemperatureRangeValue(f, maxF, '°F'), scaled: false };
   }
   if (c != null) {
-    return { text: `${c}°C`, scaled: false };
+    return { text: formatTemperatureRangeValue(c, maxC, '°C'), scaled: false };
   }
 
   return { text: '', scaled: false };
@@ -321,9 +498,31 @@ export function shouldShowTimerLabel(label: string | null | undefined): boolean 
 
 export function formatTimerToken(timer: StepTimerToken): string {
   const showLabel = shouldShowTimerLabel(timer.label);
-  return showLabel
-    ? `${formatSeconds(timer.seconds)} (${timer.label})`
-    : formatSeconds(timer.seconds);
+  let durationText: string;
+  if (timer.maxSeconds != null && timer.maxSeconds > timer.seconds) {
+    if (
+      timer.seconds >= 60 &&
+      timer.seconds % 60 === 0 &&
+      timer.maxSeconds % 60 === 0 &&
+      timer.maxSeconds < 3600
+    ) {
+      durationText = `${Math.floor(timer.seconds / 60)}–${Math.floor(timer.maxSeconds / 60)}m`;
+    } else if (
+      timer.seconds >= 3600 &&
+      timer.seconds % 3600 === 0 &&
+      timer.maxSeconds % 3600 === 0
+    ) {
+      durationText = `${Math.floor(timer.seconds / 3600)}–${Math.floor(timer.maxSeconds / 3600)}h`;
+    } else if (timer.seconds < 60 && timer.maxSeconds < 60) {
+      durationText = `${timer.seconds}–${timer.maxSeconds}s`;
+    } else {
+      durationText = `${formatSeconds(timer.seconds)}–${formatSeconds(timer.maxSeconds)}`;
+    }
+  } else {
+    durationText = formatSeconds(timer.seconds);
+  }
+
+  return showLabel ? `${durationText} (${timer.label})` : durationText;
 }
 
 export function formatTemperatureToken(
@@ -356,8 +555,20 @@ export function stepInstructionToPlainText(
         return formatTemperatureToken(seg.token as StepTemperatureToken, system);
       }
 
+      if (seg.token.type === 'dimension') {
+        return formatDimensionDisplay(seg.token as StepDimensionToken, system).text;
+      }
+
+      if (seg.token.type === 'fixed') {
+        return formatFixedDisplay(seg.token as StepFixedToken, system).text;
+      }
+
+      if (seg.token.type === 'mixture') {
+        return formatMixtureDisplay(seg.token as StepMixtureToken, 1, system).text;
+      }
+
       // Ingredient
-      return formatTokenDisplay(seg.token as StepIngredientToken, 1, 'Original');
+      return formatTokenDisplay(seg.token as StepIngredientToken, 1, system);
     })
     .join('');
 }
@@ -622,7 +833,14 @@ export function deriveStepMetadataFromInstruction(
       continue;
     }
 
-    if (token.type === 'temperature' || 'fahrenheit' in token || 'celsius' in token) {
+    if (
+      token.type === 'temperature' ||
+      token.type === 'dimension' ||
+      token.type === 'fixed' ||
+      token.type === 'mixture' ||
+      'fahrenheit' in token ||
+      'celsius' in token
+    ) {
       continue;
     }
 

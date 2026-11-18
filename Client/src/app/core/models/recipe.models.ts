@@ -105,6 +105,20 @@ export interface RecipeSummaryDto {
   latestCookNote?: string | null;
 }
 
+export interface RecipeIngredientReplacementDto {
+  id: string;
+  sortOrder: number;
+  displayName: string;
+  quantity: number | null;
+  maxQuantity: number | null;
+  unit: MeasurementUnit | null;
+  customUnitName: string | null;
+  foodItemId: string | null;
+  foodItemName: string | null;
+  isPantryStaple: boolean;
+  preparationNote: string | null;
+}
+
 export interface RecipeIngredientDto {
   id: string;
   sortOrder: number;
@@ -126,6 +140,7 @@ export interface RecipeIngredientDto {
   alternativeMeasurement?: RecipeMeasurement | null;
   preferAlternativeMeasurement?: boolean;
   unresolvedRecipeTitle?: string | null;
+  replacements?: RecipeIngredientReplacementDto[] | null;
 }
 
 export interface RecipeStepTimerDto {
@@ -234,6 +249,16 @@ export interface RecipePagedResultDto {
   isFuzzySearch: boolean;
 }
 
+export interface RecipeIngredientReplacementInput {
+  displayName: string;
+  quantity?: number | null;
+  maxQuantity?: number | null;
+  unit?: MeasurementUnit | null;
+  customUnitName?: string | null;
+  foodItemId?: string | null;
+  preparationNote?: string | null;
+}
+
 export interface RecipeIngredientInput {
   sectionName?: string | null;
   quantity?: number | null;
@@ -249,6 +274,7 @@ export interface RecipeIngredientInput {
   alternativeMeasurement?: RecipeMeasurement | null;
   preferAlternativeMeasurement?: boolean;
   unresolvedRecipeTitle?: string | null;
+  replacements?: RecipeIngredientReplacementInput[] | null;
 }
 
 export interface RecipeStepTimerInput {
@@ -365,6 +391,7 @@ export interface RecipePreviewIngredient {
   linkedRecipeTitle?: string | null;
   linkedRecipeSlug?: string | null;
   unresolvedRecipeTitle?: string | null;
+  replacements?: RecipeIngredientReplacementDto[] | null;
 }
 
 export interface RecipePreviewStep {

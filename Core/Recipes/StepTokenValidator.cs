@@ -1,873 +1,13 @@
 using System.Globalization;
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
-using App.Core.FoodCatalog;
+using App.Core.Ingestion;
 
-namespace IngestionPoc.Models;
+namespace App.Core.Recipes;
 
-public sealed record RecipeInputItem(
-    string Id,
-    string Title,
-    string SourceKind,
-    string NormalizedText,
-    string? SourceReference = null,
-    string? ProductionExtractedDraftJson = null,
-    decimal? ProductionConfidenceScore = null,
-    string? ProductionJobStatus = null
-);
-
-public sealed record PromptFileInfo(string Name, string FilePath, string Content, string Sha256);
-
-public sealed class PromptSet
-{
-    public required PromptFileInfo ExtractRecipe { get; init; }
-    public required PromptFileInfo ShortenDescription { get; init; }
-    public required PromptFileInfo SearchTerms { get; init; }
-    public required PromptFileInfo MatchIngredient { get; init; }
-    public required PromptFileInfo MatchIngredientBatch { get; init; }
-    public required PromptFileInfo TokenizeStep { get; init; }
-    public required PromptFileInfo TokenizeStepsBatch { get; init; }
-    public required PromptFileInfo PolishFull { get; init; }
-    public required PromptFileInfo PolishTargeted { get; init; }
-
-    public IReadOnlyList<PromptFileInfo> All =>
-        [
-            ExtractRecipe,
-            ShortenDescription,
-            SearchTerms,
-            MatchIngredient,
-            MatchIngredientBatch,
-            TokenizeStep,
-            TokenizeStepsBatch,
-            PolishFull,
-            PolishTargeted,
-        ];
-
-    public static PromptSet LoadFromDirectory(string directory)
-    {
-        return new PromptSet
-        {
-            ExtractRecipe = Load(directory, "01-extract-recipe.md"),
-            ShortenDescription = Load(directory, "02-shorten-description.md"),
-            SearchTerms = Load(directory, "03a-ingredient-search-terms.md"),
-            MatchIngredient = Load(directory, "03b-ingredient-match.md"),
-            MatchIngredientBatch = Load(directory, "03c-ingredient-match-batch.md"),
-            TokenizeStep = Load(directory, "04-tokenize-step.md"),
-            TokenizeStepsBatch = Load(directory, "04b-tokenize-steps-batch.md"),
-            PolishFull = Load(directory, "05a-polish-full.md"),
-            PolishTargeted = Load(directory, "05b-polish-targeted.md"),
-        };
-    }
-
-    private static PromptFileInfo Load(string dir, string fileName)
-    {
-        var fullPath = Path.GetFullPath(Path.Combine(dir, fileName));
-        if (!File.Exists(fullPath))
-        {
-            throw new FileNotFoundException($"Missing prompt markdown file: {fullPath}", fullPath);
-        }
-
-        var content = File.ReadAllText(fullPath, Encoding.UTF8).Trim();
-        var hash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(content)));
-        return new PromptFileInfo(fileName, fullPath, content, hash);
-    }
-}
-
-// Stage 1 DTOs
-public sealed record Stage1RecipeDto(
-    string Title,
-    string? Description,
-    decimal? Servings,
-    string? Yield,
-    IReadOnlyList<Stage1SectionDto> Sections,
-    Stage1TimingDto? Timing,
-    IReadOnlyList<string> Tags
-);
-
-public sealed record Stage1SectionDto(
-    string? Name,
-    IReadOnlyList<Stage1IngredientDto> Ingredients,
-    IReadOnlyList<string> Instructions
-);
-
-public sealed record Stage1IngredientDto(
-    string Name,
-    decimal? Quantity,
-    decimal? MaxQuantity,
-    string? Unit,
-    string? PrepNote,
-    bool IsOptional,
-    IReadOnlyList<Stage1ReplacementDto>? Replacements,
-    IReadOnlyList<Stage1AlternateMeasurementDto>? AlternateMeasurements
-);
-
-public sealed record Stage1ReplacementDto(
-    string Name,
-    decimal? Quantity,
-    string? Unit,
-    string? PrepNote
-);
-
-public sealed record Stage1AlternateMeasurementDto(decimal Quantity, string? Unit);
-
-public sealed record Stage1TimingDto(int? Prep, int? Cook, int? Total);
-
-// Stage 2 DTO
-public sealed record Stage2ShortenedDescriptionDto(string Description);
-
-// Stage 3 DTOs
-public sealed record Stage3SearchTermsDto(IReadOnlyList<string> SearchTerms);
-
-public sealed record FoodItemCandidate(
-    Guid Id,
-    string Name,
-    string NormalizedName,
-    FoodCategory Category,
-    bool IsPantryStaple,
-    IReadOnlyList<string> Aliases,
-    double Score,
-    string MatchReason
-);
-
-public sealed record RecipeCandidate(
-    Guid Id,
-    string Title,
-    string Slug,
-    double Score,
-    string MatchReason
-);
-
-public sealed record DbSearchCandidates(
-    IReadOnlyList<string> SearchTermsUsed,
-    IReadOnlyList<FoodItemCandidate> ExistingIngredients,
-    IReadOnlyList<RecipeCandidate> ExistingRecipes
-);
-
-public sealed record Stage3MatchDecisionDto(
-    string MatchType,
-    string? Id,
-    string? Name,
-    string? Category
-);
-
-public sealed record Stage3BatchMatchEntryDto(
-    int IngredientIndex,
-    string MatchType,
-    string? Id,
-    string? Name,
-    string? Category
-);
-
-public sealed record Stage3BatchMatchResponseDto(IReadOnlyList<Stage3BatchMatchEntryDto> Matches);
-
-public enum Stage3Mode
-{
-    LlmTerms,
-    VectorSingle,
-    VectorBatched,
-}
-
-public sealed record RecipeQualityScorecard(
-    int TotalScore,
-    int IngredientScore,
-    int StepScore,
-    int ResolutionScore,
-    int TimingScore,
-    IReadOnlyList<string> Deductions
-);
-
-public sealed record ResolvedIngredientResult(
-    int GlobalIndex,
-    string? SectionName,
-    Stage1IngredientDto Extracted,
-    IReadOnlyList<string> SearchTerms,
-    DbSearchCandidates DbCandidates,
-    Stage3MatchDecisionDto Decision,
-    IReadOnlyList<string> ValidationWarnings
-);
-
-// Stage 4 Token Models
-public abstract record PocStepToken(string Type);
-
-public sealed record PocTextToken(string Text) : PocStepToken("text");
-
-public sealed record PocIngredientToken(
-    int? IngredientIndex,
-    string Name,
-    decimal? Quantity,
-    decimal? MaxQuantity,
-    string? Unit
-) : PocStepToken("ingredient");
-
-public sealed record PocMixtureToken(
-    string Name,
-    decimal Quantity,
-    decimal? MaxQuantity,
-    string? Unit
-) : PocStepToken("mixture");
-
-public sealed record PocTimerToken(decimal Amount, decimal? MaxAmount, string Unit, string Label)
-    : PocStepToken("timer");
-
-public sealed record PocTemperatureToken(decimal Amount, decimal? MaxAmount, string Unit)
-    : PocStepToken("temperature");
-
-public sealed record PocDimensionToken(
-    decimal Amount,
-    decimal? MaxAmount,
-    string Unit,
-    bool Hyphenated
-) : PocStepToken("dimension");
-
-public sealed record PocFixedToken(
-    string Name,
-    decimal Amount,
-    decimal? MaxAmount,
-    string? Unit,
-    bool Hyphenated
-) : PocStepToken("fixed");
-
-public sealed record StepTokenizeResult(
-    int StepNumber,
-    string? SectionName,
-    string OriginalInstruction,
-    JsonArray RawTokensJson,
-    IReadOnlyList<PocStepToken> ParsedTokens,
-    string RenderedOriginal,
-    string RenderedScaled2x,
-    string RenderedMetric1x,
-    IReadOnlyList<string> ValidationWarnings
-);
-
-public enum Stage4Mode
-{
-    Single,
-    Batched,
-}
-
-public sealed record Stage4BatchStepDto(int StepNumber, JsonArray Tokens);
-
-public sealed record Stage4BatchResponseDto(IReadOnlyList<Stage4BatchStepDto> Steps);
-
-public enum PolishMode
-{
-    None,
-    Targeted,
-    Full,
-    Both,
-}
-
-// Stage 5 DTOs
-public sealed record PolishFullIngredientDto(
-    int Index,
-    string? Section,
-    string Name,
-    decimal? Quantity,
-    decimal? MaxQuantity,
-    string? Unit,
-    string? PrepNote,
-    bool IsOptional,
-    IReadOnlyList<Stage1ReplacementDto>? Replacements,
-    IReadOnlyList<Stage1AlternateMeasurementDto>? AlternateMeasurements
-);
-
-public sealed record PolishFullStepDto(int StepNumber, string? SectionName, JsonArray Tokens);
-
-public sealed record PolishFullResponseDto(
-    string Title,
-    string? Description,
-    decimal? Servings,
-    string? Yield,
-    Stage1TimingDto? Timing,
-    IReadOnlyList<string> Tags,
-    IReadOnlyList<PolishFullIngredientDto> Ingredients,
-    IReadOnlyList<PolishFullStepDto> Steps,
-    IReadOnlyList<string> PolishNotes
-);
-
-public sealed record PolishIngredientPatchDto(
-    int Index,
-    string? Name,
-    decimal? Quantity,
-    decimal? MaxQuantity,
-    string? Unit,
-    string? PrepNote,
-    bool? IsOptional,
-    IReadOnlyList<Stage1AlternateMeasurementDto>? AlternateMeasurements = null
-);
-
-public sealed record PolishStepPatchDto(int StepNumber, JsonArray Tokens);
-
-public sealed record PolishTargetedResponseDto(
-    string? Title,
-    string? Description,
-    decimal? Servings,
-    string? Yield,
-    Stage1TimingDto? Timing,
-    IReadOnlyList<string>? Tags,
-    IReadOnlyList<PolishIngredientPatchDto> IngredientPatches,
-    IReadOnlyList<PolishStepPatchDto> StepPatches,
-    IReadOnlyList<string> PolishNotes
-);
-
-public sealed record PolishSummaryMetrics(
-    string Variant,
-    bool Success,
-    long ElapsedMs,
-    int PolishNotesCount,
-    int StepWarningsAfterPolish,
-    int ProseOnlyIngredientsAfterPolish,
-    IReadOnlyList<string> PolishNotes,
-    string? ParseError
-);
-
-public static class PipelineSchemas
-{
-    private static object TimingSchema() =>
-        new
-        {
-            type = "object",
-            additionalProperties = false,
-            properties = new
-            {
-                prep = new { type = new[] { "integer", "null" } },
-                cook = new { type = new[] { "integer", "null" } },
-                total = new { type = new[] { "integer", "null" } },
-            },
-            required = new[] { "prep", "cook", "total" },
-        };
-
-    private static object AlternateMeasurementsArraySchema() =>
-        new
-        {
-            type = "array",
-            items = new
-            {
-                type = "object",
-                additionalProperties = false,
-                properties = new
-                {
-                    quantity = new { type = "number" },
-                    unit = new { type = new[] { "string", "null" } },
-                },
-                required = new[] { "quantity", "unit" },
-            },
-        };
-
-    private static object IngredientObjectSchema(bool includeIndexAndSection)
-    {
-        var properties = new Dictionary<string, object>();
-        var required = new List<string>();
-
-        if (includeIndexAndSection)
-        {
-            properties["index"] = new { type = "integer" };
-            properties["section"] = new { type = new[] { "string", "null" } };
-            required.Add("index");
-            required.Add("section");
-        }
-
-        properties["name"] = new { type = "string" };
-        properties["quantity"] = new { type = new[] { "number", "null" } };
-        properties["maxQuantity"] = new { type = new[] { "number", "null" } };
-        properties["unit"] = new { type = new[] { "string", "null" } };
-        properties["prepNote"] = new { type = new[] { "string", "null" } };
-        properties["isOptional"] = new { type = "boolean" };
-        properties["replacements"] = new
-        {
-            type = "array",
-            items = new
-            {
-                type = "object",
-                additionalProperties = false,
-                properties = new
-                {
-                    name = new { type = "string" },
-                    quantity = new { type = new[] { "number", "null" } },
-                    unit = new { type = new[] { "string", "null" } },
-                    prepNote = new { type = new[] { "string", "null" } },
-                },
-                required = new[] { "name", "quantity", "unit", "prepNote" },
-            },
-        };
-        properties["alternateMeasurements"] = AlternateMeasurementsArraySchema();
-
-        required.AddRange([
-            "name",
-            "quantity",
-            "maxQuantity",
-            "unit",
-            "prepNote",
-            "isOptional",
-            "replacements",
-            "alternateMeasurements",
-        ]);
-
-        return new
-        {
-            type = "object",
-            additionalProperties = false,
-            properties,
-            required = required.ToArray(),
-        };
-    }
-
-    private static object StepTokenArraySchema() =>
-        new
-        {
-            type = "array",
-            items = new
-            {
-                anyOf = new object[]
-                {
-                    new { type = "string" },
-                    new
-                    {
-                        type = "object",
-                        additionalProperties = false,
-                        properties = new
-                        {
-                            type = new { type = "string", @enum = new[] { "ingredient" } },
-                            ingredientIndex = new { type = new[] { "integer", "null" } },
-                            name = new { type = "string" },
-                            quantity = new { type = "number" },
-                            maxQuantity = new { type = new[] { "number", "null" } },
-                            unit = new { type = new[] { "string", "null" } },
-                        },
-                        required = new[]
-                        {
-                            "type",
-                            "ingredientIndex",
-                            "name",
-                            "quantity",
-                            "maxQuantity",
-                            "unit",
-                        },
-                    },
-                    new
-                    {
-                        type = "object",
-                        additionalProperties = false,
-                        properties = new
-                        {
-                            type = new { type = "string", @enum = new[] { "mixture" } },
-                            name = new { type = "string" },
-                            quantity = new { type = "number" },
-                            maxQuantity = new { type = new[] { "number", "null" } },
-                            unit = new { type = new[] { "string", "null" } },
-                        },
-                        required = new[] { "type", "name", "quantity", "maxQuantity", "unit" },
-                    },
-                    new
-                    {
-                        type = "object",
-                        additionalProperties = false,
-                        properties = new
-                        {
-                            type = new { type = "string", @enum = new[] { "timer" } },
-                            amount = new { type = "number" },
-                            maxAmount = new { type = new[] { "number", "null" } },
-                            unit = new
-                            {
-                                type = "string",
-                                @enum = new[] { "second", "minute", "hour", "day" },
-                            },
-                            label = new { type = "string" },
-                        },
-                        required = new[] { "type", "amount", "maxAmount", "unit", "label" },
-                    },
-                    new
-                    {
-                        type = "object",
-                        additionalProperties = false,
-                        properties = new
-                        {
-                            type = new { type = "string", @enum = new[] { "temperature" } },
-                            amount = new { type = "number" },
-                            maxAmount = new { type = new[] { "number", "null" } },
-                            unit = new
-                            {
-                                type = "string",
-                                @enum = new[] { "fahrenheit", "celsius" },
-                            },
-                        },
-                        required = new[] { "type", "amount", "maxAmount", "unit" },
-                    },
-                    new
-                    {
-                        type = "object",
-                        additionalProperties = false,
-                        properties = new
-                        {
-                            type = new { type = "string", @enum = new[] { "dimension" } },
-                            amount = new { type = "number" },
-                            maxAmount = new { type = new[] { "number", "null" } },
-                            unit = new
-                            {
-                                type = "string",
-                                @enum = new[]
-                                {
-                                    "inch",
-                                    "foot",
-                                    "yard",
-                                    "millimeter",
-                                    "centimeter",
-                                    "meter",
-                                },
-                            },
-                            hyphenated = new { type = "boolean" },
-                        },
-                        required = new[] { "type", "amount", "maxAmount", "unit", "hyphenated" },
-                    },
-                    new
-                    {
-                        type = "object",
-                        additionalProperties = false,
-                        properties = new
-                        {
-                            type = new { type = "string", @enum = new[] { "fixed" } },
-                            name = new { type = "string" },
-                            amount = new { type = "number" },
-                            maxAmount = new { type = new[] { "number", "null" } },
-                            unit = new { type = new[] { "string", "null" } },
-                            hyphenated = new { type = "boolean" },
-                        },
-                        required = new[]
-                        {
-                            "type",
-                            "name",
-                            "amount",
-                            "maxAmount",
-                            "unit",
-                            "hyphenated",
-                        },
-                    },
-                },
-            },
-        };
-
-    public static object Stage1ExtractRecipeSchema() =>
-        new
-        {
-            type = "object",
-            additionalProperties = false,
-            properties = new
-            {
-                title = new { type = "string" },
-                description = new { type = new[] { "string", "null" } },
-                servings = new { type = new[] { "number", "null" } },
-                yield = new { type = new[] { "string", "null" } },
-                sections = new
-                {
-                    type = "array",
-                    items = new
-                    {
-                        type = "object",
-                        additionalProperties = false,
-                        properties = new
-                        {
-                            name = new { type = new[] { "string", "null" } },
-                            ingredients = new
-                            {
-                                type = "array",
-                                items = IngredientObjectSchema(includeIndexAndSection: false),
-                            },
-                            instructions = new { type = "array", items = new { type = "string" } },
-                        },
-                        required = new[] { "name", "ingredients", "instructions" },
-                    },
-                },
-                timing = TimingSchema(),
-                tags = new { type = "array", items = new { type = "string" } },
-            },
-            required = new[]
-            {
-                "title",
-                "description",
-                "servings",
-                "yield",
-                "sections",
-                "timing",
-                "tags",
-            },
-        };
-
-    public static object Stage2ShortenDescriptionSchema() =>
-        new
-        {
-            type = "object",
-            additionalProperties = false,
-            properties = new { description = new { type = "string" } },
-            required = new[] { "description" },
-        };
-
-    public static object Stage3SearchTermsSchema() =>
-        new
-        {
-            type = "object",
-            additionalProperties = false,
-            properties = new
-            {
-                searchTerms = new { type = "array", items = new { type = "string" } },
-            },
-            required = new[] { "searchTerms" },
-        };
-
-    private static object Stage3MatchObjectSchema(bool includeIngredientIndex)
-    {
-        var props = new Dictionary<string, object>();
-        var req = new List<string>();
-        if (includeIngredientIndex)
-        {
-            props["ingredientIndex"] = new { type = "integer" };
-            req.Add("ingredientIndex");
-        }
-
-        props["matchType"] = new
-        {
-            type = "string",
-            @enum = new[]
-            {
-                "existing_ingredient",
-                "existing_recipe",
-                "new_ingredient",
-                "unresolved_recipe",
-            },
-        };
-        props["id"] = new { type = new[] { "string", "null" } };
-        props["name"] = new { type = new[] { "string", "null" } };
-        props["category"] = new
-        {
-            type = new object[] { "string", "null" },
-            @enum = new object?[]
-            {
-                "Produce",
-                "MeatAndSeafood",
-                "DairyAndEggs",
-                "Refrigerated",
-                "Bakery",
-                "PantryDryGoods",
-                "CannedAndJarred",
-                "CondimentsAndSauces",
-                "SpicesAndSeasonings",
-                "Baking",
-                "Snacks",
-                "Beverages",
-                "Frozen",
-                "Other",
-                null,
-            },
-        };
-
-        req.AddRange(["matchType", "id", "name", "category"]);
-        return new
-        {
-            type = "object",
-            additionalProperties = false,
-            properties = props,
-            required = req.ToArray(),
-        };
-    }
-
-    public static object Stage3MatchIngredientSchema() =>
-        Stage3MatchObjectSchema(includeIngredientIndex: false);
-
-    public static object Stage3MatchBatchSchema() =>
-        new
-        {
-            type = "object",
-            additionalProperties = false,
-            properties = new
-            {
-                matches = new
-                {
-                    type = "array",
-                    items = Stage3MatchObjectSchema(includeIngredientIndex: true),
-                },
-            },
-            required = new[] { "matches" },
-        };
-
-    public static object Stage4TokenizeStepSchema() =>
-        new
-        {
-            type = "object",
-            additionalProperties = false,
-            properties = new { tokens = StepTokenArraySchema() },
-            required = new[] { "tokens" },
-        };
-
-    public static object Stage4BatchStepsSchema() =>
-        new
-        {
-            type = "object",
-            additionalProperties = false,
-            properties = new
-            {
-                steps = new
-                {
-                    type = "array",
-                    items = new
-                    {
-                        type = "object",
-                        additionalProperties = false,
-                        properties = new
-                        {
-                            stepNumber = new { type = "integer" },
-                            tokens = StepTokenArraySchema(),
-                        },
-                        required = new[] { "stepNumber", "tokens" },
-                    },
-                },
-            },
-            required = new[] { "steps" },
-        };
-
-    public static object Stage5PolishFullSchema() =>
-        new
-        {
-            type = "object",
-            additionalProperties = false,
-            properties = new
-            {
-                title = new { type = "string" },
-                description = new { type = new[] { "string", "null" } },
-                servings = new { type = new[] { "number", "null" } },
-                yield = new { type = new[] { "string", "null" } },
-                timing = TimingSchema(),
-                tags = new { type = "array", items = new { type = "string" } },
-                ingredients = new
-                {
-                    type = "array",
-                    items = IngredientObjectSchema(includeIndexAndSection: true),
-                },
-                steps = new
-                {
-                    type = "array",
-                    items = new
-                    {
-                        type = "object",
-                        additionalProperties = false,
-                        properties = new
-                        {
-                            stepNumber = new { type = "integer" },
-                            sectionName = new { type = new[] { "string", "null" } },
-                            tokens = StepTokenArraySchema(),
-                        },
-                        required = new[] { "stepNumber", "sectionName", "tokens" },
-                    },
-                },
-                polishNotes = new { type = "array", items = new { type = "string" } },
-            },
-            required = new[]
-            {
-                "title",
-                "description",
-                "servings",
-                "yield",
-                "timing",
-                "tags",
-                "ingredients",
-                "steps",
-                "polishNotes",
-            },
-        };
-
-    public static object Stage5PolishTargetedSchema() =>
-        new
-        {
-            type = "object",
-            additionalProperties = false,
-            properties = new
-            {
-                title = new { type = new[] { "string", "null" } },
-                description = new { type = new[] { "string", "null" } },
-                servings = new { type = new[] { "number", "null" } },
-                yield = new { type = new[] { "string", "null" } },
-                timing = new { anyOf = new object[] { TimingSchema(), new { type = "null" } } },
-                tags = new
-                {
-                    anyOf = new object[]
-                    {
-                        new { type = "array", items = new { type = "string" } },
-                        new { type = "null" },
-                    },
-                },
-                ingredientPatches = new
-                {
-                    type = "array",
-                    items = new
-                    {
-                        type = "object",
-                        additionalProperties = false,
-                        properties = new
-                        {
-                            index = new { type = "integer" },
-                            name = new { type = new[] { "string", "null" } },
-                            quantity = new { type = new[] { "number", "null" } },
-                            maxQuantity = new { type = new[] { "number", "null" } },
-                            unit = new { type = new[] { "string", "null" } },
-                            prepNote = new { type = new[] { "string", "null" } },
-                            isOptional = new { type = new[] { "boolean", "null" } },
-                            alternateMeasurements = new
-                            {
-                                anyOf = new object[]
-                                {
-                                    AlternateMeasurementsArraySchema(),
-                                    new { type = "null" },
-                                },
-                            },
-                        },
-                        required = new[]
-                        {
-                            "index",
-                            "name",
-                            "quantity",
-                            "maxQuantity",
-                            "unit",
-                            "prepNote",
-                            "isOptional",
-                            "alternateMeasurements",
-                        },
-                    },
-                },
-                stepPatches = new
-                {
-                    type = "array",
-                    items = new
-                    {
-                        type = "object",
-                        additionalProperties = false,
-                        properties = new
-                        {
-                            stepNumber = new { type = "integer" },
-                            tokens = StepTokenArraySchema(),
-                        },
-                        required = new[] { "stepNumber", "tokens" },
-                    },
-                },
-                polishNotes = new { type = "array", items = new { type = "string" } },
-            },
-            required = new[]
-            {
-                "title",
-                "description",
-                "servings",
-                "yield",
-                "timing",
-                "tags",
-                "ingredientPatches",
-                "stepPatches",
-                "polishNotes",
-            },
-        };
-}
-
-public static partial class StepTokenParserAndRenderer
+public static partial class StepTokenValidator
 {
     private static readonly HashSet<string> PluralUnitNames = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -1174,55 +314,253 @@ public static partial class StepTokenParserAndRenderer
         return sanitized;
     }
 
-    private static bool TempUnitMatchesWord(string unit, string phrase)
+    public static ValidatedStage4StepResult BuildAndValidateStep(
+        int stepNumber,
+        string? sectionName,
+        string originalInstruction,
+        JsonArray rawTokensJson,
+        int ingredientCount,
+        string? extraParseError = null
+    )
     {
-        var compact = phrase
-            .Replace(" ", string.Empty, StringComparison.Ordinal)
-            .ToLowerInvariant();
-        if (compact is "degree" or "degrees")
+        var sanitized = SanitizeRawTokens(rawTokensJson);
+        var parsedTokens = ParseRawTokens(sanitized, out var parseErrors);
+        if (!string.IsNullOrWhiteSpace(extraParseError))
         {
-            return true;
+            parseErrors.Add(extraParseError);
         }
 
-        return unit switch
-        {
-            "fahrenheit" => compact
-                is "°f"
-                    or "f"
-                    or "fahrenheit"
-                    or "degreef"
-                    or "degreesf"
-                    or "degreefahrenheit"
-                    or "degreesfahrenheit",
-            "celsius" => compact
-                is "°c"
-                    or "c"
-                    or "celsius"
-                    or "degreec"
-                    or "degreesc"
-                    or "degreecelsius"
-                    or "degreescelsius",
-            _ => false,
-        };
+        var warnings = ValidateStepTokens(
+            originalInstruction,
+            parsedTokens,
+            ingredientCount,
+            parseErrors
+        );
+
+        var (compiledInstruction, ingredientIndices, timers, ingredientAmounts) =
+            CompileToStepInstruction(parsedTokens, ingredientCount);
+
+        return new ValidatedStage4StepResult(
+            stepNumber,
+            sectionName,
+            originalInstruction,
+            sanitized,
+            parsedTokens,
+            compiledInstruction,
+            ingredientIndices,
+            timers,
+            ingredientAmounts,
+            warnings
+        );
     }
 
-    private static bool TimerUnitMatchesWord(string unit, string word) =>
-        unit switch
-        {
-            "second" or "seconds" => word is "second" or "seconds" or "sec" or "secs",
-            "minute" or "minutes" => word is "minute" or "minutes" or "min" or "mins",
-            "hour" or "hours" => word is "hour" or "hours" or "hr" or "hrs",
-            "day" or "days" => word is "day" or "days",
-            _ => string.Equals(unit, word, StringComparison.OrdinalIgnoreCase),
-        };
+    private static (
+        string CompiledInstruction,
+        List<int> IngredientIndices,
+        List<RecipeStepTimerInput> Timers,
+        List<RecipeStepIngredientAmountInput> IngredientAmounts
+    ) CompileToStepInstruction(IReadOnlyList<Stage4ParsedToken> parsedTokens, int ingredientCount)
+    {
+        var sb = new StringBuilder();
+        var ingredientIndices = new List<int>();
+        var seenIndices = new HashSet<int>();
+        var timers = new List<RecipeStepTimerInput>();
+        var seenTimerKeys = new HashSet<(int Seconds, string Label)>();
+        var ingredientAmountsMap = new Dictionary<int, RecipeMeasurement>();
 
-    public static List<PocStepToken> ParseTokens(
+        foreach (var token in parsedTokens)
+        {
+            switch (token)
+            {
+                case Stage4TextToken textToken:
+                    sb.Append(textToken.Text);
+                    break;
+
+                case Stage4IngredientToken ing:
+                {
+                    var (unit, customUnit) = RecipeUnitAndSectionHelpers.NormalizeUnit(ing.Unit);
+                    var (qty, maxQty) = RecipeUnitAndSectionHelpers.NormalizeQuantities(
+                        ing.Quantity,
+                        ing.MaxQuantity
+                    );
+                    var stepToken = new StepIngredientToken(
+                        Ingredient: ing.Name.Trim(),
+                        Amount: qty,
+                        Unit: unit,
+                        CustomUnitName: unit == MeasurementUnit.Custom ? customUnit : null,
+                        MaxAmount: maxQty
+                    );
+                    sb.Append(StepInstructionParser.FormatToken(stepToken));
+
+                    if (ing.IngredientIndex is int idx && idx >= 0 && idx < ingredientCount)
+                    {
+                        if (seenIndices.Add(idx))
+                        {
+                            ingredientIndices.Add(idx);
+                        }
+
+                        if (qty.HasValue && unit.HasValue && !ingredientAmountsMap.ContainsKey(idx))
+                        {
+                            ingredientAmountsMap[idx] = new RecipeMeasurement(
+                                qty,
+                                unit,
+                                maxQty,
+                                unit == MeasurementUnit.Custom ? customUnit : null
+                            );
+                        }
+                    }
+                    break;
+                }
+
+                case Stage4MixtureToken mix:
+                {
+                    var (unit, customUnit) = RecipeUnitAndSectionHelpers.NormalizeUnit(mix.Unit);
+                    var (qty, maxQty) = RecipeUnitAndSectionHelpers.NormalizeQuantities(
+                        mix.Quantity,
+                        mix.MaxQuantity
+                    );
+                    var stepToken = new StepMixtureToken(
+                        Name: mix.Name.Trim(),
+                        Amount: qty,
+                        Unit: unit,
+                        CustomUnitName: unit == MeasurementUnit.Custom ? customUnit : null,
+                        MaxAmount: maxQty
+                    );
+                    sb.Append(StepInstructionParser.FormatToken(stepToken));
+                    break;
+                }
+
+                case Stage4FixedToken fx:
+                {
+                    var (unit, customUnit) = RecipeUnitAndSectionHelpers.NormalizeUnit(fx.Unit);
+                    var (qty, maxQty) = RecipeUnitAndSectionHelpers.NormalizeQuantities(
+                        fx.Amount,
+                        fx.MaxAmount
+                    );
+                    var stepToken = new StepFixedToken(
+                        Amount: qty,
+                        Unit: unit,
+                        CustomUnitName: unit == MeasurementUnit.Custom ? customUnit : null,
+                        MaxAmount: maxQty,
+                        Name: string.IsNullOrWhiteSpace(fx.Name) ? null : fx.Name.Trim(),
+                        Hyphenated: fx.Hyphenated
+                    );
+                    sb.Append(StepInstructionParser.FormatToken(stepToken));
+                    break;
+                }
+
+                case Stage4DimensionToken dim:
+                {
+                    if (!DimensionUnitHelper.TryParse(dim.Unit, out var dimUnit))
+                    {
+                        dimUnit = DimensionUnit.Inch;
+                    }
+                    var (val, maxVal) = RecipeUnitAndSectionHelpers.NormalizeQuantities(
+                        dim.Amount,
+                        dim.MaxAmount
+                    );
+                    var stepToken = new StepDimensionToken(
+                        Value: val ?? dim.Amount,
+                        Unit: dimUnit,
+                        MaxValue: maxVal,
+                        Hyphenated: dim.Hyphenated
+                    );
+                    sb.Append(StepInstructionParser.FormatToken(stepToken));
+                    break;
+                }
+
+                case Stage4TimerToken timer:
+                {
+                    var seconds = ConvertTimerToSeconds(timer.Amount, timer.Unit);
+                    int? maxSeconds =
+                        timer.MaxAmount.HasValue && timer.MaxAmount.Value > timer.Amount
+                            ? ConvertTimerToSeconds(timer.MaxAmount.Value, timer.Unit)
+                            : null;
+                    var cleanLabel = string.IsNullOrWhiteSpace(timer.Label)
+                        ? "Timer"
+                        : timer.Label.Trim();
+                    if (cleanLabel.Length > 150)
+                    {
+                        cleanLabel = cleanLabel[..150].Trim();
+                    }
+
+                    var tokenLabel = StepInstructionParser.IsDurationLabel(cleanLabel)
+                        ? null
+                        : cleanLabel;
+                    var stepToken = new StepTimerToken(seconds, tokenLabel, maxSeconds);
+                    sb.Append(StepInstructionParser.FormatToken(stepToken));
+
+                    if (seenTimerKeys.Add((seconds, cleanLabel.ToLowerInvariant())))
+                    {
+                        timers.Add(new RecipeStepTimerInput(seconds, cleanLabel));
+                    }
+                    break;
+                }
+
+                case Stage4TemperatureToken temp:
+                {
+                    var isCelsius = string.Equals(
+                        temp.Unit?.Trim(),
+                        "celsius",
+                        StringComparison.OrdinalIgnoreCase
+                    );
+                    var (val, maxVal) = RecipeUnitAndSectionHelpers.NormalizeQuantities(
+                        temp.Amount,
+                        temp.MaxAmount
+                    );
+                    var stepToken = isCelsius
+                        ? new StepTemperatureToken(
+                            Fahrenheit: null,
+                            Celsius: val ?? temp.Amount,
+                            MaxFahrenheit: null,
+                            MaxCelsius: maxVal
+                        )
+                        : new StepTemperatureToken(
+                            Fahrenheit: val ?? temp.Amount,
+                            Celsius: null,
+                            MaxFahrenheit: maxVal,
+                            MaxCelsius: null
+                        );
+                    sb.Append(StepInstructionParser.FormatToken(stepToken));
+                    break;
+                }
+            }
+        }
+
+        var compiledInstruction = sb.ToString().Trim();
+        if (compiledInstruction.Length > 4000)
+        {
+            compiledInstruction = compiledInstruction[..4000];
+        }
+
+        var amountsList = ingredientAmountsMap
+            .OrderBy(kvp => kvp.Key)
+            .Select(kvp => new RecipeStepIngredientAmountInput(kvp.Key, kvp.Value))
+            .ToList();
+
+        return (compiledInstruction, ingredientIndices, timers, amountsList);
+    }
+
+    private static int ConvertTimerToSeconds(decimal amount, string? unit)
+    {
+        var multiplier = unit?.Trim().ToLowerInvariant() switch
+        {
+            "second" or "seconds" => 1m,
+            "hour" or "hours" => 3600m,
+            "day" or "days" => 86400m,
+            _ => 60m,
+        };
+        var raw = (int)Math.Round(amount * multiplier, MidpointRounding.AwayFromZero);
+        return Math.Clamp(raw, 1, 864000);
+    }
+
+    public static List<Stage4ParsedToken> ParseRawTokens(
         JsonArray tokensArray,
         out List<string> parseErrors
     )
     {
         parseErrors = [];
-        var result = new List<PocStepToken>(tokensArray.Count);
+        var result = new List<Stage4ParsedToken>(tokensArray.Count);
 
         for (var i = 0; i < tokensArray.Count; i++)
         {
@@ -1235,7 +573,7 @@ public static partial class StepTokenParserAndRenderer
 
             if (node is JsonValue val && val.TryGetValue<string>(out var text))
             {
-                result.Add(new PocTextToken(text));
+                result.Add(new Stage4TextToken(text));
                 continue;
             }
 
@@ -1250,7 +588,7 @@ public static partial class StepTokenParserAndRenderer
             {
                 case "ingredient":
                     result.Add(
-                        new PocIngredientToken(
+                        new Stage4IngredientToken(
                             GetNullableInt(obj["ingredientIndex"]),
                             obj["name"]?.GetValue<string>() ?? string.Empty,
                             GetNullableDecimal(obj["quantity"]),
@@ -1261,7 +599,7 @@ public static partial class StepTokenParserAndRenderer
                     break;
                 case "mixture":
                     result.Add(
-                        new PocMixtureToken(
+                        new Stage4MixtureToken(
                             obj["name"]?.GetValue<string>() ?? string.Empty,
                             GetNullableDecimal(obj["quantity"]) ?? 0m,
                             GetNullableDecimal(obj["maxQuantity"]),
@@ -1271,7 +609,7 @@ public static partial class StepTokenParserAndRenderer
                     break;
                 case "timer":
                     result.Add(
-                        new PocTimerToken(
+                        new Stage4TimerToken(
                             GetNullableDecimal(obj["amount"]) ?? 0m,
                             GetNullableDecimal(obj["maxAmount"]),
                             GetNullableString(obj["unit"]) ?? "minute",
@@ -1281,7 +619,7 @@ public static partial class StepTokenParserAndRenderer
                     break;
                 case "temperature":
                     result.Add(
-                        new PocTemperatureToken(
+                        new Stage4TemperatureToken(
                             GetNullableDecimal(obj["amount"]) ?? 0m,
                             GetNullableDecimal(obj["maxAmount"]),
                             GetNullableString(obj["unit"]) ?? "fahrenheit"
@@ -1290,7 +628,7 @@ public static partial class StepTokenParserAndRenderer
                     break;
                 case "dimension":
                     result.Add(
-                        new PocDimensionToken(
+                        new Stage4DimensionToken(
                             GetNullableDecimal(obj["amount"]) ?? 0m,
                             GetNullableDecimal(obj["maxAmount"]),
                             GetNullableString(obj["unit"]) ?? "inch",
@@ -1300,7 +638,7 @@ public static partial class StepTokenParserAndRenderer
                     break;
                 case "fixed":
                     result.Add(
-                        new PocFixedToken(
+                        new Stage4FixedToken(
                             obj["name"]?.GetValue<string>() ?? string.Empty,
                             GetNullableDecimal(obj["amount"]) ?? 0m,
                             GetNullableDecimal(obj["maxAmount"]),
@@ -1318,10 +656,10 @@ public static partial class StepTokenParserAndRenderer
         return result;
     }
 
-    public static string Render(
-        IReadOnlyList<PocStepToken> tokens,
-        decimal scaleFactor,
-        bool convertToMetric
+    public static string RenderForValidation(
+        IReadOnlyList<Stage4ParsedToken> tokens,
+        decimal scaleFactor = 1m,
+        bool convertToMetric = false
     )
     {
         var sb = new StringBuilder();
@@ -1329,10 +667,10 @@ public static partial class StepTokenParserAndRenderer
         {
             switch (token)
             {
-                case PocTextToken t:
+                case Stage4TextToken t:
                     sb.Append(t.Text);
                     break;
-                case PocIngredientToken ing:
+                case Stage4IngredientToken ing:
                     sb.Append(
                         RenderAmountAndUnit(
                             ing.Quantity.HasValue ? ing.Quantity.Value * scaleFactor : null,
@@ -1344,7 +682,7 @@ public static partial class StepTokenParserAndRenderer
                         )
                     );
                     break;
-                case PocMixtureToken mix:
+                case Stage4MixtureToken mix:
                     sb.Append(
                         RenderAmountAndUnit(
                             mix.Quantity * scaleFactor,
@@ -1356,7 +694,7 @@ public static partial class StepTokenParserAndRenderer
                         )
                     );
                     break;
-                case PocTimerToken timer:
+                case Stage4TimerToken timer:
                     sb.Append(
                         RenderAmountAndUnit(
                             timer.Amount,
@@ -1368,10 +706,10 @@ public static partial class StepTokenParserAndRenderer
                         )
                     );
                     break;
-                case PocTemperatureToken temp:
+                case Stage4TemperatureToken temp:
                     sb.Append(RenderTemperature(temp, convertToMetric));
                     break;
-                case PocDimensionToken dim:
+                case Stage4DimensionToken dim:
                     sb.Append(
                         RenderAmountAndUnit(
                             dim.Amount,
@@ -1383,7 +721,7 @@ public static partial class StepTokenParserAndRenderer
                         )
                     );
                     break;
-                case PocFixedToken fx:
+                case Stage4FixedToken fx:
                     var renderedMeasure = RenderAmountAndUnit(
                         fx.Amount,
                         fx.MaxAmount,
@@ -1406,7 +744,7 @@ public static partial class StepTokenParserAndRenderer
 
     public static List<string> ValidateStepTokens(
         string originalInstruction,
-        IReadOnlyList<PocStepToken> tokens,
+        IReadOnlyList<Stage4ParsedToken> tokens,
         int ingredientCount,
         IReadOnlyList<string> parseErrors
     )
@@ -1418,14 +756,13 @@ public static partial class StepTokenParserAndRenderer
             return warnings;
         }
 
-        var rendered = Render(tokens, scaleFactor: 1m, convertToMetric: false);
+        var rendered = RenderForValidation(tokens, scaleFactor: 1m, convertToMetric: false);
         if (string.IsNullOrWhiteSpace(rendered))
         {
             warnings.Add("Rendered step text is empty.");
             return warnings;
         }
 
-        // Check if non-numeric prose words were dropped
         var origWords = WordRegex()
             .Matches(originalInstruction)
             .Select(m => m.Value.ToLowerInvariant())
@@ -1468,12 +805,12 @@ public static partial class StepTokenParserAndRenderer
         var origCueCount = ExplicitQuantityCueRegex().Matches(origClean).Count;
         var quantifiedTokenCount = tokens.Count(t =>
             t
-                is PocIngredientToken
-                    or PocMixtureToken
-                    or PocFixedToken
-                    or PocTimerToken
-                    or PocDimensionToken
-                    or PocTemperatureToken
+                is Stage4IngredientToken
+                    or Stage4MixtureToken
+                    or Stage4FixedToken
+                    or Stage4TimerToken
+                    or Stage4DimensionToken
+                    or Stage4TemperatureToken
         );
         if (!hasDistributive && quantifiedTokenCount > origCueCount)
         {
@@ -1487,17 +824,17 @@ public static partial class StepTokenParserAndRenderer
             var tokenUnitCount = tokens.Count(t =>
                 t switch
                 {
-                    PocIngredientToken ing => string.Equals(
+                    Stage4IngredientToken ing => string.Equals(
                         ing.Unit?.Trim(),
                         unitName,
                         StringComparison.OrdinalIgnoreCase
                     ),
-                    PocMixtureToken mix => string.Equals(
+                    Stage4MixtureToken mix => string.Equals(
                         mix.Unit?.Trim(),
                         unitName,
                         StringComparison.OrdinalIgnoreCase
                     ),
-                    PocFixedToken fx => string.Equals(
+                    Stage4FixedToken fx => string.Equals(
                         fx.Unit?.Trim(),
                         unitName,
                         StringComparison.OrdinalIgnoreCase
@@ -1537,16 +874,16 @@ public static partial class StepTokenParserAndRenderer
         {
             decimal? tokenPrimaryVal = tokens[i] switch
             {
-                PocIngredientToken ing => ing.Quantity,
-                PocMixtureToken mix => mix.Quantity,
-                PocFixedToken fx => fx.Amount,
-                PocTimerToken tm => tm.Amount,
-                PocDimensionToken dm => dm.Amount,
+                Stage4IngredientToken ing => ing.Quantity,
+                Stage4MixtureToken mix => mix.Quantity,
+                Stage4FixedToken fx => fx.Amount,
+                Stage4TimerToken tm => tm.Amount,
+                Stage4DimensionToken dm => dm.Amount,
                 _ => null,
             };
             if (
                 i > 0
-                && tokens[i - 1] is PocTextToken prevSpelledTxt
+                && tokens[i - 1] is Stage4TextToken prevSpelledTxt
                 && tokenPrimaryVal.HasValue
                 && TryMatchSpelledNumber(
                     prevSpelledTxt.Text,
@@ -1561,8 +898,8 @@ public static partial class StepTokenParserAndRenderer
             }
             if (
                 i + 1 < tokens.Count
-                && tokens[i] is not PocTextToken
-                && tokens[i + 1] is not PocTextToken
+                && tokens[i] is not Stage4TextToken
+                && tokens[i + 1] is not Stage4TextToken
             )
             {
                 warnings.Add(
@@ -1571,8 +908,8 @@ public static partial class StepTokenParserAndRenderer
             }
             else if (
                 i + 1 < tokens.Count
-                && tokens[i] is PocTextToken prevTxt
-                && tokens[i + 1] is not PocTextToken
+                && tokens[i] is Stage4TextToken prevTxt
+                && tokens[i + 1] is not Stage4TextToken
                 && prevTxt.Text.Length > 0
                 && char.IsLetterOrDigit(prevTxt.Text[^1])
             )
@@ -1583,8 +920,8 @@ public static partial class StepTokenParserAndRenderer
             }
             else if (
                 i + 1 < tokens.Count
-                && tokens[i] is not PocTextToken
-                && tokens[i + 1] is PocTextToken nextTxt
+                && tokens[i] is not Stage4TextToken
+                && tokens[i + 1] is Stage4TextToken nextTxt
                 && nextTxt.Text.Length > 0
                 && char.IsLetterOrDigit(nextTxt.Text[0])
             )
@@ -1596,7 +933,7 @@ public static partial class StepTokenParserAndRenderer
 
             switch (tokens[i])
             {
-                case PocTextToken txt:
+                case Stage4TextToken txt:
                     foreach (Match untok in UntokenizedQuantityRegex().Matches(txt.Text))
                     {
                         var isRotationAngle = false;
@@ -1621,7 +958,7 @@ public static partial class StepTokenParserAndRenderer
                         }
                     }
                     break;
-                case PocIngredientToken ing:
+                case Stage4IngredientToken ing:
                     if (
                         ing.IngredientIndex is < 0
                         || (
@@ -1658,7 +995,7 @@ public static partial class StepTokenParserAndRenderer
                     }
                     if (
                         i > 0
-                        && tokens[i - 1] is PocTextToken prevIngTxt
+                        && tokens[i - 1] is Stage4TextToken prevIngTxt
                         && TrailingUpToRegex().IsMatch(prevIngTxt.Text)
                         && ing.Quantity.HasValue
                         && ing.MaxQuantity.HasValue
@@ -1688,7 +1025,7 @@ public static partial class StepTokenParserAndRenderer
                         warnings
                     );
                     break;
-                case PocMixtureToken mix:
+                case Stage4MixtureToken mix:
                     if (mix.Quantity <= 0m)
                     {
                         warnings.Add(
@@ -1736,7 +1073,7 @@ public static partial class StepTokenParserAndRenderer
                         warnings
                     );
                     break;
-                case PocFixedToken fx:
+                case Stage4FixedToken fx:
                     if (fx.Amount <= 0m)
                     {
                         warnings.Add(
@@ -1759,7 +1096,7 @@ public static partial class StepTokenParserAndRenderer
                         warnings
                     );
                     break;
-                case PocTimerToken timer:
+                case Stage4TimerToken timer:
                     if (timer.Amount <= 0m)
                     {
                         warnings.Add(
@@ -1778,7 +1115,7 @@ public static partial class StepTokenParserAndRenderer
                     }
                     if (
                         i > 0
-                        && tokens[i - 1] is PocTextToken prevTimerTxt
+                        && tokens[i - 1] is Stage4TextToken prevTimerTxt
                         && TrailingUpToRegex().IsMatch(prevTimerTxt.Text)
                         && timer.MaxAmount.HasValue
                         && timer.MaxAmount.Value > timer.Amount
@@ -1790,7 +1127,7 @@ public static partial class StepTokenParserAndRenderer
                     }
                     if (
                         i + 1 < tokens.Count
-                        && tokens[i + 1] is PocTextToken trailingTimerTxt
+                        && tokens[i + 1] is Stage4TextToken trailingTimerTxt
                         && DuplicateTimeUnitPrefixRegex().IsMatch(trailingTimerTxt.Text)
                     )
                     {
@@ -1799,7 +1136,7 @@ public static partial class StepTokenParserAndRenderer
                         );
                     }
                     break;
-                case PocDimensionToken dim:
+                case Stage4DimensionToken dim:
                     if (dim.MaxAmount.HasValue && dim.MaxAmount.Value < dim.Amount)
                     {
                         warnings.Add(
@@ -1808,7 +1145,7 @@ public static partial class StepTokenParserAndRenderer
                     }
                     if (
                         i > 0
-                        && tokens[i - 1] is PocTextToken prevDimTxt
+                        && tokens[i - 1] is Stage4TextToken prevDimTxt
                         && TrailingUpToRegex().IsMatch(prevDimTxt.Text)
                         && dim.MaxAmount.HasValue
                         && dim.MaxAmount.Value > dim.Amount
@@ -1847,7 +1184,7 @@ public static partial class StepTokenParserAndRenderer
                             );
                         }
                     }
-                    if (i + 1 < tokens.Count && tokens[i + 1] is PocTextToken trailingDimTxt)
+                    if (i + 1 < tokens.Count && tokens[i + 1] is Stage4TextToken trailingDimTxt)
                     {
                         if (DuplicateDimUnitPrefixRegex().IsMatch(trailingDimTxt.Text))
                         {
@@ -1866,7 +1203,7 @@ public static partial class StepTokenParserAndRenderer
                         }
                     }
                     break;
-                case PocTemperatureToken temp:
+                case Stage4TemperatureToken temp:
                     if (temp.MaxAmount.HasValue && temp.MaxAmount.Value < temp.Amount)
                     {
                         warnings.Add(
@@ -1875,7 +1212,7 @@ public static partial class StepTokenParserAndRenderer
                     }
                     if (
                         i + 1 < tokens.Count
-                        && tokens[i + 1] is PocTextToken trailingTempTxt
+                        && tokens[i + 1] is Stage4TextToken trailingTempTxt
                         && DuplicateTempUnitPrefixRegex().IsMatch(trailingTempTxt.Text)
                     )
                     {
@@ -1921,7 +1258,94 @@ public static partial class StepTokenParserAndRenderer
         return warnings;
     }
 
-    private static string RenderTemperature(PocTemperatureToken temp, bool convertToMetric)
+    public static bool TryFindIncompatibleAlternateMeasurement(
+        decimal? primaryQty,
+        decimal? primaryMaxQty,
+        string? primaryUnit,
+        IReadOnlyList<Stage1AlternateMeasurementDto>? alternates,
+        out string? reason
+    )
+    {
+        reason = null;
+        if (
+            !primaryQty.HasValue
+            || primaryQty.Value <= 0m
+            || alternates is not { Count: > 0 }
+            || !TryGetVolumeOrWeightFactor(primaryUnit, out var primaryDim, out var primaryFactor)
+        )
+        {
+            return false;
+        }
+
+        var minPrimaryBase = primaryQty.Value * primaryFactor;
+        var maxPrimaryBase = (primaryMaxQty ?? primaryQty.Value) * primaryFactor;
+        foreach (var alt in alternates)
+        {
+            if (
+                !alt.Quantity.HasValue
+                || alt.Quantity.Value <= 0m
+                || !TryGetVolumeOrWeightFactor(alt.Unit, out var altDim, out var altFactor)
+                || !string.Equals(altDim, primaryDim, StringComparison.Ordinal)
+            )
+            {
+                continue;
+            }
+
+            var altBase = alt.Quantity.Value * altFactor;
+            if (altBase < minPrimaryBase * 0.70m || altBase > maxPrimaryBase * 1.45m)
+            {
+                reason =
+                    $"{alt.Quantity.Value} {alt.Unit} is not equivalent to {primaryQty.Value} {primaryUnit} (sum 'A plus B' ingredients into primary quantity instead of splitting into alternateMeasurements).";
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TempUnitMatchesWord(string unit, string phrase)
+    {
+        var compact = phrase
+            .Replace(" ", string.Empty, StringComparison.Ordinal)
+            .ToLowerInvariant();
+        if (compact is "degree" or "degrees")
+        {
+            return true;
+        }
+
+        return unit switch
+        {
+            "fahrenheit" => compact
+                is "°f"
+                    or "f"
+                    or "fahrenheit"
+                    or "degreef"
+                    or "degreesf"
+                    or "degreefahrenheit"
+                    or "degreesfahrenheit",
+            "celsius" => compact
+                is "°c"
+                    or "c"
+                    or "celsius"
+                    or "degreec"
+                    or "degreesc"
+                    or "degreecelsius"
+                    or "degreescelsius",
+            _ => false,
+        };
+    }
+
+    private static bool TimerUnitMatchesWord(string unit, string word) =>
+        unit switch
+        {
+            "second" or "seconds" => word is "second" or "seconds" or "sec" or "secs",
+            "minute" or "minutes" => word is "minute" or "minutes" or "min" or "mins",
+            "hour" or "hours" => word is "hour" or "hours" or "hr" or "hrs",
+            "day" or "days" => word is "day" or "days",
+            _ => string.Equals(unit, word, StringComparison.OrdinalIgnoreCase),
+        };
+
+    private static string RenderTemperature(Stage4TemperatureToken temp, bool convertToMetric)
     {
         var amount = temp.Amount;
         var max = temp.MaxAmount;
@@ -1995,50 +1419,6 @@ public static partial class StepTokenParserAndRenderer
             : $"{qtyStr} {unitDisplay}";
 
         return string.IsNullOrWhiteSpace(suffix) ? combined : $"{combined} {suffix}";
-    }
-
-    public static bool TryFindIncompatibleAlternateMeasurement(
-        decimal? primaryQty,
-        decimal? primaryMaxQty,
-        string? primaryUnit,
-        IReadOnlyList<Stage1AlternateMeasurementDto>? alternates,
-        out string? reason
-    )
-    {
-        reason = null;
-        if (
-            !primaryQty.HasValue
-            || primaryQty.Value <= 0m
-            || alternates is not { Count: > 0 }
-            || !TryGetVolumeOrWeightFactor(primaryUnit, out var primaryDim, out var primaryFactor)
-        )
-        {
-            return false;
-        }
-
-        var minPrimaryBase = primaryQty.Value * primaryFactor;
-        var maxPrimaryBase = (primaryMaxQty ?? primaryQty.Value) * primaryFactor;
-        foreach (var alt in alternates)
-        {
-            if (
-                alt.Quantity <= 0m
-                || !TryGetVolumeOrWeightFactor(alt.Unit, out var altDim, out var altFactor)
-                || !string.Equals(altDim, primaryDim, StringComparison.Ordinal)
-            )
-            {
-                continue;
-            }
-
-            var altBase = alt.Quantity * altFactor;
-            if (altBase < minPrimaryBase * 0.70m || altBase > maxPrimaryBase * 1.45m)
-            {
-                reason =
-                    $"{alt.Quantity} {alt.Unit} is not equivalent to {primaryQty.Value} {primaryUnit} (sum 'A plus B' ingredients into primary quantity instead of splitting into alternateMeasurements).";
-                return true;
-            }
-        }
-
-        return false;
     }
 
     private static bool TryGetVolumeOrWeightFactor(
@@ -2268,7 +1648,7 @@ public static partial class StepTokenParserAndRenderer
                 : val.ToString("0.##", CultureInfo.InvariantCulture);
         }
 
-        return App.Core.Recipes.CulinaryMath.FormatNumber(val, isMetric: false);
+        return CulinaryMath.FormatNumber(val, isMetric: false);
     }
 
     private static string FormatUnitDisplay(string? unit, decimal effectiveQty, bool hyphenated)
@@ -2340,10 +1720,32 @@ public static partial class StepTokenParserAndRenderer
                 or "about";
 
     private static bool IsTempOrTimeTextWord(string w) =>
-        w is "half" or "quarter" or "third" or "third" or "one" or "two" or "three";
+        w is "half" or "quarter" or "third" or "one" or "two" or "three";
 
-    private static int? GetNullableInt(JsonNode? node) =>
-        node is JsonValue v && v.TryGetValue<int>(out var i) ? i : null;
+    private static int? GetNullableInt(JsonNode? node)
+    {
+        if (node is not JsonValue v)
+        {
+            return null;
+        }
+        if (v.TryGetValue<int>(out var i))
+        {
+            return i;
+        }
+        if (v.TryGetValue<long>(out var l))
+        {
+            return (int)l;
+        }
+        if (v.TryGetValue<decimal>(out var d))
+        {
+            return (int)d;
+        }
+        if (v.TryGetValue<string>(out var s) && int.TryParse(s, out var parsed))
+        {
+            return parsed;
+        }
+        return null;
+    }
 
     private static decimal? GetNullableDecimal(JsonNode? node)
     {
@@ -2355,9 +1757,28 @@ public static partial class StepTokenParserAndRenderer
         {
             return d;
         }
+        if (v.TryGetValue<int>(out var i))
+        {
+            return i;
+        }
+        if (v.TryGetValue<long>(out var l))
+        {
+            return l;
+        }
         if (v.TryGetValue<double>(out var dbl))
         {
             return (decimal)dbl;
+        }
+        if (v.TryGetValue<float>(out var flt))
+        {
+            return (decimal)flt;
+        }
+        if (
+            v.TryGetValue<string>(out var s)
+            && decimal.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture, out var parsed)
+        )
+        {
+            return parsed;
         }
         return null;
     }
@@ -2387,7 +1808,7 @@ public static partial class StepTokenParserAndRenderer
     private static void CheckBoundaryWordDuplication(
         int tokenIndex,
         string tokenName,
-        IReadOnlyList<PocStepToken> tokens,
+        IReadOnlyList<Stage4ParsedToken> tokens,
         Dictionary<string, int> origWordCounts,
         Dictionary<string, int> renderedWordCounts,
         List<string> warnings
@@ -2395,7 +1816,7 @@ public static partial class StepTokenParserAndRenderer
     {
         if (
             tokenIndex + 1 >= tokens.Count
-            || tokens[tokenIndex + 1] is not PocTextToken trailingTxt
+            || tokens[tokenIndex + 1] is not Stage4TextToken trailingTxt
             || string.IsNullOrWhiteSpace(tokenName)
         )
         {

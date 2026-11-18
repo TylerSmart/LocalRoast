@@ -42,6 +42,7 @@ import {
   FormattedQuantityResult,
   formatCountdown,
   formatDuration,
+  formatIngredientReplacement,
   scaleIngredient,
 } from '../../../core/utils/culinary-math';
 import {
@@ -130,6 +131,7 @@ export class CookModeComponent implements OnInit, OnDestroy {
 
   protected readonly formatCountdown = formatCountdown;
   protected readonly formatDuration = formatDuration;
+  protected readonly formatReplacement = formatIngredientReplacement;
   protected readonly shouldShowTimerLabel = shouldShowTimerLabel;
 
   protected readonly scaleFactor = computed(() => {

@@ -1246,3 +1246,16 @@
     }
   }
 }
+
+.ingredient-replacements {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.875em;
+  color: var(--mat-sys-on-surface-variant);
+  font-style: italic;
+
+  .ingredient-replacement-item {
+    display: inline-block;
+    margin-right: 0.65rem;
+  }
+}

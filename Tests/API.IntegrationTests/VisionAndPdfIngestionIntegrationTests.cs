@@ -426,58 +426,56 @@ public sealed class VisionAndPdfIngestionIntegrationTests
             );
         }
 
-        public Task<ExtractedRecipeDto> ExtractRecipeFromTextAsync(
-            EffectiveLlmConnectionConfig config,
-            LlmExtractionContext context,
-            CancellationToken cancellationToken = default
-        )
-        {
-            return Task.FromResult(
-                new ExtractedRecipeDto(
-                    Title: "Grandma's Shortbread",
-                    Description: "Buttery shortbread from a scanned recipe card.",
-                    Servings: 12m,
-                    YieldDisplay: "12 cookies",
-                    PrepTimeMinutes: 15,
-                    CookTimeMinutes: 20,
-                    TotalTimeMinutes: 35,
-                    Difficulty: "Easy",
-                    ProposedTags: ["Dessert"],
-                    Ingredients:
-                    [
-                        new(
-                            RefId: "ing_1",
-                            CanonicalFoodItem: "butter",
-                            DisplayName: "butter",
-                            Quantity: 1m,
-                            Unit: "cup",
-                            PreparationNotes: "softened",
-                            IsOptional: false,
-                            RawText: "1 cup butter, softened"
-                        ),
-                    ],
-                    Steps:
-                    [
-                        new(
-                            StepNumber: 1,
-                            TemplateText: "Cream {{ing_1}} and bake for {{timer_1}}.",
-                            IngredientTokens: [new("ing_1", "ing_1")],
-                            TimerTokens: [new("timer_1", 1200, "Bake")]
-                        ),
-                    ],
-                    QualityAudit: new RecipeQualityAuditDto(
-                        IsPlausibleRecipe: false,
-                        Warnings: ["Low-confidence scanned recipe card."]
-                    )
-                )
-            );
-        }
+        private readonly TestStagePipelineResponder _responder = new(_ => new ExtractedRecipeDto(
+            Title: "Grandma's Shortbread",
+            Description: "Buttery shortbread from a scanned recipe card.",
+            Servings: 12m,
+            YieldDisplay: "12 cookies",
+            PrepTimeMinutes: 15,
+            CookTimeMinutes: 20,
+            TotalTimeMinutes: 35,
+            Difficulty: "Easy",
+            ProposedTags: ["Dessert"],
+            Ingredients:
+            [
+                new(
+                    RefId: "ing_1",
+                    CanonicalFoodItem: "butter",
+                    DisplayName: "butter",
+                    Quantity: 1m,
+                    Unit: "cup",
+                    PreparationNotes: "softened",
+                    IsOptional: false,
+                    RawText: "1 cup butter, softened"
+                ),
+            ],
+            Steps:
+            [
+                new(
+                    StepNumber: 1,
+                    TemplateText: "Cream {{ing_1}} and bake for {{timer_1}}.",
+                    IngredientTokens: [new("ing_1", "ing_1")],
+                    TimerTokens: [new("timer_1", 1200, "Bake")]
+                ),
+            ],
+            QualityAudit: new RecipeQualityAuditDto(IsPlausibleRecipe: true, Warnings: [])
+        ));
 
-        public Task<LlmEntityDisambiguationResult> DisambiguateEntitiesAsync(
+        public Task<LlmStructuredStageResult<T>> ExecuteStructuredStageAsync<T>(
             EffectiveLlmConnectionConfig config,
-            LlmEntityDisambiguationContext context,
+            string stageName,
+            IReadOnlyList<LlmStageChatMessage> messages,
+            System.Text.Json.Nodes.JsonNode? jsonSchema,
+            bool? overrideThinking = null,
+            int maxTokens = 16384,
             CancellationToken cancellationToken = default
-        ) => Task.FromResult(new LlmEntityDisambiguationResult());
+        ) => Task.FromResult(_responder.Respond<T>(config, stageName, messages));
+
+        public Task<float[][]> GenerateEmbeddingsAsync(
+            EffectiveLlmConnectionConfig config,
+            IReadOnlyList<string> inputs,
+            CancellationToken cancellationToken = default
+        ) => Task.FromResult(Array.Empty<float[]>());
 
         public Task<LlmSubstitutionPayload> SuggestIngredientSubstitutionsAsync(
             EffectiveLlmConnectionConfig config,

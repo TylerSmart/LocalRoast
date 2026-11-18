@@ -715,4 +715,32 @@ describe('IngestionReviewComponent', () => {
     ]);
     expect(payload.steps[0].timers).toEqual([{ durationSeconds: 180, label: 'Sear' }]);
   });
+
+  it('round-trips ingredient replacements in draft payload and preview data', () => {
+    component.addIngredientReplacement(0, {
+      displayName: 'margarine',
+      quantity: 2,
+      maxQuantity: null,
+      unit: 'Tbsp',
+      customUnitName: null,
+      preparationNote: 'melted',
+    });
+    expect(component.getReplacementsArray(0).length).toBe(1);
+
+    const payload = component.buildDraftPayload();
+    expect(payload.ingredients[0].replacements).toEqual([
+      expect.objectContaining({
+        displayName: 'margarine',
+        quantity: 2,
+        unit: 'Tbsp',
+        preparationNote: 'melted',
+      }),
+    ]);
+
+    component['refreshPreviewData']();
+    expect(component.previewData()?.ingredients[0].replacements?.[0].displayName).toBe('margarine');
+
+    component.removeIngredientReplacement(0, 0);
+    expect(component.getReplacementsArray(0).length).toBe(0);
+  });
 });

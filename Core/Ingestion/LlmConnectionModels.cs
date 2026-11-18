@@ -9,6 +9,7 @@ public enum LlmWorkflow
     Text = 0,
     Vision = 1,
     Refinement = 2,
+    Embedding = 3,
 }
 
 public sealed record LlmConnectionDto(
@@ -87,5 +88,6 @@ public sealed record UpdateLlmWorkflowsRequest(
     bool AutoPublishHighConfidenceText = false,
     [Range(0, 10)] int MaxIngestionRetries = 3,
     bool EnableIngestion = true,
-    bool AutoResumeQueue = true
+    bool AutoResumeQueue = true,
+    Guid? EmbeddingModelConfigurationId = null
 );

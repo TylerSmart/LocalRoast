@@ -20,6 +20,8 @@ public sealed class HouseholdLlmSettings : IAuditable
 
     public string? VisionModel { get; set; }
 
+    public string? EmbeddingModel { get; set; }
+
     public string OllamaKeepAlive { get; set; } = "5m";
 
     public int ContextWindowTokens { get; set; } = 8192;
@@ -85,6 +87,10 @@ public sealed class HouseholdLlmSettings : IAuditable
     public Guid? RefineModelConfigurationId { get; set; }
 
     public LlmModelConfiguration? RefineModelConfiguration { get; set; }
+
+    public Guid? EmbeddingModelConfigurationId { get; set; }
+
+    public LlmModelConfiguration? EmbeddingModelConfiguration { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; }
 

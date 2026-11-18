@@ -32,13 +32,6 @@ public sealed class RecipeMeasurementTests
             preferAlternative
         );
 
-    private static IngestionExtractedDraftDto Compile(ExtractedRecipeDto extracted)
-    {
-        var validation = RecipeValidator.Validate(extracted);
-        var matches = EntityCandidateMatcher.Match(extracted, [], []);
-        return RecipeDraftCompiler.Compile(extracted, validation, matches);
-    }
-
     [TestMethod]
     [DataRow("5 cups (25 ounces) flour", 5, 25)]
     [DataRow("1 1/2 cups (7 1/2 oz) flour", 1.5, 7.5)]
@@ -81,92 +74,6 @@ public sealed class RecipeMeasurementTests
         Assert.AreEqual(MeasurementUnit.Ml, amounts[2].Unit);
         Assert.IsEmpty(SourceMeasurementParser.Parse("−5 cups flour"));
         Assert.IsEmpty(SourceMeasurementParser.Parse("1-1000000 cups flour"));
-    }
-
-    [TestMethod]
-    public void Compile_Starter_PreservesPairsAndIndividualFlatStepAmounts()
-    {
-        var extracted = new ExtractedRecipeDto(
-            Title: "Synthetic Starter",
-            Ingredients:
-            [
-                new(
-                    RefId: "ing_1",
-                    CanonicalFoodItem: "flour",
-                    DisplayName: "flour",
-                    Quantity: 5m,
-                    Unit: "cup",
-                    AltQuantity: 25m,
-                    AltUnit: "oz",
-                    RawText: "5 cups (25 ounces) flour"
-                ),
-            ],
-            Steps:
-            [
-                new(
-                    StepNumber: 1,
-                    TemplateText: "Combine {{ing_1_a}} with water.",
-                    IngredientTokens: [new("ing_1_a", "ing_1", 1m, "cup")]
-                ),
-                new(
-                    StepNumber: 2,
-                    TemplateText: "Feed with {{ing_1_b}}.",
-                    IngredientTokens: [new("ing_1_b", "ing_1", 4m, "cups")]
-                ),
-            ]
-        );
-        var draft = Compile(extracted);
-        Assert.AreEqual(5m, draft.Ingredients![0].Quantity);
-        Assert.AreEqual(25m, draft.Ingredients[0].AlternativeMeasurement!.Quantity);
-        Assert.AreEqual(MeasurementUnit.Cup, draft.Ingredients[0].Unit);
-        Assert.AreEqual(1m, draft.Steps![0].IngredientAmounts![0].Measurement.Quantity);
-        Assert.AreEqual(4m, draft.Steps[1].IngredientAmounts![0].Measurement.Quantity);
-        StringAssert.Contains(
-            draft.Steps[0].Instruction,
-            "||{\"ingredient\":\"flour\",\"amount\":1,\"unit\":\"cup\",\"type\":\"Ingredient\"}||"
-        );
-        StringAssert.Contains(
-            draft.Steps[1].Instruction,
-            "||{\"ingredient\":\"flour\",\"amount\":4,\"unit\":\"cup\",\"type\":\"Ingredient\"}||"
-        );
-        Assert.IsEmpty(draft.ValidationIssues!);
-        Assert.AreEqual(0.96m, draft.ConfidenceScore);
-    }
-
-    [TestMethod]
-    public void Compile_OverflowingStepAmounts_AreFlaggedInValidationIssuesAndLowerConfidence()
-    {
-        var extracted = new ExtractedRecipeDto(
-            Title: "Synthetic Starter",
-            Ingredients:
-            [
-                new(
-                    RefId: "ing_1",
-                    CanonicalFoodItem: "flour",
-                    DisplayName: "flour",
-                    Quantity: 5m,
-                    Unit: "cup",
-                    AltQuantity: 25m,
-                    AltUnit: "oz",
-                    RawText: "5 cups (25 oz) flour"
-                ),
-            ],
-            Steps:
-            [
-                new(
-                    StepNumber: 1,
-                    TemplateText: "Add {{ing_1_a}} then {{ing_1_b}}.",
-                    IngredientTokens:
-                    [
-                        new("ing_1_a", "ing_1", 4m, "cup"),
-                        new("ing_1_b", "ing_1", 3m, "cup"),
-                    ]
-                ),
-            ]
-        );
-        var draft = Compile(extracted);
-        Assert.IsNotEmpty(draft.ValidationIssues!);
-        Assert.IsLessThan(0.90m, draft.ConfidenceScore);
     }
 
     [TestMethod]

@@ -52,4 +52,20 @@ describe('StepInstructionComponent', () => {
     const fixedChip = el.querySelector('.fixed-amount');
     expect(fixedChip?.textContent).toBe('5m (Simmer)');
   });
+
+  it('renders mixture, dimension, and fixed chips with expected scaling behavior', () => {
+    const richStep: InstructionStep = {
+      instruction:
+        'Spread ||{"type":"mixture","name":"glaze","amount":2,"unit":"tbsp"}|| in a ||{"type":"dimension","value":9,"unit":"inch","hyphenated":true}|| pan with ||{"type":"fixed","amount":1,"unit":"tsp","name":"salt"}||.',
+    };
+    fixture.componentRef.setInput('step', richStep);
+    fixture.componentRef.setInput('factor', 2);
+    fixture.detectChanges();
+    const el: HTMLElement = fixture.nativeElement;
+    expect(el.textContent).toContain('1/4 cup glaze');
+    expect(el.textContent).toContain('9-inch');
+    expect(el.textContent).toContain('1 tsp');
+    expect(el.querySelectorAll('.inline-amount.is-scaled').length).toBe(1);
+    expect(el.querySelectorAll('.fixed-amount').length).toBe(2);
+  });
 });

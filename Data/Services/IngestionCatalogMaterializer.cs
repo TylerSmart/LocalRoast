@@ -598,7 +598,7 @@ public static partial class IngestionCatalogMaterializer
         CancellationToken cancellationToken
     )
     {
-        if (RecipeValidator.IsRawGrocerySeePageNote(ing.OriginalRawText))
+        if (IngestionMetadataAndTagHelper.IsRawGrocerySeePageNote(ing.OriginalRawText))
         {
             return null;
         }
@@ -790,6 +790,12 @@ public static partial class IngestionCatalogMaterializer
                     cleanQty = 1m;
                 }
 
+                var replacementsInput = await MaterializeReplacementsAsync(
+                    dbContext,
+                    ing.Replacements,
+                    cancellationToken
+                );
+
                 ingredientsInput.Add(
                     new RecipeIngredientInput(
                         SectionName: ing.SectionName,
@@ -809,7 +815,8 @@ public static partial class IngestionCatalogMaterializer
                         OriginalRawText: ing.OriginalRawText,
                         AlternativeMeasurement: ing.AlternativeMeasurement,
                         PreferAlternativeMeasurement: ing.PreferAlternativeMeasurement,
-                        UnresolvedRecipeTitle: linkedRecipeId.HasValue ? null : recipeTitle
+                        UnresolvedRecipeTitle: linkedRecipeId.HasValue ? null : recipeTitle,
+                        Replacements: replacementsInput
                     )
                 );
             }
@@ -1089,6 +1096,83 @@ public static partial class IngestionCatalogMaterializer
         }
 
         return totalPromoted;
+    }
+
+    public static async Task<IReadOnlyList<RecipeIngredientReplacementInput>?> MaterializeReplacementsAsync(
+        AppDbContext dbContext,
+        IReadOnlyList<IngestionDraftReplacementDto>? replacements,
+        CancellationToken cancellationToken
+    )
+    {
+        if (replacements is null || replacements.Count == 0)
+        {
+            return null;
+        }
+
+        var result = new List<RecipeIngredientReplacementInput>(replacements.Count);
+        foreach (var rep in replacements)
+        {
+            if (rep is null || string.IsNullOrWhiteSpace(rep.DisplayName))
+            {
+                continue;
+            }
+
+            var foodItemId = rep.MatchedFoodItemId;
+            if (
+                foodItemId == null
+                && rep.CreateNewFoodItem
+                && !string.IsNullOrWhiteSpace(rep.ProposedFoodItemName)
+            )
+            {
+                foodItemId = await ResolveOrCreateFoodItemAsync(
+                    dbContext,
+                    rep.ProposedFoodItemName,
+                    rep.SuggestedIsPantryStaple,
+                    rep.SuggestedCategory,
+                    cancellationToken
+                );
+            }
+
+            var (cleanQty, cleanMaxQty) = RecipeUnitAndSectionHelpers.NormalizeQuantities(
+                rep.Quantity,
+                rep.MaxQuantity
+            );
+            var cleanUnit =
+                rep.Unit == MeasurementUnit.Custom
+                && (
+                    string.IsNullOrWhiteSpace(rep.CustomUnitName)
+                    || RecipeUnitAndSectionHelpers.IsDisallowedUnitPlaceholder(rep.CustomUnitName)
+                )
+                    ? null
+                    : rep.Unit;
+
+            if (
+                (cleanUnit is MeasurementUnit.Pinch or MeasurementUnit.Dash)
+                && (cleanQty is null or <= 0.1m)
+            )
+            {
+                cleanQty = 1m;
+            }
+
+            result.Add(
+                new RecipeIngredientReplacementInput(
+                    DisplayName: RecipeUnitAndSectionHelpers.StripLeadingBulletOrIndex(
+                        rep.DisplayName.Trim()
+                    ),
+                    Quantity: cleanQty,
+                    MaxQuantity: cleanMaxQty,
+                    Unit: cleanUnit,
+                    CustomUnitName: cleanUnit == MeasurementUnit.Custom ? rep.CustomUnitName : null,
+                    FoodItemId: foodItemId,
+                    PreparationNote: IngestionMetadataAndTagHelper.CleanOptionalText(
+                        rep.PreparationNote,
+                        300
+                    )
+                )
+            );
+        }
+
+        return result.Count > 0 ? result : null;
     }
 
     public static async Task<IReadOnlyList<Guid>> ResolveAndMaterializeTagsAsync(

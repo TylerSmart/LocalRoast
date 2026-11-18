@@ -173,6 +173,24 @@ public sealed class MockMultimodalServer : IAsyncDisposable
             }
         );
 
+        app.MapPost(
+            "/v1/embeddings",
+            async (HttpRequest request) =>
+            {
+                using var body = await JsonDocument.ParseAsync(request.Body);
+                var count =
+                    body.RootElement.TryGetProperty("input", out var inputProp)
+                    && inputProp.ValueKind == JsonValueKind.Array
+                        ? inputProp.GetArrayLength()
+                        : 1;
+                var data = Enumerable
+                    .Range(0, count)
+                    .Select(i => new { index = i, embedding = new[] { 1.0f, 0.0f } })
+                    .ToArray();
+                return Results.Ok(new { data });
+            }
+        );
+
         await app.StartAsync();
         return server;
     }

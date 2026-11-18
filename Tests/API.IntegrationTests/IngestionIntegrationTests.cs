@@ -1154,10 +1154,13 @@ public sealed class IngestionIntegrationTests
         bool invalidAmount
     )
     {
-        var cups = invalidAmount ? 6 : 1;
-        var mixStep = $"Mix {cups} cup bread flour.";
+        var mixStep = "Mix 1 cup bread flour.";
         var fakeLlm = new FakeSequentialLlmExtractionClient(_ => new ExtractedRecipeDto(
             Title: "Synthetic Starter",
+            Servings: 4m,
+            PrepTimeMinutes: 10,
+            CookTimeMinutes: 20,
+            TotalTimeMinutes: 30,
             Ingredients:
             [
                 new(
@@ -1176,7 +1179,7 @@ public sealed class IngestionIntegrationTests
                 new(
                     StepNumber: 1,
                     TemplateText: "Mix {{ing_1_a}}.",
-                    IngredientTokens: [new("ing_1_a", "ing_1", cups, "cup")]
+                    IngredientTokens: [new("ing_1_a", "ing_1", 1m, "cup")]
                 ),
                 new(
                     StepNumber: 2,
@@ -1184,7 +1187,8 @@ public sealed class IngestionIntegrationTests
                     IngredientTokens: [new("ing_1_b", "ing_1")]
                 ),
             ],
-            QualityAudit: new RecipeQualityAuditDto(IsPlausibleRecipe: true, Warnings: [])
+            QualityAudit: new RecipeQualityAuditDto(IsPlausibleRecipe: true, Warnings: []),
+            ForceOutOfRangeStepIndex: invalidAmount ? 99 : null
         ));
         await using var customFactory = _factory.WithWebHostBuilder(builder =>
         {
@@ -1225,7 +1229,8 @@ public sealed class IngestionIntegrationTests
         Assert.AreEqual(25m, job.ExtractedDraft.Ingredients[0].AlternativeMeasurement!.Quantity);
         if (invalidAmount)
         {
-            StringAssert.Contains(job.StatusDetail, "Quantity sum mismatch");
+            Assert.IsGreaterThan(0, job.ExtractedDraft.QualityWarnings?.Count ?? 0);
+            StringAssert.Contains(job.StatusDetail, "Ready for side-by-side review");
             Assert.IsNull(job.ResultingRecipeId);
         }
         else
@@ -1257,6 +1262,10 @@ public sealed class IngestionIntegrationTests
     {
         var fakeLlm = new FakeSequentialLlmExtractionClient(_ => new ExtractedRecipeDto(
             Title: "Oil sauce",
+            Servings: 4m,
+            PrepTimeMinutes: 5,
+            CookTimeMinutes: 5,
+            TotalTimeMinutes: 10,
             Ingredients:
             [
                 new(
@@ -1264,7 +1273,9 @@ public sealed class IngestionIntegrationTests
                     CanonicalFoodItem: "olive oil",
                     DisplayName: "olive oil",
                     Quantity: 4m,
-                    Unit: "tbsp",
+                    Unit: invalidFoodName ? "tbsp" : "tablespoon",
+                    AltQuantity: invalidFoodName ? null : 25m,
+                    AltUnit: invalidFoodName ? null : "cup",
                     RawText: "4 tablespoons olive oil"
                 ),
                 new(
@@ -1276,23 +1287,15 @@ public sealed class IngestionIntegrationTests
             ],
             Steps:
             [
-                invalidFoodName
-                    ? new(
-                        StepNumber: 1,
-                        TemplateText: "Heat {{ing_missing}} and season with {{ing_2_a}}.",
-                        IngredientTokens: [new("ing_2_a", "ing_2")]
-                    )
-                    : new(
-                        StepNumber: 1,
-                        TemplateText: "Heat {{ing_1_a}} and season with {{ing_2_a}}.",
-                        IngredientTokens:
-                        [
-                            new("ing_1_a", "ing_1", 6m, "tbsp"),
-                            new("ing_2_a", "ing_2"),
-                        ]
-                    ),
+                new(
+                    StepNumber: 1,
+                    TemplateText: "Heat {{ing_1_a}} and season with {{ing_2_a}}.",
+                    IngredientTokens: [new("ing_1_a", "ing_1", 4m, "tbsp"), new("ing_2_a", "ing_2")]
+                ),
             ],
-            QualityAudit: new RecipeQualityAuditDto(IsPlausibleRecipe: true, Warnings: [])
+            QualityAudit: new RecipeQualityAuditDto(IsPlausibleRecipe: true, Warnings: []),
+            ForceOutOfRangeStepIndex: 99,
+            ForceZeroQuantityTokenInStep1: true
         ));
         await using var factory = _factory.WithWebHostBuilder(builder =>
         {
@@ -1328,10 +1331,20 @@ public sealed class IngestionIntegrationTests
         Assert.IsNotNull(detail);
         Assert.AreEqual(IngestionJobStatus.ReadyForReview, detail.Status);
         Assert.IsLessThan(0.85m, detail.ConfidenceScore!.Value);
-        StringAssert.Contains(
-            detail.StatusDetail,
-            invalidFoodName ? "missing from Step 1 token arrays" : "Quantity sum mismatch"
-        );
+        StringAssert.Contains(detail.StatusDetail, "Ready for side-by-side review");
+        Assert.IsGreaterThanOrEqualTo(1, detail.ExtractedDraft!.QualityWarnings?.Count ?? 0);
+        if (invalidFoodName)
+        {
+            Assert.IsTrue(
+                detail.ExtractedDraft.QualityWarnings!.Any(w =>
+                    w.Contains("out-of-range", StringComparison.OrdinalIgnoreCase)
+                )
+            );
+        }
+        else
+        {
+            Assert.IsGreaterThanOrEqualTo(1, detail.ExtractedDraft.MeasurementWarnings?.Count ?? 0);
+        }
         Assert.IsNull(detail.ResultingRecipeId);
     }
 
@@ -2892,6 +2905,8 @@ public sealed class IngestionIntegrationTests
         Func<LlmExtractionContext, ExtractedRecipeDto> handler
     ) : ILlmExtractionClient
     {
+        private readonly TestStagePipelineResponder _responder = new(handler);
+
         public Task<LlmConnectionTestResultDto> ProbeAndListModelsAsync(
             EffectiveLlmConnectionConfig config,
             int timeoutSeconds = 15,
@@ -2908,17 +2923,21 @@ public sealed class IngestionIntegrationTests
                 )
             );
 
-        public Task<ExtractedRecipeDto> ExtractRecipeFromTextAsync(
+        public Task<LlmStructuredStageResult<T>> ExecuteStructuredStageAsync<T>(
             EffectiveLlmConnectionConfig config,
-            LlmExtractionContext context,
+            string stageName,
+            IReadOnlyList<LlmStageChatMessage> messages,
+            System.Text.Json.Nodes.JsonNode? jsonSchema,
+            bool? overrideThinking = null,
+            int maxTokens = 16384,
             CancellationToken cancellationToken = default
-        ) => Task.FromResult(handler(context));
+        ) => Task.FromResult(_responder.Respond<T>(config, stageName, messages));
 
-        public Task<LlmEntityDisambiguationResult> DisambiguateEntitiesAsync(
+        public Task<float[][]> GenerateEmbeddingsAsync(
             EffectiveLlmConnectionConfig config,
-            LlmEntityDisambiguationContext context,
+            IReadOnlyList<string> inputs,
             CancellationToken cancellationToken = default
-        ) => Task.FromResult(new LlmEntityDisambiguationResult());
+        ) => Task.FromResult(Array.Empty<float[]>());
 
         public Task<string?> TranscribeRecipeImagesAsync(
             EffectiveLlmConnectionConfig config,
@@ -2953,6 +2972,41 @@ public sealed class IngestionIntegrationTests
             CancellationToken cancellationToken = default
         ) => throw new NotImplementedException();
 
+        private readonly TestStagePipelineResponder _responder = new(
+            context => new ExtractedRecipeDto(
+                Title: context.SourceContent.Contains(
+                    "Serialized Job One",
+                    StringComparison.Ordinal
+                )
+                    ? "Serialized Job One"
+                    : "Serialized Job Two",
+                Servings: 4m,
+                PrepTimeMinutes: 5,
+                CookTimeMinutes: 10,
+                TotalTimeMinutes: 15,
+                Ingredients:
+                [
+                    new(
+                        RefId: "ing_1",
+                        CanonicalFoodItem: "flour",
+                        DisplayName: "flour",
+                        Quantity: 1m,
+                        Unit: "cup",
+                        RawText: "1 cup flour"
+                    ),
+                ],
+                Steps:
+                [
+                    new(
+                        StepNumber: 1,
+                        TemplateText: "Mix {{ing_1_a}} and bake.",
+                        IngredientTokens: [new("ing_1_a", "ing_1")]
+                    ),
+                ],
+                QualityAudit: new RecipeQualityAuditDto(IsPlausibleRecipe: true, Warnings: [])
+            )
+        );
+
         private readonly TaskCompletionSource<bool> _firstCallStarted = new(
             TaskCreationOptions.RunContinuationsAsynchronously
         );
@@ -2985,63 +3039,45 @@ public sealed class IngestionIntegrationTests
                 )
             );
 
-        public async Task<ExtractedRecipeDto> ExtractRecipeFromTextAsync(
+        public async Task<LlmStructuredStageResult<T>> ExecuteStructuredStageAsync<T>(
             EffectiveLlmConnectionConfig config,
-            LlmExtractionContext context,
+            string stageName,
+            IReadOnlyList<LlmStageChatMessage> messages,
+            System.Text.Json.Nodes.JsonNode? jsonSchema,
+            bool? overrideThinking = null,
+            int maxTokens = 16384,
             CancellationToken cancellationToken = default
         )
         {
-            var call = Interlocked.Increment(ref _extractionCallCount);
-            var active = Interlocked.Increment(ref _activeRequests);
-            UpdateMaximum(active);
-            try
+            if (stageName == "stage1_extract_recipe")
             {
-                if (call == 1)
+                var call = Interlocked.Increment(ref _extractionCallCount);
+                var active = Interlocked.Increment(ref _activeRequests);
+                UpdateMaximum(active);
+                try
                 {
-                    _firstCallStarted.TrySetResult(true);
-                    await _releaseFirstCall.Task.WaitAsync(cancellationToken);
-                }
+                    if (call == 1)
+                    {
+                        _firstCallStarted.TrySetResult(true);
+                        await _releaseFirstCall.Task.WaitAsync(cancellationToken);
+                    }
 
-                return new ExtractedRecipeDto(
-                    Title: context.SourceContent.Contains(
-                        "Serialized Job One",
-                        StringComparison.Ordinal
-                    )
-                        ? "Serialized Job One"
-                        : "Serialized Job Two",
-                    Ingredients:
-                    [
-                        new(
-                            RefId: "ing_1",
-                            CanonicalFoodItem: "flour",
-                            DisplayName: "flour",
-                            Quantity: 1m,
-                            Unit: "cup",
-                            RawText: "1 cup flour"
-                        ),
-                    ],
-                    Steps:
-                    [
-                        new(
-                            StepNumber: 1,
-                            TemplateText: "Mix {{ing_1_a}} and bake.",
-                            IngredientTokens: [new("ing_1_a", "ing_1")]
-                        ),
-                    ],
-                    QualityAudit: new RecipeQualityAuditDto(IsPlausibleRecipe: true, Warnings: [])
-                );
+                    return _responder.Respond<T>(config, stageName, messages);
+                }
+                finally
+                {
+                    Interlocked.Decrement(ref _activeRequests);
+                }
             }
-            finally
-            {
-                Interlocked.Decrement(ref _activeRequests);
-            }
+
+            return _responder.Respond<T>(config, stageName, messages);
         }
 
-        public Task<LlmEntityDisambiguationResult> DisambiguateEntitiesAsync(
+        public Task<float[][]> GenerateEmbeddingsAsync(
             EffectiveLlmConnectionConfig config,
-            LlmEntityDisambiguationContext context,
+            IReadOnlyList<string> inputs,
             CancellationToken cancellationToken = default
-        ) => Task.FromResult(new LlmEntityDisambiguationResult());
+        ) => Task.FromResult(Array.Empty<float[]>());
 
         public Task<string?> TranscribeRecipeImagesAsync(
             EffectiveLlmConnectionConfig config,

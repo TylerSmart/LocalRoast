@@ -128,6 +128,11 @@ public sealed class AppDataMaintenanceService(
             var steps = await dbContext.RecipeSteps.ToListAsync(cancellationToken);
             dbContext.RecipeSteps.RemoveRange(steps);
 
+            var replacements = await dbContext.RecipeIngredientReplacements.ToListAsync(
+                cancellationToken
+            );
+            dbContext.RecipeIngredientReplacements.RemoveRange(replacements);
+
             var recipeIngredients = await dbContext.RecipeIngredients.ToListAsync(
                 cancellationToken
             );
@@ -157,9 +162,12 @@ public sealed class AppDataMaintenanceService(
 
             await dbContext.SaveChangesAsync(cancellationToken);
 
-            // Stage 5: Food items & aliases
+            // Stage 5: Food items, aliases & catalog embeddings
             var aliases = await dbContext.FoodItemAliases.ToListAsync(cancellationToken);
             dbContext.FoodItemAliases.RemoveRange(aliases);
+
+            var embeddings = await dbContext.CatalogEmbeddings.ToListAsync(cancellationToken);
+            dbContext.CatalogEmbeddings.RemoveRange(embeddings);
 
             var foodItems = await dbContext.FoodItems.ToListAsync(cancellationToken);
             dbContext.FoodItems.RemoveRange(foodItems);

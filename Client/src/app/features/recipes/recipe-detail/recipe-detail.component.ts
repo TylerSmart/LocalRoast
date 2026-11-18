@@ -32,6 +32,7 @@ import { AiKitchenHelperService } from '../../../core/services/ai-helpers/ai-kit
 import {
   FormattedQuantityResult,
   formatDuration,
+  formatIngredientReplacement,
   formatMinutes,
   scaleIngredient,
 } from '../../../core/utils/culinary-math';
@@ -132,6 +133,7 @@ export class RecipeDetailComponent implements OnInit {
   protected readonly isUploadingAttachment = signal<boolean>(false);
   protected readonly isRerunningIngestion = signal<boolean>(false);
   protected readonly formatMinutes = formatMinutes;
+  protected readonly formatReplacement = formatIngredientReplacement;
   protected readonly previewPhotoUrl = signal<string | null>(null);
 
   protected readonly latestCookNote = computed<CookLogDto | null>(() => {

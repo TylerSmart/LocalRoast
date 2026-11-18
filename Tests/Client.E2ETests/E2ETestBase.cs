@@ -763,7 +763,7 @@ public abstract class E2ETestBase : PageTest
         string connectionName = E2ELlmConnectionName
     ) => $"{model} @ {connectionName}";
 
-    /// <summary>Picks a saved model configuration for the "text", "vision" or "refine" workflow.</summary>
+    /// <summary>Picks a saved model configuration for the "text", "vision", "refine", or "embedding" workflow.</summary>
     protected async Task AssignLlmWorkflowAsync(
         ILocator dialog,
         string workflow,

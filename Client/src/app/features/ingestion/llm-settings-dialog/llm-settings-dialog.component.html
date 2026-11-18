@@ -138,7 +138,8 @@
                   }
                 </mat-select>
                 <mat-hint>
-                  A larger model that re-checks drafts with issues while no imports are queued.
+                  Optional Stage 5 Targeted Polish model override when warnings are detected during
+                  extraction.
                 </mat-hint>
               </mat-form-field>
               @if (refineConfiguration(); as config) {
@@ -148,8 +149,36 @@
               }
               @if (refineMatchesText()) {
                 <p class="assignment-detail" role="status">
-                  Refinement uses the same model as text extraction, so it will not run. Pick a
-                  different model or connection.
+                  Stage 5 Targeted Polish already uses the Text model when needed. Pick a different
+                  model or connection here to override it.
+                </p>
+              }
+            </div>
+
+            <div class="workflow-assignment">
+              <mat-form-field appearance="outline" class="form-field full-width">
+                <mat-label>Embedding workflow (optional)</mat-label>
+                <mat-select
+                  formControlName="embeddingModelConfigurationId"
+                  data-testid="workflow-embedding-select"
+                >
+                  <mat-option value="">Not assigned (use Stage 3 search terms)</mat-option>
+                  @for (group of configurationGroups(); track group.connection.id) {
+                    <mat-optgroup [label]="group.connection.name">
+                      @for (config of group.configurations; track config.id) {
+                        <mat-option [value]="config.id">{{ config.name }}</mat-option>
+                      }
+                    </mat-optgroup>
+                  }
+                </mat-select>
+                <mat-hint>
+                  Enables hybrid vector + lexical catalog matching (with automatic search-term
+                  fallback when unassigned).
+                </mat-hint>
+              </mat-form-field>
+              @if (embeddingConfiguration(); as config) {
+                <p class="assignment-detail" data-testid="workflow-embedding-detail">
+                  {{ config.model }} on {{ config.connectionName }}
                 </p>
               }
             </div>

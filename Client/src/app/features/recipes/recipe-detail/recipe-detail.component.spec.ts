@@ -437,4 +437,40 @@ describe('RecipeDetailComponent', () => {
     expect(mockIngestionService.retryJob).toHaveBeenCalledWith('job-100');
     expect(navSpy).toHaveBeenCalledWith(['/ingest']);
   });
+
+  it('renders and scales structured ingredient replacements', () => {
+    const withReplacements: RecipeDetailDto = {
+      ...sampleRecipe,
+      ingredients: [
+        {
+          ...sampleRecipe.ingredients[0],
+          replacements: [
+            {
+              id: 'rep-1',
+              sortOrder: 0,
+              displayName: 'rice noodles',
+              quantity: 2,
+              maxQuantity: null,
+              unit: 'Cup',
+              customUnitName: null,
+              foodItemId: null,
+              foodItemName: null,
+              isPantryStaple: false,
+              preparationNote: 'dried',
+            },
+          ],
+        },
+        sampleRecipe.ingredients[1],
+      ],
+    };
+    mockRecipeService.getRecipeById.mockReturnValueOnce(of(withReplacements));
+    component.loadRecipe('r-1');
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain('2 cups rice noodles (dried)');
+
+    component.setMultiplier(2);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('4 cups rice noodles (dried)');
+  });
 });

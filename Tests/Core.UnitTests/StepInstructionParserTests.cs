@@ -69,7 +69,7 @@ public sealed class StepInstructionParserTests
 
         var temp = segments[1].Token as StepTemperatureToken;
         Assert.IsNotNull(temp);
-        Assert.AreEqual(425, temp.Fahrenheit);
+        Assert.AreEqual(425m, temp.Fahrenheit);
     }
 
     [TestMethod]
@@ -546,5 +546,116 @@ public sealed class StepInstructionParserTests
             "Add ||{\"ingredient\":\"ice water\",\"amount\":2,\"unit\":\"tbsp\",\"type\":\"Ingredient\"}|| of the ||{\"ingredient\":\"ice water\",\"amount\":1,\"unit\":\"tbsp\",\"type\":\"Ingredient\"}||.";
         var cleanedOfThe = StepInstructionParser.CleanStepInstruction(duplicateOfThe);
         Assert.AreEqual("Add 2 tbsp ice water.", StepInstructionParser.ToPlainText(cleanedOfThe));
+    }
+
+    [TestMethod]
+    public void ParseFormatAndToPlainText_SupportsAllSixTokenTypesAndRanges()
+    {
+        const string mixtureRaw =
+            "Brush ||{\"type\":\"mixture\",\"amount\":1,\"maxAmount\":2,\"unit\":\"tbsp\",\"name\":\"herb oil\"}|| over the roast.";
+        var mixtureToken = StepInstructionParser
+            .ExtractTokens(mixtureRaw)
+            .OfType<StepMixtureToken>()
+            .Single();
+        Assert.AreEqual(1m, mixtureToken.Amount);
+        Assert.AreEqual(2m, mixtureToken.MaxAmount);
+        Assert.AreEqual(MeasurementUnit.Tbsp, mixtureToken.Unit);
+        Assert.AreEqual("herb oil", mixtureToken.Name);
+        var formattedMixture =
+            $"Brush {StepInstructionParser.FormatToken(mixtureToken)} over the roast.";
+        var reparsedMixture = StepInstructionParser
+            .ExtractTokens(formattedMixture)
+            .OfType<StepMixtureToken>()
+            .Single();
+        Assert.AreEqual(mixtureToken, reparsedMixture);
+        StringAssert.Contains(StepInstructionParser.ToPlainText(mixtureRaw), "tbsp");
+        StringAssert.Contains(StepInstructionParser.ToPlainText(mixtureRaw), "herb oil");
+
+        const string fixedRaw =
+            "Stir in ||{\"type\":\"fixed\",\"amount\":1,\"maxAmount\":2,\"unit\":\"tsp\"}|| vinegar.";
+        var fixedToken = StepInstructionParser
+            .ExtractTokens(fixedRaw)
+            .OfType<StepFixedToken>()
+            .Single();
+        Assert.AreEqual(1m, fixedToken.Amount);
+        Assert.AreEqual(2m, fixedToken.MaxAmount);
+        Assert.AreEqual(MeasurementUnit.Tsp, fixedToken.Unit);
+        var formattedFixed = $"Stir in {StepInstructionParser.FormatToken(fixedToken)} vinegar.";
+        Assert.AreEqual(
+            fixedToken,
+            StepInstructionParser.ExtractTokens(formattedFixed).OfType<StepFixedToken>().Single()
+        );
+        StringAssert.Contains(StepInstructionParser.ToPlainText(fixedRaw), "tsp");
+
+        const string dimHyphenatedRaw =
+            "Press into a ||{\"type\":\"dimension\",\"value\":9,\"unit\":\"inch\",\"hyphenated\":true}|| pan.";
+        var dimHyphenated = StepInstructionParser
+            .ExtractTokens(dimHyphenatedRaw)
+            .OfType<StepDimensionToken>()
+            .Single();
+        Assert.AreEqual(9m, dimHyphenated.Value);
+        Assert.IsNull(dimHyphenated.MaxValue);
+        Assert.AreEqual(DimensionUnit.Inch, dimHyphenated.Unit);
+        Assert.IsTrue(dimHyphenated.Hyphenated);
+        Assert.AreEqual(
+            "Press into a 9-inch pan.",
+            StepInstructionParser.ToPlainText(dimHyphenatedRaw)
+        );
+        var formattedDim = $"Press into a {StepInstructionParser.FormatToken(dimHyphenated)} pan.";
+        Assert.AreEqual(
+            dimHyphenated,
+            StepInstructionParser.ExtractTokens(formattedDim).OfType<StepDimensionToken>().Single()
+        );
+
+        const string dimUnhyphenatedRaw =
+            "Cut into ||{\"type\":\"dimension\",\"value\":1,\"maxValue\":2,\"unit\":\"inch\",\"hyphenated\":false}|| cubes.";
+        var dimUnhyphenated = StepInstructionParser
+            .ExtractTokens(dimUnhyphenatedRaw)
+            .OfType<StepDimensionToken>()
+            .Single();
+        Assert.AreEqual(1m, dimUnhyphenated.Value);
+        Assert.AreEqual(2m, dimUnhyphenated.MaxValue);
+        Assert.IsFalse(dimUnhyphenated.Hyphenated);
+        var plainDimRange = StepInstructionParser.ToPlainText(dimUnhyphenatedRaw);
+        StringAssert.Contains(plainDimRange, "1");
+        StringAssert.Contains(plainDimRange, "2");
+        Assert.IsFalse(plainDimRange.Contains("-inch", StringComparison.OrdinalIgnoreCase));
+
+        const string timerRangeRaw =
+            "Bake for ||{\"type\":\"timer\",\"seconds\":300,\"maxSeconds\":420}||.";
+        var timerRange = StepInstructionParser
+            .ExtractTokens(timerRangeRaw)
+            .OfType<StepTimerToken>()
+            .Single();
+        Assert.AreEqual(300, timerRange.Seconds);
+        Assert.AreEqual(420, timerRange.MaxSeconds);
+        var formattedTimer = $"Bake for {StepInstructionParser.FormatToken(timerRange)}.";
+        Assert.AreEqual(
+            timerRange,
+            StepInstructionParser.ExtractTokens(formattedTimer).OfType<StepTimerToken>().Single()
+        );
+        StringAssert.Contains(StepInstructionParser.ToPlainText(timerRangeRaw), "5");
+        StringAssert.Contains(StepInstructionParser.ToPlainText(timerRangeRaw), "7 minutes");
+
+        const string tempRangeRaw =
+            "Preheat oven to ||{\"type\":\"temperature\",\"fahrenheit\":350,\"maxFahrenheit\":375,\"celsius\":175,\"maxCelsius\":190}||.";
+        var tempRange = StepInstructionParser
+            .ExtractTokens(tempRangeRaw)
+            .OfType<StepTemperatureToken>()
+            .Single();
+        Assert.AreEqual(350, tempRange.Fahrenheit);
+        Assert.AreEqual(375, tempRange.MaxFahrenheit);
+        Assert.AreEqual(175, tempRange.Celsius);
+        Assert.AreEqual(190, tempRange.MaxCelsius);
+        var formattedTemp = $"Preheat oven to {StepInstructionParser.FormatToken(tempRange)}.";
+        Assert.AreEqual(
+            tempRange,
+            StepInstructionParser
+                .ExtractTokens(formattedTemp)
+                .OfType<StepTemperatureToken>()
+                .Single()
+        );
+        StringAssert.Contains(StepInstructionParser.ToPlainText(tempRangeRaw), "350");
+        StringAssert.Contains(StepInstructionParser.ToPlainText(tempRangeRaw), "375°F");
     }
 }

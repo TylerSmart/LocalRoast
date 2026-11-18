@@ -330,4 +330,38 @@ public sealed class LlmProfilesAndRefinementE2ETests : E2ETestBase
                 "(el, value) => { el.value = value; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); }",
                 value
             );
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task LlmSettingsDialog_EmbeddingWorkflowPersistsAndFitsOnMobile()
+    {
+        await using var mockServer = await MockLanLlmAndBlogServer.StartAsync();
+        mockServer.ExtraModels.Add("embeddinggemma");
+        await RegisterAndLoginAsync();
+        await Page.SetViewportSizeAsync(360, 800);
+        await Page.GotoAsync($"{ServerUrl}/ingest");
+
+        await Page.Locator(".llm-settings-btn").ClickAsync();
+        var dialog = Page.Locator("app-llm-settings-dialog");
+        await AddLlmConnectionInDialogAsync(dialog, mockServer.BaseUrl);
+        await AddLlmModelInDialogAsync(dialog, "qwen2.5:14b");
+        await AddLlmModelInDialogAsync(dialog, "embeddinggemma");
+
+        await AssignLlmWorkflowAsync(dialog, "text", "qwen2.5:14b");
+        await AssignLlmWorkflowAsync(dialog, "embedding", "embeddinggemma");
+
+        Assert.IsTrue(
+            await Page.EvaluateAsync<bool>(
+                "document.documentElement.scrollWidth <= window.innerWidth"
+            ),
+            "LLM Settings embedding workflow assignment must fit a 360px mobile viewport."
+        );
+
+        await SaveLlmWorkflowsAsync(dialog);
+
+        await Page.Locator(".llm-settings-btn").ClickAsync();
+        await OpenLlmSettingsTabAsync(dialog, "Workflows");
+        await Expect(dialog.GetByTestId("workflow-embedding-select"))
+            .ToContainTextAsync(LlmConfigName("embeddinggemma"));
+    }
 }

@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  convertDimension,
   formatAmount,
   formatCountdown,
+  formatDimensionToken,
   formatDuration,
+  formatIngredientReplacement,
   formatMinutes,
   formatNumber,
   getUnitLabel,
@@ -354,6 +357,60 @@ describe('culinary-math', () => {
       expect(formatCountdown(3600)).toBe('1:00:00');
       expect(formatCountdown(3905)).toBe('1:05:05');
       expect(formatCountdown(7322)).toBe('2:02:02');
+    });
+  });
+
+  describe('dimensions and ingredient replacements', () => {
+    it('converts dimensions between imperial and metric units without scaling', () => {
+      const metric = convertDimension(9, 13, 'inch', 'Metric');
+      expect(metric.unit).toBe('cm');
+      expect(metric.converted).toBe(true);
+      expect(metric.value).toBeCloseTo(22.9, 1);
+      expect(metric.maxValue).toBeCloseTo(33, 1);
+
+      const imperial = convertDimension(30, null, 'cm', 'UsCustomary');
+      expect(imperial.unit).toBe('inch');
+      expect(imperial.converted).toBe(true);
+      expect(imperial.value).toBeCloseTo(11.81, 1);
+    });
+
+    it('formats hyphenated and non-hyphenated dimensions and ranges', () => {
+      expect(formatDimensionToken(9, null, 'inch', true, 'Original')).toEqual({
+        text: '9-inch',
+        scaled: false,
+      });
+      expect(formatDimensionToken(9, 13, 'inch', true, 'Metric').text).toBe('23–33-cm');
+      expect(formatDimensionToken(2, null, 'inch', false, 'Original').text).toBe('2 inches');
+    });
+
+    it('scales and formats ingredient replacements including preparation note', () => {
+      const text = formatIngredientReplacement(
+        {
+          displayName: 'ground turkey',
+          quantity: 1,
+          maxQuantity: 1.5,
+          unit: 'Lb',
+          customUnitName: null,
+          preparationNote: 'lean',
+        },
+        2,
+        'Original',
+      );
+      expect(text).toBe('2–3 lb ground turkey (lean)');
+
+      const metricText = formatIngredientReplacement(
+        {
+          displayName: 'butter',
+          quantity: 4,
+          maxQuantity: null,
+          unit: 'Oz',
+          customUnitName: null,
+          preparationNote: null,
+        },
+        1,
+        'Metric',
+      );
+      expect(metricText).toBe('113 g butter');
     });
   });
 });
