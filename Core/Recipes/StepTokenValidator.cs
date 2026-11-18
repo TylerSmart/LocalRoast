@@ -72,7 +72,7 @@ public static partial class StepTokenValidator
     private static partial Regex DistributiveQuantifierRegex();
 
     [GeneratedRegex(
-        @"\b(?:between\s+)?(?:\d+(?:\s+\d+/\d+|\.\d+|/\d+)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|twenty|thirty|forty|fifty|sixty|half|halves|third|thirds|quarter|quarters|dozen|couple)(?:\s*-?\s*(?:to|or|and|–|-)\s*(?:\d+(?:\s+\d+/\d+|\.\d+|/\d+)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|twenty|thirty|forty|fifty|sixty|half|halves|third|thirds|quarter|quarters|dozen|couple))?\b|\b(?:a|an)\s+(?:[a-z]+\s+)?(?:pinch|dash|smidgen|drop|handful|splash|drizzle|second|minute|hour|day|inch|foot|cup|clove|can|sprig|slice|sheet|bunch|leaf|stalk|stick)\b",
+        @"\b(?:between\s+)?(?:\d+(?:\s+\d+/\d+|\.\d+|/\d+)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|twenty|thirty|forty|fifty|sixty|half|halves|third|thirds|quarter|quarters|dozen|couple)(?:\s*-?\s*(?:to|or|and|–|-)\s*(?:\d+(?:\s+\d+/\d+|\.\d+|/\d+)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|twenty|thirty|forty|fifty|sixty|half|halves|third|thirds|quarter|quarters|dozen|couple))?\b|\b(?:a|an)\s+(?:[a-z]+\s+)?(?:pinch|dash|smidgen|drop|handful|splash|drizzle|second|minute|hour|day|inch|foot|cup|clove|can|sprig|slice|sheet|bunch|leaf|stalk|stick)\b|\b(?:pinch|dash|smidgen)(?:\s+of)?\s+(?!the\b|it\b|them\b|edges?\b|sides?\b|corners?\b|ends?\b|dough\b|crust\b|pleats?\b|seams?\b)[a-z]{3,}\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex ExplicitQuantityCueRegex();
@@ -110,134 +110,109 @@ public static partial class StepTokenValidator
     )]
     private static partial Regex PrepositionalArticlePhraseRegex();
 
-    private static readonly (string CanonicalUnit, Regex Pattern)[] UnitMeasurementPatterns =
-    [
-        (
-            "teaspoon",
-            new Regex(
-                @"(?:\b|\d)(?:teaspoons?|tsps?\.?)\b",
-                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    private static readonly HashSet<string> NonCommaListWordsAfterToken = new(
+        StringComparer.OrdinalIgnoreCase
+    )
+    {
+        "and",
+        "or",
+        "to",
+        "in",
+        "into",
+        "on",
+        "over",
+        "for",
+        "with",
+        "until",
+        "from",
+        "of",
+        "per",
+        "total",
+        "longer",
+        "more",
+        "each",
+        "at",
+        "before",
+        "after",
+        "between",
+        "apart",
+        "together",
+        "evenly",
+        "thick",
+        "wide",
+        "long",
+        "pieces",
+        "slices",
+        "portions",
+    };
+
+    private static readonly (
+        string CanonicalUnit,
+        Regex Pattern,
+        Regex QuantifiedPattern
+    )[] UnitMeasurementPatterns = BuildUnitMeasurementPatterns();
+
+    private static (
+        string CanonicalUnit,
+        Regex Pattern,
+        Regex QuantifiedPattern
+    )[] BuildUnitMeasurementPatterns()
+    {
+        (string CanonicalUnit, string PatternBody)[] defs =
+        [
+            ("teaspoon", @"(?:teaspoons?|tsps?\.?)"),
+            ("tablespoon", @"(?:tablespoons?|tbsps?\.?|tbs\.?)"),
+            ("fluid ounce", @"(?:fl(?:uid)?\s+oz\.?|fluid\s+ounces?)"),
+            ("cup", @"(?:cups?|c\.)"),
+            ("pint", @"(?:pints?|pts?\.?)"),
+            ("quart", @"(?:quarts?|qts?\.?)"),
+            ("gallon", @"(?:gallons?|gals?\.?)"),
+            ("ounce", @"(?:ounces?|ozs?\.?)"),
+            ("pound", @"(?:pounds?|lbs?\.?)"),
+            ("milligram", @"(?:milligrams?|mg)"),
+            ("gram", @"(?:grams?|g)"),
+            ("kilogram", @"(?:kilograms?|kgs?)"),
+            ("milliliter", @"(?:milliliters?|millilitres?|ml)"),
+            ("liter", @"(?:liters?|litres?)"),
+            ("clove", @"cloves?"),
+            ("can", @"cans?"),
+            ("pinch", @"pinch(?:es)?"),
+            ("dash", @"dash(?:es)?"),
+            ("stick", @"sticks?"),
+            ("sprig", @"sprigs?"),
+            ("slice", @"slices?"),
+            ("bunch", @"bunch(?:es)?"),
+            ("head", @"heads?"),
+        ];
+
+        return defs.Select(d =>
+                (
+                    d.CanonicalUnit,
+                    new Regex(
+                        d.CanonicalUnit
+                            is "cup"
+                                or "liter"
+                                or "clove"
+                                or "can"
+                                or "pinch"
+                                or "dash"
+                                or "stick"
+                                or "sprig"
+                                or "slice"
+                                or "bunch"
+                                or "head"
+                            ? $@"\b{d.PatternBody}\b"
+                            : $@"(?:\b|\d){d.PatternBody}\b",
+                        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+                    ),
+                    new Regex(
+                        $@"\b\d+(?:\s+\d+/\d+|/\d+|\.\d+)?\s+{d.PatternBody}\b",
+                        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+                    )
+                )
             )
-        ),
-        (
-            "tablespoon",
-            new Regex(
-                @"(?:\b|\d)(?:tablespoons?|tbsps?\.?|tbs\.?)\b",
-                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
-            )
-        ),
-        (
-            "fluid ounce",
-            new Regex(
-                @"(?:\b|\d)fl(?:uid)?\s+oz\.?\b|\bfluid\s+ounces?\b",
-                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
-            )
-        ),
-        (
-            "cup",
-            new Regex(@"\b(?:cups?|c\.)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
-        ),
-        (
-            "pint",
-            new Regex(
-                @"(?:\b|\d)(?:pints?|pts?\.?)\b",
-                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
-            )
-        ),
-        (
-            "quart",
-            new Regex(
-                @"(?:\b|\d)(?:quarts?|qts?\.?)\b",
-                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
-            )
-        ),
-        (
-            "gallon",
-            new Regex(
-                @"(?:\b|\d)(?:gallons?|gals?\.?)\b",
-                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
-            )
-        ),
-        (
-            "ounce",
-            new Regex(
-                @"(?:\b|\d)(?:ounces?|ozs?\.?)\b",
-                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
-            )
-        ),
-        (
-            "pound",
-            new Regex(
-                @"(?:\b|\d)(?:pounds?|lbs?\.?)\b",
-                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
-            )
-        ),
-        (
-            "milligram",
-            new Regex(
-                @"(?:\b|\d)(?:milligrams?|mg)\b",
-                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
-            )
-        ),
-        (
-            "gram",
-            new Regex(
-                @"(?:\b|\d)(?:grams?|g)\b",
-                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
-            )
-        ),
-        (
-            "kilogram",
-            new Regex(
-                @"(?:\b|\d)(?:kilograms?|kgs?)\b",
-                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
-            )
-        ),
-        (
-            "milliliter",
-            new Regex(
-                @"(?:\b|\d)(?:milliliters?|millilitres?|ml)\b",
-                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
-            )
-        ),
-        (
-            "liter",
-            new Regex(
-                @"\b(?:liters?|litres?)\b",
-                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
-            )
-        ),
-        (
-            "clove",
-            new Regex(@"\bcloves?\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
-        ),
-        ("can", new Regex(@"\bcans?\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)),
-        (
-            "pinch",
-            new Regex(@"\bpinch(?:es)?\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
-        ),
-        (
-            "dash",
-            new Regex(@"\bdash(?:es)?\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
-        ),
-        (
-            "stick",
-            new Regex(@"\bsticks?\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
-        ),
-        (
-            "sprig",
-            new Regex(@"\bsprigs?\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
-        ),
-        (
-            "slice",
-            new Regex(@"\bslices?\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
-        ),
-        (
-            "bunch",
-            new Regex(@"\bbunch(?:es)?\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
-        ),
-        ("head", new Regex(@"\bheads?\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)),
-    ];
+            .ToArray();
+    }
 
     [GeneratedRegex(
         @"^\s*-?\s*(?:inch(?:es)?|feet|foot|yards?|millimeters?|centimeters?|meters?|mm\b|cm\b)\b",
@@ -276,6 +251,39 @@ public static partial class StepTokenValidator
     private static partial Regex RangeConnectorOnlyRegex();
 
     [GeneratedRegex(
+        @"(?<lead>(?:^|(?<=[\s(\[]))(?<dupMin>\d+(?:\s+\d+/\d+|/\d+|\.\d+)?)\s*(?:to|–|-)\s*)$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex LeadingDanglingRangeRegex();
+
+    [GeneratedRegex(
+        @"^\s+of\s+the\s*(?=[,.;:)\]])",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex DanglingOfTheBeforePunctRegex();
+
+    [GeneratedRegex(
+        @"^\s+of\s+the(?=\s+(?:in|into|to|on|over|left|with|and|or|from|until|for|at|as|before|after|then)\b|\s*\(|\s*$)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex DanglingOfTheBeforePrepRegex();
+
+    [GeneratedRegex(@"^\s+of\s+the\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex DanglingOfThePrefixRegex();
+
+    [GeneratedRegex(
+        @"\([^)]*\b(?:should\s+have|yields?)(?:\s+about)?\s*(?:of\b[^)]*)?\)|\(\s*\)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex BrokenYieldParenRegex();
+
+    [GeneratedRegex(@"^\s+(?<w>[a-zA-Z]{3,})\b", RegexOptions.CultureInvariant)]
+    private static partial Regex LeadingThreeLetterWordRegex();
+
+    [GeneratedRegex(@"\bfrom\s*$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex TrailingFromWordRegex();
+
+    [GeneratedRegex(
         @"^\s*(?:°\s*[FC]|degrees?(?:\s+(?:F|C|Fahrenheit|Celsius))?\b|fahrenheit\b|celsius\b|[FC]\b)",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
@@ -308,28 +316,33 @@ public static partial class StepTokenValidator
 
         var sanitized = MergeAdjacentStrings(tokensArray);
 
-        // Collapse duplicated range upper-bound timer: [timer(min..max), " to ", timer(max)] -> [timer(min..max)]
+        // Collapse duplicated range upper-bound tokens: [tok(min..max), " to ", tok(max)] -> [tok(min..max)]
         for (var i = 0; i + 2 < sanitized.Count; i++)
         {
             if (
-                sanitized[i] is JsonObject t1
-                && string.Equals(
-                    GetNullableString(t1["type"]),
-                    "timer",
-                    StringComparison.OrdinalIgnoreCase
-                )
+                sanitized[i] is not JsonObject t1
+                || sanitized[i + 1] is not JsonValue midVal
+                || !midVal.TryGetValue<string>(out var midStr)
+                || !RangeConnectorOnlyRegex().IsMatch(midStr)
+                || sanitized[i + 2] is not JsonObject t2
+            )
+            {
+                continue;
+            }
+
+            var type1 = GetNullableString(t1["type"])?.Trim().ToLowerInvariant();
+            var type2 = GetNullableString(t2["type"])?.Trim().ToLowerInvariant();
+            if (type1 != type2)
+            {
+                continue;
+            }
+
+            var shouldCollapse = false;
+            if (
+                type1 == "timer"
                 && GetNullableDecimal(t1["amount"]) is decimal min1
                 && GetNullableDecimal(t1["maxAmount"]) is decimal max1
                 && max1 > min1
-                && sanitized[i + 1] is JsonValue midVal
-                && midVal.TryGetValue<string>(out var midStr)
-                && RangeConnectorOnlyRegex().IsMatch(midStr)
-                && sanitized[i + 2] is JsonObject t2
-                && string.Equals(
-                    GetNullableString(t2["type"]),
-                    "timer",
-                    StringComparison.OrdinalIgnoreCase
-                )
                 && GetNullableDecimal(t2["maxAmount"]) is null
                 && GetNullableDecimal(t2["amount"]) is decimal amt2
                 && amt2 > 0m
@@ -343,12 +356,88 @@ public static partial class StepTokenValidator
                     )
             )
             {
+                shouldCollapse = true;
+            }
+            else if (
+                type1 == "temperature"
+                && GetNullableDecimal(t1["amount"]) is decimal tMin1
+                && GetNullableDecimal(t1["maxAmount"]) is decimal tMax1
+                && tMax1 > tMin1
+                && GetNullableDecimal(t2["maxAmount"]) is null
+                && GetNullableDecimal(t2["amount"]) is decimal tAmt2
+                && tMax1 == tAmt2
+                && string.Equals(
+                    GetNullableString(t1["unit"]) ?? "fahrenheit",
+                    GetNullableString(t2["unit"]) ?? "fahrenheit",
+                    StringComparison.OrdinalIgnoreCase
+                )
+            )
+            {
+                shouldCollapse = true;
+            }
+            else if (
+                type1 == "dimension"
+                && GetNullableDecimal(t1["amount"]) is decimal dMin1
+                && GetNullableDecimal(t1["maxAmount"]) is decimal dMax1
+                && dMax1 > dMin1
+                && GetNullableDecimal(t2["maxAmount"]) is null
+                && GetNullableDecimal(t2["amount"]) is decimal dAmt2
+                && dMax1 == dAmt2
+                && string.Equals(
+                    GetNullableString(t1["unit"]) ?? "inch",
+                    GetNullableString(t2["unit"]) ?? "inch",
+                    StringComparison.OrdinalIgnoreCase
+                )
+                && (
+                    !GetBool(t1["hyphenated"])
+                    || GetBool(t1["hyphenated"]) == GetBool(t2["hyphenated"])
+                )
+            )
+            {
+                shouldCollapse = true;
+            }
+
+            if (shouldCollapse)
+            {
                 sanitized.RemoveAt(i + 2);
                 sanitized.RemoveAt(i + 1);
             }
         }
 
         sanitized = MergeAdjacentStrings(sanitized);
+
+        // Strip leading duplicated lower bound before a range token: "(10 to " + {timer(10..11m)} -> "(" + {timer(10..11m)}
+        for (var i = 0; i + 1 < sanitized.Count; i++)
+        {
+            if (
+                sanitized[i] is not JsonValue leadVal
+                || !leadVal.TryGetValue<string>(out var prevText)
+                || sanitized[i + 1] is not JsonObject nextTok
+            )
+            {
+                continue;
+            }
+
+            var leadMatch = LeadingDanglingRangeRegex().Match(prevText);
+            if (!leadMatch.Success)
+            {
+                continue;
+            }
+
+            var minVal = GetNullableDecimal(nextTok["amount"] ?? nextTok["quantity"]);
+            var maxVal = GetNullableDecimal(nextTok["maxAmount"] ?? nextTok["maxQuantity"]);
+            if (
+                minVal.HasValue
+                && maxVal.HasValue
+                && maxVal.Value > minVal.Value
+                && TryParseSimpleAmount(leadMatch.Groups["dupMin"].Value, out var parsedMin)
+                && parsedMin == minVal.Value
+            )
+            {
+                var leadGroup = leadMatch.Groups["lead"];
+                sanitized[i] = JsonValue.Create(prevText[..leadGroup.Index]);
+            }
+        }
 
         for (var i = 0; i + 1 < sanitized.Count; i++)
         {
@@ -428,6 +517,29 @@ public static partial class StepTokenValidator
                     sanitized[i + 1] = JsonValue.Create(nextText[match.Length..]);
                 }
             }
+            else if (
+                tokType is "ingredient" or "mixture" or "fixed"
+                && !string.IsNullOrWhiteSpace(GetNullableString(tokObj["name"]))
+            )
+            {
+                var punctMatch = DanglingOfTheBeforePunctRegex().Match(nextText);
+                if (punctMatch.Success)
+                {
+                    sanitized[i + 1] = JsonValue.Create(nextText[punctMatch.Length..]);
+                }
+                else
+                {
+                    var prepMatch = DanglingOfTheBeforePrepRegex().Match(nextText);
+                    if (prepMatch.Success)
+                    {
+                        var rest = nextText[prepMatch.Length..];
+                        var normalizedRest = string.IsNullOrEmpty(rest)
+                            ? string.Empty
+                            : (rest.StartsWith(' ') ? " " + rest.TrimStart() : rest);
+                        sanitized[i + 1] = JsonValue.Create(normalizedRest);
+                    }
+                }
+            }
         }
 
         return sanitized;
@@ -445,15 +557,20 @@ public static partial class StepTokenValidator
         var sanitized = SanitizeRawTokens(rawTokensJson);
         if (
             originalInstruction.TrimEnd().EndsWith(".)", StringComparison.Ordinal)
+            && !originalInstruction.TrimEnd().EndsWith(".).", StringComparison.Ordinal)
             && sanitized.Count > 0
             && sanitized[^1] is JsonValue lastTextVal
             && lastTextVal.TryGetValue<string>(out var lastTextStr)
         )
         {
             var trimmedEnd = lastTextStr.TrimEnd();
-            if (trimmedEnd.EndsWith(").", StringComparison.Ordinal))
+            var trailingWs = lastTextStr[trimmedEnd.Length..];
+            if (trimmedEnd.EndsWith(".).", StringComparison.Ordinal))
             {
-                var trailingWs = lastTextStr[trimmedEnd.Length..];
+                sanitized[^1] = JsonValue.Create(trimmedEnd[..^3] + ".)" + trailingWs);
+            }
+            else if (trimmedEnd.EndsWith(").", StringComparison.Ordinal))
+            {
                 sanitized[^1] = JsonValue.Create(trimmedEnd[..^2] + ".)" + trailingWs);
             }
         }
@@ -963,6 +1080,33 @@ public static partial class StepTokenValidator
             warnings.Add("Rendered step dropped trailing period '.'.");
         }
 
+        if (
+            BrokenYieldParenRegex().IsMatch(rendered)
+            && !BrokenYieldParenRegex().IsMatch(originalInstruction)
+        )
+        {
+            warnings.Add(
+                "Rendered step has broken or empty parenthetical yield phrase (e.g., '(you should have )' or '(about of juice)'); emit type='fixed' with the measurement and unit inside the parentheses."
+            );
+        }
+
+        var hasUntokenizedInText = tokens
+            .OfType<Stage4TextToken>()
+            .Any(txt =>
+                UntokenizedQuantityRegex()
+                    .Matches(txt.Text)
+                    .Cast<Match>()
+                    .Any(untok =>
+                        !RotationAngleRegex()
+                            .Matches(txt.Text)
+                            .Cast<Match>()
+                            .Any(rot =>
+                                untok.Index >= rot.Index
+                                && untok.Index + untok.Length <= rot.Index + rot.Length
+                            )
+                    )
+            );
+
         var origClean = LeadStepNumberRegex().Replace(originalInstruction, string.Empty);
         var hasDistributive = DistributiveQuantifierRegex().IsMatch(origClean);
         var origCueCount = ExplicitQuantityCueRegex().Matches(origClean).Count;
@@ -977,12 +1121,23 @@ public static partial class StepTokenValidator
         );
         if (!hasDistributive && quantifiedTokenCount > origCueCount)
         {
+            var suspectOneTokens = tokens
+                .OfType<Stage4IngredientToken>()
+                .Where(ing => ing.Quantity == 1m)
+                .Select(ing => $"'{ing.Name}' (qty=1, unit={ing.Unit ?? "null"})")
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(4)
+                .ToList();
+            var suspectHint =
+                suspectOneTokens.Count > 0
+                    ? $" Suspect unmeasured ingredient tokens: {string.Join(", ", suspectOneTokens)}."
+                    : string.Empty;
             warnings.Add(
-                $"Invented unprinted quantities: step emitted {quantifiedTokenCount} quantitative tokens but original instruction only contains {origCueCount} explicit numeric cues; leave unquantified mentions as plain text without pulling numbers from the ingredient list."
+                $"Invented unprinted quantities: step emitted {quantifiedTokenCount} quantitative tokens but original instruction only contains {origCueCount} explicit numeric cues; leave unquantified mentions as plain text without pulling numbers from the ingredient list.{suspectHint}"
             );
         }
 
-        foreach (var (unitName, unitPattern) in UnitMeasurementPatterns)
+        foreach (var (unitName, unitPattern, quantifiedUnitPattern) in UnitMeasurementPatterns)
         {
             var tokenUnitCount = tokens.Count(t =>
                 t switch
@@ -1016,6 +1171,17 @@ public static partial class StepTokenValidator
                 warnings.Add(
                     $"Invented unit '{unitName}' ({tokenUnitCount} token(s) vs {origUnitCount} in original instruction); unquantified mentions must stay plain text."
                 );
+            }
+
+            if (!hasUntokenizedInText && !hasDistributive)
+            {
+                var quantifiedOrigUnitCount = quantifiedUnitPattern.Matches(origClean).Count;
+                if (tokenUnitCount < quantifiedOrigUnitCount)
+                {
+                    warnings.Add(
+                        $"Dropped '{unitName}' measurement ({tokenUnitCount} tokenized vs {quantifiedOrigUnitCount} printed in original instruction); emit every printed numeric measurement as its own token instead of dropping a quantity/unit."
+                    );
+                }
             }
         }
 
@@ -1106,6 +1272,10 @@ public static partial class StepTokenValidator
             );
         }
 
+        var originalCommaCount = originalInstruction.Count(c => c == ',');
+        var renderedCommaCount = rendered.Count(c => c == ',');
+        var hasDroppedComma = originalCommaCount > renderedCommaCount;
+
         for (var i = 0; i < tokens.Count; i++)
         {
             decimal? tokenPrimaryVal = tokens[i] switch
@@ -1130,6 +1300,33 @@ public static partial class StepTokenValidator
             {
                 warnings.Add(
                     $"Duplicate spelled number '{wordNum}' right before [{i}]; consume '{wordNum}' inside the token so output does not read '{wordNum} {tokenPrimaryVal.Value}'."
+                );
+            }
+            if (
+                i > 0
+                && tokens[i - 1] is Stage4TextToken prevRangeTxt
+                && tokens[i] is not Stage4TextToken
+                && LeadingDanglingRangeRegex().IsMatch(prevRangeTxt.Text)
+            )
+            {
+                warnings.Add(
+                    $"Dangling range start '{LeadingDanglingRangeRegex().Match(prevRangeTxt.Text).Value.Trim()}' left in text right before [{i}] ({tokens[i].Type}); combine the lower and upper bounds inside ONE token."
+                );
+            }
+            if (
+                i + 2 < tokens.Count
+                && tokens[i] is Stage4TimerToken or Stage4DimensionToken or Stage4TemperatureToken
+                && tokens[i + 1] is Stage4TextToken midMismatchConn
+                && RangeConnectorOnlyRegex().IsMatch(midMismatchConn.Text)
+                && tokens[i + 2]
+                    is Stage4TimerToken
+                        or Stage4DimensionToken
+                        or Stage4TemperatureToken
+                && tokens[i].Type != tokens[i + 2].Type
+            )
+            {
+                warnings.Add(
+                    $"Unexpected range connector '{midMismatchConn.Text.Trim()}' between mismatched token types [{i}] ({tokens[i].Type}) and [{i + 2}] ({tokens[i + 2].Type}); combine a physical range into ONE token of the matching type."
                 );
             }
             if (
@@ -1467,6 +1664,24 @@ public static partial class StepTokenValidator
                             );
                         }
                     }
+                    if (
+                        i + 2 < tokens.Count
+                        && tokens[i + 1] is Stage4TextToken midDimRangeTxt
+                        && RangeConnectorOnlyRegex().IsMatch(midDimRangeTxt.Text)
+                        && tokens[i + 2] is Stage4DimensionToken nextDim
+                        && !(
+                            i > 0
+                            && tokens[i - 1] is Stage4TextToken prevFromDim
+                            && TrailingFromWordRegex().IsMatch(prevFromDim.Text)
+                        )
+                        && string.Equals(dim.Unit, nextDim.Unit, StringComparison.OrdinalIgnoreCase)
+                        && (nextDim.MaxAmount ?? nextDim.Amount) >= dim.Amount
+                    )
+                    {
+                        warnings.Add(
+                            $"Split single-unit dimension range across two dimension tokens [{i}] and [{i + 2}]; combine into ONE dimension token (amount={dim.Amount}, maxAmount={nextDim.MaxAmount ?? nextDim.Amount}, unit='{dim.Unit}', hyphenated={nextDim.Hyphenated.ToString().ToLowerInvariant()}) and remove '{midDimRangeTxt.Text}' and [{i + 2}]."
+                        );
+                    }
                     if (i + 1 < tokens.Count && tokens[i + 1] is Stage4TextToken trailingDimTxt)
                     {
                         if (DuplicateDimUnitPrefixRegex().IsMatch(trailingDimTxt.Text))
@@ -1494,6 +1709,28 @@ public static partial class StepTokenValidator
                         );
                     }
                     if (
+                        i + 2 < tokens.Count
+                        && tokens[i + 1] is Stage4TextToken midTempRangeTxt
+                        && RangeConnectorOnlyRegex().IsMatch(midTempRangeTxt.Text)
+                        && tokens[i + 2] is Stage4TemperatureToken nextTemp
+                        && !(
+                            i > 0
+                            && tokens[i - 1] is Stage4TextToken prevFromTemp
+                            && TrailingFromWordRegex().IsMatch(prevFromTemp.Text)
+                        )
+                        && string.Equals(
+                            NormalizeTempUnit(temp.Unit),
+                            NormalizeTempUnit(nextTemp.Unit),
+                            StringComparison.OrdinalIgnoreCase
+                        )
+                        && (nextTemp.MaxAmount ?? nextTemp.Amount) >= temp.Amount
+                    )
+                    {
+                        warnings.Add(
+                            $"Split single-unit temperature range across two temperature tokens [{i}] and [{i + 2}]; combine into ONE temperature token (amount={temp.Amount}, maxAmount={nextTemp.MaxAmount ?? nextTemp.Amount}, unit='{temp.Unit}') and remove '{midTempRangeTxt.Text}' and [{i + 2}]."
+                        );
+                    }
+                    if (
                         i + 1 < tokens.Count
                         && tokens[i + 1] is Stage4TextToken trailingTempTxt
                         && DuplicateTempUnitPrefixRegex().IsMatch(trailingTempTxt.Text)
@@ -1504,6 +1741,25 @@ public static partial class StepTokenValidator
                         );
                     }
                     break;
+            }
+
+            if (tokens[i] is Stage4IngredientToken or Stage4MixtureToken or Stage4FixedToken)
+            {
+                var tokenName = tokens[i] switch
+                {
+                    Stage4IngredientToken ingTok => ingTok.Name,
+                    Stage4MixtureToken mixTok => mixTok.Name,
+                    Stage4FixedToken fxTok => fxTok.Name,
+                    _ => null,
+                };
+                CheckTrailingDanglingOrComma(
+                    i,
+                    tokens[i].Type,
+                    tokenName,
+                    tokens,
+                    hasDroppedComma,
+                    warnings
+                );
             }
         }
 
@@ -1539,6 +1795,48 @@ public static partial class StepTokenValidator
         }
 
         return warnings;
+    }
+
+    private static void CheckTrailingDanglingOrComma(
+        int index,
+        string tokenType,
+        string? tokenName,
+        IReadOnlyList<Stage4ParsedToken> tokens,
+        bool hasDroppedComma,
+        List<string> warnings
+    )
+    {
+        if (index + 1 >= tokens.Count || tokens[index + 1] is not Stage4TextToken nextTxt)
+        {
+            return;
+        }
+
+        if (
+            !string.IsNullOrWhiteSpace(tokenName)
+            && DanglingOfThePrefixRegex().IsMatch(nextTxt.Text)
+        )
+        {
+            warnings.Add(
+                $"Dangling 'of the' after {tokenType} token '{tokenName}'; absorb 'of the' cleanly inside the token phrase so output does not read '{tokenName} of the ...'."
+            );
+        }
+
+        if (hasDroppedComma)
+        {
+            var match = LeadingThreeLetterWordRegex().Match(nextTxt.Text);
+            if (match.Success && !NonCommaListWordsAfterToken.Contains(match.Groups["w"].Value))
+            {
+                warnings.Add(
+                    $"Dropped comma after token [{index}] ('{tokenName}') before '{match.Groups["w"].Value}'; restore the comma from the original instruction so list items stay separated."
+                );
+            }
+        }
+    }
+
+    private static string NormalizeTempUnit(string? unit)
+    {
+        var trimmed = unit?.Trim().ToLowerInvariant() ?? "fahrenheit";
+        return trimmed is "c" or "celsius" ? "celsius" : "fahrenheit";
     }
 
     public static bool TryFindIncompatibleAlternateMeasurement(

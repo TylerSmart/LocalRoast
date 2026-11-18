@@ -831,10 +831,8 @@ public sealed partial class IngestionRecipePipeline(
             .Select(ing => new
             {
                 index = ing.Index,
+                section = ing.SectionName,
                 name = ing.Name,
-                quantity = ing.Quantity,
-                maxQuantity = ing.MaxQuantity,
-                unit = ing.Unit,
                 prepNote = ing.PrepNote,
             })
             .ToList();
@@ -1816,6 +1814,53 @@ public sealed partial class IngestionRecipePipeline(
                     ingQty = null;
                 }
 
+                if (
+                    ingQty is null
+                    && ing.MaxQuantity is null
+                    && string.IsNullOrWhiteSpace(ingUnit)
+                    && (ing.AlternateMeasurements is null || ing.AlternateMeasurements.Count == 0)
+                    && SaltAndPepperSplitRegex().Match(ingName) is { Success: true } spMatch
+                )
+                {
+                    list.Add(
+                        new WorkIngredient
+                        {
+                            Index = idx++,
+                            SectionName = secName,
+                            Name = spMatch.Groups["salt"].Value.Trim(),
+                            Quantity = null,
+                            MaxQuantity = null,
+                            Unit = null,
+                            PrepNote = string.Equals(
+                                ing.PrepNote?.Trim(),
+                                "to taste",
+                                StringComparison.OrdinalIgnoreCase
+                            )
+                                ? ing.PrepNote
+                                : null,
+                            IsOptional = ing.IsOptional,
+                            Replacements = null,
+                            AlternateMeasurements = null,
+                        }
+                    );
+                    list.Add(
+                        new WorkIngredient
+                        {
+                            Index = idx++,
+                            SectionName = secName,
+                            Name = spMatch.Groups["pep"].Value.Trim(),
+                            Quantity = null,
+                            MaxQuantity = null,
+                            Unit = null,
+                            PrepNote = ing.PrepNote,
+                            IsOptional = ing.IsOptional,
+                            Replacements = null,
+                            AlternateMeasurements = null,
+                        }
+                    );
+                    continue;
+                }
+
                 list.Add(
                     new WorkIngredient
                     {
@@ -2469,6 +2514,12 @@ public sealed partial class IngestionRecipePipeline(
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex UnquantifiedSeasoningOrSprayRegex();
+
+    [GeneratedRegex(
+        @"^(?<salt>(?:table|kosher|sea|fine|coarse|flak(?:e|y))\s+salt|salt)\s+and\s+(?<pep>(?:freshly\s+)?(?:ground|cracked)\s+(?:black\s+|white\s+)?pepper|(?:black|white)\s+pepper|pepper)$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex SaltAndPepperSplitRegex();
 
     [GeneratedRegex(
         @"\b(?:ground|cracked|coarse(?:ly)?|freshly\s+ground|black|white|cayenne|red\s+pepper)\b",

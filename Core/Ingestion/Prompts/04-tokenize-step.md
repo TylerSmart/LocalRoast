@@ -7,7 +7,7 @@ You are a cookbook recipe transcriber. Your job is to transform a single recipe 
 
 You will receive a JSON payload containing:
 - `instruction`: the step text to tokenize.
-- `ingredients`: the recipe's master ingredients list (with `index`, `name`, `quantity`, `maxQuantity`, `unit`, `prepNote`) so you can accurately link `ingredientIndex` when a quantified ingredient IS present in the step.
+- `ingredients`: the recipe's master ingredients list (with `index`, `section`, `name`, `prepNote`) so you can accurately link `ingredientIndex` when a quantified ingredient IS present in the step.
 - `priorSteps`: earlier steps in the recipe (for context on whether a measurement refers to a raw ingredient vs. an already-prepared mixture/subset).
 
 ## Token Types (`"tokens"` Array Elements)
@@ -112,7 +112,7 @@ Concatenating all strings and rendered tokens in order MUST reconstruct the comp
   "hyphenated": true
 }
 ```
-- Use for non-scaling tool/vessel measurements (`"1/4-cup measure"`, `"4-cup liquid measuring cup"` -> `name: "liquid measuring cup"`, `"2-ounce ladle"`, `"1-quart pitcher"`, `"12-cup Bundt pan"`), **parenthetical/informational prep yields** (`"(you should have 5 to 6 cups)"` -> `{type: "fixed", name: null, amount: 5, maxAmount: 6, unit: "cup", hyphenated: false}`, `"(you should have 2 to 2 1/2 cups of pulp)"` -> `name: "pulp", amount: 2, maxAmount: 2.5, unit: "cup"`, `"(about 2/3 cup of juice)"` -> `name: "juice", amount: 0.6667, unit: "cup"`, `"yield about 3/4 cup skins"` -> `name: "skins"`), as well as pot-boiling/blanching cooking water (`"Bring 2 quarts water to boil"` -> `{type: "fixed", name: "water", amount: 2, maxAmount: null, unit: "quart", hyphenated: false}`). For measuring tools like `"4-cup liquid measuring cup"`, ALWAYS keep `"cup"` in `name` (`"liquid measuring cup"`). NEVER emit `dimension` for volume/capacity containers like `"1-quart pitcher"` (never map `quart` to `yard`!). Converts US ↔ Metric; NEVER scales when multiplying servings.
+- Use for non-scaling tool/vessel measurements (`"1/4-cup measure"`, `"4-cup liquid measuring cup"` -> `name: "liquid measuring cup"`, `"2-ounce ladle"`, `"1-quart pitcher"`, `"12-cup Bundt pan"`), **parenthetical/informational prep yields** — keep the opening `"(you should have "` / `"(about "` and closing `")"` / `")."` in plain text around the `fixed` token (`"(you should have 5 to 6 cups)."` -> `"(you should have "` + `{ "type": "fixed", "name": null, "amount": 5, "maxAmount": 6, "unit": "cup", "hyphenated": false }` + `")."`, `"(you should have 2 to 2 1/2 cups of pulp)."` -> `"(you should have "` + `{ "type": "fixed", "name": "pulp", "amount": 2, "maxAmount": 2.5, "unit": "cup", "hyphenated": false }` + `")."`, `"(about 2/3 cup of juice)"` -> `"(about "` + `{ "type": "fixed", "name": "juice", "amount": 0.6667, "maxAmount": null, "unit": "cup", "hyphenated": false }` + `")"`, `"yield about 3/4 cup skins"` -> `"yield about "` + `{ "type": "fixed", "name": "skins", "amount": 0.75, "maxAmount": null, "unit": "cup", "hyphenated": false }` — NEVER drop `"of pulp"`/`"5 to 6 cups"` and leave an empty `"(you should have )"`!), as well as pot-boiling/blanching cooking water (`"Bring 2 quarts water to boil"` -> `{type: "fixed", name: "water", amount: 2, maxAmount: null, unit: "quart", hyphenated: false}`). For measuring tools like `"4-cup liquid measuring cup"`, ALWAYS keep `"cup"` in `name` (`"liquid measuring cup"`). NEVER emit `dimension` for volume/capacity containers like `"1-quart pitcher"` (never map `quart` to `yard`!). Converts US ↔ Metric; NEVER scales when multiplying servings.
 
 ---
 
@@ -120,7 +120,7 @@ Concatenating all strings and rendered tokens in order MUST reconstruct the comp
 
 ### Example A — Explicit Ingredient + Temperature
 **Input step:** `"With a pot on the stove, bring 2 cups of water to 200 deg F."`
-**Ingredients:** `[{ "index": 0, "name": "water", "quantity": 2, "unit": "cup" }]`
+**Ingredients:** `[{ "index": 0, "section": null, "name": "water", "prepNote": null }]`
 **Output `"tokens"`:**
 ```json
 [
@@ -134,7 +134,7 @@ Concatenating all strings and rendered tokens in order MUST reconstruct the comp
 
 ### Example B — Unquantified Ingredients Stay Plain Text; Explicit Quantity + Timer Tokenized
 **Input step:** `"Combine chickpeas, baking soda, and 6 cups water in medium saucepan and bring to boil over high heat. Reduce heat and simmer until soft, 20 to 25 minutes."`
-**Ingredients:** `[{ "index": 0, "name": "chickpeas", "quantity": 2, "unit": "can" }, { "index": 1, "name": "baking soda", "quantity": 0.5, "unit": "teaspoon" }]`
+**Ingredients:** `[{ "index": 0, "section": null, "name": "chickpeas", "prepNote": null }, { "index": 1, "section": null, "name": "baking soda", "prepNote": null }]`
 **Output `"tokens"`:**
 ```json
 [
@@ -148,7 +148,7 @@ Concatenating all strings and rendered tokens in order MUST reconstruct the comp
 
 ### Example C — Post-Prep Subset (`mixture`), Explicit Liquid, Timer, and Unquantified Seasonings Kept Plain
 **Input step:** `"While chickpeas cook, mince garlic. Measure out 1 tablespoon garlic and set aside; discard remaining garlic. Whisk lemon juice, salt, and reserved garlic together and let sit for 10 minutes. Season with salt and up to additional 1 1/2 teaspoons lime juice to taste."`
-**Ingredients:** `[{ "index": 2, "name": "garlic", "quantity": 4, "unit": "clove" }, { "index": 3, "name": "lemon juice", "quantity": 0.3333, "unit": "cup" }, { "index": 4, "name": "salt", "quantity": 1, "unit": "teaspoon" }, { "index": 5, "name": "lime juice", "quantity": 1.5, "maxQuantity": 2, "unit": "tablespoon" }]`
+**Ingredients:** `[{ "index": 2, "section": null, "name": "garlic", "prepNote": "minced" }, { "index": 3, "section": null, "name": "lemon juice", "prepNote": null }, { "index": 4, "section": null, "name": "salt", "prepNote": null }, { "index": 5, "section": null, "name": "lime juice", "prepNote": null }]`
 **Output `"tokens"`:**
 ```json
 [
@@ -164,7 +164,7 @@ Concatenating all strings and rendered tokens in order MUST reconstruct the comp
 
 ### Example D — Dimensions, Fixed Tool Sizes, Non-Token Counts, and Timer Range
 **Input step:** `"Heat 1 teaspoon oil in 12-inch nonstick skillet over medium heat. Using 1/4-cup measure or 2-ounce ladle, portion batter into pan in 3 places, leaving 2 inches between portions, and spread into 4-inch rounds. Cook until golden, 2 to 3 minutes."`
-**Ingredients:** `[{ "index": 6, "name": "vegetable oil", "quantity": 2, "unit": "teaspoon" }]`
+**Ingredients:** `[{ "index": 6, "section": null, "name": "vegetable oil", "prepNote": null }]`
 **Output `"tokens"`:**
 ```json
 [

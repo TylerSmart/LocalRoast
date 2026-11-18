@@ -637,4 +637,316 @@ public sealed class StepTokenValidatorTests
             StepTokenValidator.RenderForValidation(res2.ParsedTokens)
         );
     }
+
+    [TestMethod]
+    public void BarePinchSaltAndRemainingPinchSaltDoNotFlagInventedQuantities()
+    {
+        var tokens1 = new JsonArray { "Whisk eggs, milk, and pinch salt." };
+        var res1 = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 1,
+            sectionName: null,
+            originalInstruction: "Whisk eggs, milk, and pinch salt.",
+            rawTokensJson: tokens1,
+            ingredientCount: 3
+        );
+        Assert.IsEmpty(res1.ValidationWarnings, string.Join(" | ", res1.ValidationWarnings));
+
+        var tokens2 = new JsonArray { "Season with remaining pinch salt and stir." };
+        var res2 = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 2,
+            sectionName: null,
+            originalInstruction: "Season with remaining pinch salt and stir.",
+            rawTokensJson: tokens2,
+            ingredientCount: 1
+        );
+        Assert.IsEmpty(res2.ValidationWarnings, string.Join(" | ", res2.ValidationWarnings));
+    }
+
+    [TestMethod]
+    public void DanglingOfTheStrippedWhenTokenHasNameAndPreservedWhenFixedNameIsNull()
+    {
+        var ingOfThe = new JsonArray
+        {
+            "Pour ",
+            new JsonObject
+            {
+                ["type"] = "ingredient",
+                ["ingredientIndex"] = 0,
+                ["name"] = "tomatoes",
+                ["quantity"] = 2,
+                ["unit"] = "cup",
+            },
+            " of the , crush, and bring to simmer.",
+        };
+        var resIng = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 1,
+            sectionName: null,
+            originalInstruction: "Pour 2 cups of the tomatoes, crush, and bring to simmer.",
+            rawTokensJson: ingOfThe,
+            ingredientCount: 1
+        );
+        Assert.IsEmpty(resIng.ValidationWarnings, string.Join(" | ", resIng.ValidationWarnings));
+        Assert.AreEqual(
+            "Pour 2 cups tomatoes, crush, and bring to simmer.",
+            StepTokenValidator.RenderForValidation(resIng.ParsedTokens)
+        );
+
+        var fixedOfThe = new JsonArray
+        {
+            "Transfer ",
+            new JsonObject
+            {
+                ["type"] = "fixed",
+                ["name"] = "pulp",
+                ["amount"] = 2,
+                ["unit"] = "cup",
+                ["hyphenated"] = false,
+            },
+            " of the to bowl.",
+        };
+        var resFixed = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 1,
+            sectionName: null,
+            originalInstruction: "Transfer 2 cups of the pulp to bowl.",
+            rawTokensJson: fixedOfThe,
+            ingredientCount: 0
+        );
+        Assert.IsEmpty(
+            resFixed.ValidationWarnings,
+            string.Join(" | ", resFixed.ValidationWarnings)
+        );
+        Assert.AreEqual(
+            "Transfer 2 cups pulp to bowl.",
+            StepTokenValidator.RenderForValidation(resFixed.ParsedTokens)
+        );
+
+        var nounlessFixed = new JsonArray
+        {
+            "Strain (about ",
+            new JsonObject
+            {
+                ["type"] = "fixed",
+                ["name"] = null,
+                ["amount"] = 0.5,
+                ["unit"] = "cup",
+                ["hyphenated"] = false,
+            },
+            " of the liquid).",
+        };
+        var resNullName = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 1,
+            sectionName: null,
+            originalInstruction: "Strain (about 1/2 cup of the liquid).",
+            rawTokensJson: nounlessFixed,
+            ingredientCount: 0
+        );
+        Assert.IsEmpty(
+            resNullName.ValidationWarnings,
+            string.Join(" | ", resNullName.ValidationWarnings)
+        );
+        Assert.AreEqual(
+            "Strain (about 1/2 cup of the liquid).",
+            StepTokenValidator.RenderForValidation(resNullName.ParsedTokens)
+        );
+    }
+
+    [TestMethod]
+    public void LeadingDuplicatedRangeAndSplitTempUpperBoundAreSanitized()
+    {
+        var leadingDupTimer = new JsonArray
+        {
+            "Bake 10 to ",
+            new JsonObject
+            {
+                ["type"] = "timer",
+                ["amount"] = 10,
+                ["maxAmount"] = 11,
+                ["unit"] = "minute",
+                ["label"] = "Bake cookies",
+            },
+            ".",
+        };
+        var resTimer = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 1,
+            sectionName: null,
+            originalInstruction: "Bake 10 to 11 minutes.",
+            rawTokensJson: leadingDupTimer,
+            ingredientCount: 0
+        );
+        Assert.IsEmpty(
+            resTimer.ValidationWarnings,
+            string.Join(" | ", resTimer.ValidationWarnings)
+        );
+        Assert.AreEqual(
+            "Bake 10 to 11 minutes.",
+            StepTokenValidator.RenderForValidation(resTimer.ParsedTokens)
+        );
+
+        var trailingDupTemp = new JsonArray
+        {
+            "Heat oil to ",
+            new JsonObject
+            {
+                ["type"] = "temperature",
+                ["amount"] = 340,
+                ["maxAmount"] = 360,
+                ["unit"] = "fahrenheit",
+            },
+            " to ",
+            new JsonObject
+            {
+                ["type"] = "temperature",
+                ["amount"] = 360,
+                ["unit"] = "fahrenheit",
+            },
+            ".",
+        };
+        var resTemp = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 1,
+            sectionName: null,
+            originalInstruction: "Heat oil to 340 to 360 degrees.",
+            rawTokensJson: trailingDupTemp,
+            ingredientCount: 0
+        );
+        Assert.IsEmpty(resTemp.ValidationWarnings, string.Join(" | ", resTemp.ValidationWarnings));
+        Assert.AreEqual(
+            "Heat oil to 340–360°F.",
+            StepTokenValidator.RenderForValidation(resTemp.ParsedTokens)
+        );
+
+        var splitTemp = new JsonArray
+        {
+            "Heat oil to ",
+            new JsonObject
+            {
+                ["type"] = "temperature",
+                ["amount"] = 340,
+                ["unit"] = "fahrenheit",
+            },
+            " to ",
+            new JsonObject
+            {
+                ["type"] = "temperature",
+                ["amount"] = 360,
+                ["unit"] = "fahrenheit",
+            },
+            ".",
+        };
+        var resSplitTemp = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 1,
+            sectionName: null,
+            originalInstruction: "Heat oil to 340 to 360 degrees.",
+            rawTokensJson: splitTemp,
+            ingredientCount: 0
+        );
+        Assert.IsTrue(
+            resSplitTemp.ValidationWarnings.Any(w =>
+                w.Contains("Split single-unit temperature range", StringComparison.Ordinal)
+            ),
+            string.Join(" | ", resSplitTemp.ValidationWarnings)
+        );
+
+        var mismatchRange = new JsonArray
+        {
+            "Bake at ",
+            new JsonObject
+            {
+                ["type"] = "temperature",
+                ["amount"] = 325,
+                ["unit"] = "fahrenheit",
+            },
+            " to ",
+            new JsonObject
+            {
+                ["type"] = "timer",
+                ["amount"] = 350,
+                ["unit"] = "minute",
+                ["label"] = "Bake",
+            },
+            ".",
+        };
+        var resMismatch = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 1,
+            sectionName: null,
+            originalInstruction: "Bake at 325 to 350 degrees.",
+            rawTokensJson: mismatchRange,
+            ingredientCount: 0
+        );
+        Assert.IsTrue(
+            resMismatch.ValidationWarnings.Any(w =>
+                w.Contains("Unexpected range connector", StringComparison.Ordinal)
+            ),
+            string.Join(" | ", resMismatch.ValidationWarnings)
+        );
+    }
+
+    [TestMethod]
+    public void EmptyYieldParenAndDroppedMeasurementCommaAreFlagged()
+    {
+        var emptyYield = new JsonArray { "Set aside (you should have )." };
+        var resEmptyYield = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 1,
+            sectionName: null,
+            originalInstruction: "Set aside (you should have 5 to 6 cups).",
+            rawTokensJson: emptyYield,
+            ingredientCount: 0
+        );
+        Assert.IsTrue(
+            resEmptyYield.ValidationWarnings.Any(w =>
+                w.Contains("parenthetical yield", StringComparison.OrdinalIgnoreCase)
+            ),
+            $"Expected empty yield warning, got: {string.Join(" | ", resEmptyYield.ValidationWarnings)}"
+        );
+
+        var droppedMeasureComma = new JsonArray
+        {
+            "Whisk ",
+            new JsonObject
+            {
+                ["type"] = "ingredient",
+                ["ingredientIndex"] = 0,
+                ["name"] = "oil",
+                ["quantity"] = 1,
+                ["unit"] = "tablespoon",
+            },
+            " salt, and ",
+            new JsonObject
+            {
+                ["type"] = "ingredient",
+                ["ingredientIndex"] = 1,
+                ["name"] = "salt",
+                ["quantity"] = 0.125,
+                ["unit"] = "teaspoon",
+            },
+            " pepper.",
+        };
+        var resDropped = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 1,
+            sectionName: null,
+            originalInstruction: "Whisk 1 tablespoon oil, 1/8 teaspoon salt, and 1/8 teaspoon pepper.",
+            rawTokensJson: droppedMeasureComma,
+            ingredientCount: 2
+        );
+        Assert.IsTrue(
+            resDropped.ValidationWarnings.Any(w =>
+                w.Contains("Dropped 'teaspoon' measurement", StringComparison.Ordinal)
+            ),
+            $"Expected dropped measurement warning, got: {string.Join(" | ", resDropped.ValidationWarnings)}"
+        );
+        Assert.IsTrue(
+            resDropped.ValidationWarnings.Any(w =>
+                w.Contains("Dropped comma after token", StringComparison.Ordinal)
+            ),
+            $"Expected dropped comma warning, got: {string.Join(" | ", resDropped.ValidationWarnings)}"
+        );
+    }
+
+    [TestMethod]
+    public void FoodNameSanitizerNormalizesDriedPrepPrefixes()
+    {
+        Assert.AreEqual(
+            "dried onion",
+            App.Core.FoodCatalog.FoodNameSanitizer.NormalizeCanonicalFoodName("dried minced onions")
+        );
+    }
 }

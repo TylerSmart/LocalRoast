@@ -28,6 +28,12 @@ public static partial class FoodNameSanitizer
     )]
     private static partial Regex FrozenPrepPrefixRegex();
 
+    [GeneratedRegex(
+        @"^dried\s+(?:minced|chopped|flaked)\s+(?<item>onions?|garlic)$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex DriedPrepPrefixRegex();
+
     [GeneratedRegex(@"^garlic\s+cloves?$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex GarlicCloveRegex();
 
@@ -175,6 +181,16 @@ public static partial class FoodNameSanitizer
 
                 return $"{first} {noun}";
             }
+        }
+
+        var driedMatch = DriedPrepPrefixRegex().Match(trimmed);
+        if (driedMatch.Success)
+        {
+            return driedMatch
+                .Groups["item"]
+                .Value.StartsWith("onion", StringComparison.OrdinalIgnoreCase)
+                ? "dried onion"
+                : "dried garlic";
         }
 
         var frozenMatch = FrozenPrepPrefixRegex().Match(trimmed);

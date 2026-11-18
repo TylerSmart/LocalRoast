@@ -39,7 +39,7 @@ Choose exactly one of these four `matchType` values:
 - `PantryDryGoods`: dried pasta, rice, grain, oat, quinoa, dried bean, lentil, nut & seed (`walnut`, `pine nut`, `pecan`, `cumin seed`), peanut/nut butter, breadcrumb, cracker, dried mushroom.
 - `CannedAndJarred`: canned chickpea, black bean, canned tomato, tomato paste, broth & stock (`chicken broth`, `vegetable broth`), olive, caper, pickle, jarred roasted pepper, coconut milk, jam.
 - `CondimentsAndSauces`: cooking oils (`olive oil`, `extra-virgin olive oil`, `vegetable oil`), vinegars (`distilled white vinegar`), mustards (`Dijon mustard`), mayonnaise, tahini, soy sauce, hot sauce, Worcestershire, ketchup, honey, maple syrup, pastes/concentrates (`tamarind concentrate`).
-- `SpicesAndSeasonings`: salt (`kosher salt`, `table salt`, `sea salt`), peppercorns, black pepper, ground spices & dried herbs (`cumin`, `smoked paprika`, `curry powder`, `cayenne pepper`, `cinnamon`, `garlic powder`, `dried oregano`, `red pepper flakes`), spice blends.
+- `SpicesAndSeasonings`: salt (`kosher salt`, `table salt`, `sea salt`), peppercorns, black pepper, ground spices & dried herbs (`cumin`, `smoked paprika`, `curry powder`, `cayenne pepper`, `cinnamon`, `garlic powder`, `dried oregano`, `dried onion`, `red pepper flakes`), spice blends.
 - `Baking`: flours (`all-purpose flour`, `bread flour`, `whole-wheat flour`), sugars (`granulated sugar`, `brown sugar`, `confectioners' sugar`), baking soda, baking powder, yeast, cornstarch, vanilla extract, cocoa powder, chocolate, chocolate chips, molasses.
 - `Snacks`: potato/tortilla chips, pretzels, popcorn, snack bars, candy.
 - `Beverages`: water, ice, coffee, tea, juice cartons, soda, beer, wine, spirits.
