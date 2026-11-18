@@ -99,10 +99,16 @@ public static partial class StepTokenValidator
     private static partial Regex TrailingSpelledNumberRegex();
 
     [GeneratedRegex(
-        @"\b(?:rotate|rotated|rotating)\b[^.\n]{0,80}(?:90|180)\s+degrees?\b",
+        @"\b(?:rotate[sd]?|rotating|turn(?:s|ed|ing)?)\b[^.\n]{0,80}(?:90|180)\s+degrees?\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex RotationAngleRegex();
+
+    [GeneratedRegex(
+        @"\b(?<noun>[a-zA-Z]{3,})\s+(?<prep>in|into|to|on|over)\s+(?:a|an|the)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex PrepositionalArticlePhraseRegex();
 
     private static readonly (string CanonicalUnit, Regex Pattern)[] UnitMeasurementPatterns =
     [
@@ -268,7 +274,25 @@ public static partial class StepTokenValidator
 
     public static JsonArray SanitizeRawTokens(JsonArray tokensArray)
     {
-        var sanitized = (JsonArray)tokensArray.DeepClone();
+        var sanitized = new JsonArray();
+        foreach (var node in tokensArray)
+        {
+            if (
+                node is JsonValue val
+                && val.TryGetValue<string>(out var s)
+                && sanitized.Count > 0
+                && sanitized[^1] is JsonValue prevVal
+                && prevVal.TryGetValue<string>(out var prevStr)
+            )
+            {
+                sanitized[^1] = JsonValue.Create(prevStr + s);
+            }
+            else
+            {
+                sanitized.Add(node?.DeepClone());
+            }
+        }
+
         for (var i = 0; i + 1 < sanitized.Count; i++)
         {
             if (
@@ -287,12 +311,22 @@ public static partial class StepTokenValidator
                     .Trim()
                     .ToLowerInvariant();
                 var match = DuplicateTimeUnitPrefixRegex().Match(nextText);
-                if (
-                    match.Success
-                    && TimerUnitMatchesWord(unit, match.Value.Trim().ToLowerInvariant())
-                )
+                if (match.Success)
                 {
-                    sanitized[i + 1] = JsonValue.Create(nextText[match.Length..]);
+                    var candidateWord = match.Value.Trim().ToLowerInvariant();
+                    var hasRange =
+                        GetNullableDecimal(tokObj["maxAmount"]) is decimal maxA
+                        && GetNullableDecimal(tokObj["amount"]) is decimal minA
+                        && maxA > minA;
+                    if (hasRange && candidateWord.StartsWith("to ", StringComparison.Ordinal))
+                    {
+                        candidateWord = candidateWord[3..].TrimStart();
+                    }
+
+                    if (TimerUnitMatchesWord(unit, candidateWord))
+                    {
+                        sanitized[i + 1] = JsonValue.Create(nextText[match.Length..]);
+                    }
                 }
             }
             else if (tokType == "temperature" && !nextText.TrimStart().StartsWith('-'))
@@ -379,6 +413,17 @@ public static partial class StepTokenValidator
                 case Stage4IngredientToken ing:
                 {
                     var (unit, customUnit) = RecipeUnitAndSectionHelpers.NormalizeUnit(ing.Unit);
+                    if (
+                        unit == MeasurementUnit.Custom
+                        && RecipeUnitAndSectionHelpers.IsRedundantSelfCustomUnit(
+                            customUnit,
+                            ing.Name
+                        )
+                    )
+                    {
+                        unit = null;
+                        customUnit = null;
+                    }
                     var (qty, maxQty) = RecipeUnitAndSectionHelpers.NormalizeQuantities(
                         ing.Quantity,
                         ing.MaxQuantity
@@ -415,6 +460,17 @@ public static partial class StepTokenValidator
                 case Stage4MixtureToken mix:
                 {
                     var (unit, customUnit) = RecipeUnitAndSectionHelpers.NormalizeUnit(mix.Unit);
+                    if (
+                        unit == MeasurementUnit.Custom
+                        && RecipeUnitAndSectionHelpers.IsRedundantSelfCustomUnit(
+                            customUnit,
+                            mix.Name
+                        )
+                    )
+                    {
+                        unit = null;
+                        customUnit = null;
+                    }
                     var (qty, maxQty) = RecipeUnitAndSectionHelpers.NormalizeQuantities(
                         mix.Quantity,
                         mix.MaxQuantity
@@ -573,7 +629,14 @@ public static partial class StepTokenValidator
 
             if (node is JsonValue val && val.TryGetValue<string>(out var text))
             {
-                result.Add(new Stage4TextToken(text));
+                if (result.Count > 0 && result[^1] is Stage4TextToken prevTextTok)
+                {
+                    result[^1] = new Stage4TextToken(prevTextTok.Text + text);
+                }
+                else
+                {
+                    result.Add(new Stage4TextToken(text));
+                }
                 continue;
             }
 
@@ -859,6 +922,79 @@ public static partial class StepTokenValidator
         var origNormWordCounts = CountNormalizedWords(originalInstruction);
         var renderedNormWordCounts = CountNormalizedWords(rendered);
 
+        if (missingWords.Count < 3)
+        {
+            var multisetDeficitCount = 0;
+            var multisetDeficitSamples = new List<string>();
+            foreach (var kvp in origNormWordCounts)
+            {
+                if (kvp.Key.Length < 4 || IsExcludedContentDropWord(kvp.Key))
+                {
+                    continue;
+                }
+
+                var deficit = kvp.Value - renderedNormWordCounts.GetValueOrDefault(kvp.Key);
+                if (deficit > 0)
+                {
+                    multisetDeficitCount += deficit;
+                    if (multisetDeficitSamples.Count < 6)
+                    {
+                        multisetDeficitSamples.Add($"{kvp.Key} (-{deficit})");
+                    }
+                }
+            }
+
+            if (multisetDeficitCount >= 4)
+            {
+                warnings.Add(
+                    $"Dropped prose clause/words from instruction ({string.Join(", ", multisetDeficitSamples)}); preserve every sentence and clause verbatim."
+                );
+            }
+        }
+
+        var checkedPrepPairs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (Match pm in PrepositionalArticlePhraseRegex().Matches(originalInstruction))
+        {
+            var noun = pm.Groups["noun"].Value;
+            var prep = pm.Groups["prep"].Value.ToLowerInvariant();
+            var nounSing = SimpleSingular(noun);
+            if (IsExcludedContentDropWord(nounSing) || !checkedPrepPairs.Add($"{nounSing}|{prep}"))
+            {
+                continue;
+            }
+
+            var nounDeficit =
+                origNormWordCounts.GetValueOrDefault(nounSing)
+                > renderedNormWordCounts.GetValueOrDefault(nounSing);
+            if (!nounDeficit)
+            {
+                continue;
+            }
+
+            var prepPattern = $@"\b{Regex.Escape(prep)}\b";
+            var origPrepCount = Regex
+                .Matches(
+                    originalInstruction,
+                    prepPattern,
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+                )
+                .Count;
+            var rendPrepCount = Regex
+                .Matches(
+                    rendered,
+                    prepPattern,
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+                )
+                .Count;
+            if (origPrepCount > rendPrepCount)
+            {
+                warnings.Add(
+                    $"Dropped phrase '{pm.Value}' (missing '{noun} {prep}'); keep '{pm.Value}' in plain text before the container/equipment token."
+                );
+                break;
+            }
+        }
+
         if (
             MultiAxisByDimensionRegex().IsMatch(originalInstruction)
             && WordByRegex().Matches(originalInstruction).Count
@@ -1086,7 +1222,7 @@ public static partial class StepTokenValidator
                             $"Fixed token '{fx.Name}' has inverted range {fx.Amount}..{fx.MaxAmount} {fx.Unit}."
                         );
                     }
-                    CheckUnitRepeatedInName(fx.Unit, fx.Name, warnings);
+                    CheckUnitRepeatedInName(fx.Unit, fx.Name, warnings, allowMeasuringVessel: true);
                     CheckBoundaryWordDuplication(
                         i,
                         fx.Name,
@@ -1097,6 +1233,20 @@ public static partial class StepTokenValidator
                     );
                     break;
                 case Stage4TimerToken timer:
+                    var expectedTimerPattern = GetTimerUnitPattern(timer.Unit);
+                    if (
+                        expectedTimerPattern is not null
+                        && !Regex.IsMatch(
+                            originalInstruction,
+                            expectedTimerPattern,
+                            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+                        )
+                    )
+                    {
+                        warnings.Add(
+                            $"Timer token '{timer.Label}' used unit '{timer.Unit}', which does not appear in original instruction (use the printed time unit, or leave 'weeks'/'months' storage durations as plain text without a timer token)."
+                        );
+                    }
                     if (timer.Amount <= 0m)
                     {
                         warnings.Add(
@@ -1815,10 +1965,27 @@ public static partial class StepTokenValidator
         return null;
     }
 
-    private static void CheckUnitRepeatedInName(string? unit, string name, List<string> warnings)
+    private static void CheckUnitRepeatedInName(
+        string? unit,
+        string name,
+        List<string> warnings,
+        bool allowMeasuringVessel = false
+    )
     {
         var u = unit?.Trim();
         if (string.IsNullOrWhiteSpace(u) || string.IsNullOrWhiteSpace(name))
+        {
+            return;
+        }
+
+        if (
+            allowMeasuringVessel
+            && Regex.IsMatch(
+                name,
+                $@"\b(?:measuring|measure)\s+{Regex.Escape(u)}s?\b",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+            )
+        )
         {
             return;
         }
@@ -1945,6 +2112,67 @@ public static partial class StepTokenValidator
             _ => null,
         };
         return spelledVal.HasValue && spelledVal.Value == val;
+    }
+
+    private static string? GetTimerUnitPattern(string? unit) =>
+        unit?.Trim().ToLowerInvariant() switch
+        {
+            "second" or "seconds" => @"\b(?:seconds?|secs?)\b",
+            "minute" or "minutes" => @"\b(?:minutes?|mins?)\b",
+            "hour" or "hours" => @"\b(?:hours?|hrs?|overnight)\b",
+            "day" or "days" => @"\b(?:days?|overnight)\b",
+            _ => null,
+        };
+
+    private static bool IsExcludedContentDropWord(string singularWord)
+    {
+        if (IsUnitOrNumberWord(singularWord) || IsTempOrTimeTextWord(singularWord))
+        {
+            return true;
+        }
+
+        return singularWord
+            is "quart"
+                or "pint"
+                or "gallon"
+                or "liter"
+                or "milliliter"
+                or "kilogram"
+                or "pinch"
+                or "dash"
+                or "clove"
+                or "slice"
+                or "bunch"
+                or "foot"
+                or "yard"
+                or "day"
+                or "percent"
+                or "four"
+                or "five"
+                or "six"
+                or "seven"
+                or "eight"
+                or "nine"
+                or "ten"
+                or "twelve"
+                or "large"
+                or "medium"
+                or "small"
+                or "fresh"
+                or "freshly"
+                or "ground"
+                or "kosher"
+                or "table"
+                or "unsalted"
+                or "extra"
+                or "virgin"
+                or "whole"
+                or "with"
+                or "from"
+                or "into"
+                or "over"
+                or "that"
+                or "this";
     }
 
     private static string GetDimensionUnitPattern(string unit) =>

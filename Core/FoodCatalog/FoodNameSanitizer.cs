@@ -17,6 +17,12 @@ public static partial class FoodNameSanitizer
     private static partial Regex EggSizePrefixRegex();
 
     [GeneratedRegex(
+        @"^(?:jumbo|extra[- ]large|large|medium|small)\s+egg\s+(?<part>whites?|yolks?)$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex EggPartSizePrefixRegex();
+
+    [GeneratedRegex(
         @"^frozen\s+(?:chopped|diced|sliced|minced|cut|whole)\s+(?<item>.+)$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
@@ -124,6 +130,16 @@ public static partial class FoodNameSanitizer
         if (EggSizePrefixRegex().IsMatch(trimmed))
         {
             return "egg";
+        }
+
+        var eggPartMatch = EggPartSizePrefixRegex().Match(trimmed);
+        if (eggPartMatch.Success)
+        {
+            return eggPartMatch
+                .Groups["part"]
+                .Value.StartsWith("white", StringComparison.OrdinalIgnoreCase)
+                ? "egg white"
+                : "egg yolk";
         }
 
         if (GarlicCloveRegex().IsMatch(trimmed))

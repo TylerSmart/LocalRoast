@@ -156,8 +156,12 @@ public static class RecipeUnitAndSectionHelpers
         decimal? maxQuantity
     )
     {
-        var cleanQty = quantity is > 0m ? quantity : null;
-        var cleanMax = maxQuantity is > 0m ? maxQuantity : null;
+        var cleanQty = quantity is > 0m
+            ? decimal.Round(quantity.Value, 4, MidpointRounding.AwayFromZero)
+            : (decimal?)null;
+        var cleanMax = maxQuantity is > 0m
+            ? decimal.Round(maxQuantity.Value, 4, MidpointRounding.AwayFromZero)
+            : (decimal?)null;
 
         if (cleanMax.HasValue && !cleanQty.HasValue)
         {
@@ -967,5 +971,69 @@ public static class RecipeUnitAndSectionHelpers
         }
 
         return results;
+    }
+
+    public static bool IsRedundantSelfCustomUnit(string? customUnitName, string? itemName)
+    {
+        if (string.IsNullOrWhiteSpace(customUnitName) || string.IsNullOrWhiteSpace(itemName))
+        {
+            return false;
+        }
+
+        var unitTrimmed = customUnitName.Trim();
+        if (unitTrimmed.Contains(' ') || unitTrimmed.Length < 2)
+        {
+            return false;
+        }
+
+        var coreName = itemName.Trim();
+        var commaOrParenIdx = coreName.IndexOfAny([',', '(', ';']);
+        if (commaOrParenIdx > 0)
+        {
+            coreName = coreName[..commaOrParenIdx];
+        }
+
+        var lastWordMatch = Regex.Match(
+            coreName,
+            @"([a-zA-Z]{2,})[^a-zA-Z]*$",
+            RegexOptions.CultureInvariant,
+            RegexTimeout
+        );
+        if (!lastWordMatch.Success)
+        {
+            return false;
+        }
+
+        return string.Equals(
+            SimpleSingularNoun(unitTrimmed),
+            SimpleSingularNoun(lastWordMatch.Groups[1].Value),
+            StringComparison.OrdinalIgnoreCase
+        );
+    }
+
+    private static string SimpleSingularNoun(string word)
+    {
+        var lower = word.Trim().ToLowerInvariant();
+        return lower switch
+        {
+            "leaves" => "leaf",
+            "loaves" => "loaf",
+            "halves" => "half",
+            _ when lower.EndsWith("ies", StringComparison.Ordinal) && lower.Length > 4 =>
+                string.Concat(lower.AsSpan(0, lower.Length - 3), "y"),
+            _ when lower.Length > 4
+                    && (
+                        lower.EndsWith("ches", StringComparison.Ordinal)
+                        || lower.EndsWith("shes", StringComparison.Ordinal)
+                        || lower.EndsWith("xes", StringComparison.Ordinal)
+                        || lower.EndsWith("zes", StringComparison.Ordinal)
+                        || lower.EndsWith("ses", StringComparison.Ordinal)
+                        || lower.EndsWith("oes", StringComparison.Ordinal)
+                    ) => lower[..^2],
+            _ when lower.EndsWith('s')
+                    && lower.Length > 3
+                    && !lower.EndsWith("ss", StringComparison.Ordinal) => lower[..^1],
+            _ => lower,
+        };
     }
 }

@@ -1158,11 +1158,20 @@ public sealed partial class IngestionRecipePipeline(
                 ing.MaxQuantity
             );
             var (cleanUnit, cleanCustomUnit) = RecipeUnitAndSectionHelpers.NormalizeUnit(ing.Unit);
+            var foodOrIngName = match.MatchedFoodItemName ?? match.ProposedFoodItemName;
             if (
                 cleanUnit == MeasurementUnit.Custom
                 && (
                     string.IsNullOrWhiteSpace(cleanCustomUnit)
                     || RecipeUnitAndSectionHelpers.IsDisallowedUnitPlaceholder(cleanCustomUnit)
+                    || RecipeUnitAndSectionHelpers.IsRedundantSelfCustomUnit(
+                        cleanCustomUnit,
+                        ing.Name
+                    )
+                    || RecipeUnitAndSectionHelpers.IsRedundantSelfCustomUnit(
+                        cleanCustomUnit,
+                        foodOrIngName
+                    )
                 )
             )
             {
@@ -1236,11 +1245,21 @@ public sealed partial class IngestionRecipePipeline(
                         rep.MaxQuantity
                     );
                     var (repUnit, repCustom) = RecipeUnitAndSectionHelpers.NormalizeUnit(rep.Unit);
+                    var repFoodOrName =
+                        repMatch?.MatchedFoodItemName ?? repMatch?.ProposedFoodItemName;
                     if (
                         repUnit == MeasurementUnit.Custom
                         && (
                             string.IsNullOrWhiteSpace(repCustom)
                             || RecipeUnitAndSectionHelpers.IsDisallowedUnitPlaceholder(repCustom)
+                            || RecipeUnitAndSectionHelpers.IsRedundantSelfCustomUnit(
+                                repCustom,
+                                rep.Name
+                            )
+                            || RecipeUnitAndSectionHelpers.IsRedundantSelfCustomUnit(
+                                repCustom,
+                                repFoodOrName
+                            )
                         )
                     )
                     {
@@ -1557,6 +1576,7 @@ public sealed partial class IngestionRecipePipeline(
     )
     {
         var matchType = decision?.MatchType?.Trim().ToLowerInvariant() ?? "new_ingredient";
+        var rejectedGenericMatch = false;
 
         if (matchType is "existing_ingredient" or "existing_food")
         {
@@ -1575,6 +1595,16 @@ public sealed partial class IngestionRecipePipeline(
                 )
                 .Select(c => foodsById.GetValueOrDefault(c.Id))
                 .FirstOrDefault(f => f is not null);
+
+            if (
+                food is not null
+                && food.Name.Equals("egg", StringComparison.OrdinalIgnoreCase)
+                && EggPartWordRegex().IsMatch(rawName)
+            )
+            {
+                food = null;
+                rejectedGenericMatch = true;
+            }
 
             if (food is not null)
             {
@@ -1668,9 +1698,10 @@ public sealed partial class IngestionRecipePipeline(
         }
 
         // New grocery ingredient (or safety exact-normalized match when decision was missing/invalid)
-        var candidateName = !string.IsNullOrWhiteSpace(decision?.Name)
-            ? decision!.Name.Trim()
-            : rawName.Trim();
+        var candidateName =
+            !rejectedGenericMatch && !string.IsNullOrWhiteSpace(decision?.Name)
+                ? decision!.Name.Trim()
+                : rawName.Trim();
         var canonical = FoodNameSanitizer.NormalizeCanonicalFoodName(candidateName);
         if (string.IsNullOrWhiteSpace(canonical))
         {
@@ -1687,6 +1718,23 @@ public sealed partial class IngestionRecipePipeline(
         )
         {
             canonical = "black pepper";
+        }
+
+        if (foodsByNormName.TryGetValue(canonical, out var exactNormalizedFood))
+        {
+            return new ReconciledMatch(
+                IsRecipeReference: false,
+                MatchedFoodItemId: exactNormalizedFood.Id,
+                MatchedFoodItemName: exactNormalizedFood.Name,
+                IsNewFoodItem: false,
+                CreateNewFoodItem: false,
+                ProposedFoodItemName: null,
+                SuggestedCategory: exactNormalizedFood.Category,
+                SuggestedIsPantryStaple: exactNormalizedFood.IsPantryStaple,
+                ReferencedRecipeTitle: null,
+                MatchedRecipeId: null,
+                MatchedRecipeTitle: null
+            );
         }
 
         var category =
@@ -1728,15 +1776,26 @@ public sealed partial class IngestionRecipePipeline(
             var secName = NormalizeSection(section.Name);
             foreach (var ing in section.Ingredients ?? [])
             {
+                var ingName = ing.Name?.Trim() ?? string.Empty;
+                var ingUnit = ing.Unit;
+                var (uKind, uCustom) = RecipeUnitAndSectionHelpers.NormalizeUnit(ingUnit);
+                if (
+                    uKind == MeasurementUnit.Custom
+                    && RecipeUnitAndSectionHelpers.IsRedundantSelfCustomUnit(uCustom, ingName)
+                )
+                {
+                    ingUnit = null;
+                }
+
                 list.Add(
                     new WorkIngredient
                     {
                         Index = idx++,
                         SectionName = secName,
-                        Name = ing.Name?.Trim() ?? string.Empty,
+                        Name = ingName,
                         Quantity = ing.Quantity,
                         MaxQuantity = ing.MaxQuantity,
-                        Unit = ing.Unit,
+                        Unit = ingUnit,
                         PrepNote = ing.PrepNote,
                         IsOptional = ing.IsOptional,
                         Replacements = ing.Replacements,
@@ -1761,7 +1820,16 @@ public sealed partial class IngestionRecipePipeline(
                 {
                     continue;
                 }
-                list.Add(new WorkStep(num++, secName, instruction.Trim()));
+
+                var cleanInstruction = LeadStepPrefixRegex()
+                    .Replace(instruction.Trim(), string.Empty)
+                    .Trim();
+                if (string.IsNullOrWhiteSpace(cleanInstruction))
+                {
+                    continue;
+                }
+
+                list.Add(new WorkStep(num++, secName, cleanInstruction));
             }
         }
         return list;
@@ -2039,10 +2107,41 @@ public sealed partial class IngestionRecipePipeline(
             return $"You omitted source instruction step(s): {string.Join("; ", omitted.Take(3))}. Extract EVERY numbered instruction step 1-to-1 verbatim without skipping any step.";
         }
 
-        var extractedStepCount = (dto.Sections ?? []).Sum(s => s.Instructions?.Count ?? 0);
-        if (extractedStepCount < numberedSteps.Count)
+        var extractedInstructions = (dto.Sections ?? [])
+            .SelectMany(s => s.Instructions ?? [])
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .ToList();
+        if (extractedInstructions.Count < numberedSteps.Count)
         {
-            return $"Source has {numberedSteps.Count} numbered instruction steps, but you extracted {extractedStepCount}. Map EVERY source numbered step 1-to-1 into sections[].instructions without skipping or merging steps.";
+            return $"Source has {numberedSteps.Count} numbered instruction steps, but you extracted {extractedInstructions.Count}. Map EVERY source numbered step 1-to-1 into sections[].instructions without skipping or merging steps.";
+        }
+
+        if (extractedInstructions.Count == numberedSteps.Count)
+        {
+            for (var k = 0; k < numberedSteps.Count; k++)
+            {
+                var srcClean = LeadUpperSectionPrefixRegex()
+                    .Replace(numberedSteps[k].Text.Trim(), string.Empty)
+                    .Trim();
+                var extClean = LeadUpperSectionPrefixRegex()
+                    .Replace(
+                        LeadStepPrefixRegex()
+                            .Replace(extractedInstructions[k].Trim(), string.Empty)
+                            .Trim(),
+                        string.Empty
+                    )
+                    .Trim();
+
+                if (
+                    srcClean.Length >= 80
+                    && srcClean.Length - extClean.Length >= 45
+                    && extClean.Length * 100 < srcClean.Length * 82
+                )
+                {
+                    var snippet = srcClean.Length > 70 ? srcClean[..70] + "..." : srcClean;
+                    return $"Step {numberedSteps[k].Num} omitted sentences from the source ('{snippet}'). Copy EVERY sentence of Step {numberedSteps[k].Num} verbatim from start to finish.";
+                }
+            }
         }
 
         return null;
@@ -2097,6 +2196,29 @@ public sealed partial class IngestionRecipePipeline(
                 {
                     issues.Add(
                         $"'{ingName}' is missing its source fruit/ingredient qualifier; include the specific name (e.g., 'lime juice', 'lemon juice', 'lemon zest')."
+                    );
+                }
+
+                if (BareEggPartRegex().IsMatch(ingName))
+                {
+                    issues.Add(
+                        $"'{ingName}' is ambiguous without 'egg'; specify 'egg white' or 'egg yolk' instead of bare '{ingName}'."
+                    );
+                }
+
+                var (unitKind, customUnitName) = RecipeUnitAndSectionHelpers.NormalizeUnit(
+                    ing.Unit
+                );
+                if (
+                    unitKind == MeasurementUnit.Custom
+                    && RecipeUnitAndSectionHelpers.IsRedundantSelfCustomUnit(
+                        customUnitName,
+                        ingName
+                    )
+                )
+                {
+                    issues.Add(
+                        $"'{ingName}' repeats its own noun in unit='{ing.Unit}'; set unit=null."
                     );
                 }
 
@@ -2168,6 +2290,24 @@ public sealed partial class IngestionRecipePipeline(
 
     [GeneratedRegex(@"^(\d+)\.\s+(.+)$", RegexOptions.CultureInvariant)]
     private static partial Regex NumberedInstructionLineRegex();
+
+    [GeneratedRegex(@"^\s*\d+[.)]\s+", RegexOptions.CultureInvariant)]
+    private static partial Regex LeadStepPrefixRegex();
+
+    [GeneratedRegex(@"^[A-Z][A-Z0-9\s,'’&-]{2,44}:\s*", RegexOptions.CultureInvariant)]
+    private static partial Regex LeadUpperSectionPrefixRegex();
+
+    [GeneratedRegex(
+        @"^(?:(?:jumbo|extra[- ]large|large|medium|small)\s+)?(?:whites?|yolks?)$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex BareEggPartRegex();
+
+    [GeneratedRegex(
+        @"\b(?:yolks?|whites?)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex EggPartWordRegex();
 
     [GeneratedRegex(@"\s+or\s+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex OrAlternativeRegex();
