@@ -22,8 +22,6 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
 
     public DbSet<RecipeStep> RecipeSteps => Set<RecipeStep>();
 
-    public DbSet<RecipeStepIngredient> RecipeStepIngredients => Set<RecipeStepIngredient>();
-
     public DbSet<RecipeStepTimer> RecipeStepTimers => Set<RecipeStepTimer>();
 
     public DbSet<Collection> Collections => Set<Collection>();

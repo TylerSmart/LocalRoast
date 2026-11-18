@@ -110,12 +110,10 @@ public sealed class McpAndPatE2ETests : E2ETestBase
                     new Dictionary<string, object?>
                     {
                         ["instruction"] = "Simmer broth with charred scallions for 20 minutes.",
-                        ["ingredientIndices"] = new[] { 0 },
                     },
                     new Dictionary<string, object?>
                     {
                         ["instruction"] = "Cook noodles and serve hot.",
-                        ["ingredientIndices"] = new[] { 1 },
                     },
                 },
             }

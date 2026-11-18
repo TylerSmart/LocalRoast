@@ -12,7 +12,6 @@ import {
   scaleAndConvert,
   scaleIngredient,
   scaleStepIngredient,
-  formatStepIngredient,
   IngredientMeasurements,
 } from './culinary-math';
 
@@ -31,15 +30,16 @@ describe('culinary-math', () => {
       [2, '283'],
     ])('scales a one-cup step by %s using the authored weight ratio', (factor, grams) => {
       expect(
-        formatStepIngredient(flour, { quantity: 1, unit: 'Cup' }, Number(factor), 'Metric'),
-      ).toBe(`${grams} g Bread flour`);
+        scaleStepIngredient(flour, { quantity: 1, unit: 'Cup' }, Number(factor), 'Metric')
+          .formattedMeasurement,
+      ).toBe(`${grams} g`);
     });
     it('keeps whole-recipe totals separate from step portions', () => {
       expect(scaleIngredient(flour, 1, 'Original').quantity).toBe(25);
       expect(scaleStepIngredient(flour, { quantity: 1, unit: 'Cup' }, 1, 'Original').quantity).toBe(
         5,
       );
-      expect(formatStepIngredient(flour, null, 2, 'Metric')).toBe('Bread flour');
+      expect(scaleStepIngredient(flour, null, 2, 'Metric').formattedMeasurement).toBe('');
     });
     it('converts same-dimension units and the reverse source ratio', () => {
       expect(

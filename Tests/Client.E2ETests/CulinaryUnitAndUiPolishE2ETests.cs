@@ -43,7 +43,6 @@ public sealed class CulinaryUnitAndUiPolishE2ETests : E2ETestBase
                         steps: [
                             {
                                 instruction: 'Mix olive oil and lemon juice.',
-                                ingredientIds: [],
                             }
                         ],
                     }),

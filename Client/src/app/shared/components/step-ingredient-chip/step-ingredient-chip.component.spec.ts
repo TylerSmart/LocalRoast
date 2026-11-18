@@ -8,9 +8,9 @@ describe('StepIngredientChipComponent', () => {
 
   const mockToken: StepIngredientToken = {
     ingredient: 'butter',
-    amount: 4,
+    amount: 1,
     unit: 'Tsp',
-    displayAmount: 1,
+    notes: 'melted',
   };
 
   beforeEach(async () => {
@@ -24,14 +24,14 @@ describe('StepIngredientChipComponent', () => {
     fixture.detectChanges();
   });
 
-  it('renders display amount and ingredient label', () => {
+  it('renders amount and ingredient label', () => {
     expect(component).toBeTruthy();
     const btn = fixture.nativeElement.querySelector('button');
     expect(btn.textContent).toContain('1 tsp butter');
   });
 
-  it('shows total in tooltip when display amount is used', () => {
-    expect(component['tooltipText']()).toContain('Total recipe uses: 4 tsp butter');
+  it('shows note in tooltip when present', () => {
+    expect(component['tooltipText']()).toContain('Note: melted');
   });
 
   it('emits edit when editable and clicked', () => {

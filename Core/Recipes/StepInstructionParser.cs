@@ -308,18 +308,14 @@ public static partial class StepInstructionParser
                     }
                     else
                     {
-                        var amt = ing.DisplayAmount ?? ing.Amount;
-                        var maxAmt = ing.DisplayAmount.HasValue ? null : ing.MaxAmount;
-                        var unit = ing.DisplayUnit ?? ing.Unit;
-                        var customUnitName = !string.IsNullOrEmpty(ing.DisplayCustomUnitName)
-                            ? ing.DisplayCustomUnitName
-                            : (
-                                !string.IsNullOrEmpty(ing.CustomUnitName)
-                                && !ing.DisplayUnit.HasValue
-                                && (!ing.Unit.HasValue || ing.Unit == MeasurementUnit.Custom)
-                                    ? ing.CustomUnitName
-                                    : null
-                            );
+                        var amt = ing.Amount;
+                        var maxAmt = ing.MaxAmount;
+                        var unit = ing.Unit;
+                        var customUnitName =
+                            !string.IsNullOrEmpty(ing.CustomUnitName)
+                            && (!ing.Unit.HasValue || ing.Unit == MeasurementUnit.Custom)
+                                ? ing.CustomUnitName
+                                : null;
                         var unitStr = !string.IsNullOrEmpty(customUnitName)
                             ? customUnitName
                             : (
@@ -853,7 +849,7 @@ public static partial class StepInstructionParser
                         sanitizedToken == ingToken ? segment.Text : FormatToken(sanitizedToken)
                     );
                     if (
-                        (sanitizedToken.Amount.HasValue || sanitizedToken.DisplayAmount.HasValue)
+                        sanitizedToken.Amount.HasValue
                         && i + 2 < segments.Count
                         && segments[i + 1].Token is null
                         && OfTheConnectorRegex().IsMatch(segments[i + 1].Text)
@@ -976,7 +972,7 @@ public static partial class StepInstructionParser
             return;
         }
 
-        var tokenAmount = token.DisplayAmount ?? token.Amount;
+        var tokenAmount = token.Amount;
         if (!tokenAmount.HasValue)
         {
             return;
@@ -1003,8 +999,8 @@ public static partial class StepInstructionParser
             RegexTimeout
         );
         var (parsedUnit, parsedCustom) = RecipeUnitAndSectionHelpers.NormalizeUnit(rawUnit.Trim());
-        var tokenUnit = token.DisplayUnit ?? token.Unit;
-        var tokenCustom = token.DisplayCustomUnitName ?? token.CustomUnitName;
+        var tokenUnit = token.Unit;
+        var tokenCustom = token.CustomUnitName;
 
         var sameUnit =
             parsedUnit.HasValue
@@ -1060,10 +1056,7 @@ public static partial class StepInstructionParser
                         trimmedDisplay,
                         token.Ingredient,
                         StringComparison.OrdinalIgnoreCase
-                    )
-                    && !token.Amount.HasValue
-                    && !token.DisplayAmount.HasValue
-                    && string.IsNullOrWhiteSpace(token.DisplayCustomUnitName)
+                    ) && !token.Amount.HasValue
                 )
                 {
                     return token with { DisplayText = null };
@@ -1076,11 +1069,7 @@ public static partial class StepInstructionParser
             }
         }
 
-        if (
-            !token.Amount.HasValue
-            && !token.DisplayAmount.HasValue
-            && !string.IsNullOrWhiteSpace(token.Ingredient)
-        )
+        if (!token.Amount.HasValue && !string.IsNullOrWhiteSpace(token.Ingredient))
         {
             var ingTrimmed = token.Ingredient.Trim();
             if (
@@ -1107,9 +1096,7 @@ public static partial class StepInstructionParser
             || segments[index + 1].Token is not null
             || (
                 !token.Amount.HasValue
-                && !token.DisplayAmount.HasValue
                 && !token.Unit.HasValue
-                && !token.DisplayUnit.HasValue
                 && string.IsNullOrWhiteSpace(token.CustomUnitName)
             )
         )
@@ -1131,10 +1118,10 @@ public static partial class StepInstructionParser
         var matchesLastIngWord =
             ingWords.Length > 0 && MatchesWordOrPlural(trailingWord, ingWords[^1]);
 
-        var unitWord = token.DisplayCustomUnitName ?? token.CustomUnitName;
+        var unitWord = token.CustomUnitName;
         if (string.IsNullOrWhiteSpace(unitWord))
         {
-            var effectiveUnit = token.DisplayUnit ?? token.Unit;
+            var effectiveUnit = token.Unit;
             unitWord = effectiveUnit
                 is MeasurementUnit.Clove
                     or MeasurementUnit.Slice
@@ -1262,11 +1249,7 @@ public static partial class StepInstructionParser
             return text;
         }
 
-        var hasTokenQuantityOrUnit =
-            token.Amount.HasValue
-            || token.DisplayAmount.HasValue
-            || token.Unit.HasValue
-            || token.DisplayUnit.HasValue;
+        var hasTokenQuantityOrUnit = token.Amount.HasValue || token.Unit.HasValue;
 
         if (!hasTokenQuantityOrUnit)
         {
@@ -1326,242 +1309,5 @@ public static partial class StepInstructionParser
                 second.Ingredient?.Trim(),
                 StringComparison.OrdinalIgnoreCase
             );
-    }
-
-    public static int FindBestMatchingIngredientIndex(
-        StepIngredientToken token,
-        string? stepSectionName,
-        IReadOnlyList<IngredientCandidateInfo> candidates,
-        IReadOnlyCollection<int>? currentStepIndices = null,
-        string? stepInstruction = null
-    )
-    {
-        if (candidates is null || candidates.Count == 0)
-        {
-            return -1;
-        }
-
-        if (token.IngredientId.HasValue)
-        {
-            var idMatch = candidates.FirstOrDefault(c => c.Id == token.IngredientId.Value);
-            if (idMatch.Index >= 0)
-            {
-                return idMatch.Index;
-            }
-        }
-
-        if (string.IsNullOrWhiteSpace(token.Ingredient))
-        {
-            return -1;
-        }
-
-        var tokenName = token.Ingredient.Trim();
-        var matching = new List<(IngredientCandidateInfo Candidate, int NameScore)>();
-
-        foreach (var c in candidates)
-        {
-            var disp = c.DisplayName?.Trim();
-            var alt = c.CanonicalOrMatchedName?.Trim();
-            var nameScore = 0;
-
-            if (!string.IsNullOrWhiteSpace(disp))
-            {
-                if (string.Equals(tokenName, disp, StringComparison.OrdinalIgnoreCase))
-                {
-                    nameScore = 100;
-                }
-                else if (
-                    disp.Contains(tokenName, StringComparison.OrdinalIgnoreCase)
-                    || tokenName.Contains(disp, StringComparison.OrdinalIgnoreCase)
-                )
-                {
-                    nameScore = 50;
-                }
-            }
-
-            if (nameScore < 90 && !string.IsNullOrWhiteSpace(alt))
-            {
-                if (string.Equals(tokenName, alt, StringComparison.OrdinalIgnoreCase))
-                {
-                    nameScore = Math.Max(nameScore, 90);
-                }
-                else if (
-                    alt.Contains(tokenName, StringComparison.OrdinalIgnoreCase)
-                    || tokenName.Contains(alt, StringComparison.OrdinalIgnoreCase)
-                )
-                {
-                    nameScore = Math.Max(nameScore, 40);
-                }
-            }
-
-            if (
-                nameScore == 0
-                && RecipeUnitAndSectionHelpers.IsEggPartMatch(tokenName, disp, alt, candidates)
-            )
-            {
-                nameScore =
-                    !string.IsNullOrWhiteSpace(c.PreparationNote)
-                    && c.PreparationNote.Contains("separated", StringComparison.OrdinalIgnoreCase)
-                        ? 85
-                        : 75;
-            }
-
-            if (nameScore > 0)
-            {
-                matching.Add((c, nameScore));
-            }
-        }
-
-        if (matching.Count == 0)
-        {
-            return -1;
-        }
-
-        if (matching.Count == 1)
-        {
-            return matching[0].Candidate.Index;
-        }
-
-        var stepSectionNorm = RecipeUnitAndSectionHelpers.NormalizeSectionName(stepSectionName);
-        var bestScore = int.MinValue;
-        var bestIdx = matching[0].Candidate.Index;
-
-        foreach (var (cand, nameScore) in matching)
-        {
-            var score = nameScore;
-            var candSectionNorm = RecipeUnitAndSectionHelpers.NormalizeSectionName(
-                cand.SectionName
-            );
-
-            if (!string.IsNullOrEmpty(stepSectionNorm) && !string.IsNullOrEmpty(candSectionNorm))
-            {
-                if (
-                    string.Equals(
-                        stepSectionNorm,
-                        candSectionNorm,
-                        StringComparison.OrdinalIgnoreCase
-                    )
-                )
-                {
-                    score += 250;
-                }
-                else if (
-                    candSectionNorm.Contains(stepSectionNorm, StringComparison.OrdinalIgnoreCase)
-                    || stepSectionNorm.Contains(candSectionNorm, StringComparison.OrdinalIgnoreCase)
-                )
-                {
-                    score += 180;
-                }
-                else
-                {
-                    score -= 100;
-                }
-            }
-            else if (
-                string.IsNullOrEmpty(stepSectionNorm) && !string.IsNullOrEmpty(candSectionNorm)
-            )
-            {
-                if (
-                    !string.IsNullOrWhiteSpace(stepInstruction)
-                    && stepInstruction.Contains(candSectionNorm, StringComparison.OrdinalIgnoreCase)
-                )
-                {
-                    score += 80;
-                }
-            }
-
-            if (token.Amount.HasValue && cand.Quantity.HasValue && cand.Quantity.Value > 0)
-            {
-                var tokenAmt = token.Amount.Value;
-                var candQty = cand.Quantity.Value;
-                var candMax = cand.MaxQuantity ?? candQty;
-
-                decimal? convertedAmt = null;
-                if (token.Unit == cand.Unit)
-                {
-                    convertedAmt = tokenAmt;
-                }
-                else if (token.Unit.HasValue && cand.Unit.HasValue)
-                {
-                    if (
-                        CulinaryMath.TryConvertQuantity(
-                            tokenAmt,
-                            token.Unit.Value,
-                            cand.Unit.Value,
-                            out var cAmt
-                        )
-                    )
-                    {
-                        convertedAmt = cAmt;
-                    }
-                }
-
-                if (convertedAmt.HasValue)
-                {
-                    var val = convertedAmt.Value;
-                    var tolerance = Math.Max(0.001m, candQty * 0.01m);
-
-                    if (Math.Abs(val - candQty) <= tolerance)
-                    {
-                        score += 150;
-                    }
-                    else if (
-                        cand.MaxQuantity.HasValue
-                        && val >= candQty - tolerance
-                        && val <= candMax + tolerance
-                    )
-                    {
-                        score += 120;
-                    }
-                    else if (val < candQty - tolerance)
-                    {
-                        score += 60;
-                    }
-                    else if (val > candMax + tolerance)
-                    {
-                        score -= 120;
-                    }
-                }
-            }
-
-            if (token.Unit.HasValue && cand.Unit.HasValue && token.Unit == cand.Unit)
-            {
-                score += 40;
-            }
-
-            if (currentStepIndices?.Contains(cand.Index) == true)
-            {
-                score += 30;
-            }
-
-            var hasRemaining =
-                !string.IsNullOrWhiteSpace(stepInstruction)
-                && Regex.IsMatch(
-                    stepInstruction,
-                    @"\bremaining\b",
-                    RegexOptions.IgnoreCase,
-                    RegexTimeout
-                );
-            var candIsDivided =
-                !string.IsNullOrWhiteSpace(cand.PreparationNote)
-                && cand.PreparationNote.Contains("divided", StringComparison.OrdinalIgnoreCase);
-
-            if (hasRemaining)
-            {
-                score += candIsDivided ? 150 : -80;
-            }
-            else if (candIsDivided)
-            {
-                score += 20;
-            }
-
-            if (score > bestScore)
-            {
-                bestScore = score;
-                bestIdx = cand.Index;
-            }
-        }
-
-        return bestIdx;
     }
 }

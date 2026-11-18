@@ -215,7 +215,6 @@ public sealed class IngestionIntegrationTests
                 new IngestionDraftStepDto(
                     SectionName: null,
                     Instruction: "Whisk ingredients together until smooth and creamy.",
-                    IngredientIndices: [0],
                     Timers: null,
                     ImagePath: null
                 ),
@@ -284,7 +283,7 @@ public sealed class IngestionIntegrationTests
     }
 
     [TestMethod]
-    public async Task DraftApprove_PublishesStepTokensWithIngredientIds()
+    public async Task DraftApprove_PublishesStepTokens()
     {
         await AuthenticateAsync(_client);
         var job = await EnqueueRawTextJobAsync(_client, "Inline Roux");
@@ -309,7 +308,7 @@ public sealed class IngestionIntegrationTests
                     OriginalRawText: "2 tablespoons butter"
                 ),
             ],
-            Steps: [new IngestionDraftStepDto(Instruction: instruction, IngredientIndices: [0, 1])]
+            Steps: [new IngestionDraftStepDto(Instruction: instruction)]
         );
 
         var approveResp = await _client.PostAsJsonAsync(
@@ -328,15 +327,12 @@ public sealed class IngestionIntegrationTests
             $"/api/recipes/{published.Id}"
         );
         Assert.IsNotNull(recipe);
-        var flour = recipe.Ingredients.Single(i => i.DisplayName == "flour");
-        var butter = recipe.Ingredients.Single(i => i.DisplayName == "butter");
         var step = recipe.Steps.Single();
         Assert.AreEqual(instruction, step.Instruction);
         var tokens = StepInstructionParser.ExtractTokens(step.Instruction);
         Assert.AreEqual(2, tokens.Count);
         Assert.AreEqual(2m, ((StepIngredientToken)tokens[0]).Amount);
         Assert.AreEqual(0.25m, ((StepIngredientToken)tokens[1]).Amount);
-        CollectionAssert.AreEquivalent(new[] { flour.Id, butter.Id }, step.IngredientIds.ToArray());
     }
 
     [TestMethod]
@@ -1241,7 +1237,6 @@ public sealed class IngestionIntegrationTests
             Assert.IsNotNull(recipe);
             var flour = recipe.Ingredients[0];
             Assert.AreEqual(25m, flour.AlternativeMeasurement!.Quantity);
-            Assert.AreEqual(1m, recipe.Steps[0].IngredientAmounts![0].Measurement.Quantity);
             var tokens = StepInstructionParser.ExtractTokens(recipe.Steps[0].Instruction);
             var inline = (StepIngredientToken)tokens.Single();
             Assert.AreEqual("bread flour", inline.Ingredient);
@@ -1374,19 +1369,24 @@ public sealed class IngestionIntegrationTests
         );
         Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
 
-        var unknown = new IngestionExtractedDraftDto(
+        var invalidTokenStep = new IngestionExtractedDraftDto(
             "Rice",
             Ingredients: [new(DisplayName: "rice")],
-            Steps: [new(Instruction: "Cook rice.", IngredientIndices: [3])]
+            Steps:
+            [
+                new(
+                    Instruction: "Cook ||{\"ingredient\": \"rice\", \"amount\": 0, \"unit\": \"cup\"}||."
+                ),
+            ]
         );
         response = await _client.PostAsJsonAsync(
             $"/api/ingestion/jobs/{id}/review-diagnostics",
-            new IngestionDraftDiagnosticsRequest(unknown)
+            new IngestionDraftDiagnosticsRequest(invalidTokenStep)
         );
         Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
         var diagnostics = await response.Content.ReadFromJsonAsync<IngestionReviewDiagnosticsDto>();
         Assert.IsNotNull(diagnostics);
-        Assert.IsTrue(diagnostics.ValidationIssues.Any(issue => issue.Contains("out of range")));
+        Assert.IsTrue(diagnostics.ValidationIssues.Any(issue => issue.Contains("non-positive")));
     }
 
     [TestMethod]
@@ -1641,7 +1641,7 @@ public sealed class IngestionIntegrationTests
                     OriginalRawText: "2 cups flour"
                 ),
             ],
-            Steps: [new IngestionDraftStepDto(Instruction: "Mix flour.", IngredientIndices: [0])]
+            Steps: [new IngestionDraftStepDto(Instruction: "Mix flour.")]
         );
 
         using (var scope = _factory.Services.CreateScope())
@@ -1796,8 +1796,7 @@ public sealed class IngestionIntegrationTests
             Steps:
             [
                 new IngestionDraftStepDto(
-                    Instruction: "Stir sugar.",
-                    IngredientIndices: [99] // Invalid: index out of range
+                    Instruction: "Stir ||{\"ingredient\": \"sugar\", \"amount\": 0, \"unit\": \"cup\"}||."
                 ),
             ]
         );

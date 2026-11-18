@@ -355,7 +355,7 @@ public sealed class AccountIntegrationTests
                     PreparationNote: null
                 ),
             ],
-            Steps: [new RecipeStepInput(null, "Grill sandwich.", [0])]
+            Steps: [new RecipeStepInput(null, "Grill sandwich.")]
         );
         var recipeRes = await _client.PostAsJsonAsync("/api/recipes", recipeReq);
         Assert.AreEqual(HttpStatusCode.Created, recipeRes.StatusCode);
@@ -465,10 +465,7 @@ public sealed class AccountIntegrationTests
                         DisplayName: "rolled oats"
                     ),
                 ],
-                Steps:
-                [
-                    new IngestionDraftStepDto(Instruction: "Cook oats.", IngredientIndices: [0]),
-                ]
+                Steps: [new IngestionDraftStepDto(Instruction: "Cook oats.")]
             )
         );
         Assert.AreEqual(HttpStatusCode.Created, approveRes.StatusCode);

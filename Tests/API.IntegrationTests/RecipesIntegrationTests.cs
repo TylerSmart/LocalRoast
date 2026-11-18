@@ -111,13 +111,11 @@ public sealed class RecipesIntegrationTests
                 new RecipeStepInput(
                     SectionName: "Prep",
                     Instruction: "Mix softened butter with minced garlic.",
-                    IngredientIndices: [1, 2],
                     Timers: []
                 ),
                 new RecipeStepInput(
                     SectionName: "Roast",
                     Instruction: "Rub butter under skin and roast chicken at 425F.",
-                    IngredientIndices: [0],
                     Timers:
                     [
                         new RecipeStepTimerInput(DurationSeconds: 3000, Label: "Roast in oven"),
@@ -138,11 +136,6 @@ public sealed class RecipesIntegrationTests
         Assert.AreEqual(2, created.Steps.Count);
         Assert.AreEqual(1, created.Steps[1].Timers.Count);
         Assert.AreEqual("Roast in oven", created.Steps[1].Timers[0].Label);
-
-        // Verify ingredient reference indices in step 0 mapped to ingredient IDs
-        Assert.AreEqual(2, created.Steps[0].IngredientIds.Count);
-        Assert.AreEqual(created.Ingredients[1].Id, created.Steps[0].IngredientIds[0]);
-        Assert.AreEqual(created.Ingredients[2].Id, created.Steps[0].IngredientIds[1]);
 
         // List endpoint returns summary
         var listRes = await _client.GetAsync("/api/recipes?search=garlic");
@@ -174,14 +167,7 @@ public sealed class RecipesIntegrationTests
                     DisplayName: "Bread"
                 ),
             ],
-            Steps:
-            [
-                new RecipeStepInput(
-                    SectionName: null,
-                    Instruction: "Toast bread in toaster.",
-                    IngredientIndices: [0]
-                ),
-            ]
+            Steps: [new RecipeStepInput(SectionName: null, Instruction: "Toast bread in toaster.")]
         );
 
         var created = await (
@@ -220,8 +206,7 @@ public sealed class RecipesIntegrationTests
             [
                 new RecipeStepInput(
                     SectionName: null,
-                    Instruction: "Toast bread, then spread butter.",
-                    IngredientIndices: [0, 1]
+                    Instruction: "Toast bread, then spread butter."
                 ),
             ]
         );
@@ -270,8 +255,7 @@ public sealed class RecipesIntegrationTests
             [
                 new RecipeStepInput(
                     SectionName: null,
-                    Instruction: "Slice onion and pickle in vinegar.",
-                    IngredientIndices: [0]
+                    Instruction: "Slice onion and pickle in vinegar."
                 ),
             ]
         );
@@ -312,8 +296,7 @@ public sealed class RecipesIntegrationTests
             [
                 new RecipeStepInput(
                     SectionName: null,
-                    Instruction: "Serve pork with pickled onions.",
-                    IngredientIndices: [0, 1]
+                    Instruction: "Serve pork with pickled onions."
                 ),
             ]
         );
@@ -429,7 +412,7 @@ public sealed class RecipesIntegrationTests
                 ))
                 .ToList(),
             Steps: created
-                .Steps.Select(s => new RecipeStepInput(s.SectionName, s.Instruction, [0], []))
+                .Steps.Select(s => new RecipeStepInput(s.SectionName, s.Instruction, []))
                 .ToList()
         );
 
@@ -520,7 +503,6 @@ public sealed class RecipesIntegrationTests
                 new RecipeStepInput(
                     SectionName: "Bake",
                     Instruction: "Bake in hot skillet.",
-                    IngredientIndices: [0, 1],
                     Timers: [new RecipeStepTimerInput(1500, "Bake timer")]
                 ),
             ]
@@ -575,7 +557,6 @@ public sealed class RecipesIntegrationTests
                 new RecipeStepInput(
                     SectionName: "Bake",
                     Instruction: "Bake in hot skillet until crust is deep golden.",
-                    IngredientIndices: [0, 1, 2],
                     Timers: [new RecipeStepTimerInput(1500, "Bake timer")]
                 ),
             ]

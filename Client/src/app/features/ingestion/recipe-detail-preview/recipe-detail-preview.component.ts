@@ -34,7 +34,6 @@ import {
   formatIngredientUses,
   ingredientUses,
   isIngredientDivided,
-  stepIngredientCallouts,
 } from '../../../core/utils/step-instruction';
 import { shouldShowTimerLabel } from '../../../core/utils/step-token-parser';
 import { StepInstructionComponent } from '../../../shared/components/step-instruction/step-instruction.component';
@@ -48,7 +47,6 @@ export interface ScaledPreviewIngredientItem {
 export interface ScaledPreviewStepItem {
   step: RecipePreviewStep;
   instructionStep: NumberedInstructionStep;
-  ingredientCallouts: { id: string; label: string }[];
 }
 
 export interface PreviewIngredientSectionGroup {
@@ -146,16 +144,11 @@ export class RecipeDetailPreviewComponent {
     Array.from(this.scaledIngredientsMap().values()).map((item) => item.ingredient),
   );
 
-  /** Preview steps with inline amounts keyed by preview ingredient ids (`ing-N`). */
   readonly instructionSteps = computed<NumberedInstructionStep[]>(() => {
-    const map = this.scaledIngredientsMap();
     return this.recipe().steps.map((step) => ({
       stepNumber: step.stepNumber,
+      sectionName: step.sectionName,
       instruction: step.instruction,
-      ingredientIds: (step.ingredientIndices ?? []).flatMap((idx) => {
-        const item = map.get(idx);
-        return item ? [item.ingredient.id] : [];
-      }),
     }));
   });
 
@@ -188,7 +181,6 @@ export class RecipeDetailPreviewComponent {
 
   readonly groupedSteps = computed<PreviewStepSectionGroup[]>(() => {
     const r = this.recipe();
-    const map = this.scaledIngredientsMap();
     const instructionSteps = this.instructionSteps();
     const sectionsMap = new Map<string, ScaledPreviewStepItem[]>();
 
@@ -199,26 +191,9 @@ export class RecipeDetailPreviewComponent {
         sectionsMap.set(section, []);
       }
 
-      const callouts = stepIngredientCallouts(
-        {
-          ...instructionStep,
-          ingredientIds: instructionStep.ingredientIds ?? [],
-          ingredientAmounts: (step.ingredientAmounts ?? []).flatMap((amount) => {
-            const item = map.get(amount.ingredientIndex);
-            return item
-              ? [{ ingredientId: item.ingredient.id, measurement: amount.measurement }]
-              : [];
-          }),
-        },
-        this.displayIngredients(),
-        this.scaleFactor(),
-        this.targetSystem(),
-      );
-
       sectionsMap.get(section)!.push({
         step,
         instructionStep,
-        ingredientCallouts: callouts,
       });
     }
 

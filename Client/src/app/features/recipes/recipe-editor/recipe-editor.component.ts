@@ -50,14 +50,7 @@ import { RecipeService } from '../../../core/services/recipe/recipe.service';
 import { TaxonomyService } from '../../../core/services/taxonomy/taxonomy.service';
 import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialog/confirm-dialog.component';
 import { MeasurementEditorComponent } from '../../../shared/components/measurement-editor/measurement-editor.component';
-import {
-  buildStepAmounts,
-  createStepAmounts,
-  getStepAmounts,
-  ingredientMeasurementValidator,
-  remapStepIngredients,
-  toggleStepIngredient,
-} from '../../../core/utils/recipe-measurement-forms';
+import { ingredientMeasurementValidator } from '../../../core/utils/recipe-measurement-forms';
 import {
   SearchableSelectComponent,
   SearchableSelectOption,
@@ -114,7 +107,6 @@ interface StepFormValue {
   sectionName?: string | null;
   instruction: string;
   imagePath?: string | null;
-  ingredientIndices?: number[];
   timers?: TimerFormValue[];
 }
 
@@ -362,10 +354,8 @@ export class RecipeEditorComponent implements OnInit {
 
     // Populate Ingredients
     this.ingredientsArray.clear();
-    const ingredientIdToIndex = new Map<string, number>();
 
-    detail.ingredients.forEach((ing, index) => {
-      ingredientIdToIndex.set(ing.id, index);
+    detail.ingredients.forEach((ing) => {
       const isSubRecipe = !!ing.linkedRecipeId;
       const group = this.fb.group(
         {
@@ -399,10 +389,6 @@ export class RecipeEditorComponent implements OnInit {
     // Populate Steps
     this.stepsArray.clear();
     detail.steps.forEach((step) => {
-      const selectedIndices = step.ingredientIds
-        .map((id) => ingredientIdToIndex.get(id))
-        .filter((idx): idx is number => idx !== undefined);
-
       const timersArray = this.fb.array<FormGroup>([]);
       const seenTimers = new Set<string>();
       step.timers.forEach((t) => {
@@ -424,22 +410,11 @@ export class RecipeEditorComponent implements OnInit {
         sectionName: [step.sectionName ?? '', Validators.maxLength(150)],
         instruction: [step.instruction, [Validators.required, Validators.maxLength(4000)]],
         imagePath: [step.imagePath ?? null],
-        ingredientIndices: [selectedIndices],
-        ingredientAmounts: createStepAmounts(
-          selectedIndices,
-          (step.ingredientAmounts ?? []).flatMap((a) => {
-            const index = ingredientIdToIndex.get(a.ingredientId);
-            return index === undefined
-              ? []
-              : [{ ingredientIndex: index, measurement: a.measurement }];
-          }),
-        ),
         timers: timersArray,
       });
 
-      const originMeta = deriveStepMetadataFromInstruction(step.instruction, []);
+      const originMeta = deriveStepMetadataFromInstruction(step.instruction);
       this.loadedStepTokenOrigins.set(stepGroup, {
-        hasIngredientTokens: originMeta.hasIngredientTokens,
         hasTimerTokens: originMeta.hasTimerTokens,
       });
 
@@ -721,7 +696,6 @@ export class RecipeEditorComponent implements OnInit {
 
   removeIngredient(index: number): void {
     this.ingredientsArray.removeAt(index);
-    remapStepIngredients(this.stepsArray, (i) => (i === index ? null : i > index ? i - 1 : i));
   }
 
   moveIngredientUp(index: number): void {
@@ -729,9 +703,6 @@ export class RecipeEditorComponent implements OnInit {
       const item = this.ingredientsArray.at(index);
       this.ingredientsArray.removeAt(index);
       this.ingredientsArray.insert(index - 1, item);
-      remapStepIngredients(this.stepsArray, (i) =>
-        i === index ? index - 1 : i === index - 1 ? index : i,
-      );
     }
   }
 
@@ -740,9 +711,6 @@ export class RecipeEditorComponent implements OnInit {
       const item = this.ingredientsArray.at(index);
       this.ingredientsArray.removeAt(index);
       this.ingredientsArray.insert(index + 1, item);
-      remapStepIngredients(this.stepsArray, (i) =>
-        i === index ? index + 1 : i === index + 1 ? index : i,
-      );
     }
   }
 
@@ -796,8 +764,6 @@ export class RecipeEditorComponent implements OnInit {
       sectionName: ['', Validators.maxLength(150)],
       instruction: ['', [Validators.required, Validators.maxLength(4000)]],
       imagePath: [null as string | null],
-      ingredientIndices: [[] as number[]],
-      ingredientAmounts: createStepAmounts([]),
       timers: this.fb.array<FormGroup>([]),
     });
     this.stepsArray.push(stepGroup);
@@ -841,14 +807,6 @@ export class RecipeEditorComponent implements OnInit {
   removeTimerFromStep(stepIndex: number, timerIndex: number): void {
     const timers = this.getTimersArray(stepIndex);
     timers.removeAt(timerIndex);
-  }
-
-  toggleStepIngredientCallout(stepIndex: number, ingredientIndex: number): void {
-    toggleStepIngredient(this.stepsArray.at(stepIndex), ingredientIndex);
-  }
-
-  getStepAmountsArray(stepIndex: number) {
-    return getStepAmounts(this.stepsArray.at(stepIndex));
   }
 
   getStepDialogIngredients(): StepDialogIngredientOption[] {
@@ -930,7 +888,6 @@ export class RecipeEditorComponent implements OnInit {
     }));
 
     // Map steps
-    const dialogIngredientOptions = this.getStepDialogIngredients();
     const rawSteps = (val.steps || []) as unknown as StepFormValue[];
     const mappedSteps: RecipeStepInput[] = rawSteps.map((s, index) => {
       const stepGroup = this.stepsArray.at(index);
@@ -946,11 +903,7 @@ export class RecipeEditorComponent implements OnInit {
 
       const resolved = resolveStepMetadataForPayload(
         s.instruction,
-        dialogIngredientOptions,
-        s.sectionName,
         this.loadedStepTokenOrigins.get(stepGroup),
-        s.ingredientIndices || [],
-        buildStepAmounts(stepGroup),
         fallbackTimers,
       );
 
@@ -958,8 +911,6 @@ export class RecipeEditorComponent implements OnInit {
         sectionName: s.sectionName?.trim() || null,
         instruction: (s.instruction || '').trim(),
         imagePath: s.imagePath?.trim() || null,
-        ingredientIndices: resolved.ingredientIndices,
-        ingredientAmounts: resolved.ingredientAmounts,
         timers: resolved.timers,
       };
     });

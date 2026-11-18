@@ -93,9 +93,7 @@ public record RecipeStepDto(
     string? SectionName,
     string Instruction,
     string? ImagePath,
-    IReadOnlyList<Guid> IngredientIds,
-    IReadOnlyList<RecipeStepTimerDto> Timers,
-    IReadOnlyList<RecipeStepIngredientAmountDto>? IngredientAmounts = null
+    IReadOnlyList<RecipeStepTimerDto> Timers
 );
 
 public record DetectedStepAmountDto(
@@ -235,10 +233,8 @@ public record RecipeStepTimerInput(
 public record RecipeStepInput(
     [MaxLength(150)] string? SectionName = null,
     [Required, MaxLength(4000)] string Instruction = "",
-    IReadOnlyList<int>? IngredientIndices = null,
     IReadOnlyList<RecipeStepTimerInput>? Timers = null,
-    [MaxLength(500)] string? ImagePath = null,
-    IReadOnlyList<RecipeStepIngredientAmountInput>? IngredientAmounts = null
+    [MaxLength(500)] string? ImagePath = null
 );
 
 public record UpsertRecipeRequest(

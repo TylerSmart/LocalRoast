@@ -26,24 +26,12 @@ export class StepIngredientChipComponent {
   });
 
   protected readonly isScaled = computed(() => {
-    return (
-      (this.factor() !== 1 || this.unitSystem() !== 'Original') &&
-      (this.token().displayAmount ?? this.token().amount) != null
-    );
+    return (this.factor() !== 1 || this.unitSystem() !== 'Original') && this.token().amount != null;
   });
 
   protected readonly tooltipText = computed(() => {
     const t = this.token();
     const parts: string[] = [];
-
-    if (t.displayAmount != null && t.amount != null) {
-      const totalDisplay = formatTokenDisplay(
-        { ...t, displayAmount: t.amount },
-        this.factor(),
-        this.unitSystem(),
-      );
-      parts.push(`Total recipe uses: ${totalDisplay}`);
-    }
 
     if (t.notes) {
       parts.push(`Note: ${t.notes}`);

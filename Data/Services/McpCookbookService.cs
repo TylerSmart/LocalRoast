@@ -219,45 +219,13 @@ public sealed class McpCookbookService(
             return null;
         }
 
-        var ingredientMap = detail.Ingredients.ToDictionary(i => i.Id);
-
         var mcpSteps = detail
-            .Steps.Select(s =>
-            {
-                var callouts = s
-                    .IngredientIds.Where(ingredientMap.ContainsKey)
-                    .Select(id =>
-                    {
-                        var ing = ingredientMap[id];
-                        var amount = s
-                            .IngredientAmounts?.FirstOrDefault(a => a.IngredientId == id)
-                            ?.Measurement;
-                        var scaled = CulinaryMath.ScaleStepIngredient(
-                            ing,
-                            amount,
-                            1,
-                            UnitSystem.Original
-                        );
-                        return new McpStepIngredientCalloutDto(
-                            IngredientId: ing.Id,
-                            DisplayName: ing.DisplayName,
-                            Quantity: scaled.Quantity,
-                            MaxQuantity: scaled.MaxQuantity,
-                            Unit: scaled.Unit,
-                            CustomUnitName: amount?.CustomUnitName,
-                            PreparationNote: ing.PreparationNote
-                        );
-                    })
-                    .ToList();
-
-                return new McpRecipeStepDetailDto(
-                    StepNumber: s.StepNumber,
-                    SectionName: s.SectionName,
-                    Instruction: s.Instruction,
-                    StepIngredients: callouts,
-                    Timers: s.Timers
-                );
-            })
+            .Steps.Select(s => new McpRecipeStepDetailDto(
+                StepNumber: s.StepNumber,
+                SectionName: s.SectionName,
+                Instruction: s.Instruction,
+                Timers: s.Timers
+            ))
             .ToList();
 
         return new McpRecipeDetailDto(
@@ -607,22 +575,14 @@ public sealed class McpCookbookService(
                     );
                 }
 
-                var validIndices = (s.IngredientIndices ?? [])
-                    .Where(idx => idx >= 0 && idx < ingCount)
-                    .Distinct()
-                    .OrderBy(idx => idx)
-                    .ToList();
-
                 stepsInput.Add(
                     new RecipeStepInput(
                         SectionName: string.IsNullOrWhiteSpace(s.SectionName)
                             ? null
                             : s.SectionName.Trim(),
                         Instruction: instruction,
-                        IngredientIndices: validIndices,
                         Timers: timers,
-                        ImagePath: null,
-                        IngredientAmounts: s.IngredientAmounts
+                        ImagePath: null
                     )
                 );
             }

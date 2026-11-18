@@ -172,9 +172,7 @@ public sealed record ValidatedStage4StepResult(
     JsonArray SanitizedTokensJson,
     IReadOnlyList<Stage4ParsedToken> ParsedTokens,
     string CompiledInstruction,
-    IReadOnlyList<int> IngredientIndices,
     IReadOnlyList<RecipeStepTimerInput> Timers,
-    IReadOnlyList<RecipeStepIngredientAmountInput> IngredientAmounts,
     IReadOnlyList<string> ValidationWarnings
 );
 

@@ -1539,60 +1539,6 @@ namespace App.Data.Migrations
                     b.ToTable("RecipeSteps", (string)null);
                 });
 
-            modelBuilder.Entity("App.Data.Entities.RecipeStepIngredient", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<string>("CreatedBy")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
-
-                    b.Property<string>("CustomUnitName")
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<decimal?>("MaxQuantity")
-                        .HasPrecision(10, 4)
-                        .HasColumnType("decimal(10,4)");
-
-                    b.Property<DateTimeOffset>("ModifiedAt")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<string>("ModifiedBy")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
-
-                    b.Property<decimal?>("Quantity")
-                        .HasPrecision(10, 4)
-                        .HasColumnType("decimal(10,4)");
-
-                    b.Property<Guid>("RecipeIngredientId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("RecipeStepId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("Unit")
-                        .HasMaxLength(32)
-                        .HasColumnType("nvarchar(32)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("RecipeIngredientId");
-
-                    b.HasIndex("RecipeStepId", "RecipeIngredientId")
-                        .IsUnique();
-
-                    b.ToTable("RecipeStepIngredients", (string)null);
-                });
-
             modelBuilder.Entity("App.Data.Entities.RecipeStepTimer", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2264,25 +2210,6 @@ namespace App.Data.Migrations
                     b.Navigation("Recipe");
                 });
 
-            modelBuilder.Entity("App.Data.Entities.RecipeStepIngredient", b =>
-                {
-                    b.HasOne("App.Data.Entities.RecipeIngredient", "RecipeIngredient")
-                        .WithMany("StepReferences")
-                        .HasForeignKey("RecipeIngredientId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("App.Data.Entities.RecipeStep", "RecipeStep")
-                        .WithMany("IngredientReferences")
-                        .HasForeignKey("RecipeStepId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("RecipeIngredient");
-
-                    b.Navigation("RecipeStep");
-                });
-
             modelBuilder.Entity("App.Data.Entities.RecipeStepTimer", b =>
                 {
                     b.HasOne("App.Data.Entities.RecipeStep", "RecipeStep")
@@ -2410,14 +2337,10 @@ namespace App.Data.Migrations
             modelBuilder.Entity("App.Data.Entities.RecipeIngredient", b =>
                 {
                     b.Navigation("Replacements");
-
-                    b.Navigation("StepReferences");
                 });
 
             modelBuilder.Entity("App.Data.Entities.RecipeStep", b =>
                 {
-                    b.Navigation("IngredientReferences");
-
                     b.Navigation("Timers");
                 });
 

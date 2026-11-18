@@ -24,8 +24,5 @@ public sealed class RecipeStep : IAuditable
 
     public Recipe Recipe { get; set; } = null!;
 
-    public ICollection<RecipeStepIngredient> IngredientReferences { get; set; } =
-        new List<RecipeStepIngredient>();
-
     public ICollection<RecipeStepTimer> Timers { get; set; } = new List<RecipeStepTimer>();
 }

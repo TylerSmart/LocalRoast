@@ -120,11 +120,6 @@ public sealed class AppDataMaintenanceService(
             var stepTimers = await dbContext.RecipeStepTimers.ToListAsync(cancellationToken);
             dbContext.RecipeStepTimers.RemoveRange(stepTimers);
 
-            var stepIngredients = await dbContext.RecipeStepIngredients.ToListAsync(
-                cancellationToken
-            );
-            dbContext.RecipeStepIngredients.RemoveRange(stepIngredients);
-
             var steps = await dbContext.RecipeSteps.ToListAsync(cancellationToken);
             dbContext.RecipeSteps.RemoveRange(steps);
 

@@ -588,8 +588,7 @@ public static partial class StepTokenValidator
             parseErrors
         );
 
-        var (compiledInstruction, ingredientIndices, timers, ingredientAmounts) =
-            CompileToStepInstruction(parsedTokens, ingredientCount);
+        var (compiledInstruction, timers) = CompileToStepInstruction(parsedTokens);
 
         return new ValidatedStage4StepResult(
             stepNumber,
@@ -598,26 +597,19 @@ public static partial class StepTokenValidator
             sanitized,
             parsedTokens,
             compiledInstruction,
-            ingredientIndices,
             timers,
-            ingredientAmounts,
             warnings
         );
     }
 
     private static (
         string CompiledInstruction,
-        List<int> IngredientIndices,
-        List<RecipeStepTimerInput> Timers,
-        List<RecipeStepIngredientAmountInput> IngredientAmounts
-    ) CompileToStepInstruction(IReadOnlyList<Stage4ParsedToken> parsedTokens, int ingredientCount)
+        List<RecipeStepTimerInput> Timers
+    ) CompileToStepInstruction(IReadOnlyList<Stage4ParsedToken> parsedTokens)
     {
         var sb = new StringBuilder();
-        var ingredientIndices = new List<int>();
-        var seenIndices = new HashSet<int>();
         var timers = new List<RecipeStepTimerInput>();
         var seenTimerKeys = new HashSet<(int Seconds, string Label)>();
-        var ingredientAmountsMap = new Dictionary<int, RecipeMeasurement>();
 
         foreach (var token in parsedTokens)
         {
@@ -653,24 +645,6 @@ public static partial class StepTokenValidator
                         MaxAmount: maxQty
                     );
                     sb.Append(StepInstructionParser.FormatToken(stepToken));
-
-                    if (ing.IngredientIndex is int idx && idx >= 0 && idx < ingredientCount)
-                    {
-                        if (seenIndices.Add(idx))
-                        {
-                            ingredientIndices.Add(idx);
-                        }
-
-                        if (qty.HasValue && unit.HasValue && !ingredientAmountsMap.ContainsKey(idx))
-                        {
-                            ingredientAmountsMap[idx] = new RecipeMeasurement(
-                                qty,
-                                unit,
-                                maxQty,
-                                unit == MeasurementUnit.Custom ? customUnit : null
-                            );
-                        }
-                    }
                     break;
                 }
 
@@ -806,12 +780,7 @@ public static partial class StepTokenValidator
             compiledInstruction = compiledInstruction[..4000];
         }
 
-        var amountsList = ingredientAmountsMap
-            .OrderBy(kvp => kvp.Key)
-            .Select(kvp => new RecipeStepIngredientAmountInput(kvp.Key, kvp.Value))
-            .ToList();
-
-        return (compiledInstruction, ingredientIndices, timers, amountsList);
+        return (compiledInstruction, timers);
     }
 
     private static int ConvertTimerToSeconds(decimal amount, string? unit)

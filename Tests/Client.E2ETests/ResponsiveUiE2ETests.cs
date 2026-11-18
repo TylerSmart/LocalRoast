@@ -378,7 +378,6 @@ public sealed class ResponsiveUiE2ETests : E2ETestBase
                 {
                     stepNumber = 1,
                     instruction = RecipeTitle + ". Mix thoroughly, then roast until golden.",
-                    ingredientIndices = new[] { 0 },
                     timers = new[]
                     {
                         new

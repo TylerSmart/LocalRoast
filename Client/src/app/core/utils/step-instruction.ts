@@ -1,5 +1,5 @@
-import { RecipeMeasurement, UnitSystem } from '../models/recipe.models';
-import { formatStepIngredient, IngredientMeasurements } from './culinary-math';
+import { UnitSystem } from '../models/recipe.models';
+import { IngredientMeasurements } from './culinary-math';
 import {
   formatDimensionDisplay,
   formatFixedDisplay,
@@ -35,14 +35,18 @@ export interface InstructionSegment {
 
 export interface InstructionStep {
   instruction: string;
-  ingredientIds?: readonly string[] | null;
+  sectionName?: string | null;
 }
 
 export interface NumberedInstructionStep extends InstructionStep {
   stepNumber: number;
 }
 
-export type InstructionIngredient = IngredientMeasurements & { id: string; displayName: string };
+export type InstructionIngredient = IngredientMeasurements & {
+  id: string;
+  displayName: string;
+  sectionName?: string | null;
+};
 
 export function buildInstructionSegments(
   step: InstructionStep,
@@ -128,23 +132,17 @@ export function buildInstructionSegments(
       });
     } else {
       const ing = seg.token as StepIngredientToken;
-      const matched = matchIngredient(ing, _ingredients, step.ingredientIds);
+      const matched = matchIngredient(ing, _ingredients, step.sectionName);
       const matchedId = matched?.id ?? ing.ingredientId ?? null;
       const displayText = formatTokenDisplay(ing, factor, system, matched);
-      const totalText =
-        ing.displayAmount != null && ing.amount != null
-          ? `Total recipe: ${formatTokenDisplay({ ...ing, displayAmount: ing.amount }, factor, system, matched)}`
-          : ing.notes
-            ? `Note: ${ing.notes}`
-            : null;
-      const isScaled =
-        (factor !== 1 || system !== 'Original') && (ing.displayAmount ?? ing.amount) != null;
+      const noteText = ing.notes ? `Note: ${ing.notes}` : null;
+      const isScaled = (factor !== 1 || system !== 'Original') && ing.amount != null;
       segments.push({
         text: displayText,
         amount: {
           kind: 'Ingredient',
           ingredientId: matchedId,
-          ingredientName: totalText ?? ing.ingredient,
+          ingredientName: noteText ?? ing.ingredient,
           scaled: isScaled,
         },
       });
@@ -168,7 +166,7 @@ export function renderScaledInstruction(
 export function matchIngredient(
   token: StepIngredientToken,
   ingredients: readonly InstructionIngredient[],
-  stepIngredientIds?: readonly string[] | null,
+  stepSectionName?: string | null,
 ): InstructionIngredient | undefined {
   if (token.ingredientId) {
     const found = ingredients.find((i) => i.id === token.ingredientId);
@@ -188,11 +186,13 @@ export function matchIngredient(
     return nameMatches[0];
   }
 
-  // If multiple ingredients match by name, prioritize candidate linked to this step via stepIngredientIds
-  if (stepIngredientIds && stepIngredientIds.length > 0) {
-    const inStep = nameMatches.find((i) => stepIngredientIds.includes(i.id));
-    if (inStep) {
-      return inStep;
+  const normalizedSection = stepSectionName?.trim().toLowerCase() ?? '';
+  if (normalizedSection) {
+    const inSection = nameMatches.find(
+      (i) => (i.sectionName?.trim().toLowerCase() ?? '') === normalizedSection,
+    );
+    if (inSection) {
+      return inSection;
     }
   }
 
@@ -203,67 +203,6 @@ export function matchIngredient(
   }
 
   return nameMatches[0];
-}
-
-export function stepIngredientCallouts(
-  step: InstructionStep & { ingredientIds?: readonly string[] } & {
-    ingredientAmounts?:
-      readonly { ingredientId: string; measurement?: RecipeMeasurement | null }[] | null;
-  },
-  ingredients: readonly InstructionIngredient[],
-  factor = 1,
-  system: UnitSystem = 'Original',
-): { id: string; label: string }[] {
-  const result: { id: string; label: string }[] = [];
-  const seenIds = new Set<string>();
-
-  // 1. From step tokens
-  const segments = parseStepInstruction(step.instruction ?? '');
-  const hasTokens = segments.some((s) => !!s.token);
-
-  for (const seg of segments) {
-    if (seg.token && (seg.token.type === 'ingredient' || 'ingredient' in seg.token)) {
-      const ingToken = seg.token as StepIngredientToken;
-      const matched = matchIngredient(ingToken, ingredients, step.ingredientIds);
-      const id = matched?.id ?? ingToken.ingredientId ?? ingToken.ingredient;
-      if (!seenIds.has(id)) {
-        seenIds.add(id);
-        const label = formatTokenDisplay(ingToken, factor, system, matched);
-        result.push({ id, label });
-      }
-    }
-  }
-
-  // 2. From assigned ingredient amounts
-  if (step.ingredientAmounts) {
-    for (const a of step.ingredientAmounts) {
-      if (!seenIds.has(a.ingredientId)) {
-        seenIds.add(a.ingredientId);
-        const matched = ingredients.find((i) => i.id === a.ingredientId);
-        if (matched) {
-          const label = a.measurement
-            ? formatStepIngredient(matched, a.measurement, factor, system)
-            : matched.displayName;
-          result.push({ id: a.ingredientId, label });
-        }
-      }
-    }
-  }
-
-  // 3. From ingredientIds (only when no step tokens present)
-  if (!hasTokens && step.ingredientIds) {
-    for (const id of step.ingredientIds) {
-      if (!seenIds.has(id)) {
-        seenIds.add(id);
-        const matched = ingredients.find((i) => i.id === id);
-        if (matched) {
-          result.push({ id, label: matched.displayName });
-        }
-      }
-    }
-  }
-
-  return result;
 }
 
 export function ingredientUses(
@@ -283,7 +222,7 @@ export function ingredientUses(
     for (const seg of segments) {
       if (seg.token && (seg.token.type === 'ingredient' || 'ingredient' in seg.token)) {
         const ingToken = seg.token as StepIngredientToken;
-        const matched = matchIngredient(ingToken, ingredients, step.ingredientIds);
+        const matched = matchIngredient(ingToken, ingredients, step.sectionName);
         if (matched?.id === ingredientId) {
           uses.push({
             stepNumber: step.stepNumber,
@@ -312,11 +251,4 @@ export function isIngredientDivided(
 ): boolean {
   const uses = ingredientUses(steps, ingredientId, ingredients, factor, system);
   return uses.length > 1;
-}
-
-export function inlineAmountInputsToDtos(
-  _amounts: readonly unknown[] = [],
-  _mapIngredientId?: (index: number) => string | undefined,
-): unknown[] {
-  return [];
 }

@@ -268,7 +268,6 @@ public sealed class ShareLinkIntegrationTests
                 new RecipeStepInput(
                     SectionName: "Dough Prep",
                     Instruction: "Mix flour and water and autolyse.",
-                    IngredientIndices: [0, 1],
                     Timers: [new RecipeStepTimerInput(DurationSeconds: 1800, Label: "Autolyse")]
                 ),
             ]

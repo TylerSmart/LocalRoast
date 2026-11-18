@@ -1,13 +1,6 @@
-import {
-  MeasurementUnit,
-  RecipeMeasurement,
-  RecipeStepIngredientAmountInput,
-  RecipeStepTimerInput,
-  UnitSystem,
-} from '../models/recipe.models';
+import { MeasurementUnit, RecipeStepTimerInput, UnitSystem } from '../models/recipe.models';
 import {
   DimensionUnit,
-  StepDialogIngredientOption,
   StepDimensionToken,
   StepFixedToken,
   StepIngredientToken,
@@ -204,9 +197,7 @@ export function parseStepInstruction(instruction: string | null | undefined): St
         'ingredient' in parsed ||
         typeStr === 'ingredient' ||
         'amount' in parsed ||
-        'unit' in parsed ||
-        'displayAmount' in parsed ||
-        'displayUnit' in parsed
+        'unit' in parsed
       ) {
         token = {
           type: 'ingredient',
@@ -216,9 +207,6 @@ export function parseStepInstruction(instruction: string | null | undefined): St
           maxAmount: parsed['maxAmount'] != null ? Number(parsed['maxAmount']) : null,
           unit: (parsed['unit'] as string) ?? null,
           customUnitName: (parsed['customUnitName'] as string) ?? null,
-          displayAmount: parsed['displayAmount'] != null ? Number(parsed['displayAmount']) : null,
-          displayUnit: (parsed['displayUnit'] as string) ?? null,
-          displayCustomUnitName: (parsed['displayCustomUnitName'] as string) ?? null,
           displayText: (parsed['displayText'] as string) ?? null,
           notes: (parsed['notes'] as string) ?? null,
         } as StepIngredientToken;
@@ -279,23 +267,20 @@ export function formatTokenDisplay(
     return token.displayText;
   }
 
-  const qty = token.displayAmount ?? token.amount;
-  const maxQty = token.displayAmount != null ? null : (token.maxAmount ?? null);
-  const unitStr = token.displayUnit ?? token.unit;
+  const qty = token.amount;
+  const maxQty = token.maxAmount ?? null;
+  const unitStr = token.unit;
   const normalizedUnit = normalizeMeasurementUnit(unitStr);
 
   if (qty === null || qty === undefined || isNaN(qty)) {
     return token.ingredient;
   }
 
-  const customUnitName =
-    token.displayAmount != null && token.displayCustomUnitName
-      ? token.displayCustomUnitName
-      : token.customUnitName
-        ? token.customUnitName
-        : normalizedUnit === 'Custom' && typeof unitStr === 'string'
-          ? unitStr
-          : null;
+  const customUnitName = token.customUnitName
+    ? token.customUnitName
+    : normalizedUnit === 'Custom' && typeof unitStr === 'string'
+      ? unitStr
+      : null;
   const formatted = matchedIngredient?.alternativeMeasurement?.quantity
     ? scaleStepIngredient(
         matchedIngredient,
@@ -596,12 +581,7 @@ export function cleanStepInstruction(instruction: string | null | undefined): st
       let text = seg.text;
       if (i + 1 < segments.length && segments[i + 1].token?.type === 'ingredient') {
         const nextToken = segments[i + 1].token as StepIngredientToken;
-        if (
-          nextToken.amount != null ||
-          nextToken.displayAmount != null ||
-          nextToken.unit != null ||
-          nextToken.displayUnit != null
-        ) {
+        if (nextToken.amount != null || nextToken.unit != null) {
           const match = TRAILING_MEASUREMENT_REGEX.exec(text);
           if (match) {
             text = text.slice(0, match.index);
@@ -678,10 +658,7 @@ export function cleanStepInstruction(instruction: string | null | undefined): st
 
 export interface DerivedStepMetadata {
   hasTokens: boolean;
-  hasIngredientTokens: boolean;
   hasTimerTokens: boolean;
-  ingredientIndices: number[];
-  ingredientAmounts: RecipeStepIngredientAmountInput[];
   timers: RecipeStepTimerInput[];
 }
 
@@ -746,73 +723,15 @@ export function insertTokenAtOffset(
   return { nextInstruction, nextCaretOffset };
 }
 
-function findBestCandidateIndex(
-  token: StepIngredientToken,
-  ingredients: readonly (Pick<StepDialogIngredientOption, 'id' | 'displayName' | 'sectionName'> & {
-    index?: number;
-  })[],
-  stepSectionName?: string | null,
-  preferredIndices?: readonly number[],
-): number {
-  if (token.ingredientId) {
-    const byIdPos = ingredients.findIndex((c) => c.id && c.id === token.ingredientId);
-    if (byIdPos >= 0) {
-      return ingredients[byIdPos].index ?? byIdPos;
-    }
-  }
-
-  const clean = token.ingredient.trim().toLowerCase();
-  if (!clean) {
-    return -1;
-  }
-
-  const normalizedSection = stepSectionName?.trim().toLowerCase() ?? '';
-  let bestIndex = -1;
-  let bestScore = -1;
-
-  for (let i = 0; i < ingredients.length; i++) {
-    const cand = ingredients[i];
-    const name = cand.displayName.trim().toLowerCase();
-    if (!name) continue;
-    if (name !== clean && !name.includes(clean) && !clean.includes(name)) continue;
-
-    let score = 0;
-    if (name === clean) score += 8;
-    if (normalizedSection && (cand.sectionName?.trim().toLowerCase() ?? '') === normalizedSection) {
-      score += 4;
-    }
-    const candIdx = cand.index ?? i;
-    if (preferredIndices?.includes(candIdx)) {
-      score += 2;
-    }
-
-    if (score > bestScore) {
-      bestScore = score;
-      bestIndex = candIdx;
-    }
-  }
-
-  return bestIndex;
-}
-
 export function deriveStepMetadataFromInstruction(
   instruction: string | null | undefined,
-  ingredients: readonly (Pick<StepDialogIngredientOption, 'id' | 'displayName' | 'sectionName'> & {
-    index?: number;
-  })[],
-  stepSectionName?: string | null,
-  preferredIndices?: readonly number[],
 ): DerivedStepMetadata {
   const segments = parseStepInstruction(instruction ?? '');
   const tokens = segments.map((s) => s.token).filter((t): t is StepToken => !!t);
 
-  const ingredientIndices: number[] = [];
-  const seenIndices = new Set<number>();
-  const amountsMap = new Map<number, RecipeStepIngredientAmountInput>();
   const timers: RecipeStepTimerInput[] = [];
   const seenTimers = new Set<string>();
 
-  let hasIngredientTokens = false;
   let hasTimerTokens = false;
 
   for (const token of tokens) {
@@ -830,98 +749,31 @@ export function deriveStepMetadataFromInstruction(
           });
         }
       }
-      continue;
-    }
-
-    if (
-      token.type === 'temperature' ||
-      token.type === 'dimension' ||
-      token.type === 'fixed' ||
-      token.type === 'mixture' ||
-      'fahrenheit' in token ||
-      'celsius' in token
-    ) {
-      continue;
-    }
-
-    hasIngredientTokens = true;
-    const ingToken = token as StepIngredientToken;
-    const matchIdx = findBestCandidateIndex(
-      ingToken,
-      ingredients,
-      stepSectionName,
-      preferredIndices,
-    );
-
-    if (matchIdx >= 0) {
-      if (!seenIndices.has(matchIdx)) {
-        seenIndices.add(matchIdx);
-        ingredientIndices.push(matchIdx);
-      }
-
-      if (ingToken.amount != null && !Number.isNaN(ingToken.amount) && !amountsMap.has(matchIdx)) {
-        const normalizedUnit = normalizeMeasurementUnit(ingToken.unit);
-        const rawUnit = typeof ingToken.unit === 'string' ? ingToken.unit.trim() : '';
-        const customUnitName =
-          normalizedUnit === 'Custom' && rawUnit && rawUnit.toLowerCase() !== 'custom'
-            ? rawUnit
-            : null;
-        const measurement: RecipeMeasurement = {
-          quantity: ingToken.amount,
-          maxQuantity: null,
-          unit: normalizedUnit,
-          customUnitName,
-        };
-        amountsMap.set(matchIdx, {
-          ingredientIndex: matchIdx,
-          measurement,
-        });
-      }
     }
   }
 
   return {
     hasTokens: tokens.length > 0,
-    hasIngredientTokens,
     hasTimerTokens,
-    ingredientIndices,
-    ingredientAmounts: Array.from(amountsMap.values()),
     timers,
   };
 }
 
 export interface StepTokenOriginFlags {
-  hasIngredientTokens: boolean;
   hasTimerTokens: boolean;
 }
 
 export function resolveStepMetadataForPayload(
   instruction: string | null | undefined,
-  ingredients: readonly (Pick<StepDialogIngredientOption, 'id' | 'displayName' | 'sectionName'> & {
-    index?: number;
-  })[],
-  sectionName: string | null | undefined,
   origin: StepTokenOriginFlags | undefined,
-  fallbackIndices: number[],
-  fallbackAmounts: RecipeStepIngredientAmountInput[],
   fallbackTimers: RecipeStepTimerInput[],
 ): {
-  ingredientIndices: number[];
-  ingredientAmounts: RecipeStepIngredientAmountInput[];
   timers: RecipeStepTimerInput[];
 } {
-  const meta = deriveStepMetadataFromInstruction(
-    instruction,
-    ingredients,
-    sectionName,
-    fallbackIndices,
-  );
-  const useDerivedIngredients = meta.hasIngredientTokens || !!origin?.hasIngredientTokens;
+  const meta = deriveStepMetadataFromInstruction(instruction);
   const useDerivedTimers = meta.hasTimerTokens || !!origin?.hasTimerTokens;
 
   return {
-    ingredientIndices: useDerivedIngredients ? meta.ingredientIndices : fallbackIndices,
-    ingredientAmounts: useDerivedIngredients ? meta.ingredientAmounts : fallbackAmounts,
     timers: useDerivedTimers ? meta.timers : fallbackTimers,
   };
 }

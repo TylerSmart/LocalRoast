@@ -51,7 +51,6 @@ describe('RecipeDetailPreviewDialogComponent', () => {
         sectionName: null,
         instruction: 'Simmer carrots until tender.',
         imagePath: null,
-        ingredientIndices: [0],
         timers: [],
       },
     ],

@@ -65,14 +65,7 @@ import { IngestionService } from '../../../core/services/ingestion/ingestion.ser
 import { TaxonomyService } from '../../../core/services/taxonomy/taxonomy.service';
 import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialog/confirm-dialog.component';
 import { MeasurementEditorComponent } from '../../../shared/components/measurement-editor/measurement-editor.component';
-import {
-  buildStepAmounts,
-  createStepAmounts,
-  getStepAmounts,
-  ingredientMeasurementValidator,
-  remapStepIngredients,
-  syncStepAmounts,
-} from '../../../core/utils/recipe-measurement-forms';
+import { ingredientMeasurementValidator } from '../../../core/utils/recipe-measurement-forms';
 import { RecipeDetailPreviewComponent } from '../recipe-detail-preview/recipe-detail-preview.component';
 import {
   RecipeDetailPreviewDialogComponent,
@@ -615,7 +608,6 @@ export class IngestionReviewComponent implements OnInit {
 
   removeIngredient(index: number): void {
     this.ingredientsArray.removeAt(index);
-    remapStepIngredients(this.stepsArray, (i) => (i === index ? null : i > index ? i - 1 : i));
   }
 
   onRecipeReferenceToggled(index: number, isRecipeReference: boolean): void {
@@ -669,18 +661,12 @@ export class IngestionReviewComponent implements OnInit {
       stepNumber: [stepNumber],
       sectionName: [step?.sectionName ?? null],
       instruction: [step?.instruction ?? '', [Validators.required]],
-      ingredientIndices: [step?.ingredientIndices ?? []],
-      ingredientAmounts: createStepAmounts(
-        step?.ingredientIndices ?? [],
-        step?.ingredientAmounts ?? [],
-      ),
       timers: timersArray,
       imagePath: [step?.imagePath ?? null],
     });
 
-    const originMeta = deriveStepMetadataFromInstruction(step?.instruction ?? '', []);
+    const originMeta = deriveStepMetadataFromInstruction(step?.instruction ?? '');
     this.loadedStepTokenOrigins.set(fg, {
-      hasIngredientTokens: originMeta.hasIngredientTokens,
       hasTimerTokens: originMeta.hasTimerTokens,
     });
 
@@ -709,13 +695,6 @@ export class IngestionReviewComponent implements OnInit {
         };
       })
       .filter((item) => !!item.displayName);
-  }
-
-  getStepAmountsArray(stepIndex: number) {
-    return getStepAmounts(this.stepsArray.at(stepIndex));
-  }
-  syncStepAmounts(stepIndex: number): void {
-    syncStepAmounts(this.stepsArray.at(stepIndex));
   }
 
   getStepTimersArray(stepIndex: number): FormArray<FormGroup> {
@@ -885,8 +864,6 @@ export class IngestionReviewComponent implements OnInit {
         sectionName: st.sectionName,
         instruction: st.instruction,
         imagePath: st.imagePath,
-        ingredientIndices: st.ingredientIndices,
-        ingredientAmounts: st.ingredientAmounts,
         timers: st.timers,
       })),
     };
@@ -1013,13 +990,6 @@ export class IngestionReviewComponent implements OnInit {
       },
     );
 
-    const ingredientCandidates = ingredients.map((ing, idx) => ({
-      index: idx,
-      id: null,
-      displayName: ing.displayName,
-      sectionName: ing.sectionName,
-    }));
-
     const steps: IngestionDraftStepDto[] = this.stepsArray.controls.map((ctrl, i) => {
       const val = ctrl.getRawValue();
       const timersArray = ctrl.get('timers') as FormArray<FormGroup>;
@@ -1035,11 +1005,7 @@ export class IngestionReviewComponent implements OnInit {
 
       const resolved = resolveStepMetadataForPayload(
         val.instruction,
-        ingredientCandidates,
-        val.sectionName,
         this.loadedStepTokenOrigins.get(ctrl),
-        val.ingredientIndices || [],
-        buildStepAmounts(ctrl),
         fallbackTimers,
       );
 
@@ -1047,8 +1013,6 @@ export class IngestionReviewComponent implements OnInit {
         stepNumber: i + 1,
         sectionName: val.sectionName?.trim() || null,
         instruction: (val.instruction || '').trim(),
-        ingredientIndices: resolved.ingredientIndices,
-        ingredientAmounts: resolved.ingredientAmounts,
         timers: resolved.timers,
         imagePath: val.imagePath || null,
       };

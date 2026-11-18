@@ -62,17 +62,10 @@ public record LlmExtractedMeasurementItem(
         decimal? MaxQuantity = null
 );
 
-public record LlmExtractedStepIngredientAmountItem(
-    [property: JsonConverter(typeof(FlexibleNullableIntJsonConverter))] int? IngredientIndex,
-    LlmExtractedMeasurementItem Measurement
-);
-
 public record LlmExtractedStepItem(
     string? SectionName,
     string? Instruction = null,
-    IReadOnlyList<int>? IngredientIndices = null,
     IReadOnlyList<LlmExtractedTimerItem>? Timers = null,
-    IReadOnlyList<LlmExtractedStepIngredientAmountItem>? IngredientAmounts = null,
     string? OriginalRawText = null
 );
 
@@ -155,10 +148,8 @@ public record IngestionDraftIngredientDto(
 public record IngestionDraftStepDto(
     [MaxLength(150)] string? SectionName = null,
     [Required, MaxLength(4000)] string Instruction = "",
-    IReadOnlyList<int>? IngredientIndices = null,
     IReadOnlyList<RecipeStepTimerInput>? Timers = null,
-    [MaxLength(500)] string? ImagePath = null,
-    IReadOnlyList<RecipeStepIngredientAmountInput>? IngredientAmounts = null
+    [MaxLength(500)] string? ImagePath = null
 );
 
 public record IngestionExtractedDraftDto(

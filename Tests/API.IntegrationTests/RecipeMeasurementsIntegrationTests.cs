@@ -59,19 +59,10 @@ public sealed class RecipeMeasurementsIntegrationTests
             ],
             Steps:
             [
-                new(
-                    Instruction: "Mix the listed flour.",
-                    IngredientAmounts: [new(0, new(1, MeasurementUnit.Cup))]
-                ),
-                new(
-                    Instruction: "Feed with the listed flour.",
-                    IngredientAmounts: [new(0, new(4, MeasurementUnit.Cup))]
-                ),
-                new(
-                    Instruction: "Rest the prepared portion.",
-                    IngredientAmounts: [new(0, new(1, MeasurementUnit.Cup))]
-                ),
-                new(Instruction: "Inspect the flour.", IngredientIndices: [0]),
+                new(Instruction: "Mix the listed flour."),
+                new(Instruction: "Feed with the listed flour."),
+                new(Instruction: "Rest the prepared portion."),
+                new(Instruction: "Inspect the flour."),
             ]
         );
 
@@ -90,11 +81,6 @@ public sealed class RecipeMeasurementsIntegrationTests
         var flour = recipe.Ingredients.Single();
         Assert.AreEqual(25m, flour.AlternativeMeasurement!.Quantity);
         Assert.IsTrue(flour.PreferAlternativeMeasurement);
-        Assert.AreEqual(1m, recipe.Steps[0].IngredientAmounts![0].Measurement.Quantity);
-        Assert.AreEqual(4m, recipe.Steps[1].IngredientAmounts![0].Measurement.Quantity);
-        Assert.AreEqual(flour.Id, recipe.Steps[0].IngredientAmounts![0].IngredientId);
-        CollectionAssert.AreEqual(new[] { flour.Id }, recipe.Steps[0].IngredientIds.ToArray());
-        Assert.IsEmpty(recipe.Steps[3].IngredientAmounts!);
 
         var shareResponse = await _client.PostAsJsonAsync(
             $"/api/recipes/{recipe.Id}/shares",
@@ -110,7 +96,6 @@ public sealed class RecipeMeasurementsIntegrationTests
         Assert.IsNotNull(shared);
         Assert.AreEqual(25m, shared.Ingredients[0].AlternativeMeasurement!.Quantity);
         Assert.IsTrue(shared.Ingredients[0].PreferAlternativeMeasurement);
-        Assert.AreEqual(1m, shared.Steps[0].IngredientAmounts![0].Measurement.Quantity);
 
         using (var scope = _factory.Services.CreateScope())
         {
@@ -118,9 +103,7 @@ public sealed class RecipeMeasurementsIntegrationTests
                 .ServiceProvider.GetRequiredService<IMcpCookbookService>()
                 .GetRecipeAsync(recipe.Id);
             Assert.IsNotNull(mcp);
-            Assert.AreEqual(5m, mcp.Steps[0].StepIngredients[0].Quantity);
-            Assert.AreEqual(MeasurementUnit.Oz, mcp.Steps[0].StepIngredients[0].Unit);
-            Assert.IsNull(mcp.Steps[3].StepIngredients[0].Quantity);
+            Assert.IsNotEmpty(mcp.Steps);
         }
 
         var date = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(3));
@@ -163,7 +146,7 @@ public sealed class RecipeMeasurementsIntegrationTests
     }
 
     [TestMethod]
-    public async Task InvalidAlternativesAndStepAmounts_ReturnBadRequest()
+    public async Task InvalidAlternatives_ReturnBadRequest()
     {
         var valid = Starter();
         var ingredient = valid.Ingredients![0];
@@ -186,40 +169,6 @@ public sealed class RecipeMeasurementsIntegrationTests
             valid with
             {
                 Ingredients = [ingredient with { AlternativeMeasurement = null }],
-            },
-            valid with
-            {
-                Steps =
-                [
-                    new RecipeStepInput(
-                        Instruction: "Mix.",
-                        IngredientAmounts: [new(9, new(1, MeasurementUnit.Cup))]
-                    ),
-                ],
-            },
-            valid with
-            {
-                Steps =
-                [
-                    new RecipeStepInput(
-                        Instruction: "Mix.",
-                        IngredientAmounts: [new(0, new(2, MeasurementUnit.Cup, 1))]
-                    ),
-                ],
-            },
-            valid with
-            {
-                Steps =
-                [
-                    new RecipeStepInput(
-                        Instruction: "Mix.",
-                        IngredientAmounts:
-                        [
-                            new(0, new(1, MeasurementUnit.Cup)),
-                            new(0, new(1, MeasurementUnit.Cup)),
-                        ]
-                    ),
-                ],
             },
         };
         foreach (var request in invalidRequests)

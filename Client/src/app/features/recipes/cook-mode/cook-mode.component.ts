@@ -45,10 +45,7 @@ import {
   formatIngredientReplacement,
   scaleIngredient,
 } from '../../../core/utils/culinary-math';
-import {
-  renderScaledInstruction,
-  stepIngredientCallouts,
-} from '../../../core/utils/step-instruction';
+import { renderScaledInstruction } from '../../../core/utils/step-instruction';
 import { StepInstructionComponent } from '../../../shared/components/step-instruction/step-instruction.component';
 import { shouldShowTimerLabel } from '../../../core/utils/step-token-parser';
 import {
@@ -65,7 +62,6 @@ export interface ScaledCookIngredient {
 
 export interface ScaledCookStep {
   step: RecipeStepDto;
-  ingredientCallouts: { id: string; label: string }[];
 }
 
 export interface CookIngredientSection {
@@ -201,19 +197,9 @@ export class CookModeComponent implements OnInit, OnDestroy {
 
   protected readonly flattenedSteps = computed<ScaledCookStep[]>(() => {
     const r = this.recipe();
-    const ingredients = this.displayIngredients();
     if (!r) return [];
 
-    return r.steps.map((step) => {
-      const callouts = stepIngredientCallouts(
-        step,
-        ingredients,
-        this.scaleFactor(),
-        this.targetSystem(),
-      );
-
-      return { step, ingredientCallouts: callouts };
-    });
+    return r.steps.map((step) => ({ step }));
   });
 
   protected readonly currentStep = computed<ScaledCookStep | null>(() => {
@@ -401,14 +387,6 @@ export class CookModeComponent implements OnInit, OnDestroy {
     });
   }
 
-  openIngredientSubstitutionById(ingredientId: string, event?: Event): void {
-    event?.stopPropagation();
-    const item = this.scaledIngredientsMap().get(ingredientId);
-    if (item) {
-      this.openIngredientSubstitution(item, event);
-    }
-  }
-
   openKitchenQuestion(context: Partial<KitchenQuestionDialogData> = {}, event?: Event): void {
     event?.stopPropagation();
     const recipe = this.recipe();
@@ -529,18 +507,12 @@ export class CookModeComponent implements OnInit, OnDestroy {
   protected narrateCurrentStep(): void {
     const step = this.currentStep();
     if (step) {
-      const text = renderScaledInstruction(
+      const instruction = renderScaledInstruction(
         step.step,
         this.displayIngredients(),
         this.scaleFactor(),
         this.targetSystem(),
       );
-      const amounts = step.ingredientCallouts.filter((c) =>
-        step.step.ingredientAmounts?.some((a) => a.ingredientId === c.id),
-      );
-      const instruction = amounts.length
-        ? `Ingredients for this step: ${amounts.map((a) => a.label).join(', ')}. ${text}`
-        : text;
       this.speechNarrationService.speakStep(
         step.step.stepNumber,
         instruction,

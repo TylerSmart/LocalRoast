@@ -119,15 +119,12 @@ export class StepTokenDialogComponent implements OnInit {
   protected dimensionForm!: FormGroup;
   protected timerForm!: FormGroup;
   protected temperatureForm!: FormGroup;
-  protected readonly showDisplayAmount = signal<boolean>(false);
 
   ngOnInit(): void {
     const existing = this.data?.token;
 
     if (this.mode() === 'ingredient') {
       const ingToken = existing as StepIngredientToken | undefined;
-      const hasDisplay = ingToken?.displayAmount != null;
-      this.showDisplayAmount.set(hasDisplay);
 
       const matchedOption =
         this.ingredientOptions.find(
@@ -141,12 +138,9 @@ export class StepTokenDialogComponent implements OnInit {
       this.ingredientForm = this.fb.group({
         ingredient: [ingToken?.ingredient ?? '', [Validators.required]],
         ingredientId: [ingToken?.ingredientId ?? null],
-        amount: [ingToken?.amount ?? null],
+        amount: [ingToken?.amount ?? null, [Validators.required, Validators.min(0.0001)]],
         maxAmount: [ingToken?.maxAmount ?? null],
         unit: [ingToken?.unit ?? ingToken?.customUnitName ?? ''],
-        useDisplayAmount: [hasDisplay],
-        displayAmount: [ingToken?.displayAmount ?? null],
-        displayUnit: [ingToken?.displayUnit ?? ''],
         notes: [ingToken?.notes ?? ''],
       });
     } else if (this.mode() === 'mixture') {
@@ -280,16 +274,6 @@ export class StepTokenDialogComponent implements OnInit {
     }
   }
 
-  protected onToggleDisplayAmount(checked: boolean): void {
-    this.showDisplayAmount.set(checked);
-    if (!checked) {
-      this.ingredientForm.patchValue({
-        displayAmount: null,
-        displayUnit: '',
-      });
-    }
-  }
-
   protected formatUnitForToken(unit?: string | null, customUnitName?: string | null): string {
     if (!unit) return '';
     if (unit === 'Custom') return customUnitName?.trim() ?? '';
@@ -375,10 +359,6 @@ export class StepTokenDialogComponent implements OnInit {
       }
       if (val.unit) {
         token.unit = String(val.unit).trim();
-      }
-      if (this.showDisplayAmount() && val.displayAmount != null && val.displayAmount !== '') {
-        token.displayAmount = Number(val.displayAmount);
-        token.displayUnit = val.displayUnit || val.unit || null;
       }
       if (val.notes) {
         token.notes = String(val.notes).trim();

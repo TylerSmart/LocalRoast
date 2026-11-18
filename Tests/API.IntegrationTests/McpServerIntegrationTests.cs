@@ -225,12 +225,10 @@ public sealed class McpServerIntegrationTests
                     new Dictionary<string, object?>
                     {
                         ["instruction"] = "Roast bell peppers for 15 minutes.",
-                        ["ingredientIndices"] = new[] { 0 },
                     },
                     new Dictionary<string, object?>
                     {
                         ["instruction"] = "Toss with penne and garlic.",
-                        ["ingredientIndices"] = new[] { 1 },
                     },
                 },
             }

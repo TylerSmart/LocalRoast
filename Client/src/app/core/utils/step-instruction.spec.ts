@@ -4,7 +4,6 @@ import {
   ingredientUses,
   matchIngredient,
   renderScaledInstruction,
-  stepIngredientCallouts,
 } from './step-instruction';
 
 const flour: InstructionIngredient = {
@@ -53,14 +52,14 @@ describe('step-instruction utils', () => {
     );
   });
 
-  it('handles per-item display amount and total amount', () => {
+  it('handles ingredient notes', () => {
     const step = {
       instruction:
-        'Top each pancake with ||{"ingredient":"butter","amount":4,"unit":"teaspoon","displayAmount":1,"displayUnit":"teaspoon"}||.',
+        'Top each pancake with ||{"ingredient":"butter","amount":1,"unit":"teaspoon","notes":"melted"}||.',
     };
     const segments = buildInstructionSegments(step, ingredients, 1, 'Original');
     expect(segments[1].text).toBe('1 tsp butter');
-    expect(segments[1].amount?.ingredientName).toBe('Total recipe: 4 tsp butter');
+    expect(segments[1].amount?.ingredientName).toBe('Note: melted');
   });
 
   it('renders timer tokens', () => {
@@ -100,16 +99,18 @@ describe('step-instruction utils', () => {
     expect(renderScaledInstruction(step, ingredients, 1, 'Metric')).toBe('Preheat oven to 163°C.');
   });
 
-  it('disambiguates duplicate ingredients by stepIngredientIds', () => {
+  it('disambiguates duplicate ingredients by step sectionName', () => {
     const hotSauce1: InstructionIngredient = {
       id: 'sauce-1',
       displayName: 'hot sauce',
+      sectionName: 'Sauce',
       quantity: 0.5,
       unit: 'Cup',
     };
     const hotSauce2: InstructionIngredient = {
       id: 'sauce-2',
       displayName: 'hot sauce',
+      sectionName: 'Glaze',
       quantity: 1,
       unit: 'Tbsp',
     };
@@ -121,25 +122,25 @@ describe('step-instruction utils', () => {
       unit: 'Tbsp',
     };
 
-    // When step links to sauce-2, matchIngredient chooses sauce-2
-    const match = matchIngredient(token, multiIngs, ['sauce-2']);
+    // When step is in Glaze section, matchIngredient chooses sauce-2
+    const match = matchIngredient(token, multiIngs, 'Glaze');
     expect(match?.id).toBe('sauce-2');
 
-    // When step links to sauce-1, matchIngredient chooses sauce-1
-    const match1 = matchIngredient(token, multiIngs, ['sauce-1']);
+    // When step is in Sauce section, matchIngredient chooses sauce-1
+    const match1 = matchIngredient(token, multiIngs, 'Sauce');
     expect(match1?.id).toBe('sauce-1');
 
-    // ingredientUses attributes each step to its linked ingredient
+    // ingredientUses attributes each step to its matching section ingredient
     const steps = [
       {
         stepNumber: 1,
+        sectionName: 'Sauce',
         instruction: 'Whisk ||{"ingredient":"hot sauce","amount":0.5,"unit":"cup"}||.',
-        ingredientIds: ['sauce-1'],
       },
       {
         stepNumber: 2,
+        sectionName: 'Glaze',
         instruction: 'Whisk ||{"ingredient":"hot sauce","amount":1,"unit":"tbsp"}||.',
-        ingredientIds: ['sauce-2'],
       },
     ];
 
@@ -150,10 +151,6 @@ describe('step-instruction utils', () => {
     const uses2 = ingredientUses(steps, 'sauce-2', multiIngs);
     expect(uses2.length).toBe(1);
     expect(uses2[0].stepNumber).toBe(2);
-
-    // Callouts link to the correct ingredient ID
-    const callouts = stepIngredientCallouts(steps[1], multiIngs);
-    expect(callouts).toEqual([{ id: 'sauce-2', label: '1 tbsp hot sauce' }]);
   });
 
   it('scales mixture, keeps fixed unscaled, and converts dimension units without scaling', () => {

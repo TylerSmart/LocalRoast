@@ -504,9 +504,6 @@ public sealed class AiKitchenHelperServiceTests
             StepNumber = 1,
             Instruction = "Whisk buttermilk and flour together.",
         };
-        step1.IngredientReferences.Add(
-            new RecipeStepIngredient { RecipeStepId = step1.Id, RecipeIngredientId = buttermilk.Id }
-        );
         recipe.Steps.Add(step1);
 
         _dbContext.Recipes.Add(recipe);

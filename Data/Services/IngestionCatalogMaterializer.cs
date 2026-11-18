@@ -831,10 +831,8 @@ public static partial class IngestionCatalogMaterializer
                     new RecipeStepInput(
                         SectionName: s.SectionName,
                         Instruction: s.Instruction,
-                        IngredientIndices: s.IngredientIndices,
                         Timers: s.Timers,
-                        ImagePath: s.ImagePath,
-                        IngredientAmounts: s.IngredientAmounts
+                        ImagePath: s.ImagePath
                     )
                 );
             }

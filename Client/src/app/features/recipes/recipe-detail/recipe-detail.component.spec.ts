@@ -87,7 +87,6 @@ describe('RecipeDetailComponent', () => {
         sectionName: null,
         instruction: 'Bring broth to a boil and stir in noodles.',
         imagePath: null,
-        ingredientIds: ['i-1', 'i-2'],
         timers: [
           {
             id: 't-1',
@@ -273,7 +272,7 @@ describe('RecipeDetailComponent', () => {
     expect(noodles?.displayQuantityAndUnit).toBe('4 cups');
   });
 
-  it('uses explicit step portions and switches an ingredient equivalent without changing others', () => {
+  it('scales inline step tokens using authored equivalent without changing other ingredients', () => {
     const ingredient = {
       ...sampleRecipe.ingredients[0],
       quantity: 5,
@@ -283,10 +282,7 @@ describe('RecipeDetailComponent', () => {
     };
     const step = {
       ...sampleRecipe.steps[0],
-      ingredientIds: [ingredient.id],
-      ingredientAmounts: [
-        { ingredientId: ingredient.id, measurement: { quantity: 1, unit: 'Cup' as const } },
-      ],
+      instruction: `Mix ||{"ingredient":"${ingredient.displayName}","amount":1,"unit":"cup"}||.`,
     };
     component['recipe'].set({
       ...sampleRecipe,
@@ -294,37 +290,26 @@ describe('RecipeDetailComponent', () => {
       steps: [step],
     });
     component['targetSystem'].set('Metric');
-    expect(component['groupedSteps']()[0].items[0].ingredientCallouts[0].label).toBe(
-      `142 g ${ingredient.displayName}`,
-    );
+    fixture.detectChanges();
+    const text = () =>
+      fixture.nativeElement.querySelector('.step-instruction-text')?.textContent?.trim();
+    expect(text()).toBe(`Mix 142 g ${ingredient.displayName}.`);
     component.setMultiplier(0.5);
-    expect(component['groupedSteps']()[0].items[0].ingredientCallouts[0].label).toBe(
-      `71 g ${ingredient.displayName}`,
-    );
+    fixture.detectChanges();
+    expect(text()).toBe(`Mix 71 g ${ingredient.displayName}.`);
     component.toggleIngredientMeasurement(ingredient);
-    expect(component['groupedSteps']()[0].items[0].ingredientCallouts[0].label).toBe(
-      `118 ml ${ingredient.displayName}`,
-    );
+    fixture.detectChanges();
+    expect(text()).toBe(`Mix 118 ml ${ingredient.displayName}.`);
     component.toggleIngredientMeasurement(ingredient);
-    expect(component['groupedSteps']()[0].items[0].ingredientCallouts[0].label).toBe(
-      `71 g ${ingredient.displayName}`,
-    );
+    fixture.detectChanges();
+    expect(text()).toBe(`Mix 71 g ${ingredient.displayName}.`);
     expect(
       component['scaledIngredientsMap']().get(sampleRecipe.ingredients[1].id)?.ingredient
         .preferAlternativeMeasurement,
     ).toBeUndefined();
-    component['recipe'].set({
-      ...sampleRecipe,
-      ingredients: [ingredient],
-      steps: [{ ...step, ingredientAmounts: [] }],
-    });
-    expect(component['groupedSteps']()[0].items[0].ingredientCallouts[0].label).toBe(
-      ingredient.displayName,
-    );
   });
 
-  it('renders inline step tokens as scaled chips with a divided breakdown', () => {
-    const ingredient = sampleRecipe.ingredients[0];
+  it('renders inline step tokens as scaled chips with a divided breakdown and no step callouts', () => {
     component['recipe'].set({
       ...sampleRecipe,
       steps: [
@@ -334,8 +319,6 @@ describe('RecipeDetailComponent', () => {
           stepNumber: 1,
           instruction:
             'Whisk ||{"ingredient":"Egg Noodles","amount":1,"unit":"cup"}||, then reduce to 1 cup.',
-          ingredientIds: [ingredient.id],
-          ingredientAmounts: [],
         },
         {
           ...sampleRecipe.steps[0],
@@ -343,8 +326,6 @@ describe('RecipeDetailComponent', () => {
           stepNumber: 2,
           instruction:
             'Stir in the remaining ||{"ingredient":"Egg Noodles","amount":1,"unit":"cup"}||.',
-          ingredientIds: [ingredient.id],
-          ingredientAmounts: [],
         },
       ],
     });
@@ -356,9 +337,7 @@ describe('RecipeDetailComponent', () => {
       'Whisk 1 cup Egg Noodles, then reduce to 1 cup.',
       'Stir in the remaining 1 cup Egg Noodles.',
     ]);
-    expect(component['groupedSteps']()[0].items[0].ingredientCallouts).toEqual([
-      { id: ingredient.id, label: '1 cup Egg Noodles' },
-    ]);
+    expect(el.querySelector('.step-callouts-strip')).toBeNull();
 
     component.setMultiplier(2);
     fixture.detectChanges();

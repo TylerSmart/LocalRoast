@@ -26,21 +26,10 @@ public sealed record McpCookHistoryNoteDto(
     string? Notes
 );
 
-public sealed record McpStepIngredientCalloutDto(
-    Guid IngredientId,
-    string DisplayName,
-    decimal? Quantity,
-    decimal? MaxQuantity,
-    MeasurementUnit? Unit,
-    string? CustomUnitName,
-    string? PreparationNote
-);
-
 public sealed record McpRecipeStepDetailDto(
     int StepNumber,
     string? SectionName,
     string Instruction,
-    IReadOnlyList<McpStepIngredientCalloutDto> StepIngredients,
     IReadOnlyList<RecipeStepTimerDto> Timers
 );
 
@@ -124,9 +113,7 @@ public sealed record McpStructuredIngredientInput(
 public sealed record McpStructuredStepInput(
     [Required, MaxLength(4000)] string Instruction,
     [MaxLength(150)] string? SectionName = null,
-    IReadOnlyList<int>? IngredientIndices = null,
-    IReadOnlyList<RecipeStepTimerInput>? Timers = null,
-    IReadOnlyList<RecipeStepIngredientAmountInput>? IngredientAmounts = null
+    IReadOnlyList<RecipeStepTimerInput>? Timers = null
 );
 
 public sealed record McpSaveStructuredRecipeRequest(

@@ -307,7 +307,7 @@ public sealed class NavigationAndThemeE2ETests : E2ETestBase
                                 displayName: 'rolled oats'
                             }
                         ],
-                        steps: [{ instruction: 'Cook oats.', ingredientIndices: [0] }]
+                        steps: [{ instruction: 'Cook oats.' }]
                     })
                 });
 

@@ -220,33 +220,6 @@
   padding: 0 0.4rem;
 }
 
-.step-ingredients-selector {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  padding: 0.5rem;
-  border-radius: 0.375rem;
-  background-color: var(--mat-sys-surface, #ffffff);
-  border: 1px dashed var(--mat-sys-outline-variant, #cac4d0);
-
-  .sub-label {
-    font-size: 0.75rem;
-    font-weight: 600;
-    color: var(--mat-sys-outline, #79747e);
-    text-transform: uppercase;
-  }
-
-  .callout-checkboxes {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.75rem;
-
-    .callout-check {
-      font-size: 0.85rem;
-    }
-  }
-}
-
 .step-timers-section {
   display: flex;
   flex-direction: column;

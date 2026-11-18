@@ -81,7 +81,6 @@ public sealed class AiKitchenHelperService(
             .Include(r => r.Ingredients)
                 .ThenInclude(i => i.FoodItem)
             .Include(r => r.Steps)
-                .ThenInclude(s => s.IngredientReferences)
             .FirstOrDefaultAsync(r => r.Id == request.RecipeId, cancellationToken);
 
         if (recipe is null)
@@ -134,7 +133,7 @@ public sealed class AiKitchenHelperService(
 
         var relevantSteps = recipe
             .Steps.OrderBy(s => s.StepNumber)
-            .Where(s => s.IngredientReferences.Any(si => si.RecipeIngredientId == ingredient.Id))
+            .Where(s => StepMentionsIngredient(s.Instruction, ingredient))
             .Select(s => s.Instruction)
             .ToList();
 
@@ -578,5 +577,47 @@ public sealed class AiKitchenHelperService(
             ConsideredCookbookRecipeCount: catalogList.Count,
             Candidates: resultCandidates
         );
+    }
+
+    private static bool StepMentionsIngredient(string? instruction, RecipeIngredient ingredient)
+    {
+        if (string.IsNullOrWhiteSpace(instruction))
+        {
+            return false;
+        }
+
+        var displayName = ingredient.DisplayName?.Trim() ?? string.Empty;
+        var tokens = StepInstructionParser.ExtractTokens(instruction);
+        foreach (var token in tokens.OfType<StepIngredientToken>())
+        {
+            if (token.IngredientId.HasValue && token.IngredientId.Value == ingredient.Id)
+            {
+                return true;
+            }
+
+            if (displayName.Length > 0 && !string.IsNullOrWhiteSpace(token.Ingredient))
+            {
+                var tokenName = token.Ingredient.Trim();
+                if (
+                    displayName.Equals(tokenName, StringComparison.OrdinalIgnoreCase)
+                    || displayName.Contains(tokenName, StringComparison.OrdinalIgnoreCase)
+                    || tokenName.Contains(displayName, StringComparison.OrdinalIgnoreCase)
+                )
+                {
+                    return true;
+                }
+            }
+        }
+
+        if (displayName.Length > 0)
+        {
+            var plainText = StepInstructionParser.ToPlainText(instruction);
+            if (plainText.Contains(displayName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

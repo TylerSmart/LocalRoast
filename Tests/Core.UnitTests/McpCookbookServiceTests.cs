@@ -304,21 +304,13 @@ public sealed class McpCookbookServiceTests
                         PreferAlternativeMeasurement: true
                     ),
                 ],
-                Steps:
-                [
-                    new McpStructuredStepInput(
-                        "Mix the listed flour.",
-                        IngredientAmounts: [new(0, new(1, MeasurementUnit.Cup))]
-                    ),
-                ]
+                Steps: [new McpStructuredStepInput("Mix the listed flour.")]
             )
         );
         Assert.AreEqual(25m, recipe.Ingredients[0].AlternativeMeasurement!.Quantity);
-        Assert.AreEqual(1m, recipe.Steps[0].IngredientAmounts![0].Measurement.Quantity);
         var detail = await _service.GetRecipeAsync(recipe.Id);
         Assert.IsNotNull(detail);
-        Assert.AreEqual(5m, detail.Steps[0].StepIngredients[0].Quantity);
-        Assert.AreEqual(MeasurementUnit.Oz, detail.Steps[0].StepIngredients[0].Unit);
+        Assert.AreEqual(1, detail.Steps.Count);
     }
 
     [TestMethod]
@@ -349,12 +341,10 @@ public sealed class McpCookbookServiceTests
             Steps:
             [
                 new McpStructuredStepInput(
-                    Instruction: "Boil pasta in salted water for 10 minutes until al dente.",
-                    IngredientIndices: [1]
+                    Instruction: "Boil pasta in salted water for 10 minutes until al dente."
                 ),
                 new McpStructuredStepInput(
-                    Instruction: "Saute minced garlic in butter for 3 minutes.",
-                    IngredientIndices: [0]
+                    Instruction: "Saute minced garlic in butter for 3 minutes."
                 ),
             ]
         );
@@ -411,7 +401,7 @@ public sealed class McpCookbookServiceTests
     }
 
     [TestMethod]
-    public async Task GetRecipeAsync_BySlug_ReturnsMcpRecipeDetailWithStepCallouts()
+    public async Task GetRecipeAsync_BySlug_ReturnsMcpRecipeDetailWithSteps()
     {
         var created = await _service.SaveStructuredRecipeAsync(
             new McpSaveStructuredRecipeRequest(
@@ -426,13 +416,7 @@ public sealed class McpCookbookServiceTests
                         Unit: "clove"
                     ),
                 ],
-                Steps:
-                [
-                    new McpStructuredStepInput(
-                        "Toss potatoes with garlic.",
-                        IngredientIndices: [0]
-                    ),
-                ]
+                Steps: [new McpStructuredStepInput("Toss potatoes with garlic.")]
             )
         );
 
@@ -443,10 +427,7 @@ public sealed class McpCookbookServiceTests
         Assert.AreEqual(created.Id, detail.Id);
 
         Assert.AreEqual(1, detail.Steps.Count);
-
-        Assert.AreEqual(1, detail.Steps[0].StepIngredients.Count);
-
-        Assert.AreEqual("Garlic", detail.Steps[0].StepIngredients[0].DisplayName);
+        Assert.AreEqual("Toss potatoes with garlic.", detail.Steps[0].Instruction);
     }
 
     [TestMethod]

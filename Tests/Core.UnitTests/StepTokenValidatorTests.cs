@@ -84,11 +84,6 @@ public sealed class StepTokenValidatorTests
             result.ValidationWarnings,
             string.Join(" | ", result.ValidationWarnings)
         );
-        Assert.HasCount(1, result.IngredientIndices);
-        Assert.AreEqual(0, result.IngredientIndices[0]);
-        Assert.HasCount(1, result.IngredientAmounts);
-        Assert.AreEqual(1m, result.IngredientAmounts[0].Measurement.Quantity);
-        Assert.AreEqual(2m, result.IngredientAmounts[0].Measurement.MaxQuantity);
         Assert.HasCount(1, result.Timers);
         Assert.AreEqual(600, result.Timers[0].DurationSeconds);
 

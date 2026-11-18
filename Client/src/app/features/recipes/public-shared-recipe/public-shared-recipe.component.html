@@ -362,16 +362,6 @@
                                         [factor]="scaleFactor() * (item.ingredient.quantity ?? 1)"
                                         [unitSystem]="targetSystem()"
                                       ></app-step-instruction>
-                                      @for (
-                                        callout of subRecipeStepCallouts(
-                                          subStep,
-                                          subRecipe,
-                                          item.ingredient.quantity
-                                        );
-                                        track callout.id
-                                      ) {
-                                        <div>{{ callout.label }}</div>
-                                      }
                                     </li>
                                   }
                                 </ol>
@@ -430,21 +420,6 @@
                           class="step-reference-image"
                           loading="lazy"
                         />
-                      </div>
-                    }
-
-                    <!-- Inline Scaled Ingredient Callouts -->
-                    @if (stepItem.ingredientCallouts.length > 0) {
-                      <div class="step-callouts-strip">
-                        <span class="callout-label">Used in this step:</span>
-                        <div class="callout-chips">
-                          @for (callout of stepItem.ingredientCallouts; track callout.id) {
-                            <span class="ingredient-callout-pill">
-                              <mat-icon class="callout-icon">restaurant</mat-icon>
-                              <span>{{ callout.label }}</span>
-                            </span>
-                          }
-                        </div>
                       </div>
                     }
 

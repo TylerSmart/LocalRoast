@@ -58,7 +58,7 @@ public sealed class RecipeStepTokensIntegrationTests
                     DisplayName: "flour"
                 ),
             ],
-            Steps: [new RecipeStepInput(Instruction: RouxStepWithTokens, IngredientIndices: [0, 1])]
+            Steps: [new RecipeStepInput(Instruction: RouxStepWithTokens)]
         );
 
     private async Task<RecipeDetailDto> CreateAsync(UpsertRecipeRequest request)
@@ -75,7 +75,7 @@ public sealed class RecipeStepTokensIntegrationTests
     }
 
     [TestMethod]
-    public async Task CreateAndGet_RoundTripsStepTokensAndDerivesIngredients()
+    public async Task CreateAndGet_RoundTripsStepTokens()
     {
         var created = await CreateAsync(RouxRecipe());
 
@@ -83,8 +83,6 @@ public sealed class RecipeStepTokensIntegrationTests
         var recipe = JsonSerializer.Deserialize<RecipeDetailDto>(json, JsonSerializerOptions.Web);
         Assert.IsNotNull(recipe);
 
-        var butter = recipe.Ingredients.Single(i => i.DisplayName == "butter");
-        var flour = recipe.Ingredients.Single(i => i.DisplayName == "flour");
         var step = recipe.Steps.Single();
         Assert.AreEqual(RouxStepWithTokens, step.Instruction);
 
@@ -106,8 +104,6 @@ public sealed class RecipeStepTokensIntegrationTests
         Assert.IsNotNull(timerToken);
         Assert.AreEqual(300, timerToken.Seconds);
         Assert.AreEqual("Simmer roux", timerToken.Label);
-
-        CollectionAssert.AreEquivalent(new[] { butter.Id, flour.Id }, step.IngredientIds.ToArray());
     }
 
     [TestMethod]
@@ -120,8 +116,8 @@ public sealed class RecipeStepTokensIntegrationTests
         {
             Steps =
             [
-                new RecipeStepInput(Instruction: updatedInstruction, IngredientIndices: [0]),
-                new RecipeStepInput(Instruction: "Whisk in the flour.", IngredientIndices: [1]),
+                new RecipeStepInput(Instruction: updatedInstruction),
+                new RecipeStepInput(Instruction: "Whisk in the flour."),
             ],
         };
 
@@ -142,10 +138,10 @@ public sealed class RecipeStepTokensIntegrationTests
     }
 
     [TestMethod]
-    public async Task StepTokens_PancakePerItemDisplayAmount_RoundTripsProperly()
+    public async Task StepTokens_RoundTripsUnitTokenProperly()
     {
         const string pancakeStep =
-            "Top each pancake with ||{\"ingredient\": \"butter\", \"unit\": \"teaspoon\", \"amount\": 4, \"displayAmount\": 1}||.";
+            "Top pancakes with ||{\"ingredient\": \"butter\", \"unit\": \"teaspoon\", \"amount\": 4}||.";
         var pancakeRecipe = new UpsertRecipeRequest(
             Title: "Fluffy Pancakes",
             Ingredients:
@@ -156,7 +152,7 @@ public sealed class RecipeStepTokensIntegrationTests
                     DisplayName: "butter"
                 ),
             ],
-            Steps: [new RecipeStepInput(Instruction: pancakeStep, IngredientIndices: [0])]
+            Steps: [new RecipeStepInput(Instruction: pancakeStep)]
         );
 
         var created = await CreateAsync(pancakeRecipe);
@@ -167,7 +163,6 @@ public sealed class RecipeStepTokensIntegrationTests
         Assert.IsNotNull(token);
         Assert.AreEqual("butter", token.Ingredient);
         Assert.AreEqual(4m, token.Amount);
-        Assert.AreEqual(1m, token.DisplayAmount);
         Assert.AreEqual(MeasurementUnit.Tsp, token.Unit);
     }
 
@@ -248,7 +243,6 @@ public sealed class RecipeStepTokensIntegrationTests
             [
                 new RecipeStepInput(
                     Instruction: stepWithTimer,
-                    IngredientIndices: [0],
                     Timers:
                     [
                         new RecipeStepTimerInput(DurationSeconds: 300, Label: "Simmer roux"),

@@ -60,16 +60,6 @@ export interface RecipeMeasurement {
   customUnitName?: string | null;
 }
 
-export interface RecipeStepIngredientAmountInput {
-  ingredientIndex: number;
-  measurement: RecipeMeasurement;
-}
-
-export interface RecipeStepIngredientAmountDto {
-  ingredientId: string;
-  measurement: RecipeMeasurement;
-}
-
 export interface DetectedStepAmountDto {
   start: number;
   length: number;
@@ -156,9 +146,7 @@ export interface RecipeStepDto {
   sectionName: string | null;
   instruction: string;
   imagePath: string | null;
-  ingredientIds: string[];
   timers: RecipeStepTimerDto[];
-  ingredientAmounts?: RecipeStepIngredientAmountDto[] | null;
 }
 
 export interface SubRecipePreviewDto {
@@ -285,10 +273,8 @@ export interface RecipeStepTimerInput {
 export interface RecipeStepInput {
   sectionName?: string | null;
   instruction: string;
-  ingredientIndices?: number[] | null;
   timers?: RecipeStepTimerInput[] | null;
   imagePath?: string | null;
-  ingredientAmounts?: RecipeStepIngredientAmountInput[] | null;
 }
 
 export interface UpsertRecipeRequest {
@@ -400,9 +386,7 @@ export interface RecipePreviewStep {
   sectionName?: string | null;
   instruction: string;
   imagePath?: string | null;
-  ingredientIndices?: number[];
   timers?: { durationSeconds: number; label?: string }[];
-  ingredientAmounts?: RecipeStepIngredientAmountInput[] | null;
 }
 
 export interface RecipePreviewData {

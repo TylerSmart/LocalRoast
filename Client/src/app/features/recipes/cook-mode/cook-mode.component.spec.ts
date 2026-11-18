@@ -162,7 +162,6 @@ describe('CookModeComponent', () => {
         sectionName: 'Brown Meat',
         instruction: 'Brown ground beef in a large pot over medium heat.',
         imagePath: null,
-        ingredientIds: ['ing-1'],
         timers: [{ id: 't-1', sortOrder: 1, durationSeconds: 600, label: 'Brown Beef' }],
       },
       {
@@ -171,7 +170,6 @@ describe('CookModeComponent', () => {
         sectionName: 'Simmer',
         instruction: 'Stir in chili powder and simmer gently.',
         imagePath: null,
-        ingredientIds: ['ing-2'],
         timers: [{ id: 't-2', sortOrder: 1, durationSeconds: 1800, label: 'Simmer Chili' }],
       },
     ],
@@ -184,14 +182,12 @@ describe('CookModeComponent', () => {
     modifiedBy: 'system',
   };
 
-  it('renders scaled inline amount chips and callouts and narrates the scaled text', () => {
+  it('renders scaled inline amount chips without step callouts and narrates the scaled text', () => {
     const ingredient = { ...mockRecipe.ingredients[0], quantity: 2, unit: 'Cup' as const };
     const step = {
       ...mockRecipe.steps[0],
       instruction:
         'Whisk ||{"ingredient":"Ground Beef","amount":1,"unit":"cup"}|| in, then reduce to 1 cup.',
-      ingredientIds: [ingredient.id],
-      ingredientAmounts: [],
     };
     component['recipe'].set({ ...mockRecipe, ingredients: [ingredient], steps: [step] });
     component['activeStepIndex'].set(0);
@@ -202,9 +198,7 @@ describe('CookModeComponent', () => {
       'Whisk 2 cups Ground Beef in, then reduce to 1 cup.',
     );
     expect(el.querySelector('.inline-amount')?.textContent).toBe('2 cups Ground Beef');
-    expect(component['flattenedSteps']()[0].ingredientCallouts).toEqual([
-      { id: ingredient.id, label: '2 cups Ground Beef' },
-    ]);
+    expect(el.querySelector('.step-callouts-box')).toBeNull();
     component['narrateCurrentStep']();
     expect(mockSpeechNarrationService.speakStep).toHaveBeenLastCalledWith(
       step.stepNumber,
@@ -213,7 +207,7 @@ describe('CookModeComponent', () => {
     );
   });
 
-  it('uses scaled step portions in cook callouts and spoken narration', () => {
+  it('uses scaled inline tokens with authored equivalent and speaks instruction directly', () => {
     const ingredient = {
       ...mockRecipe.ingredients[0],
       quantity: 5,
@@ -223,38 +217,30 @@ describe('CookModeComponent', () => {
     };
     const step = {
       ...mockRecipe.steps[0],
-      ingredientIds: [ingredient.id],
-      ingredientAmounts: [
-        { ingredientId: ingredient.id, measurement: { quantity: 1, unit: 'Cup' as const } },
-      ],
+      instruction: 'Mix ||{"ingredient":"Ground Beef","amount":1,"unit":"cup"}|| in bowl.',
     };
     component['recipe'].set({ ...mockRecipe, ingredients: [ingredient], steps: [step] });
     component['targetServings'].set(mockRecipe.baseServings);
     component['targetSystem'].set('Metric');
-    expect(component['flattenedSteps']()[0].ingredientCallouts[0].label).toBe(
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.inline-amount')?.textContent).toBe(
       `142 g ${ingredient.displayName}`,
     );
     component['narrateCurrentStep']();
     expect(mockSpeechNarrationService.speakStep).toHaveBeenCalledWith(
       step.stepNumber,
-      `Ingredients for this step: 142 g ${ingredient.displayName}. ${step.instruction}`,
+      `Mix 142 g ${ingredient.displayName} in bowl.`,
       step.sectionName,
     );
     component.toggleIngredientMeasurement(ingredient);
-    expect(component['flattenedSteps']()[0].ingredientCallouts[0].label).toBe(
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.inline-amount')?.textContent).toBe(
       `237 ml ${ingredient.displayName}`,
     );
     component.toggleIngredientMeasurement(ingredient);
-    expect(component['flattenedSteps']()[0].ingredientCallouts[0].label).toBe(
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.inline-amount')?.textContent).toBe(
       `142 g ${ingredient.displayName}`,
-    );
-    component['recipe'].set({
-      ...mockRecipe,
-      ingredients: [ingredient],
-      steps: [{ ...step, ingredientAmounts: [] }],
-    });
-    expect(component['flattenedSteps']()[0].ingredientCallouts[0].label).toBe(
-      ingredient.displayName,
     );
   });
 

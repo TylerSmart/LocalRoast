@@ -1022,9 +1022,7 @@ public sealed partial class IngestionRecipePipeline(
                     SanitizedTokensJson: [step.Instruction],
                     ParsedTokens: [new Stage4TextToken(step.Instruction)],
                     CompiledInstruction: step.Instruction,
-                    IngredientIndices: [],
                     Timers: [],
-                    IngredientAmounts: [],
                     ValidationWarnings:
                     [
                         "Step could not be tokenized; preserved verbatim plain text.",
@@ -1362,56 +1360,10 @@ public sealed partial class IngestionRecipePipeline(
             );
         }
 
-        // Compile steps & deterministically link unquantified prose mentions for Cook Mode + diagnostics
+        // Compile steps & step diagnostics
         var compiledSteps = new List<IngestionDraftStepDto>(validatedSteps.Count);
         foreach (var step in validatedSteps)
         {
-            var plainText = StepInstructionParser.ToPlainText(step.CompiledInstruction);
-            var combinedIndices = new SortedSet<int>(step.IngredientIndices);
-
-            for (var i = 0; i < compiledIngredients.Count; i++)
-            {
-                if (combinedIndices.Contains(i))
-                {
-                    continue;
-                }
-
-                var candIng = compiledIngredients[i];
-                var candName = candIng.DisplayName?.Trim() ?? string.Empty;
-                if (
-                    candName.Length >= 3
-                    && !candName.Equals("unknown", StringComparison.OrdinalIgnoreCase)
-                    && WordBoundaryContains(plainText, candName)
-                )
-                {
-                    // When duplicate ingredient names exist across sections, prefer the section match if one exists
-                    var hasBetterSectionMatch = compiledIngredients
-                        .Select((other, otherIdx) => (other, otherIdx))
-                        .Any(x =>
-                            x.otherIdx != i
-                            && string.Equals(
-                                x.other.DisplayName?.Trim(),
-                                candName,
-                                StringComparison.OrdinalIgnoreCase
-                            )
-                            && string.Equals(
-                                x.other.SectionName,
-                                step.SectionName,
-                                StringComparison.OrdinalIgnoreCase
-                            )
-                            && !string.Equals(
-                                candIng.SectionName,
-                                step.SectionName,
-                                StringComparison.OrdinalIgnoreCase
-                            )
-                        );
-                    if (!hasBetterSectionMatch)
-                    {
-                        combinedIndices.Add(i);
-                    }
-                }
-            }
-
             foreach (var warning in step.ValidationWarnings)
             {
                 qualityWarnings.Add($"Step {step.StepNumber}: {warning}");
@@ -1427,10 +1379,8 @@ public sealed partial class IngestionRecipePipeline(
                         step.CompiledInstruction,
                         4000
                     ),
-                    IngredientIndices: [.. combinedIndices],
                     Timers: step.Timers,
-                    ImagePath: null,
-                    IngredientAmounts: step.IngredientAmounts
+                    ImagePath: null
                 )
             );
         }
@@ -2052,11 +2002,6 @@ public sealed partial class IngestionRecipePipeline(
                     or MeasurementUnit.Dash
             || unit is null;
     }
-
-    private static bool WordBoundaryContains(string haystack, string needle) =>
-        !string.IsNullOrWhiteSpace(haystack)
-        && !string.IsNullOrWhiteSpace(needle)
-        && Regex.IsMatch(haystack, $@"\b{Regex.Escape(needle)}\b", RegexOptions.IgnoreCase);
 
     private static async Task ReportProgressAsync(Func<string, Task>? callback, string message)
     {

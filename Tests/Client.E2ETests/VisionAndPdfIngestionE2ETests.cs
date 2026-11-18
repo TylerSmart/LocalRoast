@@ -115,8 +115,7 @@ public sealed class MockMultimodalServer : IAsyncDisposable
                           "steps": [
                             {
                               "stepNumber": 1,
-                              "instruction": "Whisk flour and gently fold in fresh blueberries.",
-                              "ingredientIndices": [0, 1]
+                              "instruction": "Whisk flour and gently fold in fresh blueberries."
                             }
                           ]
                         }
@@ -150,8 +149,7 @@ public sealed class MockMultimodalServer : IAsyncDisposable
                           "steps": [
                             {
                               "stepNumber": 1,
-                              "instruction": "Knead dough until smooth and elastic.",
-                              "ingredientIndices": [0]
+                              "instruction": "Knead dough until smooth and elastic."
                             }
                           ]
                         }

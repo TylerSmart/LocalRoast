@@ -29,7 +29,6 @@ import {
   MeasurementUnit,
   RecipeDifficulty,
   RecipeMeasurement,
-  RecipeStepIngredientAmountInput,
   RecipeStepTimerInput,
 } from './recipe.models';
 
@@ -342,10 +341,8 @@ export interface IngestionDraftStepDto {
   stepNumber: number;
   sectionName: string | null;
   instruction: string;
-  ingredientIndices: number[];
   timers: RecipeStepTimerInput[];
   imagePath: string | null;
-  ingredientAmounts?: RecipeStepIngredientAmountInput[] | null;
 }
 
 export interface IngestionExtractedDraftDto {

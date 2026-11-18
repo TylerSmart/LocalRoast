@@ -50,17 +50,18 @@ describe('step-token-parser', () => {
     expect(segments[2].text).toBe(' in a bowl.');
   });
 
-  it('parses ingredient token with per-item displayAmount', () => {
+  it('parses ingredient token with notes and range', () => {
     const raw =
-      'Top each pancake with ||{"ingredient":"butter","amount":4,"unit":"teaspoon","displayAmount":1}||.';
+      'Top pancakes with ||{"ingredient":"butter","amount":1,"maxAmount":2,"unit":"teaspoon","notes":"melted"}||.';
     const segments = parseStepInstruction(raw);
     expect(segments.length).toBe(3);
 
     const token = segments[1].token as StepIngredientToken;
     expect(token.ingredient).toBe('butter');
-    expect(token.amount).toBe(4);
-    expect(token.displayAmount).toBe(1);
+    expect(token.amount).toBe(1);
+    expect(token.maxAmount).toBe(2);
     expect(token.unit).toBe('teaspoon');
+    expect(token.notes).toBe('melted');
   });
 
   it('parses timer token', () => {
@@ -94,12 +95,11 @@ describe('step-token-parser', () => {
   it('formats token display and respects scaling factors', () => {
     const token: StepIngredientToken = {
       ingredient: 'butter',
-      amount: 4,
+      amount: 1,
       unit: 'Tsp',
-      displayAmount: 1,
     };
 
-    // Factor 1 (display amount 1 tsp)
+    // Factor 1 (1 tsp)
     expect(formatTokenDisplay(token, 1)).toBe('1 tsp butter');
 
     // Scaled by 2
@@ -328,31 +328,13 @@ describe('step-token-parser', () => {
     expect(atEnd.nextInstruction).toBe('Bake for ||{"type":"timer","seconds":600}|| ');
   });
 
-  it('derives ingredientIndices, ingredientAmounts, and timers from inline tokens', () => {
-    const ingredients = [
-      { index: 0, id: 'ing-butter', displayName: 'Unsalted Butter', sectionName: 'Sauce' },
-      { index: 1, id: 'ing-butter-crust', displayName: 'Unsalted Butter', sectionName: 'Crust' },
-      { index: 2, id: 'ing-garlic', displayName: 'Garlic', sectionName: null },
-    ];
+  it('derives timers from inline tokens', () => {
     const instruction =
       'Melt ||{"ingredient":"Unsalted Butter","amount":2,"unit":"tbsp"}||, add ||{"ingredient":"Garlic"}||, and simmer for ||{"type":"timer","seconds":300,"label":"Simmer"}|| at ||{"type":"temperature","fahrenheit":350}||.';
 
-    const meta = deriveStepMetadataFromInstruction(instruction, ingredients, 'Crust');
+    const meta = deriveStepMetadataFromInstruction(instruction);
     expect(meta.hasTokens).toBe(true);
-    expect(meta.hasIngredientTokens).toBe(true);
     expect(meta.hasTimerTokens).toBe(true);
-    expect(meta.ingredientIndices).toEqual([1, 2]);
-    expect(meta.ingredientAmounts).toEqual([
-      {
-        ingredientIndex: 1,
-        measurement: {
-          quantity: 2,
-          maxQuantity: null,
-          unit: 'Tbsp',
-          customUnitName: null,
-        },
-      },
-    ]);
     expect(meta.timers).toEqual([{ durationSeconds: 300, label: 'Simmer' }]);
   });
 
@@ -377,12 +359,7 @@ describe('step-token-parser', () => {
     expect(plain).toContain('350–375°F');
     expect(plain).toContain('5–7m');
 
-    const meta = deriveStepMetadataFromInstruction(raw, [
-      { index: 0, id: 'ing-oil', displayName: 'Olive Oil', sectionName: null },
-    ]);
-    // mixture/fixed/dimension do not pollute ingredientIndices or ingredientAmounts
-    expect(meta.ingredientIndices).toEqual([]);
-    expect(meta.ingredientAmounts).toEqual([]);
+    const meta = deriveStepMetadataFromInstruction(raw);
     expect(meta.timers).toEqual([{ durationSeconds: 300, label: 'Timer' }]);
   });
 });

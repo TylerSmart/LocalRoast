@@ -360,17 +360,6 @@ public sealed record StepIngredientToken(
     ]
         MeasurementUnit? Unit = null,
     [property: JsonPropertyName("customUnitName")] string? CustomUnitName = null,
-    [property:
-        JsonPropertyName("displayAmount"),
-        JsonConverter(typeof(FlexibleNullableDecimalJsonConverter))
-    ]
-        decimal? DisplayAmount = null,
-    [property:
-        JsonPropertyName("displayUnit"),
-        JsonConverter(typeof(FlexibleMeasurementUnitJsonConverter))
-    ]
-        MeasurementUnit? DisplayUnit = null,
-    [property: JsonPropertyName("displayCustomUnitName")] string? DisplayCustomUnitName = null,
     [property: JsonPropertyName("displayText")] string? DisplayText = null,
     [property: JsonPropertyName("notes")] string? Notes = null,
     [property:

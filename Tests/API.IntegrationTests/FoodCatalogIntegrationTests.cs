@@ -251,11 +251,7 @@ public sealed class FoodCatalogIntegrationTests
             ],
             Steps:
             [
-                new RecipeStepInput(
-                    SectionName: null,
-                    Instruction: "Drizzle honey over carrots.",
-                    IngredientIndices: [0]
-                ),
+                new RecipeStepInput(SectionName: null, Instruction: "Drizzle honey over carrots."),
             ]
         );
         var recipeRes = await _client.PostAsJsonAsync("/api/recipes", recipeReq);
@@ -411,11 +407,7 @@ public sealed class FoodCatalogIntegrationTests
             ],
             Steps:
             [
-                new RecipeStepInput(
-                    SectionName: null,
-                    Instruction: "Scatter basil over tomatoes.",
-                    IngredientIndices: [0]
-                ),
+                new RecipeStepInput(SectionName: null, Instruction: "Scatter basil over tomatoes."),
             ]
         );
         var recipeRes = await _client.PostAsJsonAsync("/api/recipes", recipeReq);
@@ -461,7 +453,7 @@ public sealed class FoodCatalogIntegrationTests
                     PreparationNote: null
                 ),
             ],
-            Steps: [new RecipeStepInput(null, "Mix.", [0])]
+            Steps: [new RecipeStepInput(null, "Mix.")]
         );
         var recipeRes = await _client.PostAsJsonAsync("/api/recipes", recipeReq);
         Assert.AreEqual(HttpStatusCode.Created, recipeRes.StatusCode);
@@ -525,7 +517,7 @@ public sealed class FoodCatalogIntegrationTests
                     PreparationNote: null
                 ),
             ],
-            Steps: [new RecipeStepInput(null, "Cook.", [0])]
+            Steps: [new RecipeStepInput(null, "Cook.")]
         );
         var recipeRes = await _client.PostAsJsonAsync("/api/recipes", recipeReq);
         Assert.AreEqual(HttpStatusCode.Created, recipeRes.StatusCode);

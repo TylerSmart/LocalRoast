@@ -77,109 +77,7 @@ public sealed class RecipeMeasurementTests
     }
 
     [TestMethod]
-    [DataRow(0.5, 2.5, "71")]
-    [DataRow(1.0, 5.0, "142")]
-    [DataRow(2.0, 10.0, "283")]
-    public void StepAmounts_ScaleUsingRecipeSpecificWeightRatio(
-        double scale,
-        double ounces,
-        string grams
-    )
-    {
-        var ingredient = Flour();
-        var amount = new RecipeMeasurement(1, MeasurementUnit.Cup);
-        var original = CulinaryMath.ScaleStepIngredient(
-            ingredient,
-            amount,
-            (decimal)scale,
-            UnitSystem.Original
-        );
-        Assert.AreEqual((decimal)ounces, original.Quantity);
-        Assert.AreEqual(MeasurementUnit.Oz, original.Unit);
-        var metric = CulinaryMath.ScaleStepIngredient(
-            ingredient,
-            amount,
-            (decimal)scale,
-            UnitSystem.Metric
-        );
-        Assert.AreEqual(grams, metric.FormattedAmount);
-        Assert.AreEqual(MeasurementUnit.G, metric.Unit);
-    }
-
-    [TestMethod]
-    public void StepAmounts_HandleSameDimensionAndInverseAlternativeConversion()
-    {
-        var ingredient = Flour();
-        var fromTablespoons = CulinaryMath.ScaleStepIngredient(
-            ingredient,
-            new RecipeMeasurement(16, MeasurementUnit.Tbsp),
-            1,
-            UnitSystem.Original
-        );
-        Assert.IsTrue(Math.Abs(fromTablespoons.Quantity!.Value - 5m) < 0.0001m);
-        var fromWeight = CulinaryMath.ScaleStepIngredient(
-            Flour(false),
-            new RecipeMeasurement(5, MeasurementUnit.Oz),
-            1,
-            UnitSystem.Original
-        );
-        Assert.AreEqual(1m, fromWeight.Quantity);
-        Assert.AreEqual(MeasurementUnit.Cup, fromWeight.Unit);
-        var authoredCup = Flour() with
-        {
-            Quantity = 1,
-            AlternativeMeasurement = new(250, MeasurementUnit.Ml),
-        };
-        Assert.AreEqual(
-            250m,
-            CulinaryMath
-                .ScaleStepIngredient(
-                    authoredCup,
-                    new RecipeMeasurement(1, MeasurementUnit.Cup),
-                    1,
-                    UnitSystem.Metric
-                )
-                .Quantity
-        );
-        var authoredLiters = CulinaryMath.ScaleStepIngredient(
-            authoredCup,
-            new RecipeMeasurement(1, MeasurementUnit.L),
-            1,
-            UnitSystem.Original
-        );
-        Assert.AreEqual(1m, authoredLiters.Quantity);
-        Assert.AreEqual(MeasurementUnit.L, authoredLiters.Unit);
-    }
-
-    [TestMethod]
-    public void StepAmounts_UnassignedAreNameOnlyAndIncompatibleUnitsAreNotInvented()
-    {
-        var ingredient = Flour();
-        var unassigned = CulinaryMath.ScaleStepIngredient(ingredient, null, 2, UnitSystem.Metric);
-        Assert.IsNull(unassigned.Quantity);
-        Assert.AreEqual("", unassigned.UnitLabel);
-        var authored = CulinaryMath.ScaleStepIngredient(
-            ingredient,
-            new RecipeMeasurement(1, MeasurementUnit.Pinch),
-            2,
-            UnitSystem.Metric
-        );
-        Assert.AreEqual(2m, authored.Quantity);
-        Assert.AreEqual(MeasurementUnit.Pinch, authored.Unit);
-        var withoutEquivalent = CulinaryMath.ScaleStepIngredient(
-            ingredient with
-            {
-                AlternativeMeasurement = null,
-            },
-            new RecipeMeasurement(1, MeasurementUnit.Cup),
-            1,
-            UnitSystem.Metric
-        );
-        Assert.AreEqual(MeasurementUnit.Ml, withoutEquivalent.Unit);
-    }
-
-    [TestMethod]
-    public void MeasurementValidation_RejectsInvalidValuesAndMissingIngredientIndex()
+    public void MeasurementValidation_RejectsInvalidValues()
     {
         foreach (
             var invalid in new RecipeMeasurement[]
@@ -197,11 +95,6 @@ public sealed class RecipeMeasurementTests
             Assert.Throws<DomainValidationException>(() =>
                 RecipeMeasurementValidation.Validate(invalid)
             );
-        Assert.Throws<JsonException>(() =>
-            JsonSerializer.Deserialize<RecipeStepIngredientAmountInput>(
-                """{"Measurement":{"Quantity":1,"Unit":1}}"""
-            )
-        );
     }
 
     [TestMethod]

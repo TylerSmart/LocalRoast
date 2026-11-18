@@ -276,10 +276,7 @@ public sealed class AiKitchenHelpersIntegrationTests
                         PreparationNote: "peeled"
                     ),
                 ],
-                Steps:
-                [
-                    new RecipeStepInput(Instruction: "Julienne the kiwi.", IngredientIndices: [0]),
-                ]
+                Steps: [new RecipeStepInput(Instruction: "Julienne the kiwi.")]
             )
         );
         Assert.AreEqual(HttpStatusCode.Created, recipeResponse.StatusCode);
@@ -433,14 +430,7 @@ public sealed class AiKitchenHelpersIntegrationTests
                         PreparationNote: null
                     ),
                 ],
-                Steps:
-                [
-                    new RecipeStepInput(
-                        SectionName: null,
-                        Instruction: "Top with sour cream",
-                        IngredientIndices: [0]
-                    ),
-                ]
+                Steps: [new RecipeStepInput(SectionName: null, Instruction: "Top with sour cream")]
             )
         );
         Assert.AreEqual(HttpStatusCode.Created, recipeRes.StatusCode);
@@ -527,14 +517,7 @@ public sealed class AiKitchenHelpersIntegrationTests
                         PreparationNote: null
                     ),
                 ],
-                Steps:
-                [
-                    new RecipeStepInput(
-                        SectionName: null,
-                        Instruction: "Stir in cream",
-                        IngredientIndices: [0]
-                    ),
-                ]
+                Steps: [new RecipeStepInput(SectionName: null, Instruction: "Stir in cream")]
             )
         );
         Assert.AreEqual(HttpStatusCode.Created, recipeRes.StatusCode);

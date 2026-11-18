@@ -448,8 +448,6 @@ public sealed partial class RecipeService(
                 .ThenInclude(i => i.Replacements)
                     .ThenInclude(rep => rep.FoodItem)
             .Include(r => r.Steps)
-                .ThenInclude(s => s.IngredientReferences)
-            .Include(r => r.Steps)
                 .ThenInclude(s => s.Timers)
             .Include(r => r.RecipeCollections)
                 .ThenInclude(rc => rc.Collection)
@@ -484,8 +482,6 @@ public sealed partial class RecipeService(
                 .Include(r => r.Ingredients)
                     .ThenInclude(i => i.Replacements)
                         .ThenInclude(rep => rep.FoodItem)
-                .Include(r => r.Steps)
-                    .ThenInclude(s => s.IngredientReferences)
                 .Include(r => r.Steps)
                     .ThenInclude(s => s.Timers)
                 .ToListAsync(cancellationToken);
@@ -672,15 +668,8 @@ public sealed partial class RecipeService(
             s.SectionName,
             s.Instruction,
             s.ImagePath,
-            s.IngredientReferences.Select(ir => ir.RecipeIngredientId).ToList(),
             s.Timers.OrderBy(t => t.SortOrder)
                 .Select(t => new RecipeStepTimerDto(t.Id, t.SortOrder, t.DurationSeconds, t.Label))
-                .ToList(),
-            s.IngredientReferences.Where(ir => ir.Quantity.HasValue && ir.Unit.HasValue)
-                .Select(ir => new RecipeStepIngredientAmountDto(
-                    ir.RecipeIngredientId,
-                    new RecipeMeasurement(ir.Quantity, ir.Unit, ir.MaxQuantity, ir.CustomUnitName)
-                ))
                 .ToList()
         );
     }
@@ -756,8 +745,6 @@ public sealed partial class RecipeService(
             .Recipes.Include(r => r.Ingredients)
                 .ThenInclude(i => i.Replacements)
             .Include(r => r.Steps)
-                .ThenInclude(s => s.IngredientReferences)
-            .Include(r => r.Steps)
                 .ThenInclude(s => s.Timers)
             .Include(r => r.RecipeCollections)
             .Include(r => r.RecipeTags)
@@ -789,9 +776,6 @@ public sealed partial class RecipeService(
 
         var totalTime = ComputeTotalTime(request);
 
-        dbContext.RecipeStepIngredients.RemoveRange(
-            recipe.Steps.SelectMany(s => s.IngredientReferences).ToList()
-        );
         dbContext.RecipeStepTimers.RemoveRange(recipe.Steps.SelectMany(s => s.Timers).ToList());
         dbContext.RecipeSteps.RemoveRange(recipe.Steps.ToList());
         dbContext.RecipeIngredientReplacements.RemoveRange(
@@ -875,7 +859,6 @@ public sealed partial class RecipeService(
     {
         var recipe = await dbContext
             .Recipes.Include(r => r.Steps)
-                .ThenInclude(s => s.IngredientReferences)
             .Include(r => r.Attachments)
             .Include(r => r.CookLogs)
             .FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
@@ -907,10 +890,6 @@ public sealed partial class RecipeService(
             .CookLogs.Where(c => c.RecipeId == id)
             .Select(c => new { c.PhotoImagePath, c.PhotoThumbnailPath })
             .ToListAsync(cancellationToken);
-
-        dbContext.RecipeStepIngredients.RemoveRange(
-            recipe.Steps.SelectMany(s => s.IngredientReferences).ToList()
-        );
 
         var shareLinks = await dbContext
             .ShareLinks.Where(s => s.RecipeId == id)
@@ -1340,19 +1319,6 @@ public sealed partial class RecipeService(
                     throw new DomainValidationException("Step instruction is required.");
                 }
 
-                if (step.IngredientIndices is not null)
-                {
-                    foreach (var idx in step.IngredientIndices)
-                    {
-                        if (idx < 0 || idx >= ingCount)
-                        {
-                            throw new DomainValidationException(
-                                $"Step ingredient index {idx} is out of bounds."
-                            );
-                        }
-                    }
-                }
-
                 if (step.Timers is not null)
                 {
                     foreach (var timer in step.Timers)
@@ -1366,28 +1332,6 @@ public sealed partial class RecipeService(
                             throw new DomainValidationException("Timer label is required.");
                         }
                     }
-                }
-                var seenAmountIndices = new HashSet<int>();
-                foreach (var amount in step.IngredientAmounts ?? [])
-                {
-                    if (
-                        amount is null
-                        || amount.IngredientIndex < 0
-                        || amount.IngredientIndex >= ingCount
-                        || amount.Measurement is null
-                    )
-                    {
-                        throw new DomainValidationException(
-                            "Each step measurement must reference a valid ingredient index."
-                        );
-                    }
-                    if (!seenAmountIndices.Add(amount.IngredientIndex))
-                    {
-                        throw new DomainValidationException(
-                            "Duplicate step measurement for the same ingredient index."
-                        );
-                    }
-                    RecipeMeasurementValidation.Validate(amount.Measurement);
                 }
             }
         }
@@ -1625,88 +1569,11 @@ public sealed partial class RecipeService(
                 ImagePath = ValidateAndNormalizeMediaPath(sInput.ImagePath),
             };
 
-            var amounts = (sInput.IngredientAmounts ?? [])
-                .GroupBy(a => a.IngredientIndex)
-                .ToDictionary(g => g.Key, g => (RecipeMeasurement?)g.First().Measurement);
-            var indices = (sInput.IngredientIndices ?? []).Concat(amounts.Keys).ToList();
-
             var tokens = StepInstructionParser.ExtractTokens(sInput.Instruction);
-            var ingredientCandidates = createdIngredients
-                .Select(
-                    (ci, idx) =>
-                        new IngredientCandidateInfo(
-                            idx,
-                            ci.SectionName,
-                            ci.DisplayName,
-                            ci.FoodItem?.Name,
-                            ci.Quantity,
-                            ci.MaxQuantity,
-                            ci.Unit,
-                            ci.CustomUnitName,
-                            ci.Id,
-                            ci.PreparationNote
-                        )
-                )
-                .ToArray();
 
             foreach (var token in tokens)
             {
-                if (token is StepIngredientToken ingToken)
-                {
-                    var matchIdx = StepInstructionParser.FindBestMatchingIngredientIndex(
-                        ingToken,
-                        sInput.SectionName,
-                        ingredientCandidates,
-                        indices,
-                        sInput.Instruction
-                    );
-
-                    if (matchIdx >= 0)
-                    {
-                        var candidate = ingredientCandidates[matchIdx];
-                        var otherMismatched = indices
-                            .Where(idx =>
-                                idx != matchIdx
-                                && idx >= 0
-                                && idx < ingredientCandidates.Length
-                                && (
-                                    string.Equals(
-                                        ingredientCandidates[idx].DisplayName,
-                                        candidate.DisplayName,
-                                        StringComparison.OrdinalIgnoreCase
-                                    )
-                                    || (
-                                        !string.IsNullOrEmpty(candidate.CanonicalOrMatchedName)
-                                        && string.Equals(
-                                            ingredientCandidates[idx].CanonicalOrMatchedName,
-                                            candidate.CanonicalOrMatchedName,
-                                            StringComparison.OrdinalIgnoreCase
-                                        )
-                                    )
-                                )
-                            )
-                            .ToList();
-
-                        foreach (var oldIdx in otherMismatched)
-                        {
-                            indices.Remove(oldIdx);
-                            amounts.Remove(oldIdx);
-                        }
-
-                        if (!indices.Contains(matchIdx))
-                            indices.Add(matchIdx);
-                        if (ingToken.Amount.HasValue && !amounts.ContainsKey(matchIdx))
-                        {
-                            amounts[matchIdx] = new RecipeMeasurement(
-                                ingToken.Amount,
-                                ingToken.Unit,
-                                null,
-                                ingToken.CustomUnitName
-                            );
-                        }
-                    }
-                }
-                else if (token is StepTimerToken timerToken && timerToken.Seconds >= 1)
+                if (token is StepTimerToken timerToken && timerToken.Seconds >= 1)
                 {
                     var timerLabel = !string.IsNullOrWhiteSpace(timerToken.Label)
                         ? timerToken.Label.Trim()
@@ -1733,25 +1600,6 @@ public sealed partial class RecipeService(
                             }
                         );
                     }
-                }
-            }
-
-            foreach (var idx in indices.Distinct())
-            {
-                if (idx >= 0 && idx < createdIngredients.Count)
-                {
-                    var amount = amounts.GetValueOrDefault(idx);
-                    stepEntity.IngredientReferences.Add(
-                        new RecipeStepIngredient
-                        {
-                            RecipeStep = stepEntity,
-                            RecipeIngredient = createdIngredients[idx],
-                            Quantity = amount?.Quantity,
-                            MaxQuantity = amount?.MaxQuantity,
-                            Unit = amount?.Unit,
-                            CustomUnitName = amount?.CustomUnitName?.Trim(),
-                        }
-                    );
                 }
             }
             if (sInput.Timers is not null)

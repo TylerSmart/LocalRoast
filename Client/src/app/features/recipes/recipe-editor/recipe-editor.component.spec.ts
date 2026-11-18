@@ -79,23 +79,6 @@ describe('RecipeEditorComponent', () => {
     expect(component.ingredientsArray.length).toBe(1);
   });
 
-  it('keeps assigned portions attached to ingredients when removing and reordering', () => {
-    component.addIngredient();
-    component.addIngredient();
-    component.toggleStepIngredientCallout(0, 2);
-    component
-      .getStepAmountsArray(0)
-      .at(0)
-      .controls.measurement.setValue({ quantity: 1, unit: 'Cup' });
-    component.moveIngredientUp(2);
-    expect(component.stepsArray.at(0).get('ingredientIndices')?.value).toEqual([1]);
-    expect(component.getStepAmountsArray(0).at(0).controls.ingredientIndex.value).toBe(1);
-    component.removeIngredient(0);
-    expect(component.getStepAmountsArray(0).at(0).controls.ingredientIndex.value).toBe(0);
-    component.removeIngredient(0);
-    expect(component.getStepAmountsArray(0).length).toBe(0);
-  });
-
   it('loads unresolved recipe references and clears them when linked to a saved recipe', () => {
     const referencedTitle = 'Foolproof All-Butter Dough';
     const recipeDetail: RecipeDetailDto = {
@@ -242,8 +225,6 @@ describe('RecipeEditorComponent', () => {
           sectionName: null,
           instruction: 'Add ||{"ingredient":"milk","amount":3,"unit":"tbsp"}||.',
           imagePath: null,
-          ingredientIds: ['milk'],
-          ingredientAmounts: [],
           timers: [],
         },
       ],
@@ -325,11 +306,6 @@ describe('RecipeEditorComponent', () => {
     component.stepsArray.at(0).patchValue({
       instruction: 'Boil water and cook pasta.',
     });
-    component.toggleStepIngredientCallout(0, 0);
-    component
-      .getStepAmountsArray(0)
-      .at(0)
-      .controls.measurement.setValue({ quantity: 0.5, unit: 'Cup' });
 
     component.onSave();
 
@@ -344,16 +320,14 @@ describe('RecipeEditorComponent', () => {
         ],
         steps: [
           expect.objectContaining({
-            ingredientAmounts: [
-              { ingredientIndex: 0, measurement: { quantity: 0.5, unit: 'Cup' } },
-            ],
+            instruction: 'Boil water and cook pasta.',
           }),
         ],
       }),
     );
   });
 
-  it('derives ingredientIndices, ingredientAmounts, and timers from inline step tokens on save', () => {
+  it('derives timers from inline step tokens on save', () => {
     mockRecipeService.createRecipe.mockReturnValue(
       of({
         id: 'saved-2',
@@ -409,18 +383,6 @@ describe('RecipeEditorComponent', () => {
       expect.objectContaining({
         steps: [
           expect.objectContaining({
-            ingredientIndices: [0],
-            ingredientAmounts: [
-              {
-                ingredientIndex: 0,
-                measurement: {
-                  quantity: 0.5,
-                  maxQuantity: null,
-                  unit: 'Lb',
-                  customUnitName: null,
-                },
-              },
-            ],
             timers: [{ durationSeconds: 480, label: 'Boil' }],
           }),
         ],

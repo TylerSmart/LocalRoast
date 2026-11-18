@@ -518,43 +518,6 @@
       }
     }
 
-    .step-callouts-strip {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      flex-wrap: wrap;
-      margin-left: 2.5rem;
-      font-size: 0.8rem;
-
-      .callout-label {
-        color: var(--mat-sys-outline, #79747e);
-        font-weight: 500;
-      }
-
-      .callout-chips {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0.35rem;
-
-        .ingredient-callout-pill {
-          display: inline-flex;
-          align-items: center;
-          gap: 0.25rem;
-          padding: 0.15rem 0.5rem;
-          border-radius: 9999px;
-          background-color: var(--mat-sys-surface-container-high, #ece6f0);
-          color: var(--mat-sys-on-surface-variant, #49454f);
-          font-weight: 500;
-
-          .callout-icon {
-            font-size: 0.85rem;
-            width: 0.85rem;
-            height: 0.85rem;
-          }
-        }
-      }
-    }
-
     .step-timers-strip {
       display: flex;
       align-items: center;

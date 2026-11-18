@@ -54,7 +54,6 @@ describe('PublicSharedRecipeComponent', () => {
         sectionName: null,
         instruction: 'Sear meat on high heat.',
         imagePath: null,
-        ingredientIds: ['ing-1'],
         timers: [{ id: 't-1', sortOrder: 1, durationSeconds: 600, label: 'Sear' }],
       },
     ],
@@ -88,7 +87,6 @@ describe('PublicSharedRecipeComponent', () => {
             sectionName: null,
             instruction: 'Roast tomatoes on comal.',
             imagePath: null,
-            ingredientIds: ['sub-ing-1'],
             timers: [],
           },
         ],
@@ -158,7 +156,7 @@ describe('PublicSharedRecipeComponent', () => {
     expect(scaledLabel).toContain('Roma Tomatoes');
   });
 
-  it('uses assigned portions and per-ingredient equivalents in public recipes', () => {
+  it('scales inline step tokens using per-ingredient equivalents in public recipes', () => {
     const ingredient = {
       ...mockPublicRecipe.ingredients[0],
       quantity: 5,
@@ -168,36 +166,23 @@ describe('PublicSharedRecipeComponent', () => {
     };
     const step = {
       ...mockPublicRecipe.steps[0],
-      instruction: `Mix ${ingredient.displayName}.`,
-      ingredientIds: [ingredient.id],
-      ingredientAmounts: [
-        { ingredientId: ingredient.id, measurement: { quantity: 1, unit: 'Cup' as const } },
-      ],
+      instruction: `Mix ||{"ingredient":"${ingredient.displayName}","amount":1,"unit":"cup"}||.`,
     };
     component['recipe'].set({ ...mockPublicRecipe, ingredients: [ingredient], steps: [step] });
     component['targetSystem'].set('Metric');
-    expect(component['groupedSteps']()[0].items[0].ingredientCallouts[0].label).toBe(
-      `142 g ${ingredient.displayName}`,
-    );
+    fixture.detectChanges();
+    const text = () =>
+      fixture.nativeElement.querySelector('.step-instruction-text')?.textContent?.trim();
+    expect(text()).toBe(`Mix 142 g ${ingredient.displayName}.`);
     component.toggleIngredientMeasurement(ingredient);
-    expect(component['groupedSteps']()[0].items[0].ingredientCallouts[0].label).toBe(
-      `237 ml ${ingredient.displayName}`,
-    );
+    fixture.detectChanges();
+    expect(text()).toBe(`Mix 237 ml ${ingredient.displayName}.`);
     component.toggleIngredientMeasurement(ingredient);
-    expect(component['groupedSteps']()[0].items[0].ingredientCallouts[0].label).toBe(
-      `142 g ${ingredient.displayName}`,
-    );
-    component['recipe'].set({
-      ...mockPublicRecipe,
-      ingredients: [ingredient],
-      steps: [{ ...step, ingredientAmounts: [] }],
-    });
-    expect(component['groupedSteps']()[0].items[0].ingredientCallouts[0].label).toBe(
-      ingredient.displayName,
-    );
+    fixture.detectChanges();
+    expect(text()).toBe(`Mix 142 g ${ingredient.displayName}.`);
   });
 
-  it('renders inline step tokens as scaled chips with a divided breakdown', () => {
+  it('renders inline step tokens as scaled chips with a divided breakdown without callouts', () => {
     const ingredient = { ...mockPublicRecipe.ingredients[0], linkedSubRecipeId: null };
     component['recipe'].set({
       ...mockPublicRecipe,
@@ -219,9 +204,7 @@ describe('PublicSharedRecipeComponent', () => {
     expect(el.querySelector('.ingredient-uses')?.textContent).toBe(
       'Divided: 2 lb Pork Shoulder (step 1) · 2 lb Pork Shoulder (step 1)',
     );
-    expect(component['groupedSteps']()[0].items[0].ingredientCallouts).toEqual([
-      { id: ingredient.id, label: '2 lb Pork Shoulder' },
-    ]);
+    expect(el.querySelector('.step-callouts-strip')).toBeNull();
   });
 
   it('sets isUnavailable true when API returns error', () => {

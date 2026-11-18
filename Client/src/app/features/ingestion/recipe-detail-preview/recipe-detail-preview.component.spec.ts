@@ -75,7 +75,6 @@ describe('RecipeDetailPreviewComponent', () => {
         instruction:
           'Bring a large pot of salted water to a rolling boil and cook fettuccine until al dente.',
         imagePath: null,
-        ingredientIndices: [2],
         timers: [{ durationSeconds: 600, label: 'Boil Pasta' }],
       },
       {
@@ -85,7 +84,6 @@ describe('RecipeDetailPreviewComponent', () => {
         instruction:
           'In a skillet over medium heat, warm olive oil and sauté minced garlic until fragrant.',
         imagePath: null,
-        ingredientIndices: [0, 1],
         timers: [{ durationSeconds: 180, label: 'Sauté Garlic' }],
       },
     ],
@@ -140,15 +138,15 @@ describe('RecipeDetailPreviewComponent', () => {
     expect(ingText).toContain('Fettuccine');
   });
 
-  it('renders instructions with step numbers, ingredient callouts, and timers', () => {
+  it('renders instructions with step numbers and timers without step callouts', () => {
     const el = fixture.nativeElement as HTMLElement;
     const stepsText = el.querySelector('.instructions-column')?.textContent;
     expect(stepsText).toContain('Bring a large pot of salted water');
     expect(stepsText).toContain('In a skillet over medium heat');
     expect(stepsText).toContain('10 mins');
     expect(stepsText).toContain('3 mins');
-    expect(stepsText).toContain('Used in this step:');
-    expect(stepsText).toContain('Fettuccine');
+    expect(stepsText).not.toContain('Used in this step:');
+    expect(el.querySelector('.step-callouts-strip')).toBeNull();
   });
 
   it('scales ingredient quantities when servings are adjusted', () => {
@@ -163,7 +161,7 @@ describe('RecipeDetailPreviewComponent', () => {
     expect(map.get(0)?.scaled.unit).toBe('Cup');
   });
 
-  it('scales a one-serving starter to half with the assigned step amount and authored weight equivalent', () => {
+  it('scales a one-serving starter to half with inline token amount and authored weight equivalent', () => {
     const ingredient = {
       ...mockRecipeData.ingredients[0],
       quantity: 5,
@@ -173,11 +171,7 @@ describe('RecipeDetailPreviewComponent', () => {
     };
     const step = {
       ...mockRecipeData.steps[0],
-      instruction: `Mix ${ingredient.displayName}.`,
-      ingredientIndices: [ingredient.index],
-      ingredientAmounts: [
-        { ingredientIndex: ingredient.index, measurement: { quantity: 1, unit: 'Cup' as const } },
-      ],
+      instruction: `Mix ||{"ingredient":"${ingredient.displayName}","amount":1,"unit":"cup"}||.`,
     };
     fixture.componentRef.setInput('recipe', {
       ...mockRecipeData,
@@ -187,9 +181,10 @@ describe('RecipeDetailPreviewComponent', () => {
     });
     component.targetSystem.set('Metric');
     component.setMultiplier(0.5);
+    fixture.detectChanges();
     expect(component.scaleFactor()).toBe(0.5);
-    expect(component.groupedSteps()[0].items[0].ingredientCallouts[0].label).toBe(
-      `71 g ${ingredient.displayName}`,
+    expect(fixture.nativeElement.querySelector('.step-instruction-text')?.textContent?.trim()).toBe(
+      `Mix 71 g ${ingredient.displayName}.`,
     );
   });
 
@@ -201,7 +196,6 @@ describe('RecipeDetailPreviewComponent', () => {
           ...mockRecipeData.steps[1],
           instruction:
             'Warm ||{"ingredient":"Olive Oil","amount":1,"unit":"tbsp"}||, then add ||{"ingredient":"Olive Oil","amount":1,"unit":"tbsp"}|| more.',
-          ingredientIndices: [0, 1],
         },
       ],
     });
@@ -214,9 +208,6 @@ describe('RecipeDetailPreviewComponent', () => {
     expect(el.querySelector('.ingredient-uses')?.textContent).toBe(
       'Divided: 2 tbsp Olive Oil (step 2) · 2 tbsp Olive Oil (step 2)',
     );
-    expect(component.groupedSteps()[0].items[0].ingredientCallouts.map((c) => c.id)).toEqual([
-      'ing-0',
-    ]);
   });
 
   it('emits publishRequested when publish button is clicked', () => {

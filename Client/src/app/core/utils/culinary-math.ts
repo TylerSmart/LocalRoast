@@ -109,16 +109,6 @@ export function scaleStepIngredient(
   );
 }
 
-export function formatStepIngredient(
-  ingredient: IngredientMeasurements & { displayName: string },
-  amount: RecipeMeasurement | null | undefined,
-  factor: number,
-  system: UnitSystem,
-): string {
-  const scaled = scaleStepIngredient(ingredient, amount, factor, system);
-  return [scaled.formattedMeasurement, ingredient.displayName].filter(Boolean).join(' ');
-}
-
 export interface FormattedQuantityResult {
   quantity: number | null;
   maxQuantity: number | null;

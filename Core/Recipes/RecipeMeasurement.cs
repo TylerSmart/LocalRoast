@@ -11,13 +11,6 @@ public record RecipeMeasurement(
     [MaxLength(50)] string? CustomUnitName = null
 );
 
-public record RecipeStepIngredientAmountInput(
-    [property: JsonRequired] [Range(0, int.MaxValue)] int IngredientIndex,
-    [Required] RecipeMeasurement Measurement
-);
-
-public record RecipeStepIngredientAmountDto(Guid IngredientId, RecipeMeasurement Measurement);
-
 public static class RecipeMeasurementValidation
 {
     public static void Validate(RecipeMeasurement measurement)

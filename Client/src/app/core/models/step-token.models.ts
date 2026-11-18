@@ -13,9 +13,6 @@ export interface StepIngredientToken {
   maxAmount?: number | null;
   unit?: MeasurementUnit | string | null;
   customUnitName?: string | null;
-  displayAmount?: number | null;
-  displayUnit?: MeasurementUnit | string | null;
-  displayCustomUnitName?: string | null;
   displayText?: string | null;
   notes?: string | null;
 }

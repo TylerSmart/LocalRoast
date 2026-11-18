@@ -40,7 +40,6 @@ import {
   formatIngredientUses,
   ingredientUses,
   isIngredientDivided,
-  stepIngredientCallouts,
 } from '../../../core/utils/step-instruction';
 import { StepInstructionComponent } from '../../../shared/components/step-instruction/step-instruction.component';
 import { getTodayIsoLocal } from '../../../core/utils/meal-plan-date';
@@ -76,7 +75,6 @@ export interface ScaledIngredientItem {
 
 export interface ScaledStepItem {
   step: RecipeStepDto;
-  ingredientCallouts: { id: string; label: string }[];
 }
 
 export interface IngredientSectionGroup {
@@ -248,7 +246,7 @@ export class RecipeDetailComponent implements OnInit {
     }));
   });
 
-  // Steps grouped by section with resolved ingredient chips
+  // Steps grouped by section
   protected readonly groupedSteps = computed<StepSectionGroup[]>(() => {
     const r = this.recipe();
     if (!r) {
@@ -263,16 +261,8 @@ export class RecipeDetailComponent implements OnInit {
         sectionsMap.set(section, []);
       }
 
-      const callouts = stepIngredientCallouts(
-        step,
-        this.displayIngredients(),
-        this.scaleFactor(),
-        this.targetSystem(),
-      );
-
       sectionsMap.get(section)!.push({
         step,
-        ingredientCallouts: callouts,
       });
     }
 

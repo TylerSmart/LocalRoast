@@ -514,31 +514,6 @@
               </button>
             }
 
-            <!-- Scaled Ingredient Callouts for this Step -->
-            @if (currentStep()!.ingredientCallouts.length > 0) {
-              <div class="step-callouts-box">
-                <span class="callouts-label">Ingredients for this step:</span>
-                <div class="callouts-chips">
-                  @for (callout of currentStep()!.ingredientCallouts; track callout.id) {
-                    <span class="cook-step-ingredient-chip">
-                      <span>{{ callout.label }}</span>
-                      @if (aiHelper.isAvailable()) {
-                        <button
-                          type="button"
-                          class="cook-substitute-btn chip-sub-btn"
-                          matTooltip="Suggest substitution"
-                          aria-label="Suggest substitution"
-                          (click)="openIngredientSubstitutionById(callout.id, $event)"
-                        >
-                          <mat-icon>auto_awesome</mat-icon>
-                        </button>
-                      }
-                    </span>
-                  }
-                </div>
-              </div>
-            }
-
             <!-- Step Timers (1-tap launch) -->
             @if (currentStep()!.step.timers.length > 0) {
               <div class="step-timers-box">

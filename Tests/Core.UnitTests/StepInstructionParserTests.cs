@@ -22,7 +22,7 @@ public sealed class StepInstructionParserTests
     public void ParseSegments_WithIngredientToken_ParsesCorrectly()
     {
         const string text =
-            "Top each of 4 pancakes with ||{\"ingredient\": \"butter\", \"amount\": 4, \"unit\": \"teaspoon\", \"displayAmount\": 1, \"displayUnit\": \"teaspoon\"}|| and serve.";
+            "Top each of 4 pancakes with ||{\"ingredient\": \"butter\", \"amount\": 4, \"unit\": \"teaspoon\"}|| and serve.";
         var segments = StepInstructionParser.ParseSegments(text);
 
         Assert.AreEqual(3, segments.Count);
@@ -35,8 +35,7 @@ public sealed class StepInstructionParserTests
         Assert.AreEqual("butter", token.Ingredient);
         Assert.AreEqual(4m, token.Amount);
         Assert.AreEqual(MeasurementUnit.Tsp, token.Unit);
-        Assert.AreEqual(1m, token.DisplayAmount);
-        Assert.AreEqual(MeasurementUnit.Tsp, token.DisplayUnit);
+        Assert.AreEqual("butter", token.Ingredient);
 
         Assert.AreEqual(" and serve.", segments[2].Text);
         Assert.IsNull(segments[2].Token);
@@ -82,10 +81,10 @@ public sealed class StepInstructionParserTests
     }
 
     [TestMethod]
-    public void ToPlainText_FormatsDisplayAmountAndIngredient()
+    public void ToPlainText_FormatsIngredientToken()
     {
         const string text =
-            "Top each pancake with ||{\"ingredient\": \"butter\", \"amount\": 4, \"unit\": \"tsp\", \"displayAmount\": 1, \"displayUnit\": \"tsp\"}||.";
+            "Top each pancake with ||{\"ingredient\": \"butter\", \"amount\": 1, \"unit\": \"tsp\"}||.";
         var plain = StepInstructionParser.ToPlainText(text);
 
         Assert.AreEqual("Top each pancake with 1 tsp butter.", plain);
@@ -97,16 +96,13 @@ public sealed class StepInstructionParserTests
         var token = new StepIngredientToken(
             Ingredient: "butter",
             Amount: 4m,
-            Unit: MeasurementUnit.Tsp,
-            DisplayAmount: 1m,
-            DisplayUnit: MeasurementUnit.Tsp
+            Unit: MeasurementUnit.Tsp
         );
 
         var formatted = StepInstructionParser.FormatToken(token);
         Assert.IsTrue(formatted.StartsWith("||{") && formatted.EndsWith("}||"));
         Assert.IsTrue(formatted.Contains("\"ingredient\":\"butter\""));
         Assert.IsTrue(formatted.Contains("\"amount\":4"));
-        Assert.IsTrue(formatted.Contains("\"displayAmount\":1"));
     }
 
     [TestMethod]
@@ -127,8 +123,7 @@ public sealed class StepInstructionParserTests
     [TestMethod]
     public void ParseSegments_WithMissingIngredientProperty_FallsBackToIngredientToken()
     {
-        const string text =
-            "Reserve ||{\"amount\": 1, \"unit\": \"tbsp\", \"displayAmount\": 1, \"displayUnit\": \"tbsp\"}|| fat.";
+        const string text = "Reserve ||{\"amount\": 1, \"unit\": \"tbsp\"}|| fat.";
         var segments = StepInstructionParser.ParseSegments(text);
 
         Assert.IsTrue(segments.Any(s => s.Token is StepIngredientToken));
@@ -310,7 +305,7 @@ public sealed class StepInstructionParserTests
     public void ParseSegments_MergesSplitJsonObjectsInsideDelimiters()
     {
         const string text =
-            "Melt ||{\"ingredient\": \"unsalted butter\", \"amount\": 6, \"unit\": \"tbsp\"}, {\"displayAmount\": 6, \"displayUnit\": \"tbsp\"}|| in a skillet.";
+            "Melt ||{\"ingredient\": \"unsalted butter\"}, {\"amount\": 6, \"unit\": \"tbsp\"}|| in a skillet.";
 
         var segments = StepInstructionParser.ParseSegments(text);
         var token = segments.Select(s => s.Token).OfType<StepIngredientToken>().Single();
@@ -318,8 +313,6 @@ public sealed class StepInstructionParserTests
         Assert.AreEqual("unsalted butter", token.Ingredient);
         Assert.AreEqual(6m, token.Amount);
         Assert.AreEqual(MeasurementUnit.Tbsp, token.Unit);
-        Assert.AreEqual(6m, token.DisplayAmount);
-        Assert.AreEqual(MeasurementUnit.Tbsp, token.DisplayUnit);
     }
 
     [TestMethod]
@@ -376,8 +369,7 @@ public sealed class StepInstructionParserTests
     [TestMethod]
     public void CleanStepInstruction_ConvertsNamelessIngredientTokenToPlainText()
     {
-        const string text =
-            "Pour ||{\"amount\": 1.5, \"unit\": \"cup\", \"displayAmount\": 1.5, \"displayUnit\": \"cup\"}|| into the bowl.";
+        const string text = "Pour ||{\"amount\": 1.5, \"unit\": \"cup\"}|| into the bowl.";
 
         var cleaned = StepInstructionParser.CleanStepInstruction(text);
 

@@ -72,9 +72,6 @@ public sealed class RecipeIngredient : IAuditable
 
     public Recipe? LinkedRecipe { get; set; }
 
-    public ICollection<RecipeStepIngredient> StepReferences { get; set; } =
-        new List<RecipeStepIngredient>();
-
     public ICollection<RecipeIngredientReplacement> Replacements { get; set; } =
         new List<RecipeIngredientReplacement>();
 }

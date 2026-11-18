@@ -19,7 +19,7 @@ public sealed class StepTokensE2ETests : E2ETestBase
                 new
                 {
                     displayName = "butter",
-                    quantity = 4,
+                    quantity = 1,
                     unit = "Tsp",
                 },
             },
@@ -27,8 +27,7 @@ public sealed class StepTokensE2ETests : E2ETestBase
             {
                 new
                 {
-                    instruction = "Top each of the 4 pancakes with ||{\"ingredient\":\"butter\",\"amount\":4,\"unit\":\"teaspoon\",\"displayAmount\":1,\"displayUnit\":\"teaspoon\"}||.",
-                    ingredientIndices = new[] { 0 },
+                    instruction = "Top pancakes with ||{\"ingredient\":\"butter\",\"amount\":1,\"unit\":\"teaspoon\"}||.",
                 },
             },
         };
@@ -57,7 +56,7 @@ public sealed class StepTokensE2ETests : E2ETestBase
 
     [TestMethod]
     [Timeout(DefaultTestTimeoutMs)]
-    public async Task StepTokens_PancakePerItemDisplay_ScalesCorrectlyInCookMode()
+    public async Task StepTokens_InlineIngredient_ScalesCorrectlyInCookMode()
     {
         await RegisterAndLoginAsync();
         var recipeId = await SeedPancakesRecipeAsync(
@@ -67,6 +66,7 @@ public sealed class StepTokensE2ETests : E2ETestBase
         await Page.GotoAsync($"{ServerUrl}/recipes/{recipeId}/cook");
         var instruction = Page.Locator(".instruction-text");
         await Expect(instruction).ToContainTextAsync("1 tsp butter");
+        await Expect(Page.Locator(".step-callouts-box")).ToHaveCountAsync(0);
 
         var chip = Page.Locator(".mult-chip", new() { HasTextRegex = TwoX });
         await chip.ClickAsync();
@@ -76,16 +76,9 @@ public sealed class StepTokensE2ETests : E2ETestBase
         await Expect(amountChip).ToHaveTextAsync("2 tsp butter");
         await Expect(amountChip).ToHaveClassAsync(new Regex("is-scaled"));
 
-        // Verify tooltip on hover
+        // Verify tooltip on hover shows ingredient name
         var titleAttr = await amountChip.GetAttributeAsync("title");
-        Assert.IsTrue(
-            titleAttr != null
-                && (
-                    titleAttr.Contains("2 tbsp + 2 tsp butter")
-                    || titleAttr.Contains("8 tsp butter")
-                ),
-            $"Expected tooltip to mention scaled total butter, got: {titleAttr}"
-        );
+        Assert.AreEqual("butter", titleAttr);
     }
 
     [TestMethod]
@@ -121,11 +114,8 @@ public sealed class StepTokensE2ETests : E2ETestBase
         await dialog.Locator("input[formcontrolname='ingredient']").FillAsync("Eggs");
         await dialog.Locator("input[formcontrolname='amount']").FillAsync("4");
         await dialog.Locator("input[formcontrolname='unit']").FillAsync("whole");
-
-        // Toggle custom display amount
-        await dialog.Locator("mat-checkbox[formcontrolname='useDisplayAmount']").ClickAsync();
-        await dialog.Locator("input[formcontrolname='displayAmount']").FillAsync("2");
-        await dialog.Locator("input[formcontrolname='displayUnit']").FillAsync("whole");
+        // Click back to top field to dismiss unit autocomplete dropdown before clicking Insert Token
+        await dialog.Locator("input[formcontrolname='ingredient']").ClickAsync();
 
         // Save
         await dialog.Locator("button", new() { HasText = "Insert Token" }).ClickAsync();
@@ -135,7 +125,7 @@ public sealed class StepTokensE2ETests : E2ETestBase
         var val = await editor.GetAttributeAsync("data-serialized-value");
         Assert.IsNotNull(val);
         Assert.Contains(
-            "||{\"type\":\"ingredient\",\"ingredient\":\"Eggs\",\"amount\":4,\"unit\":\"whole\",\"displayAmount\":2,\"displayUnit\":\"whole\"}||",
+            "||{\"type\":\"ingredient\",\"ingredient\":\"Eggs\",\"amount\":4,\"unit\":\"whole\"}||",
             val
         );
 
@@ -149,7 +139,7 @@ public sealed class StepTokensE2ETests : E2ETestBase
         // Verify inline chip inside editable surface
         var inlineChip = editable.Locator(".inline-step-chip.is-ingredient");
         await Expect(inlineChip).ToBeVisibleAsync();
-        await Expect(inlineChip).ToContainTextAsync("2 Eggs");
+        await Expect(inlineChip).ToContainTextAsync("4 Eggs");
 
         // Continue typing after chip and insert timer & temperature chips dynamically
         await Page.Keyboard.TypeAsync("and cook ");

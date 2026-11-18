@@ -31,7 +31,6 @@ import {
   formatIngredientUses,
   ingredientUses,
   isIngredientDivided,
-  stepIngredientCallouts,
 } from '../../../core/utils/step-instruction';
 import { StepInstructionComponent } from '../../../shared/components/step-instruction/step-instruction.component';
 import { shouldShowTimerLabel } from '../../../core/utils/step-token-parser';
@@ -44,7 +43,6 @@ export interface PublicScaledIngredientItem {
 
 export interface PublicScaledStepItem {
   step: RecipeStepDto;
-  ingredientCallouts: { id: string; label: string }[];
 }
 
 export interface PublicIngredientSectionGroup {
@@ -194,7 +192,6 @@ export class PublicSharedRecipeComponent implements OnInit {
 
   protected readonly groupedSteps = computed<PublicStepSectionGroup[]>(() => {
     const r = this.recipe();
-    const ingredients = this.displayIngredients();
     if (!r) {
       return [];
     }
@@ -207,16 +204,8 @@ export class PublicSharedRecipeComponent implements OnInit {
         sectionsMap.set(section, []);
       }
 
-      const callouts = stepIngredientCallouts(
-        step,
-        ingredients,
-        this.scaleFactor(),
-        this.targetSystem(),
-      );
-
       sectionsMap.get(section)!.push({
         step,
-        ingredientCallouts: callouts,
       });
     }
 
@@ -304,15 +293,6 @@ export class PublicSharedRecipeComponent implements OnInit {
     const scaled = scaleIngredient(ing, factor, sys);
     const qtyAndUnit = scaled.formattedMeasurement;
     return qtyAndUnit ? `${qtyAndUnit} ${ing.displayName}` : ing.displayName;
-  }
-
-  subRecipeStepCallouts(step: RecipeStepDto, sub: PublicSubRecipeDto, quantity: number | null) {
-    return stepIngredientCallouts(
-      step,
-      sub.ingredients,
-      this.scaleFactor() * (quantity ?? 1),
-      this.targetSystem(),
-    );
   }
 
   toggleTheme(): void {

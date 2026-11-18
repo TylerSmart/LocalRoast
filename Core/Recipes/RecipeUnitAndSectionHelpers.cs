@@ -3,19 +3,6 @@ using App.Core.Ingestion;
 
 namespace App.Core.Recipes;
 
-public readonly record struct IngredientCandidateInfo(
-    int Index,
-    string? SectionName,
-    string? DisplayName,
-    string? CanonicalOrMatchedName,
-    decimal? Quantity,
-    decimal? MaxQuantity,
-    MeasurementUnit? Unit,
-    string? CustomUnitName,
-    Guid? Id = null,
-    string? PreparationNote = null
-);
-
 public static class RecipeUnitAndSectionHelpers
 {
     private static readonly TimeSpan RegexTimeout = TimeSpan.FromSeconds(1);
@@ -789,94 +776,6 @@ public static class RecipeUnitAndSectionHelpers
         }
 
         return false;
-    }
-
-    public static bool IsWholeEggIngredient(string? displayName, string? canonicalName)
-    {
-        var combined = $"{displayName} {canonicalName}".Trim();
-        if (string.IsNullOrWhiteSpace(combined))
-        {
-            return false;
-        }
-
-        return Regex.IsMatch(combined, @"\beggs?\b", RegexOptions.IgnoreCase, RegexTimeout)
-            && !Regex.IsMatch(
-                combined,
-                @"\b(?:noodles?|pasta|yolks?|whites?|replacer|substitute|wash|powder)\b",
-                RegexOptions.IgnoreCase,
-                RegexTimeout
-            );
-    }
-
-    public static bool IsSeparatedEggPartTerm(string? text) =>
-        !string.IsNullOrWhiteSpace(text)
-        && Regex.IsMatch(
-            text,
-            @"\b(?:egg\s+yolks?|egg\s+whites?|yolks?|whites)\b",
-            RegexOptions.IgnoreCase,
-            RegexTimeout
-        );
-
-    public static bool IsEggPartMatch(
-        string? tokenName,
-        string? candidateDisplayName,
-        string? candidateCanonicalName,
-        IReadOnlyList<IngredientCandidateInfo> allCandidates
-    )
-    {
-        if (
-            string.IsNullOrWhiteSpace(tokenName)
-            || !IsSeparatedEggPartTerm(tokenName)
-            || !IsWholeEggIngredient(candidateDisplayName, candidateCanonicalName)
-        )
-        {
-            return false;
-        }
-
-        var wantsYolk = Regex.IsMatch(
-            tokenName,
-            @"\byolks?\b",
-            RegexOptions.IgnoreCase,
-            RegexTimeout
-        );
-        var wantsWhite = Regex.IsMatch(
-            tokenName,
-            @"\b(?:egg\s+)?whites?\b",
-            RegexOptions.IgnoreCase,
-            RegexTimeout
-        );
-
-        foreach (var cand in allCandidates)
-        {
-            var other = $"{cand.DisplayName} {cand.CanonicalOrMatchedName}".Trim();
-            if (string.IsNullOrWhiteSpace(other))
-            {
-                continue;
-            }
-
-            if (
-                wantsYolk
-                && Regex.IsMatch(other, @"\byolks?\b", RegexOptions.IgnoreCase, RegexTimeout)
-            )
-            {
-                return false;
-            }
-
-            if (
-                wantsWhite
-                && Regex.IsMatch(
-                    other,
-                    @"\b(?:egg\s+whites?|whites)\b",
-                    RegexOptions.IgnoreCase,
-                    RegexTimeout
-                )
-            )
-            {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     private const string TimerVerbsPattern =
