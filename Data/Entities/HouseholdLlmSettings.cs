@@ -74,23 +74,21 @@ public sealed class HouseholdLlmSettings : IAuditable
 
     public string? PauseReason { get; set; }
 
-    public bool ModelProfilesSeeded { get; set; }
+    public Guid? TextModelProfileId { get; set; }
 
-    public Guid? TextModelConfigurationId { get; set; }
+    public LlmModelProfile? TextModelProfile { get; set; }
 
-    public LlmModelConfiguration? TextModelConfiguration { get; set; }
+    public Guid? VisionModelProfileId { get; set; }
 
-    public Guid? VisionModelConfigurationId { get; set; }
+    public LlmModelProfile? VisionModelProfile { get; set; }
 
-    public LlmModelConfiguration? VisionModelConfiguration { get; set; }
+    public Guid? RefineModelProfileId { get; set; }
 
-    public Guid? RefineModelConfigurationId { get; set; }
+    public LlmModelProfile? RefineModelProfile { get; set; }
 
-    public LlmModelConfiguration? RefineModelConfiguration { get; set; }
+    public Guid? EmbeddingModelProfileId { get; set; }
 
-    public Guid? EmbeddingModelConfigurationId { get; set; }
-
-    public LlmModelConfiguration? EmbeddingModelConfiguration { get; set; }
+    public LlmModelProfile? EmbeddingModelProfile { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; }
 

@@ -14,7 +14,6 @@ import { MatIconModule } from '@angular/material/icon';
 import type {
   LlmConnectionDto,
   LlmModelConfigurationDto,
-  LlmModelProfile,
 } from '../../../core/models/ingestion.models';
 import { LlmSettingsService } from '../../../core/services/llm-settings/llm-settings.service';
 import {
@@ -22,7 +21,7 @@ import {
   type LlmModelConfigurationDialogData,
 } from '../llm-model-configuration-dialog/llm-model-configuration-dialog.component';
 
-/** Saves a model on a connection together with its tuning so workflows can select it by name. */
+/** Saves each unique (Connection, Model) pair together with optional hardware placement and rate limits. */
 @Component({
   selector: 'app-llm-model-configurations-panel',
   imports: [MatButtonModule, MatIconModule],
@@ -37,11 +36,9 @@ export class LlmModelConfigurationsPanelComponent {
 
   readonly connections = input.required<LlmConnectionDto[]>();
   readonly configurations = input.required<LlmModelConfigurationDto[]>();
-  readonly profiles = input.required<LlmModelProfile[]>();
   /** Emits after a configuration is created, updated or deleted. */
   readonly changed = output<void>();
   readonly addConnectionRequested = output<void>();
-  readonly saveAsProfileRequested = output<LlmModelConfigurationDto>();
 
   readonly isSaving = signal(false);
   readonly errorMessage = signal<string | null>(null);
@@ -52,15 +49,6 @@ export class LlmModelConfigurationsPanelComponent {
 
   startEdit(configuration: LlmModelConfigurationDto): void {
     this.openDialog({ configuration });
-  }
-
-  duplicate(configuration: LlmModelConfigurationDto): void {
-    this.openDialog({ duplicateFrom: configuration });
-  }
-
-  /** Opens a new model configuration dialog pre-filled with a profile's recommendations. */
-  applyProfile(profile: LlmModelProfile): void {
-    this.openDialog({ initialProfile: profile });
   }
 
   delete(configuration: LlmModelConfigurationDto): void {
@@ -84,12 +72,8 @@ export class LlmModelConfigurationsPanelComponent {
       });
   }
 
-  profileName(id: string | null): string | null {
-    return id ? (this.profiles().find((profile) => profile.id === id)?.displayName ?? null) : null;
-  }
-
   private openDialog(
-    data: Omit<LlmModelConfigurationDialogData, 'connections' | 'profiles'>,
+    data: Omit<LlmModelConfigurationDialogData, 'connections' | 'existingConfigurations'>,
   ): void {
     this.errorMessage.set(null);
     this.dialog
@@ -104,7 +88,7 @@ export class LlmModelConfigurationsPanelComponent {
         data: {
           ...data,
           connections: this.connections(),
-          profiles: this.profiles(),
+          existingConfigurations: this.configurations(),
         },
       })
       .afterClosed()

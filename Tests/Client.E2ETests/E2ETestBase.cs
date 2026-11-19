@@ -617,9 +617,10 @@ public abstract class E2ETestBase : PageTest
                     return response;
                 };
                 await send('PUT', '/api/llm-settings/workflows', {
-                    textModelConfigurationId: null,
-                    visionModelConfigurationId: null,
-                    refineModelConfigurationId: null,
+                    textModelProfileId: null,
+                    visionModelProfileId: null,
+                    refineModelProfileId: null,
+                    embeddingModelProfileId: null,
                     autoPublishHighConfidenceText: false,
                     maxIngestionRetries: 3,
                     enableIngestion: true,
@@ -763,27 +764,99 @@ public abstract class E2ETestBase : PageTest
         string connectionName = E2ELlmConnectionName
     ) => $"{model} @ {connectionName}";
 
-    /// <summary>Picks a saved model configuration for the "text", "vision", "refine", or "embedding" workflow.</summary>
+    protected static ILocator GetLlmProfileCard(
+        ILocator dialog,
+        string model,
+        string profileName = "Defaults",
+        string connectionName = E2ELlmConnectionName
+    ) =>
+        dialog
+            .Locator(
+                "section.profile-model-group",
+                new() { HasText = LlmConfigName(model, connectionName) }
+            )
+            .Locator(
+                ".profile-card",
+                new()
+                {
+                    Has = dialog.Page.Locator(
+                        ".profile-card-title",
+                        new() { HasTextRegex = new Regex($"^\\s*{Regex.Escape(profileName)}\\s*$") }
+                    ),
+                }
+            );
+
+    protected async Task AddLlmProfileInDialogAsync(
+        ILocator dialog,
+        string model,
+        string displayName,
+        string connectionName = E2ELlmConnectionName,
+        Func<ILocator, Task>? tune = null
+    )
+    {
+        await OpenLlmSettingsTabAsync(dialog, "Profiles");
+        var modelGroup = dialog.Locator(
+            "section.profile-model-group",
+            new() { HasText = LlmConfigName(model, connectionName) }
+        );
+        await modelGroup.GetByRole(AriaRole.Button, new() { Name = "Add Profile" }).ClickAsync();
+        var editor = Page.GetByTestId("profile-editor-form");
+        await Expect(editor).ToBeVisibleAsync();
+        await editor.GetByTestId("profile-form-name").FillAsync(displayName);
+        if (tune is not null)
+        {
+            await tune(editor);
+        }
+        await Page.RunAndWaitForResponseAsync(
+            () => editor.GetByTestId("save-profile-btn").ClickAsync(),
+            resp =>
+                resp.Url.EndsWith("/api/llm-settings/model-profiles")
+                && resp.Request.Method == "POST"
+                && resp.Ok
+        );
+        await Expect(editor).Not.ToBeVisibleAsync();
+        await Expect(GetLlmProfileCard(dialog, model, displayName, connectionName))
+            .ToBeVisibleAsync();
+    }
+
+    /// <summary>Picks a model-scoped profile (grouped by Model @ Connection) for the "text", "vision", "refine", or "embedding" workflow.</summary>
     protected async Task AssignLlmWorkflowAsync(
         ILocator dialog,
         string workflow,
         string? model,
-        string connectionName = E2ELlmConnectionName
+        string connectionName = E2ELlmConnectionName,
+        string profileName = "Defaults"
     )
     {
         await OpenLlmSettingsTabAsync(dialog, "Workflows");
         await dialog.GetByTestId($"workflow-{workflow}-select").ClickAsync();
-        var option = model is null
-            ? Page.Locator("mat-option", new() { HasText = "Not assigned" })
-            : Page.Locator(
-                "mat-option",
+        ILocator option;
+        if (model is null)
+        {
+            option = Page.Locator("mat-option", new() { HasText = "Not assigned" });
+        }
+        else
+        {
+            var group = Page.Locator(
+                "mat-optgroup",
                 new()
                 {
-                    HasTextRegex = new Regex(
-                        $"^\\s*{Regex.Escape(LlmConfigName(model, connectionName))}\\s*$"
+                    Has = Page.Locator(
+                        ".mat-mdc-optgroup-label",
+                        new()
+                        {
+                            HasTextRegex = new Regex(
+                                $"^\\s*{Regex.Escape(LlmConfigName(model, connectionName))}\\s*$"
+                            ),
+                        }
                     ),
                 }
             );
+            option = group.Locator(
+                "mat-option",
+                new() { HasTextRegex = new Regex($"^\\s*{Regex.Escape(profileName)}\\s*$") }
+            );
+        }
         await option.ClickAsync();
         await Expect(Page.Locator(".cdk-overlay-pane mat-option")).ToHaveCountAsync(0);
     }

@@ -6,7 +6,6 @@ import {
   computed,
   inject,
   signal,
-  viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
@@ -34,7 +33,7 @@ import {
   type LlmModelProfileDialogData,
 } from '../llm-model-profile-dialog/llm-model-profile-dialog.component';
 
-export { filterModels, matchModelProfile } from './llm-settings.utils';
+export { filterModels } from './llm-settings.utils';
 
 export const LLM_SETTINGS_TABS = {
   workflows: 0,
@@ -43,9 +42,9 @@ export const LLM_SETTINGS_TABS = {
   profiles: 3,
 } as const;
 
-interface ConnectionGroup {
-  connection: LlmConnectionDto;
-  configurations: LlmModelConfigurationDto[];
+export interface ModelProfileGroup {
+  configuration: LlmModelConfigurationDto;
+  profiles: LlmModelProfile[];
 }
 
 @Component({
@@ -75,7 +74,6 @@ export class LlmSettingsDialogComponent implements OnInit {
   private readonly llmSettingsService = inject(LlmSettingsService);
   private readonly ingestionService = inject(IngestionService);
   private readonly dialogRef = inject(MatDialogRef<LlmSettingsDialogComponent>);
-  private readonly modelsPanel = viewChild(LlmModelConfigurationsPanelComponent);
 
   readonly tabs = LLM_SETTINGS_TABS;
   readonly isLoading = signal(true);
@@ -90,10 +88,10 @@ export class LlmSettingsDialogComponent implements OnInit {
   readonly profileCrudError = signal<string | null>(null);
 
   readonly workflowForm = this.fb.nonNullable.group({
-    textModelConfigurationId: this.fb.nonNullable.control(''),
-    visionModelConfigurationId: this.fb.nonNullable.control(''),
-    refineModelConfigurationId: this.fb.nonNullable.control(''),
-    embeddingModelConfigurationId: this.fb.nonNullable.control(''),
+    textModelProfileId: this.fb.nonNullable.control(''),
+    visionModelProfileId: this.fb.nonNullable.control(''),
+    refineModelProfileId: this.fb.nonNullable.control(''),
+    embeddingModelProfileId: this.fb.nonNullable.control(''),
     enableIngestion: this.fb.nonNullable.control(true),
     autoPublishHighConfidenceText: this.fb.nonNullable.control(false),
     autoResumeQueue: this.fb.nonNullable.control(true),
@@ -108,33 +106,54 @@ export class LlmSettingsDialogComponent implements OnInit {
     initialValue: this.workflowForm.getRawValue(),
   });
 
-  /** Saved configurations grouped by connection for the workflow dropdowns. */
-  readonly configurationGroups = computed<ConnectionGroup[]>(() =>
-    this.connections()
-      .map((connection) => ({
-        connection,
-        configurations: this.configurations().filter((c) => c.connectionId === connection.id),
-      }))
-      .filter((group) => group.configurations.length > 0),
+  /** Saved models paired with their child profiles (Defaults first), ordered by connection and model name. */
+  readonly modelProfileSections = computed<ModelProfileGroup[]>(() => {
+    const connectionOrder = new Map(this.connections().map((c, idx) => [c.id, idx]));
+    const sortedConfigs = [...this.configurations()].sort((a, b) => {
+      const connDiff =
+        (connectionOrder.get(a.connectionId) ?? Number.MAX_SAFE_INTEGER) -
+        (connectionOrder.get(b.connectionId) ?? Number.MAX_SAFE_INTEGER);
+      return connDiff !== 0 ? connDiff : a.name.localeCompare(b.name);
+    });
+
+    const profilesByConfig = new Map<string, LlmModelProfile[]>();
+    for (const profile of this.profiles()) {
+      const list = profilesByConfig.get(profile.modelConfigurationId) ?? [];
+      list.push(profile);
+      profilesByConfig.set(profile.modelConfigurationId, list);
+    }
+
+    return sortedConfigs.map((configuration) => {
+      const items = [...(profilesByConfig.get(configuration.id) ?? [])].sort((a, b) => {
+        if (a.isDefault !== b.isDefault) {
+          return a.isDefault ? -1 : 1;
+        }
+        return a.displayName.localeCompare(b.displayName);
+      });
+      return { configuration, profiles: items };
+    });
+  });
+
+  /** Non-empty model profile groups used in workflow <mat-optgroup> selects. */
+  readonly profileGroups = computed<ModelProfileGroup[]>(() =>
+    this.modelProfileSections().filter((group) => group.profiles.length > 0),
   );
-  readonly textConfiguration = computed(() =>
-    this.findConfiguration(this.workflowValues().textModelConfigurationId),
+
+  readonly textProfile = computed(() => this.findProfile(this.workflowValues().textModelProfileId));
+  readonly visionProfile = computed(() =>
+    this.findProfile(this.workflowValues().visionModelProfileId),
   );
-  readonly visionConfiguration = computed(() =>
-    this.findConfiguration(this.workflowValues().visionModelConfigurationId),
+  readonly refineProfile = computed(() =>
+    this.findProfile(this.workflowValues().refineModelProfileId),
   );
-  readonly refineConfiguration = computed(() =>
-    this.findConfiguration(this.workflowValues().refineModelConfigurationId),
+  readonly embeddingProfile = computed(() =>
+    this.findProfile(this.workflowValues().embeddingModelProfileId),
   );
-  readonly embeddingConfiguration = computed(() =>
-    this.findConfiguration(this.workflowValues().embeddingModelConfigurationId),
-  );
+
   readonly refineMatchesText = computed(() => {
-    const text = this.textConfiguration();
-    const refine = this.refineConfiguration();
-    return (
-      !!text && !!refine && text.connectionId === refine.connectionId && text.model === refine.model
-    );
+    const text = this.textProfile();
+    const refine = this.refineProfile();
+    return !!text && !!refine && text.id === refine.id;
   });
 
   ngOnInit(): void {
@@ -159,10 +178,10 @@ export class LlmSettingsDialogComponent implements OnInit {
           this.configurations.set(configurations);
           this.profiles.set(profiles);
           this.workflowForm.reset({
-            textModelConfigurationId: settings.textModelConfigurationId ?? '',
-            visionModelConfigurationId: settings.visionModelConfigurationId ?? '',
-            refineModelConfigurationId: settings.refineModelConfigurationId ?? '',
-            embeddingModelConfigurationId: settings.embeddingModelConfigurationId ?? '',
+            textModelProfileId: settings.textModelProfileId ?? '',
+            visionModelProfileId: settings.visionModelProfileId ?? '',
+            refineModelProfileId: settings.refineModelProfileId ?? '',
+            embeddingModelProfileId: settings.embeddingModelProfileId ?? '',
             enableIngestion: settings.enableIngestion ?? true,
             autoPublishHighConfidenceText: settings.autoPublishHighConfidenceText,
             autoResumeQueue: settings.autoResumeQueue ?? true,
@@ -180,18 +199,22 @@ export class LlmSettingsDialogComponent implements OnInit {
       });
   }
 
-  /** Reloads connections and configurations after a panel saves or deletes one. */
+  /** Reloads connections, models, and profiles after a panel saves or deletes an item. */
   reloadCatalog(): void {
     forkJoin({
       connections: this.llmSettingsService.getConnections(),
       configurations: this.llmSettingsService.getModelConfigurations(),
+      profiles: this.llmSettingsService
+        .getModelProfiles()
+        .pipe(catchError(() => of([] as LlmModelProfile[]))),
     })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: ({ connections, configurations }) => {
+        next: ({ connections, configurations, profiles }) => {
           this.connections.set(connections);
           this.configurations.set(configurations);
-          this.dropMissingAssignments(configurations);
+          this.profiles.set(profiles);
+          this.syncWorkflowAssignments(configurations, profiles);
         },
         error: (err) =>
           this.errorMessage.set(err?.error?.detail || 'Failed to reload LLM connections.'),
@@ -208,10 +231,10 @@ export class LlmSettingsDialogComponent implements OnInit {
     const values = this.workflowForm.getRawValue();
     this.llmSettingsService
       .updateWorkflows({
-        textModelConfigurationId: values.textModelConfigurationId || null,
-        visionModelConfigurationId: values.visionModelConfigurationId || null,
-        refineModelConfigurationId: values.refineModelConfigurationId || null,
-        embeddingModelConfigurationId: values.embeddingModelConfigurationId || null,
+        textModelProfileId: values.textModelProfileId || null,
+        visionModelProfileId: values.visionModelProfileId || null,
+        refineModelProfileId: values.refineModelProfileId || null,
+        embeddingModelProfileId: values.embeddingModelProfileId || null,
         autoPublishHighConfidenceText: values.autoPublishHighConfidenceText,
         maxIngestionRetries: values.maxIngestionRetries,
         enableIngestion: values.enableIngestion,
@@ -237,37 +260,38 @@ export class LlmSettingsDialogComponent implements OnInit {
   }
 
   loadProfiles(): void {
-    this.llmSettingsService
-      .getModelProfiles()
+    forkJoin({
+      configurations: this.llmSettingsService
+        .getModelConfigurations()
+        .pipe(catchError(() => of(this.configurations()))),
+      profiles: this.llmSettingsService
+        .getModelProfiles()
+        .pipe(catchError(() => of([] as LlmModelProfile[]))),
+    })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (profiles) => this.profiles.set(profiles),
-        error: () => this.profiles.set([]),
+        next: ({ configurations, profiles }) => {
+          this.configurations.set(configurations);
+          this.profiles.set(profiles);
+          this.dropMissingProfiles(profiles);
+        },
       });
   }
 
-  /** Opens the Models tab with the profile's recommendations in the configuration editor. */
-  applyProfileToModel(profile: LlmModelProfile): void {
-    this.selectedTabIndex.set(LLM_SETTINGS_TABS.models);
-    this.modelsPanel()?.applyProfile(profile);
-  }
-
-  /** Opens a new profile dialog pre-filled from a saved model configuration. */
-  saveConfigurationAsProfile(configuration: LlmModelConfigurationDto): void {
-    this.selectedTabIndex.set(LLM_SETTINGS_TABS.profiles);
-    this.openProfileDialog({ fromConfiguration: configuration });
-  }
-
-  startAddProfile(): void {
-    this.openProfileDialog({});
+  startAddProfile(initialModelConfigurationId?: string): void {
+    this.openProfileDialog({ initialModelConfigurationId: initialModelConfigurationId ?? null });
   }
 
   startEditProfile(profile: LlmModelProfile): void {
     this.openProfileDialog({ profile });
   }
 
+  duplicateProfile(profile: LlmModelProfile): void {
+    this.openProfileDialog({ duplicateFrom: profile });
+  }
+
   deleteProfile(profile: LlmModelProfile): void {
-    if (this.isSavingProfile()) {
+    if (this.isSavingProfile() || profile.isDefault) {
       return;
     }
     this.isSavingProfile.set(true);
@@ -290,31 +314,9 @@ export class LlmSettingsDialogComponent implements OnInit {
       });
   }
 
-  restoreDefaults(): void {
-    if (this.isSavingProfile()) {
-      return;
-    }
-    this.isSavingProfile.set(true);
-    this.profileCrudError.set(null);
-
-    this.llmSettingsService
-      .restoreDefaultModelProfiles()
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (restored) => {
-          this.isSavingProfile.set(false);
-          this.profiles.set(restored);
-        },
-        error: (err) => {
-          this.profileCrudError.set(
-            err?.error?.detail || err?.message || 'Failed to restore default profiles.',
-          );
-          this.isSavingProfile.set(false);
-        },
-      });
-  }
-
-  private openProfileDialog(data: LlmModelProfileDialogData): void {
+  private openProfileDialog(
+    data: Omit<LlmModelProfileDialogData, 'connections' | 'configurations' | 'existingProfiles'>,
+  ): void {
     this.profileCrudError.set(null);
     this.dialog
       .open<LlmModelProfileDialogComponent, LlmModelProfileDialogData, LlmModelProfile | undefined>(
@@ -323,7 +325,12 @@ export class LlmSettingsDialogComponent implements OnInit {
           width: '620px',
           maxWidth: '95vw',
           autoFocus: false,
-          data,
+          data: {
+            ...data,
+            connections: this.connections(),
+            configurations: this.configurations(),
+            existingProfiles: this.profiles(),
+          },
         },
       )
       .afterClosed()
@@ -335,30 +342,43 @@ export class LlmSettingsDialogComponent implements OnInit {
       });
   }
 
-  private findConfiguration(id: string | undefined): LlmModelConfigurationDto | null {
-    return id ? (this.configurations().find((c) => c.id === id) ?? null) : null;
+  private findProfile(id: string | undefined): LlmModelProfile | null {
+    return id ? (this.profiles().find((p) => p.id === id) ?? null) : null;
   }
 
   /**
-   * Clears selections whose configuration was deleted, and pre-selects the text workflow when the
-   * first configuration is created so a new setup works after a single save.
+   * Clears selections whose profile was deleted, and pre-selects the first model's Defaults profile
+   * for Text when the first saved model is created so a new setup works after a single save.
    */
-  private dropMissingAssignments(configurations: LlmModelConfigurationDto[]): void {
-    const ids = new Set(configurations.map((c) => c.id));
+  private syncWorkflowAssignments(
+    configurations: LlmModelConfigurationDto[],
+    profiles: LlmModelProfile[],
+  ): void {
+    this.dropMissingProfiles(profiles);
+    const controls = this.workflowForm.controls;
+    if (!controls.textModelProfileId.value && configurations.length === 1) {
+      const defaultProfileId =
+        configurations[0].defaultProfileId ||
+        profiles.find((p) => p.modelConfigurationId === configurations[0].id && p.isDefault)?.id;
+      if (defaultProfileId && profiles.some((p) => p.id === defaultProfileId)) {
+        controls.textModelProfileId.setValue(defaultProfileId);
+        this.workflowForm.markAsDirty();
+      }
+    }
+  }
+
+  private dropMissingProfiles(profiles: LlmModelProfile[]): void {
+    const ids = new Set(profiles.map((p) => p.id));
     const controls = this.workflowForm.controls;
     for (const control of [
-      controls.textModelConfigurationId,
-      controls.visionModelConfigurationId,
-      controls.refineModelConfigurationId,
-      controls.embeddingModelConfigurationId,
+      controls.textModelProfileId,
+      controls.visionModelProfileId,
+      controls.refineModelProfileId,
+      controls.embeddingModelProfileId,
     ]) {
       if (control.value && !ids.has(control.value)) {
         control.setValue('');
       }
-    }
-    if (!controls.textModelConfigurationId.value && configurations.length === 1) {
-      controls.textModelConfigurationId.setValue(configurations[0].id);
-      this.workflowForm.markAsDirty();
     }
   }
 }

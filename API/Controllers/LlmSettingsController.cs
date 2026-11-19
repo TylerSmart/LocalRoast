@@ -29,6 +29,7 @@ public sealed class LlmSettingsController(ILlmSettingsService settingsService) :
     [HttpPost("model-profiles")]
     [ProducesResponseType(typeof(LlmModelProfileDto), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     public async Task<IActionResult> CreateModelProfile(
         [FromBody] UpsertLlmModelProfileRequest request,
         CancellationToken cancellationToken
@@ -50,14 +51,26 @@ public sealed class LlmSettingsController(ILlmSettingsService settingsService) :
                 }
             );
         }
+        catch (ConflictException ex)
+        {
+            return Conflict(
+                new ProblemDetails
+                {
+                    Status = StatusCodes.Status409Conflict,
+                    Title = ex.Title,
+                    Detail = ex.Message,
+                }
+            );
+        }
     }
 
-    [HttpPut("model-profiles/{id}")]
+    [HttpPut("model-profiles/{id:guid}")]
     [ProducesResponseType(typeof(LlmModelProfileDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     public async Task<IActionResult> UpdateModelProfile(
-        string id,
+        Guid id,
         [FromBody] UpsertLlmModelProfileRequest request,
         CancellationToken cancellationToken
     )
@@ -93,13 +106,25 @@ public sealed class LlmSettingsController(ILlmSettingsService settingsService) :
                 }
             );
         }
+        catch (ConflictException ex)
+        {
+            return Conflict(
+                new ProblemDetails
+                {
+                    Status = StatusCodes.Status409Conflict,
+                    Title = ex.Title,
+                    Detail = ex.Message,
+                }
+            );
+        }
     }
 
-    [HttpDelete("model-profiles/{id}")]
+    [HttpDelete("model-profiles/{id:guid}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     public async Task<IActionResult> DeleteModelProfile(
-        string id,
+        Guid id,
         CancellationToken cancellationToken
     )
     {
@@ -119,16 +144,17 @@ public sealed class LlmSettingsController(ILlmSettingsService settingsService) :
                 }
             );
         }
-    }
-
-    [HttpPost("model-profiles/restore-defaults")]
-    [ProducesResponseType(typeof(IReadOnlyList<LlmModelProfileDto>), StatusCodes.Status200OK)]
-    public async Task<IActionResult> RestoreDefaultModelProfiles(
-        CancellationToken cancellationToken
-    )
-    {
-        var restored = await settingsService.RestoreDefaultModelProfilesAsync(cancellationToken);
-        return Ok(restored);
+        catch (ConflictException ex)
+        {
+            return Conflict(
+                new ProblemDetails
+                {
+                    Status = StatusCodes.Status409Conflict,
+                    Title = ex.Title,
+                    Detail = ex.Message,
+                }
+            );
+        }
     }
 
     [HttpPut]

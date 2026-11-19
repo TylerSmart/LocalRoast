@@ -153,7 +153,8 @@
       <div class="profile-section" role="group" aria-labelledby="connectionLimitsHeading">
         <div id="connectionLimitsHeading" class="sampling-heading">Concurrency & Rate Limits</div>
         <p class="sampling-hint">
-          Applies only to this connection. Keep local GPUs at 1-2 concurrent requests.
+          Applies across all models on this connection. You can also set tighter per-model limits on
+          individual models. Keep local GPUs at 1-2 concurrent requests.
         </p>
 
         <div class="toggle-section">

@@ -343,7 +343,7 @@ namespace App.Data.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
-                    b.Property<Guid?>("EmbeddingModelConfigurationId")
+                    b.Property<Guid?>("EmbeddingModelProfileId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<bool>("EnableIngestion")
@@ -364,11 +364,6 @@ namespace App.Data.Migrations
 
                     b.Property<int>("MaxIngestionRetries")
                         .HasColumnType("int");
-
-                    b.Property<bool>("ModelProfilesSeeded")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bit")
-                        .HasDefaultValue(false);
 
                     b.Property<DateTimeOffset>("ModifiedAt")
                         .HasColumnType("datetimeoffset");
@@ -405,7 +400,7 @@ namespace App.Data.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
-                    b.Property<Guid?>("RefineModelConfigurationId")
+                    b.Property<Guid?>("RefineModelProfileId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<int>("RefineRequestTimeoutSeconds")
@@ -438,7 +433,7 @@ namespace App.Data.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
-                    b.Property<Guid?>("TextModelConfigurationId")
+                    b.Property<Guid?>("TextModelProfileId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<int?>("TopK")
@@ -451,21 +446,21 @@ namespace App.Data.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
-                    b.Property<Guid?>("VisionModelConfigurationId")
+                    b.Property<Guid?>("VisionModelProfileId")
                         .HasColumnType("uniqueidentifier");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("EmbeddingModelConfigurationId");
+                    b.HasIndex("EmbeddingModelProfileId");
 
-                    b.HasIndex("RefineModelConfigurationId");
+                    b.HasIndex("RefineModelProfileId");
 
                     b.HasIndex("SingletonKey")
                         .IsUnique();
 
-                    b.HasIndex("TextModelConfigurationId");
+                    b.HasIndex("TextModelProfileId");
 
-                    b.HasIndex("VisionModelConfigurationId");
+                    b.HasIndex("VisionModelProfileId");
 
                     b.ToTable("HouseholdLlmSettings", (string)null);
                 });
@@ -701,11 +696,6 @@ namespace App.Data.Migrations
                     b.Property<Guid>("ConnectionId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<int>("ContextWindowTokens")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int")
-                        .HasDefaultValue(8192);
-
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("datetimeoffset");
 
@@ -714,8 +704,19 @@ namespace App.Data.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("nvarchar(256)");
 
-                    b.Property<bool>("EnableThinking")
-                        .HasColumnType("bit");
+                    b.Property<string>("DailyQuotaResetTime")
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)");
+
+                    b.Property<string>("DailyQuotaResetTimezone")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<int?>("DailyRequestQuota")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("MaxConcurrentRequests")
+                        .HasColumnType("int");
 
                     b.Property<string>("Model")
                         .IsRequired()
@@ -738,29 +739,15 @@ namespace App.Data.Migrations
                     b.Property<int?>("OllamaGpuLayers")
                         .HasColumnType("int");
 
-                    b.Property<string>("ProfileSlug")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<int>("RequestTimeoutSeconds")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int")
-                        .HasDefaultValue(120);
-
-                    b.Property<double?>("Temperature")
-                        .HasColumnType("float");
-
-                    b.Property<int?>("TopK")
+                    b.Property<int?>("RequestsPerMinute")
                         .HasColumnType("int");
-
-                    b.Property<double?>("TopP")
-                        .HasColumnType("float");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ConnectionId");
-
                     b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.HasIndex("ConnectionId", "Model")
                         .IsUnique();
 
                     b.ToTable("LlmModelConfigurations", (string)null);
@@ -775,7 +762,7 @@ namespace App.Data.Migrations
                     b.Property<int>("ContextWindowTokens")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("int")
-                        .HasDefaultValue(32768);
+                        .HasDefaultValue(8192);
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("datetimeoffset");
@@ -793,18 +780,13 @@ namespace App.Data.Migrations
                     b.Property<bool>("EnableThinking")
                         .HasColumnType("bit");
 
-                    b.Property<bool>("IsBuiltInDefault")
-                        .HasColumnType("bit");
+                    b.Property<bool>("IsDefault")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
 
-                    b.Property<string>("MatchPrefixesJson")
-                        .IsRequired()
-                        .HasMaxLength(1000)
-                        .HasColumnType("nvarchar(1000)");
-
-                    b.Property<string>("ModelTag")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
+                    b.Property<Guid>("ModelConfigurationId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTimeOffset>("ModifiedAt")
                         .HasColumnType("datetimeoffset");
@@ -819,21 +801,10 @@ namespace App.Data.Migrations
                         .HasMaxLength(4000)
                         .HasColumnType("nvarchar(4000)");
 
-                    b.Property<bool>("RecommendedAsRefineModel")
-                        .HasColumnType("bit");
-
                     b.Property<int>("RequestTimeoutSeconds")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("int")
-                        .HasDefaultValue(600);
-
-                    b.Property<string>("Slug")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<int>("SortOrder")
-                        .HasColumnType("int");
+                        .HasDefaultValue(120);
 
                     b.Property<string>("Summary")
                         .IsRequired()
@@ -851,7 +822,7 @@ namespace App.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("Slug")
+                    b.HasIndex("ModelConfigurationId", "DisplayName")
                         .IsUnique();
 
                     b.ToTable("LlmModelProfiles", (string)null);
@@ -2030,33 +2001,33 @@ namespace App.Data.Migrations
 
             modelBuilder.Entity("App.Data.Entities.HouseholdLlmSettings", b =>
                 {
-                    b.HasOne("App.Data.Entities.LlmModelConfiguration", "EmbeddingModelConfiguration")
+                    b.HasOne("App.Data.Entities.LlmModelProfile", "EmbeddingModelProfile")
                         .WithMany()
-                        .HasForeignKey("EmbeddingModelConfigurationId")
+                        .HasForeignKey("EmbeddingModelProfileId")
                         .OnDelete(DeleteBehavior.Restrict);
 
-                    b.HasOne("App.Data.Entities.LlmModelConfiguration", "RefineModelConfiguration")
+                    b.HasOne("App.Data.Entities.LlmModelProfile", "RefineModelProfile")
                         .WithMany()
-                        .HasForeignKey("RefineModelConfigurationId")
+                        .HasForeignKey("RefineModelProfileId")
                         .OnDelete(DeleteBehavior.Restrict);
 
-                    b.HasOne("App.Data.Entities.LlmModelConfiguration", "TextModelConfiguration")
+                    b.HasOne("App.Data.Entities.LlmModelProfile", "TextModelProfile")
                         .WithMany()
-                        .HasForeignKey("TextModelConfigurationId")
+                        .HasForeignKey("TextModelProfileId")
                         .OnDelete(DeleteBehavior.Restrict);
 
-                    b.HasOne("App.Data.Entities.LlmModelConfiguration", "VisionModelConfiguration")
+                    b.HasOne("App.Data.Entities.LlmModelProfile", "VisionModelProfile")
                         .WithMany()
-                        .HasForeignKey("VisionModelConfigurationId")
+                        .HasForeignKey("VisionModelProfileId")
                         .OnDelete(DeleteBehavior.Restrict);
 
-                    b.Navigation("EmbeddingModelConfiguration");
+                    b.Navigation("EmbeddingModelProfile");
 
-                    b.Navigation("RefineModelConfiguration");
+                    b.Navigation("RefineModelProfile");
 
-                    b.Navigation("TextModelConfiguration");
+                    b.Navigation("TextModelProfile");
 
-                    b.Navigation("VisionModelConfiguration");
+                    b.Navigation("VisionModelProfile");
                 });
 
             modelBuilder.Entity("App.Data.Entities.IngestionJob", b =>
@@ -2078,6 +2049,17 @@ namespace App.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("Connection");
+                });
+
+            modelBuilder.Entity("App.Data.Entities.LlmModelProfile", b =>
+                {
+                    b.HasOne("App.Data.Entities.LlmModelConfiguration", "ModelConfiguration")
+                        .WithMany("Profiles")
+                        .HasForeignKey("ModelConfigurationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ModelConfiguration");
                 });
 
             modelBuilder.Entity("App.Data.Entities.MealPlanEntry", b =>
@@ -2297,6 +2279,11 @@ namespace App.Data.Migrations
             modelBuilder.Entity("App.Data.Entities.LlmConnection", b =>
                 {
                     b.Navigation("ModelConfigurations");
+                });
+
+            modelBuilder.Entity("App.Data.Entities.LlmModelConfiguration", b =>
+                {
+                    b.Navigation("Profiles");
                 });
 
             modelBuilder.Entity("App.Data.Entities.MealPlanEntry", b =>

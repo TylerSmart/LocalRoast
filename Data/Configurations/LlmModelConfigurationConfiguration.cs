@@ -17,9 +17,10 @@ public sealed class LlmModelConfigurationConfiguration
         builder.HasIndex(c => c.Name).IsUnique();
 
         builder.Property(c => c.Model).IsRequired().HasMaxLength(200);
-        builder.Property(c => c.ProfileSlug).HasMaxLength(100);
-        builder.Property(c => c.ContextWindowTokens).HasDefaultValue(8192);
-        builder.Property(c => c.RequestTimeoutSeconds).HasDefaultValue(120);
+        builder.HasIndex(c => new { c.ConnectionId, c.Model }).IsUnique();
+
+        builder.Property(c => c.DailyQuotaResetTimezone).HasMaxLength(64);
+        builder.Property(c => c.DailyQuotaResetTime).HasMaxLength(10);
 
         builder
             .HasOne(c => c.Connection)

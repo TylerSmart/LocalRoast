@@ -173,22 +173,37 @@ public sealed partial class IngestionRecipePipeline(
                 "Stage 5/5: Polishing flagged recipe details..."
             );
 
-            var polishRes = await RunStage5PolishAsync(
-                polishConfig,
-                request.SourceText,
-                title,
-                description,
-                servings,
-                yieldDisplay,
-                timing,
-                rawTags,
-                workIngredients,
-                validatedSteps,
-                incompatibleAlts,
-                remainingStepWarnings,
-                missingMetadata,
-                cancellationToken
-            );
+            Stage5TargetedPolishResponseDto? polishRes = null;
+            try
+            {
+                polishRes = await RunStage5PolishAsync(
+                    polishConfig,
+                    request.SourceText,
+                    title,
+                    description,
+                    servings,
+                    yieldDisplay,
+                    timing,
+                    rawTags,
+                    workIngredients,
+                    validatedSteps,
+                    incompatibleAlts,
+                    remainingStepWarnings,
+                    missingMetadata,
+                    cancellationToken
+                );
+            }
+            catch (LlmHostUnavailableException ex)
+                when (ex.IsQuotaExhausted
+                    && !QuotaExhaustionAffectsPrimaryTextWorkflow(ex, request.Config)
+                )
+            {
+                logger?.LogWarning(
+                    ex,
+                    "Refinement model quota exhausted on '{Model}'; skipping Stage 5 polish so primary Text ingestion can continue.",
+                    polishConfig.TextModel
+                );
+            }
 
             if (polishRes is not null)
             {
@@ -1120,6 +1135,32 @@ public sealed partial class IngestionRecipePipeline(
         );
 
         return res.Parsed;
+    }
+
+    private static bool QuotaExhaustionAffectsPrimaryTextWorkflow(
+        LlmHostUnavailableException ex,
+        EffectiveLlmConnectionConfig primaryTextConfig
+    )
+    {
+        if (ex.ExhaustedQuotaScope is null || string.IsNullOrWhiteSpace(ex.ExhaustedGateKey))
+        {
+            return true;
+        }
+
+        return ex.ExhaustedQuotaScope switch
+        {
+            LlmQuotaScope.Connection => string.Equals(
+                ex.ExhaustedGateKey,
+                primaryTextConfig.ConnectionKey,
+                StringComparison.Ordinal
+            ),
+            LlmQuotaScope.Model => string.Equals(
+                ex.ExhaustedGateKey,
+                primaryTextConfig.ModelKey,
+                StringComparison.Ordinal
+            ),
+            _ => true,
+        };
     }
 
     private static IngestionExtractedDraftDto CompileDraft(

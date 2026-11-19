@@ -7,39 +7,9 @@ namespace App.Core.UnitTests;
 public sealed class LlmModelProfilesTests
 {
     [TestMethod]
-    [DataRow("gemma4:e4b", "gemma4-e4b")]
-    [DataRow("  GEMMA4:E4B-it-q8_0 ", "gemma4-e4b")]
-    [DataRow("gemma4:e2b", "gemma4-e2b")]
-    [DataRow("gemma4:12b", "gemma4-12b")]
-    [DataRow("gemma4:26b-a4b", "gemma4-26b-a4b")]
-    [DataRow("gemini-2.5-flash-lite", "gemini-flash-lite")]
-    [DataRow("google/gemini-2.5-flash", "gemini-flash")]
-    [DataRow("gemini-4-argon", "gemini-argon")]
-    [DataRow("gemini-2.5-pro", "gemini-argon")]
-    [DataRow("embeddinggemma", "embeddinggemma")]
-    [DataRow("embeddinggemma:latest", "embeddinggemma")]
-    [DataRow("gemma4-26b-gpu24", null)]
-    [DataRow("qwen2.5:14b", null)]
-    [DataRow("", null)]
-    [DataRow(null, null)]
-    public void Match_UsesLongestTagPrefix(string? model, string? expectedId) =>
-        Assert.AreEqual(expectedId, LlmModelProfiles.Match(model)?.Id);
-
-    [TestMethod]
-    public void Profiles_HaveUniqueIdsAndValidSettings()
+    public void LlmWorkflow_IncludesEmbedding()
     {
-        Assert.HasCount(
-            LlmModelProfiles.All.Count,
-            LlmModelProfiles.All.Select(profile => profile.Id).Distinct()
-        );
-        foreach (var profile in LlmModelProfiles.All)
-        {
-            Assert.IsTrue(profile.Temperature is null or >= 0 and <= 2, profile.Id);
-            Assert.IsTrue(profile.TopP is null or >= 0 and <= 1, profile.Id);
-            Assert.IsTrue(profile.TopK is null or >= 1 and <= 1000, profile.Id);
-            Assert.IsTrue(profile.RequestTimeoutSeconds is >= 5 and <= 1800, profile.Id);
-        }
-        Assert.IsTrue(LlmModelProfiles.All.Any(profile => profile.RecommendedAsRefineModel));
+        Assert.IsTrue(Enum.IsDefined(LlmWorkflow.Embedding));
     }
 
     [TestMethod]
@@ -112,10 +82,83 @@ public sealed class LlmModelProfilesTests
     }
 
     [TestMethod]
-    public void BuiltInProfiles_IncludeEmbeddingGemmaAndEmbeddingWorkflow()
+    public void EffectiveConcurrencyAndResetSchedule_PreferModelOverrideAndFallBackToConnection()
     {
-        var profile = LlmModelProfiles.Match("embeddinggemma");
-        Assert.IsNotNull(profile);
-        Assert.IsTrue(Enum.IsDefined(LlmWorkflow.Embedding));
+        var config = new EffectiveLlmConnectionConfig(
+            Provider: LlmProvider.OpenAiCompatible,
+            BaseUrl: "https://api.example.com/v1",
+            ApiKey: "secret",
+            TextModel: "gemini-flash",
+            VisionModel: null,
+            OllamaKeepAlive: "5m",
+            RequestTimeoutSeconds: 120,
+            AutoPublishHighConfidenceText: false,
+            MaxConcurrentRequests: 3,
+            DailyQuotaResetTimezone: "UTC",
+            DailyQuotaResetTime: "00:00"
+        );
+
+        Assert.AreEqual(3, config.EffectiveMaxConcurrentRequests);
+        Assert.AreEqual("UTC", config.EffectiveQuotaResetTimezone);
+        Assert.AreEqual("00:00", config.EffectiveQuotaResetTime);
+
+        var withOverrides = config with
+        {
+            ModelMaxConcurrentRequests = 1,
+            ModelDailyQuotaResetTimezone = "America/Los_Angeles",
+            ModelDailyQuotaResetTime = "03:00",
+        };
+
+        Assert.AreEqual(1, withOverrides.EffectiveMaxConcurrentRequests);
+        Assert.AreEqual("America/Los_Angeles", withOverrides.EffectiveQuotaResetTimezone);
+        Assert.AreEqual("03:00", withOverrides.EffectiveQuotaResetTime);
+
+        // Model cannot exceed connection max concurrency
+        var higherModelConcurrency = config with
+        {
+            ModelMaxConcurrentRequests = 5,
+        };
+        Assert.AreEqual(3, higherModelConcurrency.EffectiveMaxConcurrentRequests);
+    }
+
+    [TestMethod]
+    public void HasDistinctRefinement_ReturnsTrueWhenSameModelUsesDifferentProfileTuning()
+    {
+        var textConfig = new EffectiveLlmConnectionConfig(
+            Provider: LlmProvider.Ollama,
+            BaseUrl: "http://localhost:11434",
+            ApiKey: null,
+            TextModel: "gemma4:12b",
+            VisionModel: null,
+            OllamaKeepAlive: "5m",
+            RequestTimeoutSeconds: 120,
+            AutoPublishHighConfidenceText: false,
+            EnableThinking: false,
+            ContextWindowTokens: 8192,
+            ConnectionKey: "conn-1",
+            ModelKey: "conn-1:gemma4:12b"
+        );
+
+        var sameModelSameProfile = textConfig with
+        {
+            RefineModel = "gemma4:12b",
+            RefineConfig = textConfig,
+        };
+        Assert.IsFalse(sameModelSameProfile.HasDistinctRefinement());
+
+        var sameModelThinkingProfile = textConfig with
+        {
+            RefineModel = "gemma4:12b",
+            RefineConfig = textConfig with
+            {
+                EnableThinking = true,
+                Temperature = 1.0,
+                TopP = 0.95,
+                TopK = 64,
+                ContextWindowTokens = 32768,
+                RequestTimeoutSeconds = 900,
+            },
+        };
+        Assert.IsTrue(sameModelThinkingProfile.HasDistinctRefinement());
     }
 }

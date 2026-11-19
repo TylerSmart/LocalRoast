@@ -31,29 +31,28 @@ public sealed class HouseholdLlmSettingsConfiguration
         builder.Property(s => s.DailyQuotaResetTime).HasMaxLength(10).HasDefaultValue("00:00");
         builder.Property(s => s.AutoResumeQueue).HasDefaultValue(true);
         builder.Property(s => s.PauseReason).HasMaxLength(500);
-        builder.Property(s => s.ModelProfilesSeeded).HasDefaultValue(false);
 
         // Restrict: SQL Server rejects multiple SET NULL paths to one table; the service
-        // refuses to delete assigned configurations instead.
+        // refuses to delete assigned profiles/models instead.
         builder
-            .HasOne(s => s.TextModelConfiguration)
+            .HasOne(s => s.TextModelProfile)
             .WithMany()
-            .HasForeignKey(s => s.TextModelConfigurationId)
+            .HasForeignKey(s => s.TextModelProfileId)
             .OnDelete(DeleteBehavior.Restrict);
         builder
-            .HasOne(s => s.VisionModelConfiguration)
+            .HasOne(s => s.VisionModelProfile)
             .WithMany()
-            .HasForeignKey(s => s.VisionModelConfigurationId)
+            .HasForeignKey(s => s.VisionModelProfileId)
             .OnDelete(DeleteBehavior.Restrict);
         builder
-            .HasOne(s => s.RefineModelConfiguration)
+            .HasOne(s => s.RefineModelProfile)
             .WithMany()
-            .HasForeignKey(s => s.RefineModelConfigurationId)
+            .HasForeignKey(s => s.RefineModelProfileId)
             .OnDelete(DeleteBehavior.Restrict);
         builder
-            .HasOne(s => s.EmbeddingModelConfiguration)
+            .HasOne(s => s.EmbeddingModelProfile)
             .WithMany()
-            .HasForeignKey(s => s.EmbeddingModelConfigurationId)
+            .HasForeignKey(s => s.EmbeddingModelProfileId)
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.Property(s => s.CreatedBy).IsRequired().HasMaxLength(256);

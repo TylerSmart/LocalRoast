@@ -287,19 +287,37 @@ public sealed class LlmSettingsIntegrationTests
     }
 
     [TestMethod]
-    public async Task ModelProfiles_ListRecommendedSettingsForEachModel()
+    public async Task ModelProfiles_ListsModelScopedProfilesWithDefaultsFirst()
     {
         await AuthenticateAsync(_client);
+        var model = await CreateSavedModelAsync();
+
+        var customRes = await _client.PostAsJsonAsync(
+            "/api/llm-settings/model-profiles",
+            new UpsertLlmModelProfileRequest(
+                ModelConfigurationId: model.Id,
+                DisplayName: "Deep Thinking",
+                EnableThinking: true,
+                Temperature: 1.0,
+                TopK: 64
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Created, customRes.StatusCode);
 
         var profiles = await _client.GetFromJsonAsync<List<LlmModelProfileDto>>(
             "/api/llm-settings/model-profiles"
         );
 
         Assert.IsNotNull(profiles);
-        var e4b = profiles.Single(profile => profile.Id == "gemma4-e4b");
-        Assert.IsTrue(e4b.EnableThinking);
-        var thinking = profiles.Single(profile => profile.Id == "gemma4-12b-thinking");
-        Assert.IsTrue(thinking.RecommendedAsRefineModel);
+        Assert.AreEqual(2, profiles.Count);
+        Assert.IsTrue(profiles[0].IsDefault);
+        Assert.AreEqual(LlmProfileDefaults.DefaultDisplayName, profiles[0].DisplayName);
+        Assert.IsFalse(profiles[0].EnableThinking);
+
+        var thinking = profiles[1];
+        Assert.IsFalse(thinking.IsDefault);
+        Assert.AreEqual("Deep Thinking", thinking.DisplayName);
+        Assert.IsTrue(thinking.EnableThinking);
         Assert.AreEqual(1.0, thinking.Temperature);
         Assert.AreEqual(64, thinking.TopK);
     }
@@ -482,35 +500,66 @@ public sealed class LlmSettingsIntegrationTests
         Assert.IsTrue(enabled.EnableIngestion);
     }
 
+    private async Task<LlmModelConfigurationDto> CreateSavedModelAsync(
+        string connectionName = "Local Ollama",
+        string model = "qwen2.5:14b"
+    )
+    {
+        var connRes = await _client.PostAsJsonAsync(
+            "/api/llm-settings/connections",
+            new UpsertLlmConnectionRequest(
+                connectionName,
+                LlmProvider.Ollama,
+                "http://localhost:11434"
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Created, connRes.StatusCode);
+        var conn = (await connRes.Content.ReadFromJsonAsync<LlmConnectionDto>())!;
+
+        var cfgRes = await _client.PostAsJsonAsync(
+            "/api/llm-settings/model-configurations",
+            new UpsertLlmModelConfigurationRequest($"{model} @ {connectionName}", conn.Id, model)
+        );
+        Assert.AreEqual(HttpStatusCode.Created, cfgRes.StatusCode);
+        return (await cfgRes.Content.ReadFromJsonAsync<LlmModelConfigurationDto>())!;
+    }
+
     [TestMethod]
-    public async Task GetModelProfiles_Authenticated_ReturnsSeededDefaults()
+    public async Task GetModelProfiles_FreshDeployment_ReturnsEmptyListUntilModelIsCreated()
     {
         await AuthenticateAsync(_client);
 
-        var response = await _client.GetAsync("/api/llm-settings/model-profiles");
-        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+        var initialResponse = await _client.GetAsync("/api/llm-settings/model-profiles");
+        Assert.AreEqual(HttpStatusCode.OK, initialResponse.StatusCode);
 
-        var profiles = await response.Content.ReadFromJsonAsync<List<LlmModelProfileDto>>();
-        Assert.IsNotNull(profiles);
-        Assert.AreEqual(LlmModelProfiles.All.Count, profiles.Count);
-        Assert.IsTrue(profiles.Any(p => p.Id == "gemma4-e4b" && p.IsBuiltInDefault));
-        Assert.IsTrue(profiles.Any(p => p.Id == "gemma4-e2b" && p.IsBuiltInDefault));
-        Assert.IsTrue(profiles.Any(p => p.Id == "gemma4-12b" && p.IsBuiltInDefault));
-        Assert.IsTrue(
-            profiles.Any(p => p.Id == "gemma4-12b-thinking" && p.RecommendedAsRefineModel)
+        var initialProfiles = await initialResponse.Content.ReadFromJsonAsync<
+            List<LlmModelProfileDto>
+        >();
+        Assert.IsNotNull(initialProfiles);
+        Assert.AreEqual(0, initialProfiles.Count);
+
+        var model = await CreateSavedModelAsync();
+
+        var afterModel = await _client.GetFromJsonAsync<List<LlmModelProfileDto>>(
+            "/api/llm-settings/model-profiles"
         );
-        Assert.IsTrue(profiles.Any(p => p.Id == "gemma4-26b-a4b" && p.RecommendedAsRefineModel));
+        Assert.IsNotNull(afterModel);
+        Assert.AreEqual(1, afterModel.Count);
+        Assert.AreEqual(model.DefaultProfileId, afterModel[0].Id);
+        Assert.AreEqual(LlmProfileDefaults.DefaultDisplayName, afterModel[0].DisplayName);
+        Assert.IsTrue(afterModel[0].IsDefault);
+        Assert.AreEqual(model.Id, afterModel[0].ModelConfigurationId);
     }
 
     [TestMethod]
     public async Task CreateModelProfile_ValidRequest_CreatesAndReturns201()
     {
         await AuthenticateAsync(_client);
+        var model = await CreateSavedModelAsync();
 
         var req = new UpsertLlmModelProfileRequest(
-            DisplayName: "Qwen 2.5 14B Custom",
-            ModelTag: "qwen2.5:14b",
-            MatchPrefixes: ["qwen2.5:14b"],
+            ModelConfigurationId: model.Id,
+            DisplayName: "Thinking",
             Summary: "Solid mid-size model for high-fidelity extraction.",
             EnableThinking: true,
             Temperature: 0.7,
@@ -518,7 +567,6 @@ public sealed class LlmSettingsIntegrationTests
             TopK: 40,
             ContextWindowTokens: 16384,
             RequestTimeoutSeconds: 450,
-            RecommendedAsRefineModel: true,
             Notes: ["Custom Ollama build"]
         );
 
@@ -527,18 +575,18 @@ public sealed class LlmSettingsIntegrationTests
 
         var created = await postResponse.Content.ReadFromJsonAsync<LlmModelProfileDto>();
         Assert.IsNotNull(created);
-        Assert.AreEqual("qwen-2-5-14b-custom", created.Id);
-        Assert.AreEqual("Qwen 2.5 14B Custom", created.DisplayName);
-        Assert.AreEqual("qwen2.5:14b", created.ModelTag);
-        Assert.IsFalse(created.IsBuiltInDefault);
+        Assert.AreNotEqual(Guid.Empty, created.Id);
+        Assert.AreEqual(model.Id, created.ModelConfigurationId);
+        Assert.AreEqual("Thinking", created.DisplayName);
+        Assert.AreEqual("qwen2.5:14b", created.Model);
+        Assert.IsFalse(created.IsDefault);
         Assert.AreEqual(16384, created.ContextWindowTokens);
         Assert.AreEqual(450, created.RequestTimeoutSeconds);
-        Assert.IsTrue(created.RecommendedAsRefineModel);
 
         var getResponse = await _client.GetAsync("/api/llm-settings/model-profiles");
         var list = await getResponse.Content.ReadFromJsonAsync<List<LlmModelProfileDto>>();
         Assert.IsNotNull(list);
-        Assert.AreEqual(LlmModelProfiles.All.Count + 1, list.Count);
+        Assert.AreEqual(2, list.Count);
         Assert.IsTrue(list.Any(p => p.Id == created.Id));
     }
 
@@ -546,10 +594,11 @@ public sealed class LlmSettingsIntegrationTests
     public async Task UpdateModelProfile_ValidRequest_UpdatesAndReturns200()
     {
         await AuthenticateAsync(_client);
+        var model = await CreateSavedModelAsync();
 
         var req = new UpsertLlmModelProfileRequest(
-            DisplayName: "Test Custom Model",
-            ModelTag: "test:latest",
+            ModelConfigurationId: model.Id,
+            DisplayName: "Test Custom Profile",
             Summary: "Initial summary."
         );
         var postResponse = await _client.PostAsJsonAsync("/api/llm-settings/model-profiles", req);
@@ -579,13 +628,14 @@ public sealed class LlmSettingsIntegrationTests
     public async Task UpdateModelProfile_NotFound_Returns404()
     {
         await AuthenticateAsync(_client);
+        var model = await CreateSavedModelAsync();
 
         var updateReq = new UpsertLlmModelProfileRequest(
-            DisplayName: "Missing Model",
-            ModelTag: "missing:tag"
+            ModelConfigurationId: model.Id,
+            DisplayName: "Missing Profile"
         );
         var putResponse = await _client.PutAsJsonAsync(
-            "/api/llm-settings/model-profiles/does-not-exist",
+            $"/api/llm-settings/model-profiles/{Guid.NewGuid()}",
             updateReq
         );
         Assert.AreEqual(HttpStatusCode.NotFound, putResponse.StatusCode);
@@ -595,10 +645,11 @@ public sealed class LlmSettingsIntegrationTests
     public async Task DeleteModelProfile_ValidId_DeletesAndReturns204()
     {
         await AuthenticateAsync(_client);
+        var model = await CreateSavedModelAsync();
 
         var req = new UpsertLlmModelProfileRequest(
-            DisplayName: "To Be Deleted",
-            ModelTag: "delete-me:latest"
+            ModelConfigurationId: model.Id,
+            DisplayName: "To Be Deleted"
         );
         var postResponse = await _client.PostAsJsonAsync("/api/llm-settings/model-profiles", req);
         var created = await postResponse.Content.ReadFromJsonAsync<LlmModelProfileDto>();
@@ -621,88 +672,41 @@ public sealed class LlmSettingsIntegrationTests
         await AuthenticateAsync(_client);
 
         var deleteResponse = await _client.DeleteAsync(
-            "/api/llm-settings/model-profiles/does-not-exist"
+            $"/api/llm-settings/model-profiles/{Guid.NewGuid()}"
         );
         Assert.AreEqual(HttpStatusCode.NotFound, deleteResponse.StatusCode);
-    }
-
-    [TestMethod]
-    public async Task RestoreDefaultModelProfiles_RestoresDefaultsPreservingCustomProfiles()
-    {
-        await AuthenticateAsync(_client);
-
-        // Create a custom profile
-        var customReq = new UpsertLlmModelProfileRequest(
-            DisplayName: "Custom Profile To Keep",
-            ModelTag: "keep-me:latest"
-        );
-        var postResponse = await _client.PostAsJsonAsync(
-            "/api/llm-settings/model-profiles",
-            customReq
-        );
-        var customCreated = await postResponse.Content.ReadFromJsonAsync<LlmModelProfileDto>();
-        Assert.IsNotNull(customCreated);
-
-        // Delete one default profile
-        var deleteResponse = await _client.DeleteAsync(
-            "/api/llm-settings/model-profiles/gemma4-e2b"
-        );
-        Assert.AreEqual(HttpStatusCode.NoContent, deleteResponse.StatusCode);
-
-        // Modify another default profile
-        var updateReq = new UpsertLlmModelProfileRequest(
-            DisplayName: "Modified Gemma 4 E4B",
-            ModelTag: "gemma4:e4b",
-            Summary: "Overridden summary."
-        );
-        var putResponse = await _client.PutAsJsonAsync(
-            "/api/llm-settings/model-profiles/gemma4-e4b",
-            updateReq
-        );
-        Assert.AreEqual(HttpStatusCode.OK, putResponse.StatusCode);
-
-        // Restore defaults
-        var restoreResponse = await _client.PostAsync(
-            "/api/llm-settings/model-profiles/restore-defaults",
-            null
-        );
-        Assert.AreEqual(HttpStatusCode.OK, restoreResponse.StatusCode);
-
-        var list = await restoreResponse.Content.ReadFromJsonAsync<List<LlmModelProfileDto>>();
-        Assert.IsNotNull(list);
-
-        // Both gemma4-e2b restored and gemma4-e4b reset to default
-        var e2b = list.FirstOrDefault(p => p.Id == "gemma4-e2b");
-        Assert.IsNotNull(e2b);
-
-        var e4b = list.FirstOrDefault(p => p.Id == "gemma4-e4b");
-        Assert.IsNotNull(e4b);
-        Assert.AreEqual("Gemma 4 E4B", e4b.DisplayName);
-        StringAssert.Contains(e4b.Summary, "Default choice");
-
-        // Custom profile is still intact
-        var custom = list.FirstOrDefault(p => p.Id == customCreated.Id);
-        Assert.IsNotNull(custom);
     }
 
     [TestMethod]
     public async Task CreateModelProfile_ValidationErrors_ReturnsBadRequest()
     {
         await AuthenticateAsync(_client);
+        var model = await CreateSavedModelAsync();
 
         // Missing DisplayName
-        var invalidReq = new UpsertLlmModelProfileRequest(DisplayName: "", ModelTag: "valid:tag");
+        var invalidReq = new UpsertLlmModelProfileRequest(
+            ModelConfigurationId: model.Id,
+            DisplayName: ""
+        );
         var resp1 = await _client.PostAsJsonAsync("/api/llm-settings/model-profiles", invalidReq);
         Assert.AreEqual(HttpStatusCode.BadRequest, resp1.StatusCode);
 
         // Invalid temperature
         var invalidTemp = new UpsertLlmModelProfileRequest(
+            ModelConfigurationId: model.Id,
             DisplayName: "Bad Temp",
-            ModelTag: "valid:tag",
             Temperature: 3.5
         );
         var resp2 = await _client.PostAsJsonAsync("/api/llm-settings/model-profiles", invalidTemp);
         Assert.AreEqual(HttpStatusCode.BadRequest, resp2.StatusCode);
+
+        // Unknown ModelConfigurationId
+        var unknownModel = new UpsertLlmModelProfileRequest(
+            ModelConfigurationId: Guid.NewGuid(),
+            DisplayName: "Orphan Profile"
+        );
+        var resp3 = await _client.PostAsJsonAsync("/api/llm-settings/model-profiles", unknownModel);
+        Assert.AreEqual(HttpStatusCode.BadRequest, resp3.StatusCode);
     }
 
     [TestMethod]
@@ -725,24 +729,6 @@ public sealed class LlmSettingsIntegrationTests
             .ServiceProvider.GetRequiredService<ILlmSettingsService>()
             .GetEffectiveConfigAsync();
         Assert.IsFalse(effective.EnableRateLimitSafeguards);
-    }
-
-    [TestMethod]
-    public async Task GetModelProfiles_IncludesGeminiProfiles()
-    {
-        await AuthenticateAsync(_client);
-
-        var response = await _client.GetAsync("/api/llm-settings/model-profiles");
-        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
-
-        var profiles = await response.Content.ReadFromJsonAsync<List<LlmModelProfileDto>>();
-        Assert.IsNotNull(profiles);
-        Assert.IsTrue(
-            profiles.Any(p => p.Id == "gemini-flash-lite"),
-            "Expected gemini-flash-lite profile"
-        );
-        Assert.IsTrue(profiles.Any(p => p.Id == "gemini-flash"), "Expected gemini-flash profile");
-        Assert.IsTrue(profiles.Any(p => p.Id == "gemini-argon"), "Expected gemini-argon profile");
     }
 
     [TestMethod]

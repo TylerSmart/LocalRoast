@@ -134,6 +134,7 @@ public sealed class LlmConnectionService(
         var configurations = await dbContext
             .LlmModelConfigurations.AsNoTracking()
             .Include(c => c.Connection)
+            .Include(c => c.Profiles)
             .OrderBy(c => c.Name)
             .ToListAsync(cancellationToken);
         var settings = await GetSettingsAssignmentsAsync(cancellationToken);
@@ -154,6 +155,27 @@ public sealed class LlmConnectionService(
 
         var entity = new LlmModelConfiguration { Connection = connection };
         ApplyModelConfigurationRequest(entity, request);
+
+        var defaultProfile = new LlmModelProfile
+        {
+            Id = Guid.NewGuid(),
+            ModelConfigurationId = entity.Id,
+            ModelConfiguration = entity,
+            DisplayName = LlmProfileDefaults.DefaultDisplayName,
+            Summary = string.Empty,
+            EnableThinking = false,
+            Temperature = null,
+            TopP = null,
+            TopK = null,
+            ContextWindowTokens = LlmProfileDefaults.DefaultContextWindowTokens,
+            RequestTimeoutSeconds = LlmProfileDefaults.DefaultRequestTimeoutSeconds,
+            NotesJson = "[]",
+            IsDefault = true,
+            CreatedBy = "System",
+            ModifiedBy = "System",
+        };
+        entity.Profiles.Add(defaultProfile);
+
         dbContext.LlmModelConfigurations.Add(entity);
         await dbContext.SaveChangesAsync(cancellationToken);
 
@@ -167,10 +189,10 @@ public sealed class LlmConnectionService(
     )
     {
         var entity =
-            await dbContext.LlmModelConfigurations.FirstOrDefaultAsync(
-                c => c.Id == id,
-                cancellationToken
-            ) ?? throw new NotFoundException($"Model configuration '{id}' not found.");
+            await dbContext
+                .LlmModelConfigurations.Include(c => c.Profiles)
+                .FirstOrDefaultAsync(c => c.Id == id, cancellationToken)
+            ?? throw new NotFoundException($"Model configuration '{id}' not found.");
         var connection = await ValidateModelConfigurationRequestAsync(
             request,
             id,
@@ -178,6 +200,7 @@ public sealed class LlmConnectionService(
         );
 
         entity.Connection = connection;
+        entity.ConnectionId = connection.Id;
         ApplyModelConfigurationRequest(entity, request);
         await dbContext.SaveChangesAsync(cancellationToken);
 
@@ -201,23 +224,27 @@ public sealed class LlmConnectionService(
     )
     {
         var entity =
-            await dbContext.LlmModelConfigurations.FirstOrDefaultAsync(
-                c => c.Id == id,
-                cancellationToken
-            ) ?? throw new NotFoundException($"Model configuration '{id}' not found.");
+            await dbContext
+                .LlmModelConfigurations.Include(c => c.Profiles)
+                .FirstOrDefaultAsync(c => c.Id == id, cancellationToken)
+            ?? throw new NotFoundException($"Model configuration '{id}' not found.");
 
         var workflows = GetAssignedWorkflows(
-            id,
+            entity.Profiles.Select(p => p.Id),
             await GetSettingsAssignmentsAsync(cancellationToken)
         );
         if (workflows.Count > 0)
         {
             throw new ConflictException(
-                $"'{entity.Name}' is selected for the {string.Join(", ", workflows)} workflow(s). Choose another configuration there first.",
+                $"'{entity.Name}' is selected for the {string.Join(", ", workflows)} workflow(s). Choose another profile there first.",
                 "Configuration in use"
             );
         }
 
+        if (entity.Profiles.Count > 0)
+        {
+            dbContext.LlmModelProfiles.RemoveRange(entity.Profiles);
+        }
         dbContext.LlmModelConfigurations.Remove(entity);
         await dbContext.SaveChangesAsync(cancellationToken);
     }
@@ -311,35 +338,6 @@ public sealed class LlmConnectionService(
             throw new DomainValidationException("Model is required.");
         }
 
-        if (request.ContextWindowTokens is < 2048 or > 65536)
-        {
-            throw new DomainValidationException(
-                "ContextWindowTokens must be between 2048 and 65536."
-            );
-        }
-
-        if (request.RequestTimeoutSeconds is < 5 or > 1800)
-        {
-            throw new DomainValidationException(
-                "RequestTimeoutSeconds must be between 5 and 1800."
-            );
-        }
-
-        if (request.Temperature is < 0.0 or > 2.0)
-        {
-            throw new DomainValidationException("Temperature must be between 0.0 and 2.0.");
-        }
-
-        if (request.TopP is < 0.0 or > 1.0)
-        {
-            throw new DomainValidationException("TopP must be between 0.0 and 1.0.");
-        }
-
-        if (request.TopK is < 1 or > 1000)
-        {
-            throw new DomainValidationException("TopK must be between 1 and 1000.");
-        }
-
         if (request.OllamaGpuLayers is < 0)
         {
             throw new DomainValidationException(
@@ -347,10 +345,39 @@ public sealed class LlmConnectionService(
             );
         }
 
-        var normalized = request.Name.Trim().ToLower();
+        if (request.MaxConcurrentRequests is < 1 or > 5)
+        {
+            throw new DomainValidationException("MaxConcurrentRequests must be between 1 and 5.");
+        }
+
+        if (request.RequestsPerMinute is < 1 or > 1000)
+        {
+            throw new DomainValidationException("RequestsPerMinute must be between 1 and 1000.");
+        }
+
+        if (request.DailyRequestQuota is < 1 or > 100000)
+        {
+            throw new DomainValidationException("DailyRequestQuota must be between 1 and 100000.");
+        }
+
+        if (
+            !string.IsNullOrWhiteSpace(request.DailyQuotaResetTime)
+            && !TimeOnly.TryParseExact(request.DailyQuotaResetTime.Trim(), "HH:mm", out _)
+        )
+        {
+            throw new DomainValidationException("DailyQuotaResetTime must use HH:mm format.");
+        }
+
+        var connection =
+            await dbContext.LlmConnections.FirstOrDefaultAsync(
+                c => c.Id == request.ConnectionId,
+                cancellationToken
+            ) ?? throw new DomainValidationException("Choose a saved connection for this model.");
+
+        var normalizedName = request.Name.Trim().ToLower();
         if (
             await dbContext.LlmModelConfigurations.AnyAsync(
-                c => c.Name.ToLower() == normalized && c.Id != excludeId,
+                c => c.Name.ToLower() == normalizedName && c.Id != excludeId,
                 cancellationToken
             )
         )
@@ -360,10 +387,24 @@ public sealed class LlmConnectionService(
             );
         }
 
-        return await dbContext.LlmConnections.FirstOrDefaultAsync(
-                c => c.Id == request.ConnectionId,
+        var normalizedModel = request.Model.Trim().ToLower();
+        if (
+            await dbContext.LlmModelConfigurations.AnyAsync(
+                c =>
+                    c.ConnectionId == request.ConnectionId
+                    && c.Model.ToLower() == normalizedModel
+                    && c.Id != excludeId,
                 cancellationToken
-            ) ?? throw new DomainValidationException("Choose a saved connection for this model.");
+            )
+        )
+        {
+            throw new ConflictException(
+                $"Model '{request.Model.Trim()}' is already configured on '{connection.Name}'. Create additional profiles for this model instead of duplicating it.",
+                "Duplicate model on connection"
+            );
+        }
+
+        return connection;
     }
 
     private static void ApplyModelConfigurationRequest(
@@ -373,16 +414,16 @@ public sealed class LlmConnectionService(
     {
         entity.Name = request.Name.Trim();
         entity.Model = request.Model.Trim();
-        entity.ProfileSlug = string.IsNullOrWhiteSpace(request.ProfileId)
-            ? null
-            : request.ProfileId.Trim();
-        entity.EnableThinking = request.EnableThinking;
-        entity.Temperature = request.Temperature;
-        entity.TopP = request.TopP;
-        entity.TopK = request.TopK;
-        entity.ContextWindowTokens = request.ContextWindowTokens;
-        entity.RequestTimeoutSeconds = request.RequestTimeoutSeconds;
         entity.OllamaGpuLayers = request.OllamaGpuLayers;
+        entity.MaxConcurrentRequests = request.MaxConcurrentRequests;
+        entity.RequestsPerMinute = request.RequestsPerMinute;
+        entity.DailyRequestQuota = request.DailyRequestQuota;
+        entity.DailyQuotaResetTimezone = string.IsNullOrWhiteSpace(request.DailyQuotaResetTimezone)
+            ? null
+            : request.DailyQuotaResetTimezone.Trim();
+        entity.DailyQuotaResetTime = string.IsNullOrWhiteSpace(request.DailyQuotaResetTime)
+            ? null
+            : request.DailyQuotaResetTime.Trim();
     }
 
     private Task<HouseholdLlmSettings?> GetSettingsAssignmentsAsync(
@@ -396,7 +437,7 @@ public sealed class LlmConnectionService(
             );
 
     private static List<LlmWorkflow> GetAssignedWorkflows(
-        Guid configurationId,
+        IEnumerable<Guid> profileIds,
         HouseholdLlmSettings? settings
     )
     {
@@ -405,19 +446,20 @@ public sealed class LlmConnectionService(
         {
             return workflows;
         }
-        if (settings.TextModelConfigurationId == configurationId)
+        var idSet = profileIds.ToHashSet();
+        if (settings.TextModelProfileId is { } textId && idSet.Contains(textId))
         {
             workflows.Add(LlmWorkflow.Text);
         }
-        if (settings.VisionModelConfigurationId == configurationId)
+        if (settings.VisionModelProfileId is { } visionId && idSet.Contains(visionId))
         {
             workflows.Add(LlmWorkflow.Vision);
         }
-        if (settings.RefineModelConfigurationId == configurationId)
+        if (settings.RefineModelProfileId is { } refineId && idSet.Contains(refineId))
         {
             workflows.Add(LlmWorkflow.Refinement);
         }
-        if (settings.EmbeddingModelConfigurationId == configurationId)
+        if (settings.EmbeddingModelProfileId is { } embedId && idSet.Contains(embedId))
         {
             workflows.Add(LlmWorkflow.Embedding);
         }
@@ -447,23 +489,30 @@ public sealed class LlmConnectionService(
     private static LlmModelConfigurationDto ToDto(
         LlmModelConfiguration c,
         HouseholdLlmSettings? settings
-    ) =>
-        new(
+    )
+    {
+        var defaultProfileId =
+            c.Profiles.FirstOrDefault(p => p.IsDefault)?.Id
+            ?? c.Profiles.FirstOrDefault()?.Id
+            ?? Guid.Empty;
+
+        return new LlmModelConfigurationDto(
             Id: c.Id,
             Name: c.Name,
             ConnectionId: c.Connection?.Id ?? c.ConnectionId,
             ConnectionName: c.Connection?.Name ?? string.Empty,
             Provider: c.Connection?.Provider ?? LlmProvider.Ollama,
             Model: c.Model,
-            ProfileId: c.ProfileSlug,
-            EnableThinking: c.EnableThinking,
-            Temperature: c.Temperature,
-            TopP: c.TopP,
-            TopK: c.TopK,
-            ContextWindowTokens: c.ContextWindowTokens,
-            RequestTimeoutSeconds: c.RequestTimeoutSeconds,
-            AssignedWorkflows: GetAssignedWorkflows(c.Id, settings),
+            DefaultProfileId: defaultProfileId,
+            ProfileCount: c.Profiles.Count,
+            AssignedWorkflows: GetAssignedWorkflows(c.Profiles.Select(p => p.Id), settings),
             ModifiedAt: c.ModifiedAt,
-            OllamaGpuLayers: c.OllamaGpuLayers
+            OllamaGpuLayers: c.OllamaGpuLayers,
+            MaxConcurrentRequests: c.MaxConcurrentRequests,
+            RequestsPerMinute: c.RequestsPerMinute,
+            DailyRequestQuota: c.DailyRequestQuota,
+            DailyQuotaResetTimezone: c.DailyQuotaResetTimezone,
+            DailyQuotaResetTime: c.DailyQuotaResetTime
         );
+    }
 }

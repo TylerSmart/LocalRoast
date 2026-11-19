@@ -45,7 +45,8 @@ public sealed class LlmConnectionsIntegrationTests
         string baseUrl,
         LlmProvider provider = LlmProvider.Ollama,
         string? apiKey = null,
-        int? dailyQuota = null
+        int? dailyQuota = null,
+        int maxConcurrent = 1
     )
     {
         var response = await _client.PostAsJsonAsync(
@@ -55,6 +56,7 @@ public sealed class LlmConnectionsIntegrationTests
                 provider,
                 baseUrl,
                 ApiKey: apiKey,
+                MaxConcurrentRequests: maxConcurrent,
                 DailyRequestQuota: dailyQuota
             )
         );
@@ -66,9 +68,12 @@ public sealed class LlmConnectionsIntegrationTests
         string name,
         Guid connectionId,
         string model,
-        int contextWindow = 8192,
-        double? temperature = null,
-        int? gpuLayers = null
+        int? gpuLayers = null,
+        int? maxConcurrent = null,
+        int? rpm = null,
+        int? rpd = null,
+        string? resetTimezone = null,
+        string? resetTime = null
     )
     {
         var response = await _client.PostAsJsonAsync(
@@ -77,13 +82,45 @@ public sealed class LlmConnectionsIntegrationTests
                 name,
                 connectionId,
                 model,
-                Temperature: temperature,
-                ContextWindowTokens: contextWindow,
-                OllamaGpuLayers: gpuLayers
+                OllamaGpuLayers: gpuLayers,
+                MaxConcurrentRequests: maxConcurrent,
+                RequestsPerMinute: rpm,
+                DailyRequestQuota: rpd,
+                DailyQuotaResetTimezone: resetTimezone,
+                DailyQuotaResetTime: resetTime
             )
         );
         Assert.AreEqual(HttpStatusCode.Created, response.StatusCode);
         return (await response.Content.ReadFromJsonAsync<LlmModelConfigurationDto>())!;
+    }
+
+    private async Task<LlmModelProfileDto> CreateProfileAsync(
+        Guid modelConfigurationId,
+        string displayName,
+        bool enableThinking = false,
+        double? temperature = null,
+        double? topP = null,
+        int? topK = null,
+        int contextWindowTokens = 8192,
+        int requestTimeoutSeconds = 120
+    )
+    {
+        var response = await _client.PostAsJsonAsync(
+            "/api/llm-settings/model-profiles",
+            new UpsertLlmModelProfileRequest(
+                ModelConfigurationId: modelConfigurationId,
+                DisplayName: displayName,
+                Summary: $"{displayName} tuning",
+                EnableThinking: enableThinking,
+                Temperature: temperature,
+                TopP: topP,
+                TopK: topK,
+                ContextWindowTokens: contextWindowTokens,
+                RequestTimeoutSeconds: requestTimeoutSeconds
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Created, response.StatusCode);
+        return (await response.Content.ReadFromJsonAsync<LlmModelProfileDto>())!;
     }
 
     private async Task<EffectiveLlmConnectionConfig> GetEffectiveConfigAsync()
@@ -135,17 +172,24 @@ public sealed class LlmConnectionsIntegrationTests
     }
 
     [TestMethod]
-    public async Task Workflows_UseEachAssignedConfigurationsMachineAndTuning()
+    public async Task Workflows_UseEachAssignedProfilesModelMachineLimitsAndTuning()
     {
-        var desktop = await CreateConnectionAsync("Desktop", "http://desktop:11434");
+        var desktop = await CreateConnectionAsync(
+            "Desktop",
+            "http://desktop:11434",
+            maxConcurrent: 2
+        );
         var laptop = await CreateConnectionAsync("Laptop", "http://laptop:11434", dailyQuota: 50);
         var text = await CreateConfigurationAsync(
             "Gemma text",
             desktop.Id,
             "gemma4:12b",
-            contextWindow: 16384,
-            temperature: 1.0,
-            gpuLayers: 30
+            gpuLayers: 30,
+            maxConcurrent: 1,
+            rpm: 10,
+            rpd: 250,
+            resetTimezone: "America/Los_Angeles",
+            resetTime: "00:00"
         );
         var vision = await CreateConfigurationAsync(
             "Qwen vision",
@@ -157,62 +201,177 @@ public sealed class LlmConnectionsIntegrationTests
             "Big refine",
             laptop.Id,
             "gemma4:26b",
-            contextWindow: 32768,
             gpuLayers: 24
+        );
+
+        Assert.AreNotEqual(Guid.Empty, text.DefaultProfileId);
+        Assert.AreEqual(1, text.ProfileCount);
+
+        var visionThinking = await CreateProfileAsync(
+            vision.Id,
+            "Thinking",
+            enableThinking: true,
+            contextWindowTokens: 32768,
+            requestTimeoutSeconds: 600
+        );
+        var refineDeep = await CreateProfileAsync(
+            refine.Id,
+            "Deep Polish",
+            enableThinking: true,
+            temperature: 1.0,
+            topP: 0.95,
+            topK: 64,
+            contextWindowTokens: 32768,
+            requestTimeoutSeconds: 900
         );
 
         var response = await _client.PutAsJsonAsync(
             "/api/llm-settings/workflows",
-            new UpdateLlmWorkflowsRequest(text.Id, vision.Id, refine.Id)
+            new UpdateLlmWorkflowsRequest(
+                TextModelProfileId: text.DefaultProfileId,
+                VisionModelProfileId: visionThinking.Id,
+                RefineModelProfileId: refineDeep.Id
+            )
         );
         Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
         var settings = await response.Content.ReadFromJsonAsync<LlmSettingsDto>();
-        Assert.AreEqual(text.Id, settings!.TextModelConfigurationId);
+        Assert.AreEqual(text.DefaultProfileId, settings!.TextModelProfileId);
+        Assert.AreEqual(visionThinking.Id, settings.VisionModelProfileId);
+        Assert.AreEqual(refineDeep.Id, settings.RefineModelProfileId);
         Assert.AreEqual("gemma4:12b", settings.TextModel);
         Assert.AreEqual("qwen3-vl:8b", settings.VisionModel);
         Assert.AreEqual("gemma4:26b", settings.RefineModel);
 
         var effective = await GetEffectiveConfigAsync();
         Assert.AreEqual("http://desktop:11434", effective.BaseUrl);
-        Assert.AreEqual(16384, effective.ContextWindowTokens);
-        Assert.AreEqual(1.0, effective.Temperature);
+        Assert.AreEqual(8192, effective.ContextWindowTokens);
+        Assert.IsNull(effective.Temperature);
         Assert.AreEqual(desktop.Id.ToString(), effective.ConnectionKey);
+        Assert.AreEqual($"{desktop.Id}:gemma4:12b", effective.ModelKey);
+        Assert.AreEqual(1, effective.EffectiveMaxConcurrentRequests);
+        Assert.AreEqual(10, effective.ModelRequestsPerMinute);
+        Assert.AreEqual(250, effective.ModelDailyRequestQuota);
+        Assert.AreEqual("America/Los_Angeles", effective.EffectiveQuotaResetTimezone);
+        Assert.AreEqual("00:00", effective.EffectiveQuotaResetTime);
         Assert.AreEqual(30, effective.OllamaGpuLayers);
 
         var visionConfig = effective.ForVision();
         Assert.AreEqual("http://laptop:11434", visionConfig.BaseUrl);
         Assert.AreEqual("qwen3-vl:8b", visionConfig.VisionModel);
         Assert.AreEqual(50, visionConfig.DailyRequestQuota);
+        Assert.AreEqual(32768, visionConfig.ContextWindowTokens);
+        Assert.IsTrue(visionConfig.EnableThinking);
         Assert.AreEqual(laptop.Id.ToString(), visionConfig.ConnectionKey);
+        Assert.AreEqual($"{laptop.Id}:qwen3-vl:8b", visionConfig.ModelKey);
         Assert.AreEqual(0, visionConfig.OllamaGpuLayers);
 
         var refineConfig = effective.ForRefinement();
         Assert.AreEqual("http://laptop:11434", refineConfig.BaseUrl);
         Assert.AreEqual("gemma4:26b", refineConfig.TextModel);
         Assert.AreEqual(32768, refineConfig.ContextWindowTokens);
+        Assert.AreEqual(1.0, refineConfig.Temperature);
         Assert.AreEqual(24, refineConfig.OllamaGpuLayers);
         Assert.IsTrue(effective.HasDistinctRefinement());
 
         var configurations = await _client.GetFromJsonAsync<List<LlmModelConfigurationDto>>(
             "/api/llm-settings/model-configurations"
         );
+        var refineModelDto = configurations!.Single(c => c.Id == refine.Id);
+        Assert.AreEqual(2, refineModelDto.ProfileCount);
         CollectionAssert.AreEqual(
             new[] { LlmWorkflow.Refinement },
-            configurations!.Single(c => c.Id == refine.Id).AssignedWorkflows.ToArray()
+            refineModelDto.AssignedWorkflows.ToArray()
+        );
+
+        var profiles = await _client.GetFromJsonAsync<List<LlmModelProfileDto>>(
+            "/api/llm-settings/model-profiles"
+        );
+        CollectionAssert.AreEqual(
+            new[] { LlmWorkflow.Refinement },
+            profiles!.Single(p => p.Id == refineDeep.Id).AssignedWorkflows.ToArray()
         );
     }
 
     [TestMethod]
-    public async Task ModelConfigurations_GpuLayersPersistUpdateAndClear_AndRejectInvalidInput()
+    public async Task ModelConfigurations_EnforceUniqueConnectionModel_AndAllowSameModelWithMultipleProfiles()
+    {
+        var connA = await CreateConnectionAsync("Host A", "http://host-a:11434");
+        var connB = await CreateConnectionAsync("Host B", "http://host-b:11434");
+
+        var created = await CreateConfigurationAsync("Gemma on A", connA.Id, "gemma4:12b");
+        Assert.AreEqual("gemma4:12b", created.Model);
+
+        // Duplicate model on same connection (case-insensitive) -> 409 Conflict
+        var dupResponse = await _client.PostAsJsonAsync(
+            "/api/llm-settings/model-configurations",
+            new UpsertLlmModelConfigurationRequest("Gemma on A (thinking)", connA.Id, "GEMMA4:12B")
+        );
+        Assert.AreEqual(HttpStatusCode.Conflict, dupResponse.StatusCode);
+
+        // Same model on a different connection -> 201 Created, gets its own Defaults profile
+        var onB = await CreateConfigurationAsync("Gemma on B", connB.Id, "gemma4:12b");
+        Assert.AreEqual(connB.Id, onB.ConnectionId);
+        Assert.AreNotEqual(created.DefaultProfileId, onB.DefaultProfileId);
+
+        // Create a Thinking profile under created and another Thinking profile under onB (same name allowed across models)
+        var thinkingA = await CreateProfileAsync(
+            created.Id,
+            "Thinking",
+            enableThinking: true,
+            temperature: 1.0,
+            topP: 0.95,
+            topK: 64,
+            contextWindowTokens: 32768,
+            requestTimeoutSeconds: 900
+        );
+        var thinkingB = await CreateProfileAsync(onB.Id, "Thinking", enableThinking: true);
+        Assert.AreNotEqual(thinkingA.Id, thinkingB.Id);
+
+        // Duplicate profile name on the SAME model -> 409 Conflict
+        var dupProfile = await _client.PostAsJsonAsync(
+            "/api/llm-settings/model-profiles",
+            new UpsertLlmModelProfileRequest(created.Id, "  thinking  ")
+        );
+        Assert.AreEqual(HttpStatusCode.Conflict, dupProfile.StatusCode);
+
+        // Same model can be assigned to both Text and Refinement using different child profiles while sharing ModelKey
+        var workflowRes = await _client.PutAsJsonAsync(
+            "/api/llm-settings/workflows",
+            new UpdateLlmWorkflowsRequest(
+                TextModelProfileId: created.DefaultProfileId,
+                RefineModelProfileId: thinkingA.Id
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.OK, workflowRes.StatusCode);
+
+        var effective = await GetEffectiveConfigAsync();
+        Assert.IsFalse(effective.EnableThinking);
+        Assert.IsTrue(effective.ForRefinement().EnableThinking);
+        Assert.AreEqual(effective.ModelKey, effective.ForRefinement().ModelKey);
+        Assert.IsTrue(effective.HasDistinctRefinement());
+    }
+
+    [TestMethod]
+    public async Task ModelConfigurations_RateLimitsAndGpuLayersPersistUpdateAndClear_AndRejectInvalidInput()
     {
         var connection = await CreateConnectionAsync("Desktop", "http://desktop:11434");
         var model = await CreateConfigurationAsync(
             "Gemma",
             connection.Id,
             "gemma4:26b-a4b",
-            gpuLayers: 24
+            gpuLayers: 24,
+            maxConcurrent: 2,
+            rpm: 15,
+            rpd: 500,
+            resetTimezone: "America/Los_Angeles",
+            resetTime: "00:00"
         );
         Assert.AreEqual(24, model.OllamaGpuLayers);
+        Assert.AreEqual(2, model.MaxConcurrentRequests);
+        Assert.AreEqual(15, model.RequestsPerMinute);
+        Assert.AreEqual(500, model.DailyRequestQuota);
+        Assert.AreEqual("America/Los_Angeles", model.DailyQuotaResetTimezone);
+        Assert.AreEqual("00:00", model.DailyQuotaResetTime);
 
         foreach (int? layers in new int?[] { 20, 0, null })
         {
@@ -222,26 +381,28 @@ public sealed class LlmConnectionsIntegrationTests
                     model.Name,
                     connection.Id,
                     model.Model,
-                    OllamaGpuLayers: layers
+                    OllamaGpuLayers: layers,
+                    MaxConcurrentRequests: null,
+                    RequestsPerMinute: null,
+                    DailyRequestQuota: null,
+                    DailyQuotaResetTimezone: null,
+                    DailyQuotaResetTime: null
                 )
             );
             Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
-            Assert.AreEqual(
-                layers,
-                (
-                    await response.Content.ReadFromJsonAsync<LlmModelConfigurationDto>()
-                )!.OllamaGpuLayers
-            );
-            var saved = await _client.GetFromJsonAsync<List<LlmModelConfigurationDto>>(
-                "/api/llm-settings/model-configurations"
-            );
-            Assert.AreEqual(layers, saved!.Single(c => c.Id == model.Id).OllamaGpuLayers);
+            var updated = await response.Content.ReadFromJsonAsync<LlmModelConfigurationDto>();
+            Assert.AreEqual(layers, updated!.OllamaGpuLayers);
+            Assert.IsNull(updated.MaxConcurrentRequests);
+            Assert.IsNull(updated.RequestsPerMinute);
+            Assert.IsNull(updated.DailyRequestQuota);
+            Assert.IsNull(updated.DailyQuotaResetTimezone);
+            Assert.IsNull(updated.DailyQuotaResetTime);
         }
 
         foreach (var invalid in new[] { "-1", "1.5" })
         {
             using var payload = new StringContent(
-                $$"""{"name":"Bad","connectionId":"{{connection.Id}}","model":"gemma4:26b-a4b","ollamaGpuLayers":{{invalid}}}""",
+                $$"""{"name":"Bad","connectionId":"{{connection.Id}}","model":"gemma4:e2b","ollamaGpuLayers":{{invalid}}}""",
                 System.Text.Encoding.UTF8,
                 "application/json"
             );
@@ -251,6 +412,17 @@ public sealed class LlmConnectionsIntegrationTests
             );
             Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
         }
+
+        var invalidReset = await _client.PostAsJsonAsync(
+            "/api/llm-settings/model-configurations",
+            new UpsertLlmModelConfigurationRequest(
+                "Bad Reset",
+                connection.Id,
+                "gemma4:e2b",
+                DailyQuotaResetTime: "99:99"
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.BadRequest, invalidReset.StatusCode);
     }
 
     [TestMethod]
@@ -266,7 +438,7 @@ public sealed class LlmConnectionsIntegrationTests
 
         var response = await _client.PutAsJsonAsync(
             "/api/llm-settings/workflows",
-            new UpdateLlmWorkflowsRequest(TextModelConfigurationId: text.Id)
+            new UpdateLlmWorkflowsRequest(TextModelProfileId: text.DefaultProfileId)
         );
         Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
 
@@ -275,32 +447,67 @@ public sealed class LlmConnectionsIntegrationTests
         Assert.IsNull(effective.VisionModel);
         Assert.IsNull(effective.ForVision().VisionModel);
 
-        var unknown = await _client.PutAsJsonAsync(
+        var unknownProfile = await _client.PutAsJsonAsync(
             "/api/llm-settings/workflows",
-            new UpdateLlmWorkflowsRequest(TextModelConfigurationId: Guid.NewGuid())
+            new UpdateLlmWorkflowsRequest(TextModelProfileId: Guid.NewGuid())
         );
-        Assert.AreEqual(HttpStatusCode.BadRequest, unknown.StatusCode);
+        Assert.AreEqual(HttpStatusCode.BadRequest, unknownProfile.StatusCode);
     }
 
     [TestMethod]
-    public async Task Delete_InUseItemsReturnConflict_UntilReleased()
+    public async Task Delete_InUseItemsAndDefaultsProfileReturnConflict_AndDeletingModelCascadesProfiles()
     {
         var connection = await CreateConnectionAsync("Desktop", "http://desktop:11434");
         var text = await CreateConfigurationAsync("Text", connection.Id, "gemma4:12b");
+        var custom = await CreateProfileAsync(text.Id, "Custom", enableThinking: true);
         await _client.PutAsJsonAsync(
             "/api/llm-settings/workflows",
-            new UpdateLlmWorkflowsRequest(TextModelConfigurationId: text.Id)
+            new UpdateLlmWorkflowsRequest(TextModelProfileId: custom.Id)
         );
+
+        // Undeletable Defaults profile always returns 409 Conflict
+        var deleteDefaults = await _client.DeleteAsync(
+            $"/api/llm-settings/model-profiles/{text.DefaultProfileId}"
+        );
+        Assert.AreEqual(HttpStatusCode.Conflict, deleteDefaults.StatusCode);
+
+        // Renaming or moving Defaults profile returns 400 BadRequest
+        var renameDefaults = await _client.PutAsJsonAsync(
+            $"/api/llm-settings/model-profiles/{text.DefaultProfileId}",
+            new UpsertLlmModelProfileRequest(text.Id, "Renamed")
+        );
+        Assert.AreEqual(HttpStatusCode.BadRequest, renameDefaults.StatusCode);
+
+        // Editing Defaults profile tuning succeeds
+        var editDefaults = await _client.PutAsJsonAsync(
+            $"/api/llm-settings/model-profiles/{text.DefaultProfileId}",
+            new UpsertLlmModelProfileRequest(
+                text.Id,
+                LlmProfileDefaults.DefaultDisplayName,
+                EnableThinking: true,
+                RequestTimeoutSeconds: 300
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.OK, editDefaults.StatusCode);
+
+        // Assigned custom profile returns 409 Conflict while in use
+        var deleteAssignedProfile = await _client.DeleteAsync(
+            $"/api/llm-settings/model-profiles/{custom.Id}"
+        );
+        Assert.AreEqual(HttpStatusCode.Conflict, deleteAssignedProfile.StatusCode);
 
         var deleteConnection = await _client.DeleteAsync(
             $"/api/llm-settings/connections/{connection.Id}"
         );
         Assert.AreEqual(HttpStatusCode.Conflict, deleteConnection.StatusCode);
-        var deleteAssigned = await _client.DeleteAsync(
+
+        // Model with an assigned child profile returns 409 Conflict
+        var deleteAssignedModel = await _client.DeleteAsync(
             $"/api/llm-settings/model-configurations/{text.Id}"
         );
-        Assert.AreEqual(HttpStatusCode.Conflict, deleteAssigned.StatusCode);
+        Assert.AreEqual(HttpStatusCode.Conflict, deleteAssignedModel.StatusCode);
 
+        // Release workflow assignment, then deleting the model removes BOTH Defaults and custom profiles
         await _client.PutAsJsonAsync(
             "/api/llm-settings/workflows",
             new UpdateLlmWorkflowsRequest()
@@ -311,6 +518,13 @@ public sealed class LlmConnectionsIntegrationTests
                 await _client.DeleteAsync($"/api/llm-settings/model-configurations/{text.Id}")
             ).StatusCode
         );
+
+        var remainingProfiles = await _client.GetFromJsonAsync<List<LlmModelProfileDto>>(
+            "/api/llm-settings/model-profiles"
+        );
+        Assert.IsNotNull(remainingProfiles);
+        Assert.AreEqual(0, remainingProfiles.Count);
+
         Assert.AreEqual(
             HttpStatusCode.NoContent,
             (await _client.DeleteAsync($"/api/llm-settings/connections/{connection.Id}")).StatusCode

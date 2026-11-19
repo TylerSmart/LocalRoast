@@ -1,4 +1,3 @@
-using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Playwright;
 
@@ -9,7 +8,7 @@ public sealed class LlmProfilesAndRefinementE2ETests : E2ETestBase
 {
     [TestMethod]
     [Timeout(DefaultTestTimeoutMs)]
-    public async Task LlmSettingsDialog_ProfilesApplyRecommendationsAndRefineSettingsPersistOnMobile()
+    public async Task LlmSettingsDialog_WorkflowModelAndProfileSelectionsPersistOnMobile()
     {
         await using var mockServer = await MockLanLlmAndBlogServer.StartAsync();
         await RegisterAndLoginAsync();
@@ -19,29 +18,26 @@ public sealed class LlmProfilesAndRefinementE2ETests : E2ETestBase
 
         var dialog = Page.Locator("app-llm-settings-dialog");
         await AddLlmConnectionInDialogAsync(dialog, mockServer.BaseUrl);
-
-        // A profile applied to a custom model keeps the model name but copies its tuning.
-        await AddLlmModelInDialogAsync(
+        await AddLlmModelInDialogAsync(dialog, "gemma4:12b");
+        await AddLlmProfileInDialogAsync(
             dialog,
-            "my-custom-e4b",
+            "gemma4:12b",
+            "Thinking",
             tune: async editor =>
             {
-                await ApplyProfileInModelEditorAsync(editor, "Gemma 4 12B with thinking");
-                await Expect(editor.GetByTestId("model-config-model"))
-                    .ToHaveValueAsync("my-custom-e4b");
-                await Expect(editor.GetByTestId("model-config-temperature")).ToHaveValueAsync("1");
-                await Expect(editor.GetByTestId("model-config-top-k")).ToHaveValueAsync("64");
-                await Expect(editor.GetByTestId("model-config-timeout")).ToHaveValueAsync("900");
+                await editor.Locator("[data-testid='profile-form-thinking'] button").ClickAsync();
+                await editor.GetByTestId("profile-form-timeout").FillAsync("900");
             }
         );
 
-        // A profile applied to a blank model fills in the profile's own model tag.
-        await AddModelFromProfileAsync(dialog, "Gemma 4 26B A4B", "gemma4:26b-a4b", "1200");
+        // Assign the exact same saved model to Text (Defaults) and Refinement (Thinking) using the grouped profile selects
+        await AssignLlmWorkflowAsync(dialog, "text", "gemma4:12b", profileName: "Defaults");
+        await AssignLlmWorkflowAsync(dialog, "refine", "gemma4:12b", profileName: "Thinking");
 
-        await AssignLlmWorkflowAsync(dialog, "text", "my-custom-e4b");
-        await AssignLlmWorkflowAsync(dialog, "refine", "gemma4:26b-a4b");
         var refineDetail = dialog.GetByTestId("workflow-refine-detail");
-        await Expect(refineDetail).ToContainTextAsync($"gemma4:26b-a4b on {E2ELlmConnectionName}");
+        await Expect(refineDetail).ToContainTextAsync($"gemma4:12b on {E2ELlmConnectionName}");
+        await Expect(refineDetail).ToContainTextAsync("Thinking");
+
         var refineAssignment = dialog.Locator(
             ".workflow-assignment:has([data-testid='workflow-refine-detail'])"
         );
@@ -70,16 +66,109 @@ public sealed class LlmProfilesAndRefinementE2ETests : E2ETestBase
 
         await Page.Locator(".llm-settings-btn").ClickAsync();
         await Expect(dialog.GetByTestId("workflow-text-select"))
-            .ToContainTextAsync(LlmConfigName("my-custom-e4b"));
+            .ToContainTextAsync(LlmConfigName("gemma4:12b"));
+        await Expect(dialog.GetByTestId("workflow-text-select")).ToContainTextAsync("Defaults");
         await Expect(dialog.GetByTestId("workflow-refine-select"))
-            .ToContainTextAsync(LlmConfigName("gemma4:26b-a4b"));
+            .ToContainTextAsync(LlmConfigName("gemma4:12b"));
+        await Expect(dialog.GetByTestId("workflow-refine-select")).ToContainTextAsync("Thinking");
+
         await OpenLlmSettingsTabAsync(dialog, "Models");
-        var refineCard = dialog.Locator(
+        var modelCard = dialog.Locator(
             ".model-config-card",
-            new() { HasText = LlmConfigName("gemma4:26b-a4b") }
+            new() { HasText = LlmConfigName("gemma4:12b") }
         );
-        await Expect(refineCard).ToContainTextAsync("Temp: 1");
-        await Expect(refineCard).ToContainTextAsync("Refinement");
+        await Expect(modelCard).ToContainTextAsync("2 profiles");
+        await Expect(modelCard).ToContainTextAsync("Text");
+        await Expect(modelCard).ToContainTextAsync("Refinement");
+
+        await OpenLlmSettingsTabAsync(dialog, "Profiles");
+        await Expect(GetLlmProfileCard(dialog, "gemma4:12b", "Defaults"))
+            .ToContainTextAsync("Text");
+        await Expect(GetLlmProfileCard(dialog, "gemma4:12b", "Thinking"))
+            .ToContainTextAsync("Refinement");
+        await dialog
+            .GetByRole(AriaRole.Button, new() { Name = "Close", Exact = true })
+            .ClickAsync();
+        await Expect(dialog).Not.ToBeVisibleAsync();
+    }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task LlmSettingsDialog_PerModelRateLimitsPersistClearAndBlockDuplicatesOnMobile()
+    {
+        await using var mockServer = await MockLanLlmAndBlogServer.StartAsync();
+        await RegisterAndLoginAsync();
+        await Page.GotoAsync($"{ServerUrl}/ingest");
+        await Page.SetViewportSizeAsync(360, 740);
+        await Page.Locator(".llm-settings-btn").ClickAsync();
+
+        var dialog = Page.Locator("app-llm-settings-dialog");
+        await AddLlmConnectionInDialogAsync(dialog, mockServer.BaseUrl);
+        await AddLlmModelInDialogAsync(
+            dialog,
+            "gemini-2.5-flash",
+            tune: async editor =>
+            {
+                await editor.GetByTestId("model-config-max-concurrent").FillAsync("2");
+                await editor.GetByTestId("model-config-rpm").FillAsync("10");
+                await editor.GetByTestId("model-config-rpd").FillAsync("250");
+                await editor.GetByTestId("model-config-reset-timezone").ClickAsync();
+                await Page.Locator("mat-option", new() { HasText = "Pacific Time" }).ClickAsync();
+                await editor.GetByTestId("model-config-reset-time").FillAsync("00:00");
+                Assert.IsTrue(
+                    await editor.EvaluateAsync<bool>("el => el.scrollWidth <= el.clientWidth"),
+                    "Per-model rate limit controls must fit the model editor at 360px."
+                );
+            }
+        );
+
+        var card = dialog.Locator(".model-config-card", new() { HasText = "gemini-2.5-flash" });
+        await Expect(card).ToContainTextAsync("Concurrent: 2");
+        await Expect(card).ToContainTextAsync("RPM: 10");
+        await Expect(card).ToContainTextAsync("RPD: 250");
+        await Expect(card).ToContainTextAsync("Reset: 00:00 (America/Los_Angeles)");
+
+        // Attempting to add the same model on the same connection is blocked upfront
+        await dialog.GetByTestId("add-model-config-btn").ClickAsync();
+        var dupEditor = Page.GetByTestId("model-config-editor-form");
+        await dupEditor.GetByTestId("model-config-model").FillAsync("GEMINI-2.5-FLASH");
+        await Page.Keyboard.PressAsync("Tab");
+        await Expect(dupEditor.GetByTestId("duplicate-model-warning")).ToBeVisibleAsync();
+        await Expect(dupEditor.GetByTestId("save-model-config-btn")).ToBeDisabledAsync();
+        await dupEditor.GetByTestId("cancel-model-config-btn").ClickAsync();
+        await Expect(dupEditor).Not.ToBeVisibleAsync();
+
+        // Reload and verify persistence, then clear per-model rate limits
+        await dialog
+            .GetByRole(AriaRole.Button, new() { Name = "Close", Exact = true })
+            .ClickAsync();
+        await Page.ReloadAsync();
+        await Page.Locator(".llm-settings-btn").ClickAsync();
+        await OpenLlmSettingsTabAsync(dialog, "Models");
+        await card.GetByTestId("edit-model-config-btn").ClickAsync();
+        var editEditor = Page.GetByTestId("model-config-editor-form");
+        await Expect(editEditor.GetByTestId("model-config-max-concurrent")).ToHaveValueAsync("2");
+        await Expect(editEditor.GetByTestId("model-config-rpm")).ToHaveValueAsync("10");
+        await Expect(editEditor.GetByTestId("model-config-rpd")).ToHaveValueAsync("250");
+        await Expect(editEditor.GetByTestId("model-config-reset-time")).ToHaveValueAsync("00:00");
+
+        await editEditor.GetByTestId("model-config-max-concurrent").FillAsync("");
+        await editEditor.GetByTestId("model-config-rpm").FillAsync("");
+        await editEditor.GetByTestId("model-config-rpd").FillAsync("");
+        await editEditor.GetByTestId("model-config-reset-timezone").ClickAsync();
+        await Page.Locator("mat-option", new() { HasText = "Inherit from connection" })
+            .ClickAsync();
+        await editEditor.GetByTestId("model-config-reset-time").FillAsync("");
+        await Page.RunAndWaitForResponseAsync(
+            () => editEditor.GetByTestId("save-model-config-btn").ClickAsync(),
+            resp =>
+                resp.Url.Contains("/api/llm-settings/model-configurations/")
+                && resp.Request.Method == "PUT"
+                && resp.Ok
+        );
+        await Expect(editEditor).Not.ToBeVisibleAsync();
+        await Expect(card).Not.ToContainTextAsync("RPM:");
+        await Expect(card).Not.ToContainTextAsync("RPD:");
         await dialog
             .GetByRole(AriaRole.Button, new() { Name = "Close", Exact = true })
             .ClickAsync();
@@ -238,13 +327,35 @@ public sealed class LlmProfilesAndRefinementE2ETests : E2ETestBase
         await Expect(connectionCard).ToContainTextAsync("RPD: 1500");
         await Expect(connectionCard).ToContainTextAsync("Key: ");
 
-        await AddModelFromProfileAsync(
+        await AddLlmModelInDialogAsync(
             dialog,
-            "Gemini Flash Lite",
             "gemini-2.5-flash-lite",
-            connectionName: connectionName
+            connectionName,
+            async editor =>
+            {
+                await editor.GetByTestId("model-config-rpm").FillAsync("10");
+                await editor.GetByTestId("model-config-rpd").FillAsync("1000");
+            }
         );
-        await AssignLlmWorkflowAsync(dialog, "text", "gemini-2.5-flash-lite", connectionName);
+        await AddLlmProfileInDialogAsync(
+            dialog,
+            "gemini-2.5-flash-lite",
+            "Fast Lite",
+            connectionName,
+            async editor =>
+            {
+                // OpenAI-compatible cloud models hide the Ollama-only context window section
+                await Expect(editor.GetByTestId("profile-context-section")).ToHaveCountAsync(0);
+                await editor.GetByTestId("profile-form-timeout").FillAsync("180");
+            }
+        );
+        await AssignLlmWorkflowAsync(
+            dialog,
+            "text",
+            "gemini-2.5-flash-lite",
+            connectionName,
+            profileName: "Fast Lite"
+        );
         await Expect(dialog.GetByTestId("auto-resume-toggle")).ToBeVisibleAsync();
         await SaveLlmWorkflowsAsync(dialog);
 
@@ -252,6 +363,7 @@ public sealed class LlmProfilesAndRefinementE2ETests : E2ETestBase
         await Page.Locator(".llm-settings-btn").ClickAsync();
         await Expect(dialog.GetByTestId("workflow-text-select"))
             .ToContainTextAsync(LlmConfigName("gemini-2.5-flash-lite", connectionName));
+        await Expect(dialog.GetByTestId("workflow-text-select")).ToContainTextAsync("Fast Lite");
         await OpenLlmSettingsTabAsync(dialog, "Connections");
         await connectionCard.GetByTestId("edit-connection-btn").ClickAsync();
         var editor = Page.GetByTestId("connection-editor-form");
@@ -269,58 +381,6 @@ public sealed class LlmProfilesAndRefinementE2ETests : E2ETestBase
             .GetByRole(AriaRole.Button, new() { Name = "Close", Exact = true })
             .ClickAsync();
         await Expect(dialog).Not.ToBeVisibleAsync();
-    }
-
-    private async Task ApplyProfileInModelEditorAsync(ILocator editor, string profileName)
-    {
-        await editor.GetByTestId("llm-profile-select").ClickAsync();
-        await Page.Locator("mat-option", new() { HasText = profileName }).ClickAsync();
-        await editor.GetByTestId("llm-apply-profile").ClickAsync();
-        await Expect(editor.Locator(".profile-message"))
-            .ToContainTextAsync($"Applied {profileName}");
-    }
-
-    /// <summary>Adds a model configuration by applying a profile to a blank model field.</summary>
-    private async Task AddModelFromProfileAsync(
-        ILocator dialog,
-        string profileName,
-        string expectedModel,
-        string? expectedTimeout = null,
-        string connectionName = E2ELlmConnectionName
-    )
-    {
-        await OpenLlmSettingsTabAsync(dialog, "Models");
-        await dialog.GetByTestId("add-model-config-btn").ClickAsync();
-        var editor = Page.GetByTestId("model-config-editor-form");
-        var connectionSelect = editor.GetByTestId("model-config-connection");
-        if (!(await connectionSelect.InnerTextAsync()).Contains(connectionName))
-        {
-            await connectionSelect.ClickAsync();
-            await Page.Locator("mat-option", new() { HasText = connectionName }).ClickAsync();
-        }
-        await Expect(editor.GetByTestId("model-config-model")).ToHaveValueAsync("");
-        await ApplyProfileInModelEditorAsync(editor, profileName);
-        await Expect(editor.GetByTestId("model-config-model")).ToHaveValueAsync(expectedModel);
-        if (expectedTimeout is not null)
-        {
-            await Expect(editor.GetByTestId("model-config-timeout"))
-                .ToHaveValueAsync(expectedTimeout);
-        }
-        await Page.RunAndWaitForResponseAsync(
-            () => editor.GetByTestId("save-model-config-btn").ClickAsync(),
-            resp =>
-                resp.Url.EndsWith("/api/llm-settings/model-configurations")
-                && resp.Request.Method == "POST"
-                && resp.Ok
-        );
-        await Expect(editor).Not.ToBeVisibleAsync();
-        await Expect(
-                dialog.Locator(
-                    ".model-config-card",
-                    new() { HasText = LlmConfigName(expectedModel, connectionName) }
-                )
-            )
-            .ToBeVisibleAsync();
     }
 
     private static Task SetConcurrencySliderAsync(ILocator editor, string value) =>

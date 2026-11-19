@@ -4,7 +4,6 @@ import { of } from 'rxjs';
 import type {
   LlmConnectionDto,
   LlmModelConfigurationDto,
-  LlmModelProfile,
 } from '../../../core/models/ingestion.models';
 import { LlmSettingsService } from '../../../core/services/llm-settings/llm-settings.service';
 import {
@@ -22,30 +21,14 @@ const connection = (id: string, name: string): LlmConnectionDto => ({
   ollamaKeepAlive: '5m',
   ollamaCpuOnly: false,
   enableRateLimitSafeguards: true,
-  maxConcurrentRequests: 1,
-  requestsPerMinute: null,
-  dailyRequestQuota: null,
+  maxConcurrentRequests: 2,
+  requestsPerMinute: 30,
+  dailyRequestQuota: 1000,
   dailyQuotaResetTimezone: 'UTC',
   dailyQuotaResetTime: '00:00',
   modelConfigurationCount: 0,
   modifiedAt: '2026-11-13T00:00:00Z',
 });
-
-const profile: LlmModelProfile = {
-  id: 'gemma4-12b-thinking',
-  displayName: 'Gemma 4 12B (thinking)',
-  modelTag: 'gemma4:12b',
-  matchPrefixes: ['gemma4:12b'],
-  summary: 'Best quality',
-  enableThinking: true,
-  temperature: 1,
-  topP: 0.95,
-  topK: 64,
-  contextWindowTokens: 16384,
-  requestTimeoutSeconds: 1200,
-  recommendedAsRefineModel: true,
-  notes: [],
-};
 
 const savedConfiguration: LlmModelConfigurationDto = {
   id: 'cfg-1',
@@ -54,14 +37,14 @@ const savedConfiguration: LlmModelConfigurationDto = {
   connectionName: 'Desk GPU',
   provider: 'Ollama',
   model: 'qwen2.5:14b',
-  profileId: null,
-  enableThinking: false,
-  temperature: 0.2,
-  topP: null,
-  topK: null,
-  contextWindowTokens: 8192,
-  requestTimeoutSeconds: 300,
   ollamaGpuLayers: 24,
+  maxConcurrentRequests: 1,
+  requestsPerMinute: 10,
+  dailyRequestQuota: 250,
+  dailyQuotaResetTimezone: 'America/Los_Angeles',
+  dailyQuotaResetTime: '00:00',
+  defaultProfileId: 'prof-1',
+  profileCount: 1,
   assignedWorkflows: ['Text'],
   modifiedAt: '2026-11-13T00:00:00Z',
 };
@@ -86,7 +69,7 @@ describe('LlmModelConfigurationDialogComponent', () => {
   }> {
     const data: LlmModelConfigurationDialogData = {
       connections: [connection('desk', 'Desk GPU'), connection('laptop', 'Laptop')],
-      profiles: [profile],
+      existingConfigurations: [],
       ...overrides,
     };
 
@@ -135,45 +118,14 @@ describe('LlmModelConfigurationDialogComponent', () => {
     expect(component.availableModels()).toEqual(['gemma4:12b', 'qwen2.5:14b']);
   });
 
-  it('suggests the matching profile when a model is picked', async () => {
-    const { component } = await create();
-    component.form.controls.model.setValue('gemma4:12b-it-q8');
-
-    component.onModelSelected('gemma4:12b-it-q8');
-
-    expect(component.selectedProfileId()).toBe(profile.id);
-    expect(component.appliedProfileId()).toBeNull();
-  });
-
-  it('applies a profile without replacing an already chosen model', async () => {
-    const { component } = await create();
-    component.form.controls.model.setValue('my-gemma-gpu');
-    component.form.controls.ollamaGpuLayers.setValue(24);
-
-    component.applyProfile(profile);
-
-    const values = component.form.getRawValue();
-    expect(values.model).toBe('my-gemma-gpu');
-    expect(values.enableThinking).toBe(true);
-    expect(values.temperature).toBe(1);
-    expect(values.topK).toBe(64);
-    expect(values.requestTimeoutSeconds).toBe(1200);
-    expect(values.ollamaGpuLayers).toBe(24);
-    expect(component.appliedProfileId()).toBe(profile.id);
-  });
-
-  it('opens a new model from an initial profile using its model tag', async () => {
-    const { component } = await create({ initialProfile: profile });
-
-    expect(component.editingConfiguration()).toBeNull();
-    expect(component.form.controls.model.value).toBe('gemma4:12b');
-    expect(component.appliedProfileId()).toBe(profile.id);
-  });
-
-  it('saves a new model with a default name and the applied profile', async () => {
+  it('saves a new model with a default name and optional per-model rate limits', async () => {
     const { component } = await create();
     component.form.controls.model.setValue('gemma4:12b');
-    component.applyProfile(profile);
+    component.form.controls.maxConcurrentRequests.setValue(1);
+    component.form.controls.requestsPerMinute.setValue(10);
+    component.form.controls.dailyRequestQuota.setValue(250);
+    component.form.controls.dailyQuotaResetTimezone.setValue('America/Los_Angeles');
+    component.form.controls.dailyQuotaResetTime.setValue('00:00');
 
     component.save();
 
@@ -181,21 +133,22 @@ describe('LlmModelConfigurationDialogComponent', () => {
       name: 'gemma4:12b @ Desk GPU',
       connectionId: 'desk',
       model: 'gemma4:12b',
-      profileId: profile.id,
-      enableThinking: true,
-      temperature: 1,
-      topP: 0.95,
-      topK: 64,
-      contextWindowTokens: 16384,
-      requestTimeoutSeconds: 1200,
       ollamaGpuLayers: null,
+      maxConcurrentRequests: 1,
+      requestsPerMinute: 10,
+      dailyRequestQuota: 250,
+      dailyQuotaResetTimezone: 'America/Los_Angeles',
+      dailyQuotaResetTime: '00:00',
     });
     expect(dialogRef.close).toHaveBeenCalledWith(savedConfiguration);
   });
 
-  it('updates an existing model and keeps a custom name', async () => {
-    const { component } = await create({ configuration: savedConfiguration });
-    component.form.controls.temperature.setValue(0.4);
+  it('updates an existing model and preserves its custom name and rate limits', async () => {
+    const { component } = await create({
+      configuration: savedConfiguration,
+      existingConfigurations: [savedConfiguration],
+    });
+    component.form.controls.requestsPerMinute.setValue(15);
 
     component.save();
 
@@ -204,34 +157,37 @@ describe('LlmModelConfigurationDialogComponent', () => {
       expect.objectContaining({
         name: 'Desk text',
         model: 'qwen2.5:14b',
-        temperature: 0.4,
         ollamaGpuLayers: 24,
+        requestsPerMinute: 15,
+        dailyRequestQuota: 250,
       }),
     );
     expect(dialogRef.close).toHaveBeenCalledWith(savedConfiguration);
   });
 
-  it('duplicates a model as a new configuration', async () => {
-    const { component } = await create({ duplicateFrom: savedConfiguration });
-    component.save();
+  it('blocks saving duplicate (connection, model) pairs case-insensitively', async () => {
+    const { component } = await create({ existingConfigurations: [savedConfiguration] });
+    component.form.controls.model.setValue('  QWEN2.5:14B  ');
 
-    expect(service['createModelConfiguration']).toHaveBeenCalledWith(
-      expect.objectContaining({
-        name: 'Desk text (copy)',
-        model: 'qwen2.5:14b',
-        ollamaGpuLayers: 24,
-      }),
-    );
+    expect(component.isDuplicateModelOnConnection()).toBe(true);
+    component.save();
+    expect(service['createModelConfiguration']).not.toHaveBeenCalled();
+
+    // Same model on a different connection is allowed
+    component.form.controls.connectionId.setValue('laptop');
+    expect(component.isDuplicateModelOnConnection()).toBe(false);
   });
 
   it.each([
     ['model', ''],
-    ['temperature', 2.5],
-    ['topK', 12.5],
     ['ollamaGpuLayers', -1],
     ['ollamaGpuLayers', 1.5],
-    ['contextWindowTokens', 1024],
-    ['requestTimeoutSeconds', 1801],
+    ['maxConcurrentRequests', 0],
+    ['maxConcurrentRequests', 6],
+    ['requestsPerMinute', 0],
+    ['requestsPerMinute', 1001],
+    ['dailyRequestQuota', 0],
+    ['dailyQuotaResetTime', '25:00'],
   ] as const)('blocks saving when %s is %s', async (control, value) => {
     const { component } = await create();
     component.form.controls.model.setValue('gemma4:12b');

@@ -11,32 +11,12 @@ import type {
 } from '../../../core/models/ingestion.models';
 import { IngestionService } from '../../../core/services/ingestion/ingestion.service';
 import { LlmSettingsService } from '../../../core/services/llm-settings/llm-settings.service';
-import { LlmModelConfigurationDialogComponent } from '../llm-model-configuration-dialog/llm-model-configuration-dialog.component';
 import { LlmModelProfileDialogComponent } from '../llm-model-profile-dialog/llm-model-profile-dialog.component';
 import {
   LLM_SETTINGS_TABS,
   LlmSettingsDialogComponent,
   filterModels,
-  matchModelProfile,
 } from './llm-settings-dialog.component';
-
-const testProfiles: LlmModelProfile[] = [
-  {
-    id: 'gemma4-e4b',
-    displayName: 'Gemma 4 E4B',
-    modelTag: 'gemma4:e4b',
-    matchPrefixes: ['gemma4:e4b'],
-    summary: 'Fast default',
-    enableThinking: false,
-    temperature: 0.2,
-    topP: 0.95,
-    topK: 64,
-    contextWindowTokens: 16384,
-    requestTimeoutSeconds: 600,
-    recommendedAsRefineModel: false,
-    notes: ['Small model.'],
-  },
-];
 
 const connection = (id: string, name: string): LlmConnectionDto => ({
   id,
@@ -60,24 +40,56 @@ const connection = (id: string, name: string): LlmConnectionDto => ({
 const configuration = (
   id: string,
   connectionId: string,
+  connectionName: string,
   model: string,
+  defaultProfileId: string,
+  profileCount = 1,
 ): LlmModelConfigurationDto => ({
   id,
-  name: `${model} @ ${connectionId}`,
+  name: `${model} @ ${connectionName}`,
   connectionId,
-  connectionName: connectionId,
+  connectionName,
   provider: 'Ollama',
   model,
-  profileId: null,
-  enableThinking: true,
-  temperature: 0.7,
-  topP: 0.9,
-  topK: 40,
-  contextWindowTokens: 16384,
-  requestTimeoutSeconds: 450,
   ollamaGpuLayers: null,
+  maxConcurrentRequests: null,
+  requestsPerMinute: null,
+  dailyRequestQuota: null,
+  dailyQuotaResetTimezone: null,
+  dailyQuotaResetTime: null,
+  defaultProfileId,
+  profileCount,
   assignedWorkflows: [],
   modifiedAt: '2026-11-13T00:00:00Z',
+});
+
+const profile = (
+  id: string,
+  config: LlmModelConfigurationDto,
+  displayName: string,
+  isDefault: boolean,
+  overrides: Partial<LlmModelProfile> = {},
+): LlmModelProfile => ({
+  id,
+  modelConfigurationId: config.id,
+  modelConfigurationName: config.name,
+  connectionId: config.connectionId,
+  connectionName: config.connectionName,
+  provider: config.provider,
+  model: config.model,
+  displayName,
+  summary: isDefault ? 'Default tuning for this model.' : `${displayName} preset`,
+  enableThinking: false,
+  temperature: null,
+  topP: null,
+  topK: null,
+  contextWindowTokens: 8192,
+  requestTimeoutSeconds: 120,
+  notes: [],
+  isDefault,
+  assignedWorkflows: [],
+  modifiedAt: '2026-11-13T00:00:00Z',
+  ...overrides,
 });
 
 describe('LlmSettingsDialogComponent', () => {
@@ -89,19 +101,45 @@ describe('LlmSettingsDialogComponent', () => {
   let mockIngestionService: { refreshSummary: ReturnType<typeof vi.fn> };
 
   const connections = [connection('desk', 'Desk GPU'), connection('laptop', 'Laptop')];
-  const configurations = [
-    configuration('cfg-text', 'desk', 'gemma4:12b'),
-    configuration('cfg-vision', 'laptop', 'qwen2.5vl:7b'),
-    configuration('cfg-refine', 'laptop', 'gemma4:12b'),
-  ];
+  const cfgText = configuration('cfg-text', 'desk', 'Desk GPU', 'gemma4:12b', 'prof-text-def', 2);
+  const cfgVision = configuration(
+    'cfg-vision',
+    'laptop',
+    'Laptop',
+    'qwen2.5vl:7b',
+    'prof-vision-def',
+    1,
+  );
+  const cfgRefine = configuration(
+    'cfg-refine',
+    'laptop',
+    'Laptop',
+    'gemma4:12b',
+    'prof-refine-def',
+    1,
+  );
+  const configurations = [cfgText, cfgVision, cfgRefine];
+
+  const profTextDefault = profile('prof-text-def', cfgText, 'Defaults', true);
+  const profTextThinking = profile('prof-text-thinking', cfgText, 'Thinking', false, {
+    enableThinking: true,
+    temperature: 1,
+    contextWindowTokens: 32768,
+    requestTimeoutSeconds: 900,
+  });
+  const profVisionDefault = profile('prof-vision-def', cfgVision, 'Defaults', true);
+  const profRefineDefault = profile('prof-refine-def', cfgRefine, 'Defaults', true);
+  const testProfiles = [profTextThinking, profTextDefault, profVisionDefault, profRefineDefault];
+
   const settings = {
     autoPublishHighConfidenceText: true,
     enableIngestion: true,
     maxIngestionRetries: 5,
     autoResumeQueue: false,
-    textModelConfigurationId: 'cfg-text',
-    visionModelConfigurationId: 'cfg-vision',
-    refineModelConfigurationId: null,
+    textModelProfileId: 'prof-text-def',
+    visionModelProfileId: 'prof-vision-def',
+    refineModelProfileId: null,
+    embeddingModelProfileId: null,
   } as unknown as LlmSettingsDto;
 
   async function create(): Promise<void> {
@@ -126,7 +164,7 @@ describe('LlmSettingsDialogComponent', () => {
   beforeEach(() => {
     mockDialogRef = { close: vi.fn() };
     mockDialog = {
-      open: vi.fn().mockReturnValue({ afterClosed: () => of(testProfiles[0]) }),
+      open: vi.fn().mockReturnValue({ afterClosed: () => of(profTextThinking) }),
     };
     mockIngestionService = { refreshSummary: vi.fn() };
     service = {
@@ -137,7 +175,6 @@ describe('LlmSettingsDialogComponent', () => {
       createModelProfile: vi.fn().mockImplementation((req) => of({ ...req, id: 'custom' })),
       updateModelProfile: vi.fn().mockImplementation((id, req) => of({ ...req, id })),
       deleteModelProfile: vi.fn().mockReturnValue(of(undefined)),
-      restoreDefaultModelProfiles: vi.fn().mockReturnValue(of(testProfiles)),
       updateWorkflows: vi.fn().mockReturnValue(of(settings)),
       testSavedConnection: vi.fn().mockReturnValue(
         of({
@@ -152,27 +189,33 @@ describe('LlmSettingsDialogComponent', () => {
     };
   });
 
-  it('loads the workflow assignments and the saved catalog', async () => {
+  it('loads workflow profile assignments and groups profiles under each model with Defaults first', async () => {
     await create();
 
     const values = component.workflowForm.getRawValue();
-    expect(values.textModelConfigurationId).toBe('cfg-text');
-    expect(values.visionModelConfigurationId).toBe('cfg-vision');
-    expect(values.refineModelConfigurationId).toBe('');
+    expect(values.textModelProfileId).toBe('prof-text-def');
+    expect(values.visionModelProfileId).toBe('prof-vision-def');
+    expect(values.refineModelProfileId).toBe('');
     expect(values.maxIngestionRetries).toBe(5);
     expect(values.autoResumeQueue).toBe(false);
     expect(component.selectedTabIndex()).toBe(LLM_SETTINGS_TABS.workflows);
-    expect(component.textConfiguration()?.model).toBe('gemma4:12b');
-    expect(component.configurationGroups().map((g) => g.connection.id)).toEqual(['desk', 'laptop']);
-    expect(component.configurationGroups()[1].configurations.map((c) => c.id)).toEqual([
-      'cfg-vision',
+    expect(component.textProfile()?.model).toBe('gemma4:12b');
+    expect(component.profileGroups().map((g) => g.configuration.id)).toEqual([
+      'cfg-text',
       'cfg-refine',
+      'cfg-vision',
+    ]);
+    // Defaults is always sorted ahead of custom profiles inside a model group
+    expect(component.profileGroups()[0].profiles.map((p) => p.id)).toEqual([
+      'prof-text-def',
+      'prof-text-thinking',
     ]);
   });
 
   it('opens on the Connections tab when nothing is configured yet', async () => {
     service['getConnections'].mockReturnValue(of([]));
     service['getModelConfigurations'].mockReturnValue(of([]));
+    service['getModelProfiles'].mockReturnValue(of([]));
     await create();
 
     expect(component.selectedTabIndex()).toBe(LLM_SETTINGS_TABS.connections);
@@ -188,18 +231,18 @@ describe('LlmSettingsDialogComponent', () => {
     expect(component.isLoading()).toBe(false);
   });
 
-  it('saves workflow assignments, sending unassigned workflows as null', async () => {
+  it('saves workflow profile assignments, sending unassigned workflows as null', async () => {
     await create();
-    component.workflowForm.controls.visionModelConfigurationId.setValue('');
-    component.workflowForm.controls.refineModelConfigurationId.setValue('cfg-refine');
+    component.workflowForm.controls.visionModelProfileId.setValue('');
+    component.workflowForm.controls.refineModelProfileId.setValue('prof-text-thinking');
 
     component.onSave();
 
     expect(service['updateWorkflows']).toHaveBeenCalledWith({
-      textModelConfigurationId: 'cfg-text',
-      visionModelConfigurationId: null,
-      refineModelConfigurationId: 'cfg-refine',
-      embeddingModelConfigurationId: null,
+      textModelProfileId: 'prof-text-def',
+      visionModelProfileId: null,
+      refineModelProfileId: 'prof-text-thinking',
+      embeddingModelProfileId: null,
       autoPublishHighConfidenceText: true,
       maxIngestionRetries: 5,
       enableIngestion: true,
@@ -209,18 +252,25 @@ describe('LlmSettingsDialogComponent', () => {
     expect(mockDialogRef.close).toHaveBeenCalledWith(true);
   });
 
-  it('persists selected embeddingModelConfigurationId when assigned', async () => {
-    service['getModelConfigurations'].mockReturnValue(
-      of([...configurations, configuration('cfg-embed', 'desk', 'embeddinggemma')]),
+  it('persists selected embeddingModelProfileId when assigned', async () => {
+    const cfgEmbed = configuration(
+      'cfg-embed',
+      'desk',
+      'Desk GPU',
+      'embeddinggemma',
+      'prof-embed-def',
     );
+    const profEmbed = profile('prof-embed-def', cfgEmbed, 'Defaults', true);
+    service['getModelConfigurations'].mockReturnValue(of([...configurations, cfgEmbed]));
+    service['getModelProfiles'].mockReturnValue(of([...testProfiles, profEmbed]));
     await create();
-    component.workflowForm.controls.embeddingModelConfigurationId.setValue('cfg-embed');
+    component.workflowForm.controls.embeddingModelProfileId.setValue('prof-embed-def');
 
     component.onSave();
 
     expect(service['updateWorkflows']).toHaveBeenCalledWith(
       expect.objectContaining({
-        embeddingModelConfigurationId: 'cfg-embed',
+        embeddingModelProfileId: 'prof-embed-def',
       }),
     );
   });
@@ -228,13 +278,13 @@ describe('LlmSettingsDialogComponent', () => {
   it('keeps the dialog open and shows the API error when saving fails', async () => {
     await create();
     service['updateWorkflows'].mockReturnValue(
-      throwError(() => ({ error: { detail: 'Unknown model configuration.' } })),
+      throwError(() => ({ error: { detail: 'Unknown model profile.' } })),
     );
     component.selectedTabIndex.set(LLM_SETTINGS_TABS.profiles);
 
     component.onSave();
 
-    expect(component.errorMessage()).toBe('Unknown model configuration.');
+    expect(component.errorMessage()).toBe('Unknown model profile.');
     expect(component.selectedTabIndex()).toBe(LLM_SETTINGS_TABS.workflows);
     expect(mockDialogRef.close).not.toHaveBeenCalled();
   });
@@ -248,101 +298,88 @@ describe('LlmSettingsDialogComponent', () => {
     expect(service['updateWorkflows']).not.toHaveBeenCalled();
   });
 
-  it('warns when refinement would reuse the text model on the same connection', async () => {
+  it('only warns refineMatchesText when Text and Refinement select the exact same profile ID', async () => {
     await create();
     expect(component.refineMatchesText()).toBe(false);
 
-    service['getModelConfigurations'].mockReturnValue(
-      of([...configurations, configuration('cfg-same', 'desk', 'gemma4:12b')]),
-    );
-    component.reloadCatalog();
-    component.workflowForm.controls.refineModelConfigurationId.setValue('cfg-same');
+    // Same model + same profile -> warns
+    component.workflowForm.controls.refineModelProfileId.setValue('prof-text-def');
     expect(component.refineMatchesText()).toBe(true);
 
-    component.workflowForm.controls.refineModelConfigurationId.setValue('cfg-refine');
+    // Same model + DIFFERENT profile -> does NOT warn
+    component.workflowForm.controls.refineModelProfileId.setValue('prof-text-thinking');
+    expect(component.refineMatchesText()).toBe(false);
+
+    // Different connection/model -> does NOT warn
+    component.workflowForm.controls.refineModelProfileId.setValue('prof-refine-def');
     expect(component.refineMatchesText()).toBe(false);
   });
 
-  it('clears assignments whose configuration was deleted', async () => {
+  it('clears assignments whose profile was deleted during reloadCatalog', async () => {
     await create();
-    service['getModelConfigurations'].mockReturnValue(of([configurations[0]]));
+    service['getModelConfigurations'].mockReturnValue(of([cfgText]));
+    service['getModelProfiles'].mockReturnValue(of([profTextDefault, profTextThinking]));
 
     component.reloadCatalog();
 
-    expect(component.workflowForm.controls.textModelConfigurationId.value).toBe('cfg-text');
-    expect(component.workflowForm.controls.visionModelConfigurationId.value).toBe('');
+    expect(component.workflowForm.controls.textModelProfileId.value).toBe('prof-text-def');
+    expect(component.workflowForm.controls.visionModelProfileId.value).toBe('');
   });
 
-  it('assigns the first saved configuration to the text workflow', async () => {
-    service['getSettings'].mockReturnValue(of({ ...settings, textModelConfigurationId: null }));
+  it('assigns the first saved model Defaults profile to the text workflow', async () => {
+    service['getSettings'].mockReturnValue(of({ ...settings, textModelProfileId: null }));
     service['getModelConfigurations'].mockReturnValue(of([]));
+    service['getModelProfiles'].mockReturnValue(of([]));
     await create();
 
-    service['getModelConfigurations'].mockReturnValue(of([configurations[0]]));
+    service['getModelConfigurations'].mockReturnValue(of([cfgText]));
+    service['getModelProfiles'].mockReturnValue(of([profTextDefault]));
     component.reloadCatalog();
 
-    expect(component.workflowForm.controls.textModelConfigurationId.value).toBe('cfg-text');
+    expect(component.workflowForm.controls.textModelProfileId.value).toBe('prof-text-def');
   });
 
-  it('opens the model configuration dialog from a profile card on the Models tab', async () => {
+  it('refuses to delete a Defaults profile and opens profile dialog with catalog context', async () => {
     await create();
-    component.selectedTabIndex.set(LLM_SETTINGS_TABS.profiles);
 
-    component.applyProfileToModel(testProfiles[0]);
-    fixture.detectChanges();
-    await fixture.whenStable();
-    fixture.detectChanges();
+    component.deleteProfile(profTextDefault);
+    expect(service['deleteModelProfile']).not.toHaveBeenCalled();
 
-    expect(component.selectedTabIndex()).toBe(LLM_SETTINGS_TABS.models);
+    component.duplicateProfile(profTextDefault);
     expect(mockDialog.open).toHaveBeenCalledWith(
-      LlmModelConfigurationDialogComponent,
+      LlmModelProfileDialogComponent,
       expect.objectContaining({
-        data: {
-          initialProfile: testProfiles[0],
+        data: expect.objectContaining({
+          duplicateFrom: profTextDefault,
           connections,
-          profiles: testProfiles,
-        },
+          configurations,
+          existingProfiles: testProfiles,
+        }),
       }),
     );
-  });
 
-  it('opens the profile dialog pre-filled from a saved model configuration', async () => {
-    await create();
-
-    component.saveConfigurationAsProfile(configurations[0]);
-
-    expect(component.selectedTabIndex()).toBe(LLM_SETTINGS_TABS.profiles);
+    component.startAddProfile('cfg-text');
     expect(mockDialog.open).toHaveBeenCalledWith(
       LlmModelProfileDialogComponent,
       expect.objectContaining({
-        data: { fromConfiguration: configurations[0] },
+        data: expect.objectContaining({
+          initialModelConfigurationId: 'cfg-text',
+          connections,
+          configurations,
+        }),
       }),
     );
-    expect(service['getModelProfiles']).toHaveBeenCalledTimes(2);
-  });
 
-  it('opens profile dialog for add/edit, and deletes and restores profiles', async () => {
-    await create();
-
-    component.startAddProfile();
+    component.startEditProfile(profTextThinking);
     expect(mockDialog.open).toHaveBeenCalledWith(
       LlmModelProfileDialogComponent,
-      expect.objectContaining({ data: {} }),
+      expect.objectContaining({
+        data: expect.objectContaining({ profile: profTextThinking }),
+      }),
     );
-    expect(service['getModelProfiles']).toHaveBeenCalledTimes(2);
 
-    component.startEditProfile(testProfiles[0]);
-    expect(mockDialog.open).toHaveBeenCalledWith(
-      LlmModelProfileDialogComponent,
-      expect.objectContaining({ data: { profile: testProfiles[0] } }),
-    );
-    expect(service['getModelProfiles']).toHaveBeenCalledTimes(3);
-
-    component.deleteProfile(testProfiles[0]);
-    expect(service['deleteModelProfile']).toHaveBeenCalledWith('gemma4-e4b');
-
-    component.restoreDefaults();
-    expect(service['restoreDefaultModelProfiles']).toHaveBeenCalled();
+    component.deleteProfile(profTextThinking);
+    expect(service['deleteModelProfile']).toHaveBeenCalledWith('prof-text-thinking');
   });
 
   it('closes without saving on cancel', async () => {
@@ -352,14 +389,6 @@ describe('LlmSettingsDialogComponent', () => {
 
     expect(mockDialogRef.close).toHaveBeenCalledWith(false);
     expect(service['updateWorkflows']).not.toHaveBeenCalled();
-  });
-
-  it('matches model profiles by the longest prefix, case-insensitively', () => {
-    const extra = { ...testProfiles[0], id: 'longer', matchPrefixes: ['gemma4:e4b-it'] };
-    expect(matchModelProfile(testProfiles, 'GEMMA4:E4B')?.id).toBe('gemma4-e4b');
-    expect(matchModelProfile([...testProfiles, extra], 'gemma4:e4b-it-q8')?.id).toBe('longer');
-    expect(matchModelProfile(testProfiles, 'gemma4:12b')).toBeNull();
-    expect(matchModelProfile(testProfiles, '  ')).toBeNull();
   });
 
   it('filters models by every typed word and shows all for a blank or exact query', () => {

@@ -3,8 +3,9 @@
     <div class="profiles-header-title">
       <h3>Models</h3>
       <p class="tab-description">
-        Pick a connection, choose one of its models and tune it (or apply a profile). Saved
-        configurations become choices for the text, vision and refinement workflows.
+        Save each model once per connection with optional GPU offload and per-model rate limits.
+        Each model starts with a Defaults profile; customize or add more on the Profiles tab and
+        assign them on Workflows.
       </p>
     </div>
     <div class="profiles-header-actions">
@@ -66,25 +67,28 @@
 
         <div class="profile-chips">
           <span class="profile-chip">On: {{ config.connectionName }}</span>
-          @if (config.provider === 'Ollama') {
-            <span class="profile-chip">Context: {{ config.contextWindowTokens }}</span>
-            @if (config.ollamaGpuLayers !== null) {
-              <span class="profile-chip">GPU layers: {{ config.ollamaGpuLayers }}</span>
-            }
+          <span class="profile-chip">
+            {{ config.profileCount }} {{ config.profileCount === 1 ? 'profile' : 'profiles' }}
+          </span>
+          @if (config.provider === 'Ollama' && config.ollamaGpuLayers !== null) {
+            <span class="profile-chip">GPU layers: {{ config.ollamaGpuLayers }}</span>
           }
-          <span class="profile-chip">Timeout: {{ config.requestTimeoutSeconds }}s</span>
-          <span class="profile-chip">Thinking: {{ config.enableThinking ? 'On' : 'Off' }}</span>
-          @if (config.temperature !== null) {
-            <span class="profile-chip">Temp: {{ config.temperature }}</span>
+          @if (config.maxConcurrentRequests !== null) {
+            <span class="profile-chip">Concurrent: {{ config.maxConcurrentRequests }}</span>
           }
-          @if (config.topP !== null) {
-            <span class="profile-chip">Top P: {{ config.topP }}</span>
+          @if (config.requestsPerMinute !== null) {
+            <span class="profile-chip">RPM: {{ config.requestsPerMinute }}</span>
           }
-          @if (config.topK !== null) {
-            <span class="profile-chip">Top K: {{ config.topK }}</span>
+          @if (config.dailyRequestQuota !== null) {
+            <span class="profile-chip">RPD: {{ config.dailyRequestQuota }}</span>
           }
-          @if (profileName(config.profileId); as profile) {
-            <span class="profile-chip">Profile: {{ profile }}</span>
+          @if (config.dailyQuotaResetTimezone || config.dailyQuotaResetTime) {
+            <span class="profile-chip">
+              Reset: {{ config.dailyQuotaResetTime || 'Inherit'
+              }}{{
+                config.dailyQuotaResetTimezone ? ' (' + config.dailyQuotaResetTimezone + ')' : ''
+              }}
+            </span>
           }
         </div>
 
@@ -102,26 +106,7 @@
           <button
             mat-button
             type="button"
-            (click)="duplicate(config)"
-            [attr.aria-label]="'Duplicate model configuration ' + config.name"
-            data-testid="duplicate-model-config-btn"
-          >
-            <mat-icon>content_copy</mat-icon>
-            <span>Duplicate</span>
-          </button>
-          <button
-            mat-button
-            type="button"
-            (click)="saveAsProfileRequested.emit(config)"
-            [attr.aria-label]="'Save ' + config.name + ' as a profile'"
-            data-testid="save-as-profile-btn"
-          >
-            <mat-icon>bookmark_add</mat-icon>
-            <span>Save as Profile</span>
-          </button>
-          <button
-            mat-button
-            type="button"
+            class="delete-card-btn"
             (click)="delete(config)"
             [disabled]="isSaving()"
             [attr.aria-label]="'Delete model configuration ' + config.name"

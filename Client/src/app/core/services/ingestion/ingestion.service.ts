@@ -64,13 +64,6 @@ export class IngestionService {
     return this.http.delete<void>(apiUrl(`/llm-settings/model-profiles/${id}`));
   }
 
-  restoreDefaultModelProfiles(): Observable<LlmModelProfile[]> {
-    return this.http.post<LlmModelProfile[]>(
-      apiUrl('/llm-settings/model-profiles/restore-defaults'),
-      null,
-    );
-  }
-
   getJobsPaged(
     status?: IngestionJobStatus | null,
     search?: string | null,

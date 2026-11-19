@@ -2,7 +2,7 @@
   <div class="dialog-header">
     <div class="header-icon-title">
       <mat-icon class="header-icon">smart_toy</mat-icon>
-      <h2 mat-dialog-title class="dialog-title">LLM Connections & Models</h2>
+      <h2 mat-dialog-title class="dialog-title">LLM Connections &amp; Models</h2>
     </div>
     <button
       mat-icon-button
@@ -40,8 +40,9 @@
         <mat-tab label="Workflows">
           <form [formGroup]="workflowForm" class="tab-body settings-form" (ngSubmit)="onSave()">
             <p class="tab-description">
-              Choose which saved model handles each job. Each workflow can run on a different
-              machine or provider, and switching is just picking another saved model.
+              Choose which model profile handles each job. Profiles are grouped by model and
+              connection, and multiple workflows can share one model's rate limits with different
+              tuning profiles.
             </p>
 
             @if (configurations().length === 0) {
@@ -71,114 +72,146 @@
               </div>
             }
 
+            <!-- Text Workflow -->
             <div class="workflow-assignment">
               <mat-form-field appearance="outline" class="form-field full-width">
                 <mat-label>Text workflow</mat-label>
-                <mat-select
-                  formControlName="textModelConfigurationId"
-                  data-testid="workflow-text-select"
-                >
+                <mat-select formControlName="textModelProfileId" data-testid="workflow-text-select">
+                  <mat-select-trigger>
+                    @if (textProfile(); as selected) {
+                      {{ selected.modelConfigurationName }} &mdash; {{ selected.displayName }}
+                    } @else {
+                      Not assigned (text extraction off)
+                    }
+                  </mat-select-trigger>
                   <mat-option value="">Not assigned (text extraction off)</mat-option>
-                  @for (group of configurationGroups(); track group.connection.id) {
-                    <mat-optgroup [label]="group.connection.name">
-                      @for (config of group.configurations; track config.id) {
-                        <mat-option [value]="config.id">{{ config.name }}</mat-option>
+                  @for (group of profileGroups(); track group.configuration.id) {
+                    <mat-optgroup [label]="group.configuration.name">
+                      @for (profile of group.profiles; track profile.id) {
+                        <mat-option [value]="profile.id">{{ profile.displayName }}</mat-option>
                       }
                     </mat-optgroup>
                   }
                 </mat-select>
                 <mat-hint>Extracts recipes from web pages and pasted text.</mat-hint>
               </mat-form-field>
-              @if (textConfiguration(); as config) {
+              @if (textProfile(); as profile) {
                 <p class="assignment-detail" data-testid="workflow-text-detail">
-                  {{ config.model }} on {{ config.connectionName }}
+                  {{ profile.model }} on {{ profile.connectionName }} &middot; Profile:
+                  {{ profile.displayName }}
                 </p>
               }
             </div>
 
+            <!-- Vision Workflow -->
             <div class="workflow-assignment">
               <mat-form-field appearance="outline" class="form-field full-width">
                 <mat-label>Vision workflow (optional)</mat-label>
                 <mat-select
-                  formControlName="visionModelConfigurationId"
+                  formControlName="visionModelProfileId"
                   data-testid="workflow-vision-select"
                 >
+                  <mat-select-trigger>
+                    @if (visionProfile(); as selected) {
+                      {{ selected.modelConfigurationName }} &mdash; {{ selected.displayName }}
+                    } @else {
+                      Not assigned (photo and PDF scans off)
+                    }
+                  </mat-select-trigger>
                   <mat-option value="">Not assigned (photo and PDF scans off)</mat-option>
-                  @for (group of configurationGroups(); track group.connection.id) {
-                    <mat-optgroup [label]="group.connection.name">
-                      @for (config of group.configurations; track config.id) {
-                        <mat-option [value]="config.id">{{ config.name }}</mat-option>
+                  @for (group of profileGroups(); track group.configuration.id) {
+                    <mat-optgroup [label]="group.configuration.name">
+                      @for (profile of group.profiles; track profile.id) {
+                        <mat-option [value]="profile.id">{{ profile.displayName }}</mat-option>
                       }
                     </mat-optgroup>
                   }
                 </mat-select>
                 <mat-hint>Reads cookbook photos and scanned PDFs. Needs a vision model.</mat-hint>
               </mat-form-field>
-              @if (visionConfiguration(); as config) {
+              @if (visionProfile(); as profile) {
                 <p class="assignment-detail" data-testid="workflow-vision-detail">
-                  {{ config.model }} on {{ config.connectionName }}
+                  {{ profile.model }} on {{ profile.connectionName }} &middot; Profile:
+                  {{ profile.displayName }}
                 </p>
               }
             </div>
 
+            <!-- Refinement Workflow -->
             <div class="workflow-assignment">
               <mat-form-field appearance="outline" class="form-field full-width">
                 <mat-label>Refinement workflow (optional)</mat-label>
                 <mat-select
-                  formControlName="refineModelConfigurationId"
+                  formControlName="refineModelProfileId"
                   data-testid="workflow-refine-select"
                 >
+                  <mat-select-trigger>
+                    @if (refineProfile(); as selected) {
+                      {{ selected.modelConfigurationName }} &mdash; {{ selected.displayName }}
+                    } @else {
+                      Not assigned (refinement off)
+                    }
+                  </mat-select-trigger>
                   <mat-option value="">Not assigned (refinement off)</mat-option>
-                  @for (group of configurationGroups(); track group.connection.id) {
-                    <mat-optgroup [label]="group.connection.name">
-                      @for (config of group.configurations; track config.id) {
-                        <mat-option [value]="config.id">{{ config.name }}</mat-option>
+                  @for (group of profileGroups(); track group.configuration.id) {
+                    <mat-optgroup [label]="group.configuration.name">
+                      @for (profile of group.profiles; track profile.id) {
+                        <mat-option [value]="profile.id">{{ profile.displayName }}</mat-option>
                       }
                     </mat-optgroup>
                   }
                 </mat-select>
                 <mat-hint>
-                  Optional Stage 5 Targeted Polish model override when warnings are detected during
-                  extraction.
+                  Optional Stage 5 Targeted Polish profile override when warnings are detected.
                 </mat-hint>
               </mat-form-field>
-              @if (refineConfiguration(); as config) {
+              @if (refineProfile(); as profile) {
                 <p class="assignment-detail" data-testid="workflow-refine-detail">
-                  {{ config.model }} on {{ config.connectionName }}
+                  {{ profile.model }} on {{ profile.connectionName }} &middot; Profile:
+                  {{ profile.displayName }}
                 </p>
               }
               @if (refineMatchesText()) {
                 <p class="assignment-detail" role="status">
-                  Stage 5 Targeted Polish already uses the Text model when needed. Pick a different
-                  model or connection here to override it.
+                  Stage 5 Targeted Polish already uses the Text profile when needed. Pick a
+                  different model or profile here to override it.
                 </p>
               }
             </div>
 
+            <!-- Embedding Workflow -->
             <div class="workflow-assignment">
               <mat-form-field appearance="outline" class="form-field full-width">
                 <mat-label>Embedding workflow (optional)</mat-label>
                 <mat-select
-                  formControlName="embeddingModelConfigurationId"
+                  formControlName="embeddingModelProfileId"
                   data-testid="workflow-embedding-select"
                 >
+                  <mat-select-trigger>
+                    @if (embeddingProfile(); as selected) {
+                      {{ selected.modelConfigurationName }} &mdash; {{ selected.displayName }}
+                    } @else {
+                      Not assigned (use Stage 3 search terms)
+                    }
+                  </mat-select-trigger>
                   <mat-option value="">Not assigned (use Stage 3 search terms)</mat-option>
-                  @for (group of configurationGroups(); track group.connection.id) {
-                    <mat-optgroup [label]="group.connection.name">
-                      @for (config of group.configurations; track config.id) {
-                        <mat-option [value]="config.id">{{ config.name }}</mat-option>
+                  @for (group of profileGroups(); track group.configuration.id) {
+                    <mat-optgroup [label]="group.configuration.name">
+                      @for (profile of group.profiles; track profile.id) {
+                        <mat-option [value]="profile.id">{{ profile.displayName }}</mat-option>
                       }
                     </mat-optgroup>
                   }
                 </mat-select>
                 <mat-hint>
                   Enables hybrid vector + lexical catalog matching (with automatic search-term
-                  fallback when unassigned).
+                  fallback when unassigned or quota-limited).
                 </mat-hint>
               </mat-form-field>
-              @if (embeddingConfiguration(); as config) {
+              @if (embeddingProfile(); as profile) {
                 <p class="assignment-detail" data-testid="workflow-embedding-detail">
-                  {{ config.model }} on {{ config.connectionName }}
+                  {{ profile.model }} on {{ profile.connectionName }} &middot; Profile:
+                  {{ profile.displayName }}
                 </p>
               }
             </div>
@@ -209,8 +242,8 @@
                   Auto-resume queue after quota reset / cooldown
                 </mat-slide-toggle>
                 <span class="toggle-hint">
-                  Resumes processing when a connection's rate limit backoff ends or its daily quota
-                  resets.
+                  Resumes processing when a connection's or model's rate limit backoff ends or its
+                  daily quota resets.
                 </span>
               </div>
               <mat-form-field appearance="outline" class="form-field">
@@ -241,10 +274,8 @@
           <app-llm-model-configurations-panel
             [connections]="connections()"
             [configurations]="configurations()"
-            [profiles]="profiles()"
             (changed)="reloadCatalog()"
             (addConnectionRequested)="selectedTabIndex.set(tabs.connections)"
-            (saveAsProfileRequested)="saveConfigurationAsProfile($event)"
           />
         </mat-tab>
 
@@ -255,27 +286,18 @@
               <div class="profiles-header-title">
                 <h3>Model Profiles</h3>
                 <p class="tab-description">
-                  Reusable tuning presets. Apply one while setting up a model on the Models tab.
+                  Each saved model gets its own undeletable Defaults profile automatically. Add
+                  custom profiles under any model for specialized thinking, temperature, or timeout
+                  settings.
                 </p>
               </div>
               <div class="profiles-header-actions">
-                <button
-                  mat-stroked-button
-                  type="button"
-                  class="restore-defaults-btn"
-                  (click)="restoreDefaults()"
-                  [disabled]="isSavingProfile()"
-                  data-testid="restore-defaults-btn"
-                >
-                  <mat-icon>restore</mat-icon>
-                  <span>Restore Defaults</span>
-                </button>
                 <button
                   mat-flat-button
                   type="button"
                   class="add-profile-btn"
                   (click)="startAddProfile()"
-                  [disabled]="isSavingProfile()"
+                  [disabled]="isSavingProfile() || configurations().length === 0"
                   data-testid="add-profile-btn"
                 >
                   <mat-icon>add</mat-icon>
@@ -292,97 +314,148 @@
             }
 
             <div class="profiles-list" data-testid="profile-cards-list">
-              @for (profile of profiles(); track profile.id) {
-                <div class="profile-card" [attr.data-testid]="'profile-card-' + profile.id">
-                  <div class="profile-card-header">
-                    <div class="profile-card-ident">
-                      <h4 class="profile-card-title">{{ profile.displayName }}</h4>
-                      <span class="profile-card-tag">{{ profile.modelTag }}</span>
+              @for (section of modelProfileSections(); track section.configuration.id) {
+                <section
+                  class="profile-model-group"
+                  [attr.data-testid]="'profile-model-group-' + section.configuration.id"
+                >
+                  <div class="profile-model-group-header">
+                    <div class="profile-model-group-ident">
+                      <h4 class="profile-model-group-title">{{ section.configuration.name }}</h4>
+                      <span class="profile-model-group-tag">{{ section.configuration.model }}</span>
                     </div>
-                    @if (profile.isBuiltInDefault) {
-                      <span class="profile-badge-default">Built-in Default</span>
-                    }
-                  </div>
-
-                  @if (profile.summary) {
-                    <p class="profile-card-summary">{{ profile.summary }}</p>
-                  }
-
-                  <div class="profile-chips">
-                    <span class="profile-chip">Context: {{ profile.contextWindowTokens }}</span>
-                    <span class="profile-chip">Timeout: {{ profile.requestTimeoutSeconds }}s</span>
-                    <span class="profile-chip"
-                      >Thinking: {{ profile.enableThinking ? 'On' : 'Off' }}</span
-                    >
-                    @if (profile.temperature !== null && profile.temperature !== undefined) {
-                      <span class="profile-chip">Temp: {{ profile.temperature }}</span>
-                    }
-                    @if (profile.topP !== null && profile.topP !== undefined) {
-                      <span class="profile-chip">Top P: {{ profile.topP }}</span>
-                    }
-                    @if (profile.topK !== null && profile.topK !== undefined) {
-                      <span class="profile-chip">Top K: {{ profile.topK }}</span>
-                    }
-                    @if (profile.recommendedAsRefineModel) {
-                      <span class="profile-chip chip-refine">Refine Recommended</span>
-                    }
-                  </div>
-
-                  @if (profile.notes && profile.notes.length > 0) {
-                    <ul class="profile-card-notes">
-                      @for (note of profile.notes; track note) {
-                        <li>{{ note }}</li>
-                      }
-                    </ul>
-                  }
-
-                  <div class="profile-card-actions">
                     <button
-                      mat-button
+                      mat-stroked-button
                       type="button"
-                      class="apply-card-btn"
-                      (click)="applyProfileToModel(profile)"
-                      [disabled]="connections().length === 0"
-                      [attr.aria-label]="'Use profile ' + profile.displayName + ' for a model'"
-                      data-testid="apply-profile-card-btn"
+                      (click)="startAddProfile(section.configuration.id)"
+                      [disabled]="isSavingProfile()"
+                      [attr.data-testid]="'add-profile-for-model-' + section.configuration.id"
                     >
-                      <mat-icon>check_circle</mat-icon>
-                      <span>Use for Model</span>
-                    </button>
-                    <button
-                      mat-button
-                      type="button"
-                      class="edit-card-btn"
-                      (click)="startEditProfile(profile)"
-                      [attr.data-testid]="'edit-profile-' + profile.id"
-                    >
-                      <mat-icon>edit</mat-icon>
-                      <span>Edit</span>
-                    </button>
-                    <button
-                      mat-button
-                      type="button"
-                      class="delete-card-btn"
-                      (click)="deleteProfile(profile)"
-                      [attr.data-testid]="'delete-profile-' + profile.id"
-                    >
-                      <mat-icon>delete</mat-icon>
-                      <span>Delete</span>
+                      <mat-icon>add</mat-icon>
+                      <span>Add Profile</span>
                     </button>
                   </div>
-                </div>
+
+                  <div class="profile-model-group-cards">
+                    @for (profile of section.profiles; track profile.id) {
+                      <div class="profile-card" [attr.data-testid]="'profile-card-' + profile.id">
+                        <div class="profile-card-header">
+                          <div class="profile-card-ident">
+                            <h5 class="profile-card-title">{{ profile.displayName }}</h5>
+                          </div>
+                          <div class="card-badges">
+                            @if (profile.isDefault) {
+                              <span class="profile-badge-default profile-badge-standard">
+                                Default
+                              </span>
+                            }
+                            @for (workflow of profile.assignedWorkflows; track workflow) {
+                              <span class="workflow-badge">{{ workflow }}</span>
+                            }
+                          </div>
+                        </div>
+
+                        @if (profile.summary) {
+                          <p class="profile-card-summary">{{ profile.summary }}</p>
+                        }
+
+                        <div class="profile-chips">
+                          @if (profile.provider === 'Ollama') {
+                            <span class="profile-chip">
+                              Context: {{ profile.contextWindowTokens }}
+                            </span>
+                          }
+                          <span class="profile-chip">
+                            Timeout: {{ profile.requestTimeoutSeconds }}s
+                          </span>
+                          <span class="profile-chip">
+                            Thinking: {{ profile.enableThinking ? 'On' : 'Off' }}
+                          </span>
+                          @if (profile.temperature !== null && profile.temperature !== undefined) {
+                            <span class="profile-chip">Temp: {{ profile.temperature }}</span>
+                          }
+                          @if (profile.topP !== null && profile.topP !== undefined) {
+                            <span class="profile-chip">Top P: {{ profile.topP }}</span>
+                          }
+                          @if (profile.topK !== null && profile.topK !== undefined) {
+                            <span class="profile-chip">Top K: {{ profile.topK }}</span>
+                          }
+                        </div>
+
+                        @if (profile.notes && profile.notes.length > 0) {
+                          <ul class="profile-card-notes">
+                            @for (note of profile.notes; track note) {
+                              <li>{{ note }}</li>
+                            }
+                          </ul>
+                        }
+
+                        <div class="profile-card-actions">
+                          <button
+                            mat-button
+                            type="button"
+                            class="duplicate-card-btn"
+                            (click)="duplicateProfile(profile)"
+                            [attr.aria-label]="'Duplicate profile ' + profile.displayName"
+                            [attr.data-testid]="'duplicate-profile-' + profile.id"
+                          >
+                            <mat-icon>content_copy</mat-icon>
+                            <span>Duplicate</span>
+                          </button>
+                          <button
+                            mat-button
+                            type="button"
+                            class="edit-card-btn"
+                            (click)="startEditProfile(profile)"
+                            [attr.data-testid]="'edit-profile-' + profile.id"
+                          >
+                            <mat-icon>edit</mat-icon>
+                            <span>Edit</span>
+                          </button>
+                          @if (!profile.isDefault) {
+                            <button
+                              mat-button
+                              type="button"
+                              class="delete-card-btn"
+                              (click)="deleteProfile(profile)"
+                              [attr.data-testid]="'delete-profile-' + profile.id"
+                            >
+                              <mat-icon>delete</mat-icon>
+                              <span>Delete</span>
+                            </button>
+                          }
+                        </div>
+                      </div>
+                    }
+                  </div>
+                </section>
               } @empty {
-                <div class="empty-profiles-state">
-                  <p>No model profiles configured.</p>
-                  <button
-                    mat-stroked-button
-                    type="button"
-                    (click)="restoreDefaults()"
-                    data-testid="empty-restore-defaults-btn"
-                  >
-                    <mat-icon>restore</mat-icon>
-                    <span>Restore Built-in Profiles</span>
-                  </button>
+                <div class="empty-profiles-state" data-testid="profiles-empty-state">
+                  <mat-icon>tune</mat-icon>
+                  <p>
+                    No profiles yet. Add a saved model first and its Defaults profile will be
+                    created automatically.
+                  </p>
+                  <div class="empty-state-actions">
+                    <button
+                      mat-stroked-button
+                      type="button"
+                      (click)="selectedTabIndex.set(tabs.connections)"
+                      data-testid="profiles-go-connections-btn"
+                    >
+                      <mat-icon>dns</mat-icon>
+                      <span>Connections</span>
+                    </button>
+                    <button
+                      mat-stroked-button
+                      type="button"
+                      (click)="selectedTabIndex.set(tabs.models)"
+                      data-testid="profiles-go-models-btn"
+                    >
+                      <mat-icon>memory</mat-icon>
+                      <span>Models</span>
+                    </button>
+                  </div>
                 </div>
               }
             </div>

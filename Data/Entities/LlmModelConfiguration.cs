@@ -1,6 +1,6 @@
 namespace App.Data.Entities;
 
-/// <summary>A saved model on a connection with its own tuning; workflows select these.</summary>
+/// <summary>A unique saved model on a connection with its hardware placement and optional per-model rate limits.</summary>
 public sealed class LlmModelConfiguration : IAuditable
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -13,22 +13,19 @@ public sealed class LlmModelConfiguration : IAuditable
 
     public string Model { get; set; } = string.Empty;
 
-    /// <summary>Slug of the profile last applied; informational only, settings are copied.</summary>
-    public string? ProfileSlug { get; set; }
-
-    public bool EnableThinking { get; set; }
-
-    public double? Temperature { get; set; }
-
-    public double? TopP { get; set; }
-
-    public int? TopK { get; set; }
-
-    public int ContextWindowTokens { get; set; } = 8192;
-
-    public int RequestTimeoutSeconds { get; set; } = 120;
-
     public int? OllamaGpuLayers { get; set; }
+
+    public int? MaxConcurrentRequests { get; set; }
+
+    public int? RequestsPerMinute { get; set; }
+
+    public int? DailyRequestQuota { get; set; }
+
+    public string? DailyQuotaResetTimezone { get; set; }
+
+    public string? DailyQuotaResetTime { get; set; }
+
+    public ICollection<LlmModelProfile> Profiles { get; set; } = [];
 
     public DateTimeOffset CreatedAt { get; set; }
 

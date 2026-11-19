@@ -115,11 +115,11 @@ public record LlmSettingsDto(
     bool AutoResumeQueue = true,
     DateTimeOffset? PausedUntilUtc = null,
     string? PauseReason = null,
-    Guid? TextModelConfigurationId = null,
-    Guid? VisionModelConfigurationId = null,
-    Guid? RefineModelConfigurationId = null,
-    Guid? EmbeddingModelConfigurationId = null,
-    string? EmbeddingModel = null
+    string? EmbeddingModel = null,
+    Guid? TextModelProfileId = null,
+    Guid? VisionModelProfileId = null,
+    Guid? RefineModelProfileId = null,
+    Guid? EmbeddingModelProfileId = null
 );
 
 public record EffectiveLlmConnectionConfig(
@@ -159,9 +159,30 @@ public record EffectiveLlmConnectionConfig(
     EffectiveLlmConnectionConfig? RefineConfig = null,
     int? OllamaGpuLayers = null,
     string? EmbeddingModel = null,
-    EffectiveLlmConnectionConfig? EmbeddingConfig = null
+    EffectiveLlmConnectionConfig? EmbeddingConfig = null,
+    string? ModelKey = null,
+    int? ModelMaxConcurrentRequests = null,
+    int? ModelRequestsPerMinute = null,
+    int? ModelDailyRequestQuota = null,
+    string? ModelDailyQuotaResetTimezone = null,
+    string? ModelDailyQuotaResetTime = null
 )
 {
+    public int EffectiveMaxConcurrentRequests =>
+        ModelMaxConcurrentRequests.HasValue
+            ? Math.Clamp(Math.Min(MaxConcurrentRequests, ModelMaxConcurrentRequests.Value), 1, 5)
+            : Math.Clamp(MaxConcurrentRequests, 1, 5);
+
+    public string EffectiveQuotaResetTimezone =>
+        !string.IsNullOrWhiteSpace(ModelDailyQuotaResetTimezone)
+            ? ModelDailyQuotaResetTimezone
+            : DailyQuotaResetTimezone;
+
+    public string EffectiveQuotaResetTime =>
+        !string.IsNullOrWhiteSpace(ModelDailyQuotaResetTime)
+            ? ModelDailyQuotaResetTime
+            : DailyQuotaResetTime;
+
     /// <summary>
     /// The connection settings for vision requests. A vision model configuration on its own
     /// connection supplies its host, credentials, limits and tuning.
@@ -198,7 +219,10 @@ public record EffectiveLlmConnectionConfig(
             RequestTimeoutSeconds = RefineRequestTimeoutSeconds,
         };
 
-    /// <summary>True when a refine model is set that is not the text model on the same host.</summary>
+    /// <summary>
+    /// True when a refine model is configured with a different host, model, or tuning profile
+    /// from the primary Text workflow.
+    /// </summary>
     public bool HasDistinctRefinement()
     {
         var refineModel = RefineModel?.Trim();
@@ -210,7 +234,13 @@ public record EffectiveLlmConnectionConfig(
         var refine = ForRefinement();
         return !string.Equals(refineModel, TextModel?.Trim(), StringComparison.OrdinalIgnoreCase)
             || !string.Equals(refine.BaseUrl, BaseUrl, StringComparison.OrdinalIgnoreCase)
-            || refine.Provider != Provider;
+            || refine.Provider != Provider
+            || refine.EnableThinking != EnableThinking
+            || refine.Temperature != Temperature
+            || refine.TopP != TopP
+            || refine.TopK != TopK
+            || refine.ContextWindowTokens != ContextWindowTokens
+            || refine.RequestTimeoutSeconds != RequestTimeoutSeconds;
     }
 }
 
@@ -255,21 +285,6 @@ public record TestLlmConnectionRequest(
     bool ClearApiKey = false,
     [Range(5, 120)] int? TimeoutSeconds = 15,
     Guid? ConnectionId = null
-);
-
-public record UpsertLlmModelProfileRequest(
-    [Required, MaxLength(150)] string DisplayName,
-    [Required, MaxLength(200)] string ModelTag,
-    IReadOnlyList<string>? MatchPrefixes = null,
-    [MaxLength(500)] string? Summary = null,
-    bool EnableThinking = false,
-    [Range(0.0, 2.0)] double? Temperature = null,
-    [Range(0.0, 1.0)] double? TopP = null,
-    [Range(1, 1000)] int? TopK = null,
-    [Range(2048, 65536)] int ContextWindowTokens = 32768,
-    [Range(5, 1800)] int RequestTimeoutSeconds = 600,
-    bool RecommendedAsRefineModel = false,
-    IReadOnlyList<string>? Notes = null
 );
 
 public record LlmConnectionTestResultDto(

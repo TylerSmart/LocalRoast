@@ -1,30 +1,7 @@
 import type {
   LlmConnectionTestResultDto,
-  LlmModelProfile,
   LlmProvider,
 } from '../../../core/models/ingestion.models';
-
-/** Returns the profile with the longest match prefix that starts the model tag. */
-export function matchModelProfile(
-  profiles: readonly LlmModelProfile[],
-  model: string | null | undefined,
-): LlmModelProfile | null {
-  const tag = model?.trim().toLowerCase() ?? '';
-  if (!tag) {
-    return null;
-  }
-  let best: LlmModelProfile | null = null;
-  let bestLength = 0;
-  for (const profile of profiles) {
-    for (const prefix of profile.matchPrefixes) {
-      if (tag.startsWith(prefix.toLowerCase()) && prefix.length > bestLength) {
-        best = profile;
-        bestLength = prefix.length;
-      }
-    }
-  }
-  return best;
-}
 
 /**
  * Filters discovered model names by every whitespace-separated word in the query (case-insensitive),

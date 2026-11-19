@@ -47,13 +47,6 @@ export class LlmSettingsService {
     return this.http.delete<void>(apiUrl(`/llm-settings/model-profiles/${id}`));
   }
 
-  restoreDefaultModelProfiles(): Observable<LlmModelProfile[]> {
-    return this.http.post<LlmModelProfile[]>(
-      apiUrl('/llm-settings/model-profiles/restore-defaults'),
-      null,
-    );
-  }
-
   updateSettings(request: UpdateLlmSettingsRequest): Observable<LlmSettingsDto> {
     return this.http.put<LlmSettingsDto>(apiUrl('/llm-settings'), request).pipe(
       tap(() => {

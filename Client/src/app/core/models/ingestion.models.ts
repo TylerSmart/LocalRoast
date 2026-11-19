@@ -52,9 +52,13 @@ export type IngestionJobSortDirection = 'Asc' | 'Desc';
 
 export interface LlmModelProfile {
   id: string;
+  modelConfigurationId: string;
+  modelConfigurationName: string;
+  connectionId: string;
+  connectionName: string;
+  provider: LlmProvider;
+  model: string;
   displayName: string;
-  modelTag: string;
-  matchPrefixes: string[];
   summary: string;
   enableThinking: boolean;
   temperature: number | null;
@@ -62,17 +66,15 @@ export interface LlmModelProfile {
   topK: number | null;
   contextWindowTokens: number;
   requestTimeoutSeconds: number;
-  recommendedAsRefineModel: boolean;
   notes: string[];
-  isBuiltInDefault?: boolean;
-  dailyQuotaResetTimezone?: string;
-  dailyQuotaResetTime?: string;
+  isDefault: boolean;
+  assignedWorkflows: LlmWorkflow[];
+  modifiedAt: string;
 }
 
 export interface UpsertLlmModelProfileRequest {
+  modelConfigurationId: string;
   displayName: string;
-  modelTag: string;
-  matchPrefixes?: string[];
   summary?: string | null;
   enableThinking?: boolean;
   temperature?: number | null;
@@ -80,23 +82,6 @@ export interface UpsertLlmModelProfileRequest {
   topK?: number | null;
   contextWindowTokens?: number;
   requestTimeoutSeconds?: number;
-  recommendedAsRefineModel?: boolean;
-  notes?: string[];
-  isBuiltInDefault?: boolean;
-}
-
-export interface UpsertLlmModelProfileRequest {
-  displayName: string;
-  modelTag: string;
-  matchPrefixes?: string[];
-  summary?: string | null;
-  enableThinking?: boolean;
-  temperature?: number | null;
-  topP?: number | null;
-  topK?: number | null;
-  contextWindowTokens?: number;
-  requestTimeoutSeconds?: number;
-  recommendedAsRefineModel?: boolean;
   notes?: string[];
 }
 
@@ -134,11 +119,11 @@ export interface LlmSettingsDto {
   autoResumeQueue?: boolean;
   pausedUntilUtc?: string | null;
   pauseReason?: string | null;
-  textModelConfigurationId?: string | null;
-  visionModelConfigurationId?: string | null;
-  refineModelConfigurationId?: string | null;
   embeddingModel?: string | null;
-  embeddingModelConfigurationId?: string | null;
+  textModelProfileId?: string | null;
+  visionModelProfileId?: string | null;
+  refineModelProfileId?: string | null;
+  embeddingModelProfileId?: string | null;
 }
 
 export type LlmWorkflow = 'Text' | 'Vision' | 'Refinement' | 'Embedding';
@@ -179,7 +164,7 @@ export interface UpsertLlmConnectionRequest {
   dailyQuotaResetTime: string;
 }
 
-/** A model on a saved connection together with its tuning. */
+/** A unique saved model on a connection together with optional hardware placement and per-model rate limits. */
 export interface LlmModelConfigurationDto {
   id: string;
   name: string;
@@ -187,14 +172,14 @@ export interface LlmModelConfigurationDto {
   connectionName: string;
   provider: LlmProvider;
   model: string;
-  profileId: string | null;
-  enableThinking: boolean;
-  temperature: number | null;
-  topP: number | null;
-  topK: number | null;
-  contextWindowTokens: number;
-  requestTimeoutSeconds: number;
   ollamaGpuLayers: number | null;
+  maxConcurrentRequests: number | null;
+  requestsPerMinute: number | null;
+  dailyRequestQuota: number | null;
+  dailyQuotaResetTimezone: string | null;
+  dailyQuotaResetTime: string | null;
+  defaultProfileId: string;
+  profileCount: number;
   assignedWorkflows: LlmWorkflow[];
   modifiedAt: string;
 }
@@ -203,21 +188,19 @@ export interface UpsertLlmModelConfigurationRequest {
   name: string;
   connectionId: string;
   model: string;
-  profileId: string | null;
-  enableThinking: boolean;
-  temperature: number | null;
-  topP: number | null;
-  topK: number | null;
-  contextWindowTokens: number;
-  requestTimeoutSeconds: number;
   ollamaGpuLayers: number | null;
+  maxConcurrentRequests: number | null;
+  requestsPerMinute: number | null;
+  dailyRequestQuota: number | null;
+  dailyQuotaResetTimezone: string | null;
+  dailyQuotaResetTime: string | null;
 }
 
 export interface UpdateLlmWorkflowsRequest {
-  textModelConfigurationId: string | null;
-  visionModelConfigurationId: string | null;
-  refineModelConfigurationId: string | null;
-  embeddingModelConfigurationId?: string | null;
+  textModelProfileId: string | null;
+  visionModelProfileId: string | null;
+  refineModelProfileId: string | null;
+  embeddingModelProfileId?: string | null;
   autoPublishHighConfidenceText: boolean;
   maxIngestionRetries: number;
   enableIngestion: boolean;

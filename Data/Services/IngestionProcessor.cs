@@ -102,7 +102,7 @@ public sealed class IngestionProcessor(
     {
         var initialConfig = await llmSettingsService.GetEffectiveConfigAsync(cancellationToken);
         using var executionLock = await queueSignal.AcquireJobExecutionAsync(
-            initialConfig.MaxConcurrentRequests,
+            initialConfig.EffectiveMaxConcurrentRequests,
             cancellationToken
         );
 
@@ -775,13 +775,22 @@ public sealed class IngestionProcessor(
 
                 if (trackedJob is not null)
                 {
-                    if (ex.IsQuotaExhausted && initialConfig.EnableRateLimitSafeguards)
+                    var safeguardsEnabled = ex.ExhaustedQuotaScope.HasValue
+                        ? ex.SafeguardsEnabled
+                        : initialConfig.EnableRateLimitSafeguards;
+                    if (ex.IsQuotaExhausted && safeguardsEnabled)
                     {
+                        var resetTimezone = !string.IsNullOrWhiteSpace(ex.QuotaResetTimezone)
+                            ? ex.QuotaResetTimezone
+                            : initialConfig.EffectiveQuotaResetTimezone;
+                        var resetTime = !string.IsNullOrWhiteSpace(ex.QuotaResetTime)
+                            ? ex.QuotaResetTime
+                            : initialConfig.EffectiveQuotaResetTime;
                         var nextReset = initialConfig.AutoResumeQueue
                             ? LlmQuotaSchedule.GetNextResetUtc(
                                 DateTimeOffset.UtcNow,
-                                initialConfig.DailyQuotaResetTimezone,
-                                initialConfig.DailyQuotaResetTime
+                                resetTimezone,
+                                resetTime
                             )
                             : (DateTimeOffset?)null;
                         var reason = $"Provider quota exhausted ({ex.Message})";
@@ -794,24 +803,12 @@ public sealed class IngestionProcessor(
                         );
                         trackedJob.Status = IngestionJobStatus.Queued;
                         trackedJob.NextRetryAt = null;
-                        var tzLabel = !string.IsNullOrWhiteSpace(
-                            initialConfig.DailyQuotaResetTimezone
-                        )
-                            ? $" ({initialConfig.DailyQuotaResetTimezone})"
+                        var tzLabel = !string.IsNullOrWhiteSpace(resetTimezone)
+                            ? $" ({resetTimezone})"
                             : string.Empty;
                         trackedJob.StatusDetail = nextReset.HasValue
                             ? $"Paused: {reason}. Ingestion will automatically resume at {nextReset.Value:u}{tzLabel}."
                             : $"Paused: {reason}. Ingestion was auto-paused until manually resumed.";
-#if false
-                        await llmSettingsService.SetIngestionEnabledAsync(
-                            false,
-                            CancellationToken.None
-                        );
-                        trackedJob.Status = IngestionJobStatus.Queued;
-                        trackedJob.NextRetryAt = null;
-                        trackedJob.StatusDetail =
-                            $"Paused: Provider API quota exhausted ({ex.Message}). Ingestion was auto-paused to prevent repeated requests until quota resets.";
-#endif
                         await dbContext.SaveChangesAsync(CancellationToken.None);
                         logger.LogWarning(
                             "Auto-paused ingestion for job {JobId} because provider quota is exhausted.",

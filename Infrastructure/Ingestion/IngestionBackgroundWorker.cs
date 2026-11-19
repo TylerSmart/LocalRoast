@@ -77,7 +77,7 @@ public sealed class IngestionBackgroundWorker(
                 }
 
                 // 2. Drain all pending queued jobs (supporting configurable max concurrency)
-                var maxConcurrency = Math.Clamp(config.MaxConcurrentRequests, 1, 5);
+                var maxConcurrency = config.EffectiveMaxConcurrentRequests;
                 if (maxConcurrency <= 1)
                 {
                     bool processedAny;

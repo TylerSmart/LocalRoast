@@ -4,7 +4,6 @@ import { of, throwError } from 'rxjs';
 import type {
   LlmConnectionDto,
   LlmModelConfigurationDto,
-  LlmModelProfile,
 } from '../../../core/models/ingestion.models';
 import { LlmSettingsService } from '../../../core/services/llm-settings/llm-settings.service';
 import { LlmModelConfigurationDialogComponent } from '../llm-model-configuration-dialog/llm-model-configuration-dialog.component';
@@ -29,22 +28,6 @@ const connection = (id: string, name: string): LlmConnectionDto => ({
   modifiedAt: '2026-11-13T00:00:00Z',
 });
 
-const profile: LlmModelProfile = {
-  id: 'gemma4-12b-thinking',
-  displayName: 'Gemma 4 12B (thinking)',
-  modelTag: 'gemma4:12b',
-  matchPrefixes: ['gemma4:12b'],
-  summary: 'Best quality',
-  enableThinking: true,
-  temperature: 1,
-  topP: 0.95,
-  topK: 64,
-  contextWindowTokens: 16384,
-  requestTimeoutSeconds: 1200,
-  recommendedAsRefineModel: true,
-  notes: [],
-};
-
 const savedConfiguration: LlmModelConfigurationDto = {
   id: 'cfg-1',
   name: 'Desk text',
@@ -52,14 +35,14 @@ const savedConfiguration: LlmModelConfigurationDto = {
   connectionName: 'Desk GPU',
   provider: 'Ollama',
   model: 'qwen2.5:14b',
-  profileId: null,
-  enableThinking: false,
-  temperature: 0.2,
-  topP: null,
-  topK: null,
-  contextWindowTokens: 8192,
-  requestTimeoutSeconds: 300,
   ollamaGpuLayers: 24,
+  maxConcurrentRequests: 1,
+  requestsPerMinute: 12,
+  dailyRequestQuota: 500,
+  dailyQuotaResetTimezone: 'America/Los_Angeles',
+  dailyQuotaResetTime: '00:00',
+  defaultProfileId: 'prof-1',
+  profileCount: 2,
   assignedWorkflows: ['Text'],
   modifiedAt: '2026-11-13T00:00:00Z',
 };
@@ -92,7 +75,6 @@ describe('LlmModelConfigurationsPanelComponent', () => {
     component = fixture.componentInstance;
     fixture.componentRef.setInput('connections', connections);
     fixture.componentRef.setInput('configurations', [savedConfiguration]);
-    fixture.componentRef.setInput('profiles', [profile]);
     changed = vi.fn<() => void>();
     component.changed.subscribe(() => changed());
     fixture.detectChanges();
@@ -104,7 +86,7 @@ describe('LlmModelConfigurationsPanelComponent', () => {
     expect(dialog.open).toHaveBeenCalledWith(
       LlmModelConfigurationDialogComponent,
       expect.objectContaining({
-        data: { connections, profiles: [profile] },
+        data: { connections, existingConfigurations: [savedConfiguration] },
       }),
     );
     expect(changed).toHaveBeenCalled();
@@ -116,34 +98,23 @@ describe('LlmModelConfigurationsPanelComponent', () => {
     expect(dialog.open).toHaveBeenCalledWith(
       LlmModelConfigurationDialogComponent,
       expect.objectContaining({
-        data: { configuration: savedConfiguration, connections, profiles: [profile] },
+        data: {
+          configuration: savedConfiguration,
+          connections,
+          existingConfigurations: [savedConfiguration],
+        },
       }),
     );
     expect(changed).toHaveBeenCalled();
   });
 
-  it('opens the model configuration dialog to duplicate a saved model', () => {
-    component.duplicate(savedConfiguration);
-
-    expect(dialog.open).toHaveBeenCalledWith(
-      LlmModelConfigurationDialogComponent,
-      expect.objectContaining({
-        data: { duplicateFrom: savedConfiguration, connections, profiles: [profile] },
-      }),
-    );
-    expect(changed).toHaveBeenCalled();
-  });
-
-  it('opens the model configuration dialog with an initial profile', () => {
-    component.applyProfile(profile);
-
-    expect(dialog.open).toHaveBeenCalledWith(
-      LlmModelConfigurationDialogComponent,
-      expect.objectContaining({
-        data: { initialProfile: profile, connections, profiles: [profile] },
-      }),
-    );
-    expect(changed).toHaveBeenCalled();
+  it('renders model rate limit and GPU layer chips on the card', () => {
+    const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+    expect(text).toContain('GPU layers: 24');
+    expect(text).toContain('Concurrent: 1');
+    expect(text).toContain('RPM: 12');
+    expect(text).toContain('RPD: 500');
+    expect(text).toContain('Reset: 00:00 (America/Los_Angeles)');
   });
 
   it('does not emit changed when the dialog is cancelled', () => {

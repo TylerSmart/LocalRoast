@@ -76,16 +76,18 @@
           matInput
           formControlName="model"
           [matAutocomplete]="modelAuto"
-          placeholder="e.g. qwen2.5:14b, google/gemini-3.8-flash"
+          placeholder="e.g. gemma4:e4b, gemini-2.5-flash"
           required
           data-testid="model-config-model"
         />
-        <mat-autocomplete
-          #modelAuto="matAutocomplete"
-          (optionSelected)="onModelSelected($event.option.value)"
-        >
+        <mat-autocomplete #modelAuto="matAutocomplete">
           @for (m of filteredModels(); track m) {
-            <mat-option [value]="m">{{ m }}</mat-option>
+            <mat-option [value]="m" [disabled]="isModelAlreadySaved(m)">
+              {{ m }}
+              @if (isModelAlreadySaved(m)) {
+                (already saved)
+              }
+            </mat-option>
           } @empty {
             @if (availableModels().length > 0) {
               <mat-option disabled>No models match</mat-option>
@@ -96,47 +98,32 @@
           <mat-error>Model is required</mat-error>
         } @else {
           <mat-hint>
-            {{ availableModels().length }} model(s) found on this connection. Type to filter.
+            {{ availableModels().length }} model(s) found on this connection. Each model can be
+            saved once per connection.
           </mat-hint>
         }
       </mat-form-field>
 
-      @if (profiles().length > 0) {
-        <div class="profile-section" role="group" aria-labelledby="modelConfigProfileHeading">
-          <div id="modelConfigProfileHeading" class="sampling-heading">Profile</div>
-          <div class="profile-row">
-            <mat-form-field appearance="outline" class="form-field" subscriptSizing="dynamic">
-              <mat-label>Model profile</mat-label>
-              <mat-select
-                [value]="selectedProfileId()"
-                (selectionChange)="onProfileSelected($event.value)"
-                data-testid="llm-profile-select"
-              >
-                @for (profile of profiles(); track profile.id) {
-                  <mat-option [value]="profile.id">{{ profile.displayName }}</mat-option>
-                }
-              </mat-select>
-              @if (selectedProfile(); as profile) {
-                <mat-hint>{{ profile.summary }}</mat-hint>
-              }
-            </mat-form-field>
-            <button
-              mat-stroked-button
-              type="button"
-              class="apply-profile-btn"
-              (click)="applySelectedProfile()"
-              [disabled]="!selectedProfile()"
-              data-testid="llm-apply-profile"
-            >
-              <mat-icon>auto_fix_high</mat-icon>
-              <span>Apply</span>
-            </button>
-          </div>
-          @if (profileMessage(); as message) {
-            <p class="profile-message" role="status">{{ message }}</p>
-          }
+      @if (isDuplicateModelOnConnection()) {
+        <div class="error-banner" role="alert" data-testid="duplicate-model-warning">
+          <mat-icon>error_outline</mat-icon>
+          <span>
+            This model is already configured on {{ selectedConnection()?.name }}. Assign different
+            profiles per workflow instead of saving the same model twice.
+          </span>
         </div>
       }
+
+      <mat-form-field appearance="outline" class="form-field full-width">
+        <mat-label>Configuration name</mat-label>
+        <input
+          matInput
+          formControlName="name"
+          [placeholder]="defaultName() || 'e.g. Gemini Flash on AI Studio'"
+          data-testid="model-config-name"
+        />
+        <mat-hint>Shown in the workflow dropdowns</mat-hint>
+      </mat-form-field>
 
       @if (selectedConnection()?.provider === 'Ollama') {
         <mat-form-field
@@ -169,133 +156,109 @@
             </mat-hint>
           }
         </mat-form-field>
-        <div class="context-window-section">
-          <div class="context-window-heading">
-            <label for="modelConfigContextSlider">Context window</label>
-            <span>{{ form.controls.contextWindowTokens.value }} tokens</span>
-          </div>
-          <input
-            id="modelConfigContextSlider"
-            class="context-window-slider"
-            type="range"
-            min="2048"
-            max="65536"
-            step="2048"
-            [value]="form.controls.contextWindowTokens.value"
-            (input)="onContextWindowSliderInput($event)"
-            aria-describedby="modelConfigContextHint"
-          />
-          <mat-form-field appearance="outline" class="form-field context-window-number">
-            <mat-label>Context window (tokens)</mat-label>
-            <input
-              matInput
-              type="number"
-              formControlName="contextWindowTokens"
-              min="2048"
-              max="65536"
-              step="1"
-              aria-describedby="modelConfigContextHint"
-              data-testid="model-config-context"
-            />
-          </mat-form-field>
-          <p id="modelConfigContextHint" class="context-window-hint">
-            Larger windows fit more source text but use more memory.
-          </p>
-        </div>
       }
 
-      <div class="toggle-section">
-        <mat-slide-toggle formControlName="enableThinking" data-testid="model-config-thinking">
-          Enable thinking / internal reasoning
-        </mat-slide-toggle>
-        <span class="toggle-hint">
-          Lets reasoning models think before answering. Slower, but often more accurate.
-        </span>
-      </div>
-
-      <div class="sampling-section" role="group" aria-labelledby="modelConfigSamplingHeading">
-        <div id="modelConfigSamplingHeading" class="sampling-heading">Sampling (optional)</div>
-        <div class="form-row three-cols">
-          <mat-form-field appearance="outline" class="form-field">
-            <mat-label>Temperature</mat-label>
-            <input
-              matInput
-              type="number"
-              formControlName="temperature"
-              min="0"
-              max="2"
-              step="0.05"
-              placeholder="Default"
-              data-testid="model-config-temperature"
-            />
-            @if (form.controls.temperature.invalid) {
-              <mat-error>0 to 2</mat-error>
-            }
-          </mat-form-field>
-          <mat-form-field appearance="outline" class="form-field">
-            <mat-label>Top P</mat-label>
-            <input
-              matInput
-              type="number"
-              formControlName="topP"
-              min="0"
-              max="1"
-              step="0.05"
-              placeholder="Default"
-              data-testid="model-config-top-p"
-            />
-            @if (form.controls.topP.invalid) {
-              <mat-error>0 to 1</mat-error>
-            }
-          </mat-form-field>
-          <mat-form-field appearance="outline" class="form-field">
-            <mat-label>Top K</mat-label>
-            <input
-              matInput
-              type="number"
-              formControlName="topK"
-              min="1"
-              max="1000"
-              step="1"
-              placeholder="Default"
-              data-testid="model-config-top-k"
-            />
-            @if (form.controls.topK.invalid) {
-              <mat-error>Whole number 1 to 1000</mat-error>
-            }
-          </mat-form-field>
+      <div class="profile-section" role="group" aria-labelledby="modelRateLimitsHeading">
+        <div id="modelRateLimitsHeading" class="sampling-heading">
+          Model Concurrency &amp; Rate Limits (optional)
         </div>
         <p class="sampling-hint">
-          Leave blank for LocalRoast defaults (temperature 0 for extraction) and the model's own Top
-          P/Top K.
+          Enforced alongside {{ selectedConnection()?.name || 'the connection' }}'s host limits.
+          Leave any field blank to inherit from the connection or apply no extra per-model cap.
         </p>
-      </div>
 
-      <div class="form-row two-cols">
-        <mat-form-field appearance="outline" class="form-field">
-          <mat-label>Timeout (seconds)</mat-label>
+        <mat-form-field appearance="outline" class="form-field full-width">
+          <mat-label>Max concurrent requests (optional)</mat-label>
           <input
             matInput
             type="number"
-            formControlName="requestTimeoutSeconds"
-            min="5"
-            max="1800"
-            data-testid="model-config-timeout"
+            formControlName="maxConcurrentRequests"
+            min="1"
+            max="5"
+            step="1"
+            [placeholder]="
+              'Inherit from connection (' + (selectedConnection()?.maxConcurrentRequests ?? 1) + ')'
+            "
+            data-testid="model-config-max-concurrent"
           />
-          @if (form.controls.requestTimeoutSeconds.invalid) {
-            <mat-error>5 to 1800</mat-error>
+          @if (form.controls.maxConcurrentRequests.invalid) {
+            <mat-error>1 to 5 whole number</mat-error>
+          } @else {
+            <mat-hint>
+              Caps concurrent calls to this specific model without exceeding the connection limit.
+            </mat-hint>
           }
         </mat-form-field>
-        <mat-form-field appearance="outline" class="form-field">
-          <mat-label>Configuration name</mat-label>
-          <input
-            matInput
-            formControlName="name"
-            [placeholder]="defaultName() || 'e.g. Qwen on Gaming PC'"
-            data-testid="model-config-name"
-          />
-          <mat-hint>Shown in the workflow dropdowns</mat-hint>
-        </mat-form-field>
+
+        <div class="form-row two-cols">
+          <mat-form-field appearance="outline" class="form-field">
+            <mat-label>Requests Per Minute (RPM)</mat-label>
+            <input
+              matInput
+              type="number"
+              formControlName="requestsPerMinute"
+              min="1"
+              max="1000"
+              step="1"
+              placeholder="No model limit"
+              data-testid="model-config-rpm"
+            />
+            @if (form.controls.requestsPerMinute.invalid) {
+              <mat-error>1 to 1000 whole number</mat-error>
+            }
+          </mat-form-field>
+
+          <mat-form-field appearance="outline" class="form-field">
+            <mat-label>Daily Request Quota (RPD)</mat-label>
+            <input
+              matInput
+              type="number"
+              formControlName="dailyRequestQuota"
+              min="1"
+              max="100000"
+              step="1"
+              placeholder="No model limit"
+              data-testid="model-config-rpd"
+            />
+            @if (form.controls.dailyRequestQuota.invalid) {
+              <mat-error>1 to 100000 whole number</mat-error>
+            }
+          </mat-form-field>
+        </div>
+
+        <div class="form-row two-cols">
+          <mat-form-field appearance="outline" class="form-field">
+            <mat-label>Daily Quota Reset Timezone</mat-label>
+            <mat-select
+              formControlName="dailyQuotaResetTimezone"
+              data-testid="model-config-reset-timezone"
+            >
+              <mat-option value="">
+                Inherit from connection ({{
+                  selectedConnection()?.dailyQuotaResetTimezone || 'UTC'
+                }})
+              </mat-option>
+              @for (tz of timezoneOptions; track tz.value) {
+                <mat-option [value]="tz.value">{{ tz.label }}</mat-option>
+              }
+            </mat-select>
+          </mat-form-field>
+
+          <mat-form-field appearance="outline" class="form-field">
+            <mat-label>Reset Time of Day (HH:mm)</mat-label>
+            <input
+              matInput
+              formControlName="dailyQuotaResetTime"
+              [placeholder]="
+                'Inherit (' + (selectedConnection()?.dailyQuotaResetTime || '00:00') + ')'
+              "
+              data-testid="model-config-reset-time"
+            />
+            @if (form.controls.dailyQuotaResetTime.invalid) {
+              <mat-error>24-hour time in HH:mm format</mat-error>
+            }
+          </mat-form-field>
+        </div>
       </div>
     </form>
   </mat-dialog-content>
@@ -314,7 +277,7 @@
       mat-flat-button
       type="submit"
       form="llm-model-config-form"
-      [disabled]="form.invalid || !effectiveName() || isSaving()"
+      [disabled]="form.invalid || isDuplicateModelOnConnection() || !effectiveName() || isSaving()"
       data-testid="save-model-config-btn"
     >
       @if (isSaving()) {

@@ -102,14 +102,14 @@ public sealed class MultiStageIngestionAndReplacementsIntegrationTests
         var wfRes = await client.PutAsJsonAsync(
             "/api/llm-settings/workflows",
             new UpdateLlmWorkflowsRequest(
-                TextModelConfigurationId: textCfg.Id,
-                EmbeddingModelConfigurationId: embedCfg.Id
+                TextModelProfileId: textCfg.DefaultProfileId,
+                EmbeddingModelProfileId: embedCfg.DefaultProfileId
             )
         );
         Assert.AreEqual(HttpStatusCode.OK, wfRes.StatusCode);
         var wfSettings = await wfRes.Content.ReadFromJsonAsync<LlmSettingsDto>();
         Assert.IsNotNull(wfSettings);
-        Assert.AreEqual(embedCfg.Id, wfSettings.EmbeddingModelConfigurationId);
+        Assert.AreEqual(embedCfg.DefaultProfileId, wfSettings.EmbeddingModelProfileId);
         Assert.AreEqual("embeddinggemma", wfSettings.EmbeddingModel);
 
         // Seed existing catalog food item
@@ -455,11 +455,247 @@ public sealed class MultiStageIngestionAndReplacementsIntegrationTests
         }
     }
 
+    [TestMethod]
+    public async Task ModelQuotaExhausted_OnRefinementModel_SkipsStage5WithoutPausingTextIngestion()
+    {
+        var mockLlm = new FallbackExercisingLlmClient
+        {
+            ForceSimpleBatch = true,
+            ThrowOnStage = (cfg, stage) =>
+                stage == "stage5b_polish_targeted"
+                    ? new LlmHostUnavailableException(
+                        "Daily request limit reached for model 'gemini-2.5-pro' (50 / 50 requests today).",
+                        isQuotaExhausted: true
+                    )
+                    {
+                        ExhaustedQuotaScope = LlmQuotaScope.Model,
+                        ExhaustedGateKey = cfg.ModelKey,
+                        QuotaResetTimezone = cfg.EffectiveQuotaResetTimezone,
+                        QuotaResetTime = cfg.EffectiveQuotaResetTime,
+                        SafeguardsEnabled = cfg.EnableRateLimitSafeguards,
+                    }
+                    : null,
+        };
+
+        await using var customFactory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ILlmExtractionClient>();
+                services.AddSingleton<ILlmExtractionClient>(mockLlm);
+            });
+        });
+
+        using var client = customFactory.CreateClient();
+        await AuthenticateAsync(client);
+
+        var conn = await (
+            await client.PostAsJsonAsync(
+                "/api/llm-settings/connections",
+                new UpsertLlmConnectionRequest(
+                    Name: "Google AI Studio",
+                    Provider: LlmProvider.OpenAiCompatible,
+                    BaseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+                    EnableRateLimitSafeguards: true
+                )
+            )
+        ).Content.ReadFromJsonAsync<LlmConnectionDto>();
+        Assert.IsNotNull(conn);
+
+        var textCfg = await (
+            await client.PostAsJsonAsync(
+                "/api/llm-settings/model-configurations",
+                new UpsertLlmModelConfigurationRequest(
+                    "Flash",
+                    conn.Id,
+                    "gemini-2.5-flash",
+                    DailyRequestQuota: 1000
+                )
+            )
+        ).Content.ReadFromJsonAsync<LlmModelConfigurationDto>();
+        var refineCfg = await (
+            await client.PostAsJsonAsync(
+                "/api/llm-settings/model-configurations",
+                new UpsertLlmModelConfigurationRequest(
+                    "Pro",
+                    conn.Id,
+                    "gemini-2.5-pro",
+                    DailyRequestQuota: 50,
+                    DailyQuotaResetTimezone: "America/Los_Angeles",
+                    DailyQuotaResetTime: "00:00"
+                )
+            )
+        ).Content.ReadFromJsonAsync<LlmModelConfigurationDto>();
+        Assert.IsNotNull(textCfg);
+        Assert.IsNotNull(refineCfg);
+
+        var wfRes = await client.PutAsJsonAsync(
+            "/api/llm-settings/workflows",
+            new UpdateLlmWorkflowsRequest(
+                TextModelProfileId: textCfg.DefaultProfileId,
+                RefineModelProfileId: refineCfg.DefaultProfileId,
+                EnableIngestion: true,
+                AutoResumeQueue: true
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.OK, wfRes.StatusCode);
+
+        var enqueueRes = await client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest(
+                "Toasted Butter Bread\nIngredients:\n- 2 tbsp butter\nInstructions:\n1. Melt 2 tablespoons butter."
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Accepted, enqueueRes.StatusCode);
+        var job = await enqueueRes.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
+        Assert.IsNotNull(job);
+
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            var processed = await scope
+                .ServiceProvider.GetRequiredService<IIngestionProcessor>()
+                .ProcessNextQueuedJobAsync();
+            Assert.IsTrue(processed);
+        }
+
+        Assert.IsTrue(mockLlm.StageCalls.Contains("stage5b_polish_targeted"));
+
+        var settings = await client.GetFromJsonAsync<LlmSettingsDto>("/api/llm-settings");
+        Assert.IsNotNull(settings);
+        Assert.IsTrue(
+            settings.EnableIngestion,
+            "Exhausting an optional Refinement model's quota must not pause Text ingestion."
+        );
+
+        var detail = await client.GetFromJsonAsync<IngestionJobDetailDto>(
+            $"/api/ingestion/jobs/{job.Id}"
+        );
+        Assert.IsNotNull(detail);
+        Assert.AreEqual(IngestionJobStatus.ReadyForReview, detail.Status);
+    }
+
+    [TestMethod]
+    public async Task ModelQuotaExhausted_OnTextModel_AutoPausesQueueUsingModelResetSchedule()
+    {
+        var mockLlm = new FallbackExercisingLlmClient
+        {
+            ForceSimpleBatch = true,
+            ThrowOnStage = (cfg, stage) =>
+                stage == "stage1_extract_recipe"
+                    ? new LlmHostUnavailableException(
+                        "Daily request limit reached for model 'gemini-2.5-flash' (5 / 5 requests today).",
+                        isQuotaExhausted: true
+                    )
+                    {
+                        ExhaustedQuotaScope = LlmQuotaScope.Model,
+                        ExhaustedGateKey = cfg.ModelKey,
+                        QuotaResetTimezone = cfg.EffectiveQuotaResetTimezone,
+                        QuotaResetTime = cfg.EffectiveQuotaResetTime,
+                        SafeguardsEnabled = cfg.EnableRateLimitSafeguards,
+                    }
+                    : null,
+        };
+
+        await using var customFactory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ILlmExtractionClient>();
+                services.AddSingleton<ILlmExtractionClient>(mockLlm);
+            });
+        });
+
+        using var client = customFactory.CreateClient();
+        await AuthenticateAsync(client);
+
+        var conn = await (
+            await client.PostAsJsonAsync(
+                "/api/llm-settings/connections",
+                new UpsertLlmConnectionRequest(
+                    Name: "Google AI Studio",
+                    Provider: LlmProvider.OpenAiCompatible,
+                    BaseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+                    EnableRateLimitSafeguards: true,
+                    DailyQuotaResetTimezone: "UTC",
+                    DailyQuotaResetTime: "00:00"
+                )
+            )
+        ).Content.ReadFromJsonAsync<LlmConnectionDto>();
+        Assert.IsNotNull(conn);
+
+        var textCfg = await (
+            await client.PostAsJsonAsync(
+                "/api/llm-settings/model-configurations",
+                new UpsertLlmModelConfigurationRequest(
+                    "Flash",
+                    conn.Id,
+                    "gemini-2.5-flash",
+                    DailyRequestQuota: 5,
+                    DailyQuotaResetTimezone: "America/Los_Angeles",
+                    DailyQuotaResetTime: "03:00"
+                )
+            )
+        ).Content.ReadFromJsonAsync<LlmModelConfigurationDto>();
+        Assert.IsNotNull(textCfg);
+
+        var wfRes = await client.PutAsJsonAsync(
+            "/api/llm-settings/workflows",
+            new UpdateLlmWorkflowsRequest(
+                TextModelProfileId: textCfg.DefaultProfileId,
+                EnableIngestion: true,
+                AutoResumeQueue: true
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.OK, wfRes.StatusCode);
+
+        var enqueueRes = await client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest(
+                "Toasted Butter Bread\nIngredients:\n- 2 tbsp butter\nInstructions:\n1. Melt 2 tablespoons butter."
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Accepted, enqueueRes.StatusCode);
+        var job = await enqueueRes.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
+        Assert.IsNotNull(job);
+
+        var before = DateTimeOffset.UtcNow;
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            var processed = await scope
+                .ServiceProvider.GetRequiredService<IIngestionProcessor>()
+                .ProcessNextQueuedJobAsync();
+            Assert.IsFalse(processed);
+        }
+
+        var expectedReset = LlmQuotaSchedule.GetNextResetUtc(
+            before,
+            "America/Los_Angeles",
+            "03:00"
+        );
+        var settings = await client.GetFromJsonAsync<LlmSettingsDto>("/api/llm-settings");
+        Assert.IsNotNull(settings);
+        Assert.IsFalse(settings.EnableIngestion);
+        Assert.IsNotNull(settings.PausedUntilUtc);
+        Assert.IsLessThan(
+            5.0,
+            Math.Abs((settings.PausedUntilUtc.Value - expectedReset).TotalSeconds),
+            $"Expected PausedUntilUtc ({settings.PausedUntilUtc:u}) to match model reset ({expectedReset:u})."
+        );
+
+        var detail = await client.GetFromJsonAsync<IngestionJobDetailDto>(
+            $"/api/ingestion/jobs/{job.Id}"
+        );
+        Assert.IsNotNull(detail);
+        Assert.AreEqual(IngestionJobStatus.Queued, detail.Status);
+        StringAssert.Contains(detail.StatusDetail ?? "", "America/Los_Angeles");
+    }
+
     private sealed class FallbackExercisingLlmClient : ILlmExtractionClient
     {
         public bool ForceSimpleBatch { get; set; }
         public string? Stage1JsonOverride { get; set; }
         public string? Stage4BatchJsonOverride { get; set; }
+        public Func<EffectiveLlmConnectionConfig, string, Exception?>? ThrowOnStage { get; set; }
         public int EmbeddingCallCount { get; private set; }
         public List<string> StageCalls { get; } = [];
 
@@ -507,6 +743,12 @@ public sealed class MultiStageIngestionAndReplacementsIntegrationTests
         )
         {
             StageCalls.Add(stageName);
+            var thrown = ThrowOnStage?.Invoke(config, stageName);
+            if (thrown is not null)
+            {
+                throw thrown;
+            }
+
             var userContent =
                 messages
                     .FirstOrDefault(m =>

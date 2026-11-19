@@ -3,12 +3,74 @@
 .workflow-assignment {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 0.35rem;
+  margin-bottom: 0.5rem;
 
   .assignment-detail {
     margin: 0;
     color: var(--mat-sys-on-surface-variant, #49454f);
     font-size: 0.8rem;
     overflow-wrap: anywhere;
+  }
+}
+
+.profile-model-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.75rem;
+  border-radius: 10px;
+  background-color: var(--mat-sys-surface-container-low, #f9f6f0);
+  border: 1px solid var(--mat-sys-outline-variant, #dad4c8);
+
+  .profile-model-group-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+  }
+
+  .profile-model-group-ident {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    min-width: 0;
+  }
+
+  .profile-model-group-title {
+    margin: 0;
+    font-size: 0.95rem;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+
+  .profile-model-group-tag {
+    font-family: monospace;
+    font-size: 0.78rem;
+    color: var(--mat-sys-primary, #6b5e43);
+    overflow-wrap: anywhere;
+  }
+
+  .profile-model-group-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+}
+
+.profile-badge-standard {
+  background-color: var(--mat-sys-primary-container, #f4e1b8) !important;
+  color: var(--mat-sys-on-primary-container, #251a00) !important;
+}
+
+@media (max-width: 600px) {
+  .profile-model-group {
+    padding: 0.6rem;
+
+    .profile-model-group-header {
+      flex-direction: column;
+      align-items: flex-start;
+    }
   }
 }

@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using App.Core.Exceptions;
 using App.Core.Ingestion;
 using App.Data.Entities;
@@ -28,7 +27,7 @@ public sealed class LlmSettingsService(
 
         if (entity is not null)
         {
-            // Connection and model fields report what each workflow actually uses.
+            // Connection, model and tuning fields report what each workflow actually uses.
             var effective = ApplyWorkflowAssignments(BuildLegacyConfig(entity), entity);
             var refine = effective.ForRefinement();
             return new LlmSettingsDto(
@@ -65,11 +64,11 @@ public sealed class LlmSettingsService(
                 AutoResumeQueue: entity.AutoResumeQueue,
                 PausedUntilUtc: entity.PausedUntilUtc,
                 PauseReason: entity.PauseReason,
-                TextModelConfigurationId: entity.TextModelConfigurationId,
-                VisionModelConfigurationId: entity.VisionModelConfigurationId,
-                RefineModelConfigurationId: entity.RefineModelConfigurationId,
-                EmbeddingModelConfigurationId: entity.EmbeddingModelConfigurationId,
-                EmbeddingModel: effective.EmbeddingModel
+                EmbeddingModel: effective.EmbeddingModel,
+                TextModelProfileId: entity.TextModelProfileId,
+                VisionModelProfileId: entity.VisionModelProfileId,
+                RefineModelProfileId: entity.RefineModelProfileId,
+                EmbeddingModelProfileId: entity.EmbeddingModelProfileId
             );
         }
 
@@ -252,7 +251,7 @@ public sealed class LlmSettingsService(
             wasIngestionEnabled,
             request.EnableIngestion,
             wakeWaitingJobs: !string.IsNullOrWhiteSpace(entity.TextModel)
-                || entity.TextModelConfigurationId is not null,
+                || entity.TextModelProfileId is not null,
             cancellationToken
         );
 
@@ -266,24 +265,22 @@ public sealed class LlmSettingsService(
     {
         var requestedIds = new[]
         {
-            request.TextModelConfigurationId,
-            request.VisionModelConfigurationId,
-            request.RefineModelConfigurationId,
-            request.EmbeddingModelConfigurationId,
+            request.TextModelProfileId,
+            request.VisionModelProfileId,
+            request.RefineModelProfileId,
+            request.EmbeddingModelProfileId,
         }
             .OfType<Guid>()
             .Distinct()
             .ToList();
         var existingIds = await dbContext
-            .LlmModelConfigurations.Where(c => requestedIds.Contains(c.Id))
-            .Select(c => c.Id)
+            .LlmModelProfiles.Where(p => requestedIds.Contains(p.Id))
+            .Select(p => p.Id)
             .ToListAsync(cancellationToken);
         var missing = requestedIds.Except(existingIds).ToList();
         if (missing.Count > 0)
         {
-            throw new DomainValidationException(
-                $"Model configuration '{missing[0]}' does not exist."
-            );
+            throw new DomainValidationException($"Model profile '{missing[0]}' does not exist.");
         }
 
         var entity = await dbContext.HouseholdLlmSettings.FirstOrDefaultAsync(
@@ -296,25 +293,25 @@ public sealed class LlmSettingsService(
             dbContext.HouseholdLlmSettings.Add(entity);
         }
 
-        entity.TextModelConfigurationId = request.TextModelConfigurationId;
-        entity.VisionModelConfigurationId = request.VisionModelConfigurationId;
-        entity.RefineModelConfigurationId = request.RefineModelConfigurationId;
-        entity.EmbeddingModelConfigurationId = request.EmbeddingModelConfigurationId;
+        entity.TextModelProfileId = request.TextModelProfileId;
+        entity.VisionModelProfileId = request.VisionModelProfileId;
+        entity.RefineModelProfileId = request.RefineModelProfileId;
+        entity.EmbeddingModelProfileId = request.EmbeddingModelProfileId;
 
         // An unassigned workflow is off; never fall back to the old single-host models.
-        if (request.TextModelConfigurationId is null)
+        if (request.TextModelProfileId is null)
         {
             entity.TextModel = null;
         }
-        if (request.VisionModelConfigurationId is null)
+        if (request.VisionModelProfileId is null)
         {
             entity.VisionModel = null;
         }
-        if (request.RefineModelConfigurationId is null)
+        if (request.RefineModelProfileId is null)
         {
             entity.RefineModel = null;
         }
-        if (request.EmbeddingModelConfigurationId is null)
+        if (request.EmbeddingModelProfileId is null)
         {
             entity.EmbeddingModel = null;
         }
@@ -335,7 +332,7 @@ public sealed class LlmSettingsService(
         await ApplyQueueSideEffectsAsync(
             wasIngestionEnabled,
             request.EnableIngestion,
-            wakeWaitingJobs: request.TextModelConfigurationId is not null,
+            wakeWaitingJobs: request.TextModelProfileId is not null,
             cancellationToken
         );
 
@@ -409,14 +406,18 @@ public sealed class LlmSettingsService(
 
     private IQueryable<HouseholdLlmSettings> QuerySettingsWithAssignments() =>
         dbContext
-            .HouseholdLlmSettings.Include(s => s.TextModelConfiguration)
-                .ThenInclude(c => c!.Connection)
-            .Include(s => s.VisionModelConfiguration)
-                .ThenInclude(c => c!.Connection)
-            .Include(s => s.RefineModelConfiguration)
-                .ThenInclude(c => c!.Connection)
-            .Include(s => s.EmbeddingModelConfiguration)
-                .ThenInclude(c => c!.Connection);
+            .HouseholdLlmSettings.Include(s => s.TextModelProfile)
+                .ThenInclude(p => p!.ModelConfiguration)
+                    .ThenInclude(c => c!.Connection)
+            .Include(s => s.VisionModelProfile)
+                .ThenInclude(p => p!.ModelConfiguration)
+                    .ThenInclude(c => c!.Connection)
+            .Include(s => s.RefineModelProfile)
+                .ThenInclude(p => p!.ModelConfiguration)
+                    .ThenInclude(c => c!.Connection)
+            .Include(s => s.EmbeddingModelProfile)
+                .ThenInclude(p => p!.ModelConfiguration)
+                    .ThenInclude(c => c!.Connection);
 
     private static EffectiveLlmConnectionConfig BuildLegacyConfig(HouseholdLlmSettings entity) =>
         new(
@@ -455,50 +456,54 @@ public sealed class LlmSettingsService(
         );
 
     /// <summary>
-    /// Replaces the old single-host values with each workflow's assigned model configuration so
-    /// text, vision, refinement, and embedding can run on different machines or providers.
+    /// Replaces the old single-host values with each workflow's assigned model profile so
+    /// text, vision, refinement, and embedding resolve their exact connection, model, rate limits,
+    /// and tuning from their selected profile.
     /// </summary>
     private static EffectiveLlmConnectionConfig ApplyWorkflowAssignments(
         EffectiveLlmConnectionConfig legacy,
         HouseholdLlmSettings entity
     )
     {
-        var text = entity.TextModelConfiguration is { Connection: not null } textConfiguration
-            ? WithModelConfiguration(legacy, textConfiguration)
+        var text = entity.TextModelProfile
+            is { ModelConfiguration.Connection: not null } textProfile
+            ? WithModelProfile(legacy, textProfile)
             : legacy;
 
-        var vision = entity.VisionModelConfiguration is { Connection: not null } visionConfiguration
-            ? WithModelConfiguration(legacy, visionConfiguration) with
+        var vision = entity.VisionModelProfile
+            is { ModelConfiguration.Connection: not null } visionProfile
+            ? WithModelProfile(legacy, visionProfile) with
             {
-                TextModel = visionConfiguration.Model,
-                VisionModel = visionConfiguration.Model,
+                TextModel = visionProfile.ModelConfiguration.Model,
+                VisionModel = visionProfile.ModelConfiguration.Model,
                 RefineModel = null,
             }
             : null;
 
-        var refine = entity.RefineModelConfiguration is { Connection: not null } refineConfiguration
-            ? WithModelConfiguration(legacy, refineConfiguration) with
+        var refine = entity.RefineModelProfile
+            is { ModelConfiguration.Connection: not null } refineProfile
+            ? WithModelProfile(legacy, refineProfile) with
             {
-                TextModel = refineConfiguration.Model,
-                VisionModel = refineConfiguration.Model,
-                RefineModel = refineConfiguration.Model,
+                TextModel = refineProfile.ModelConfiguration.Model,
+                VisionModel = refineProfile.ModelConfiguration.Model,
+                RefineModel = refineProfile.ModelConfiguration.Model,
             }
             : null;
 
-        var embedding = entity.EmbeddingModelConfiguration
-            is { Connection: not null } embeddingConfiguration
-            ? WithModelConfiguration(legacy, embeddingConfiguration) with
+        var embedding = entity.EmbeddingModelProfile
+            is { ModelConfiguration.Connection: not null } embeddingProfile
+            ? WithModelProfile(legacy, embeddingProfile) with
             {
-                TextModel = embeddingConfiguration.Model,
+                TextModel = embeddingProfile.ModelConfiguration.Model,
                 VisionModel = null,
                 RefineModel = null,
-                EmbeddingModel = embeddingConfiguration.Model,
+                EmbeddingModel = embeddingProfile.ModelConfiguration.Model,
             }
             : null;
 
         return text with
         {
-            TextModel = entity.TextModelConfiguration?.Model ?? legacy.TextModel,
+            TextModel = entity.TextModelProfile?.ModelConfiguration?.Model ?? legacy.TextModel,
             VisionModel = vision?.VisionModel ?? legacy.VisionModel,
             RefineModel = refine?.RefineModel ?? legacy.RefineModel,
             EmbeddingModel = embedding?.EmbeddingModel ?? legacy.EmbeddingModel,
@@ -528,24 +533,34 @@ public sealed class LlmSettingsService(
             ConnectionKey = connection.Id.ToString(),
         };
 
-    private static EffectiveLlmConnectionConfig WithModelConfiguration(
+    private static EffectiveLlmConnectionConfig WithModelProfile(
         EffectiveLlmConnectionConfig baseConfig,
-        LlmModelConfiguration configuration
-    ) =>
-        WithConnection(baseConfig, configuration.Connection!) with
+        LlmModelProfile profile
+    )
+    {
+        var configuration = profile.ModelConfiguration!;
+        return WithConnection(baseConfig, configuration.Connection!) with
         {
             TextModel = configuration.Model,
-            EnableThinking = configuration.EnableThinking,
-            Temperature = configuration.Temperature,
-            TopP = configuration.TopP,
-            TopK = configuration.TopK,
-            ContextWindowTokens = configuration.ContextWindowTokens,
-            RequestTimeoutSeconds = configuration.RequestTimeoutSeconds,
+            EnableThinking = profile.EnableThinking,
+            Temperature = profile.Temperature,
+            TopP = profile.TopP,
+            TopK = profile.TopK,
+            ContextWindowTokens = profile.ContextWindowTokens,
+            RequestTimeoutSeconds = profile.RequestTimeoutSeconds,
             OllamaGpuLayers = configuration.OllamaGpuLayers,
+            ModelKey =
+                $"{configuration.ConnectionId}:{configuration.Model.Trim().ToLowerInvariant()}",
+            ModelMaxConcurrentRequests = configuration.MaxConcurrentRequests,
+            ModelRequestsPerMinute = configuration.RequestsPerMinute,
+            ModelDailyRequestQuota = configuration.DailyRequestQuota,
+            ModelDailyQuotaResetTimezone = configuration.DailyQuotaResetTimezone,
+            ModelDailyQuotaResetTime = configuration.DailyQuotaResetTime,
             VisionConfig = null,
             RefineConfig = null,
             EmbeddingConfig = null,
         };
+    }
 
     public async Task<LlmConnectionTestResultDto> TestConnectionAsync(
         TestLlmConnectionRequest request,
@@ -740,15 +755,24 @@ public sealed class LlmSettingsService(
         CancellationToken cancellationToken = default
     )
     {
-        await EnsureModelProfilesSeededAsync(cancellationToken);
-
         var entities = await dbContext
             .LlmModelProfiles.AsNoTracking()
-            .OrderBy(p => p.SortOrder)
+            .Include(p => p.ModelConfiguration)
+                .ThenInclude(c => c!.Connection)
+            .OrderBy(p => p.ModelConfiguration!.Connection!.Name)
+            .ThenBy(p => p.ModelConfiguration!.Name)
+            .ThenByDescending(p => p.IsDefault)
             .ThenBy(p => p.DisplayName)
             .ToListAsync(cancellationToken);
 
-        return entities.Select(ToDto).ToList();
+        var settings = await dbContext
+            .HouseholdLlmSettings.AsNoTracking()
+            .FirstOrDefaultAsync(
+                s => s.SingletonKey == HouseholdLlmSettings.DefaultSingletonKey,
+                cancellationToken
+            );
+
+        return entities.Select(p => ToDto(p, settings)).ToList();
     }
 
     public async Task<LlmModelProfileDto> CreateModelProfileAsync(
@@ -757,20 +781,27 @@ public sealed class LlmSettingsService(
     )
     {
         ValidateProfileRequest(request);
-        await EnsureModelProfilesSeededAsync(cancellationToken);
 
-        var slug = await GenerateSlugAsync(request.DisplayName, cancellationToken);
-        var maxSortOrder =
-            await dbContext.LlmModelProfiles.MaxAsync(p => (int?)p.SortOrder, cancellationToken)
-            ?? -1;
+        var modelConfig =
+            await dbContext
+                .LlmModelConfigurations.Include(c => c.Connection)
+                .FirstOrDefaultAsync(c => c.Id == request.ModelConfigurationId, cancellationToken)
+            ?? throw new DomainValidationException("Choose a saved model for this profile.");
+
+        await EnsureUniqueProfileNameAsync(
+            request.ModelConfigurationId,
+            request.DisplayName,
+            modelConfig.Name,
+            excludeId: null,
+            cancellationToken
+        );
 
         var entity = new LlmModelProfile
         {
             Id = Guid.NewGuid(),
-            Slug = slug,
+            ModelConfigurationId = modelConfig.Id,
+            ModelConfiguration = modelConfig,
             DisplayName = request.DisplayName.Trim(),
-            ModelTag = request.ModelTag.Trim(),
-            MatchPrefixesJson = JsonSerializer.Serialize(request.MatchPrefixes ?? []),
             Summary = request.Summary?.Trim() ?? string.Empty,
             EnableThinking = request.EnableThinking,
             Temperature = request.Temperature,
@@ -778,10 +809,8 @@ public sealed class LlmSettingsService(
             TopK = request.TopK,
             ContextWindowTokens = request.ContextWindowTokens,
             RequestTimeoutSeconds = request.RequestTimeoutSeconds,
-            RecommendedAsRefineModel = request.RecommendedAsRefineModel,
             NotesJson = JsonSerializer.Serialize(request.Notes ?? []),
-            SortOrder = maxSortOrder + 1,
-            IsBuiltInDefault = false,
+            IsDefault = false,
             CreatedBy = "System",
             ModifiedBy = "System",
         };
@@ -789,27 +818,77 @@ public sealed class LlmSettingsService(
         dbContext.LlmModelProfiles.Add(entity);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return ToDto(entity);
+        var settings = await dbContext
+            .HouseholdLlmSettings.AsNoTracking()
+            .FirstOrDefaultAsync(
+                s => s.SingletonKey == HouseholdLlmSettings.DefaultSingletonKey,
+                cancellationToken
+            );
+
+        return ToDto(entity, settings);
     }
 
     public async Task<LlmModelProfileDto> UpdateModelProfileAsync(
-        string id,
+        Guid id,
         UpsertLlmModelProfileRequest request,
         CancellationToken cancellationToken = default
     )
     {
         ValidateProfileRequest(request);
-        await EnsureModelProfilesSeededAsync(cancellationToken);
 
-        var entity = await FindProfileAsync(id, cancellationToken);
-        if (entity is null)
+        var entity =
+            await dbContext
+                .LlmModelProfiles.Include(p => p.ModelConfiguration)
+                    .ThenInclude(c => c!.Connection)
+                .FirstOrDefaultAsync(p => p.Id == id, cancellationToken)
+            ?? throw new NotFoundException($"Model profile '{id}' not found.");
+
+        if (entity.IsDefault)
         {
-            throw new NotFoundException($"Model profile '{id}' not found.");
+            if (request.ModelConfigurationId != entity.ModelConfigurationId)
+            {
+                throw new DomainValidationException(
+                    "The Defaults profile cannot be moved to another model."
+                );
+            }
+
+            if (
+                !string.Equals(
+                    request.DisplayName.Trim(),
+                    LlmProfileDefaults.DefaultDisplayName,
+                    StringComparison.OrdinalIgnoreCase
+                )
+            )
+            {
+                throw new DomainValidationException("The Defaults profile cannot be renamed.");
+            }
+
+            entity.DisplayName = LlmProfileDefaults.DefaultDisplayName;
+        }
+        else
+        {
+            var modelConfig =
+                await dbContext
+                    .LlmModelConfigurations.Include(c => c.Connection)
+                    .FirstOrDefaultAsync(
+                        c => c.Id == request.ModelConfigurationId,
+                        cancellationToken
+                    )
+                ?? throw new DomainValidationException("Choose a saved model for this profile.");
+
+            await EnsureUniqueProfileNameAsync(
+                request.ModelConfigurationId,
+                request.DisplayName,
+                modelConfig.Name,
+                excludeId: id,
+                cancellationToken
+            );
+
+            entity.ModelConfigurationId = modelConfig.Id;
+            entity.ModelConfiguration = modelConfig;
+            entity.DisplayName = request.DisplayName.Trim();
         }
 
-        entity.DisplayName = request.DisplayName.Trim();
-        entity.ModelTag = request.ModelTag.Trim();
-        entity.MatchPrefixesJson = JsonSerializer.Serialize(request.MatchPrefixes ?? []);
         entity.Summary = request.Summary?.Trim() ?? string.Empty;
         entity.EnableThinking = request.EnableThinking;
         entity.Temperature = request.Temperature;
@@ -817,215 +896,114 @@ public sealed class LlmSettingsService(
         entity.TopK = request.TopK;
         entity.ContextWindowTokens = request.ContextWindowTokens;
         entity.RequestTimeoutSeconds = request.RequestTimeoutSeconds;
-        entity.RecommendedAsRefineModel = request.RecommendedAsRefineModel;
         entity.NotesJson = JsonSerializer.Serialize(request.Notes ?? []);
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return ToDto(entity);
+        var settings = await dbContext
+            .HouseholdLlmSettings.AsNoTracking()
+            .FirstOrDefaultAsync(
+                s => s.SingletonKey == HouseholdLlmSettings.DefaultSingletonKey,
+                cancellationToken
+            );
+        var dto = ToDto(entity, settings);
+        if (dto.AssignedWorkflows.Count > 0)
+        {
+            await WakeWaitingJobsAsync(dbContext, queueSignal, cancellationToken);
+        }
+
+        return dto;
     }
 
     public async Task DeleteModelProfileAsync(
-        string id,
+        Guid id,
         CancellationToken cancellationToken = default
     )
     {
-        await EnsureModelProfilesSeededAsync(cancellationToken);
+        var entity =
+            await dbContext.LlmModelProfiles.FirstOrDefaultAsync(p => p.Id == id, cancellationToken)
+            ?? throw new NotFoundException($"Model profile '{id}' not found.");
 
-        var entity = await FindProfileAsync(id, cancellationToken);
-        if (entity is null)
+        if (entity.IsDefault)
         {
-            throw new NotFoundException($"Model profile '{id}' not found.");
+            throw new ConflictException(
+                $"The '{entity.DisplayName}' profile is the standard default for this model and cannot be deleted.",
+                "Profile is undeletable"
+            );
+        }
+
+        var settings = await dbContext
+            .HouseholdLlmSettings.AsNoTracking()
+            .FirstOrDefaultAsync(
+                s => s.SingletonKey == HouseholdLlmSettings.DefaultSingletonKey,
+                cancellationToken
+            );
+        var assignedWorkflows = GetAssignedWorkflows(entity.Id, settings);
+        if (assignedWorkflows.Count > 0)
+        {
+            throw new ConflictException(
+                $"'{entity.DisplayName}' is selected for the {string.Join(", ", assignedWorkflows)} workflow(s). Choose another profile there first.",
+                "Profile in use"
+            );
         }
 
         dbContext.LlmModelProfiles.Remove(entity);
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task<IReadOnlyList<LlmModelProfileDto>> RestoreDefaultModelProfilesAsync(
-        CancellationToken cancellationToken = default
-    )
-    {
-        await EnsureModelProfilesSeededAsync(cancellationToken);
-
-        for (var i = 0; i < LlmModelProfiles.All.Count; i++)
-        {
-            var def = LlmModelProfiles.All[i];
-            var existing = await dbContext.LlmModelProfiles.FirstOrDefaultAsync(
-                p => p.Slug.ToLower() == def.Id.ToLower(),
-                cancellationToken
-            );
-
-            if (existing is not null)
-            {
-                existing.DisplayName = def.DisplayName;
-                existing.ModelTag = def.ModelTag;
-                existing.MatchPrefixesJson = JsonSerializer.Serialize(def.MatchPrefixes);
-                existing.Summary = def.Summary;
-                existing.EnableThinking = def.EnableThinking;
-                existing.Temperature = def.Temperature;
-                existing.TopP = def.TopP;
-                existing.TopK = def.TopK;
-                existing.ContextWindowTokens = def.ContextWindowTokens;
-                existing.RequestTimeoutSeconds = def.RequestTimeoutSeconds;
-                existing.RecommendedAsRefineModel = def.RecommendedAsRefineModel;
-                existing.NotesJson = JsonSerializer.Serialize(def.Notes);
-                existing.SortOrder = i;
-                existing.IsBuiltInDefault = true;
-            }
-            else
-            {
-                dbContext.LlmModelProfiles.Add(
-                    new LlmModelProfile
-                    {
-                        Id = Guid.NewGuid(),
-                        Slug = def.Id,
-                        DisplayName = def.DisplayName,
-                        ModelTag = def.ModelTag,
-                        MatchPrefixesJson = JsonSerializer.Serialize(def.MatchPrefixes),
-                        Summary = def.Summary,
-                        EnableThinking = def.EnableThinking,
-                        Temperature = def.Temperature,
-                        TopP = def.TopP,
-                        TopK = def.TopK,
-                        ContextWindowTokens = def.ContextWindowTokens,
-                        RequestTimeoutSeconds = def.RequestTimeoutSeconds,
-                        RecommendedAsRefineModel = def.RecommendedAsRefineModel,
-                        NotesJson = JsonSerializer.Serialize(def.Notes),
-                        SortOrder = i,
-                        IsBuiltInDefault = true,
-                        CreatedBy = "System",
-                        ModifiedBy = "System",
-                    }
-                );
-            }
-        }
-
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return await GetModelProfilesAsync(cancellationToken);
-    }
-
-    private async Task EnsureModelProfilesSeededAsync(CancellationToken cancellationToken)
-    {
-        var settings = await dbContext.HouseholdLlmSettings.FirstOrDefaultAsync(
-            s => s.SingletonKey == HouseholdLlmSettings.DefaultSingletonKey,
-            cancellationToken
-        );
-
-        if (settings is null)
-        {
-            settings = CreateFromDefaults();
-            dbContext.HouseholdLlmSettings.Add(settings);
-        }
-
-        await SeedBuiltInProfilesAsync(settings, cancellationToken);
-    }
-
-    private async Task SeedBuiltInProfilesAsync(
-        HouseholdLlmSettings settings,
-        CancellationToken cancellationToken
-    )
-    {
-        if (settings.ModelProfilesSeeded)
-        {
-            return;
-        }
-
-        var existingSlugs = await dbContext
-            .LlmModelProfiles.Select(p => p.Slug.ToLower())
-            .ToListAsync(cancellationToken);
-
-        var addedAny = false;
-        var maxSortOrder =
-            await dbContext.LlmModelProfiles.MaxAsync(p => (int?)p.SortOrder, cancellationToken)
-            ?? -1;
-
-        for (var i = 0; i < LlmModelProfiles.All.Count; i++)
-        {
-            var p = LlmModelProfiles.All[i];
-            if (!existingSlugs.Contains(p.Id.ToLower()))
-            {
-                dbContext.LlmModelProfiles.Add(
-                    new LlmModelProfile
-                    {
-                        Id = Guid.NewGuid(),
-                        Slug = p.Id,
-                        DisplayName = p.DisplayName,
-                        ModelTag = p.ModelTag,
-                        MatchPrefixesJson = JsonSerializer.Serialize(p.MatchPrefixes),
-                        Summary = p.Summary,
-                        EnableThinking = p.EnableThinking,
-                        Temperature = p.Temperature,
-                        TopP = p.TopP,
-                        TopK = p.TopK,
-                        ContextWindowTokens = p.ContextWindowTokens,
-                        RequestTimeoutSeconds = p.RequestTimeoutSeconds,
-                        RecommendedAsRefineModel = p.RecommendedAsRefineModel,
-                        NotesJson = JsonSerializer.Serialize(p.Notes),
-                        SortOrder = maxSortOrder + 1 + i,
-                        IsBuiltInDefault = true,
-                        CreatedBy = "System",
-                        ModifiedBy = "System",
-                    }
-                );
-                addedAny = true;
-            }
-        }
-
-        if (!settings.ModelProfilesSeeded || addedAny)
-        {
-            settings.ModelProfilesSeeded = true;
-            await dbContext.SaveChangesAsync(cancellationToken);
-        }
-    }
-
-    private async Task<LlmModelProfile?> FindProfileAsync(
-        string id,
-        CancellationToken cancellationToken
-    )
-    {
-        var trimmed = id.Trim();
-        if (Guid.TryParse(trimmed, out var guid))
-        {
-            var byGuid = await dbContext.LlmModelProfiles.FirstOrDefaultAsync(
-                p => p.Id == guid,
-                cancellationToken
-            );
-            if (byGuid is not null)
-            {
-                return byGuid;
-            }
-        }
-
-        return await dbContext.LlmModelProfiles.FirstOrDefaultAsync(
-            p => p.Slug.ToLower() == trimmed.ToLower(),
-            cancellationToken
-        );
-    }
-
-    private async Task<string> GenerateSlugAsync(
+    private async Task EnsureUniqueProfileNameAsync(
+        Guid modelConfigurationId,
         string displayName,
+        string modelConfigurationName,
+        Guid? excludeId,
         CancellationToken cancellationToken
     )
     {
-        var raw = displayName.Trim().ToLowerInvariant();
-        var slug = Regex.Replace(raw, @"[^a-z0-9]+", "-").Trim('-');
-        if (string.IsNullOrEmpty(slug))
-        {
-            slug = "custom-profile";
-        }
-
-        var candidate = slug;
-        var counter = 2;
-        while (
-            await dbContext.LlmModelProfiles.AnyAsync(p => p.Slug == candidate, cancellationToken)
+        var normalized = displayName.Trim().ToLower();
+        if (
+            await dbContext.LlmModelProfiles.AnyAsync(
+                p =>
+                    p.ModelConfigurationId == modelConfigurationId
+                    && p.DisplayName.ToLower() == normalized
+                    && p.Id != excludeId,
+                cancellationToken
+            )
         )
         {
-            candidate = $"{slug}-{counter}";
-            counter++;
+            throw new ConflictException(
+                $"A profile named '{displayName.Trim()}' already exists for '{modelConfigurationName}'.",
+                "Duplicate profile name"
+            );
         }
+    }
 
-        return candidate;
+    private static List<LlmWorkflow> GetAssignedWorkflows(
+        Guid profileId,
+        HouseholdLlmSettings? settings
+    )
+    {
+        var workflows = new List<LlmWorkflow>();
+        if (settings is null)
+        {
+            return workflows;
+        }
+        if (settings.TextModelProfileId == profileId)
+        {
+            workflows.Add(LlmWorkflow.Text);
+        }
+        if (settings.VisionModelProfileId == profileId)
+        {
+            workflows.Add(LlmWorkflow.Vision);
+        }
+        if (settings.RefineModelProfileId == profileId)
+        {
+            workflows.Add(LlmWorkflow.Refinement);
+        }
+        if (settings.EmbeddingModelProfileId == profileId)
+        {
+            workflows.Add(LlmWorkflow.Embedding);
+        }
+        return workflows;
     }
 
     private static void ValidateProfileRequest(UpsertLlmModelProfileRequest request)
@@ -1033,11 +1011,6 @@ public sealed class LlmSettingsService(
         if (string.IsNullOrWhiteSpace(request.DisplayName))
         {
             throw new DomainValidationException("DisplayName is required.");
-        }
-
-        if (string.IsNullOrWhiteSpace(request.ModelTag))
-        {
-            throw new DomainValidationException("ModelTag is required.");
         }
 
         if (request.ContextWindowTokens < 2048 || request.ContextWindowTokens > 65536)
@@ -1070,18 +1043,8 @@ public sealed class LlmSettingsService(
         }
     }
 
-    private static LlmModelProfileDto ToDto(LlmModelProfile p)
+    private static LlmModelProfileDto ToDto(LlmModelProfile p, HouseholdLlmSettings? settings)
     {
-        IReadOnlyList<string> matchPrefixes;
-        try
-        {
-            matchPrefixes = JsonSerializer.Deserialize<List<string>>(p.MatchPrefixesJson) ?? [];
-        }
-        catch
-        {
-            matchPrefixes = [];
-        }
-
         IReadOnlyList<string> notes;
         try
         {
@@ -1092,13 +1055,18 @@ public sealed class LlmSettingsService(
             notes = [];
         }
 
-        var builtIn = LlmModelProfiles.All.FirstOrDefault(b => b.Id == p.Slug);
+        var modelConfig = p.ModelConfiguration;
+        var connection = modelConfig?.Connection;
 
         return new LlmModelProfileDto(
-            Id: p.Slug,
+            Id: p.Id,
+            ModelConfigurationId: modelConfig?.Id ?? p.ModelConfigurationId,
+            ModelConfigurationName: modelConfig?.Name ?? string.Empty,
+            ConnectionId: connection?.Id ?? modelConfig?.ConnectionId ?? Guid.Empty,
+            ConnectionName: connection?.Name ?? string.Empty,
+            Provider: connection?.Provider ?? LlmProvider.Ollama,
+            Model: modelConfig?.Model ?? string.Empty,
             DisplayName: p.DisplayName,
-            ModelTag: p.ModelTag,
-            MatchPrefixes: matchPrefixes,
             Summary: p.Summary,
             EnableThinking: p.EnableThinking,
             Temperature: p.Temperature,
@@ -1106,11 +1074,10 @@ public sealed class LlmSettingsService(
             TopK: p.TopK,
             ContextWindowTokens: p.ContextWindowTokens,
             RequestTimeoutSeconds: p.RequestTimeoutSeconds,
-            RecommendedAsRefineModel: p.RecommendedAsRefineModel,
             Notes: notes,
-            IsBuiltInDefault: p.IsBuiltInDefault,
-            DailyQuotaResetTimezone: builtIn?.DailyQuotaResetTimezone,
-            DailyQuotaResetTime: builtIn?.DailyQuotaResetTime
+            IsDefault: p.IsDefault,
+            AssignedWorkflows: GetAssignedWorkflows(p.Id, settings),
+            ModifiedAt: p.ModifiedAt
         );
     }
 }

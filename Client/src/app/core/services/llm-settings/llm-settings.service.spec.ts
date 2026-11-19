@@ -168,9 +168,10 @@ describe('LlmSettingsService', () => {
 
   it('saves workflow assignments via PUT /api/llm-settings/workflows and rechecks AI status', async () => {
     const request = {
-      textModelConfigurationId: 'cfg-text',
-      visionModelConfigurationId: null,
-      refineModelConfigurationId: null,
+      textModelProfileId: 'prof-text',
+      visionModelProfileId: null,
+      refineModelProfileId: null,
+      embeddingModelProfileId: null,
       autoPublishHighConfidenceText: false,
       maxIngestionRetries: 3,
       enableIngestion: true,
@@ -210,23 +211,29 @@ describe('LlmSettingsService', () => {
 
   it('creates model profile via POST /api/llm-settings/model-profiles', async () => {
     const request = {
-      displayName: 'Qwen Custom',
-      modelTag: 'qwen:14b',
+      modelConfigurationId: 'cfg-1',
+      displayName: 'Thinking',
     };
     const mockCreated = {
-      id: 'qwen-custom',
-      displayName: 'Qwen Custom',
-      modelTag: 'qwen:14b',
-      matchPrefixes: [],
+      id: 'prof-custom',
+      modelConfigurationId: 'cfg-1',
+      modelConfigurationName: 'qwen:14b @ Desk',
+      connectionId: 'conn-1',
+      connectionName: 'Desk',
+      provider: 'Ollama',
+      model: 'qwen:14b',
+      displayName: 'Thinking',
       summary: '',
-      enableThinking: false,
+      enableThinking: true,
       temperature: null,
       topP: null,
       topK: null,
-      contextWindowTokens: 32768,
-      requestTimeoutSeconds: 600,
-      recommendedAsRefineModel: false,
+      contextWindowTokens: 8192,
+      requestTimeoutSeconds: 120,
       notes: [],
+      isDefault: false,
+      assignedWorkflows: [],
+      modifiedAt: '2026-11-19T00:00:00Z',
     };
 
     const promise = firstValueFrom(service.createModelProfile(request));
@@ -236,28 +243,34 @@ describe('LlmSettingsService', () => {
     req.flush(mockCreated);
 
     const result = await promise;
-    expect(result.id).toBe('qwen-custom');
+    expect(result.id).toBe('prof-custom');
   });
 
   it('updates model profile via PUT /api/llm-settings/model-profiles/:id', async () => {
     const request = {
+      modelConfigurationId: 'cfg-1',
       displayName: 'Updated Profile',
-      modelTag: 'updated:tag',
     };
     const mockUpdated = {
       id: 'existing-profile',
+      modelConfigurationId: 'cfg-1',
+      modelConfigurationName: 'qwen:14b @ Desk',
+      connectionId: 'conn-1',
+      connectionName: 'Desk',
+      provider: 'Ollama',
+      model: 'qwen:14b',
       displayName: 'Updated Profile',
-      modelTag: 'updated:tag',
-      matchPrefixes: [],
       summary: '',
       enableThinking: false,
       temperature: null,
       topP: null,
       topK: null,
-      contextWindowTokens: 32768,
-      requestTimeoutSeconds: 600,
-      recommendedAsRefineModel: false,
+      contextWindowTokens: 8192,
+      requestTimeoutSeconds: 120,
       notes: [],
+      isDefault: false,
+      assignedWorkflows: [],
+      modifiedAt: '2026-11-19T00:00:00Z',
     };
 
     const promise = firstValueFrom(service.updateModelProfile('existing-profile', request));
@@ -276,17 +289,5 @@ describe('LlmSettingsService', () => {
     req.flush(null);
 
     await promise;
-  });
-
-  it('restores default model profiles via POST /api/llm-settings/model-profiles/restore-defaults', async () => {
-    const mockList = [{ id: 'gemma4-e4b', displayName: 'Gemma 4 E4B' }];
-    const promise = firstValueFrom(service.restoreDefaultModelProfiles());
-    const req = httpMock.expectOne('/api/llm-settings/model-profiles/restore-defaults');
-    expect(req.request.method).toBe('POST');
-    req.flush(mockList);
-
-    const result = await promise;
-    expect(result.length).toBe(1);
-    expect(result[0].id).toBe('gemma4-e4b');
   });
 });

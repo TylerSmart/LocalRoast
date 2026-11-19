@@ -61,7 +61,7 @@ public sealed class AiKitchenHelperServiceTests
 
         public Task<IReadOnlyList<LlmModelProfileDto>> GetModelProfilesAsync(
             CancellationToken cancellationToken = default
-        ) => Task.FromResult<IReadOnlyList<LlmModelProfileDto>>(LlmModelProfiles.All);
+        ) => Task.FromResult<IReadOnlyList<LlmModelProfileDto>>([]);
 
         public Task<LlmModelProfileDto> CreateModelProfileAsync(
             UpsertLlmModelProfileRequest request,
@@ -69,19 +69,15 @@ public sealed class AiKitchenHelperServiceTests
         ) => throw new NotImplementedException();
 
         public Task<LlmModelProfileDto> UpdateModelProfileAsync(
-            string id,
+            Guid id,
             UpsertLlmModelProfileRequest request,
             CancellationToken cancellationToken = default
         ) => throw new NotImplementedException();
 
         public Task DeleteModelProfileAsync(
-            string id,
+            Guid id,
             CancellationToken cancellationToken = default
         ) => throw new NotImplementedException();
-
-        public Task<IReadOnlyList<LlmModelProfileDto>> RestoreDefaultModelProfilesAsync(
-            CancellationToken cancellationToken = default
-        ) => Task.FromResult<IReadOnlyList<LlmModelProfileDto>>(LlmModelProfiles.All);
     }
 
     private sealed class MockLlmExtractionClient : ILlmExtractionClient

@@ -371,7 +371,7 @@ public sealed class LlmExtractionClient(
                 linkedCts.Token
             );
 
-            await EnsureSuccessfulLlmResponseAsync(response, linkedCts.Token);
+            await EnsureSuccessfulLlmResponseAsync(response, linkedCts.Token, config);
             var body = await response.Content.ReadAsStringAsync(linkedCts.Token);
             using var doc = JsonDocument.Parse(body);
             if (
@@ -747,7 +747,7 @@ public sealed class LlmExtractionClient(
                     config,
                     linkedCts.Token
                 );
-                await EnsureSuccessfulLlmResponseAsync(response, linkedCts.Token);
+                await EnsureSuccessfulLlmResponseAsync(response, linkedCts.Token, config);
 
                 var rawResponse = await response.Content.ReadAsStringAsync(linkedCts.Token);
                 responseContent = ExtractOllamaMessageContent(rawResponse);
@@ -814,7 +814,7 @@ public sealed class LlmExtractionClient(
                     config,
                     linkedCts.Token
                 );
-                await EnsureSuccessfulLlmResponseAsync(response, linkedCts.Token);
+                await EnsureSuccessfulLlmResponseAsync(response, linkedCts.Token, config);
 
                 var rawResponse = await response.Content.ReadAsStringAsync(linkedCts.Token);
                 responseContent = ExtractOpenAiMessageContent(rawResponse);
@@ -1041,7 +1041,7 @@ Transcribe the recipe printed in these page images. Copy text verbatim: never re
                     config,
                     linkedCts.Token
                 );
-                await EnsureSuccessfulLlmResponseAsync(response, linkedCts.Token);
+                await EnsureSuccessfulLlmResponseAsync(response, linkedCts.Token, config);
 
                 var rawResponse = await response.Content.ReadAsStringAsync(linkedCts.Token);
                 responseContent = ExtractOllamaMessageContent(rawResponse);
@@ -1120,7 +1120,7 @@ Transcribe the recipe printed in these page images. Copy text verbatim: never re
                     config,
                     linkedCts.Token
                 );
-                await EnsureSuccessfulLlmResponseAsync(response, linkedCts.Token);
+                await EnsureSuccessfulLlmResponseAsync(response, linkedCts.Token, config);
 
                 var rawResponse = await response.Content.ReadAsStringAsync(linkedCts.Token);
                 responseContent = ExtractOpenAiMessageContent(rawResponse);
@@ -1210,9 +1210,9 @@ Transcribe the recipe printed in these page images. Copy text verbatim: never re
 
                 if (isQuota)
                 {
-                    throw new LlmHostUnavailableException(
+                    throw CreateQuotaExhaustedException(
                         $"LLM provider quota exhausted (HTTP 429): {errorDetail}",
-                        isQuotaExhausted: true
+                        config
                     );
                 }
 
@@ -1402,7 +1402,8 @@ Transcribe the recipe printed in these page images. Copy text verbatim: never re
 
     private static async Task EnsureSuccessfulLlmResponseAsync(
         HttpResponseMessage response,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        EffectiveLlmConnectionConfig? config = null
     )
     {
         if (!response.IsSuccessStatusCode)
@@ -1418,7 +1419,7 @@ Transcribe the recipe printed in these page images. Copy text verbatim: never re
                     $"The model runner could not allocate enough memory. For Ollama, set a lower GPU layers value in the model configuration for partial CPU/RAM offload, try CPU-only inference, or use a smaller model. A Gemma4Assistant ctx_other warning during memory fitting is not a missing application setting. Server detail: {errorBody}"
                 );
             }
-            CheckTransientStatus(response, errorBody);
+            CheckTransientStatus(response, errorBody, config);
             var detail = !string.IsNullOrWhiteSpace(errorBody) ? $": {errorBody}" : "";
             throw new HttpRequestException(
                 $"Response status code does not indicate success: {(int)response.StatusCode} ({response.ReasonPhrase}){detail}"
@@ -1426,7 +1427,11 @@ Transcribe the recipe printed in these page images. Copy text verbatim: never re
         }
     }
 
-    private static void CheckTransientStatus(HttpResponseMessage response, string? errorBody = null)
+    private static void CheckTransientStatus(
+        HttpResponseMessage response,
+        string? errorBody = null,
+        EffectiveLlmConnectionConfig? config = null
+    )
     {
         var code = (int)response.StatusCode;
         if (code is 408 or 429 or 502 or 503 or 504)
@@ -1436,11 +1441,42 @@ Transcribe the recipe printed in these page images. Copy text verbatim: never re
                 : response.ReasonPhrase ?? $"HTTP {code}";
 
             var isQuota = code == 429 && IsHardQuotaExhaustion(detail);
+            if (isQuota && config is not null)
+            {
+                throw CreateQuotaExhaustedException(
+                    $"LLM host returned temporary error HTTP {code} ({response.ReasonPhrase}): {detail}",
+                    config
+                );
+            }
+
             throw new LlmHostUnavailableException(
                 $"LLM host returned temporary error HTTP {code} ({response.ReasonPhrase}): {detail}",
                 isQuotaExhausted: isQuota
             );
         }
+    }
+
+    private static LlmHostUnavailableException CreateQuotaExhaustedException(
+        string message,
+        EffectiveLlmConnectionConfig config
+    )
+    {
+        var useConnectionScope =
+            config.DailyRequestQuota.HasValue && !config.ModelDailyRequestQuota.HasValue;
+        var scope =
+            !useConnectionScope && !string.IsNullOrWhiteSpace(config.ModelKey)
+                ? LlmQuotaScope.Model
+                : LlmQuotaScope.Connection;
+        var gateKey = scope == LlmQuotaScope.Model ? config.ModelKey : config.ConnectionKey;
+
+        return new LlmHostUnavailableException(message, isQuotaExhausted: true)
+        {
+            ExhaustedQuotaScope = scope,
+            ExhaustedGateKey = gateKey,
+            QuotaResetTimezone = config.EffectiveQuotaResetTimezone,
+            QuotaResetTime = config.EffectiveQuotaResetTime,
+            SafeguardsEnabled = config.EnableRateLimitSafeguards,
+        };
     }
 
     private static string NormalizeBaseUrl(LlmProvider provider, string baseUrl)

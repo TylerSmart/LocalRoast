@@ -13,7 +13,7 @@ public interface ILlmSettingsService
         CancellationToken cancellationToken = default
     );
 
-    /// <summary>Assigns saved model configurations to the text, vision and refinement workflows.</summary>
+    /// <summary>Assigns saved model profiles to the text, vision, refinement, and embedding workflows.</summary>
     Task<LlmSettingsDto> UpdateWorkflowsAsync(
         UpdateLlmWorkflowsRequest request,
         CancellationToken cancellationToken = default
@@ -34,16 +34,12 @@ public interface ILlmSettingsService
     );
 
     Task<LlmModelProfileDto> UpdateModelProfileAsync(
-        string id,
+        Guid id,
         UpsertLlmModelProfileRequest request,
         CancellationToken cancellationToken = default
     );
 
-    Task DeleteModelProfileAsync(string id, CancellationToken cancellationToken = default);
-
-    Task<IReadOnlyList<LlmModelProfileDto>> RestoreDefaultModelProfilesAsync(
-        CancellationToken cancellationToken = default
-    );
+    Task DeleteModelProfileAsync(Guid id, CancellationToken cancellationToken = default);
 
     Task<LlmSettingsDto> SetIngestionEnabledAsync(
         bool enabled,

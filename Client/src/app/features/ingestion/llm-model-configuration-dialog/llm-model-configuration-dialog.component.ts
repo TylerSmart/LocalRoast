@@ -17,29 +17,22 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSelectModule } from '@angular/material/select';
-import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import type {
   LlmConnectionDto,
   LlmModelConfigurationDto,
-  LlmModelProfile,
   UpsertLlmModelConfigurationRequest,
 } from '../../../core/models/ingestion.models';
 import { LlmSettingsService } from '../../../core/services/llm-settings/llm-settings.service';
 import {
+  LLM_TIMEZONE_OPTIONS,
   filterModels,
-  matchModelProfile,
   providerLabel,
 } from '../llm-settings-dialog/llm-settings.utils';
 
-const DEFAULT_CONTEXT_WINDOW = 8192;
-const DEFAULT_TIMEOUT_SECONDS = 300;
-
 export interface LlmModelConfigurationDialogData {
   connections: LlmConnectionDto[];
-  profiles: LlmModelProfile[];
+  existingConfigurations?: LlmModelConfigurationDto[];
   configuration?: LlmModelConfigurationDto | null;
-  duplicateFrom?: LlmModelConfigurationDto | null;
-  initialProfile?: LlmModelProfile | null;
 }
 
 @Component({
@@ -54,7 +47,6 @@ export interface LlmModelConfigurationDialogData {
     MatInputModule,
     MatProgressSpinnerModule,
     MatSelectModule,
-    MatSlideToggleModule,
   ],
   templateUrl: './llm-model-configuration-dialog.component.html',
   styleUrl: './llm-model-configuration-dialog.component.scss',
@@ -68,9 +60,12 @@ export class LlmModelConfigurationDialogComponent implements OnInit {
   private readonly data = inject<LlmModelConfigurationDialogData>(MAT_DIALOG_DATA);
 
   readonly providerLabel = providerLabel;
+  readonly timezoneOptions = LLM_TIMEZONE_OPTIONS;
 
   readonly connections = signal<LlmConnectionDto[]>(this.data.connections);
-  readonly profiles = signal<LlmModelProfile[]>(this.data.profiles);
+  readonly existingConfigurations = signal<LlmModelConfigurationDto[]>(
+    this.data.existingConfigurations ?? [],
+  );
   readonly editingConfiguration = signal<LlmModelConfigurationDto | null>(
     this.data.configuration ?? null,
   );
@@ -79,54 +74,41 @@ export class LlmModelConfigurationDialogComponent implements OnInit {
   readonly discoveredModels = signal<Readonly<Record<string, string[]>>>({});
   readonly loadingModelsFor = signal<string | null>(null);
   readonly modelsError = signal<string | null>(null);
-  readonly selectedProfileId = signal('');
-  readonly appliedProfileId = signal<string | null>(null);
-  readonly profileMessage = signal<string | null>(null);
 
-  private readonly sourceConfig = this.data.configuration ?? this.data.duplicateFrom ?? null;
+  private readonly sourceConfig = this.data.configuration ?? null;
   private readonly initialConnectionId =
     this.sourceConfig?.connectionId ?? this.data.connections[0]?.id ?? '';
 
   readonly form = this.fb.nonNullable.group({
-    name: this.fb.nonNullable.control(
-      this.data.configuration
-        ? this.data.configuration.name
-        : this.data.duplicateFrom
-          ? `${this.data.duplicateFrom.name} (copy)`
-          : '',
-      [Validators.maxLength(150)],
-    ),
+    name: this.fb.nonNullable.control(this.sourceConfig?.name ?? '', [Validators.maxLength(150)]),
     connectionId: this.fb.nonNullable.control(this.initialConnectionId, [Validators.required]),
     model: this.fb.nonNullable.control(this.sourceConfig?.model ?? '', [
       Validators.required,
       Validators.maxLength(200),
     ]),
-    enableThinking: this.fb.nonNullable.control(this.sourceConfig?.enableThinking ?? false),
-    temperature: this.fb.control<number | null>(this.sourceConfig?.temperature ?? null, [
-      Validators.min(0),
-      Validators.max(2),
-    ]),
-    topP: this.fb.control<number | null>(this.sourceConfig?.topP ?? null, [
-      Validators.min(0),
-      Validators.max(1),
-    ]),
-    topK: this.fb.control<number | null>(this.sourceConfig?.topK ?? null, [
-      Validators.min(1),
-      Validators.max(1000),
-      Validators.pattern(/^\d+$/),
-    ]),
-    contextWindowTokens: this.fb.nonNullable.control(
-      this.sourceConfig?.contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW,
-      [Validators.required, Validators.min(2048), Validators.max(65536)],
-    ),
-    requestTimeoutSeconds: this.fb.nonNullable.control(
-      this.sourceConfig?.requestTimeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS,
-      [Validators.required, Validators.min(5), Validators.max(1800)],
-    ),
     ollamaGpuLayers: this.fb.control<number | null>(this.sourceConfig?.ollamaGpuLayers ?? null, [
       Validators.min(0),
       Validators.max(2147483647),
       Validators.pattern(/^\d+$/),
+    ]),
+    maxConcurrentRequests: this.fb.control<number | null>(
+      this.sourceConfig?.maxConcurrentRequests ?? null,
+      [Validators.min(1), Validators.max(5), Validators.pattern(/^\d+$/)],
+    ),
+    requestsPerMinute: this.fb.control<number | null>(
+      this.sourceConfig?.requestsPerMinute ?? null,
+      [Validators.min(1), Validators.max(1000), Validators.pattern(/^\d+$/)],
+    ),
+    dailyRequestQuota: this.fb.control<number | null>(
+      this.sourceConfig?.dailyRequestQuota ?? null,
+      [Validators.min(1), Validators.max(100000), Validators.pattern(/^\d+$/)],
+    ),
+    dailyQuotaResetTimezone: this.fb.nonNullable.control(
+      this.sourceConfig?.dailyQuotaResetTimezone ?? '',
+      [Validators.maxLength(64)],
+    ),
+    dailyQuotaResetTime: this.fb.nonNullable.control(this.sourceConfig?.dailyQuotaResetTime ?? '', [
+      Validators.pattern(/^$|^([01]\d|2[0-3]):[0-5]\d$/),
     ]),
   });
 
@@ -147,9 +129,19 @@ export class LlmModelConfigurationDialogComponent implements OnInit {
     () => this.discoveredModels()[this.connectionIdValue()] ?? [],
   );
   readonly filteredModels = computed(() => filterModels(this.availableModels(), this.modelQuery()));
-  readonly selectedProfile = computed(
-    () => this.profiles().find((profile) => profile.id === this.selectedProfileId()) ?? null,
-  );
+  readonly savedModelsOnSelectedConnection = computed(() => {
+    const connId = this.connectionIdValue();
+    const editingId = this.editingConfiguration()?.id ?? null;
+    return new Set(
+      this.existingConfigurations()
+        .filter((c) => c.connectionId === connId && c.id !== editingId)
+        .map((c) => c.model.trim().toLowerCase()),
+    );
+  });
+  readonly isDuplicateModelOnConnection = computed(() => {
+    const normalizedModel = this.modelQuery().trim().toLowerCase();
+    return !!normalizedModel && this.savedModelsOnSelectedConnection().has(normalizedModel);
+  });
   readonly defaultName = computed(() => {
     const model = this.modelQuery().trim();
     const connection = this.selectedConnection();
@@ -161,19 +153,6 @@ export class LlmModelConfigurationDialogComponent implements OnInit {
   );
 
   constructor() {
-    this.appliedProfileId.set(this.sourceConfig?.profileId ?? null);
-    const profiles = this.profiles();
-    this.selectedProfileId.set(
-      this.sourceConfig?.profileId ??
-        matchModelProfile(profiles, this.form.controls.model.value)?.id ??
-        profiles[0]?.id ??
-        '',
-    );
-
-    if (this.data.initialProfile) {
-      this.applyProfile(this.data.initialProfile);
-    }
-
     this.form.controls.connectionId.valueChanges
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((id) => {
@@ -191,46 +170,8 @@ export class LlmModelConfigurationDialogComponent implements OnInit {
     }
   }
 
-  applyProfile(profile: LlmModelProfile): void {
-    if (!this.form.controls.model.value.trim()) {
-      this.form.controls.model.setValue(profile.modelTag);
-    }
-    this.form.patchValue({
-      enableThinking: profile.enableThinking,
-      temperature: profile.temperature,
-      topP: profile.topP,
-      topK: profile.topK,
-      contextWindowTokens: profile.contextWindowTokens,
-      requestTimeoutSeconds: profile.requestTimeoutSeconds,
-    });
-    this.form.markAsDirty();
-    this.selectedProfileId.set(profile.id);
-    this.appliedProfileId.set(profile.id);
-    this.profileMessage.set(
-      `Applied ${profile.displayName} recommendations. Save to keep them. ${profile.notes.join(' ')}`.trim(),
-    );
-  }
-
-  applySelectedProfile(): void {
-    const profile = this.selectedProfile();
-    if (profile) {
-      this.applyProfile(profile);
-    }
-  }
-
-  onProfileSelected(id: string): void {
-    this.selectedProfileId.set(id);
-    this.profileMessage.set(null);
-  }
-
-  onModelSelected(model: string): void {
-    const match = matchModelProfile(this.profiles(), model);
-    if (match) {
-      this.selectedProfileId.set(match.id);
-      this.profileMessage.set(
-        `${match.displayName} matches this model. Apply it to use its tuning.`,
-      );
-    }
+  isModelAlreadySaved(model: string): boolean {
+    return this.savedModelsOnSelectedConnection().has(model.trim().toLowerCase());
   }
 
   refreshModels(): void {
@@ -266,14 +207,8 @@ export class LlmModelConfigurationDialogComponent implements OnInit {
       });
   }
 
-  onContextWindowSliderInput(event: Event): void {
-    this.form.controls.contextWindowTokens.setValue(
-      (event.target as HTMLInputElement).valueAsNumber,
-    );
-  }
-
   save(): void {
-    if (this.form.invalid || this.isSaving()) {
+    if (this.form.invalid || this.isDuplicateModelOnConnection() || this.isSaving()) {
       this.form.markAllAsTouched();
       return;
     }
@@ -285,14 +220,12 @@ export class LlmModelConfigurationDialogComponent implements OnInit {
       name: this.effectiveName(),
       connectionId: values.connectionId,
       model: values.model.trim(),
-      profileId: this.appliedProfileId(),
-      enableThinking: values.enableThinking,
-      temperature: values.temperature,
-      topP: values.topP,
-      topK: values.topK,
-      contextWindowTokens: values.contextWindowTokens,
-      requestTimeoutSeconds: values.requestTimeoutSeconds,
       ollamaGpuLayers: values.ollamaGpuLayers,
+      maxConcurrentRequests: values.maxConcurrentRequests,
+      requestsPerMinute: values.requestsPerMinute,
+      dailyRequestQuota: values.dailyRequestQuota,
+      dailyQuotaResetTimezone: values.dailyQuotaResetTimezone.trim() || null,
+      dailyQuotaResetTime: values.dailyQuotaResetTime.trim() || null,
     };
     const editing = this.editingConfiguration();
     const request$ = editing
