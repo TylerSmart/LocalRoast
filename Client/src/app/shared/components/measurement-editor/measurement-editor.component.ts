@@ -49,6 +49,8 @@ export class MeasurementEditorComponent implements ControlValueAccessor, Validat
   readonly hint = input(
     'Enter a source-provided or recipe-specific equivalent, not an assumed density.',
   );
+  readonly hideToggle = input(false);
+  readonly showValidation = input(false);
   readonly units = MEASUREMENT_UNITS;
   private readonly fb = inject(FormBuilder);
   private readonly destroyRef = inject(DestroyRef);
@@ -71,10 +73,19 @@ export class MeasurementEditorComponent implements ControlValueAccessor, Validat
   private onValidatorChange?: () => void;
 
   constructor() {
+    this.form.controls.enabled.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((enabled) => {
+        if (enabled) {
+          this.resetFieldInteractionState();
+        }
+      });
+
     this.form.valueChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
       const value = this.form.getRawValue();
+      const isEnabled = this.hideToggle() || value.enabled;
       this.onChange?.(
-        value.enabled
+        isEnabled
           ? {
               quantity: value.quantity,
               maxQuantity: value.maxQuantity,
@@ -98,6 +109,38 @@ export class MeasurementEditorComponent implements ControlValueAccessor, Validat
       },
       { emitEvent: false },
     );
+    this.resetFieldInteractionState();
+  }
+
+  private resetFieldInteractionState(): void {
+    this.form.controls.quantity.markAsUntouched();
+    this.form.controls.quantity.markAsPristine();
+    this.form.controls.maxQuantity.markAsUntouched();
+    this.form.controls.maxQuantity.markAsPristine();
+    this.form.controls.unit.markAsUntouched();
+    this.form.controls.unit.markAsPristine();
+    this.form.controls.customUnitName.markAsUntouched();
+    this.form.controls.customUnitName.markAsPristine();
+  }
+
+  protected shouldShowValidationError(): boolean {
+    if (!this.validate()) {
+      return false;
+    }
+    if (this.showValidation()) {
+      return true;
+    }
+    const { quantity, maxQuantity, unit, customUnitName } = this.form.controls;
+    return (
+      quantity.touched ||
+      quantity.dirty ||
+      maxQuantity.touched ||
+      maxQuantity.dirty ||
+      unit.touched ||
+      unit.dirty ||
+      customUnitName.touched ||
+      customUnitName.dirty
+    );
   }
 
   registerOnChange(fn: (value: RecipeMeasurement | null) => void): void {
@@ -119,7 +162,7 @@ export class MeasurementEditorComponent implements ControlValueAccessor, Validat
 
   validate(): ValidationErrors | null {
     const value = this.form.getRawValue();
-    if (!value.enabled) return null;
+    if (!this.hideToggle() && !value.enabled) return null;
     return this.form.invalid ||
       (value.maxQuantity !== null &&
         value.quantity !== null &&

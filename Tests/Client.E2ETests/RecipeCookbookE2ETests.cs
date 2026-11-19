@@ -399,4 +399,145 @@ public sealed class RecipeCookbookE2ETests : E2ETestBase
         await Expect(editSubInput).ToBeVisibleAsync();
         await Expect(editSubInput).ToHaveValueAsync(targetSubTitle);
     }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task RecipeEditor_RedesignedControls_PasteListTagFilterDisclosureReorderAndErrorStates()
+    {
+        await RegisterAndLoginAsync();
+        await EnsureTagExistsViaApiAsync("Vegetarian", "Dietary", 1);
+        await EnsureTagExistsViaApiAsync("Italian", "Cuisine", 2);
+        await EnsureFoodItemExistsViaApiAsync("All-Purpose Flour", isPantryStaple: true);
+
+        // 1. Missing recipe edit route displays a clean load error instead of a stuck spinner
+        await Page.GotoAsync($"{ServerUrl}/recipes/{Guid.NewGuid()}/edit");
+        await Expect(Page.Locator(".load-error-card")).ToBeVisibleAsync();
+        await Expect(Page.Locator("button[aria-label='Save recipe']")).ToBeDisabledAsync();
+
+        // 2. Navigate to New Recipe and verify tag filter + hidden manage buttons by default
+        await Page.GotoAsync($"{ServerUrl}/recipes/new");
+        await Expect(Page.Locator(".page-title")).ToContainTextAsync("New Recipe");
+        await Expect(Page.Locator(".chip-manage-btn")).ToHaveCountAsync(0);
+
+        // Filter tags and select Vegetarian
+        var tagFilter = Page.Locator("input[aria-label='Filter tags']");
+        await tagFilter.FillAsync("veg");
+        await Expect(
+                Page.Locator(".tags-scroll-well mat-chip-option", new() { HasText = "Vegetarian" })
+            )
+            .ToBeVisibleAsync();
+        await Expect(
+                Page.Locator(".tags-scroll-well mat-chip-option", new() { HasText = "Italian" })
+            )
+            .ToHaveCountAsync(0);
+        await Page.Locator(".tags-scroll-well mat-chip-option", new() { HasText = "Vegetarian" })
+            .ClickAsync();
+        await Expect(Page.Locator(".selected-taxonomy-bar")).ToContainTextAsync("Vegetarian");
+
+        // Toggle Manage mode to confirm edit/delete controls appear on demand
+        await Page.Locator("button.manage-toggle-btn").ClickAsync();
+        await Expect(Page.Locator(".chip-manage-btn").First).ToBeVisibleAsync();
+        await Page.Locator("button.manage-toggle-btn").ClickAsync();
+        await Expect(Page.Locator(".chip-manage-btn")).ToHaveCountAsync(0);
+
+        // 3. Clicking Save with empty required fields surfaces actionable validation jump chips
+        await Page.Locator("button[type='submit']", new() { HasText = "Save Recipe" })
+            .First.ClickAsync();
+        await Expect(Page.Locator(".editor-error-banner")).ToBeVisibleAsync();
+        await Expect(
+                Page.Locator(
+                    ".validation-jump-chip",
+                    new() { HasText = "Recipe title is required" }
+                )
+            )
+            .ToBeVisibleAsync();
+
+        // Fill title & timing (auto-computed hint)
+        var recipeTitle = $"Blueberry Galette {Guid.NewGuid():N}"[..24];
+        await Page.Locator("input[formcontrolname='title']").FillAsync(recipeTitle);
+        await Page.Locator("input[formcontrolname='prepTimeMinutes']").FillAsync("20");
+        await Page.Locator("input[formcontrolname='cookTimeMinutes']").FillAsync("40");
+        await Expect(Page.Locator(".basics-timing-grid")).ToContainTextAsync("Auto: 60 min");
+
+        // 4. Bulk-paste multi-section ingredients & verify catalog auto-linking + section dividers
+        await Page.Locator("button.paste-toggle-btn").ClickAsync();
+        await Page.Locator("textarea[aria-label='Paste ingredient lines']")
+            .FillAsync("Crust:\n2 cups All-Purpose Flour, sifted\nFilling:\n1-2 tbsp Sugar");
+        await Page.Locator(".quick-paste-actions button[color='primary']").ClickAsync();
+
+        await Expect(Page.Locator(".section-group-divider", new() { HasText = "Crust" }))
+            .ToBeVisibleAsync();
+        await Expect(Page.Locator(".section-group-divider", new() { HasText = "Filling" }))
+            .ToBeVisibleAsync();
+
+        var firstIng = Page.Locator(".ingredient-card").First;
+        await Expect(firstIng.Locator(".catalog-linked-pill"))
+            .ToContainTextAsync("All-Purpose Flour");
+
+        // 5. Expand Alt measurement on #1, fill it, then reorder #2 above #1 and verify state stays synced
+        await firstIng
+            .Locator("button.option-toggle-pill", new() { HasText = "Alt measurement" })
+            .ClickAsync();
+        await Expect(firstIng.Locator(".alt-measurement-panel")).ToBeVisibleAsync();
+        var altEditor = firstIng.Locator("app-measurement-editor");
+        await altEditor.Locator("input[formcontrolname='quantity']").FillAsync("240");
+        await altEditor.Locator("mat-select[formcontrolname='unit']").ClickAsync();
+        await Page.Locator("mat-option", new() { HasText = "Gram (g)" }).First.ClickAsync();
+        await firstIng
+            .Locator("mat-checkbox[formcontrolname='preferAlternativeMeasurement'] input")
+            .CheckAsync();
+        await Expect(
+                firstIng.Locator(
+                    "mat-checkbox[formcontrolname='preferAlternativeMeasurement'] input"
+                )
+            )
+            .ToBeCheckedAsync();
+
+        var secondIng = Page.Locator(".ingredient-card").Nth(1);
+        await secondIng.Locator("button[aria-label='Move ingredient up']").ClickAsync();
+
+        // Now Sugar is #1 (no alt panel) and All-Purpose Flour is #2 (with alt panel & prefer checked)
+        await Expect(
+                Page.Locator(".ingredient-card")
+                    .First.Locator("input[formcontrolname='displayName']")
+            )
+            .ToHaveValueAsync("Sugar");
+        await Expect(Page.Locator(".ingredient-card").First.Locator(".alt-measurement-panel"))
+            .ToHaveCountAsync(0);
+        await Expect(
+                Page.Locator(".ingredient-card")
+                    .Nth(1)
+                    .Locator("input[formcontrolname='displayName']")
+            )
+            .ToHaveValueAsync("All-Purpose Flour");
+        await Expect(Page.Locator(".ingredient-card").Nth(1).Locator(".alt-measurement-panel"))
+            .ToBeVisibleAsync();
+        await Expect(
+                Page.Locator(".ingredient-card")
+                    .Nth(1)
+                    .Locator("mat-checkbox[formcontrolname='preferAlternativeMeasurement'] input")
+            )
+            .ToBeCheckedAsync();
+
+        // 6. Add step instruction & verify 360px mobile layout has zero horizontal overflow
+        await Page.Locator("[formcontrolname='instruction'] .step-instruction-editable")
+            .First.FillAsync("Fold dough around filling and bake until golden.");
+
+        await Page.SetViewportSizeAsync(360, 740);
+        Assert.IsTrue(
+            await Page.EvaluateAsync<bool>(
+                "document.documentElement.scrollWidth <= window.innerWidth"
+            ),
+            "Redesigned Recipe Editor must not overflow horizontally at 360px."
+        );
+
+        // 7. Save and verify detail page renders sections, preferred alt measurement, and tag
+        await Page.Locator("button[type='submit']", new() { HasText = "Save Recipe" })
+            .First.ClickAsync();
+        await Expect(Page).ToHaveURLAsync(new Regex(".*/recipes/[a-f0-9-]+$"));
+        await Expect(Page.Locator(".recipe-title")).ToContainTextAsync(recipeTitle);
+        await Expect(Page.Locator(".hero-taxonomy-strip")).ToContainTextAsync("Vegetarian");
+        await Expect(Page.Locator(".ingredient-row", new() { HasText = "All-Purpose Flour" }))
+            .ToContainTextAsync("240 g");
+    }
 }

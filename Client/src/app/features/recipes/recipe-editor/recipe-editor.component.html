@@ -1,6 +1,6 @@
 <div class="recipe-editor-page">
   <!-- Top Navigation & Actions Bar -->
-  <div class="editor-header">
+  <header class="editor-header">
     <div class="header-titles">
       <a
         mat-button
@@ -8,18 +8,53 @@
         class="back-link"
       >
         <mat-icon>arrow_back</mat-icon>
-        <span>{{ isEdit() ? 'Cancel Edit' : 'Cookbook' }}</span>
+        <span>{{ isEdit() ? 'Back to Recipe' : 'Cookbook' }}</span>
       </a>
-      <h1 class="page-title">{{ isEdit() ? 'Edit Recipe' : 'New Recipe' }}</h1>
+      <div class="title-row">
+        <h1 class="page-title">{{ isEdit() ? 'Edit Recipe' : 'New Recipe' }}</h1>
+        @if (isEdit() && liveTitlePreview()) {
+          <span class="title-subtitle">{{ liveTitlePreview() }}</span>
+        }
+        @if (hasUnsavedChanges()) {
+          <span class="unsaved-pill" aria-live="polite">
+            <span class="unsaved-dot" aria-hidden="true"></span>
+            <span>Unsaved</span>
+          </span>
+        }
+      </div>
     </div>
 
     <div class="header-actions">
+      @if (!isLoading() && !loadError()) {
+        <nav class="section-jump-nav" aria-label="Jump to recipe section">
+          <button type="button" class="jump-pill" (click)="scrollToSection('section-basics')">
+            Basics
+          </button>
+          <button type="button" class="jump-pill" (click)="scrollToSection('section-taxonomy')">
+            Tags
+            @if (selectedCollectionIds().size + selectedTagIds().size > 0) {
+              <span class="jump-count">{{
+                selectedCollectionIds().size + selectedTagIds().size
+              }}</span>
+            }
+          </button>
+          <button type="button" class="jump-pill" (click)="scrollToSection('section-ingredients')">
+            Ingredients
+            <span class="jump-count">{{ ingredientsArray.length }}</span>
+          </button>
+          <button type="button" class="jump-pill" (click)="scrollToSection('section-steps')">
+            Steps
+            <span class="jump-count">{{ stepsArray.length }}</span>
+          </button>
+        </nav>
+      }
+
       <button
         mat-flat-button
         color="primary"
         type="button"
         (click)="onSave()"
-        [disabled]="isSaving()"
+        [disabled]="isSaving() || isLoading() || !!loadError()"
         aria-label="Save recipe"
       >
         @if (isSaving()) {
@@ -32,12 +67,28 @@
         }
       </button>
     </div>
-  </div>
+  </header>
 
   @if (errorMessage()) {
     <div class="editor-error-banner" role="alert">
-      <mat-icon>error</mat-icon>
-      <span>{{ errorMessage() }}</span>
+      <div class="error-banner-head">
+        <mat-icon aria-hidden="true">error_outline</mat-icon>
+        <span>{{ errorMessage() }}</span>
+      </div>
+      @if (validationIssues().length > 0) {
+        <div class="validation-jump-list">
+          @for (issue of validationIssues(); track $index) {
+            <button
+              type="button"
+              class="validation-jump-chip"
+              (click)="scrollToSection(issue.targetId)"
+            >
+              <span>{{ issue.message }}</span>
+              <mat-icon aria-hidden="true">arrow_downward</mat-icon>
+            </button>
+          }
+        </div>
+      }
     </div>
   }
 
@@ -46,104 +97,202 @@
       <mat-spinner diameter="40"></mat-spinner>
       <p>Loading recipe...</p>
     </div>
+  } @else if (loadError()) {
+    <mat-card class="editor-section-card load-error-card" role="alert">
+      <div class="load-error-content">
+        <div class="load-error-icon-wrap">
+          <mat-icon aria-hidden="true">menu_book</mat-icon>
+        </div>
+        <h2>Unable to load recipe</h2>
+        <p>{{ loadError() }}</p>
+        <div class="load-error-actions">
+          <a mat-stroked-button routerLink="/recipes">
+            <mat-icon>arrow_back</mat-icon>
+            <span>Back to Cookbook</span>
+          </a>
+          <button mat-flat-button color="primary" type="button" (click)="retryLoad()">
+            <mat-icon>refresh</mat-icon>
+            <span>Try Again</span>
+          </button>
+        </div>
+      </div>
+    </mat-card>
   } @else {
     <form [formGroup]="form" class="editor-form" (ngSubmit)="onSave()">
-      <!-- SECTION 1: Recipe Metadata Card -->
-      <mat-card class="editor-section-card">
-        <h2 class="card-section-title">
-          <mat-icon>info</mat-icon>
-          <span>Recipe Basics</span>
-        </h2>
+      <!-- SECTION 1: Recipe Basics & Cover Photo -->
+      <mat-card class="editor-section-card basics-card" id="section-basics">
+        <div class="card-section-header">
+          <h2 class="card-section-title">
+            <mat-icon>restaurant_menu</mat-icon>
+            <span>Recipe Basics</span>
+          </h2>
+        </div>
 
-        <div class="form-grid">
-          <!-- Title -->
-          <mat-form-field appearance="outline" class="col-span-full">
-            <mat-label>Recipe Title</mat-label>
+        <div class="basics-hero-layout">
+          <div class="basics-fields-col">
+            <!-- Title -->
+            <mat-form-field
+              appearance="outline"
+              class="full-width title-field"
+              id="field-recipe-title"
+            >
+              <mat-label>Recipe Title</mat-label>
+              <input
+                matInput
+                formControlName="title"
+                placeholder="e.g. Grandma's Sunday Lasagna"
+                required
+                autocomplete="off"
+              />
+              @if (form.controls.title.hasError('required')) {
+                <mat-error>Title is required</mat-error>
+              }
+            </mat-form-field>
+
+            <!-- Description -->
+            <mat-form-field appearance="outline" class="full-width">
+              <mat-label>Description / Flavor Notes</mat-label>
+              <textarea
+                matInput
+                rows="3"
+                formControlName="description"
+                placeholder="A brief overview of the dish, flavor profile, or serving notes..."
+              ></textarea>
+            </mat-form-field>
+
+            <!-- Balanced 4-Column Row: Servings, Yield, Difficulty, Status -->
+            <div class="basics-meta-grid">
+              <mat-form-field appearance="outline" id="field-base-servings">
+                <mat-label>Base Servings</mat-label>
+                <input
+                  matInput
+                  type="number"
+                  step="0.5"
+                  min="0.25"
+                  max="999"
+                  formControlName="baseServings"
+                  required
+                />
+              </mat-form-field>
+
+              <mat-form-field appearance="outline">
+                <mat-label>Yield Description</mat-label>
+                <input
+                  matInput
+                  formControlName="yieldDisplay"
+                  placeholder="e.g. 1 9×13 pan, 24 cookies"
+                />
+              </mat-form-field>
+
+              <mat-form-field appearance="outline">
+                <mat-label>Difficulty</mat-label>
+                <mat-select formControlName="difficulty">
+                  <mat-option value="Easy">Easy</mat-option>
+                  <mat-option value="Medium">Medium</mat-option>
+                  <mat-option value="Project">Project</mat-option>
+                </mat-select>
+              </mat-form-field>
+
+              <mat-form-field appearance="outline">
+                <mat-label>Status</mat-label>
+                <mat-select formControlName="status">
+                  <mat-option value="Published">Published</mat-option>
+                  <mat-option value="DraftReview">Draft / In Review</mat-option>
+                  <mat-option value="Archived">Archived</mat-option>
+                </mat-select>
+              </mat-form-field>
+            </div>
+
+            <!-- Balanced 3-Column Row: Prep, Cook, Total Time -->
+            <div class="basics-timing-grid">
+              <mat-form-field appearance="outline">
+                <mat-label>Prep Time (min)</mat-label>
+                <input matInput type="number" min="0" formControlName="prepTimeMinutes" />
+              </mat-form-field>
+
+              <mat-form-field appearance="outline">
+                <mat-label>Cook Time (min)</mat-label>
+                <input matInput type="number" min="0" formControlName="cookTimeMinutes" />
+              </mat-form-field>
+
+              <mat-form-field appearance="outline">
+                <mat-label>Total Time (min)</mat-label>
+                <input
+                  matInput
+                  type="number"
+                  min="0"
+                  formControlName="totalTimeMinutes"
+                  [placeholder]="computedTotalTime() ? computedTotalTime() + '' : 'Optional'"
+                />
+                <mat-hint>{{ totalTimeHint() }}</mat-hint>
+              </mat-form-field>
+            </div>
+          </div>
+
+          <!-- Cover Photo Side Panel -->
+          <div
+            class="cover-photo-panel"
+            [class.is-drag-over]="isCoverDragOver()"
+            (dragover)="onCoverDragOver($event)"
+            (dragleave)="onCoverDragLeave($event)"
+            (drop)="onCoverDrop($event)"
+          >
             <input
-              matInput
-              formControlName="title"
-              placeholder="e.g. Grandma's Sunday Lasagna"
-              required
-              autocomplete="off"
+              type="file"
+              #coverFileInput
+              class="cover-file-input"
+              (change)="onCoverFileSelected($event)"
+              accept="image/jpeg,image/png,image/webp,image/gif"
+              style="display: none"
             />
-            @if (form.controls.title.hasError('required')) {
-              <mat-error>Title is required</mat-error>
+
+            @if (coverImagePath()) {
+              <div class="cover-preview-wrapper">
+                <img [src]="coverImagePath()!" alt="Recipe cover photo" class="cover-preview-img" />
+                <div class="cover-preview-actions">
+                  <button
+                    mat-stroked-button
+                    type="button"
+                    (click)="coverFileInput.click()"
+                    [disabled]="isUploadingCover()"
+                  >
+                    <mat-icon>photo_camera</mat-icon>
+                    <span>Replace</span>
+                  </button>
+                  <button
+                    mat-stroked-button
+                    color="warn"
+                    type="button"
+                    (click)="removeCoverPhoto()"
+                    class="remove-cover-btn"
+                  >
+                    <mat-icon>delete</mat-icon>
+                    <span>Remove</span>
+                  </button>
+                </div>
+              </div>
+            } @else {
+              <button
+                type="button"
+                class="cover-dropzone-btn upload-cover-btn"
+                (click)="coverFileInput.click()"
+                [disabled]="isUploadingCover()"
+                aria-label="Upload cover photo"
+              >
+                @if (isUploadingCover()) {
+                  <mat-spinner diameter="28"></mat-spinner>
+                  <span class="dropzone-title">Uploading photo...</span>
+                } @else {
+                  <div class="dropzone-icon-circle" aria-hidden="true">
+                    <mat-icon>add_photo_alternate</mat-icon>
+                  </div>
+                  <span class="dropzone-title">Add Cover Photo</span>
+                  <span class="dropzone-subtitle">Drop image here or click to browse</span>
+                  <span class="cover-upload-hint">JPEG, PNG, WebP, GIF · up to 15 MB</span>
+                }
+              </button>
             }
-          </mat-form-field>
-
-          <!-- Status -->
-          <mat-form-field appearance="outline">
-            <mat-label>Status</mat-label>
-            <mat-select formControlName="status">
-              <mat-option value="Published">Published</mat-option>
-              <mat-option value="DraftReview">Draft / In Review</mat-option>
-              <mat-option value="Archived">Archived</mat-option>
-            </mat-select>
-          </mat-form-field>
-
-          <!-- Difficulty -->
-          <mat-form-field appearance="outline">
-            <mat-label>Difficulty</mat-label>
-            <mat-select formControlName="difficulty">
-              <mat-option value="Easy">Easy</mat-option>
-              <mat-option value="Medium">Medium</mat-option>
-              <mat-option value="Project">Project</mat-option>
-            </mat-select>
-          </mat-form-field>
-
-          <!-- Base Servings -->
-          <mat-form-field appearance="outline">
-            <mat-label>Base Servings</mat-label>
-            <input
-              matInput
-              type="number"
-              step="0.5"
-              min="0.25"
-              max="999"
-              formControlName="baseServings"
-              required
-            />
-          </mat-form-field>
-
-          <!-- Yield Display -->
-          <mat-form-field appearance="outline">
-            <mat-label>Yield Description</mat-label>
-            <input
-              matInput
-              formControlName="yieldDisplay"
-              placeholder="e.g. 1 9x13 pan, 24 cookies"
-            />
-          </mat-form-field>
-
-          <!-- Prep Time -->
-          <mat-form-field appearance="outline">
-            <mat-label>Prep Time (min)</mat-label>
-            <input matInput type="number" min="0" formControlName="prepTimeMinutes" />
-          </mat-form-field>
-
-          <!-- Cook Time -->
-          <mat-form-field appearance="outline">
-            <mat-label>Cook Time (min)</mat-label>
-            <input matInput type="number" min="0" formControlName="cookTimeMinutes" />
-          </mat-form-field>
-
-          <!-- Total Time (Optional override) -->
-          <mat-form-field appearance="outline">
-            <mat-label>Total Time (min, optional)</mat-label>
-            <input matInput type="number" min="0" formControlName="totalTimeMinutes" />
-            <mat-hint>Auto-computed from prep + cook if blank</mat-hint>
-          </mat-form-field>
-
-          <!-- Description -->
-          <mat-form-field appearance="outline" class="col-span-full">
-            <mat-label>Description / Flavor Notes</mat-label>
-            <textarea
-              matInput
-              rows="2"
-              formControlName="description"
-              placeholder="A brief overview of the recipe, origins, or flavor profile"
-            ></textarea>
-          </mat-form-field>
+          </div>
         </div>
 
         <!-- Collapsible Provenance / Source Info -->
@@ -151,11 +300,20 @@
           <mat-expansion-panel-header>
             <mat-panel-title>
               <mat-icon class="panel-icon">auto_stories</mat-icon>
-              <span>Source & Provenance (Optional)</span>
+              <span>Source & Provenance</span>
             </mat-panel-title>
+            @if (sourceSummary()) {
+              <mat-panel-description class="provenance-summary">
+                {{ sourceSummary() }}
+              </mat-panel-description>
+            } @else {
+              <mat-panel-description class="provenance-summary is-muted">
+                Optional
+              </mat-panel-description>
+            }
           </mat-expansion-panel-header>
 
-          <div class="form-grid">
+          <div class="provenance-grid">
             <mat-form-field appearance="outline">
               <mat-label>Source Name</mat-label>
               <input
@@ -192,67 +350,66 @@
         </mat-expansion-panel>
       </mat-card>
 
-      <!-- Cover Photo Card -->
-      <mat-card class="editor-section-card cover-photo-card">
-        <h2 class="card-section-title">
-          <mat-icon>image</mat-icon>
-          <span>Cover Photo</span>
-        </h2>
+      <!-- SECTION 2: Collections & Tags Card -->
+      <mat-card class="editor-section-card taxonomy-card" id="section-taxonomy">
+        <div class="card-section-header">
+          <div class="taxonomy-title-wrap">
+            <h2 class="card-section-title">
+              <mat-icon>collections_bookmark</mat-icon>
+              <span>Collections & Tags</span>
+            </h2>
+            @if (selectedCollectionIds().size > 0 || selectedTagIds().size > 0) {
+              <span class="taxonomy-count-badge">
+                {{ selectedCollectionIds().size + selectedTagIds().size }} selected
+              </span>
+            }
+          </div>
 
-        @if (coverImagePath()) {
-          <div class="cover-preview-wrapper">
-            <img [src]="coverImagePath()!" alt="Recipe cover photo" class="cover-preview-img" />
+          <div class="taxonomy-header-actions">
             <button
-              mat-stroked-button
-              color="warn"
+              mat-button
               type="button"
-              (click)="removeCoverPhoto()"
-              class="remove-cover-btn"
+              class="manage-toggle-btn"
+              [class.is-active]="isManagingTaxonomy()"
+              (click)="toggleManageTaxonomy()"
             >
-              <mat-icon>delete</mat-icon>
-              <span>Remove Cover Photo</span>
+              <mat-icon>{{ isManagingTaxonomy() ? 'check' : 'tune' }}</mat-icon>
+              <span>{{ isManagingTaxonomy() ? 'Done Managing' : 'Manage' }}</span>
             </button>
           </div>
-        } @else {
-          <div class="cover-upload-wrapper">
-            <input
-              type="file"
-              #coverFileInput
-              class="cover-file-input"
-              (change)="onCoverFileSelected($event)"
-              accept="image/jpeg,image/png,image/webp,image/gif"
-              style="display: none"
-            />
-            <button
-              mat-stroked-button
-              type="button"
-              (click)="coverFileInput.click()"
-              [disabled]="isUploadingCover()"
-              class="upload-cover-btn"
-            >
-              @if (isUploadingCover()) {
-                <mat-spinner diameter="18"></mat-spinner>
-                <span>Uploading...</span>
-              } @else {
-                <span class="btn-inner">
-                  <mat-icon>upload</mat-icon>
-                  <span>Upload Cover Photo</span>
-                </span>
+        </div>
+
+        <!-- Selected Summary Strip -->
+        @if (selectedCollections().length > 0 || selectedTags().length > 0) {
+          <div class="selected-taxonomy-bar" aria-label="Selected collections and tags">
+            <span class="selected-bar-label">Selected:</span>
+            <div class="selected-pills-list">
+              @for (coll of selectedCollections(); track coll.id) {
+                <button
+                  type="button"
+                  class="selected-pill is-collection"
+                  (click)="toggleCollection(coll.id)"
+                  [attr.aria-label]="'Remove collection ' + coll.name"
+                >
+                  <mat-icon aria-hidden="true">folder</mat-icon>
+                  <span>{{ coll.name }}</span>
+                  <mat-icon class="remove-pill-icon" aria-hidden="true">close</mat-icon>
+                </button>
               }
-            </button>
-            <span class="cover-upload-hint"
-              >JPEG, PNG, WebP or GIF up to 15 MB. Resized and converted to responsive WebP.</span
-            >
+              @for (tag of selectedTags(); track tag.id) {
+                <button
+                  type="button"
+                  class="selected-pill is-tag"
+                  (click)="toggleTag(tag.id)"
+                  [attr.aria-label]="'Remove tag ' + tag.name"
+                >
+                  <span>{{ tag.name }}</span>
+                  <mat-icon class="remove-pill-icon" aria-hidden="true">close</mat-icon>
+                </button>
+              }
+            </div>
           </div>
         }
-      </mat-card>
-
-      <!-- Collections & Tags Card -->
-      <mat-card class="editor-section-card taxonomy-card">
-        <h2 class="card-section-title">
-          <mat-icon>collections_bookmark</mat-icon>
-          <span>Collections & Tags</span>
-        </h2>
 
         <div class="taxonomy-editor-content">
           <!-- Collections -->
@@ -282,28 +439,33 @@
                   >
                     {{ coll.name }}
                   </mat-chip-option>
-                  <button
-                    type="button"
-                    class="chip-manage-btn"
-                    (click)="openEditCollectionDialog(coll, $event)"
-                    [attr.aria-label]="'Edit collection ' + coll.name"
-                    matTooltip="Edit collection"
-                  >
-                    <mat-icon>edit</mat-icon>
-                  </button>
-                  <button
-                    type="button"
-                    class="chip-manage-btn delete-btn"
-                    (click)="deleteCollection(coll, $event)"
-                    [attr.aria-label]="'Delete collection ' + coll.name"
-                    matTooltip="Delete collection"
-                  >
-                    <mat-icon>delete_outline</mat-icon>
-                  </button>
+                  @if (isManagingTaxonomy()) {
+                    <button
+                      type="button"
+                      class="chip-manage-btn"
+                      (click)="openEditCollectionDialog(coll, $event)"
+                      [attr.aria-label]="'Edit collection ' + coll.name"
+                      matTooltip="Edit collection"
+                    >
+                      <mat-icon>edit</mat-icon>
+                    </button>
+                    <button
+                      type="button"
+                      class="chip-manage-btn delete-btn"
+                      (click)="deleteCollection(coll, $event)"
+                      [attr.aria-label]="'Delete collection ' + coll.name"
+                      matTooltip="Delete collection"
+                    >
+                      <mat-icon>delete_outline</mat-icon>
+                    </button>
+                  }
                 </div>
               }
               @if (collections().length === 0) {
-                <span class="empty-hint">No collections created yet.</span>
+                <span class="empty-hint">
+                  No collections yet — group recipes into cookbooks like Weeknight Dinners or
+                  Baking.
+                </span>
               }
             </div>
           </div>
@@ -311,154 +473,338 @@
           <!-- Tags -->
           <div class="taxonomy-group">
             <div class="taxonomy-group-header">
-              <span class="taxonomy-group-title">Tags</span>
-              <button
-                mat-button
-                color="primary"
-                type="button"
-                (click)="openNewTagDialog()"
-                class="add-taxonomy-btn"
-              >
-                <mat-icon>add</mat-icon>
-                <span>New Tag</span>
-              </button>
+              <span class="taxonomy-group-title">Tags ({{ tags().length }})</span>
+              <div class="tags-group-actions">
+                <button
+                  mat-button
+                  color="primary"
+                  type="button"
+                  (click)="openNewTagDialog()"
+                  class="add-taxonomy-btn"
+                >
+                  <mat-icon>add</mat-icon>
+                  <span>New Tag</span>
+                </button>
+                @if (tags().length > 18) {
+                  <button
+                    mat-button
+                    type="button"
+                    class="expand-tags-btn"
+                    (click)="toggleTagListExpanded()"
+                  >
+                    <mat-icon>{{ isTagListExpanded() ? 'unfold_less' : 'unfold_more' }}</mat-icon>
+                    <span>{{ isTagListExpanded() ? 'Compact' : 'Expand All' }}</span>
+                  </button>
+                }
+              </div>
             </div>
 
-            @for (cat of tagCategories; track cat) {
-              @if (tagsByCategory()[cat]?.length) {
-                <div class="tag-category-row">
-                  <span class="tag-cat-name">{{ categoryLabel(cat) }}</span>
-                  <div class="chip-container">
-                    @for (tag of tagsByCategory()[cat]; track tag.id) {
-                      <div
-                        class="taxonomy-chip-item"
-                        [class.is-selected]="selectedTagIds().has(tag.id)"
+            @if (tags().length > 0) {
+              <div class="tags-filter-controls">
+                <div class="tag-search-box">
+                  <mat-icon class="search-icon" aria-hidden="true">search</mat-icon>
+                  <input
+                    type="search"
+                    class="tag-search-input"
+                    [value]="tagSearchQuery()"
+                    (input)="onTagSearchInput($event)"
+                    placeholder="Filter tags (e.g. Vegetarian, Italian, Air Fryer)..."
+                    aria-label="Filter tags"
+                  />
+                  @if (tagSearchQuery()) {
+                    <button
+                      type="button"
+                      class="clear-tag-search-btn"
+                      (click)="clearTagSearch()"
+                      aria-label="Clear tag filter"
+                    >
+                      <mat-icon>close</mat-icon>
+                    </button>
+                  }
+                </div>
+
+                @if (nonEmptyTagCategories().length > 1) {
+                  <div
+                    class="filter-strip tag-category-tabs"
+                    role="tablist"
+                    aria-label="Tag categories"
+                  >
+                    <button
+                      type="button"
+                      role="tab"
+                      class="category-tab-pill"
+                      [class.is-active]="activeTagCategory() === 'All'"
+                      [attr.aria-selected]="activeTagCategory() === 'All'"
+                      (click)="selectTagCategory('All')"
+                    >
+                      All
+                    </button>
+                    @for (cat of nonEmptyTagCategories(); track cat) {
+                      <button
+                        type="button"
+                        role="tab"
+                        class="category-tab-pill"
+                        [class.is-active]="activeTagCategory() === cat"
+                        [attr.aria-selected]="activeTagCategory() === cat"
+                        (click)="selectTagCategory(cat)"
                       >
-                        <mat-chip-option
-                          [selected]="selectedTagIds().has(tag.id)"
-                          (click)="toggleTag(tag.id)"
-                        >
-                          {{ tag.name }}
-                        </mat-chip-option>
-                        <button
-                          type="button"
-                          class="chip-manage-btn"
-                          (click)="openEditTagDialog(tag, $event)"
-                          [attr.aria-label]="'Edit tag ' + tag.name"
-                          matTooltip="Edit tag"
-                        >
-                          <mat-icon>edit</mat-icon>
-                        </button>
-                        <button
-                          type="button"
-                          class="chip-manage-btn delete-btn"
-                          (click)="deleteTag(tag, $event)"
-                          [attr.aria-label]="'Delete tag ' + tag.name"
-                          matTooltip="Delete tag"
-                        >
-                          <mat-icon>delete_outline</mat-icon>
-                        </button>
-                      </div>
+                        {{ categoryLabel(cat) }}
+                      </button>
                     }
                   </div>
-                </div>
-              }
-            }
-            @if (tags().length === 0) {
+                }
+              </div>
+
+              <div class="tags-scroll-well" [class.is-expanded]="isTagListExpanded()">
+                @for (group of filteredTagsByCategory(); track group.category) {
+                  <div class="tag-category-row">
+                    <span class="tag-cat-name">{{ group.label }}</span>
+                    <div class="chip-container">
+                      @for (tag of group.tags; track tag.id) {
+                        <div
+                          class="taxonomy-chip-item"
+                          [class.is-selected]="selectedTagIds().has(tag.id)"
+                        >
+                          <mat-chip-option
+                            [selected]="selectedTagIds().has(tag.id)"
+                            (click)="toggleTag(tag.id)"
+                          >
+                            {{ tag.name }}
+                          </mat-chip-option>
+                          @if (isManagingTaxonomy()) {
+                            <button
+                              type="button"
+                              class="chip-manage-btn"
+                              (click)="openEditTagDialog(tag, $event)"
+                              [attr.aria-label]="'Edit tag ' + tag.name"
+                              matTooltip="Edit tag"
+                            >
+                              <mat-icon>edit</mat-icon>
+                            </button>
+                            <button
+                              type="button"
+                              class="chip-manage-btn delete-btn"
+                              (click)="deleteTag(tag, $event)"
+                              [attr.aria-label]="'Delete tag ' + tag.name"
+                              matTooltip="Delete tag"
+                            >
+                              <mat-icon>delete_outline</mat-icon>
+                            </button>
+                          }
+                        </div>
+                      }
+                    </div>
+                  </div>
+                } @empty {
+                  <span class="empty-hint">No tags match "{{ tagSearchQuery() }}".</span>
+                }
+              </div>
+            } @else {
               <span class="empty-hint">No tags created yet.</span>
             }
           </div>
         </div>
       </mat-card>
 
-      <!-- SECTION 2: Ingredients Builder Card -->
-      <mat-card class="editor-section-card">
+      <!-- SECTION 3: Ingredients Builder Card -->
+      <mat-card class="editor-section-card" id="section-ingredients">
         <div class="card-section-header">
           <h2 class="card-section-title">
             <mat-icon>format_list_bulleted</mat-icon>
             <span>Ingredients ({{ ingredientsArray.length }})</span>
           </h2>
 
-          <button mat-stroked-button color="primary" type="button" (click)="addIngredient()">
-            <mat-icon>add</mat-icon>
-            <span>Add Ingredient</span>
-          </button>
+          <div class="section-header-tools">
+            <button
+              mat-stroked-button
+              type="button"
+              class="paste-toggle-btn"
+              [class.is-active]="showPasteIngredients()"
+              (click)="togglePasteIngredients()"
+            >
+              <mat-icon>content_paste</mat-icon>
+              <span>Paste List</span>
+            </button>
+            <button
+              mat-icon-button
+              type="button"
+              (click)="addIngredient()"
+              aria-label="New ingredient row"
+              matTooltip="Add blank ingredient"
+            >
+              <mat-icon>add</mat-icon>
+            </button>
+          </div>
         </div>
 
-        <div formArrayName="ingredients" class="builder-list">
-          @for (ingGroup of ingredientsArray.controls; track $index) {
-            <div [formGroupName]="$index" class="builder-item-card">
-              <!-- Item Header & Controls -->
+        <!-- Optional Quick-Paste Ingredient Drawer -->
+        @if (showPasteIngredients()) {
+          <div class="quick-paste-panel">
+            <div class="quick-paste-header">
+              <span class="quick-paste-title">Paste ingredients (one per line)</span>
+              <span class="quick-paste-hint">
+                End a line with ":" (e.g. For the Sauce:) to create sections.
+              </span>
+            </div>
+            <textarea
+              class="quick-paste-textarea"
+              rows="5"
+              [value]="pasteIngredientsText()"
+              (input)="onPasteTextInput($event)"
+              placeholder="For the Crust:&#10;2 1/2 cups all-purpose flour, sifted&#10;1 tsp kosher salt&#10;1 cup unsalted butter, chilled and cubed"
+              aria-label="Paste ingredient lines"
+            ></textarea>
+            <div class="quick-paste-actions">
+              <button mat-button type="button" (click)="togglePasteIngredients()">Cancel</button>
+              <button
+                mat-flat-button
+                color="primary"
+                type="button"
+                [disabled]="parsedPasteCount() === 0"
+                (click)="applyPastedIngredients()"
+              >
+                <mat-icon>playlist_add</mat-icon>
+                <span>
+                  Import {{ parsedPasteCount() || '' }}
+                  {{ parsedPasteCount() === 1 ? 'Ingredient' : 'Ingredients' }}
+                </span>
+              </button>
+            </div>
+          </div>
+        }
+
+        <div
+          formArrayName="ingredients"
+          class="builder-list"
+          cdkDropList
+          (cdkDropListDropped)="onIngredientDropped($event)"
+        >
+          @for (ingGroup of ingredientsArray.controls; track ingGroup; let ingIdx = $index) {
+            @if (shouldShowIngredientSectionHeader(ingIdx)) {
+              <div class="section-group-divider">
+                <mat-icon aria-hidden="true">segment</mat-icon>
+                <span>{{ ingGroup.get('sectionName')?.value?.trim() }}</span>
+              </div>
+            }
+
+            <div
+              [formGroupName]="ingIdx"
+              class="builder-item-card ingredient-card"
+              [class.is-sub-recipe]="ingGroup.get('isSubRecipe')?.value"
+              [attr.id]="'ingredient-card-' + ingIdx"
+              cdkDrag
+            >
+              <div class="drag-placeholder" *cdkDragPlaceholder></div>
+
+              <!-- Slim Card Header: Drag Handle + # + Inline Section + Sub-Recipe + Reorder -->
               <div class="builder-item-top">
-                <span class="item-order-pill">#{{ $index + 1 }}</span>
+                <div class="item-top-left">
+                  <button
+                    type="button"
+                    class="drag-handle-btn"
+                    cdkDragHandle
+                    aria-label="Drag to reorder ingredient"
+                    matTooltip="Drag to reorder"
+                  >
+                    <mat-icon aria-hidden="true">drag_indicator</mat-icon>
+                  </button>
+                  <span class="item-order-pill">#{{ ingIdx + 1 }}</span>
 
-                <!-- Mode Selector (Food Item vs Sub-Recipe) -->
-                <mat-checkbox
-                  formControlName="isSubRecipe"
-                  class="mode-checkbox"
-                  (change)="onSubRecipeToggled($index, $event.checked)"
-                >
-                  Sub-Recipe Component
-                </mat-checkbox>
+                  <div class="inline-section-field">
+                    <mat-icon class="inline-section-icon" aria-hidden="true">segment</mat-icon>
+                    <input
+                      type="text"
+                      class="inline-section-input"
+                      formControlName="sectionName"
+                      [matAutocomplete]="ingSectionAuto"
+                      placeholder="Section (optional)"
+                      aria-label="Ingredient section"
+                    />
+                    <mat-autocomplete #ingSectionAuto="matAutocomplete">
+                      @for (sec of existingIngredientSections(); track sec) {
+                        <mat-option [value]="sec">{{ sec }}</mat-option>
+                      }
+                    </mat-autocomplete>
+                  </div>
+                </div>
 
-                <div class="item-reorder-actions">
-                  <button
-                    mat-icon-button
-                    type="button"
-                    (click)="moveIngredientUp($index)"
-                    [disabled]="$index === 0"
-                    aria-label="Move ingredient up"
+                <div class="item-top-right">
+                  <mat-checkbox
+                    formControlName="isSubRecipe"
+                    class="mode-checkbox"
+                    (change)="onSubRecipeToggled(ingIdx, $event.checked)"
                   >
-                    <mat-icon>arrow_upward</mat-icon>
-                  </button>
-                  <button
-                    mat-icon-button
-                    type="button"
-                    (click)="moveIngredientDown($index)"
-                    [disabled]="$index === ingredientsArray.length - 1"
-                    aria-label="Move ingredient down"
-                  >
-                    <mat-icon>arrow_downward</mat-icon>
-                  </button>
-                  <button
-                    mat-icon-button
-                    color="warn"
-                    type="button"
-                    (click)="removeIngredient($index)"
-                    aria-label="Remove ingredient"
-                  >
-                    <mat-icon>delete</mat-icon>
-                  </button>
+                    Sub-recipe
+                  </mat-checkbox>
+
+                  <div class="item-reorder-actions">
+                    <button
+                      mat-icon-button
+                      type="button"
+                      (click)="moveIngredientUp(ingIdx)"
+                      [disabled]="ingIdx === 0"
+                      aria-label="Move ingredient up"
+                      matTooltip="Move up"
+                    >
+                      <mat-icon>arrow_upward</mat-icon>
+                    </button>
+                    <button
+                      mat-icon-button
+                      type="button"
+                      (click)="moveIngredientDown(ingIdx)"
+                      [disabled]="ingIdx === ingredientsArray.length - 1"
+                      aria-label="Move ingredient down"
+                      matTooltip="Move down"
+                    >
+                      <mat-icon>arrow_downward</mat-icon>
+                    </button>
+                    <button
+                      mat-icon-button
+                      color="warn"
+                      type="button"
+                      (click)="removeIngredient(ingIdx)"
+                      aria-label="Remove ingredient"
+                      matTooltip="Remove ingredient"
+                    >
+                      <mat-icon>delete_outline</mat-icon>
+                    </button>
+                  </div>
                 </div>
               </div>
 
-              <!-- Section header override -->
-              <mat-form-field appearance="outline" class="full-width">
-                <mat-label>Section (e.g. Sauce, Crust - Optional)</mat-label>
-                <input
-                  matInput
-                  formControlName="sectionName"
-                  placeholder="Leave empty for main recipe"
-                />
-              </mat-form-field>
-
-              <div class="ingredient-fields-grid">
-                <!-- Quantity & Range -->
+              <!-- Crisp Primary Fields Grid -->
+              <div
+                class="ingredient-fields-grid"
+                [class.has-range]="isRangeExpanded(ingGroup)"
+                [class.has-custom-unit]="ingGroup.get('unit')?.value === 'Custom'"
+              >
                 <mat-form-field appearance="outline" class="field-qty" subscriptSizing="dynamic">
                   <mat-label>Qty</mat-label>
                   <input matInput type="number" step="any" min="0" formControlName="quantity" />
                 </mat-form-field>
 
-                <mat-form-field appearance="outline" class="field-qty" subscriptSizing="dynamic">
-                  <mat-label>Max (opt)</mat-label>
-                  <input matInput type="number" step="any" min="0" formControlName="maxQuantity" />
-                </mat-form-field>
+                @if (isRangeExpanded(ingGroup)) {
+                  <mat-form-field
+                    appearance="outline"
+                    class="field-qty field-max-qty"
+                    subscriptSizing="dynamic"
+                  >
+                    <mat-label>Max</mat-label>
+                    <input
+                      matInput
+                      type="number"
+                      step="any"
+                      min="0"
+                      formControlName="maxQuantity"
+                      placeholder="opt."
+                    />
+                  </mat-form-field>
+                }
 
-                <!-- Unit -->
                 <mat-form-field appearance="outline" class="field-unit" subscriptSizing="dynamic">
                   <mat-label>Unit</mat-label>
                   <mat-select formControlName="unit">
-                    <mat-option [value]="null">None / Unitless</mat-option>
+                    <mat-option [value]="null">Unitless</mat-option>
                     @for (u of measurementUnits; track u.value) {
                       <mat-option [value]="u.value">{{ u.label }}</mat-option>
                     }
@@ -471,14 +817,12 @@
                     class="field-custom-unit"
                     subscriptSizing="dynamic"
                   >
-                    <mat-label>Custom Unit</mat-label>
+                    <mat-label>Custom unit</mat-label>
                     <input matInput formControlName="customUnitName" placeholder="e.g. stalk" />
                   </mat-form-field>
                 }
 
-                <!-- Linked Entity / Display Name -->
                 @if (ingGroup.get('isSubRecipe')?.value) {
-                  <!-- Sub-Recipe Autofill Selector -->
                   <app-recipe-autocomplete
                     class="field-display-name"
                     [excludeRecipeId]="recipeId()"
@@ -490,42 +834,67 @@
                       ingGroup.get('displayName')?.value ||
                       ''
                     "
-                    label="Select Linked Sub-Recipe"
-                    placeholder="Type a recipe name to autofill..."
-                    (recipeSelected)="onSubRecipeSelected($index, $event)"
-                    (textChange)="onSubRecipeTextChanged($index, $event)"
-                    (recipeCleared)="onSubRecipeCleared($index)"
+                    label="Linked Sub-Recipe"
+                    placeholder="Search saved recipes..."
+                    (recipeSelected)="onSubRecipeSelected(ingIdx, $event)"
+                    (textChange)="onSubRecipeTextChanged(ingIdx, $event)"
+                    (recipeCleared)="onSubRecipeCleared(ingIdx)"
                   />
-                  @if (
-                    ingGroup.get('unresolvedRecipeTitle')?.value &&
-                    !ingGroup.get('linkedRecipeId')?.value
-                  ) {
-                    <p class="unresolved-recipe-hint">
-                      Not in the cookbook yet:
-                      {{ ingGroup.get('unresolvedRecipeTitle')?.value }}. It will link automatically
-                      once that recipe is added, or pick an existing recipe above.
-                    </p>
-                  }
                 } @else {
-                  <!-- Food Item Autocomplete / Display Name -->
                   <mat-form-field
                     appearance="outline"
                     class="field-display-name"
                     subscriptSizing="dynamic"
                   >
-                    <mat-label>Ingredient Name / Food Item</mat-label>
+                    <mat-label>Ingredient</mat-label>
+                    @if (ingGroup.get('foodItemId')?.value) {
+                      <mat-icon
+                        matPrefix
+                        class="linked-catalog-icon"
+                        [matTooltip]="
+                          'Linked to Food Catalog: ' +
+                          getFoodItemName(ingGroup.get('foodItemId')?.value)
+                        "
+                        aria-hidden="true"
+                      >
+                        check_circle
+                      </mat-icon>
+                    }
                     <input
                       matInput
                       formControlName="displayName"
                       [matAutocomplete]="foodAuto"
+                      (input)="
+                        captureIngredientTypedName(ingIdx); onIngredientDisplayNameInput(ingIdx)
+                      "
+                      (focus)="captureIngredientTypedName(ingIdx)"
                       placeholder="e.g. All-Purpose Flour"
                       required
                     />
+                    @if (!ingGroup.get('foodItemId')?.value) {
+                      <button
+                        mat-icon-button
+                        matSuffix
+                        type="button"
+                        (click)="
+                          openCreateFoodItemForIngredient(
+                            ingIdx,
+                            ingGroup.get('displayName')?.value || ''
+                          );
+                          $event.stopPropagation()
+                        "
+                        aria-label="Add to Food Catalog"
+                        matTooltip="Create in Food Catalog"
+                        class="create-catalog-btn"
+                      >
+                        <mat-icon>library_add</mat-icon>
+                      </button>
+                    }
                     <mat-autocomplete
                       #foodAuto="matAutocomplete"
-                      (optionSelected)="onFoodItemSelected($index, $event.option.value)"
+                      (optionSelected)="onFoodOptionSelected(ingIdx, $event.option.value)"
                     >
-                      @for (item of foodItems(); track item.id) {
+                      @for (item of getFilteredFoodItemsForIngredient(ingIdx); track item.id) {
                         <mat-option [value]="item.id">
                           <span class="auto-item-name">{{ item.name }}</span>
                           @if (item.aliases.length > 0) {
@@ -533,73 +902,188 @@
                           }
                         </mat-option>
                       }
+                      @if (
+                        getTrimmedIngredientName(ingIdx) &&
+                        !hasExactFoodItemMatch(getTrimmedIngredientName(ingIdx))
+                      ) {
+                        <mat-option [value]="createFoodSentinel" class="create-food-option">
+                          <span class="create-food-option-inner">
+                            <mat-icon aria-hidden="true">add_circle_outline</mat-icon>
+                            <span>
+                              Add "{{ getTrimmedIngredientName(ingIdx) }}" to Food Catalog
+                            </span>
+                          </span>
+                        </mat-option>
+                      }
                     </mat-autocomplete>
                   </mat-form-field>
-
-                  <!-- Quick Catalog Creator Trigger -->
-                  <button
-                    mat-icon-button
-                    type="button"
-                    (click)="
-                      openCreateFoodItemForIngredient(
-                        $index,
-                        ingGroup.get('displayName')?.value || ''
-                      )
-                    "
-                    matTooltip="Add to Food Catalog"
-                    class="create-catalog-btn"
-                  >
-                    <mat-icon>add_shopping_cart</mat-icon>
-                  </button>
                 }
 
-                <!-- Preparation Note -->
                 <mat-form-field
                   appearance="outline"
                   class="field-prep field-note"
                   subscriptSizing="dynamic"
                 >
-                  <mat-label>Prep Note (e.g. minced, room temp)</mat-label>
-                  <input matInput formControlName="preparationNote" />
+                  <mat-label>Prep note</mat-label>
+                  <input
+                    matInput
+                    formControlName="preparationNote"
+                    placeholder="e.g. minced, room temp"
+                  />
                 </mat-form-field>
+              </div>
 
-                <!-- Optional Toggle -->
+              @if (
+                ingGroup.get('isSubRecipe')?.value &&
+                ingGroup.get('unresolvedRecipeTitle')?.value &&
+                !ingGroup.get('linkedRecipeId')?.value
+              ) {
+                <p class="unresolved-recipe-hint">
+                  <mat-icon aria-hidden="true">info</mat-icon>
+                  <span>
+                    Not in the cookbook yet:
+                    <strong>{{ ingGroup.get('unresolvedRecipeTitle')?.value }}</strong
+                    >. It will link automatically once that recipe is added, or pick an existing
+                    recipe above.
+                  </span>
+                </p>
+              }
+
+              <!-- Compact Progressive-Disclosure Options Bar -->
+              <div class="ingredient-options-bar">
                 <mat-checkbox formControlName="isOptional" class="field-opt field-optional">
                   Optional
                 </mat-checkbox>
+
+                <button
+                  type="button"
+                  class="option-toggle-pill"
+                  [class.is-active]="isRangeExpanded(ingGroup)"
+                  (click)="toggleRange(ingGroup)"
+                >
+                  <mat-icon aria-hidden="true">swap_horiz</mat-icon>
+                  <span>
+                    @if (ingGroup.get('maxQuantity')?.value) {
+                      Range: – {{ ingGroup.get('maxQuantity')?.value }}
+                    } @else {
+                      Range
+                    }
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  class="option-toggle-pill"
+                  [class.is-active]="isAltMeasurementExpanded(ingGroup)"
+                  (click)="toggleAltMeasurement(ingGroup)"
+                >
+                  <mat-icon aria-hidden="true">scale</mat-icon>
+                  <span>
+                    @if (formatAltMeasurementBadge(ingGroup); as altBadge) {
+                      Alt: {{ altBadge }}
+                    } @else {
+                      Alt measurement
+                    }
+                  </span>
+                </button>
+
+                @if (!ingGroup.get('isSubRecipe')?.value) {
+                  <button
+                    type="button"
+                    class="option-toggle-pill add-replacement-btn"
+                    [class.is-active]="getReplacementsArray(ingIdx).length > 0"
+                    (click)="addIngredientReplacement(ingIdx)"
+                  >
+                    <mat-icon aria-hidden="true">swap_calls</mat-icon>
+                    <span>
+                      @if (getReplacementsArray(ingIdx).length > 0) {
+                        Replacements ({{ getReplacementsArray(ingIdx).length }}) · + Add
+                      } @else {
+                        + Replacement
+                      }
+                    </span>
+                  </button>
+                }
+
+                @if (!ingGroup.get('isSubRecipe')?.value && ingGroup.get('foodItemId')?.value) {
+                  <span class="catalog-linked-pill">
+                    <span>Catalog: {{ getFoodItemName(ingGroup.get('foodItemId')?.value) }}</span>
+                    <button
+                      type="button"
+                      class="unlink-catalog-btn"
+                      (click)="unlinkFoodItem(ingIdx)"
+                      aria-label="Unlink from Food Catalog"
+                      matTooltip="Unlink catalog item"
+                    >
+                      <mat-icon>close</mat-icon>
+                    </button>
+                  </span>
+                }
               </div>
-              <app-measurement-editor
-                formControlName="alternativeMeasurement"
-              ></app-measurement-editor>
-              @if (ingGroup.hasError('primaryMeasurement')) {
-                <p role="status">
-                  An alternative requires a positive primary quantity and unit above.
-                </p>
+
+              <!-- Expanded Alternative Measurement Drawer -->
+              @if (isAltMeasurementExpanded(ingGroup)) {
+                <div class="ingredient-sub-panel alt-measurement-panel">
+                  <div class="sub-panel-header">
+                    <span class="sub-label">Alternative Measurement</span>
+                    <button
+                      mat-button
+                      type="button"
+                      class="sub-panel-remove-btn"
+                      (click)="toggleAltMeasurement(ingGroup)"
+                    >
+                      <mat-icon>close</mat-icon>
+                      <span>Remove</span>
+                    </button>
+                  </div>
+
+                  <app-measurement-editor
+                    formControlName="alternativeMeasurement"
+                    [hideToggle]="true"
+                    [showValidation]="hasAttemptedSave()"
+                  ></app-measurement-editor>
+
+                  @if (ingGroup.hasError('primaryMeasurement')) {
+                    <p class="sub-panel-error" role="status">
+                      An alternative requires a positive primary quantity and unit above.
+                    </p>
+                  }
+
+                  @if (ingGroup.get('alternativeMeasurement')?.value) {
+                    <mat-checkbox formControlName="preferAlternativeMeasurement">
+                      Prefer this alternative when displaying this ingredient
+                    </mat-checkbox>
+                  }
+                </div>
               }
-              @if (ingGroup.get('alternativeMeasurement')?.value) {
-                <mat-checkbox formControlName="preferAlternativeMeasurement">
-                  Prefer this alternative when displaying this ingredient
-                </mat-checkbox>
-              }
-              @if (!ingGroup.get('isSubRecipe')?.value) {
-                @let ingIdx = $index;
-                <div class="ingredient-replacements-editor" formArrayName="replacements">
-                  <div class="replacements-header">
+
+              <!-- Expanded Replacements Drawer (only visible when replacements exist) -->
+              @if (!ingGroup.get('isSubRecipe')?.value && getReplacementsArray(ingIdx).length > 0) {
+                <div
+                  class="ingredient-sub-panel ingredient-replacements-editor"
+                  formArrayName="replacements"
+                >
+                  <div class="sub-panel-header">
                     <span class="sub-label">
                       Replacements ({{ getReplacementsArray(ingIdx).length }})
                     </span>
                     <button
                       mat-button
                       type="button"
-                      class="add-replacement-btn"
+                      class="sub-panel-add-btn"
                       (click)="addIngredientReplacement(ingIdx)"
                     >
                       <mat-icon>add</mat-icon>
-                      <span>Add Replacement</span>
+                      <span>Add another</span>
                     </button>
                   </div>
-                  @for (repGroup of getReplacementsArray(ingIdx).controls; track $index) {
-                    <div [formGroupName]="$index" class="replacement-sub-row">
+
+                  @for (
+                    repGroup of getReplacementsArray(ingIdx).controls;
+                    track repGroup;
+                    let repIdx = $index
+                  ) {
+                    <div [formGroupName]="repIdx" class="replacement-sub-row">
                       <mat-form-field
                         appearance="outline"
                         class="rep-field rep-qty"
@@ -608,6 +1092,7 @@
                         <mat-label>Qty</mat-label>
                         <input matInput type="number" step="any" formControlName="quantity" />
                       </mat-form-field>
+
                       <mat-form-field
                         appearance="outline"
                         class="rep-field rep-unit"
@@ -615,65 +1100,90 @@
                       >
                         <mat-label>Unit</mat-label>
                         <mat-select formControlName="unit">
-                          <mat-option [value]="null">None</mat-option>
+                          <mat-option [value]="null">Unitless</mat-option>
                           @for (u of measurementUnits; track u.value) {
                             <mat-option [value]="u.value">{{ u.label }}</mat-option>
                           }
                         </mat-select>
                       </mat-form-field>
+
                       @if (repGroup.get('unit')?.value === 'Custom') {
                         <mat-form-field
                           appearance="outline"
                           class="rep-field rep-custom-unit"
                           subscriptSizing="dynamic"
                         >
-                          <mat-label>Custom Unit</mat-label>
+                          <mat-label>Custom unit</mat-label>
                           <input matInput formControlName="customUnitName" />
                         </mat-form-field>
                       }
+
                       <mat-form-field
                         appearance="outline"
                         class="rep-field rep-name"
                         subscriptSizing="dynamic"
                       >
-                        <mat-label>Replacement Ingredient</mat-label>
+                        <mat-label>Replacement</mat-label>
+                        @if (repGroup.get('foodItemId')?.value) {
+                          <mat-icon
+                            matPrefix
+                            class="linked-catalog-icon"
+                            [matTooltip]="
+                              'Linked to Food Catalog: ' +
+                              getFoodItemName(repGroup.get('foodItemId')?.value)
+                            "
+                            aria-hidden="true"
+                          >
+                            check_circle
+                          </mat-icon>
+                        }
                         <input
                           matInput
                           formControlName="displayName"
+                          [matAutocomplete]="repFoodAuto"
+                          (input)="onReplacementDisplayNameInput(ingIdx, repIdx)"
                           placeholder="e.g. lime juice"
                           required
                         />
-                      </mat-form-field>
-                      <mat-form-field
-                        appearance="outline"
-                        class="rep-field rep-food"
-                        subscriptSizing="dynamic"
-                      >
-                        <mat-label>Catalog Match (optional)</mat-label>
-                        <mat-select formControlName="foodItemId">
-                          <mat-option [value]="null">Auto / Text Only</mat-option>
-                          @for (item of foodItems(); track item.id) {
-                            <mat-option [value]="item.id">{{ item.name }}</mat-option>
+                        <mat-autocomplete
+                          #repFoodAuto="matAutocomplete"
+                          (optionSelected)="
+                            onReplacementFoodSelected(ingIdx, repIdx, $event.option.value)
+                          "
+                        >
+                          @for (
+                            item of getFilteredFoodItemsForReplacement(ingIdx, repIdx);
+                            track item.id
+                          ) {
+                            <mat-option [value]="item.id">
+                              <span class="auto-item-name">{{ item.name }}</span>
+                              @if (item.aliases.length > 0) {
+                                <span class="auto-item-alias">({{ item.aliases.join(', ') }})</span>
+                              }
+                            </mat-option>
                           }
-                        </mat-select>
+                        </mat-autocomplete>
                       </mat-form-field>
+
                       <mat-form-field
                         appearance="outline"
                         class="rep-field rep-prep"
                         subscriptSizing="dynamic"
                       >
-                        <mat-label>Prep Note</mat-label>
+                        <mat-label>Prep note</mat-label>
                         <input
                           matInput
                           formControlName="preparationNote"
                           placeholder="e.g. freshly squeezed"
                         />
                       </mat-form-field>
+
                       <button
                         mat-icon-button
                         type="button"
-                        (click)="removeIngredientReplacement(ingIdx, $index)"
+                        (click)="removeIngredientReplacement(ingIdx, repIdx)"
                         aria-label="Remove replacement"
+                        matTooltip="Remove replacement"
                       >
                         <mat-icon>close</mat-icon>
                       </button>
@@ -682,47 +1192,131 @@
                 </div>
               }
             </div>
+          } @empty {
+            <div class="empty-builder-state">
+              <p>No ingredients yet. Add your first ingredient or paste a list above.</p>
+            </div>
+          }
+        </div>
+
+        <div class="builder-footer-actions">
+          <button
+            mat-stroked-button
+            color="primary"
+            type="button"
+            class="builder-add-btn"
+            (click)="addIngredient()"
+          >
+            <mat-icon>add</mat-icon>
+            <span>Add Ingredient</span>
+          </button>
+
+          @if (lastIngredientSection()) {
+            <button
+              mat-button
+              color="primary"
+              type="button"
+              class="builder-add-section-btn"
+              (click)="addIngredient(lastIngredientSection())"
+            >
+              <mat-icon>subdirectory_arrow_right</mat-icon>
+              <span>Add to "{{ lastIngredientSection() }}"</span>
+            </button>
           }
         </div>
       </mat-card>
 
-      <!-- SECTION 3: Instructions & Steps Builder Card -->
-      <mat-card class="editor-section-card">
+      <!-- SECTION 4: Instructions & Steps Builder Card -->
+      <mat-card class="editor-section-card" id="section-steps">
         <div class="card-section-header">
           <h2 class="card-section-title">
             <mat-icon>directions</mat-icon>
             <span>Instructions & Steps ({{ stepsArray.length }})</span>
           </h2>
 
-          <button mat-stroked-button color="primary" type="button" (click)="addStep()">
+          <button
+            mat-icon-button
+            type="button"
+            (click)="addStep()"
+            aria-label="New step row"
+            matTooltip="Add blank step"
+          >
             <mat-icon>add</mat-icon>
-            <span>Add Step</span>
           </button>
         </div>
 
-        <div formArrayName="steps" class="builder-list">
+        <div
+          formArrayName="steps"
+          class="builder-list"
+          cdkDropList
+          (cdkDropListDropped)="onStepDropped($event)"
+        >
           @for (stepGroup of stepsArray.controls; track stepGroup; let stepIndex = $index) {
-            <div [formGroupName]="$index" class="builder-item-card">
+            @if (shouldShowStepSectionHeader(stepIndex)) {
+              <div class="section-group-divider">
+                <mat-icon aria-hidden="true">segment</mat-icon>
+                <span>{{ stepGroup.get('sectionName')?.value?.trim() }}</span>
+              </div>
+            }
+
+            <div
+              [formGroupName]="stepIndex"
+              class="builder-item-card step-card"
+              [attr.id]="'step-card-' + stepIndex"
+              cdkDrag
+            >
+              <div class="drag-placeholder" *cdkDragPlaceholder></div>
+
               <!-- Step Header & Controls -->
               <div class="builder-item-top">
-                <span class="step-number-badge">Step {{ $index + 1 }}</span>
+                <div class="item-top-left">
+                  <button
+                    type="button"
+                    class="drag-handle-btn"
+                    cdkDragHandle
+                    aria-label="Drag to reorder step"
+                    matTooltip="Drag to reorder"
+                  >
+                    <mat-icon aria-hidden="true">drag_indicator</mat-icon>
+                  </button>
+                  <span class="step-number-badge">Step {{ stepIndex + 1 }}</span>
+
+                  <div class="inline-section-field">
+                    <mat-icon class="inline-section-icon" aria-hidden="true">segment</mat-icon>
+                    <input
+                      type="text"
+                      class="inline-section-input"
+                      formControlName="sectionName"
+                      [matAutocomplete]="stepSectionAuto"
+                      placeholder="Section (optional)"
+                      aria-label="Step section"
+                    />
+                    <mat-autocomplete #stepSectionAuto="matAutocomplete">
+                      @for (sec of existingStepSections(); track sec) {
+                        <mat-option [value]="sec">{{ sec }}</mat-option>
+                      }
+                    </mat-autocomplete>
+                  </div>
+                </div>
 
                 <div class="item-reorder-actions">
                   <button
                     mat-icon-button
                     type="button"
-                    (click)="moveStepUp($index)"
-                    [disabled]="$index === 0"
+                    (click)="moveStepUp(stepIndex)"
+                    [disabled]="stepIndex === 0"
                     aria-label="Move step up"
+                    matTooltip="Move up"
                   >
                     <mat-icon>arrow_upward</mat-icon>
                   </button>
                   <button
                     mat-icon-button
                     type="button"
-                    (click)="moveStepDown($index)"
-                    [disabled]="$index === stepsArray.length - 1"
+                    (click)="moveStepDown(stepIndex)"
+                    [disabled]="stepIndex === stepsArray.length - 1"
                     aria-label="Move step down"
+                    matTooltip="Move down"
                   >
                     <mat-icon>arrow_downward</mat-icon>
                   </button>
@@ -730,31 +1324,42 @@
                     mat-icon-button
                     color="warn"
                     type="button"
-                    (click)="removeStep($index)"
+                    (click)="removeStep(stepIndex)"
                     aria-label="Remove step"
+                    matTooltip="Remove step"
                   >
-                    <mat-icon>delete</mat-icon>
+                    <mat-icon>delete_outline</mat-icon>
                   </button>
                 </div>
               </div>
 
-              <!-- Step Section (Optional) -->
-              <mat-form-field appearance="outline" class="full-width">
-                <mat-label>Section (Optional)</mat-label>
-                <input matInput formControlName="sectionName" placeholder="e.g. Prep, Baking" />
-              </mat-form-field>
-
               <app-step-instruction-editor
                 formControlName="instruction"
                 label="Instruction"
-                placeholder="Describe this preparation or cooking step in detail..."
+                placeholder="Describe this preparation or cooking step..."
                 [stepIndex]="stepIndex"
                 [availableIngredientOptions]="getStepDialogIngredients()"
                 [required]="true"
+                [invalid]="
+                  !!(
+                    stepGroup.get('instruction')?.invalid &&
+                    (stepGroup.get('instruction')?.touched || hasAttemptedSave())
+                  )
+                "
+                [showHelperHint]="stepIndex === 0"
               ></app-step-instruction-editor>
 
               <!-- Step Photo Controls -->
               <div class="step-photo-section">
+                <input
+                  type="file"
+                  #stepFileInput
+                  class="step-file-input"
+                  (change)="onStepFileSelected(stepIndex, $event)"
+                  accept="image/jpeg,image/png,image/webp,image/gif"
+                  style="display: none"
+                />
+
                 @if (stepGroup.get('imagePath')?.value) {
                   <div class="step-image-preview-wrapper">
                     <img
@@ -762,36 +1367,39 @@
                       alt="Step photo"
                       class="step-preview-img"
                     />
-                    <button
-                      mat-stroked-button
-                      color="warn"
-                      type="button"
-                      class="remove-step-photo-btn"
-                      (click)="removeStepPhoto($index)"
-                      aria-label="Remove step photo"
-                    >
-                      <mat-icon>delete</mat-icon>
-                      <span>Remove Step Photo</span>
-                    </button>
+                    <div class="step-photo-actions">
+                      <button
+                        mat-stroked-button
+                        type="button"
+                        (click)="stepFileInput.click()"
+                        [disabled]="stepUploadingMap()[stepIndex]"
+                      >
+                        <mat-icon>photo_camera</mat-icon>
+                        <span>Replace</span>
+                      </button>
+                      <button
+                        mat-stroked-button
+                        color="warn"
+                        type="button"
+                        class="remove-step-photo-btn"
+                        (click)="removeStepPhoto(stepIndex)"
+                        aria-label="Remove step photo"
+                      >
+                        <mat-icon>delete</mat-icon>
+                        <span>Remove</span>
+                      </button>
+                    </div>
                   </div>
                 } @else {
-                  <input
-                    type="file"
-                    #stepFileInput
-                    class="step-file-input"
-                    (change)="onStepFileSelected($index, $event)"
-                    accept="image/jpeg,image/png,image/webp,image/gif"
-                    style="display: none"
-                  />
                   <button
                     mat-button
                     type="button"
                     (click)="stepFileInput.click()"
-                    [disabled]="stepUploadingMap()[$index]"
+                    [disabled]="stepUploadingMap()[stepIndex]"
                     class="add-step-photo-btn"
                   >
-                    @if (stepUploadingMap()[$index]) {
-                      <mat-spinner diameter="18"></mat-spinner>
+                    @if (stepUploadingMap()[stepIndex]) {
+                      <mat-spinner diameter="16"></mat-spinner>
                       <span>Uploading...</span>
                     } @else {
                       <span class="btn-inner">
@@ -803,25 +1411,71 @@
                 }
               </div>
             </div>
+          } @empty {
+            <div class="empty-builder-state">
+              <p>No steps yet. Add the first step below.</p>
+            </div>
+          }
+        </div>
+
+        <div class="builder-footer-actions">
+          <button
+            mat-stroked-button
+            color="primary"
+            type="button"
+            class="builder-add-btn"
+            (click)="addStep()"
+          >
+            <mat-icon>add</mat-icon>
+            <span>Add Step</span>
+          </button>
+
+          @if (lastStepSection()) {
+            <button
+              mat-button
+              color="primary"
+              type="button"
+              class="builder-add-section-btn"
+              (click)="addStep(lastStepSection())"
+            >
+              <mat-icon>subdirectory_arrow_right</mat-icon>
+              <span>Add to "{{ lastStepSection() }}"</span>
+            </button>
           }
         </div>
       </mat-card>
 
-      <!-- Bottom Save Action Bar -->
+      <!-- Sticky Bottom Action Bar (desktop) / Static Footer (mobile) -->
       <div class="form-bottom-actions">
-        <a mat-button [routerLink]="isEdit() ? ['/recipes', recipeId()!] : ['/recipes']">
-          Cancel
-        </a>
-        <button mat-flat-button color="primary" type="submit" [disabled]="isSaving()">
-          @if (isSaving()) {
-            <mat-spinner diameter="18"></mat-spinner>
-          } @else {
-            <span class="btn-inner">
-              <mat-icon>save</mat-icon>
-              <span>Save Recipe</span>
-            </span>
+        <div class="bottom-summary">
+          <span class="summary-stats">
+            {{ ingredientsArray.length }}
+            {{ ingredientsArray.length === 1 ? 'ingredient' : 'ingredients' }}
+            · {{ stepsArray.length }} {{ stepsArray.length === 1 ? 'step' : 'steps' }}
+            @if (computedTotalTime(); as totalMins) {
+              · {{ totalMins }} min
+            }
+          </span>
+          @if (hasUnsavedChanges()) {
+            <span class="unsaved-hint">Unsaved changes</span>
           }
-        </button>
+        </div>
+
+        <div class="bottom-buttons">
+          <a mat-button [routerLink]="isEdit() ? ['/recipes', recipeId()!] : ['/recipes']">
+            Cancel
+          </a>
+          <button mat-flat-button color="primary" type="submit" [disabled]="isSaving()">
+            @if (isSaving()) {
+              <mat-spinner diameter="18"></mat-spinner>
+            } @else {
+              <span class="btn-inner">
+                <mat-icon>save</mat-icon>
+                <span>Save Recipe</span>
+              </span>
+            }
+          </button>
+        </div>
       </div>
     </form>
   }

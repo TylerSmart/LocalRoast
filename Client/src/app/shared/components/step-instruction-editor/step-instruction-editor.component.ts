@@ -10,9 +10,9 @@ import {
   viewChild,
 } from '@angular/core';
 import { ControlValueAccessor, NG_VALUE_ACCESSOR } from '@angular/forms';
-import { MatButtonModule } from '@angular/material/button';
 import { MatDialog } from '@angular/material/dialog';
 import { MatIconModule } from '@angular/material/icon';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import {
   StepDialogIngredientOption,
   StepDimensionToken,
@@ -43,7 +43,7 @@ import {
 
 @Component({
   selector: 'app-step-instruction-editor',
-  imports: [MatButtonModule, MatIconModule],
+  imports: [MatIconModule, MatTooltipModule],
   providers: [
     {
       provide: NG_VALUE_ACCESSOR,
@@ -55,6 +55,7 @@ import {
     '[attr.data-serialized-value]': 'serializedValue()',
     '[class.is-disabled]': 'disabled()',
     '[class.is-focused]': 'isFocused()',
+    '[class.is-invalid]': 'invalid()',
   },
   templateUrl: './step-instruction-editor.component.html',
   styleUrl: './step-instruction-editor.component.scss',
@@ -68,6 +69,8 @@ export class StepInstructionEditorComponent implements ControlValueAccessor, Aft
   readonly availableIngredients = input<readonly string[]>([]);
   readonly availableIngredientOptions = input<readonly StepDialogIngredientOption[]>([]);
   readonly required = input<boolean>(false);
+  readonly invalid = input<boolean>(false);
+  readonly showHelperHint = input<boolean>(false);
 
   protected readonly editableSurface = viewChild<ElementRef<HTMLDivElement>>('editableSurface');
 
