@@ -44,6 +44,13 @@ public sealed class Recipe : IAuditable
 
     public string? RefinedModel { get; set; }
 
+    /// <summary>Tracks user-requested on-demand refinement state for this recipe.</summary>
+    public RecipeRefinementStatus RefinementStatus { get; set; } = RecipeRefinementStatus.None;
+
+    public DateTimeOffset? RefinementRequestedAt { get; set; }
+
+    public string? RefinementStatusDetail { get; set; }
+
     public int TimesCooked { get; set; }
 
     public DateTimeOffset? LastCookedAt { get; set; }

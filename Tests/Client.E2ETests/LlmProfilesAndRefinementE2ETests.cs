@@ -924,4 +924,267 @@ public sealed class LlmProfilesAndRefinementE2ETests : E2ETestBase
         await Expect(dialog).Not.ToBeVisibleAsync();
         await ResetLlmSettingsViaApiAsync();
     }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task RecipeDetail_RefineNow_RefinesManualNonIngestedRecipeWhileQueuePausedOnMobile()
+    {
+        var suffix = Guid.NewGuid().ToString("N")[..6];
+        var initialTitle = $"Manual Unrefined Potatoes {suffix}";
+        var refinedTitle = $"Manual Refined Potatoes {suffix}";
+        var pollutedFoodName = $"PollutedCubePotato{suffix}";
+
+        await using var mockServer = await MockLanLlmAndBlogServer.StartAsync();
+        mockServer.ExtraModels.Add("gemma4:26b-a4b");
+        mockServer.Stage6RefinementPayload = $$"""
+            {
+              "title": "{{refinedTitle}}",
+              "description": "Crispy oven-roasted potatoes.",
+              "servings": null,
+              "yield": null,
+              "timing": null,
+              "tags": null,
+              "ingredientPatches": [
+                {
+                  "index": 0,
+                  "displayName": "yukon gold potatoes",
+                  "quantity": null,
+                  "maxQuantity": null,
+                  "unit": null,
+                  "prepNote": "cubed",
+                  "isOptional": null,
+                  "canonicalFoodName": "Yukon Gold Potato",
+                  "category": "Produce",
+                  "isPantryStaple": false,
+                  "replacementPatches": null
+                }
+              ],
+              "stepPatches": [],
+              "refinementNotes": ["Cleaned manual recipe title and catalog item."]
+            }
+            """;
+
+        await RegisterAndLoginAsync();
+        await Page.GotoAsync($"{ServerUrl}/ingest");
+
+        // Configure Refinement model ONLY, leave both automatic refinement toggles OFF, and PAUSE ingestion
+        await Page.Locator(".llm-settings-btn").ClickAsync();
+        var dialog = Page.Locator("app-llm-settings-dialog");
+        await AddLlmConnectionInDialogAsync(dialog, mockServer.BaseUrl);
+        await AddLlmModelInDialogAsync(dialog, "gemma4:26b-a4b");
+        await AssignLlmWorkflowAsync(dialog, "refine", "gemma4:26b-a4b");
+        await SaveLlmWorkflowsAsync(dialog);
+
+        var pauseBtn = Page.Locator(".toggle-ingestion-btn");
+        if ((await pauseBtn.InnerTextAsync()).Contains("Pause Ingestion"))
+        {
+            await pauseBtn.ClickAsync();
+            await Expect(pauseBtn).ToContainTextAsync("Resume Ingestion");
+        }
+
+        try
+        {
+            // Create a manually authored (non-ingested) recipe with a polluted FoodItem
+            var badFoodId = await CreateFoodItemViaApiAsync(pollutedFoodName);
+            var recipeId = await CreateRecipeWithIngredientViaApiAsync(
+                initialTitle,
+                pollutedFoodName,
+                badFoodId
+            );
+
+            await Page.SetViewportSizeAsync(360, 740);
+            await Page.GotoAsync($"{ServerUrl}/recipes/{recipeId}");
+            await Expect(Page.Locator(".recipe-title")).ToContainTextAsync(initialTitle);
+            await Expect(Page.GetByTestId("recipe-extracted-model-pill")).ToHaveCountAsync(0);
+            await Expect(Page.GetByTestId("recipe-refined-model-pill")).ToHaveCountAsync(0);
+
+            // Open Actions menu and trigger immediate refinement despite paused queue & no ingestion job
+            await Page.Locator("button.recipe-actions-menu-btn").ClickAsync();
+            var refineMenuItem = Page.GetByTestId("refine-recipe-menu-item");
+            await Expect(refineMenuItem).ToBeVisibleAsync();
+            await Expect(refineMenuItem).ToContainTextAsync("Refine Recipe");
+
+            await Page.RunAndWaitForResponseAsync(
+                () => refineMenuItem.ClickAsync(),
+                resp => resp.Url.Contains("/refine-now") && resp.Status == 202
+            );
+
+            // Page auto-polls and updates with refined title + Refined Model pill (and still no Ingested Model pill)
+            await Expect(Page.Locator(".recipe-title"))
+                .ToContainTextAsync(refinedTitle, new() { Timeout = 25000 });
+            await Expect(Page.GetByTestId("recipe-refined-model-pill"))
+                .ToContainTextAsync("gemma4:26b-a4b");
+            await Expect(Page.GetByTestId("recipe-extracted-model-pill")).ToHaveCountAsync(0);
+
+            Assert.IsTrue(
+                await Page.EvaluateAsync<bool>(
+                    "document.documentElement.scrollWidth <= window.innerWidth"
+                ),
+                "Refined manual recipe detail must fit a 360px mobile viewport."
+            );
+
+            // Actions menu now offers Re-run Refinement
+            await Page.Locator("button.recipe-actions-menu-btn").ClickAsync();
+            await Expect(Page.GetByTestId("refine-recipe-menu-item"))
+                .ToContainTextAsync("Re-run Refinement");
+            await Page.Keyboard.PressAsync("Escape");
+
+            // Orphaned polluted FoodItem was removed and clean catalog item exists
+            await Page.GotoAsync($"{ServerUrl}/catalog");
+            var searchInput = Page.Locator("input[placeholder='e.g. olive oil, garlic']");
+            await searchInput.FillAsync(pollutedFoodName);
+            await Expect(Page.Locator(".catalog-page .empty-state")).ToBeVisibleAsync();
+            await searchInput.FillAsync("Yukon Gold Potato");
+            await Expect(Page.Locator(".catalog-page")).ToContainTextAsync("Yukon Gold Potato");
+
+            // Verify queue remained paused the whole time
+            await Page.GotoAsync($"{ServerUrl}/ingest");
+            await Expect(Page.Locator(".toggle-ingestion-btn"))
+                .ToContainTextAsync("Resume Ingestion");
+        }
+        finally
+        {
+            await ResetLlmSettingsViaApiAsync();
+        }
+    }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task IngestionHub_RefineNowWhilePaused_RefinesOnlyChosenDraftAndFitsOnMobile()
+    {
+        var suffix = Guid.NewGuid().ToString("N")[..6];
+        var chosenInitialTitle = $"Chosen Draft Tofu {suffix}";
+        var refinedTitle = $"Refined Chosen Tofu {suffix}";
+        var heldInitialTitle = $"Held Draft Tofu {suffix}";
+
+        await using var mockServer = await MockLanLlmAndBlogServer.StartAsync();
+        mockServer.ExtraModels.Add("gemma4:26b-a4b");
+        mockServer.Stage6RefinementPayload = $$"""
+            {
+              "title": "{{refinedTitle}}",
+              "description": null,
+              "servings": null,
+              "yield": null,
+              "timing": null,
+              "tags": null,
+              "ingredientPatches": [],
+              "stepPatches": [],
+              "refinementNotes": ["Polished chosen draft while paused."]
+            }
+            """;
+
+        await RegisterAndLoginAsync();
+        await Page.GotoAsync($"{ServerUrl}/ingest");
+        await Page.Locator(".llm-settings-btn").ClickAsync();
+        var dialog = Page.Locator("app-llm-settings-dialog");
+
+        await AddLlmConnectionInDialogAsync(dialog, mockServer.BaseUrl);
+        await AddLlmModelInDialogAsync(dialog, "qwen2.5:14b");
+        await AddLlmModelInDialogAsync(dialog, "gemma4:26b-a4b");
+        await AssignLlmWorkflowAsync(dialog, "text", "qwen2.5:14b");
+        await AssignLlmWorkflowAsync(dialog, "refine", "gemma4:26b-a4b");
+        // Keep AutoPublish OFF and both automatic refinement toggles OFF
+        var autoPublishToggle = dialog.Locator(
+            "mat-slide-toggle[formcontrolname='autoPublishHighConfidenceText'] button[role='switch']"
+        );
+        if (await autoPublishToggle.GetAttributeAsync("aria-checked") == "true")
+        {
+            await autoPublishToggle.ClickAsync();
+        }
+        await SaveLlmWorkflowsAsync(dialog);
+
+        try
+        {
+            async Task SubmitRawDraftAsync(string title)
+            {
+                mockServer.ResponsePayload = $$"""
+                    {
+                      "title": "{{title}}",
+                      "description": "Simple draft recipe.",
+                      "baseServings": 4,
+                      "yieldDisplay": "4 servings",
+                      "prepTimeMinutes": 10,
+                      "cookTimeMinutes": 15,
+                      "totalTimeMinutes": 25,
+                      "difficulty": "Easy",
+                      "ingredients": [
+                        {
+                          "sortOrder": 0,
+                          "displayName": "Garlic",
+                          "quantity": 2,
+                          "unit": "Clove",
+                          "originalRawText": "2 cloves garlic"
+                        }
+                      ],
+                      "steps": [
+                        {
+                          "stepNumber": 1,
+                          "instruction": "Saute garlic for 2 minutes.",
+                          "ingredientIndices": [0],
+                          "timers": [{ "durationSeconds": 120, "label": "Saute" }]
+                        }
+                      ],
+                      "suggestedTagNames": ["Quick & Easy"],
+                      "confidenceScore": 0.90
+                    }
+                    """;
+
+                await Page.Locator("button.tab-pill", new() { HasText = "Paste Raw Text" })
+                    .ClickAsync();
+                await Page.Locator("input[formcontrolname='titleHint']").FillAsync(title);
+                await Page.Locator("textarea[formcontrolname='rawText']")
+                    .FillAsync($"{title}\n2 cloves garlic\nSaute garlic for 2 minutes.");
+                await Page.Locator("button[aria-label='Queue raw text recipe']").ClickAsync();
+
+                var readyCard = Page.Locator(".job-card", new() { HasText = title }).First;
+                await WaitForLocatorWithRefreshAsync(readyCard.Locator("a.review-action-btn"));
+            }
+
+            await SubmitRawDraftAsync(heldInitialTitle);
+            await SubmitRawDraftAsync(chosenInitialTitle);
+
+            // Pause ingestion queue
+            var pauseBtn = Page.Locator(".toggle-ingestion-btn");
+            await pauseBtn.ClickAsync();
+            await Expect(pauseBtn).ToContainTextAsync("Resume Ingestion");
+
+            await Page.SetViewportSizeAsync(360, 740);
+            await Page.Locator("button.filter-pill", new() { HasText = "Review Inbox" })
+                .ClickAsync();
+
+            var chosenCard = Page.Locator(
+                ".job-card",
+                new() { HasText = chosenInitialTitle }
+            ).First;
+            var heldCard = Page.Locator(".job-card", new() { HasText = heldInitialTitle }).First;
+            var refineNowBtn = chosenCard.GetByTestId("refine-now-btn");
+            await Expect(refineNowBtn).ToBeVisibleAsync();
+            await Expect(refineNowBtn).ToContainTextAsync("Refine now");
+
+            Assert.IsTrue(
+                await Page.EvaluateAsync<bool>(
+                    "document.documentElement.scrollWidth <= window.innerWidth"
+                ),
+                "Ingestion Hub cards with Refine now button must fit a 360px mobile viewport."
+            );
+
+            await Page.RunAndWaitForResponseAsync(
+                () => refineNowBtn.ClickAsync(),
+                resp => resp.Url.Contains("/refine-now") && resp.Status == 202
+            );
+
+            var refinedCard = Page.Locator(".job-card", new() { HasText = refinedTitle }).First;
+            await WaitForLocatorWithRefreshAsync(refinedCard.GetByTestId("job-refined-model-chip"));
+            await Expect(refinedCard.GetByTestId("job-refined-model-chip"))
+                .ToContainTextAsync("Refined: gemma4:26b-a4b");
+
+            // Held card stays unrefined and queue stays paused
+            await Expect(heldCard.GetByTestId("job-refined-model-chip")).ToHaveCountAsync(0);
+            await Expect(pauseBtn).ToContainTextAsync("Resume Ingestion");
+        }
+        finally
+        {
+            await ResetLlmSettingsViaApiAsync();
+        }
+    }
 }

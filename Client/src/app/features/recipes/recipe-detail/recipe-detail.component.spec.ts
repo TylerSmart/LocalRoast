@@ -113,6 +113,20 @@ describe('RecipeDetailComponent', () => {
   const mockRecipeService = {
     getRecipeById: vi.fn().mockReturnValue(of(sampleRecipe)),
     deleteRecipe: vi.fn(),
+    refineRecipeNow: vi.fn().mockReturnValue(
+      of({
+        ...sampleRecipe,
+        refinementStatus: 'Queued' as const,
+        refinementStatusDetail: 'Queued for refinement via gemma4:26b-a4b...',
+      }),
+    ),
+    dismissRefinementFailure: vi.fn().mockReturnValue(
+      of({
+        ...sampleRecipe,
+        refinementStatus: 'None' as const,
+        refinementStatusDetail: null,
+      }),
+    ),
   };
 
   const mockDialog = {
@@ -123,15 +137,34 @@ describe('RecipeDetailComponent', () => {
     open: vi.fn(),
   };
 
+  const mockHasRefinementModel = signal(true);
+  const mockRefineModel = signal<string | null>('gemma4:26b-a4b');
+
   const mockAiHelperService = {
-    checkStatus: vi
-      .fn()
-      .mockReturnValue(of({ isAvailable: true, provider: 'Ollama', latencyMs: 25 })),
-    status: signal({ isAvailable: true, provider: 'Ollama', latencyMs: 25 }),
+    checkStatus: vi.fn().mockReturnValue(
+      of({
+        isAvailable: true,
+        provider: 'Ollama',
+        latencyMs: 25,
+        refineModel: 'gemma4:26b-a4b',
+      }),
+    ),
+    status: signal({
+      isAvailable: true,
+      provider: 'Ollama',
+      latencyMs: 25,
+      refineModel: 'gemma4:26b-a4b',
+    }),
     isAvailable: signal(true),
+    refineModel: mockRefineModel,
+    hasRefinementModel: mockHasRefinementModel,
   };
 
   beforeEach(async () => {
+    mockHasRefinementModel.set(true);
+    mockRefineModel.set('gemma4:26b-a4b');
+    mockRecipeService.refineRecipeNow.mockClear();
+    mockRecipeService.dismissRefinementFailure.mockClear();
     await TestBed.configureTestingModule({
       imports: [RecipeDetailComponent],
       providers: [
@@ -476,5 +509,83 @@ describe('RecipeDetailComponent', () => {
     component.setMultiplier(2);
     fixture.detectChanges();
     expect(fixture.nativeElement.textContent).toContain('4 cups rice noodles (dried)');
+  });
+
+  it('queues immediate refinement on non-ingested recipes and displays status banner', () => {
+    const manualRecipe: RecipeDetailDto = {
+      ...sampleRecipe,
+      id: 'r-manual',
+      ingestionJobId: null,
+      extractedModel: null,
+      refinedModel: null,
+      refinementStatus: 'None',
+      refinementStatusDetail: null,
+    };
+    mockRecipeService.getRecipeById.mockReturnValueOnce(of(manualRecipe));
+    mockRecipeService.refineRecipeNow.mockReturnValueOnce(
+      of({
+        ...manualRecipe,
+        refinementStatus: 'Queued',
+        refinementStatusDetail: 'Queued for refinement via gemma4:26b-a4b...',
+      }),
+    );
+
+    component.loadRecipe('r-manual');
+    fixture.detectChanges();
+
+    expect(component['canRefineRecipe']()).toBe(true);
+    expect(component['refineMenuLabel']()).toBe('Refine Recipe');
+
+    component.refineRecipeNow();
+    fixture.detectChanges();
+
+    expect(mockRecipeService.refineRecipeNow).toHaveBeenCalledWith('r-manual');
+    const banner = fixture.nativeElement.querySelector(
+      '[data-testid="recipe-refinement-status-banner"]',
+    );
+    expect(banner?.textContent).toContain('Queued for refinement via gemma4:26b-a4b...');
+    expect(component['refineMenuLabel']()).toBe('Refinement Queued...');
+  });
+
+  it('hides refine action when no refinement model is configured and shows Re-run when already refined', () => {
+    mockHasRefinementModel.set(false);
+    mockRefineModel.set(null);
+    fixture.detectChanges();
+    expect(component['canRefineRecipe']()).toBe(false);
+
+    mockHasRefinementModel.set(true);
+    mockRefineModel.set('gemma4:26b-a4b');
+    component['recipe'].set({
+      ...sampleRecipe,
+      refinedModel: 'gemma4:12b',
+    });
+    fixture.detectChanges();
+    expect(component['canRefineRecipe']()).toBe(true);
+    expect(component['refineMenuLabel']()).toBe('Re-run Refinement');
+  });
+
+  it('displays refinement failure banner with retry and dismiss actions', () => {
+    component['recipe'].set({
+      ...sampleRecipe,
+      refinementStatus: 'Failed',
+      refinementStatusDetail: 'Refinement host unavailable.',
+    });
+    fixture.detectChanges();
+
+    const errBanner = fixture.nativeElement.querySelector(
+      '[data-testid="recipe-refinement-error-banner"]',
+    );
+    expect(errBanner?.textContent).toContain('Refinement host unavailable.');
+
+    const dismissBtn: HTMLButtonElement = fixture.nativeElement.querySelector(
+      '[data-testid="dismiss-refinement-error-btn"]',
+    );
+    dismissBtn.click();
+    fixture.detectChanges();
+
+    expect(mockRecipeService.dismissRefinementFailure).toHaveBeenCalledWith('r-1');
+    expect(
+      fixture.nativeElement.querySelector('[data-testid="recipe-refinement-error-banner"]'),
+    ).toBeNull();
   });
 });

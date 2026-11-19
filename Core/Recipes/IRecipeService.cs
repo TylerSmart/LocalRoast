@@ -66,4 +66,19 @@ public interface IRecipeService
         Guid attachmentId,
         CancellationToken cancellationToken = default
     );
+
+    /// <summary>
+    /// Queues an immediate Stage 6 refinement run for a recipe (ingested or manually created),
+    /// running even while background ingestion is paused or idle refinement is disabled.
+    /// </summary>
+    Task<RecipeDetailDto?> QueueRefinementNowAsync(
+        Guid id,
+        CancellationToken cancellationToken = default
+    );
+
+    /// <summary>Clears a failed refinement status banner on a recipe.</summary>
+    Task<RecipeDetailDto?> DismissRefinementFailureAsync(
+        Guid id,
+        CancellationToken cancellationToken = default
+    );
 }

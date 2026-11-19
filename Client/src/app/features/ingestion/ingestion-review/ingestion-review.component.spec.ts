@@ -14,7 +14,9 @@ import { RecipeAutocompleteItemDto, RecipeDetailDto } from '../../../core/models
 import { CollectionDto, TagDto } from '../../../core/models/taxonomy.models';
 import { FoodCatalogService } from '../../../core/services/food-catalog/food-catalog.service';
 import { IngestionService } from '../../../core/services/ingestion/ingestion.service';
+import { AiKitchenHelperService } from '../../../core/services/ai-helpers/ai-kitchen-helper.service';
 import { RecipeService } from '../../../core/services/recipe/recipe.service';
+import { signal } from '@angular/core';
 import { TaxonomyService } from '../../../core/services/taxonomy/taxonomy.service';
 import { IngestionReviewComponent } from './ingestion-review.component';
 
@@ -42,6 +44,7 @@ describe('IngestionReviewComponent', () => {
     approveAndPublish: ReturnType<typeof vi.fn>;
     discardJob: ReturnType<typeof vi.fn>;
     retryJob: ReturnType<typeof vi.fn>;
+    refineJobNow: ReturnType<typeof vi.fn>;
     getReviewDiagnostics: ReturnType<typeof vi.fn>;
   };
   let mockFoodCatalogService: {
@@ -214,6 +217,7 @@ describe('IngestionReviewComponent', () => {
       ),
       discardJob: vi.fn().mockReturnValue(of(undefined)),
       retryJob: vi.fn().mockReturnValue(of(sampleJob)),
+      refineJobNow: vi.fn().mockReturnValue(of({ ...sampleJob, refinementRunNowRequested: true })),
       getReviewDiagnostics: vi
         .fn()
         .mockReturnValue(of({ validationIssues: [], qualityWarnings: [] })),
@@ -253,6 +257,21 @@ describe('IngestionReviewComponent', () => {
           },
         },
         { provide: IngestionService, useValue: mockIngestionService },
+        {
+          provide: AiKitchenHelperService,
+          useValue: {
+            checkStatus: vi.fn().mockReturnValue(
+              of({
+                isAvailable: true,
+                provider: 'Ollama',
+                latencyMs: 10,
+                refineModel: 'gemma4:26b-a4b',
+              }),
+            ),
+            refineModel: signal<string | null>('gemma4:26b-a4b'),
+            hasRefinementModel: signal<boolean>(true),
+          },
+        },
         { provide: FoodCatalogService, useValue: mockFoodCatalogService },
         {
           provide: RecipeService,
@@ -790,5 +809,18 @@ describe('IngestionReviewComponent', () => {
 
     component['refreshPreviewData']();
     expect(component.previewData()?.refinedModel).toBe('gemma4:26b-a4b');
+  });
+
+  it('queues immediate refinement from review header and navigates to /ingest', () => {
+    const el = fixture.nativeElement as HTMLElement;
+    const refineBtn = el.querySelector<HTMLButtonElement>('[data-testid="review-refine-now-btn"]');
+    expect(refineBtn).toBeTruthy();
+    expect(refineBtn?.textContent).toContain('Refine Now');
+
+    refineBtn?.click();
+    fixture.detectChanges();
+
+    expect(mockIngestionService.refineJobNow).toHaveBeenCalledWith('job-123');
+    expect(router.navigate).toHaveBeenCalledWith(['/ingest']);
   });
 });

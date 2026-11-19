@@ -50,6 +50,27 @@ describe('AiKitchenHelperService', () => {
     expect(result).toEqual(mockStatus);
     expect(service.status()).toEqual(mockStatus);
     expect(service.isAvailable()).toBe(true);
+    expect(service.refineModel()).toBeNull();
+    expect(service.hasRefinementModel()).toBe(false);
+  });
+
+  it('exposes refineModel and hasRefinementModel even when helper text model is unavailable', async () => {
+    const mockStatus: AiHelperStatusDto = {
+      isAvailable: false,
+      provider: 'Ollama',
+      latencyMs: 0,
+      unavailableReason: 'AI helper text model is not configured.',
+      refineModel: '  qwen3-refine:14b  ',
+    };
+
+    const promise = firstValueFrom(service.checkStatus());
+    const req = httpMock.expectOne('/api/ai-helpers/status');
+    req.flush(mockStatus);
+
+    await promise;
+    expect(service.isAvailable()).toBe(false);
+    expect(service.refineModel()).toBe('qwen3-refine:14b');
+    expect(service.hasRefinementModel()).toBe(true);
   });
 
   it('handles error gracefully when probing status', async () => {

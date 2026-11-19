@@ -162,7 +162,9 @@ public record RecipeDetailDto(
     IReadOnlyList<CookLogDto>? CookLogs = null,
     string? ExtractedModel = null,
     Guid? IngestionJobId = null,
-    string? RefinedModel = null
+    string? RefinedModel = null,
+    RecipeRefinementStatus RefinementStatus = RecipeRefinementStatus.None,
+    string? RefinementStatusDetail = null
 )
 {
     public IReadOnlyList<RecipeCollectionBadgeDto> Collections { get; init; } = Collections ?? [];

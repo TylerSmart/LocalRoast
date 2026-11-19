@@ -512,4 +512,27 @@ describe('IngestionService', () => {
     const result = await promise;
     expect(result.totalCount).toBe(0);
   });
+
+  it('queues immediate job refinement via POST /api/ingestion/jobs/:id/refine-now', async () => {
+    const promise = firstValueFrom(service.refineJobNow('job-1'));
+    const req = httpMock.expectOne('/api/ingestion/jobs/job-1/refine-now');
+    expect(req.request.method).toBe('POST');
+    expect(req.request.body).toEqual({});
+    req.flush({
+      id: 'job-1',
+      status: 'ReadyForReview',
+      displayTitle: 'Tofu',
+      refinementRunNowRequested: true,
+    } as IngestionJobSummaryDto);
+
+    httpMock.expectOne('/api/ingestion/jobs/summary').flush({
+      readyForReviewCount: 1,
+      activeProcessingCount: 0,
+      waitingForLlmHostCount: 0,
+      failedCount: 0,
+    });
+
+    const result = await promise;
+    expect(result.refinementRunNowRequested).toBe(true);
+  });
 });

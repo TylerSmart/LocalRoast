@@ -116,6 +116,8 @@ export class IngestionHubComponent implements OnInit {
   readonly isSubmitting = signal<boolean>(false);
   readonly isRetryingAll = signal<boolean>(false);
   readonly isIngestionEnabled = signal<boolean>(true);
+  readonly refineModel = signal<string | null>(null);
+  readonly hasRefinementModel = computed(() => !!this.refineModel()?.trim());
   readonly pausedUntilUtc = signal<string | null>(null);
   readonly pauseReason = signal<string | null>(null);
   readonly isTogglingIngestion = signal<boolean>(false);
@@ -414,6 +416,7 @@ export class IngestionHubComponent implements OnInit {
       .subscribe({
         next: (settings) => {
           this.isIngestionEnabled.set(settings.enableIngestion ?? true);
+          this.refineModel.set(settings.refineModel?.trim() || null);
           this.pausedUntilUtc.set(settings.pausedUntilUtc ?? null);
           this.pauseReason.set(settings.pauseReason ?? null);
         },
@@ -728,6 +731,32 @@ export class IngestionHubComponent implements OnInit {
         error: (err) =>
           this.errorMessage.set(
             err?.error?.detail || `Failed to run job "${job.displayTitle}" now.`,
+          ),
+      });
+  }
+
+  isJobRefining(job: IngestionJobSummaryDto): boolean {
+    return !!job.refinementRunNowRequested || (job.statusDetail?.startsWith('Refining ') ?? false);
+  }
+
+  refineJobNow(job: IngestionJobSummaryDto): void {
+    this.errorMessage.set(null);
+    const paused = !this.isIngestionEnabled();
+    this.ingestionService
+      .refineJobNow(job.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.feedbackMessage.set(
+            paused
+              ? `Running refinement for "${job.displayTitle}" now while the rest of the queue stays paused.`
+              : `Queued refinement for "${job.displayTitle}" to run next.`,
+          );
+          this.loadJobs();
+        },
+        error: (err) =>
+          this.errorMessage.set(
+            err?.error?.detail || `Failed to refine "${job.displayTitle}" now.`,
           ),
       });
   }

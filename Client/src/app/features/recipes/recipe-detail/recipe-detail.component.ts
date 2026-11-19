@@ -1,7 +1,9 @@
 import { RecipeAttachmentViewerDialogComponent } from '../recipe-attachment-viewer-dialog/recipe-attachment-viewer-dialog.component';
 import { DatePipe, DecimalPipe } from '@angular/common';
-import { Component, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
+import { Subscription, interval } from 'rxjs';
 import { MatButtonModule } from '@angular/material/button';
 import { MatButtonToggleModule } from '@angular/material/button-toggle';
 import { MatCardModule } from '@angular/material/card';
@@ -113,6 +115,7 @@ export interface StepSectionGroup {
 export class RecipeDetailComponent implements OnInit {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
+  private readonly destroyRef = inject(DestroyRef);
   private readonly recipeService = inject(RecipeService);
   private readonly ingestionService = inject(IngestionService);
   private readonly dialog = inject(MatDialog);
@@ -130,9 +133,50 @@ export class RecipeDetailComponent implements OnInit {
   protected readonly checkedIngredients = signal<Record<string, boolean>>({});
   protected readonly isUploadingAttachment = signal<boolean>(false);
   protected readonly isRerunningIngestion = signal<boolean>(false);
+  protected readonly isQueueingRefinement = signal<boolean>(false);
+  protected readonly isDismissingRefinement = signal<boolean>(false);
   protected readonly formatMinutes = formatMinutes;
   protected readonly formatReplacement = formatIngredientReplacement;
   protected readonly previewPhotoUrl = signal<string | null>(null);
+  private refinementPollSub: Subscription | null = null;
+
+  protected readonly hasRefinementModel = computed(() =>
+    Boolean(this.aiHelper.hasRefinementModel?.()),
+  );
+
+  protected readonly isRefinementQueuedOrRunning = computed(() => {
+    const status = this.recipe()?.refinementStatus;
+    return status === 'Queued' || status === 'Running';
+  });
+
+  protected readonly canRefineRecipe = computed(() => {
+    const r = this.recipe();
+    if (!r || r.status === 'Archived') {
+      return false;
+    }
+    return this.hasRefinementModel() || this.isRefinementQueuedOrRunning();
+  });
+
+  protected readonly refineMenuLabel = computed(() => {
+    if (this.isQueueingRefinement()) {
+      return 'Queueing Refinement...';
+    }
+    const r = this.recipe();
+    if (r?.refinementStatus === 'Running') {
+      return 'Refining Recipe...';
+    }
+    if (r?.refinementStatus === 'Queued') {
+      return 'Refinement Queued...';
+    }
+    return r?.refinedModel ? 'Re-run Refinement' : 'Refine Recipe';
+  });
+
+  protected readonly refineMenuTooltip = computed(() => {
+    const model = this.aiHelper.refineModel?.();
+    return model
+      ? `Run refinement via ${model} now (runs even when the queue is paused)`
+      : 'Run refinement now (runs even when the queue is paused)';
+  });
 
   protected readonly latestCookNote = computed<CookLogDto | null>(() => {
     const logs = this.recipe()?.cookLogs;
@@ -273,8 +317,9 @@ export class RecipeDetailComponent implements OnInit {
   });
 
   ngOnInit(): void {
+    this.destroyRef.onDestroy(() => this.stopRefinementPolling());
     this.aiHelper.checkStatus().subscribe();
-    this.route.paramMap.subscribe((params) => {
+    this.route.paramMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
       const id = params.get('id');
       if (id) {
         this.loadRecipe(id);
@@ -313,6 +358,7 @@ export class RecipeDetailComponent implements OnInit {
   }
 
   loadRecipe(id: string): void {
+    this.stopRefinementPolling();
     this.isLoading.set(true);
     this.errorMessage.set(null);
 
@@ -322,6 +368,9 @@ export class RecipeDetailComponent implements OnInit {
         this.targetServings.set(detail.baseServings);
         this.title.setTitle(`LocalRoast | ${detail.title}`);
         this.isLoading.set(false);
+        if (detail.refinementStatus === 'Queued' || detail.refinementStatus === 'Running') {
+          this.startRefinementPolling(detail.id);
+        }
       },
       error: (err: { error?: { detail?: string; title?: string } }) => {
         this.isLoading.set(false);
@@ -330,6 +379,45 @@ export class RecipeDetailComponent implements OnInit {
         );
       },
     });
+  }
+
+  private startRefinementPolling(recipeId: string): void {
+    this.stopRefinementPolling();
+    this.refinementPollSub = interval(2000)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
+        this.recipeService.getRecipeById(recipeId).subscribe({
+          next: (detail) => {
+            if (this.recipe()?.id !== recipeId) {
+              this.stopRefinementPolling();
+              return;
+            }
+            const wasActive = this.isRefinementQueuedOrRunning();
+            this.recipe.set(detail);
+            this.title.setTitle(`LocalRoast | ${detail.title}`);
+
+            if (detail.refinementStatus !== 'Queued' && detail.refinementStatus !== 'Running') {
+              this.stopRefinementPolling();
+              if (wasActive && detail.refinementStatus !== 'Failed') {
+                const suffix = detail.refinedModel ? ` via ${detail.refinedModel}` : '';
+                this.snackBar.open(`Refinement complete${suffix}.`, 'Close', {
+                  duration: 4000,
+                });
+              }
+            }
+          },
+          error: () => {
+            // Keep polling quietly on transient network hiccups
+          },
+        });
+      });
+  }
+
+  private stopRefinementPolling(): void {
+    if (this.refinementPollSub) {
+      this.refinementPollSub.unsubscribe();
+      this.refinementPollSub = null;
+    }
   }
 
   openAddToShoppingListDialog(): void {
@@ -595,6 +683,58 @@ export class RecipeDetailComponent implements OnInit {
           });
         },
       });
+    });
+  }
+
+  refineRecipeNow(): void {
+    const r = this.recipe();
+    if (!r || this.isQueueingRefinement() || this.isRefinementQueuedOrRunning()) {
+      return;
+    }
+
+    this.isQueueingRefinement.set(true);
+    this.recipeService.refineRecipeNow(r.id).subscribe({
+      next: (updated) => {
+        this.isQueueingRefinement.set(false);
+        this.recipe.set(updated);
+        const model = this.aiHelper.refineModel?.();
+        this.snackBar.open(
+          model
+            ? `Queued refinement for "${r.title}" via ${model}.`
+            : `Queued refinement for "${r.title}".`,
+          'Close',
+          { duration: 4000 },
+        );
+        if (updated.refinementStatus === 'Queued' || updated.refinementStatus === 'Running') {
+          this.startRefinementPolling(updated.id);
+        }
+      },
+      error: (err: { error?: { detail?: string; title?: string } }) => {
+        this.isQueueingRefinement.set(false);
+        this.snackBar.open(
+          err?.error?.detail || err?.error?.title || 'Failed to queue recipe refinement.',
+          'Close',
+          { duration: 5000 },
+        );
+      },
+    });
+  }
+
+  dismissRefinementFailure(): void {
+    const r = this.recipe();
+    if (!r || this.isDismissingRefinement()) {
+      return;
+    }
+
+    this.isDismissingRefinement.set(true);
+    this.recipeService.dismissRefinementFailure(r.id).subscribe({
+      next: (updated) => {
+        this.isDismissingRefinement.set(false);
+        this.recipe.set(updated);
+      },
+      error: () => {
+        this.isDismissingRefinement.set(false);
+      },
     });
   }
 

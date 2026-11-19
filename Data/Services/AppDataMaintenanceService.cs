@@ -288,6 +288,7 @@ public sealed class AppDataMaintenanceService(
             job.AttemptCount = 0;
             job.NextRetryAt = null;
             job.RunNowRequested = false;
+            job.RefinementRunNowRequested = false;
             job.ProcessedAt = null;
             job.NormalizedSourceText = null;
             job.ScrapedPageJson = null;

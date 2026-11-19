@@ -103,6 +103,42 @@
           <span>{{ isRerunning() ? 'Re-queueing...' : 'Rerun' }}</span>
         </button>
 
+        @if (canRefineJob()) {
+          <button
+            mat-stroked-button
+            type="button"
+            (click)="refineJobNow()"
+            [disabled]="
+              isQueueingRefinement() ||
+              isRerunning() ||
+              isSaving() ||
+              isPublishing() ||
+              !!job()?.refinementRunNowRequested
+            "
+            [matTooltip]="
+              'Run refinement via ' +
+              (aiHelper?.refineModel?.() || 'refinement model') +
+              ' now (runs even when the queue is paused)'
+            "
+            aria-label="Run refinement now"
+            class="refine-btn"
+            data-testid="review-refine-now-btn"
+          >
+            @if (isQueueingRefinement()) {
+              <mat-spinner diameter="18" class="inline-spinner"></mat-spinner>
+            } @else {
+              <mat-icon>auto_fix_high</mat-icon>
+            }
+            <span>{{
+              isQueueingRefinement()
+                ? 'Queueing...'
+                : job()?.refinedModel
+                  ? 'Re-refine'
+                  : 'Refine Now'
+            }}</span>
+          </button>
+        }
+
         @if (job()?.resultingRecipeId; as publishedRecipeId) {
           <a
             mat-stroked-button

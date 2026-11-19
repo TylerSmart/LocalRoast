@@ -206,7 +206,8 @@ public sealed class IngestionService(
                     SourceFileCount: fileCount,
                     ExtractedModel: j.ExtractedModel,
                     RefinedModel: j.RefinedModel,
-                    RefinedAt: j.RefinedAt
+                    RefinedAt: j.RefinedAt,
+                    RefinementRunNowRequested: j.RefinementRunNowRequested
                 );
             })
             .ToList();
@@ -291,7 +292,8 @@ public sealed class IngestionService(
                     SourceFileCount: fileCount,
                     ExtractedModel: j.ExtractedModel,
                     RefinedModel: j.RefinedModel,
-                    RefinedAt: j.RefinedAt
+                    RefinedAt: j.RefinedAt,
+                    RefinementRunNowRequested: j.RefinementRunNowRequested
                 );
             })
             .ToList();
@@ -464,7 +466,8 @@ public sealed class IngestionService(
             SourceBookPage: job.SourceBookPage,
             ExtractedModel: job.ExtractedModel,
             RefinedModel: job.RefinedModel,
-            RefinedAt: job.RefinedAt
+            RefinedAt: job.RefinedAt,
+            RefinementRunNowRequested: job.RefinementRunNowRequested
         );
     }
 
@@ -1569,6 +1572,8 @@ public sealed class IngestionService(
 
         job.RunNowRequested = true;
 
+        job.RefinementRunNowRequested = false;
+
         job.RefinedModel = null;
 
         job.RefinedAt = null;
@@ -1637,7 +1642,73 @@ public sealed class IngestionService(
 
         job.NextRetryAt = null;
         job.RunNowRequested = true;
+        job.RefinementRunNowRequested = false;
         job.StatusDetail = "Queued to run next, even while ingestion is paused.";
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        queueSignal.NotifyWorkAvailable();
+
+        return ToSummary(job);
+    }
+
+    public async Task<IngestionJobSummaryDto?> RefineJobNowAsync(
+        Guid id,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var job = await dbContext.IngestionJobs.FirstOrDefaultAsync(
+            j => j.Id == id,
+            cancellationToken
+        );
+
+        if (job is null)
+        {
+            return null;
+        }
+
+        if (
+            job.Status is not (IngestionJobStatus.ReadyForReview or IngestionJobStatus.Published)
+            || string.IsNullOrWhiteSpace(job.ExtractedDraftJson)
+        )
+        {
+            throw new ConflictException(
+                "Only an ingestion job awaiting review or already published with an extracted draft can be refined."
+            );
+        }
+
+        var refineModelLabel = "refinement model";
+        if (llmSettingsService is not null)
+        {
+            var config = await llmSettingsService.GetEffectiveConfigAsync(cancellationToken);
+            if (!config.HasRefinementModelConfigured)
+            {
+                throw new DomainValidationException(
+                    "No Refinement model is configured in LLM Settings. Assign a Refinement workflow model first."
+                );
+            }
+
+            refineModelLabel =
+                config.ForRefinement().TextModel?.Trim()
+                ?? config.RefineModel?.Trim()
+                ?? refineModelLabel;
+        }
+
+        if (
+            queueSignal.IsJobActive(job.Id)
+            || (
+                job.ResultingRecipeId.HasValue
+                && queueSignal.IsJobActive(job.ResultingRecipeId.Value)
+            )
+        )
+        {
+            throw new ConflictException("This ingestion job is currently being processed.");
+        }
+
+        job.RefinementRunNowRequested = true;
+        job.RefinementAttemptCount = 0;
+        job.RefinementNextRetryAt = null;
+        job.StatusDetail = $"Queued for immediate refinement via {refineModelLabel}...";
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
@@ -1665,7 +1736,8 @@ public sealed class IngestionService(
             ModifiedAt: job.ModifiedAt,
             ExtractedModel: job.ExtractedModel,
             RefinedModel: job.RefinedModel,
-            RefinedAt: job.RefinedAt
+            RefinedAt: job.RefinedAt,
+            RefinementRunNowRequested: job.RefinementRunNowRequested
         );
 
     public async Task<RetryWaitingJobsResultDto> RetryAllWaitingJobsAsync(
@@ -1773,6 +1845,8 @@ public sealed class IngestionService(
 
             job.AttemptCount = 0;
 
+            job.RefinementRunNowRequested = false;
+
             job.RefinedModel = null;
 
             job.RefinedAt = null;
@@ -1809,6 +1883,10 @@ public sealed class IngestionService(
         }
 
         job.Status = IngestionJobStatus.Discarded;
+
+        job.RunNowRequested = false;
+
+        job.RefinementRunNowRequested = false;
 
         job.StatusDetail = "Job discarded by user.";
 

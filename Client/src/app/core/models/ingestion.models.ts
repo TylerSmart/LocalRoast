@@ -428,6 +428,7 @@ export interface IngestionJobSummaryDto {
   extractedModel?: string | null;
   refinedModel?: string | null;
   refinedAt?: string | null;
+  refinementRunNowRequested?: boolean;
 }
 
 export interface IngestionJobDetailDto {
@@ -459,6 +460,7 @@ export interface IngestionJobDetailDto {
   extractedModel?: string | null;
   refinedModel?: string | null;
   refinedAt?: string | null;
+  refinementRunNowRequested?: boolean;
 }
 
 export interface RetryWaitingJobsResultDto {

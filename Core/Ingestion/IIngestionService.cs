@@ -81,6 +81,15 @@ public interface IIngestionService
         CancellationToken cancellationToken = default
     );
 
+    /// <summary>
+    /// Queues an immediate refinement pass for a ReadyForReview or Published ingestion job,
+    /// even while ingestion is paused or idle refinement is disabled.
+    /// </summary>
+    Task<IngestionJobSummaryDto?> RefineJobNowAsync(
+        Guid id,
+        CancellationToken cancellationToken = default
+    );
+
     Task<RetryWaitingJobsResultDto> RetryAllWaitingJobsAsync(
         CancellationToken cancellationToken = default
     );

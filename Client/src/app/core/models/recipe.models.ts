@@ -2,6 +2,8 @@ import { RecipeCollectionBadgeDto, RecipeTagBadgeDto } from './taxonomy.models';
 
 export type RecipeStatus = 'DraftReview' | 'Published' | 'Archived';
 
+export type RecipeRefinementStatus = 'None' | 'Queued' | 'Running' | 'Failed';
+
 export type RecipeDifficulty = 'Easy' | 'Medium' | 'Project';
 
 export type MeasurementUnit =
@@ -216,6 +218,8 @@ export interface RecipeDetailDto {
   extractedModel?: string | null;
   refinedModel?: string | null;
   ingestionJobId?: string | null;
+  refinementStatus?: RecipeRefinementStatus;
+  refinementStatusDetail?: string | null;
 }
 
 export interface RecipeQueryParameters {

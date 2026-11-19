@@ -24,6 +24,7 @@ describe('IngestionHubComponent', () => {
     enqueueRawText: ReturnType<typeof vi.fn>;
     retryJob: ReturnType<typeof vi.fn>;
     runJobNow: ReturnType<typeof vi.fn>;
+    refineJobNow: ReturnType<typeof vi.fn>;
     retryAllWaitingJobs: ReturnType<typeof vi.fn>;
     retryBatchJobs: ReturnType<typeof vi.fn>;
     discardJob: ReturnType<typeof vi.fn>;
@@ -150,6 +151,9 @@ describe('IngestionHubComponent', () => {
       enqueueRawText: vi.fn().mockReturnValue(of(sampleJobs[1])),
       retryJob: vi.fn().mockReturnValue(of(sampleJobs[1])),
       runJobNow: vi.fn().mockReturnValue(of(sampleJobs[1])),
+      refineJobNow: vi
+        .fn()
+        .mockReturnValue(of({ ...sampleJobs[0], refinementRunNowRequested: true })),
       retryAllWaitingJobs: vi.fn().mockReturnValue(of({ requeuedCount: 1 })),
       retryBatchJobs: vi.fn().mockReturnValue(of({ requeuedCount: 3 })),
       discardJob: vi.fn().mockReturnValue(of(undefined)),
@@ -572,5 +576,25 @@ describe('IngestionHubComponent', () => {
 
     expect(extractedChip?.textContent).toContain('llama3:8b');
     expect(refinedChip?.textContent).toContain('Refined: gemma4:26b-a4b');
+  });
+
+  it('shows Refine now button on review/published cards when a refinement model is configured and queues while paused', () => {
+    const el = fixture.nativeElement as HTMLElement;
+    expect(el.querySelectorAll('[data-testid="refine-now-btn"]').length).toBe(0);
+
+    component.refineModel.set('gemma4:26b-a4b');
+    component.isIngestionEnabled.set(false);
+    fixture.detectChanges();
+
+    const refineBtns = el.querySelectorAll<HTMLButtonElement>('[data-testid="refine-now-btn"]');
+    expect(refineBtns.length).toBe(2);
+    expect(refineBtns[0].textContent).toContain('Refine now');
+    expect(refineBtns[1].textContent).toContain('Re-refine');
+
+    refineBtns[0].click();
+    fixture.detectChanges();
+
+    expect(mockIngestionService.refineJobNow).toHaveBeenCalledWith('job-1');
+    expect(component.feedbackMessage()).toContain('while the rest of the queue stays paused');
   });
 });

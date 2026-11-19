@@ -1,3 +1,4 @@
+using App.Core.Recipes;
 using App.Data.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
@@ -37,6 +38,13 @@ public sealed class RecipeConfiguration : IEntityTypeConfiguration<Recipe>
         builder.Property(r => r.ThumbnailImagePath).HasMaxLength(500);
         builder.Property(r => r.ExtractedModel).HasMaxLength(200);
         builder.Property(r => r.RefinedModel).HasMaxLength(200);
+        builder
+            .Property(r => r.RefinementStatus)
+            .HasConversion<string>()
+            .HasMaxLength(32)
+            .HasDefaultValue(RecipeRefinementStatus.None);
+        builder.Property(r => r.RefinementStatusDetail).HasMaxLength(1000);
+        builder.HasIndex(r => new { r.RefinementStatus, r.RefinementRequestedAt });
 
         builder.Property(r => r.AverageRating).HasPrecision(3, 2);
 

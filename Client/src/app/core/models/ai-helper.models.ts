@@ -6,6 +6,7 @@ export interface AiHelperStatusDto {
   textModel?: string | null;
   latencyMs: number;
   unavailableReason?: string | null;
+  refineModel?: string | null;
 }
 
 export interface SuggestIngredientSubstitutionsRequest {

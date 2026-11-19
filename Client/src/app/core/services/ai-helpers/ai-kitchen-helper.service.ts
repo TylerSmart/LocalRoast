@@ -21,6 +21,8 @@ export class AiKitchenHelperService {
   readonly status = signal<AiHelperStatusDto | null>(null);
   readonly isChecking = signal<boolean>(false);
   readonly isAvailable = computed(() => this.status()?.isAvailable ?? false);
+  readonly refineModel = computed(() => this.status()?.refineModel?.trim() || null);
+  readonly hasRefinementModel = computed(() => this.refineModel() !== null);
 
   private lastCheckedTimestamp = 0;
 

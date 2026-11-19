@@ -63,6 +63,7 @@ import { StepInstructionEditorComponent } from '../../../shared/components/step-
 import { CollectionDto, TagDto } from '../../../core/models/taxonomy.models';
 import { FoodCatalogService } from '../../../core/services/food-catalog/food-catalog.service';
 import { IngestionService } from '../../../core/services/ingestion/ingestion.service';
+import { AiKitchenHelperService } from '../../../core/services/ai-helpers/ai-kitchen-helper.service';
 import { TaxonomyService } from '../../../core/services/taxonomy/taxonomy.service';
 import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialog/confirm-dialog.component';
 import { MeasurementEditorComponent } from '../../../shared/components/measurement-editor/measurement-editor.component';
@@ -115,6 +116,7 @@ export class IngestionReviewComponent implements OnInit {
   private readonly fb = inject(FormBuilder);
   private readonly destroyRef = inject(DestroyRef);
   private readonly ingestionService = inject(IngestionService);
+  protected readonly aiHelper = inject(AiKitchenHelperService, { optional: true });
   private readonly foodCatalogService = inject(FoodCatalogService);
   private readonly taxonomyService = inject(TaxonomyService);
   private readonly dialog = inject(MatDialog);
@@ -129,6 +131,7 @@ export class IngestionReviewComponent implements OnInit {
   readonly isSaving = signal<boolean>(false);
   readonly isPublishing = signal<boolean>(false);
   readonly isRerunning = signal<boolean>(false);
+  readonly isQueueingRefinement = signal<boolean>(false);
   readonly errorMessage = signal<string | null>(null);
   readonly mobilePane = signal<'source' | 'draft' | 'preview'>('draft');
   readonly rightPaneMode = signal<'edit' | 'preview'>('edit');
@@ -139,6 +142,14 @@ export class IngestionReviewComponent implements OnInit {
   readonly canEditReview = computed(() => {
     const s = this.job()?.status;
     return s === 'ReadyForReview' || s === 'Published';
+  });
+  readonly canRefineJob = computed(() => {
+    const j = this.job();
+    return (
+      !!j &&
+      (j.status === 'ReadyForReview' || j.status === 'Published') &&
+      Boolean(this.aiHelper?.hasRefinementModel?.())
+    );
   });
 
   readonly allDiagnostics = computed<IngestionDiagnosticTargetDto[]>(() => {
@@ -377,6 +388,7 @@ export class IngestionReviewComponent implements OnInit {
   });
 
   ngOnInit(): void {
+    this.aiHelper?.checkStatus().pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
     this.form.valueChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
       this.ingredientRevision.update((revision) => revision + 1);
       this.markDiagnosticsStale();
@@ -1205,6 +1217,36 @@ export class IngestionReviewComponent implements OnInit {
         error: (err) => {
           this.errorMessage.set(err?.error?.detail || 'Failed to save review draft.');
           this.isSaving.set(false);
+        },
+      });
+  }
+
+  refineJobNow(): void {
+    const currentJob = this.job();
+    if (!currentJob || this.isQueueingRefinement()) return;
+
+    this.isQueueingRefinement.set(true);
+    this.ingestionService
+      .refineJobNow(currentJob.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.isQueueingRefinement.set(false);
+          const model = this.aiHelper?.refineModel?.();
+          this.snackBar.open(
+            model
+              ? `Queued refinement for "${currentJob.displayTitle}" via ${model}.`
+              : `Queued refinement for "${currentJob.displayTitle}".`,
+            'Close',
+            { duration: 4000 },
+          );
+          this.router.navigate(['/ingest']);
+        },
+        error: (err) => {
+          this.isQueueingRefinement.set(false);
+          this.snackBar.open(err?.error?.detail || 'Failed to queue refinement.', 'Close', {
+            duration: 5000,
+          });
         },
       });
   }

@@ -26,6 +26,9 @@ public sealed class AiKitchenHelperService(
     )
     {
         var config = await llmSettingsService.GetEffectiveConfigAsync(cancellationToken);
+        var refineModel = config.HasRefinementModelConfigured
+            ? (config.ForRefinement().TextModel ?? config.RefineModel)?.Trim()
+            : null;
 
         if (string.IsNullOrWhiteSpace(config.TextModel))
         {
@@ -34,7 +37,8 @@ public sealed class AiKitchenHelperService(
                 Provider: config.Provider,
                 TextModel: null,
                 LatencyMs: 0,
-                UnavailableReason: "No Text LLM model is configured in LLM Settings."
+                UnavailableReason: "No Text LLM model is configured in LLM Settings.",
+                RefineModel: refineModel
             );
         }
 
@@ -50,7 +54,8 @@ public sealed class AiKitchenHelperService(
             LatencyMs: probe.LatencyMs,
             UnavailableReason: probe.IsReachable
                 ? null
-                : (probe.ErrorMessage ?? "LLM host is unreachable.")
+                : (probe.ErrorMessage ?? "LLM host is unreachable."),
+            RefineModel: refineModel
         );
     }
 

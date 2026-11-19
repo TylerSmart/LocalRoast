@@ -10,7 +10,8 @@ public record AiHelperStatusDto(
     LlmProvider Provider,
     string? TextModel,
     int LatencyMs,
-    string? UnavailableReason
+    string? UnavailableReason,
+    string? RefineModel = null
 );
 
 public record SuggestIngredientSubstitutionsRequest(

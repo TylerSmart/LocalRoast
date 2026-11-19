@@ -15,7 +15,8 @@ public sealed partial class RecipeService(
     AppDbContext dbContext,
     IMediaStorageService mediaStorageService,
     TimeProvider? timeProvider = null,
-    IIngestionQueueSignal? queueSignal = null
+    IIngestionQueueSignal? queueSignal = null,
+    ILlmSettingsService? llmSettingsService = null
 ) : IRecipeService
 {
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
@@ -818,7 +819,9 @@ public sealed partial class RecipeService(
                 .ToList(),
             ExtractedModel: extractedModel,
             IngestionJobId: ingestionJobId,
-            RefinedModel: refinedModel
+            RefinedModel: refinedModel,
+            RefinementStatus: recipe.RefinementStatus,
+            RefinementStatusDetail: recipe.RefinementStatusDetail
         );
     }
 
@@ -1033,6 +1036,12 @@ public sealed partial class RecipeService(
             recipe.RefinedModel = string.IsNullOrWhiteSpace(request.RefinedModel)
                 ? null
                 : request.RefinedModel.Trim();
+        }
+        if (recipe.RefinementStatus == RecipeRefinementStatus.Failed)
+        {
+            recipe.RefinementStatus = RecipeRefinementStatus.None;
+            recipe.RefinementRequestedAt = null;
+            recipe.RefinementStatusDetail = null;
         }
 
         await ValidateAndBuildGraphAsync(recipe, request, cancellationToken);
@@ -2205,5 +2214,86 @@ public sealed partial class RecipeService(
 
         await mediaStorageService.DeleteMediaFileAsync(attachment.MediaUrlPath, cancellationToken);
         return true;
+    }
+
+    public async Task<RecipeDetailDto?> QueueRefinementNowAsync(
+        Guid id,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var recipe = await dbContext.Recipes.FirstOrDefaultAsync(
+            r => r.Id == id,
+            cancellationToken
+        );
+
+        if (recipe is null)
+        {
+            return null;
+        }
+
+        if (recipe.Status == RecipeStatus.Archived)
+        {
+            throw new ConflictException("Archived recipes cannot be refined.");
+        }
+
+        var refineModelLabel = "refinement model";
+        if (llmSettingsService is not null)
+        {
+            var config = await llmSettingsService.GetEffectiveConfigAsync(cancellationToken);
+            if (!config.HasRefinementModelConfigured)
+            {
+                throw new DomainValidationException(
+                    "No Refinement model is configured in LLM Settings. Assign a Refinement workflow model first."
+                );
+            }
+
+            refineModelLabel =
+                config.ForRefinement().TextModel?.Trim()
+                ?? config.RefineModel?.Trim()
+                ?? refineModelLabel;
+        }
+
+        if (
+            recipe.RefinementStatus == RecipeRefinementStatus.Running
+            && queueSignal?.IsJobActive(recipe.Id) == true
+        )
+        {
+            throw new ConflictException("Recipe refinement is already in progress.");
+        }
+
+        recipe.RefinementStatus = RecipeRefinementStatus.Queued;
+        recipe.RefinementRequestedAt = _timeProvider.GetUtcNow();
+        recipe.RefinementStatusDetail = $"Queued for refinement via {refineModelLabel}...";
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        queueSignal?.NotifyWorkAvailable();
+
+        return await GetRecipeByIdAsync(id, cancellationToken);
+    }
+
+    public async Task<RecipeDetailDto?> DismissRefinementFailureAsync(
+        Guid id,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var recipe = await dbContext.Recipes.FirstOrDefaultAsync(
+            r => r.Id == id,
+            cancellationToken
+        );
+
+        if (recipe is null)
+        {
+            return null;
+        }
+
+        if (recipe.RefinementStatus == RecipeRefinementStatus.Failed)
+        {
+            recipe.RefinementStatus = RecipeRefinementStatus.None;
+            recipe.RefinementRequestedAt = null;
+            recipe.RefinementStatusDetail = null;
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        return await GetRecipeByIdAsync(id, cancellationToken);
     }
 }

@@ -31,6 +31,7 @@ public sealed class IngestionJobConfiguration : IEntityTypeConfiguration<Ingesti
         builder.Property(j => j.ExtractedModel).HasMaxLength(200);
         builder.Property(j => j.RefinedModel).HasMaxLength(200);
         builder.Property(j => j.RefinementAttemptCount).HasDefaultValue(0);
+        builder.Property(j => j.RefinementRunNowRequested).HasDefaultValue(false);
         builder.Property(j => j.ConfidenceScore).HasPrecision(4, 3);
         builder.Property(j => j.StatusDetail).HasMaxLength(2000);
 

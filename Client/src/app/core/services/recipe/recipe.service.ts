@@ -213,4 +213,12 @@ export class RecipeService {
   deleteCookLog(recipeId: string, cookLogId: string): Observable<void> {
     return this.http.delete<void>(apiUrl(`/recipes/${recipeId}/cook-logs/${cookLogId}`));
   }
+
+  refineRecipeNow(id: string): Observable<RecipeDetailDto> {
+    return this.http.post<RecipeDetailDto>(apiUrl(`/recipes/${id}/refine-now`), {});
+  }
+
+  dismissRefinementFailure(id: string): Observable<RecipeDetailDto> {
+    return this.http.delete<RecipeDetailDto>(apiUrl(`/recipes/${id}/refinement-status`));
+  }
 }

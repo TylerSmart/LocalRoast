@@ -1480,6 +1480,604 @@ public sealed class MultiStageIngestionAndReplacementsIntegrationTests
         StringAssert.Contains(detail.StatusDetail ?? "", "America/Los_Angeles");
     }
 
+    [TestMethod]
+    public async Task RecipeRefineNow_NonIngestedRecipe_RunsWhileQueuePausedAndRefinementTogglesOff()
+    {
+        var mockLlm = new FallbackExercisingLlmClient
+        {
+            ForceSimpleBatch = true,
+            Stage6JsonOverride = """
+                {
+                  "title": "Refined Sweet Potato Mash",
+                  "description": "Velvety roasted sweet potato mash.",
+                  "servings": null,
+                  "yield": null,
+                  "timing": null,
+                  "tags": null,
+                  "ingredientPatches": [
+                    {
+                      "index": 0,
+                      "displayName": "sweet potatoes",
+                      "quantity": null,
+                      "maxQuantity": null,
+                      "unit": null,
+                      "prepNote": "peeled and cut into 1/2-inch cubes",
+                      "isOptional": null,
+                      "canonicalFoodName": "Sweet Potato",
+                      "category": "Produce",
+                      "isPantryStaple": false,
+                      "replacementPatches": null
+                    }
+                  ],
+                  "stepPatches": [],
+                  "refinementNotes": ["Cleaned manual recipe sweet potato FoodItem name."]
+                }
+                """,
+        };
+
+        await using var customFactory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ILlmExtractionClient>();
+                services.AddSingleton<ILlmExtractionClient>(mockLlm);
+            });
+        });
+
+        using var client = customFactory.CreateClient();
+        await AuthenticateAsync(client);
+
+        // 1. Before assigning a refinement model, /refine-now returns 400 Bad Request
+        var manualCreateRes = await client.PostAsJsonAsync(
+            "/api/recipes",
+            new UpsertRecipeRequest(
+                Title: "Manual Draft Mash",
+                Description: "Unrefined manual recipe.",
+                Status: RecipeStatus.DraftReview,
+                BaseServings: 4m,
+                Ingredients:
+                [
+                    new RecipeIngredientInput(
+                        Quantity: 2m,
+                        Unit: MeasurementUnit.Lb,
+                        DisplayName: "1/2-inch cubed peeled sweet potatoes"
+                    ),
+                ],
+                Steps: [new RecipeStepInput(Instruction: "Boil sweet potatoes until tender.")]
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Created, manualCreateRes.StatusCode);
+        var draftRecipe = await manualCreateRes.Content.ReadFromJsonAsync<RecipeDetailDto>();
+        Assert.IsNotNull(draftRecipe);
+
+        var noModelRes = await client.PostAsync($"/api/recipes/{draftRecipe.Id}/refine-now", null);
+        Assert.AreEqual(HttpStatusCode.BadRequest, noModelRes.StatusCode);
+
+        // 2. Configure a Refinement model with queue PAUSED and BOTH automatic refinement toggles OFF
+        var conn = await (
+            await client.PostAsJsonAsync(
+                "/api/llm-settings/connections",
+                new UpsertLlmConnectionRequest(
+                    Name: "Manual Refine Ollama",
+                    Provider: LlmProvider.Ollama,
+                    BaseUrl: "http://manual-refine.local:11434"
+                )
+            )
+        ).Content.ReadFromJsonAsync<LlmConnectionDto>();
+        Assert.IsNotNull(conn);
+
+        var refineCfg = await (
+            await client.PostAsJsonAsync(
+                "/api/llm-settings/model-configurations",
+                new UpsertLlmModelConfigurationRequest("Gemma 26B", conn.Id, "gemma4:26b-a4b")
+            )
+        ).Content.ReadFromJsonAsync<LlmModelConfigurationDto>();
+        Assert.IsNotNull(refineCfg);
+
+        var wfRes = await client.PutAsJsonAsync(
+            "/api/llm-settings/workflows",
+            new UpdateLlmWorkflowsRequest(
+                TextModelProfileId: null,
+                VisionModelProfileId: null,
+                RefineModelProfileId: refineCfg.DefaultProfileId,
+                AutoPublishHighConfidenceText: false,
+                MaxIngestionRetries: 3,
+                EnableIngestion: false,
+                AutoResumeQueue: true,
+                RefineDuringIngestion: false,
+                RefineDuringIdle: false
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.OK, wfRes.StatusCode);
+
+        // AI helper status exposes RefineModel even when TextModel is unassigned
+        var helperStatus = await client.GetFromJsonAsync<App.Core.AiHelpers.AiHelperStatusDto>(
+            "/api/ai-helpers/status"
+        );
+        Assert.IsNotNull(helperStatus);
+        Assert.IsFalse(helperStatus.IsAvailable);
+        Assert.AreEqual("gemma4:26b-a4b", helperStatus.RefineModel);
+
+        // 3. Seed a polluted FoodItem + user collection on a manual Published recipe (NO IngestionJob)
+        Guid badFoodId;
+        Guid userCollectionId;
+        Guid publishedManualId;
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var badFood = new FoodItem
+            {
+                Id = Guid.NewGuid(),
+                Name = "1/2-inch cubed peeled sweet potatoes",
+                NormalizedName = "1/2-inch cubed peeled sweet potatoes",
+                Category = FoodCategory.Produce,
+                CreatedBy = "Test",
+                ModifiedBy = "Test",
+            };
+            var userCollection = new Collection
+            {
+                Id = Guid.NewGuid(),
+                Name = $"Family Favorites {Guid.NewGuid():N}"[..24],
+                NormalizedName = $"family favorites {Guid.NewGuid():N}"[..24],
+                Slug = $"family-favorites-{Guid.NewGuid():N}"[..24],
+                CreatedBy = "Test",
+                ModifiedBy = "Test",
+            };
+            db.FoodItems.Add(badFood);
+            db.Collections.Add(userCollection);
+            await db.SaveChangesAsync();
+
+            var recipeSvc = scope.ServiceProvider.GetRequiredService<IRecipeService>();
+            var created = await recipeSvc.CreateRecipeAsync(
+                new UpsertRecipeRequest(
+                    Title: "Manual Sweet Potato Mash",
+                    Description: "Homemade classic.",
+                    Status: RecipeStatus.Published,
+                    BaseServings: 4m,
+                    CollectionIds: [userCollection.Id],
+                    Ingredients:
+                    [
+                        new RecipeIngredientInput(
+                            Quantity: 2m,
+                            Unit: MeasurementUnit.Lb,
+                            FoodItemId: badFood.Id,
+                            DisplayName: "1/2-inch cubed peeled sweet potatoes"
+                        ),
+                    ],
+                    Steps: [new RecipeStepInput(Instruction: "Boil sweet potatoes until tender.")]
+                )
+            );
+            badFoodId = badFood.Id;
+            userCollectionId = userCollection.Id;
+            publishedManualId = created.Id;
+        }
+
+        // 4. Queue immediate refinement on both DraftReview and Published manual recipes while paused
+        var queueDraftRes = await client.PostAsync(
+            $"/api/recipes/{draftRecipe.Id}/refine-now",
+            null
+        );
+        Assert.AreEqual(HttpStatusCode.Accepted, queueDraftRes.StatusCode);
+        var queuedDraft = await queueDraftRes.Content.ReadFromJsonAsync<RecipeDetailDto>();
+        Assert.AreEqual(RecipeRefinementStatus.Queued, queuedDraft!.RefinementStatus);
+
+        var queuePubRes = await client.PostAsync(
+            $"/api/recipes/{publishedManualId}/refine-now",
+            null
+        );
+        Assert.AreEqual(HttpStatusCode.Accepted, queuePubRes.StatusCode);
+
+        // Idle refinement must NOT run while queue is paused
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            Assert.IsFalse(
+                await scope
+                    .ServiceProvider.GetRequiredService<IIngestionProcessor>()
+                    .ProcessNextIdleRefinementAsync()
+            );
+        }
+
+        // Process both requested refinements even though EnableIngestion == false
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            var processor = scope.ServiceProvider.GetRequiredService<IIngestionProcessor>();
+            Assert.IsTrue(await processor.ProcessNextRequestedRefinementAsync());
+            Assert.IsTrue(await processor.ProcessNextRequestedRefinementAsync());
+            Assert.IsFalse(await processor.ProcessNextRequestedRefinementAsync());
+        }
+
+        // DraftReview recipe preserves its DraftReview status and gets RefinedModel with null ExtractedModel
+        var refinedDraft = await client.GetFromJsonAsync<RecipeDetailDto>(
+            $"/api/recipes/{draftRecipe.Id}"
+        );
+        Assert.IsNotNull(refinedDraft);
+        Assert.AreEqual(RecipeStatus.DraftReview, refinedDraft.Status);
+        Assert.IsNull(refinedDraft.ExtractedModel);
+        Assert.AreEqual("gemma4:26b-a4b", refinedDraft.RefinedModel);
+        Assert.AreEqual(RecipeRefinementStatus.None, refinedDraft.RefinementStatus);
+        Assert.IsNull(refinedDraft.RefinementStatusDetail);
+
+        // Published manual recipe preserves collections, cleans catalog, deletes orphan FoodItem
+        var refinedPub = await client.GetFromJsonAsync<RecipeDetailDto>(
+            $"/api/recipes/{publishedManualId}"
+        );
+        Assert.IsNotNull(refinedPub);
+        Assert.AreEqual("Refined Sweet Potato Mash", refinedPub.Title);
+        Assert.AreEqual(RecipeStatus.Published, refinedPub.Status);
+        Assert.IsNull(refinedPub.ExtractedModel);
+        Assert.AreEqual("gemma4:26b-a4b", refinedPub.RefinedModel);
+        Assert.AreEqual(RecipeRefinementStatus.None, refinedPub.RefinementStatus);
+        Assert.IsTrue(refinedPub.Collections.Any(c => c.Id == userCollectionId));
+
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            Assert.IsFalse(await db.FoodItems.AnyAsync(f => f.Id == badFoodId));
+            Assert.IsTrue(await db.FoodItems.AnyAsync(f => f.NormalizedName == "sweet potato"));
+        }
+    }
+
+    [TestMethod]
+    public async Task RecipeRefineNow_IngestedRecipeSyncsLinkedJob_AndRecordsAndDismissesFailure()
+    {
+        var shouldFail = false;
+        var mockLlm = new FallbackExercisingLlmClient
+        {
+            ForceSimpleBatch = true,
+            ThrowOnStage = (_, stage) =>
+                shouldFail && stage == "stage6_refine_recipe"
+                    ? new LlmHostUnavailableException("Refinement host offline.")
+                    : null,
+            Stage6JsonOverride = """
+                {
+                  "title": "Refined Ingested Stew",
+                  "description": null,
+                  "servings": null,
+                  "yield": null,
+                  "timing": null,
+                  "tags": null,
+                  "ingredientPatches": [],
+                  "stepPatches": [],
+                  "refinementNotes": ["Polished stew title."]
+                }
+                """,
+        };
+
+        await using var customFactory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ILlmExtractionClient>();
+                services.AddSingleton<ILlmExtractionClient>(mockLlm);
+            });
+        });
+
+        using var client = customFactory.CreateClient();
+        await AuthenticateAsync(client);
+
+        var conn = await (
+            await client.PostAsJsonAsync(
+                "/api/llm-settings/connections",
+                new UpsertLlmConnectionRequest(
+                    Name: "Sync Refine Ollama",
+                    Provider: LlmProvider.Ollama,
+                    BaseUrl: "http://sync-refine.local:11434"
+                )
+            )
+        ).Content.ReadFromJsonAsync<LlmConnectionDto>();
+        Assert.IsNotNull(conn);
+
+        var refineCfg = await (
+            await client.PostAsJsonAsync(
+                "/api/llm-settings/model-configurations",
+                new UpsertLlmModelConfigurationRequest("Gemma 26B", conn.Id, "gemma4:26b-a4b")
+            )
+        ).Content.ReadFromJsonAsync<LlmModelConfigurationDto>();
+        Assert.IsNotNull(refineCfg);
+
+        await client.PutAsJsonAsync(
+            "/api/llm-settings/workflows",
+            new UpdateLlmWorkflowsRequest(
+                TextModelProfileId: null,
+                VisionModelProfileId: null,
+                RefineModelProfileId: refineCfg.DefaultProfileId,
+                EnableIngestion: false,
+                RefineDuringIngestion: false,
+                RefineDuringIdle: false
+            )
+        );
+
+        Guid recipeId;
+        Guid jobId;
+        Guid archivedRecipeId;
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var recipeSvc = scope.ServiceProvider.GetRequiredService<IRecipeService>();
+
+            var recipe = await recipeSvc.CreateRecipeAsync(
+                new UpsertRecipeRequest(
+                    Title: "Unrefined Ingested Stew",
+                    Status: RecipeStatus.Published,
+                    BaseServings: 4m,
+                    ExtractedModel: "gemma4:e4b",
+                    Ingredients:
+                    [
+                        new RecipeIngredientInput(
+                            Quantity: 1m,
+                            Unit: MeasurementUnit.Tsp,
+                            DisplayName: "kosher salt"
+                        ),
+                    ],
+                    Steps: [new RecipeStepInput(Instruction: "Simmer stew.")]
+                )
+            );
+            var archived = await recipeSvc.CreateRecipeAsync(
+                new UpsertRecipeRequest(
+                    Title: "Archived Stew",
+                    Status: RecipeStatus.Archived,
+                    BaseServings: 4m,
+                    Ingredients: [new RecipeIngredientInput(DisplayName: "salt")],
+                    Steps: [new RecipeStepInput(Instruction: "Boil.")]
+                )
+            );
+
+            var job = new IngestionJob
+            {
+                Id = Guid.NewGuid(),
+                Channel = IngestionChannel.RawText,
+                Status = IngestionJobStatus.Published,
+                DisplayTitle = "Unrefined Ingested Stew",
+                NormalizedSourceText =
+                    "Unrefined Ingested Stew\nIngredients:\n- 1 tsp kosher salt\nInstructions:\n1. Simmer stew.",
+                ExtractedDraftJson = JsonSerializer.Serialize(
+                    new IngestionExtractedDraftDto(
+                        Title: "Unrefined Ingested Stew",
+                        ExtractedModel: "gemma4:e4b",
+                        Ingredients:
+                        [
+                            new IngestionDraftIngredientDto(
+                                Quantity: 1m,
+                                Unit: MeasurementUnit.Tsp,
+                                DisplayName: "kosher salt"
+                            ),
+                        ],
+                        Steps: [new IngestionDraftStepDto(Instruction: "Simmer stew.")]
+                    )
+                ),
+                ExtractedModel = "gemma4:e4b",
+                ResultingRecipeId = recipe.Id,
+                CreatedBy = "Test",
+                ModifiedBy = "Test",
+            };
+            db.IngestionJobs.Add(job);
+            await db.SaveChangesAsync();
+
+            recipeId = recipe.Id;
+            jobId = job.Id;
+            archivedRecipeId = archived.Id;
+        }
+
+        // Archived recipe cannot be refined (409 Conflict)
+        var archivedRes = await client.PostAsync(
+            $"/api/recipes/{archivedRecipeId}/refine-now",
+            null
+        );
+        Assert.AreEqual(HttpStatusCode.Conflict, archivedRes.StatusCode);
+
+        // Queue & run refinement on published ingested recipe -> syncs BOTH recipe and linked job
+        var queueRes = await client.PostAsync($"/api/recipes/{recipeId}/refine-now", null);
+        Assert.AreEqual(HttpStatusCode.Accepted, queueRes.StatusCode);
+
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            Assert.IsTrue(
+                await scope
+                    .ServiceProvider.GetRequiredService<IIngestionProcessor>()
+                    .ProcessNextRequestedRefinementAsync()
+            );
+        }
+
+        var refinedRecipe = await client.GetFromJsonAsync<RecipeDetailDto>(
+            $"/api/recipes/{recipeId}"
+        );
+        Assert.AreEqual("Refined Ingested Stew", refinedRecipe!.Title);
+        Assert.AreEqual("gemma4:e4b", refinedRecipe.ExtractedModel);
+        Assert.AreEqual("gemma4:26b-a4b", refinedRecipe.RefinedModel);
+        Assert.AreEqual(RecipeRefinementStatus.None, refinedRecipe.RefinementStatus);
+
+        var syncedJob = await client.GetFromJsonAsync<IngestionJobDetailDto>(
+            $"/api/ingestion/jobs/{jobId}"
+        );
+        Assert.AreEqual("Refined Ingested Stew", syncedJob!.DisplayTitle);
+        Assert.AreEqual("gemma4:26b-a4b", syncedJob.RefinedModel);
+        Assert.IsNotNull(syncedJob.RefinedAt);
+
+        // Failure case: when LLM host is unreachable, recipe records Failed status and can be dismissed
+        shouldFail = true;
+        var reQueueRes = await client.PostAsync($"/api/recipes/{recipeId}/refine-now", null);
+        Assert.AreEqual(HttpStatusCode.Accepted, reQueueRes.StatusCode);
+
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            Assert.IsFalse(
+                await scope
+                    .ServiceProvider.GetRequiredService<IIngestionProcessor>()
+                    .ProcessNextRequestedRefinementAsync()
+            );
+        }
+
+        var failedRecipe = await client.GetFromJsonAsync<RecipeDetailDto>(
+            $"/api/recipes/{recipeId}"
+        );
+        Assert.AreEqual(RecipeRefinementStatus.Failed, failedRecipe!.RefinementStatus);
+        StringAssert.Contains(failedRecipe.RefinementStatusDetail ?? "", "Refinement host offline");
+
+        var dismissRes = await client.DeleteAsync($"/api/recipes/{recipeId}/refinement-status");
+        Assert.AreEqual(HttpStatusCode.OK, dismissRes.StatusCode);
+        var dismissedRecipe = await dismissRes.Content.ReadFromJsonAsync<RecipeDetailDto>();
+        Assert.AreEqual(RecipeRefinementStatus.None, dismissedRecipe!.RefinementStatus);
+        Assert.IsNull(dismissedRecipe.RefinementStatusDetail);
+    }
+
+    [TestMethod]
+    public async Task IngestionJobRefineNow_ReadyForReviewJob_RunsOnlyChosenJobWhilePaused()
+    {
+        var mockLlm = new FallbackExercisingLlmClient
+        {
+            ForceSimpleBatch = true,
+            Stage6JsonOverride = """
+                {
+                  "title": "Refined Chosen Soup",
+                  "description": null,
+                  "servings": null,
+                  "yield": null,
+                  "timing": null,
+                  "tags": null,
+                  "ingredientPatches": [],
+                  "stepPatches": [],
+                  "refinementNotes": ["Polished chosen draft."]
+                }
+                """,
+        };
+
+        await using var customFactory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ILlmExtractionClient>();
+                services.AddSingleton<ILlmExtractionClient>(mockLlm);
+            });
+        });
+
+        using var client = customFactory.CreateClient();
+        await AuthenticateAsync(client);
+
+        var conn = await (
+            await client.PostAsJsonAsync(
+                "/api/llm-settings/connections",
+                new UpsertLlmConnectionRequest(
+                    Name: "Job Refine Ollama",
+                    Provider: LlmProvider.Ollama,
+                    BaseUrl: "http://job-refine.local:11434"
+                )
+            )
+        ).Content.ReadFromJsonAsync<LlmConnectionDto>();
+        Assert.IsNotNull(conn);
+
+        var refineCfg = await (
+            await client.PostAsJsonAsync(
+                "/api/llm-settings/model-configurations",
+                new UpsertLlmModelConfigurationRequest("Gemma 26B", conn.Id, "gemma4:26b-a4b")
+            )
+        ).Content.ReadFromJsonAsync<LlmModelConfigurationDto>();
+        Assert.IsNotNull(refineCfg);
+
+        await client.PutAsJsonAsync(
+            "/api/llm-settings/workflows",
+            new UpdateLlmWorkflowsRequest(
+                TextModelProfileId: null,
+                VisionModelProfileId: null,
+                RefineModelProfileId: refineCfg.DefaultProfileId,
+                EnableIngestion: false,
+                RefineDuringIngestion: false,
+                RefineDuringIdle: false
+            )
+        );
+
+        Guid chosenJobId;
+        Guid heldJobId;
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var draft = new IngestionExtractedDraftDto(
+                Title: "Original Draft Soup",
+                ExtractedModel: "gemma4:e4b",
+                Ingredients:
+                [
+                    new IngestionDraftIngredientDto(
+                        Quantity: 1m,
+                        Unit: MeasurementUnit.Tsp,
+                        DisplayName: "salt"
+                    ),
+                ],
+                Steps: [new IngestionDraftStepDto(Instruction: "Boil.")]
+            );
+
+            var chosen = new IngestionJob
+            {
+                Id = Guid.NewGuid(),
+                Channel = IngestionChannel.RawText,
+                Status = IngestionJobStatus.ReadyForReview,
+                DisplayTitle = "Chosen Soup",
+                NormalizedSourceText = "Chosen Soup\n- 1 tsp salt\n1. Boil.",
+                ExtractedDraftJson = JsonSerializer.Serialize(draft with { Title = "Chosen Soup" }),
+                ExtractedModel = "gemma4:e4b",
+                CreatedBy = "Test",
+                ModifiedBy = "Test",
+            };
+            var held = new IngestionJob
+            {
+                Id = Guid.NewGuid(),
+                Channel = IngestionChannel.RawText,
+                Status = IngestionJobStatus.ReadyForReview,
+                DisplayTitle = "Held Soup",
+                NormalizedSourceText = "Held Soup\n- 1 tsp salt\n1. Boil.",
+                ExtractedDraftJson = JsonSerializer.Serialize(draft with { Title = "Held Soup" }),
+                ExtractedModel = "gemma4:e4b",
+                CreatedBy = "Test",
+                ModifiedBy = "Test",
+            };
+            db.IngestionJobs.AddRange(chosen, held);
+            await db.SaveChangesAsync();
+            chosenJobId = chosen.Id;
+            heldJobId = held.Id;
+        }
+
+        var refineRes = await client.PostAsync(
+            $"/api/ingestion/jobs/{chosenJobId}/refine-now",
+            null
+        );
+        Assert.AreEqual(HttpStatusCode.Accepted, refineRes.StatusCode);
+        var queuedSummary = await refineRes.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
+        Assert.IsTrue(queuedSummary!.RefinementRunNowRequested);
+
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            var processor = scope.ServiceProvider.GetRequiredService<IIngestionProcessor>();
+            Assert.IsTrue(await processor.ProcessNextRequestedRefinementAsync());
+            Assert.IsFalse(await processor.ProcessNextRequestedRefinementAsync());
+        }
+
+        var chosenAfter = await client.GetFromJsonAsync<IngestionJobDetailDto>(
+            $"/api/ingestion/jobs/{chosenJobId}"
+        );
+        var heldAfter = await client.GetFromJsonAsync<IngestionJobDetailDto>(
+            $"/api/ingestion/jobs/{heldJobId}"
+        );
+        Assert.AreEqual("Refined Chosen Soup", chosenAfter!.DisplayTitle);
+        Assert.AreEqual("gemma4:26b-a4b", chosenAfter.RefinedModel);
+        Assert.IsNotNull(chosenAfter.RefinedAt);
+        Assert.IsFalse(chosenAfter.RefinementRunNowRequested);
+        Assert.IsNull(heldAfter!.RefinedAt);
+        Assert.IsNull(heldAfter.RefinedModel);
+
+        // Re-refining an already-refined job via /refine-now also works
+        var reRefineRes = await client.PostAsync(
+            $"/api/ingestion/jobs/{chosenJobId}/refine-now",
+            null
+        );
+        Assert.AreEqual(HttpStatusCode.Accepted, reRefineRes.StatusCode);
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            Assert.IsTrue(
+                await scope
+                    .ServiceProvider.GetRequiredService<IIngestionProcessor>()
+                    .ProcessNextRequestedRefinementAsync()
+            );
+        }
+    }
+
     private sealed class FallbackExercisingLlmClient : ILlmExtractionClient
     {
         public bool ForceSimpleBatch { get; set; }

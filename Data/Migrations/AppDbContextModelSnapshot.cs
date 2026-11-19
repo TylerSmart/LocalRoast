@@ -570,6 +570,11 @@ namespace App.Data.Migrations
                     b.Property<DateTimeOffset?>("RefinementNextRetryAt")
                         .HasColumnType("datetimeoffset");
 
+                    b.Property<bool>("RefinementRunNowRequested")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
+
                     b.Property<Guid?>("ResultingRecipeId")
                         .HasColumnType("uniqueidentifier");
 
@@ -1167,6 +1172,20 @@ namespace App.Data.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
+                    b.Property<DateTimeOffset?>("RefinementRequestedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("RefinementStatus")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)")
+                        .HasDefaultValue("None");
+
+                    b.Property<string>("RefinementStatusDetail")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
                     b.Property<string>("Slug")
                         .IsRequired()
                         .HasMaxLength(220)
@@ -1223,6 +1242,8 @@ namespace App.Data.Migrations
                     b.HasIndex("Status");
 
                     b.HasIndex("Title");
+
+                    b.HasIndex("RefinementStatus", "RefinementRequestedAt");
 
                     b.HasIndex("TimesCooked", "AverageRating", "LastCookedAt");
 

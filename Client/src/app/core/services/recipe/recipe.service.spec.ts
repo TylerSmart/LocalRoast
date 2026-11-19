@@ -366,4 +366,33 @@ describe('RecipeService', () => {
     deleteReq.flush(null);
     await deletePromise;
   });
+
+  it('queues immediate refinement via POST /api/recipes/:id/refine-now and dismisses failure via DELETE', async () => {
+    const refinePromise = firstValueFrom(service.refineRecipeNow('r-1'));
+    const refineReq = httpMock.expectOne('/api/recipes/r-1/refine-now');
+    expect(refineReq.request.method).toBe('POST');
+    expect(refineReq.request.body).toEqual({});
+    refineReq.flush({
+      id: 'r-1',
+      title: 'Lasagna',
+      refinementStatus: 'Queued',
+      refinementStatusDetail: 'Queued for refinement via gemma4:26b-a4b...',
+    } as RecipeDetailDto);
+
+    const refined = await refinePromise;
+    expect(refined.refinementStatus).toBe('Queued');
+
+    const dismissPromise = firstValueFrom(service.dismissRefinementFailure('r-1'));
+    const dismissReq = httpMock.expectOne('/api/recipes/r-1/refinement-status');
+    expect(dismissReq.request.method).toBe('DELETE');
+    dismissReq.flush({
+      id: 'r-1',
+      title: 'Lasagna',
+      refinementStatus: 'None',
+      refinementStatusDetail: null,
+    } as RecipeDetailDto);
+
+    const dismissed = await dismissPromise;
+    expect(dismissed.refinementStatus).toBe('None');
+  });
 });

@@ -74,6 +74,21 @@
             <span>Print Recipe</span>
           </button>
           <mat-divider></mat-divider>
+          @if (canRefineRecipe()) {
+            <button
+              mat-menu-item
+              type="button"
+              (click)="refineRecipeNow()"
+              [disabled]="isRefinementQueuedOrRunning() || isQueueingRefinement()"
+              [attr.aria-label]="recipe()!.refinedModel ? 'Re-run refinement' : 'Refine recipe'"
+              [matTooltip]="refineMenuTooltip()"
+              class="refine-recipe-menu-item"
+              data-testid="refine-recipe-menu-item"
+            >
+              <mat-icon>auto_fix_high</mat-icon>
+              <span>{{ refineMenuLabel() }}</span>
+            </button>
+          }
           @if (recipe()!.ingestionJobId) {
             <a
               mat-menu-item
@@ -97,6 +112,8 @@
                 isRerunningIngestion() ? 'Re-queueing...' : 'Re-run Ingestion Extraction'
               }}</span>
             </button>
+          }
+          @if (canRefineRecipe() || recipe()!.ingestionJobId) {
             <mat-divider></mat-divider>
           }
           <a
@@ -134,6 +151,56 @@
       <a mat-button routerLink="/recipes">Back to Recipes</a>
     </div>
   } @else if (recipe()) {
+    @if (isRefinementQueuedOrRunning()) {
+      <div
+        class="refinement-status-banner no-print"
+        role="status"
+        data-testid="recipe-refinement-status-banner"
+      >
+        <mat-spinner diameter="18" class="inline-spinner"></mat-spinner>
+        <span class="refinement-banner-text">
+          {{ recipe()!.refinementStatusDetail || 'Refining recipe...' }}
+        </span>
+      </div>
+    } @else if (recipe()!.refinementStatus === 'Failed') {
+      <div
+        class="refinement-error-banner no-print"
+        role="alert"
+        data-testid="recipe-refinement-error-banner"
+      >
+        <div class="refinement-error-content">
+          <mat-icon>error_outline</mat-icon>
+          <span>{{ recipe()!.refinementStatusDetail || 'Recipe refinement failed.' }}</span>
+        </div>
+        <div class="refinement-error-actions">
+          @if (hasRefinementModel()) {
+            <button
+              mat-stroked-button
+              type="button"
+              (click)="refineRecipeNow()"
+              [disabled]="isQueueingRefinement()"
+              aria-label="Retry recipe refinement"
+              data-testid="retry-refinement-btn"
+            >
+              <mat-icon>refresh</mat-icon>
+              <span>Retry</span>
+            </button>
+          }
+          <button
+            mat-icon-button
+            type="button"
+            (click)="dismissRefinementFailure()"
+            [disabled]="isDismissingRefinement()"
+            aria-label="Dismiss refinement error"
+            matTooltip="Dismiss"
+            data-testid="dismiss-refinement-error-btn"
+          >
+            <mat-icon>close</mat-icon>
+          </button>
+        </div>
+      </div>
+    }
+
     <!-- Recipe Hero / Header -->
     <header class="recipe-hero">
       @if (recipe()!.coverImagePath) {

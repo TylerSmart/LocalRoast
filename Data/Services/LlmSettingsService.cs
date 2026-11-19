@@ -431,6 +431,47 @@ public sealed class LlmSettingsService(
             {
                 await dbContext.SaveChangesAsync(cancellationToken);
             }
+
+            var queuedRefinementJobs = await dbContext
+                .IngestionJobs.Where(j => j.RefinementRunNowRequested)
+                .ToListAsync(cancellationToken);
+
+            foreach (var job in queuedRefinementJobs)
+            {
+                job.RefinementRunNowRequested = false;
+                if (
+                    job.StatusDetail?.StartsWith(
+                        "Queued for immediate refinement",
+                        StringComparison.Ordinal
+                    ) == true
+                    || job.StatusDetail?.StartsWith("Refining ", StringComparison.Ordinal) == true
+                )
+                {
+                    job.StatusDetail =
+                        job.Status == IngestionJobStatus.Published
+                            ? $"Published ({job.ExtractedModel ?? "ingested"})."
+                            : $"Ready for side-by-side review ({job.ExtractedModel ?? "ingested"}).";
+                }
+            }
+
+            var queuedRefinementRecipes = await dbContext
+                .Recipes.Where(r =>
+                    r.RefinementStatus == App.Core.Recipes.RecipeRefinementStatus.Queued
+                    || r.RefinementStatus == App.Core.Recipes.RecipeRefinementStatus.Running
+                )
+                .ToListAsync(cancellationToken);
+
+            foreach (var recipe in queuedRefinementRecipes)
+            {
+                recipe.RefinementStatus = App.Core.Recipes.RecipeRefinementStatus.None;
+                recipe.RefinementRequestedAt = null;
+                recipe.RefinementStatusDetail = null;
+            }
+
+            if (queuedRefinementJobs.Count > 0 || queuedRefinementRecipes.Count > 0)
+            {
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
         }
         else if (enableIngestion && !wasIngestionEnabled)
         {
@@ -772,6 +813,47 @@ public sealed class LlmSettingsService(
             }
 
             if (workingJobs.Count > 0)
+            {
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
+
+            var queuedRefinementJobs = await dbContext
+                .IngestionJobs.Where(j => j.RefinementRunNowRequested)
+                .ToListAsync(cancellationToken);
+
+            foreach (var job in queuedRefinementJobs)
+            {
+                job.RefinementRunNowRequested = false;
+                if (
+                    job.StatusDetail?.StartsWith(
+                        "Queued for immediate refinement",
+                        StringComparison.Ordinal
+                    ) == true
+                    || job.StatusDetail?.StartsWith("Refining ", StringComparison.Ordinal) == true
+                )
+                {
+                    job.StatusDetail =
+                        job.Status == IngestionJobStatus.Published
+                            ? $"Published ({job.ExtractedModel ?? "ingested"})."
+                            : $"Ready for side-by-side review ({job.ExtractedModel ?? "ingested"}).";
+                }
+            }
+
+            var queuedRefinementRecipes = await dbContext
+                .Recipes.Where(r =>
+                    r.RefinementStatus == App.Core.Recipes.RecipeRefinementStatus.Queued
+                    || r.RefinementStatus == App.Core.Recipes.RecipeRefinementStatus.Running
+                )
+                .ToListAsync(cancellationToken);
+
+            foreach (var recipe in queuedRefinementRecipes)
+            {
+                recipe.RefinementStatus = App.Core.Recipes.RecipeRefinementStatus.None;
+                recipe.RefinementRequestedAt = null;
+                recipe.RefinementStatusDetail = null;
+            }
+
+            if (queuedRefinementJobs.Count > 0 || queuedRefinementRecipes.Count > 0)
             {
                 await dbContext.SaveChangesAsync(cancellationToken);
             }

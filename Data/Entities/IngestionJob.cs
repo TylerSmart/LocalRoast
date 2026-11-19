@@ -66,6 +66,12 @@ public sealed class IngestionJob : IAuditable
     /// </summary>
     public bool RunNowRequested { get; set; }
 
+    /// <summary>
+    /// The user asked to run a refinement pass on this review/published job now, even while
+    /// ingestion is paused or idle refinement is disabled.
+    /// </summary>
+    public bool RefinementRunNowRequested { get; set; }
+
     public DateTimeOffset? ProcessedAt { get; set; }
 
     public Guid? ResultingRecipeId { get; set; }

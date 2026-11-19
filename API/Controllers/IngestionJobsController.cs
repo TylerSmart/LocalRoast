@@ -516,6 +516,42 @@ public sealed class IngestionJobsController(IIngestionService ingestionService) 
         }
     }
 
+    [HttpPost("{id:guid}/refine-now")]
+    [ProducesResponseType(typeof(IngestionJobSummaryDto), StatusCodes.Status202Accepted)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> RefineJobNow(Guid id, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var queued = await ingestionService.RefineJobNowAsync(id, cancellationToken);
+            return queued is not null ? Accepted(queued) : NotFound();
+        }
+        catch (DomainValidationException ex)
+        {
+            return BadRequest(
+                new ProblemDetails
+                {
+                    Status = StatusCodes.Status400BadRequest,
+                    Title = ex.Title,
+                    Detail = ex.Message,
+                }
+            );
+        }
+        catch (ConflictException ex)
+        {
+            return Conflict(
+                new ProblemDetails
+                {
+                    Status = StatusCodes.Status409Conflict,
+                    Title = ex.Title,
+                    Detail = ex.Message,
+                }
+            );
+        }
+    }
+
     [HttpPost("retry-waiting")]
     [ProducesResponseType(typeof(RetryWaitingJobsResultDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> RetryAllWaitingJobs(CancellationToken cancellationToken)

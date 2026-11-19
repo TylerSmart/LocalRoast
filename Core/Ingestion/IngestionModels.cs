@@ -280,7 +280,8 @@ public record IngestionJobSummaryDto(
     int SourceFileCount = 0,
     string? ExtractedModel = null,
     string? RefinedModel = null,
-    DateTimeOffset? RefinedAt = null
+    DateTimeOffset? RefinedAt = null,
+    bool RefinementRunNowRequested = false
 );
 
 public record IngestionJobDetailDto(
@@ -311,7 +312,8 @@ public record IngestionJobDetailDto(
     int? SourceBookPage = null,
     string? ExtractedModel = null,
     string? RefinedModel = null,
-    DateTimeOffset? RefinedAt = null
+    DateTimeOffset? RefinedAt = null,
+    bool RefinementRunNowRequested = false
 )
 {
     public IReadOnlyList<IngestionSourceFileDto> SourceFiles { get; init; } = SourceFiles ?? [];

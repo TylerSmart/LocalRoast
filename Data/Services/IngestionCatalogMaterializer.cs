@@ -774,12 +774,13 @@ public static partial class IngestionCatalogMaterializer
         return null;
     }
 
-    public static async Task<RecipeDetailDto> PublishDraftAsync(
+    public static async Task<UpsertRecipeRequest> BuildUpsertRequestFromDraftAsync(
         AppDbContext dbContext,
-        IRecipeService recipeService,
-        IMediaStorageService mediaStorageService,
-        IngestionJob job,
         IngestionExtractedDraftDto draft,
+        Guid? excludeRecipeId,
+        RecipeStatus targetStatus,
+        string? extractedModel,
+        string? refinedModel,
         CancellationToken cancellationToken
     )
     {
@@ -807,7 +808,7 @@ public static partial class IngestionCatalogMaterializer
                             dbContext,
                             ing,
                             recipeTitle,
-                            job.ResultingRecipeId,
+                            excludeRecipeId,
                             cancellationToken
                         )
                     )?.Id;
@@ -909,12 +910,12 @@ public static partial class IngestionCatalogMaterializer
             allowNewCustomTags: false
         );
 
-        var upsertRequest = new UpsertRecipeRequest(
+        return new UpsertRecipeRequest(
             Title: draft.Title,
             Description: draft.Description != null && draft.Description.Length > 2000
                 ? draft.Description[..2000].TrimEnd()
                 : draft.Description,
-            Status: RecipeStatus.Published,
+            Status: targetStatus,
             BaseServings: draft.BaseServings,
             YieldDisplay: draft.YieldDisplay,
             PrepTimeMinutes: draft.PrepTimeMinutes,
@@ -932,8 +933,52 @@ public static partial class IngestionCatalogMaterializer
             ThumbnailImagePath: draft.ThumbnailImagePath,
             CollectionIds: draft.SuggestedCollectionIds,
             TagIds: resolvedTagIds,
-            ExtractedModel: job.ExtractedModel,
-            RefinedModel: job.RefinedModel ?? draft.RefinedModel ?? string.Empty
+            ExtractedModel: extractedModel,
+            RefinedModel: refinedModel
+        );
+    }
+
+    public static async Task<RecipeDetailDto?> ApplyRefinedDraftToRecipeAsync(
+        AppDbContext dbContext,
+        IRecipeService recipeService,
+        Guid recipeId,
+        RecipeStatus preservedStatus,
+        string? preservedExtractedModel,
+        string refinedModel,
+        IngestionExtractedDraftDto draft,
+        CancellationToken cancellationToken
+    )
+    {
+        var upsertRequest = await BuildUpsertRequestFromDraftAsync(
+            dbContext,
+            draft,
+            excludeRecipeId: recipeId,
+            targetStatus: preservedStatus,
+            extractedModel: preservedExtractedModel,
+            refinedModel: refinedModel,
+            cancellationToken
+        );
+
+        return await recipeService.UpdateRecipeAsync(recipeId, upsertRequest, cancellationToken);
+    }
+
+    public static async Task<RecipeDetailDto> PublishDraftAsync(
+        AppDbContext dbContext,
+        IRecipeService recipeService,
+        IMediaStorageService mediaStorageService,
+        IngestionJob job,
+        IngestionExtractedDraftDto draft,
+        CancellationToken cancellationToken
+    )
+    {
+        var upsertRequest = await BuildUpsertRequestFromDraftAsync(
+            dbContext,
+            draft,
+            excludeRecipeId: job.ResultingRecipeId,
+            targetStatus: RecipeStatus.Published,
+            extractedModel: job.ExtractedModel,
+            refinedModel: job.RefinedModel ?? draft.RefinedModel ?? string.Empty,
+            cancellationToken
         );
 
         RecipeDetailDto createdRecipe;

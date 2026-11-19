@@ -77,7 +77,14 @@ public sealed class IngestionBackgroundWorker(
                     await processor.RecoverInterruptedJobsAsync(stoppingToken);
                 }
 
-                // 2. Drain all pending queued jobs (supporting configurable max concurrency)
+                // 2a. Drain explicit user-requested refinements (runs even when ingestion is paused
+                // or RefineDuringIdle is disabled)
+                if (config.HasRefinementModelConfigured && !stoppingToken.IsCancellationRequested)
+                {
+                    await DrainRequestedRefinementsAsync(stoppingToken);
+                }
+
+                // 2b. Drain all pending queued jobs (supporting configurable max concurrency)
                 var maxConcurrency = config.EffectiveMaxConcurrentRequests;
                 if (maxConcurrency <= 1)
                 {
@@ -88,6 +95,15 @@ public sealed class IngestionBackgroundWorker(
                         var processor =
                             scope.ServiceProvider.GetRequiredService<IIngestionProcessor>();
                         processedAny = await processor.ProcessNextQueuedJobAsync(stoppingToken);
+
+                        if (
+                            processedAny
+                            && config.HasRefinementModelConfigured
+                            && !stoppingToken.IsCancellationRequested
+                        )
+                        {
+                            await DrainRequestedRefinementsAsync(stoppingToken);
+                        }
                     } while (processedAny && !stoppingToken.IsCancellationRequested);
                 }
                 else
@@ -134,6 +150,14 @@ public sealed class IngestionBackgroundWorker(
                         {
                             break;
                         }
+                    }
+
+                    if (
+                        config.HasRefinementModelConfigured
+                        && !stoppingToken.IsCancellationRequested
+                    )
+                    {
+                        await DrainRequestedRefinementsAsync(stoppingToken);
                     }
                 }
 
@@ -198,6 +222,17 @@ public sealed class IngestionBackgroundWorker(
         }
 
         logger.LogInformation("IngestionBackgroundWorker stopped.");
+    }
+
+    private async Task DrainRequestedRefinementsAsync(CancellationToken stoppingToken)
+    {
+        bool refinedAny;
+        do
+        {
+            using var refineScope = scopeFactory.CreateScope();
+            var processor = refineScope.ServiceProvider.GetRequiredService<IIngestionProcessor>();
+            refinedAny = await processor.ProcessNextRequestedRefinementAsync(stoppingToken);
+        } while (refinedAny && !stoppingToken.IsCancellationRequested);
     }
 
     private async Task DrainPendingRecipeEmbeddingsAsync(CancellationToken stoppingToken)

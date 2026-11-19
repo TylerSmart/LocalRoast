@@ -858,6 +858,35 @@
               }
 
               @if (
+                hasRefinementModel() &&
+                (job.status === 'ReadyForReview' || job.status === 'Published')
+              ) {
+                <button
+                  mat-stroked-button
+                  type="button"
+                  class="refine-now-btn"
+                  data-testid="refine-now-btn"
+                  (click)="refineJobNow(job)"
+                  [disabled]="isJobRefining(job)"
+                  [attr.aria-label]="
+                    (job.refinedModel ? 'Re-refine now: ' : 'Refine now: ') + job.displayTitle
+                  "
+                  [matTooltip]="
+                    'Run refinement via ' + refineModel() + ' now, even when ingestion is paused'
+                  "
+                >
+                  <mat-icon>auto_fix_high</mat-icon>
+                  <span>{{
+                    isJobRefining(job)
+                      ? 'Refining...'
+                      : job.refinedModel
+                        ? 'Re-refine'
+                        : 'Refine now'
+                  }}</span>
+                </button>
+              }
+
+              @if (
                 job.status === 'Queued' ||
                 job.status === 'WaitingForLlmHost' ||
                 job.status === 'Failed'

@@ -298,4 +298,55 @@ public sealed class RecipesController(IRecipeService recipeService) : Controller
 
         return deleted ? NoContent() : NotFound();
     }
+
+    [HttpPost("{id:guid}/refine-now")]
+    [ProducesResponseType(typeof(RecipeDetailDto), StatusCodes.Status202Accepted)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> QueueRefinementNow(
+        Guid id,
+        CancellationToken cancellationToken
+    )
+    {
+        try
+        {
+            var updated = await recipeService.QueueRefinementNowAsync(id, cancellationToken);
+            return updated is not null ? Accepted(updated) : NotFound();
+        }
+        catch (DomainValidationException ex)
+        {
+            return BadRequest(
+                new ProblemDetails
+                {
+                    Status = StatusCodes.Status400BadRequest,
+                    Title = ex.Title,
+                    Detail = ex.Message,
+                }
+            );
+        }
+        catch (ConflictException ex)
+        {
+            return Conflict(
+                new ProblemDetails
+                {
+                    Status = StatusCodes.Status409Conflict,
+                    Title = ex.Title,
+                    Detail = ex.Message,
+                }
+            );
+        }
+    }
+
+    [HttpDelete("{id:guid}/refinement-status")]
+    [ProducesResponseType(typeof(RecipeDetailDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DismissRefinementFailure(
+        Guid id,
+        CancellationToken cancellationToken
+    )
+    {
+        var updated = await recipeService.DismissRefinementFailureAsync(id, cancellationToken);
+        return updated is not null ? Ok(updated) : NotFound();
+    }
 }

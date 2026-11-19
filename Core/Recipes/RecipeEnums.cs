@@ -73,3 +73,12 @@ public enum UnitSystem
     UsCustomary = 1,
     Metric = 2,
 }
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum RecipeRefinementStatus
+{
+    None = 0,
+    Queued = 1,
+    Running = 2,
+    Failed = 3,
+}

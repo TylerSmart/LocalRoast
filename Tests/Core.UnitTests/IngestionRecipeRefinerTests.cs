@@ -312,6 +312,115 @@ public sealed class IngestionRecipeRefinerTests
         Assert.IsGreaterThanOrEqualTo(0.90m, result.Draft.ConfidenceScore);
     }
 
+    [TestMethod]
+    public void BuildDraftAndFallbackSourceText_ForManualRecipe_PreservesMeasurementsReplacementsAndSections()
+    {
+        var foodButter = new FoodItem
+        {
+            Id = Guid.NewGuid(),
+            Name = "Unsalted Butter",
+            NormalizedName = "unsalted butter",
+            Category = FoodCategory.DairyAndEggs,
+            IsPantryStaple = false,
+        };
+        var recipe = new Recipe
+        {
+            Id = Guid.NewGuid(),
+            Title = "Manual Garlic Toast",
+            Slug = "manual-garlic-toast",
+            Description = "Crisp buttery garlic toast.",
+            Status = RecipeStatus.DraftReview,
+            BaseServings = 4m,
+            YieldDisplay = "4 slices",
+            PrepTimeMinutes = 5,
+            CookTimeMinutes = 10,
+            TotalTimeMinutes = 15,
+            Ingredients =
+            [
+                new RecipeIngredient
+                {
+                    Id = Guid.NewGuid(),
+                    SortOrder = 0,
+                    SectionName = "For the Spread",
+                    Quantity = 4m,
+                    Unit = MeasurementUnit.Tbsp,
+                    FoodItemId = foodButter.Id,
+                    FoodItem = foodButter,
+                    DisplayName = "unsalted butter",
+                    PreparationNote = "softened",
+                    AlternativeQuantity = 56m,
+                    AlternativeUnit = MeasurementUnit.G,
+                    Replacements =
+                    [
+                        new RecipeIngredientReplacement
+                        {
+                            Id = Guid.NewGuid(),
+                            SortOrder = 0,
+                            DisplayName = "olive oil",
+                            Quantity = 3m,
+                            Unit = MeasurementUnit.Tbsp,
+                        },
+                    ],
+                },
+                new RecipeIngredient
+                {
+                    Id = Guid.NewGuid(),
+                    SortOrder = 1,
+                    SectionName = "For the Spread",
+                    Quantity = 2m,
+                    Unit = MeasurementUnit.Clove,
+                    DisplayName = "minced garlic, fresh",
+                    IsOptional = true,
+                },
+            ],
+            Steps =
+            [
+                new RecipeStep
+                {
+                    Id = Guid.NewGuid(),
+                    StepNumber = 1,
+                    SectionName = "For the Spread",
+                    Instruction = "Bake at 400°F for 10 minutes until golden.",
+                    Timers =
+                    [
+                        new RecipeStepTimer
+                        {
+                            Id = Guid.NewGuid(),
+                            SortOrder = 0,
+                            DurationSeconds = 600,
+                            Label = "Bake",
+                        },
+                    ],
+                },
+            ],
+        };
+
+        var draft = IngestionProcessor.BuildDraftFromRecipe(recipe);
+
+        Assert.AreEqual("Manual Garlic Toast", draft.Title);
+        Assert.IsNull(draft.ExtractedModel);
+        Assert.AreEqual(2, draft.Ingredients!.Count);
+        Assert.AreEqual(foodButter.Id, draft.Ingredients[0].MatchedFoodItemId);
+        Assert.IsFalse(draft.Ingredients[0].IsNewFoodItem);
+        Assert.AreEqual(56m, draft.Ingredients[0].AlternativeMeasurement?.Quantity);
+        Assert.AreEqual(MeasurementUnit.G, draft.Ingredients[0].AlternativeMeasurement?.Unit);
+        Assert.AreEqual(1, draft.Ingredients[0].Replacements?.Count);
+        Assert.IsTrue(draft.Ingredients[1].IsNewFoodItem);
+        Assert.IsTrue(draft.Ingredients[1].CreateNewFoodItem);
+        Assert.AreEqual("minced garlic, fresh", draft.Ingredients[1].ProposedFoodItemName);
+
+        var sourceText = IngestionProcessor.BuildFallbackSourceTextFromDraft(draft);
+        StringAssert.Contains(sourceText, "Yield: 4 slices");
+        StringAssert.Contains(sourceText, "Prep Time: 5 minutes");
+        StringAssert.Contains(sourceText, "For the Spread:");
+        StringAssert.Contains(
+            sourceText,
+            "- 4 tbsp (56 g) unsalted butter, softened or 3 tbsp olive oil"
+        );
+        StringAssert.Contains(sourceText, "- 2 clove minced garlic, fresh (optional)");
+        StringAssert.Contains(sourceText, "1. Bake at 400°F for 10 minutes until golden.");
+    }
+
     private sealed class StubRefinerLlmClient(string responseJson) : ILlmExtractionClient
     {
         public string? LastModelUsed { get; private set; }
