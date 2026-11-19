@@ -1,7 +1,9 @@
 <div class="llm-settings-dialog-container" data-testid="connection-editor-form">
   <div class="dialog-header">
     <div class="header-icon-title">
-      <mat-icon class="header-icon">dns</mat-icon>
+      <span class="dialog-icon-badge" aria-hidden="true">
+        <mat-icon>dns</mat-icon>
+      </span>
       <h2 mat-dialog-title class="dialog-title">
         {{ editingConnection() ? 'Edit ' + editingConnection()!.name : 'Add Connection' }}
       </h2>

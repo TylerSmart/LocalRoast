@@ -1,5 +1,9 @@
 @use 'llm-settings-shared';
 
+.dialog-content {
+  padding-top: 0.25rem !important;
+}
+
 .workflow-assignment {
   display: flex;
   flex-direction: column;
@@ -8,7 +12,7 @@
 
   .assignment-detail {
     margin: 0;
-    color: var(--mat-sys-on-surface-variant, #49454f);
+    color: var(--mat-sys-on-surface-variant);
     font-size: 0.8rem;
     overflow-wrap: anywhere;
   }
@@ -18,10 +22,10 @@
     flex-direction: column;
     gap: 0.65rem;
     margin-top: 0.25rem;
-    padding: 0.65rem 0.75rem;
+    padding: 0.65rem 0.85rem;
     border-radius: 10px;
-    background-color: var(--mat-sys-surface-container-low, #f9f6f0);
-    border: 1px solid var(--mat-sys-outline-variant, #dad4c8);
+    background-color: var(--mat-sys-surface-container-low);
+    border: 1px solid var(--mat-sys-outline-variant);
     box-sizing: border-box;
     max-width: 100%;
   }
@@ -33,8 +37,8 @@
   gap: 0.6rem;
   padding: 0.75rem;
   border-radius: 10px;
-  background-color: var(--mat-sys-surface-container-low, #f9f6f0);
-  border: 1px solid var(--mat-sys-outline-variant, #dad4c8);
+  background-color: var(--mat-sys-surface-container-low);
+  border: 1px solid var(--mat-sys-outline-variant);
 
   .profile-model-group-header {
     display: flex;
@@ -59,9 +63,9 @@
   }
 
   .profile-model-group-tag {
-    font-family: monospace;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     font-size: 0.78rem;
-    color: var(--mat-sys-primary, #6b5e43);
+    color: var(--mat-sys-primary);
     overflow-wrap: anywhere;
   }
 
@@ -73,11 +77,20 @@
 }
 
 .profile-badge-standard {
-  background-color: var(--mat-sys-primary-container, #f4e1b8) !important;
-  color: var(--mat-sys-on-primary-container, #251a00) !important;
+  background-color: var(--mat-sys-primary-container) !important;
+  color: var(--mat-sys-on-primary-container) !important;
 }
 
 @media (max-width: 600px) {
+  .dialog-content {
+    padding-top: 0.2rem !important;
+  }
+
+  .settings-tabs ::ng-deep .mdc-tab {
+    padding: 0 10px;
+    min-width: auto;
+  }
+
   .profile-model-group {
     padding: 0.6rem;
 

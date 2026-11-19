@@ -9,10 +9,10 @@
   flex-direction: column;
   height: 100%;
   width: 100%;
-  background: var(--mat-sys-surface-container-low, #f9f9fb);
+  background: var(--mat-sys-surface-container-low);
+  border: 1px solid var(--mat-sys-outline-variant);
   border-radius: 12px;
   overflow: hidden;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
 .source-viewer-toolbar {
@@ -22,8 +22,8 @@
   justify-content: space-between;
   gap: 8px;
   padding: 8px 12px;
-  background: var(--mat-sys-surface-container, #f0f0f4);
-  border-bottom: 1px solid var(--mat-sys-outline-variant, #e0e0e0);
+  background: var(--mat-sys-surface-container);
+  border-bottom: 1px solid var(--mat-sys-outline-variant);
   z-index: 10;
 }
 

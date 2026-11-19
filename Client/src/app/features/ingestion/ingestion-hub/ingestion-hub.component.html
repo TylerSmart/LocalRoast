@@ -4,7 +4,7 @@
     <div class="header-titles">
       <h1 class="page-title">Recipe Ingestion & Review Inbox</h1>
       <p class="page-subtitle">
-        Import recipes from web URLs or pasted text, powered by local LLM extraction.
+        Import recipes from web URLs, pasted text, photos, or PDFs using local LLM extraction.
       </p>
     </div>
     <div class="header-actions">
@@ -142,16 +142,17 @@
       @if (activeTab() === 'urls') {
         <form [formGroup]="urlForm" (ngSubmit)="submitWebUrls()" class="capture-form">
           <mat-form-field appearance="outline" class="form-field full-width">
-            <mat-label>Web Recipe URLs (1–20, one per line)</mat-label>
+            <mat-label>Web Recipe URLs (1–20)</mat-label>
             <textarea
               matInput
               formControlName="urlsText"
               rows="3"
-              placeholder="https://cooking.nytimes.com/...&#10;https://seriouseats.com/..."
+              placeholder="Paste one URL per line, e.g. https://cooking.nytimes.com/..."
               required
             ></textarea>
             <mat-hint>
-              Pastes HTML / JSON-LD schema.org/Recipe data and downloads recipe photo locally.
+              One URL per line. Parses HTML / JSON-LD schema.org/Recipe data and downloads photos
+              locally.
             </mat-hint>
           </mat-form-field>
 
@@ -427,7 +428,7 @@
                     @for (file of selectedPdfs(); track $index; let i = $index) {
                       <mat-chip (removed)="removeSelectedPdf(i)">
                         <span class="chip-filename">{{ file.name }}</span>
-                        <button matChipRemove aria-label="'Remove ' + file.name">
+                        <button matChipRemove [attr.aria-label]="'Remove ' + file.name">
                           <mat-icon>cancel</mat-icon>
                         </button>
                       </mat-chip>
