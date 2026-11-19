@@ -272,7 +272,7 @@ public static partial class StepTokenValidator
     private static partial Regex DanglingOfThePrefixRegex();
 
     [GeneratedRegex(
-        @"\([^)]*\b(?:should\s+have|yields?)(?:\s+about)?\s*(?:of\b[^)]*)?\)|\(\s*\)",
+        @"\([^)]*\b(?:should\s+have|yields?)(?:\s+about)?[.,;:\s]*(?:of\b[^)]*)?\)|\(\s*\)",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex BrokenYieldParenRegex();
@@ -288,6 +288,42 @@ public static partial class StepTokenValidator
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex DuplicateTempUnitPrefixRegex();
+
+    [GeneratedRegex(@"^\s*-\s*degrees?\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex HyphenDegreePrefixRegex();
+
+    [GeneratedRegex(@"^\.(?=[A-Z(])", RegexOptions.CultureInvariant)]
+    private static partial Regex PeriodMissingSpacePrefixRegex();
+
+    [GeneratedRegex(@"\bafter\s+$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex RetrospectiveAfterPrefixRegex();
+
+    [GeneratedRegex(
+        @"\b(?:seconds?|minutes?|hours?|days?|secs?|mins?|hrs?)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex TimeUnitOnlyValueRegex();
+
+    [GeneratedRegex(@"\bthe\s+$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex TrailingArticleTheRegex();
+
+    [GeneratedRegex(
+        @"(?<!/|-|\d\s)\b1\b(?!\s*/|\s*(?:to|or|and|–|-)\s*\d|\s*-?\s*(?:teaspoons?|tsps?\.?|tablespoons?|tbsps?\.?|tbs\.?|cups?|pints?|quarts?|gallons?|fl(?:uid)?\s+oz\.?|ounces?|ozs?\.?|pounds?|lbs?\.?|grams?|g\b|kilograms?|kgs?\b|milliliters?|ml\b|liters?|seconds?|secs?|minutes?|mins?|hours?|hrs?|days?|inch(?:es)?|foot|feet|cm\b|mm\b|degrees?|°|pinch(?:es)?|dash(?:es)?|cloves?|cans?|slices?|sticks?|sprigs?|bunches?|heads?)\b)|\bone\b(?!\s+(?:at\s+a\s+time|by\s+one|side|piece|layer|batch|spot|corner|end|hand|half|third|quarter|fourth|more\s+minute|more\s+hour|minute|hour|second|day|inch|foot|cup|teaspoon|tablespoon|ounce|pound|quart|pint|gallon|liter|gram|clove|can|slice|stick|sprig|pinch|dash)\b)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex StandaloneOneCountRegex();
+
+    [GeneratedRegex(
+        @"(?:\b\d+/\d+|\b0\.\d+)(?!\s*-?\s*(?:teaspoons?|tsps?\.?|tablespoons?|tbsps?\.?|tbs\.?|cups?|pints?|quarts?|gallons?|fl(?:uid)?\s+oz\.?|ounces?|ozs?\.?|pounds?|lbs?\.?|grams?|g\b|kilograms?|kgs?\b|milliliters?|ml\b|liters?|seconds?|secs?|minutes?|mins?|hours?|hrs?|days?|inch(?:es)?|foot|feet|cm\b|mm\b|degrees?|°)\b)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex UnitlessNumericFractionInProseRegex();
+
+    [GeneratedRegex(
+        @"\b(?:portion\s+scoop|scoop|ladle|measuring\s+cup|measuring\s+spoon|measure|skillet|saucepan|pan|pot|pitcher)\s*$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex ToolVesselSuffixRegex();
 
     public static JsonArray SanitizeRawTokens(JsonArray tokensArray)
     {
@@ -439,10 +475,45 @@ public static partial class StepTokenValidator
             }
         }
 
-        for (var i = 0; i + 1 < sanitized.Count; i++)
+        for (var i = 0; i < sanitized.Count; i++)
         {
+            if (sanitized[i] is not JsonObject tokObj)
+            {
+                continue;
+            }
+
+            var tokType = tokObj["type"]?.GetValue<string>()?.Trim().ToLowerInvariant();
             if (
-                sanitized[i] is not JsonObject tokObj
+                tokType == "ingredient"
+                && tokObj["ingredientIndex"] is null
+                && GetNullableString(tokObj["name"]) is string rawIngName
+                && ToolVesselSuffixRegex().IsMatch(rawIngName)
+                && GetNullableDecimal(tokObj["quantity"]) is decimal toolQty
+                && toolQty > 0m
+            )
+            {
+                tokObj["type"] = "fixed";
+                tokObj["amount"] = toolQty;
+                if (tokObj["maxQuantity"] is not null)
+                {
+                    tokObj["maxAmount"] = tokObj["maxQuantity"]?.DeepClone();
+                }
+                else
+                {
+                    tokObj.Remove("maxAmount");
+                }
+                tokObj.Remove("quantity");
+                tokObj.Remove("maxQuantity");
+                tokObj.Remove("ingredientIndex");
+                if (tokObj["hyphenated"] is null)
+                {
+                    tokObj["hyphenated"] = false;
+                }
+                tokType = "fixed";
+            }
+
+            if (
+                i + 1 >= sanitized.Count
                 || sanitized[i + 1] is not JsonValue textVal
                 || !textVal.TryGetValue<string>(out var nextText)
             )
@@ -450,7 +521,12 @@ public static partial class StepTokenValidator
                 continue;
             }
 
-            var tokType = tokObj["type"]?.GetValue<string>()?.Trim().ToLowerInvariant();
+            if (PeriodMissingSpacePrefixRegex().IsMatch(nextText))
+            {
+                nextText = ". " + nextText[1..];
+                sanitized[i + 1] = JsonValue.Create(nextText);
+            }
+
             if (tokType == "timer")
             {
                 var unit = NormalizeTimerUnitWord(GetNullableString(tokObj["unit"]) ?? "minute");
@@ -503,18 +579,26 @@ public static partial class StepTokenValidator
                     }
                 }
             }
-            else if (tokType == "temperature" && !nextText.TrimStart().StartsWith('-'))
+            else if (tokType == "temperature")
             {
-                var unit = (GetNullableString(tokObj["unit"]) ?? "fahrenheit")
-                    .Trim()
-                    .ToLowerInvariant();
-                var match = DuplicateTempUnitPrefixRegex().Match(nextText);
-                if (
-                    match.Success
-                    && TempUnitMatchesWord(unit, match.Value.Trim().ToLowerInvariant())
-                )
+                var degMatch = HyphenDegreePrefixRegex().Match(nextText);
+                if (degMatch.Success)
                 {
-                    sanitized[i + 1] = JsonValue.Create(nextText[match.Length..]);
+                    sanitized[i + 1] = JsonValue.Create(nextText[degMatch.Length..]);
+                }
+                else if (!nextText.TrimStart().StartsWith('-'))
+                {
+                    var unit = (GetNullableString(tokObj["unit"]) ?? "fahrenheit")
+                        .Trim()
+                        .ToLowerInvariant();
+                    var match = DuplicateTempUnitPrefixRegex().Match(nextText);
+                    if (
+                        match.Success
+                        && TempUnitMatchesWord(unit, match.Value.Trim().ToLowerInvariant())
+                    )
+                    {
+                        sanitized[i + 1] = JsonValue.Create(nextText[match.Length..]);
+                    }
                 }
             }
             else if (
@@ -556,9 +640,7 @@ public static partial class StepTokenValidator
     {
         var sanitized = SanitizeRawTokens(rawTokensJson);
         if (
-            originalInstruction.TrimEnd().EndsWith(".)", StringComparison.Ordinal)
-            && !originalInstruction.TrimEnd().EndsWith(".).", StringComparison.Ordinal)
-            && sanitized.Count > 0
+            sanitized.Count > 0
             && sanitized[^1] is JsonValue lastTextVal
             && lastTextVal.TryGetValue<string>(out var lastTextStr)
         )
@@ -569,7 +651,11 @@ public static partial class StepTokenValidator
             {
                 sanitized[^1] = JsonValue.Create(trimmedEnd[..^3] + ".)" + trailingWs);
             }
-            else if (trimmedEnd.EndsWith(").", StringComparison.Ordinal))
+            else if (
+                originalInstruction.TrimEnd().EndsWith(".)", StringComparison.Ordinal)
+                && !originalInstruction.TrimEnd().EndsWith(".).", StringComparison.Ordinal)
+                && trimmedEnd.EndsWith(").", StringComparison.Ordinal)
+            )
             {
                 sanitized[^1] = JsonValue.Create(trimmedEnd[..^2] + ".)" + trailingWs);
             }
@@ -1065,15 +1151,7 @@ public static partial class StepTokenValidator
                 UntokenizedQuantityRegex()
                     .Matches(txt.Text)
                     .Cast<Match>()
-                    .Any(untok =>
-                        !RotationAngleRegex()
-                            .Matches(txt.Text)
-                            .Cast<Match>()
-                            .Any(rot =>
-                                untok.Index >= rot.Index
-                                && untok.Index + untok.Length <= rot.Index + rot.Length
-                            )
-                    )
+                    .Any(untok => !IsExemptPlainQuantityMatch(txt.Text, untok))
             );
 
         var origClean = LeadStepNumberRegex().Replace(originalInstruction, string.Empty);
@@ -1104,6 +1182,25 @@ public static partial class StepTokenValidator
             warnings.Add(
                 $"Invented unprinted quantities: step emitted {quantifiedTokenCount} quantitative tokens but original instruction only contains {origCueCount} explicit numeric cues; leave unquantified mentions as plain text without pulling numbers from the ingredient list.{suspectHint}"
             );
+        }
+
+        var unitlessOneIngs = tokens
+            .OfType<Stage4IngredientToken>()
+            .Where(ing =>
+                string.IsNullOrWhiteSpace(ing.Unit)
+                && ing.Quantity == 1m
+                && !ing.MaxQuantity.HasValue
+            )
+            .ToList();
+        if (unitlessOneIngs.Count > 0)
+        {
+            var standaloneOneCount = StandaloneOneCountRegex().Matches(origClean).Count;
+            if (unitlessOneIngs.Count > standaloneOneCount)
+            {
+                warnings.Add(
+                    $"Invented quantity=1 on unmeasured ingredient mention(s) ({string.Join(", ", unitlessOneIngs.Select(x => $"'{x.Name}'").Distinct(StringComparer.OrdinalIgnoreCase).Take(4))}): original instruction has {standaloneOneCount} standalone '1' count(s) vs {unitlessOneIngs.Count} unitless qty=1 ingredient token(s); leave bare ingredient mentions as plain text."
+                );
+            }
         }
 
         foreach (var (unitName, unitPattern, quantifiedUnitPattern) in UnitMeasurementPatterns)
@@ -1339,20 +1436,7 @@ public static partial class StepTokenValidator
                     var untokCount = 0;
                     foreach (Match untok in UntokenizedQuantityRegex().Matches(txt.Text))
                     {
-                        var isRotationAngle = false;
-                        foreach (Match rot in RotationAngleRegex().Matches(txt.Text))
-                        {
-                            if (
-                                untok.Index >= rot.Index
-                                && untok.Index + untok.Length <= rot.Index + rot.Length
-                            )
-                            {
-                                isRotationAngle = true;
-                                break;
-                            }
-                        }
-
-                        if (!isRotationAngle)
+                        if (!IsExemptPlainQuantityMatch(txt.Text, untok))
                         {
                             warnings.Add(
                                 $"Untokenized amount/unit '{untok.Value}' left in plain text segment (for parenthetical/informational yields like '(you should have 5 to 6 cups)' or '(about 2/3 cup of juice)', emit type='fixed' with name=null or the yielded noun)."
@@ -1423,6 +1507,50 @@ public static partial class StepTokenValidator
                         );
                     }
                     CheckUnitRepeatedInName(ing.Unit, ing.Name, warnings);
+                    if (
+                        string.IsNullOrWhiteSpace(ing.Unit)
+                        && !string.IsNullOrWhiteSpace(ing.Name)
+                        && (
+                            PluralUnitNames.Contains(ing.Name.Trim())
+                            || UnitMeasurementPatterns.Any(u =>
+                                string.Equals(
+                                    u.CanonicalUnit,
+                                    ing.Name.Trim(),
+                                    StringComparison.OrdinalIgnoreCase
+                                )
+                            )
+                        )
+                    )
+                    {
+                        warnings.Add(
+                            $"Ingredient token has unit word '{ing.Name}' as its name with unit=null; for parenthetical yields like '(you should have about 1 teaspoon)', emit type='fixed' with name=null and unit='{SimpleSingular(ing.Name.Trim().ToLowerInvariant())}'."
+                        );
+                    }
+                    if (
+                        string.IsNullOrWhiteSpace(ing.Unit)
+                        && ing.Quantity == 1m
+                        && !ing.MaxQuantity.HasValue
+                        && i > 0
+                        && tokens[i - 1] is Stage4TextToken prevArticleTxt
+                        && TrailingArticleTheRegex().IsMatch(prevArticleTxt.Text)
+                    )
+                    {
+                        warnings.Add(
+                            $"Unmeasured ingredient '{ing.Name}' after 'the ' was given quantity=1; leave bare mentions like 'the {ing.Name}' as plain text."
+                        );
+                    }
+                    if (
+                        string.IsNullOrWhiteSpace(ing.Unit)
+                        && ing.Quantity.HasValue
+                        && ing.Quantity.Value > 0m
+                        && ing.Quantity.Value % 1m != 0m
+                        && !UnitlessNumericFractionInProseRegex().IsMatch(origClean)
+                    )
+                    {
+                        warnings.Add(
+                            $"Ingredient token '{ing.Name}' converted a unitless prose fraction into quantity={ing.Quantity.Value} with unit=null; leave prose fractions without a printed unit (like 'half of ...' or 'one-third of ...') as plain text."
+                        );
+                    }
                     CheckBoundaryWordDuplication(
                         i,
                         ing.Name,
@@ -1764,6 +1892,20 @@ public static partial class StepTokenValidator
         }
 
         return warnings;
+    }
+
+    private static bool IsExemptPlainQuantityMatch(string text, Match untok)
+    {
+        foreach (Match rot in RotationAngleRegex().Matches(text))
+        {
+            if (untok.Index >= rot.Index && untok.Index + untok.Length <= rot.Index + rot.Length)
+            {
+                return true;
+            }
+        }
+
+        return TimeUnitOnlyValueRegex().IsMatch(untok.Value)
+            && RetrospectiveAfterPrefixRegex().IsMatch(text[..untok.Index]);
     }
 
     private static void CheckTrailingDanglingOrComma(

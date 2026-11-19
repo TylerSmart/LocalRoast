@@ -26,7 +26,7 @@ Return `{ "steps": [ { "stepNumber": 1, "tokens": [...] }, ... ] }` with **one e
 
 ### Example Batch Input:
 - Step 1: `"Adjust oven rack to middle position and heat oven to 350 degrees. Stir together 1 tablespoon melted butter and 1 tablespoon flour in a 12-cup Bundt pan, then microwave for 10 to 20 seconds."`
-- Step 2: `"Beat remaining 18 tablespoons butter and sugar for about 3 minutes. Cool 1 hour before glazing."`
+- Step 2: `"Beat remaining 18 tablespoons butter and sugar for about 3 minutes. Cool 1 hour before glazing. Drain liquid (you should have about 1/2 cup)."`
 
 ### Example Batch Output (`steps`):
 ```json
@@ -57,7 +57,9 @@ Return `{ "steps": [ { "stepNumber": 1, "tokens": [...] }, ... ] }` with **one e
         { "type": "timer", "amount": 3, "maxAmount": null, "unit": "minute", "label": "Beat butter and sugar" },
         ". Cool ",
         { "type": "timer", "amount": 1, "maxAmount": null, "unit": "hour", "label": "Cool cake" },
-        " before glazing."
+        " before glazing. Drain liquid (you should have about ",
+        { "type": "fixed", "name": null, "amount": 0.5, "maxAmount": null, "unit": "cup", "hyphenated": false },
+        ")."
       ]
     }
   ]

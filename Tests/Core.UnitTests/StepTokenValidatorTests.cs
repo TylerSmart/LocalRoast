@@ -937,11 +937,266 @@ public sealed class StepTokenValidatorTests
     }
 
     [TestMethod]
-    public void FoodNameSanitizerNormalizesDriedPrepPrefixes()
+    public void FoodNameSanitizerNormalizesDriedAndJarredPrepPrefixes()
     {
         Assert.AreEqual(
             "dried onion",
             App.Core.FoodCatalog.FoodNameSanitizer.NormalizeCanonicalFoodName("dried minced onions")
         );
+        Assert.AreEqual(
+            "jarred banana peppers",
+            App.Core.FoodCatalog.FoodNameSanitizer.NormalizeCanonicalFoodName(
+                "jarred sliced banana peppers"
+            )
+        );
+    }
+
+    [TestMethod]
+    public void BrokenYieldParenRegex_FlagsPeriodInsideEmptyYield()
+    {
+        var hollowYield = new JsonArray
+        {
+            "Set aside ",
+            new JsonObject
+            {
+                ["type"] = "fixed",
+                ["name"] = "corn kernels",
+                ["amount"] = 5,
+                ["maxAmount"] = 6,
+                ["unit"] = "cup",
+                ["hyphenated"] = false,
+            },
+            "(you should have .)",
+        };
+        var res = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 1,
+            sectionName: null,
+            originalInstruction: "Set aside (you should have 5 to 6 cups).",
+            rawTokensJson: hollowYield,
+            ingredientCount: 0
+        );
+        Assert.IsTrue(
+            res.ValidationWarnings.Any(w =>
+                w.Contains("parenthetical yield", StringComparison.OrdinalIgnoreCase)
+            ),
+            string.Join(" | ", res.ValidationWarnings)
+        );
+    }
+
+    [TestMethod]
+    public void RetrospectiveAfterTimerPhrase_IsExemptFromUntokenizedWarning()
+    {
+        var raw = new JsonArray
+        {
+            "Cover and cook for ",
+            new JsonObject
+            {
+                ["type"] = "timer",
+                ["amount"] = 9,
+                ["unit"] = "minute",
+                ["label"] = "Cook potatoes",
+            },
+            ". After 9 minutes, potatoes should be bubbling.",
+        };
+        var res = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 2,
+            sectionName: null,
+            originalInstruction: "Cover and cook for 9 minutes. After 9 minutes, potatoes should be bubbling.",
+            rawTokensJson: raw,
+            ingredientCount: 0
+        );
+        Assert.IsEmpty(res.ValidationWarnings, string.Join(" | ", res.ValidationWarnings));
+    }
+
+    [TestMethod]
+    public void UnitlessHallucinations_BareUnitWord_ProseFraction_AndTheArticleAreFlagged()
+    {
+        var bareUnit = new JsonArray
+        {
+            "Leave fat in skillet (you should have about ",
+            new JsonObject
+            {
+                ["type"] = "ingredient",
+                ["ingredientIndex"] = null,
+                ["name"] = "teaspoon",
+                ["quantity"] = 1,
+                ["unit"] = null,
+            },
+            ").",
+        };
+        var resBareUnit = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 1,
+            sectionName: null,
+            originalInstruction: "Leave fat in skillet (you should have about 1 teaspoon).",
+            rawTokensJson: bareUnit,
+            ingredientCount: 0
+        );
+        Assert.IsTrue(
+            resBareUnit.ValidationWarnings.Any(w =>
+                w.Contains("unit word", StringComparison.OrdinalIgnoreCase)
+            ),
+            string.Join(" | ", resBareUnit.ValidationWarnings)
+        );
+
+        var bareOne = new JsonArray
+        {
+            "Stir in ",
+            new JsonObject
+            {
+                ["type"] = "ingredient",
+                ["ingredientIndex"] = 0,
+                ["name"] = "cheddar cheese",
+                ["quantity"] = 1,
+                ["unit"] = null,
+            },
+            ".",
+        };
+        var resBareOne = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 3,
+            sectionName: null,
+            originalInstruction: "Stir in cheddar.",
+            rawTokensJson: bareOne,
+            ingredientCount: 1
+        );
+        Assert.IsTrue(
+            resBareOne.ValidationWarnings.Any(w =>
+                w.Contains("quantity=1", StringComparison.OrdinalIgnoreCase)
+            ),
+            string.Join(" | ", resBareOne.ValidationWarnings)
+        );
+
+        var articleOne = new JsonArray
+        {
+            "Flip each potato and heat the ",
+            new JsonObject
+            {
+                ["type"] = "ingredient",
+                ["ingredientIndex"] = 0,
+                ["name"] = "butter",
+                ["quantity"] = 1,
+                ["unit"] = null,
+            },
+            ".",
+        };
+        var resArticleOne = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 1,
+            sectionName: null,
+            originalInstruction: "Flip each potato and heat the butter.",
+            rawTokensJson: articleOne,
+            ingredientCount: 1
+        );
+        Assert.IsTrue(
+            resArticleOne.ValidationWarnings.Any(w =>
+                w.Contains("quantity=1", StringComparison.OrdinalIgnoreCase)
+            ),
+            string.Join(" | ", resArticleOne.ValidationWarnings)
+        );
+
+        var validEgg = new JsonArray
+        {
+            "Crack ",
+            new JsonObject
+            {
+                ["type"] = "ingredient",
+                ["ingredientIndex"] = 0,
+                ["name"] = "egg",
+                ["quantity"] = 1,
+                ["unit"] = null,
+            },
+            " into bowl.",
+        };
+        var resValidEgg = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 1,
+            sectionName: null,
+            originalInstruction: "Crack 1 egg into bowl.",
+            rawTokensJson: validEgg,
+            ingredientCount: 1
+        );
+        Assert.IsEmpty(
+            resValidEgg.ValidationWarnings,
+            string.Join(" | ", resValidEgg.ValidationWarnings)
+        );
+
+        var proseFraction = new JsonArray
+        {
+            "Process ",
+            new JsonObject
+            {
+                ["type"] = "ingredient",
+                ["ingredientIndex"] = 0,
+                ["name"] = "jarred roasted red peppers",
+                ["quantity"] = 0.5,
+                ["unit"] = null,
+            },
+            " until smooth.",
+        };
+        var resProseFraction = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 1,
+            sectionName: null,
+            originalInstruction: "Process half of red peppers until smooth.",
+            rawTokensJson: proseFraction,
+            ingredientCount: 1
+        );
+        Assert.IsTrue(
+            resProseFraction.ValidationWarnings.Any(w =>
+                w.Contains("prose fraction", StringComparison.OrdinalIgnoreCase)
+            ),
+            string.Join(" | ", resProseFraction.ValidationWarnings)
+        );
+    }
+
+    [TestMethod]
+    public void SanitizeRawTokens_CleansDegreeHyphen_PeriodSpace_ScoopFixed_AndDoubleDotParen()
+    {
+        var raw = new JsonArray
+        {
+            "Heat for ",
+            new JsonObject
+            {
+                ["type"] = "timer",
+                ["amount"] = 90,
+                ["unit"] = "second",
+                ["label"] = "Heat oil",
+            },
+            ".Reduce heat. Place in ",
+            new JsonObject
+            {
+                ["type"] = "temperature",
+                ["amount"] = 150,
+                ["unit"] = "fahrenheit",
+            },
+            "-degree water and scoop with ",
+            new JsonObject
+            {
+                ["type"] = "ingredient",
+                ["ingredientIndex"] = null,
+                ["name"] = "portion scoop",
+                ["quantity"] = 2,
+                ["unit"] = "ounce",
+            },
+            " (check every ",
+            new JsonObject
+            {
+                ["type"] = "timer",
+                ["amount"] = 30,
+                ["unit"] = "second",
+                ["label"] = "Check eggs",
+            },
+            " for doneness.).",
+        };
+        var res = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 1,
+            sectionName: null,
+            originalInstruction: "Heat for 90 seconds. Reduce heat. Place in 150-degree water and scoop with 2-ounce portion scoop (check every 30 seconds for doneness.).",
+            rawTokensJson: raw,
+            ingredientCount: 0
+        );
+        var rendered = StepTokenValidator.RenderForValidation(res.ParsedTokens);
+        Assert.Contains("90 seconds. Reduce heat.", rendered);
+        Assert.Contains("150°F water", rendered);
+        Assert.IsTrue(rendered.TrimEnd().EndsWith("doneness.)", StringComparison.Ordinal));
+        var scoopFixed = res.ParsedTokens.OfType<Stage4FixedToken>().Single();
+        Assert.AreEqual(2m, scoopFixed.Amount);
+        Assert.AreEqual("portion scoop", scoopFixed.Name);
     }
 }

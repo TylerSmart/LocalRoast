@@ -1837,7 +1837,7 @@ public sealed partial class IngestionRecipePipeline(
         var num = 1;
         foreach (var section in stage1.Sections ?? [])
         {
-            var secName = NormalizeSection(section.Name);
+            var currentSecName = NormalizeSection(section.Name);
             foreach (var instruction in section.Instructions ?? [])
             {
                 if (string.IsNullOrWhiteSpace(instruction))
@@ -1848,12 +1848,33 @@ public sealed partial class IngestionRecipePipeline(
                 var cleanInstruction = LeadStepPrefixRegex()
                     .Replace(instruction.Trim(), string.Empty)
                     .Trim();
+                if (cleanInstruction.EndsWith(".).", StringComparison.Ordinal))
+                {
+                    cleanInstruction = cleanInstruction[..^3] + ".)";
+                }
+
+                var stepSecName = currentSecName;
+                var forTheMatch = LeadForTheSectionRegex().Match(cleanInstruction);
+                if (forTheMatch.Success)
+                {
+                    cleanInstruction = cleanInstruction[forTheMatch.Length..].TrimStart();
+                    if (stepSecName is null)
+                    {
+                        var parsedSec = NormalizeSection(forTheMatch.Groups["hdr"].Value);
+                        if (!string.IsNullOrWhiteSpace(parsedSec))
+                        {
+                            currentSecName = parsedSec;
+                            stepSecName = parsedSec;
+                        }
+                    }
+                }
+
                 if (string.IsNullOrWhiteSpace(cleanInstruction))
                 {
                     continue;
                 }
 
-                list.Add(new WorkStep(num++, secName, cleanInstruction));
+                list.Add(new WorkStep(num++, stepSecName, cleanInstruction));
             }
         }
         return list;
@@ -1861,14 +1882,19 @@ public sealed partial class IngestionRecipePipeline(
 
     private static string? NormalizeSection(string? rawSection)
     {
+        if (string.IsNullOrWhiteSpace(rawSection))
+        {
+            return null;
+        }
+
+        var trimmed = rawSection.Trim().Trim('[', ']').Trim();
         if (
-            string.IsNullOrWhiteSpace(rawSection)
-            || RecipeUnitAndSectionHelpers.IsGenericTopLevelSection(rawSection)
+            string.IsNullOrWhiteSpace(trimmed)
+            || RecipeUnitAndSectionHelpers.IsGenericTopLevelSection(trimmed)
         )
         {
             return null;
         }
-        var trimmed = rawSection.Trim();
         return trimmed.Length > 150 ? trimmed[..150] : trimmed;
     }
 
@@ -2420,6 +2446,12 @@ public sealed partial class IngestionRecipePipeline(
 
     [GeneratedRegex(@"^[A-Z][A-Z0-9\s,'’&-]{2,44}:\s*", RegexOptions.CultureInvariant)]
     private static partial Regex LeadUpperSectionPrefixRegex();
+
+    [GeneratedRegex(
+        @"^FOR\s+THE\s+(?<hdr>[A-Z][A-Z0-9\s,'’&/-]{1,50}):\s+",
+        RegexOptions.CultureInvariant
+    )]
+    private static partial Regex LeadForTheSectionRegex();
 
     [GeneratedRegex(
         @"^(?:(?:jumbo|extra[- ]large|large|medium|small)\s+)?(?:whites?|yolks?)$",

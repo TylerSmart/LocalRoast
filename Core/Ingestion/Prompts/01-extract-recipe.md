@@ -53,7 +53,7 @@ For each ingredient line in the source:
 
 ### Replacements (`replacements`)
 
-- Populate ONLY when the source explicitly offers an `"or"` / `"in place of"` ingredient alternative on that line (e.g., `"1 cup pecan halves or walnuts, toasted and chopped"` -> main `name: "pecan halves"`, `replacements: [{ "name": "walnuts", "quantity": null, "unit": null, "prepNote": "toasted and chopped" }]`; `"1 tablespoon fresh dill or 1 teaspoon dried dill"` -> main `name: "fresh dill"`, `quantity: 1`, `unit: "tablespoon"`, `replacements: [{ "name": "dried dill", "quantity": 1, "unit": "teaspoon", "prepNote": null }]`).
+- Populate ONLY when THAT SPECIFIC ingredient line explicitly offers an `"or"` / `"in place of"` / `"such as A or B"` alternative — NEVER copy alternatives from another ingredient line in the recipe! (e.g., `"1 cup pecan halves or walnuts, toasted and chopped"` -> main `name: "pecan halves"`, `replacements: [{ "name": "walnuts", "quantity": null, "unit": null, "prepNote": "toasted and chopped" }]`; `"1 tablespoon fresh dill or 1 teaspoon dried dill"` -> main `name: "fresh dill"`, `quantity: 1`, `unit: "tablespoon"`, `replacements: [{ "name": "dried dill", "quantity": 1, "unit": "teaspoon", "prepNote": null }]`).
 - Use `quantity: null, unit: null` on a replacement when it reuses the main ingredient's quantity and unit.
 
 ### Alternate Measurements (`alternateMeasurements`)

@@ -29,6 +29,12 @@ public static partial class FoodNameSanitizer
     private static partial Regex FrozenPrepPrefixRegex();
 
     [GeneratedRegex(
+        @"^(?<state>jarred|pickled)\s+(?:sliced|chopped|diced|minced|cut|halved)\s+(?<item>.+)$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex JarredOrPickledPrepPrefixRegex();
+
+    [GeneratedRegex(
         @"^dried\s+(?:minced|chopped|flaked)\s+(?<item>onions?|garlic)$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
@@ -200,6 +206,16 @@ public static partial class FoodNameSanitizer
             if (!string.IsNullOrWhiteSpace(inner))
             {
                 return $"frozen {inner}";
+            }
+        }
+
+        var jarredMatch = JarredOrPickledPrepPrefixRegex().Match(trimmed);
+        if (jarredMatch.Success)
+        {
+            var inner = jarredMatch.Groups["item"].Value.Trim();
+            if (!string.IsNullOrWhiteSpace(inner))
+            {
+                return $"{jarredMatch.Groups["state"].Value.ToLowerInvariant()} {inner}";
             }
         }
 
