@@ -694,8 +694,9 @@
       color: var(--mat-sys-primary);
     }
 
-    &.delete-action:hover {
+    &.delete-action {
       color: var(--mat-sys-error);
+      --mat-icon-button-icon-color: var(--mat-sys-error);
     }
   }
 }
