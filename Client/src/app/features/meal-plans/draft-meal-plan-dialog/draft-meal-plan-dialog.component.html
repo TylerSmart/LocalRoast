@@ -1,10 +1,18 @@
 <div class="draft-dialog-container">
   <div class="dialog-header">
     <div class="title-wrap">
-      <mat-icon class="ai-header-icon">auto_awesome</mat-icon>
+      <span class="dialog-icon-badge" aria-hidden="true">
+        <mat-icon class="ai-header-icon">auto_awesome</mat-icon>
+      </span>
       <h2 mat-dialog-title class="dialog-title">Draft Seven-Day Meal Plan</h2>
     </div>
-    <button mat-icon-button type="button" (click)="close()" aria-label="Close dialog">
+    <button
+      mat-icon-button
+      type="button"
+      class="close-btn"
+      (click)="close()"
+      aria-label="Close dialog"
+    >
       <mat-icon>close</mat-icon>
     </button>
   </div>
@@ -128,7 +136,8 @@
         <div class="results-header">
           <h3 class="results-title">Proposed Meal Schedule</h3>
           <span class="meta-pill">
-            {{ resp.modelUsed }} &bull; {{ resp.consideredCookbookRecipeCount }} recipes evaluated
+            {{ resp.modelUsed }} &bull; {{ resp.consideredCookbookRecipeCount }}
+            {{ resp.consideredCookbookRecipeCount === 1 ? 'recipe' : 'recipes' }} evaluated
           </span>
         </div>
 

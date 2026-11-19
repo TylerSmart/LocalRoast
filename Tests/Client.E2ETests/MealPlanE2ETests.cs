@@ -243,7 +243,9 @@ public sealed class MealPlanE2ETests : E2ETestBase
         await Expect(tplCard.Locator(".item-badge").First).ToContainTextAsync("2 total meals");
 
         // Close templates dialog
-        await tplDialog.Locator("button", new() { HasText = "Close" }).ClickAsync();
+        await tplDialog
+            .Locator("mat-dialog-actions button", new() { HasText = "Close" })
+            .ClickAsync();
         await Expect(tplDialog).Not.ToBeVisibleAsync();
 
         // 4. Navigate another week ahead

@@ -1,10 +1,26 @@
 <div class="meal-entry-dialog-container">
-  <h2 mat-dialog-title>
-    <mat-icon class="title-icon">{{ isEdit ? 'edit_calendar' : 'add_circle' }}</mat-icon>
-    <span>{{ isEdit ? 'Edit Planned Meal' : 'Plan a Meal' }}</span>
-  </h2>
+  <div class="dialog-header">
+    <div class="title-wrap">
+      <span class="dialog-icon-badge" aria-hidden="true">
+        <mat-icon class="title-icon">{{ isEdit ? 'edit_calendar' : 'add_circle' }}</mat-icon>
+      </span>
+      <h2 mat-dialog-title class="dialog-title">
+        {{ isEdit ? 'Edit Planned Meal' : 'Plan a Meal' }}
+      </h2>
+    </div>
+    <button
+      mat-icon-button
+      type="button"
+      class="close-btn"
+      (click)="onCancel()"
+      [disabled]="isSubmitting()"
+      aria-label="Close dialog"
+    >
+      <mat-icon>close</mat-icon>
+    </button>
+  </div>
 
-  <mat-dialog-content>
+  <mat-dialog-content class="dialog-content">
     @if (errorMessage()) {
       <div class="error-banner" role="alert">
         <mat-icon>error</mat-icon>
@@ -221,7 +237,7 @@
     </form>
   </mat-dialog-content>
 
-  <mat-dialog-actions align="end">
+  <mat-dialog-actions align="end" class="dialog-actions">
     <button mat-button (click)="onCancel()" [disabled]="isSubmitting()">Cancel</button>
     <button
       mat-flat-button
