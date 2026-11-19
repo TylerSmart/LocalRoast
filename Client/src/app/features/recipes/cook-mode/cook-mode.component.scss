@@ -522,18 +522,22 @@
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
+  gap: 0.2rem;
 
   &.sub-list {
     padding-left: 0.4rem;
+
+    .ingredient-item {
+      padding: 0.42rem 0.45rem;
+    }
   }
 }
 
 .ingredient-item {
   display: flex;
-  align-items: flex-start;
-  gap: 0.45rem;
-  padding: 0.38rem 0.45rem;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.45rem;
   border-radius: 8px;
   cursor: pointer;
   user-select: none;
@@ -544,7 +548,6 @@
   }
 
   mat-checkbox {
-    margin-top: -4px;
     flex-shrink: 0;
   }
 
@@ -566,6 +569,8 @@
   font-size: 0.93rem;
   overflow-wrap: break-word;
   word-break: normal;
+  text-box-trim: trim-both;
+  text-box-edge: cap alphabetic;
 }
 
 .item-qty {
@@ -607,20 +612,16 @@
 }
 
 .ingredient-item > button[mat-icon-button] {
-  width: 32px !important;
-  height: 32px !important;
-  padding: 0 !important;
-  display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  min-height: 34px;
   flex-shrink: 0;
 
   mat-icon {
     font-size: 18px;
     width: 18px;
     height: 18px;
-    line-height: 18px;
-    margin: 0 !important;
   }
 }
 
