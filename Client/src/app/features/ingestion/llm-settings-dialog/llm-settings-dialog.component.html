@@ -294,7 +294,11 @@
 
         <!-- TAB 2: Connections -->
         <mat-tab label="Connections">
-          <app-llm-connections-panel [connections]="connections()" (changed)="reloadCatalog()" />
+          <app-llm-connections-panel
+            [connections]="connections()"
+            [configurations]="configurations()"
+            (changed)="reloadCatalog()"
+          />
         </mat-tab>
 
         <!-- TAB 3: Models -->

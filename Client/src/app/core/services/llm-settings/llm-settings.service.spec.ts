@@ -199,6 +199,9 @@ describe('LlmSettingsService', () => {
 
     service.deleteConnection('desk').subscribe();
     httpMock.expectOne({ method: 'DELETE', url: '/api/llm-settings/connections/desk' }).flush(null);
+    expect(mockAiHelperService.checkStatus).toHaveBeenCalledWith(true);
+
+    mockAiHelperService.checkStatus.mockClear();
 
     service.getModelConfigurations().subscribe();
     httpMock.expectOne({ method: 'GET', url: '/api/llm-settings/model-configurations' }).flush([]);
@@ -207,6 +210,7 @@ describe('LlmSettingsService', () => {
     httpMock
       .expectOne({ method: 'DELETE', url: '/api/llm-settings/model-configurations/cfg-1' })
       .flush(null);
+    expect(mockAiHelperService.checkStatus).toHaveBeenCalledWith(true);
   });
 
   it('creates model profile via POST /api/llm-settings/model-profiles', async () => {
@@ -282,12 +286,13 @@ describe('LlmSettingsService', () => {
     expect(result.displayName).toBe('Updated Profile');
   });
 
-  it('deletes model profile via DELETE /api/llm-settings/model-profiles/:id', async () => {
+  it('deletes model profile via DELETE /api/llm-settings/model-profiles/:id and rechecks AI status', async () => {
     const promise = firstValueFrom(service.deleteModelProfile('to-delete'));
     const req = httpMock.expectOne('/api/llm-settings/model-profiles/to-delete');
     expect(req.request.method).toBe('DELETE');
     req.flush(null);
 
     await promise;
+    expect(mockAiHelperService.checkStatus).toHaveBeenCalledWith(true);
   });
 });

@@ -1035,23 +1035,76 @@ public sealed class LlmSettingsService(
             );
         }
 
-        var settings = await dbContext
-            .HouseholdLlmSettings.AsNoTracking()
-            .FirstOrDefaultAsync(
-                s => s.SingletonKey == HouseholdLlmSettings.DefaultSingletonKey,
-                cancellationToken
-            );
-        var assignedWorkflows = GetAssignedWorkflows(entity.Id, settings);
-        if (assignedWorkflows.Count > 0)
-        {
-            throw new ConflictException(
-                $"'{entity.DisplayName}' is selected for the {string.Join(", ", assignedWorkflows)} workflow(s). Choose another profile there first.",
-                "Profile in use"
-            );
-        }
+        var preemptBackground = await UnassignWorkflowsForProfilesAsync(
+            dbContext,
+            [entity.Id],
+            cancellationToken
+        );
 
         dbContext.LlmModelProfiles.Remove(entity);
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        if (preemptBackground)
+        {
+            queueSignal.PreemptBackgroundWork();
+        }
+    }
+
+    /// <summary>
+    /// Deselects any household workflows currently assigned to one of <paramref name="profileIds"/>
+    /// and clears their legacy single-host model strings so unassigned workflows never fall back
+    /// to stale values. Returns true when an active background workflow (idle refinement or
+    /// embedding) was unassigned and should be preempted.
+    /// </summary>
+    internal static async Task<bool> UnassignWorkflowsForProfilesAsync(
+        AppDbContext dbContext,
+        IReadOnlyCollection<Guid> profileIds,
+        CancellationToken cancellationToken
+    )
+    {
+        if (profileIds.Count == 0)
+        {
+            return false;
+        }
+
+        var idSet = profileIds as HashSet<Guid> ?? profileIds.ToHashSet();
+        var settingsRows = await dbContext.HouseholdLlmSettings.ToListAsync(cancellationToken);
+        var preemptBackground = false;
+
+        foreach (var settings in settingsRows)
+        {
+            if (settings.TextModelProfileId is { } textId && idSet.Contains(textId))
+            {
+                settings.TextModelProfileId = null;
+                settings.TextModelProfile = null;
+                settings.TextModel = null;
+            }
+            if (settings.VisionModelProfileId is { } visionId && idSet.Contains(visionId))
+            {
+                settings.VisionModelProfileId = null;
+                settings.VisionModelProfile = null;
+                settings.VisionModel = null;
+            }
+            if (settings.RefineModelProfileId is { } refineId && idSet.Contains(refineId))
+            {
+                settings.RefineModelProfileId = null;
+                settings.RefineModelProfile = null;
+                settings.RefineModel = null;
+                if (settings.RefineDuringIdle)
+                {
+                    preemptBackground = true;
+                }
+            }
+            if (settings.EmbeddingModelProfileId is { } embedId && idSet.Contains(embedId))
+            {
+                settings.EmbeddingModelProfileId = null;
+                settings.EmbeddingModelProfile = null;
+                settings.EmbeddingModel = null;
+                preemptBackground = true;
+            }
+        }
+
+        return preemptBackground;
     }
 
     private async Task EnsureUniqueProfileNameAsync(

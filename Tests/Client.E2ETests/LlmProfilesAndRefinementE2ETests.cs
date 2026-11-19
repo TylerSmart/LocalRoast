@@ -756,4 +756,172 @@ public sealed class LlmProfilesAndRefinementE2ETests : E2ETestBase
 
         await ResetLlmSettingsViaApiAsync();
     }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task LlmSettingsDialog_DeleteConnectionAndAssignedModel_CascadesDependenciesAndDeselectsWorkflowsOnMobile()
+    {
+        await using var mockServer = await MockLanLlmAndBlogServer.StartAsync();
+        await RegisterAndLoginAsync();
+        await Page.GotoAsync($"{ServerUrl}/ingest");
+        await Page.SetViewportSizeAsync(360, 740);
+        await Page.Locator(".llm-settings-btn").ClickAsync();
+
+        var dialog = Page.Locator("app-llm-settings-dialog");
+        const string googleConnection = "Google AI Studio";
+        const string ollamaConnection = "Local Ollama";
+
+        // 1. Add two connections: Google AI Studio (3 models + 1 custom profile) and Local Ollama (1 model)
+        await AddLlmConnectionInDialogAsync(dialog, mockServer.BaseUrl, googleConnection);
+        await AddLlmConnectionInDialogAsync(dialog, mockServer.BaseUrl, ollamaConnection);
+
+        await AddLlmModelInDialogAsync(dialog, "models/gemini-3.8-flash", googleConnection);
+        await AddLlmModelInDialogAsync(dialog, "models/gemini-4-argon", googleConnection);
+        await AddLlmModelInDialogAsync(dialog, "models/gemini-4-hydrogen", googleConnection);
+        await AddLlmModelInDialogAsync(dialog, "qwen2.5vl:7b", ollamaConnection);
+
+        await AddLlmProfileInDialogAsync(
+            dialog,
+            "models/gemini-4-argon",
+            "Deep Reasoning",
+            googleConnection
+        );
+
+        // 2. Assign Google AI Studio models to Text and Refinement, and Local Ollama to Vision
+        await AssignLlmWorkflowAsync(
+            dialog,
+            "text",
+            "models/gemini-3.8-flash",
+            googleConnection,
+            profileName: "Defaults"
+        );
+        await AssignLlmWorkflowAsync(
+            dialog,
+            "refine",
+            "models/gemini-4-argon",
+            googleConnection,
+            profileName: "Deep Reasoning"
+        );
+        await AssignLlmWorkflowAsync(
+            dialog,
+            "vision",
+            "qwen2.5vl:7b",
+            ollamaConnection,
+            profileName: "Defaults"
+        );
+        await dialog
+            .GetByTestId("refine-during-ingestion-toggle")
+            .Locator("button[role='switch']")
+            .ClickAsync();
+        await SaveLlmWorkflowsAsync(dialog);
+
+        // 3. Reopen dialog and delete Google AI Studio from the Connections tab
+        await Page.Locator(".llm-settings-btn").ClickAsync();
+        await OpenLlmSettingsTabAsync(dialog, "Connections");
+
+        var googleCard = dialog.Locator(".connection-card", new() { HasText = googleConnection });
+        await Expect(googleCard).ToBeVisibleAsync();
+
+        // Cancel confirmation first -> nothing deleted
+        await googleCard.GetByTestId("delete-connection-btn").ClickAsync();
+        var confirmDialog = Page.Locator("app-confirm-dialog");
+        await Expect(confirmDialog).ToBeVisibleAsync();
+        await Expect(confirmDialog).ToContainTextAsync("3 saved models and their profiles");
+        await Expect(confirmDialog).ToContainTextAsync("Text and Refinement workflows");
+        Assert.IsTrue(
+            await Page.EvaluateAsync<bool>(
+                "document.documentElement.scrollWidth <= window.innerWidth"
+            ),
+            "Connection delete confirmation dialog must fit a 360px viewport."
+        );
+        await confirmDialog
+            .GetByRole(AriaRole.Button, new() { Name = "Cancel", Exact = true })
+            .ClickAsync();
+        await Expect(confirmDialog).Not.ToBeVisibleAsync();
+        await Expect(googleCard).ToBeVisibleAsync();
+
+        // Confirm delete -> cascades models & profiles and deselects Text & Refinement workflows
+        await googleCard.GetByTestId("delete-connection-btn").ClickAsync();
+        await Expect(confirmDialog).ToBeVisibleAsync();
+        await Page.RunAndWaitForResponseAsync(
+            () =>
+                confirmDialog
+                    .GetByRole(AriaRole.Button, new() { Name = "Delete Connection", Exact = true })
+                    .ClickAsync(),
+            resp =>
+                resp.Url.Contains("/api/llm-settings/connections/")
+                && resp.Request.Method == "DELETE"
+                && resp.Ok
+        );
+        await Expect(confirmDialog).Not.ToBeVisibleAsync();
+        await Expect(googleCard).Not.ToBeVisibleAsync();
+
+        // 4. Models and Profiles tabs only retain Local Ollama's model/profile
+        await OpenLlmSettingsTabAsync(dialog, "Models");
+        await Expect(dialog.Locator(".model-config-card")).ToHaveCountAsync(1);
+        await Expect(dialog.Locator(".model-config-card")).ToContainTextAsync("qwen2.5vl:7b");
+
+        await OpenLlmSettingsTabAsync(dialog, "Profiles");
+        await Expect(dialog.GetByTestId("profile-cards-list").Locator(".profile-card"))
+            .ToHaveCountAsync(1);
+        await Expect(dialog.Locator(".profile-model-group-title"))
+            .ToContainTextAsync("qwen2.5vl:7b");
+
+        // 5. Workflows tab shows Text & Refinement deselected (and NOT auto-switched to Local Ollama) while Vision stays
+        await OpenLlmSettingsTabAsync(dialog, "Workflows");
+        await Expect(dialog.GetByTestId("workflow-text-select"))
+            .ToContainTextAsync("Not assigned (text extraction off)");
+        await Expect(dialog.GetByTestId("workflow-refine-select"))
+            .ToContainTextAsync("Not assigned (refinement off)");
+        await Expect(
+                dialog
+                    .GetByTestId("refine-during-ingestion-toggle")
+                    .Locator("button[role='switch']")
+            )
+            .ToBeDisabledAsync();
+        await Expect(dialog.GetByTestId("workflow-vision-select"))
+            .ToContainTextAsync(LlmConfigName("qwen2.5vl:7b", ollamaConnection));
+
+        // 6. Close WITHOUT clicking Save Settings, reopen, and verify server persisted workflow adjustments
+        await dialog
+            .GetByRole(AriaRole.Button, new() { Name = "Close", Exact = true })
+            .ClickAsync();
+        await Expect(dialog).Not.ToBeVisibleAsync();
+
+        await Page.Locator(".llm-settings-btn").ClickAsync();
+        await Expect(dialog.GetByTestId("workflow-text-select"))
+            .ToContainTextAsync("Not assigned (text extraction off)");
+        await Expect(dialog.GetByTestId("workflow-refine-select"))
+            .ToContainTextAsync("Not assigned (refinement off)");
+        await Expect(dialog.GetByTestId("workflow-vision-select"))
+            .ToContainTextAsync(LlmConfigName("qwen2.5vl:7b", ollamaConnection));
+
+        // 7. Deleting the remaining assigned model directly confirms and deselects Vision
+        await OpenLlmSettingsTabAsync(dialog, "Models");
+        var visionCard = dialog.Locator(".model-config-card", new() { HasText = "qwen2.5vl:7b" });
+        await visionCard.GetByTestId("delete-model-config-btn").ClickAsync();
+        await Expect(confirmDialog).ToBeVisibleAsync();
+        await Expect(confirmDialog).ToContainTextAsync("deselect it from the Vision workflow");
+        await Page.RunAndWaitForResponseAsync(
+            () =>
+                confirmDialog
+                    .GetByRole(AriaRole.Button, new() { Name = "Delete Model", Exact = true })
+                    .ClickAsync(),
+            resp =>
+                resp.Url.Contains("/api/llm-settings/model-configurations/")
+                && resp.Request.Method == "DELETE"
+                && resp.Ok
+        );
+        await Expect(visionCard).Not.ToBeVisibleAsync();
+
+        await OpenLlmSettingsTabAsync(dialog, "Workflows");
+        await Expect(dialog.GetByTestId("workflow-vision-select"))
+            .ToContainTextAsync("Not assigned (photo and PDF scans off)");
+
+        await dialog
+            .GetByRole(AriaRole.Button, new() { Name = "Close", Exact = true })
+            .ClickAsync();
+        await Expect(dialog).Not.ToBeVisibleAsync();
+        await ResetLlmSettingsViaApiAsync();
+    }
 }

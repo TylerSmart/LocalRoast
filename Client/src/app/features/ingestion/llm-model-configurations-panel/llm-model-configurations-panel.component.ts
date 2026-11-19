@@ -17,9 +17,14 @@ import type {
 } from '../../../core/models/ingestion.models';
 import { LlmSettingsService } from '../../../core/services/llm-settings/llm-settings.service';
 import {
+  ConfirmDialogComponent,
+  type ConfirmDialogData,
+} from '../../../shared/components/confirm-dialog/confirm-dialog.component';
+import {
   LlmModelConfigurationDialogComponent,
   type LlmModelConfigurationDialogData,
 } from '../llm-model-configuration-dialog/llm-model-configuration-dialog.component';
+import { buildDeleteModelConfirmMessage } from '../llm-settings-dialog/llm-settings.utils';
 
 /** Saves each unique (Connection, Model) pair together with optional hardware placement and rate limits. */
 @Component({
@@ -55,6 +60,35 @@ export class LlmModelConfigurationsPanelComponent {
     if (this.isSaving()) {
       return;
     }
+    const confirmMessage = buildDeleteModelConfirmMessage(configuration);
+    if (confirmMessage) {
+      this.dialog
+        .open<ConfirmDialogComponent, ConfirmDialogData, boolean | undefined>(
+          ConfirmDialogComponent,
+          {
+            width: '440px',
+            maxWidth: '95vw',
+            data: {
+              title: 'Delete Model',
+              message: confirmMessage,
+              confirmText: 'Delete Model',
+              isDestructive: true,
+            },
+          },
+        )
+        .afterClosed()
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe((confirmed) => {
+          if (confirmed) {
+            this.executeDelete(configuration);
+          }
+        });
+      return;
+    }
+    this.executeDelete(configuration);
+  }
+
+  private executeDelete(configuration: LlmModelConfigurationDto): void {
     this.isSaving.set(true);
     this.errorMessage.set(null);
     this.llmSettingsService

@@ -48,7 +48,6 @@ public sealed class LlmConnectionsController(ILlmConnectionService connectionSer
     [HttpDelete("connections/{id:guid}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     public Task<IActionResult> DeleteConnection(Guid id, CancellationToken cancellationToken) =>
         HandleAsync(async () =>
         {
@@ -109,7 +108,6 @@ public sealed class LlmConnectionsController(ILlmConnectionService connectionSer
     [HttpDelete("model-configurations/{id:guid}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     public Task<IActionResult> DeleteModelConfiguration(
         Guid id,
         CancellationToken cancellationToken
