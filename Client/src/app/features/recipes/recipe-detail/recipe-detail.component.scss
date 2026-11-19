@@ -539,10 +539,8 @@
 }
 
 .substitute-ing-btn {
+  flex-shrink: 0;
   opacity: 0.78;
-  width: 34px;
-  height: 34px;
-  padding: 0 !important;
   color: var(--mat-sys-primary);
 
   &:hover {
@@ -550,9 +548,9 @@
   }
 
   mat-icon {
-    font-size: 18px;
-    width: 18px;
-    height: 18px;
+    font-size: 20px;
+    width: 20px;
+    height: 20px;
   }
 }
 

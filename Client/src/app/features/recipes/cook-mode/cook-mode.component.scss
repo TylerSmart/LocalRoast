@@ -127,6 +127,13 @@
   }
 }
 
+.wake-text,
+.narration-label,
+.voice-label {
+  text-box-trim: trim-both;
+  text-box-edge: cap alphabetic;
+}
+
 .wake-icon,
 .narration-icon,
 .voice-icon {
@@ -179,6 +186,8 @@
 .step-btn {
   width: 30px !important;
   height: 30px !important;
+  min-width: 30px !important;
+  min-height: 30px !important;
   padding: 0 !important;
   display: inline-flex !important;
   align-items: center !important;
@@ -200,6 +209,8 @@
   min-width: 44px;
   text-align: center;
   white-space: nowrap;
+  text-box-trim: trim-both;
+  text-box-edge: cap alphabetic;
 }
 
 /* Multiplier Chips */

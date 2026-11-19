@@ -182,19 +182,40 @@ mat-icon,
   }
 }
 
-.mat-mdc-icon-button {
+.mat-mdc-icon-button.mat-mdc-button-base {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
   min-width: 44px;
   min-height: 44px;
+  padding: 0;
+  line-height: 1;
+
+  > .mat-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+  }
+}
+
+.mat-mdc-button.mat-mdc-button-base > .mat-icon,
+.mat-mdc-unelevated-button.mat-mdc-button-base > .mat-icon,
+.mat-mdc-raised-button.mat-mdc-button-base > .mat-icon,
+.mat-mdc-outlined-button.mat-mdc-button-base > .mat-icon,
+.mat-tonal-button.mat-mdc-button-base > .mat-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
 }
 
 .mat-mdc-button .mdc-button__label,
 .mat-mdc-unelevated-button .mdc-button__label,
 .mat-mdc-raised-button .mdc-button__label,
-.mat-mdc-outlined-button .mdc-button__label {
+.mat-mdc-outlined-button .mdc-button__label,
+.mat-tonal-button .mdc-button__label {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -202,6 +223,17 @@ mat-icon,
   min-width: 0;
   line-height: 1.35;
   overflow-wrap: normal;
+  text-box-trim: trim-both;
+  text-box-edge: cap alphabetic;
+
+  &:not(:has(*)) {
+    display: inline-block;
+  }
+
+  span:not(:has(*)):not(.inbox-count-badge) {
+    text-box-trim: trim-both;
+    text-box-edge: cap alphabetic;
+  }
 }
 
 /* Ensure multi-line mat-hint and mat-error expand naturally without overlapping elements below */
