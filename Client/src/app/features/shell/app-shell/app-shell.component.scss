@@ -181,6 +181,42 @@
   }
 }
 
+.connection-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  padding: 0.6rem var(--app-page-gutter);
+  background: var(--app-warning-container);
+  color: var(--app-on-warning-container);
+  border-bottom: 1px solid var(--mat-sys-outline-variant);
+}
+
+.connection-banner-content {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.connection-banner-icon {
+  flex-shrink: 0;
+  color: var(--app-warning);
+}
+
+.connection-banner-text {
+  font-size: 0.875rem;
+  line-height: 1.35;
+}
+
+.connection-retry-btn {
+  flex-shrink: 0;
+  --mat-button-outlined-label-text-color: var(--app-on-warning-container);
+  --mat-button-outlined-outline-color: var(--app-warning);
+}
+
 .main-content {
   flex: 1;
   width: 100%;

@@ -63,7 +63,17 @@ public sealed class DualBearerAuthenticationHandler(
         // 1. Try local application JWT first
         if (TokenHandler.CanReadToken(token))
         {
-            var jwt = TokenHandler.ReadJwtToken(token);
+            JwtSecurityToken jwt;
+            try
+            {
+                jwt = TokenHandler.ReadJwtToken(token);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogDebug(ex, "Malformed JWT token could not be decoded.");
+                return AuthenticateResult.Fail("Malformed JWT token.");
+            }
+
             if (string.Equals(jwt.Issuer, _jwtOptions.Issuer, StringComparison.OrdinalIgnoreCase))
             {
                 var secretKey = string.IsNullOrWhiteSpace(_jwtOptions.Secret)
@@ -78,6 +88,7 @@ public sealed class DualBearerAuthenticationHandler(
                     ValidAudience = _jwtOptions.Audience,
                     ValidateIssuerSigningKey = true,
                     IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey)),
+                    RequireExpirationTime = _jwtOptions.ExpirationMinutes > 0,
                     ValidateLifetime = true,
                     ClockSkew = TimeSpan.FromMinutes(1),
                 };

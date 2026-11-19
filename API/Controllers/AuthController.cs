@@ -108,8 +108,7 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
     [HttpGet("me")]
     [Authorize]
     [ProducesResponseType(typeof(CurrentUserDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> GetCurrentUser(CancellationToken cancellationToken)
     {
         var userIdStr =
@@ -123,12 +122,12 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
         var user = await authService.GetCurrentUserAsync(userId, cancellationToken);
         if (user is null)
         {
-            return NotFound(
+            return Unauthorized(
                 new ProblemDetails
                 {
-                    Status = StatusCodes.Status404NotFound,
-                    Title = "User not found",
-                    Detail = "The authenticated user could not be found.",
+                    Status = StatusCodes.Status401Unauthorized,
+                    Title = "Invalid session",
+                    Detail = "The authenticated user account no longer exists.",
                 }
             );
         }

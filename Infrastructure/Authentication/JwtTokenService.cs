@@ -35,11 +35,16 @@ public sealed class JwtTokenService(IOptions<JwtOptions> options) : IJwtTokenSer
             new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
         };
 
+        DateTime? expires =
+            _options.ExpirationMinutes > 0
+                ? DateTime.UtcNow.AddMinutes(_options.ExpirationMinutes)
+                : null;
+
         var token = new JwtSecurityToken(
             issuer: _options.Issuer,
             audience: _options.Audience,
             claims: claims,
-            expires: DateTime.UtcNow.AddMinutes(_options.ExpirationMinutes),
+            expires: expires,
             signingCredentials: credentials
         );
 
@@ -68,6 +73,7 @@ public sealed class JwtTokenService(IOptions<JwtOptions> options) : IJwtTokenSer
             ValidAudience = _options.Audience,
             ValidateIssuerSigningKey = true,
             IssuerSigningKey = key,
+            RequireExpirationTime = _options.ExpirationMinutes > 0,
             ValidateLifetime = true,
             ClockSkew = TimeSpan.FromMinutes(1),
         };

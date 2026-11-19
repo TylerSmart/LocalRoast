@@ -251,9 +251,9 @@ app.UseSerilogRequestLogging(options =>
     };
 });
 
-app.UseExceptionHandler();
-
 app.UseMiddleware<ApiVersionHeaderMiddleware>();
+
+app.UseExceptionHandler();
 
 var hasHttpsUrl =
     builder

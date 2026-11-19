@@ -193,4 +193,36 @@ describe('ShoppingRealtimeService', () => {
     await service.connect();
     expect(service.syncState()).toBe('disconnected');
   });
+
+  it('configures unbounded capped automatic reconnect policy while authenticated and stops when signed out', async () => {
+    const reconnectSpy = vi.mocked(signalR.HubConnectionBuilder.prototype.withAutomaticReconnect);
+    await service.connect();
+
+    const retryPolicy = reconnectSpy.mock.calls.at(-1)?.[0] as signalR.IRetryPolicy;
+    expect(typeof retryPolicy?.nextRetryDelayInMilliseconds).toBe('function');
+
+    expect(
+      retryPolicy.nextRetryDelayInMilliseconds({
+        previousRetryCount: 0,
+        elapsedMilliseconds: 0,
+        retryReason: new Error('API restart'),
+      }),
+    ).toBe(0);
+    expect(
+      retryPolicy.nextRetryDelayInMilliseconds({
+        previousRetryCount: 10,
+        elapsedMilliseconds: 120000,
+        retryReason: new Error('API restart'),
+      }),
+    ).toBe(15000);
+
+    mockAuthService.token.set(null);
+    expect(
+      retryPolicy.nextRetryDelayInMilliseconds({
+        previousRetryCount: 11,
+        elapsedMilliseconds: 135000,
+        retryReason: new Error('Signed out'),
+      }),
+    ).toBeNull();
+  });
 });

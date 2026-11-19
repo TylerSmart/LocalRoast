@@ -1,8 +1,11 @@
+using System.IdentityModel.Tokens.Jwt;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using App.API.Dtos;
 using App.Core.Authentication;
+using App.Data;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace App.API.IntegrationTests;
@@ -308,5 +311,95 @@ public sealed class AuthIntegrationTests
 
         var repeatedResponse = await bearerClient.GetAsync("/api/auth/me");
         Assert.AreEqual(HttpStatusCode.Unauthorized, repeatedResponse.StatusCode);
+    }
+
+    [TestMethod]
+    public async Task DefaultJwtConfiguration_IssuesNonExpiringToken_AndIncludesApiVersionHeader()
+    {
+        var request = new RegisterRequest("persistent@example.com", "persistent", "Password123!");
+        var response = await _client.PostAsJsonAsync("/api/auth/register", request);
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+        Assert.IsTrue(
+            response.Headers.Contains("X-Api-Version"),
+            "API responses must include X-Api-Version so the client can distinguish API responses from proxy outages."
+        );
+
+        var auth = await response.Content.ReadFromJsonAsync<AuthResponse>();
+        Assert.IsNotNull(auth);
+        Assert.IsNull(auth.ExpiresAt);
+
+        var jwt = new JwtSecurityTokenHandler().ReadJwtToken(auth.Token);
+        Assert.IsNull(jwt.Payload.Expiration);
+
+        using var authedClient = _factory.CreateClient();
+        authedClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer",
+            auth.Token
+        );
+        var meResponse = await authedClient.GetAsync("/api/auth/me");
+        Assert.AreEqual(HttpStatusCode.OK, meResponse.StatusCode);
+        Assert.IsTrue(meResponse.Headers.Contains("X-Api-Version"));
+    }
+
+    [TestMethod]
+    public async Task PositiveExpirationMinutesConfiguration_IssuesExpiringToken()
+    {
+        using var expiringFactory = _factory.WithWebHostBuilder(builder =>
+            builder.UseSetting("Authentication:Jwt:ExpirationMinutes", "45")
+        );
+        using var client = expiringFactory.CreateClient();
+
+        var request = new RegisterRequest("expiring@example.com", "expiring", "Password123!");
+        var response = await client.PostAsJsonAsync("/api/auth/register", request);
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+
+        var auth = await response.Content.ReadFromJsonAsync<AuthResponse>();
+        Assert.IsNotNull(auth);
+        Assert.IsNotNull(auth.ExpiresAt);
+
+        var jwt = new JwtSecurityTokenHandler().ReadJwtToken(auth.Token);
+        Assert.IsNotNull(jwt.Payload.Expiration);
+    }
+
+    [TestMethod]
+    public async Task GetCurrentUser_WhenUserDeletedFromDatabase_ReturnsUnauthorized()
+    {
+        var request = new RegisterRequest("deleted@example.com", "deleteduser", "Password123!");
+        var regResponse = await _client.PostAsJsonAsync("/api/auth/register", request);
+        Assert.AreEqual(HttpStatusCode.OK, regResponse.StatusCode);
+
+        var auth = await regResponse.Content.ReadFromJsonAsync<AuthResponse>();
+        Assert.IsNotNull(auth);
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var entity = await db.Users.FindAsync(auth.Id);
+            Assert.IsNotNull(entity);
+            db.Users.Remove(entity);
+            await db.SaveChangesAsync();
+        }
+
+        using var bearerClient = _factory.CreateClient();
+        bearerClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer",
+            auth.Token
+        );
+
+        var meResponse = await bearerClient.GetAsync("/api/auth/me");
+        Assert.AreEqual(HttpStatusCode.Unauthorized, meResponse.StatusCode);
+    }
+
+    [TestMethod]
+    public async Task MalformedThreeSegmentBearerToken_ReturnsUnauthorizedNotInternalServerError()
+    {
+        using var bearerClient = _factory.CreateClient();
+        bearerClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer",
+            "tampered.jwt.token"
+        );
+
+        var meResponse = await bearerClient.GetAsync("/api/auth/me");
+        Assert.AreEqual(HttpStatusCode.Unauthorized, meResponse.StatusCode);
     }
 }

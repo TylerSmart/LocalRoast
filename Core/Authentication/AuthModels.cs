@@ -18,7 +18,7 @@ public sealed record AuthResponse(
     Guid Id,
     string Email,
     string Username,
-    DateTimeOffset ExpiresAt,
+    DateTimeOffset? ExpiresAt,
     string? ThemeSettings = null
 );
 

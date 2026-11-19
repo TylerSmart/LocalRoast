@@ -140,7 +140,8 @@ services:
       Authentication__Jwt__Secret: "${JWT_SECRET}"
       Authentication__Jwt__Issuer: "LocalRoast"
       Authentication__Jwt__Audience: "LocalRoast"
-      Authentication__Jwt__ExpirationMinutes: 1440
+      # 0 = persistent sign-in until logout/browser data clear; set positive minutes for finite expiry
+      Authentication__Jwt__ExpirationMinutes: 0
 
       # Optional: External OIDC / SSO (Google, Authentik, Keycloak, Entra ID)
       # Authentication__Oidc__Enabled: "true"
@@ -235,7 +236,7 @@ The following environment variables can be customized in `.env` or passed direct
 | `Authentication__Jwt__Secret`                 | Required              | Secret signing key for JWT tokens. Must be >= 32 characters.                 |
 | `Authentication__Jwt__Issuer`                 | `LocalRoast`      | Token issuer claim.                                                          |
 | `Authentication__Jwt__Audience`               | `LocalRoast`      | Token audience claim.                                                        |
-| `Authentication__Jwt__ExpirationMinutes`      | `1440` (24 hours)     | Session token validity duration in minutes.                                  |
+| `Authentication__Jwt__ExpirationMinutes`      | `0` (Never expires)   | Session token validity in minutes (`0` keeps sign-ins persistent until logout/storage clear). |
 | `Authentication__Oidc__Enabled`               | `false`               | Set to `true` to enable external Single Sign-On.                             |
 | `Authentication__Oidc__ProviderName`          | `OIDC`                | Display label on the login screen (e.g. `Google`, `Authentik`, `Keycloak`).  |
 | `Authentication__Oidc__Authority`             | -                     | OIDC Identity Provider discovery authority URL.                              |

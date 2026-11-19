@@ -10,5 +10,8 @@ public sealed class JwtOptions
 
     public string Audience { get; set; } = "App";
 
-    public int ExpirationMinutes { get; set; } = 1440;
+    /// <summary>
+    /// Session lifetime in minutes. Values &lt;= 0 issue non-expiring tokens (default).
+    /// </summary>
+    public int ExpirationMinutes { get; set; } = 0;
 }

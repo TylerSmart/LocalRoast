@@ -2,6 +2,7 @@ using App.Core.Authentication;
 using App.Core.Exceptions;
 using App.Data.Entities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace App.Data.Services;
 
@@ -9,9 +10,12 @@ public sealed class AuthService(
     AppDbContext dbContext,
     IPasswordHasher passwordHasher,
     IJwtTokenService jwtTokenService,
-    IOidcService oidcService
+    IOidcService oidcService,
+    IOptions<JwtOptions> jwtOptions
 ) : IAuthService
 {
+    private readonly JwtOptions _jwtOptions = jwtOptions.Value;
+
     public IReadOnlyList<AuthProviderDto> GetAuthProviders()
     {
         var providers = new List<AuthProviderDto>
@@ -93,7 +97,7 @@ public sealed class AuthService(
             Id: user.Id,
             Email: user.Email,
             Username: user.Username,
-            ExpiresAt: DateTimeOffset.UtcNow.AddHours(24),
+            ExpiresAt: GetExpiresAt(),
             ThemeSettings: user.ThemeSettings
         );
     }
@@ -127,7 +131,7 @@ public sealed class AuthService(
             Id: user.Id,
             Email: user.Email,
             Username: user.Username,
-            ExpiresAt: DateTimeOffset.UtcNow.AddHours(24),
+            ExpiresAt: GetExpiresAt(),
             ThemeSettings: user.ThemeSettings
         );
     }
@@ -186,7 +190,7 @@ public sealed class AuthService(
             Id: userSummary.Id,
             Email: userSummary.Email,
             Username: userSummary.Username,
-            ExpiresAt: DateTimeOffset.UtcNow.AddHours(24),
+            ExpiresAt: GetExpiresAt(),
             ThemeSettings: userSummary.ThemeSettings
         );
     }
@@ -263,4 +267,9 @@ public sealed class AuthService(
 
         return new UserSummary(user.Id, user.Email, user.Username, user.ThemeSettings);
     }
+
+    private DateTimeOffset? GetExpiresAt() =>
+        _jwtOptions.ExpirationMinutes > 0
+            ? DateTimeOffset.UtcNow.AddMinutes(_jwtOptions.ExpirationMinutes)
+            : null;
 }

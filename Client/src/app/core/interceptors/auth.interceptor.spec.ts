@@ -9,13 +9,19 @@ describe('authInterceptor', () => {
   let httpMock: HttpTestingController;
   let mockAuthService: {
     token: ReturnType<typeof vi.fn>;
+    isInitialized: ReturnType<typeof vi.fn>;
     logout: ReturnType<typeof vi.fn>;
+    reportBackendUnreachable: ReturnType<typeof vi.fn>;
+    reportBackendReachable: ReturnType<typeof vi.fn>;
   };
 
   beforeEach(() => {
     mockAuthService = {
       token: vi.fn(),
+      isInitialized: vi.fn().mockReturnValue(true),
       logout: vi.fn(),
+      reportBackendUnreachable: vi.fn(),
+      reportBackendReachable: vi.fn(),
     };
 
     TestBed.configureTestingModule({
@@ -67,5 +73,62 @@ describe('authInterceptor', () => {
     req.flush('Unauthorized', { status: 401, statusText: 'Unauthorized' });
 
     expect(mockAuthService.logout).toHaveBeenCalled();
+  });
+
+  it('should not call logout during startup initAuth 401 on /api/auth/me', () => {
+    mockAuthService.token.mockReturnValue('expired-token');
+    mockAuthService.isInitialized.mockReturnValue(false);
+
+    httpClient.get('/api/auth/me').subscribe({
+      error: () => undefined,
+    });
+
+    const req = httpMock.expectOne('/api/auth/me');
+    req.flush('Unauthorized', { status: 401, statusText: 'Unauthorized' });
+
+    expect(mockAuthService.logout).not.toHaveBeenCalled();
+  });
+
+  it('should report backend unreachable on proxy 500 without X-Api-Version and not logout', () => {
+    mockAuthService.token.mockReturnValue('valid-token');
+
+    httpClient.get('/api/recipes').subscribe({
+      error: () => undefined,
+    });
+
+    const req = httpMock.expectOne('/api/recipes');
+    req.flush('', { status: 500, statusText: 'Internal Server Error' });
+
+    expect(mockAuthService.logout).not.toHaveBeenCalled();
+    expect(mockAuthService.reportBackendUnreachable).toHaveBeenCalled();
+  });
+
+  it('should not report backend unreachable when 503 response includes X-Api-Version (e.g. Ollama offline)', () => {
+    mockAuthService.token.mockReturnValue('valid-token');
+
+    httpClient.post('/api/ai/substitutions', {}).subscribe({
+      error: () => undefined,
+    });
+
+    const req = httpMock.expectOne('/api/ai/substitutions');
+    req.flush('LLM unavailable', {
+      status: 503,
+      statusText: 'Service Unavailable',
+      headers: { 'X-Api-Version': '1.0.0' },
+    });
+
+    expect(mockAuthService.reportBackendUnreachable).not.toHaveBeenCalled();
+    expect(mockAuthService.reportBackendReachable).toHaveBeenCalled();
+  });
+
+  it('should report backend reachable when API responds with X-Api-Version', () => {
+    mockAuthService.token.mockReturnValue('valid-token');
+
+    httpClient.get('/api/recipes').subscribe();
+
+    const req = httpMock.expectOne('/api/recipes');
+    req.flush([], { headers: { 'X-Api-Version': '1.0.0' } });
+
+    expect(mockAuthService.reportBackendReachable).toHaveBeenCalled();
   });
 });

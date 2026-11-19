@@ -226,15 +226,17 @@ public sealed class AccountService(
     {
         var summary = new UserSummary(id, email, username, themeSettings);
         var token = jwtTokenService.GenerateToken(summary);
-        var expirationMinutes =
-            _jwtOptions.ExpirationMinutes > 0 ? _jwtOptions.ExpirationMinutes : 1440;
+        DateTimeOffset? expiresAt =
+            _jwtOptions.ExpirationMinutes > 0
+                ? DateTimeOffset.UtcNow.AddMinutes(_jwtOptions.ExpirationMinutes)
+                : null;
 
         return new AuthResponse(
             Token: token,
             Id: id,
             Email: email,
             Username: username,
-            ExpiresAt: DateTimeOffset.UtcNow.AddMinutes(expirationMinutes),
+            ExpiresAt: expiresAt,
             ThemeSettings: themeSettings
         );
     }
