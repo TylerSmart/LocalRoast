@@ -2,12 +2,12 @@
   <!-- Top Header & Actions -->
   <header class="workspace-header">
     <div class="title-and-actions">
-      <h1 class="page-title">
-        <mat-icon>shopping_cart</mat-icon>
-        <span>Shopping Lists</span>
-      </h1>
+      <div class="title-with-sync">
+        <h1 class="page-title">
+          <mat-icon>shopping_cart</mat-icon>
+          <span>Shopping Lists</span>
+        </h1>
 
-      <div class="header-action-buttons">
         @if (syncState() === 'live') {
           <span class="sync-status-pill live" role="status" aria-live="polite">
             <span class="sync-dot"></span>
@@ -31,7 +31,9 @@
             <span>Offline</span>
           </button>
         }
+      </div>
 
+      <div class="header-action-buttons">
         <button
           type="button"
           mat-flat-button

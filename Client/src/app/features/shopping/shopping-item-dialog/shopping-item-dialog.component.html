@@ -1,17 +1,34 @@
-<h2 mat-dialog-title>
-  {{ isEditing ? 'Edit Item' : 'Add Item' }}
-</h2>
+<div class="dialog-header">
+  <div class="title-wrap">
+    <span class="dialog-icon-badge" aria-hidden="true">
+      <mat-icon>{{ isEditing ? 'edit' : 'add_shopping_cart' }}</mat-icon>
+    </span>
+    <h2 mat-dialog-title class="dialog-title">
+      {{ isEditing ? 'Edit Item' : 'Add Item' }}
+    </h2>
+  </div>
+  <button
+    mat-icon-button
+    type="button"
+    class="close-btn"
+    (click)="onCancel()"
+    [disabled]="isSubmitting()"
+    aria-label="Close dialog"
+  >
+    <mat-icon>close</mat-icon>
+  </button>
+</div>
 
 <mat-dialog-content class="dialog-content">
   @if (errorMessage()) {
     <div class="error-banner" role="alert">
-      <mat-icon>error</mat-icon>
+      <mat-icon>error_outline</mat-icon>
       <span>{{ errorMessage() }}</span>
     </div>
   }
 
   <form [formGroup]="form" class="item-form" (ngSubmit)="onSubmit()">
-    <mat-form-field appearance="outline" class="full-width">
+    <mat-form-field appearance="outline" class="full-width" subscriptSizing="dynamic">
       <mat-label>Item Name</mat-label>
       <input
         matInput
@@ -25,17 +42,24 @@
     </mat-form-field>
 
     <div class="form-row quantities-row">
-      <mat-form-field appearance="outline">
+      <mat-form-field appearance="outline" subscriptSizing="dynamic">
         <mat-label>Quantity</mat-label>
         <input matInput type="number" step="0.25" min="0" formControlName="quantity" />
       </mat-form-field>
 
-      <mat-form-field appearance="outline">
-        <mat-label>Max Qty (Range)</mat-label>
-        <input matInput type="number" step="0.25" min="0" formControlName="maxQuantity" />
+      <mat-form-field appearance="outline" subscriptSizing="dynamic">
+        <mat-label>Max Qty</mat-label>
+        <input
+          matInput
+          type="number"
+          step="0.25"
+          min="0"
+          placeholder="Optional"
+          formControlName="maxQuantity"
+        />
       </mat-form-field>
 
-      <mat-form-field appearance="outline">
+      <mat-form-field appearance="outline" subscriptSizing="dynamic">
         <mat-label>Unit</mat-label>
         <mat-select formControlName="unit">
           <mat-option [value]="null">None / Count</mat-option>
@@ -47,20 +71,20 @@
     </div>
 
     @if (form.controls.unit.value === 'Custom') {
-      <mat-form-field appearance="outline" class="full-width">
+      <mat-form-field appearance="outline" class="full-width" subscriptSizing="dynamic">
         <mat-label>Custom Unit Name</mat-label>
         <input matInput formControlName="customUnitName" placeholder="e.g., package, container" />
       </mat-form-field>
     }
 
-    <mat-form-field appearance="outline" class="full-width">
+    <mat-form-field appearance="outline" class="full-width" subscriptSizing="dynamic">
       <mat-label>Notes</mat-label>
       <input matInput formControlName="notes" placeholder="e.g., Ripe, organic, brand preference" />
     </mat-form-field>
   </form>
 </mat-dialog-content>
 
-<mat-dialog-actions align="end">
+<mat-dialog-actions align="end" class="dialog-actions">
   <button mat-button type="button" (click)="onCancel()" [disabled]="isSubmitting()">Cancel</button>
   <button
     mat-flat-button

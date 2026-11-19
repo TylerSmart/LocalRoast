@@ -1,7 +1,21 @@
-<h2 mat-dialog-title class="dialog-title">
-  <mat-icon>shopping_cart_checkout</mat-icon>
-  <span>Generate Shopping List</span>
-</h2>
+<div class="dialog-header">
+  <div class="title-wrap">
+    <span class="dialog-icon-badge" aria-hidden="true">
+      <mat-icon>shopping_cart_checkout</mat-icon>
+    </span>
+    <h2 mat-dialog-title class="dialog-title">Generate Shopping List</h2>
+  </div>
+  <button
+    mat-icon-button
+    type="button"
+    class="close-btn"
+    (click)="onCancel()"
+    [disabled]="isGenerating()"
+    aria-label="Close dialog"
+  >
+    <mat-icon>close</mat-icon>
+  </button>
+</div>
 
 <mat-dialog-content class="dialog-content">
   @if (errorMessage()) {
@@ -119,7 +133,8 @@
                 and
               }
               @if (preview()!.ignoredNotesCount > 0) {
-                {{ preview()!.ignoredNotesCount }} freeform notes
+                {{ preview()!.ignoredNotesCount }} freeform
+                {{ preview()!.ignoredNotesCount === 1 ? 'note' : 'notes' }}
               }
               (zero grocery math impact).
             </span>
@@ -160,7 +175,7 @@
   </form>
 </mat-dialog-content>
 
-<mat-dialog-actions align="end">
+<mat-dialog-actions align="end" class="dialog-actions">
   <button mat-button type="button" (click)="onCancel()" [disabled]="isGenerating()">Cancel</button>
   <button
     mat-flat-button

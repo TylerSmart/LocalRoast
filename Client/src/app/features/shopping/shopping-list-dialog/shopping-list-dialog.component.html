@@ -1,11 +1,26 @@
-<h2 mat-dialog-title>
-  <mat-icon>{{ isEdit() ? 'edit' : 'playlist_add' }}</mat-icon>
-  <span>{{ isEdit() ? 'Rename Shopping List' : 'New Shopping List' }}</span>
-</h2>
+<div class="dialog-header">
+  <div class="title-wrap">
+    <span class="dialog-icon-badge" aria-hidden="true">
+      <mat-icon>{{ isEdit() ? 'edit' : 'playlist_add' }}</mat-icon>
+    </span>
+    <h2 mat-dialog-title class="dialog-title">
+      {{ isEdit() ? 'Rename Shopping List' : 'New Shopping List' }}
+    </h2>
+  </div>
+  <button
+    mat-icon-button
+    type="button"
+    class="close-btn"
+    (click)="onCancel()"
+    aria-label="Close dialog"
+  >
+    <mat-icon>close</mat-icon>
+  </button>
+</div>
 
 <form [formGroup]="form" (ngSubmit)="onSubmit()">
   <mat-dialog-content class="dialog-content">
-    <mat-form-field appearance="outline" class="full-width">
+    <mat-form-field appearance="outline" class="full-width" subscriptSizing="dynamic">
       <mat-label>List Name</mat-label>
       <input
         matInput
@@ -28,7 +43,7 @@
     </div>
   </mat-dialog-content>
 
-  <mat-dialog-actions align="end">
+  <mat-dialog-actions align="end" class="dialog-actions">
     <button type="button" mat-button (click)="onCancel()">Cancel</button>
     <button type="submit" mat-flat-button color="primary" [disabled]="form.invalid">
       {{ isEdit() ? 'Save' : 'Create' }}
