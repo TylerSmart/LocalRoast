@@ -257,4 +257,19 @@ describe('AccountSettingsDialogComponent', () => {
 
     expect(component['passwordError']()).toBe('The current password you entered is incorrect.');
   });
+
+  it('marks confirm password field invalid via custom error state matcher when passwords mismatch', () => {
+    createComponent();
+    component.passwordForm.patchValue({
+      newPassword: 'NewPassword123!',
+      confirmPassword: 'DifferentPassword456!',
+    });
+    const confirmControl = component.passwordForm.controls.confirmPassword;
+    confirmControl.markAsTouched();
+
+    expect(component['confirmPasswordErrorMatcher'].isErrorState(confirmControl, null)).toBe(true);
+
+    confirmControl.setValue('NewPassword123!');
+    expect(component['confirmPasswordErrorMatcher'].isErrorState(confirmControl, null)).toBe(false);
+  });
 });

@@ -118,4 +118,15 @@ describe('GlobalSearchDialogComponent', () => {
       queryParams: { collectionId: 'c1' },
     });
   });
+
+  it('clears the active query and resets active index when clearSearch is called', () => {
+    component['searchControl'].setValue('chicken');
+    component['activeIndex'].set(2);
+
+    component.clearSearch();
+
+    expect(component['searchControl'].value).toBe('');
+    expect(component['searchQuery']()).toBe('');
+    expect(component['activeIndex']()).toBe(0);
+  });
 });

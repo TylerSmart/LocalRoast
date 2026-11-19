@@ -8,7 +8,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 20px 12px;
+  gap: 12px;
+  padding: 14px 20px 12px;
   margin: 0;
   border-bottom: 1px solid var(--mat-sys-outline-variant);
 
@@ -16,6 +17,7 @@
     display: flex;
     align-items: center;
     gap: 12px;
+    min-width: 0;
   }
 
   .header-icon-badge {
@@ -27,6 +29,7 @@
     border-radius: 12px;
     background-color: var(--mat-sys-primary-container);
     color: var(--mat-sys-on-primary-container);
+    flex-shrink: 0;
 
     mat-icon {
       font-size: 22px;
@@ -38,48 +41,52 @@
   .dialog-title {
     margin: 0;
     font-size: 1.15rem;
-    font-weight: 600;
-    line-height: 1.3;
+    font-weight: 700;
+    line-height: 1.25;
+    letter-spacing: -0.015em;
     color: var(--mat-sys-on-surface);
   }
 
   .dialog-subtitle {
     margin: 2px 0 0;
     font-size: 0.8125rem;
+    line-height: 1.35;
+    font-weight: 400;
     color: var(--mat-sys-on-surface-variant);
   }
 }
 
 .theme-dialog-content {
-  padding: 16px 20px !important;
+  padding: 14px 20px !important;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 16px;
 }
 
 .section-group {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 
   .section-header {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 7px;
     color: var(--mat-sys-on-surface);
 
     .section-icon {
-      font-size: 18px;
-      width: 18px;
-      height: 18px;
+      font-size: 17px;
+      width: 17px;
+      height: 17px;
       color: var(--mat-sys-primary);
     }
 
     .section-title {
-      font-size: 0.875rem;
-      font-weight: 600;
+      font-size: 0.78rem;
+      font-weight: 700;
       text-transform: uppercase;
-      letter-spacing: 0.04em;
+      letter-spacing: 0.05em;
+      color: var(--mat-sys-on-surface-variant);
     }
   }
 }
@@ -94,8 +101,8 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 8px;
-    padding: 10px 14px;
+    gap: 7px;
+    padding: 9px 12px;
     border-radius: 10px;
     border: 1px solid var(--mat-sys-outline-variant);
     background-color: var(--mat-sys-surface-container-low);
@@ -120,6 +127,7 @@
       background-color: var(--mat-sys-primary-container);
       color: var(--mat-sys-on-primary-container);
       border-color: var(--mat-sys-primary);
+      font-weight: 600;
       box-shadow: 0 0 0 1px var(--mat-sys-primary);
     }
   }
@@ -132,39 +140,65 @@
   border-radius: 12px;
   overflow: hidden;
 
+  ::ng-deep {
+    .mat-mdc-tab-header {
+      border-bottom: 1px solid var(--mat-sys-outline-variant);
+    }
+
+    .mat-mdc-tab {
+      min-width: 0;
+      padding-inline: 0.5rem;
+      height: 42px;
+
+      .mdc-tab__text-label {
+        display: inline-flex;
+        align-items: center;
+        color: var(--mat-sys-on-surface-variant);
+        font-weight: 500;
+        font-size: 0.85rem;
+      }
+
+      &.mdc-tab--active .mdc-tab__text-label {
+        color: var(--mat-sys-primary);
+        font-weight: 650;
+      }
+    }
+  }
+
   .tab-color-dot {
     width: 10px;
     height: 10px;
     border-radius: 50%;
     display: inline-block;
     margin-right: 6px;
-    border: 1px solid rgba(0, 0, 0, 0.15);
+    flex-shrink: 0;
+    border: 1px solid color-mix(in srgb, var(--mat-sys-on-surface) 22%, transparent);
   }
 
   .palette-tab-content {
-    padding: 14px 16px;
+    padding: 12px 14px;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 10px;
   }
 
   .tab-description {
     margin: 0;
-    font-size: 0.8125rem;
+    font-size: 0.8rem;
     color: var(--mat-sys-on-surface-variant);
-    line-height: 1.4;
+    line-height: 1.38;
   }
 
   .swatches-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(34px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(32px, 1fr));
     gap: 8px;
     align-items: center;
   }
 
   .swatch-btn {
-    width: 34px;
-    height: 34px;
+    width: 32px;
+    height: 32px;
     border-radius: 50%;
     border: 2px solid transparent;
     cursor: pointer;
@@ -178,13 +212,13 @@
       box-shadow 0.15s ease;
 
     &:hover {
-      transform: scale(1.16);
+      transform: scale(1.14);
       z-index: 2;
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
     }
 
     &.active {
-      transform: scale(1.08);
+      transform: scale(1.06);
       border-color: var(--mat-sys-surface);
       box-shadow:
         0 0 0 2px var(--mat-sys-primary),
@@ -192,9 +226,9 @@
     }
 
     .swatch-check {
-      font-size: 18px;
-      width: 18px;
-      height: 18px;
+      font-size: 17px;
+      width: 17px;
+      height: 17px;
       color: #ffffff;
       filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.8));
       pointer-events: none;
@@ -202,30 +236,39 @@
   }
 
   .active-palette-name {
-    font-size: 0.8125rem;
-    color: var(--mat-sys-on-surface);
+    font-size: 0.8rem;
+    color: var(--mat-sys-on-surface-variant);
     display: flex;
     gap: 4px;
+
+    strong {
+      color: var(--mat-sys-on-surface);
+    }
   }
 }
 
-// Fonts List
+// Fonts List (Featured default full-width + 2x2 grid on desktop, single column on narrow mobile)
 .fonts-list {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 
   .font-card {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 10px 14px;
+    padding: 9px 12px;
     border-radius: 10px;
     border: 1px solid var(--mat-sys-outline-variant);
     background-color: var(--mat-sys-surface-container-low);
     cursor: pointer;
     text-align: left;
+    min-width: 0;
     transition: all 0.15s ease;
+
+    &.font-card-featured {
+      grid-column: 1 / -1;
+    }
 
     &:hover {
       background-color: var(--mat-sys-surface-container-high);
@@ -252,20 +295,21 @@
       .font-meta {
         display: flex;
         align-items: center;
-        gap: 8px;
+        gap: 6px;
         flex-wrap: wrap;
 
         .font-name {
-          font-size: 0.9375rem;
+          font-size: 0.9rem;
           font-weight: 600;
           color: var(--mat-sys-on-surface);
         }
 
         .font-category-chip {
-          font-size: 0.6875rem;
+          font-size: 0.65rem;
+          font-weight: 600;
           padding: 1px 6px;
-          border-radius: 6px;
-          background-color: var(--mat-sys-surface-variant);
+          border-radius: 9999px;
+          background-color: var(--mat-sys-surface-container-highest);
           color: var(--mat-sys-on-surface-variant);
           text-transform: uppercase;
           letter-spacing: 0.03em;
@@ -273,7 +317,7 @@
       }
 
       .font-sample-text {
-        font-size: 0.875rem;
+        font-size: 0.84rem;
         color: var(--mat-sys-on-surface-variant);
         white-space: nowrap;
         overflow: hidden;
@@ -285,7 +329,8 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      margin-left: 12px;
+      margin-left: 8px;
+      flex-shrink: 0;
 
       .font-selected-icon {
         font-size: 20px;
@@ -306,30 +351,33 @@
 
 // Live Preview
 .preview-card {
-  padding: 16px;
+  padding: 12px 14px;
   border-radius: 12px;
   background-color: var(--mat-sys-surface-container);
   border: 1px solid var(--mat-sys-outline-variant);
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 
   .preview-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 6px;
 
     .preview-heading {
-      font-size: 1rem;
-      font-weight: 600;
+      font-size: 0.95rem;
+      font-weight: 700;
       color: var(--mat-sys-on-surface);
     }
 
     .preview-chip {
-      padding: 3px 8px;
-      border-radius: 12px;
-      font-size: 0.75rem;
-      font-weight: 500;
+      padding: 2px 9px;
+      border-radius: 9999px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      white-space: nowrap;
 
       &.tertiary-chip {
         background-color: var(--mat-sys-tertiary-container);
@@ -340,33 +388,32 @@
 
   .preview-body {
     margin: 0;
-    font-size: 0.875rem;
+    font-size: 0.82rem;
     color: var(--mat-sys-on-surface-variant);
-    line-height: 1.45;
+    line-height: 1.4;
   }
 
   .preview-actions {
     display: flex;
     align-items: center;
     gap: 8px;
-    margin-top: 4px;
+    margin-top: 2px;
     flex-wrap: wrap;
 
     .preview-btn {
       display: inline-flex;
       align-items: center;
-      gap: 6px;
+      gap: 5px;
       padding: 6px 12px;
-      border-radius: 8px;
-      font-size: 0.8125rem;
-      font-weight: 500;
-      cursor: default;
-      border: none;
+      border-radius: 9999px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      user-select: none;
 
       mat-icon {
-        font-size: 16px;
-        width: 16px;
-        height: 16px;
+        font-size: 15px;
+        width: 15px;
+        height: 15px;
       }
 
       &.primary-btn {
@@ -385,23 +432,49 @@
 @media (max-width: 600px) {
   .mode-button-group .mode-btn {
     flex-direction: column;
-    gap: 0.35rem;
-    padding: 0.75rem 0.25rem;
+    gap: 0.3rem;
+    padding: 0.65rem 0.25rem;
+    font-size: 0.8rem;
   }
 
   .theme-dialog-header {
-    padding-inline: 1rem;
-    gap: 0.5rem;
+    padding: 12px 14px 10px;
+    gap: 8px;
   }
 
-  .color-roles-tabs .palette-tab-content {
-    padding-inline: 0.75rem;
+  .color-roles-tabs {
+    ::ng-deep .mat-mdc-tab {
+      padding-inline: 0.3rem;
+
+      .mdc-tab__text-label {
+        font-size: 0.78rem;
+      }
+    }
+
+    .tab-color-dot {
+      width: 8px;
+      height: 8px;
+      margin-right: 4px;
+    }
+
+    .palette-tab-content {
+      padding: 10px 12px;
+    }
+  }
+
+  .fonts-list {
+    grid-template-columns: 1fr;
+
+    .font-card .font-card-left .font-sample-text {
+      white-space: normal;
+      overflow-wrap: anywhere;
+    }
   }
 }
 
 // Dialog Actions
 .theme-dialog-actions {
-  padding: 12px 20px 16px !important;
+  padding: 10px 20px 14px !important;
   border-top: 1px solid var(--mat-sys-outline-variant);
   display: flex;
   align-items: center;

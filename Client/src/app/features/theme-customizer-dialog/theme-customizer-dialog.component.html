@@ -66,7 +66,12 @@
         <span class="section-title">Color Roles</span>
       </div>
 
-      <mat-tab-group animationDuration="150ms" class="color-roles-tabs">
+      <mat-tab-group
+        animationDuration="150ms"
+        mat-stretch-tabs="true"
+        [disablePagination]="true"
+        class="color-roles-tabs"
+      >
         <!-- Primary Palette Tab -->
         <mat-tab>
           <ng-template mat-tab-label>
@@ -192,10 +197,11 @@
         <span class="section-title">Typography & Font</span>
       </div>
       <div class="fonts-list" role="radiogroup" aria-label="Application font family">
-        @for (font of fonts; track font.id) {
+        @for (font of fonts; track font.id; let isFirst = $first) {
           <button
             type="button"
             class="font-card"
+            [class.font-card-featured]="isFirst"
             [class.active]="themeService.fontFamily() === font.id"
             (click)="setFont(font.id)"
             role="radio"
@@ -232,22 +238,22 @@
       </div>
       <div class="preview-card" [style.font-family]="themeService.fontFamilyDef().fontFamily">
         <div class="preview-header">
-          <span class="preview-heading">{{ appName }} Workspace</span>
-          <span class="preview-chip tertiary-chip">Active Session</span>
+          <span class="preview-heading">{{ appName }} Cookbook</span>
+          <span class="preview-chip tertiary-chip">Ready to Cook</span>
         </div>
         <p class="preview-body">
-          Working seamlessly with your custom Material 3 theme. Fast, responsive, and beautifully
-          styled across light and dark modes.
+          Preview how your Material 3 palette and typography look across recipes, meal plans, and
+          shopping lists.
         </p>
         <div class="preview-actions">
-          <button type="button" class="preview-btn primary-btn">
-            <mat-icon>add</mat-icon>
-            <span>Primary Action</span>
-          </button>
-          <button type="button" class="preview-btn secondary-btn">
-            <mat-icon>tune</mat-icon>
-            <span>Secondary Action</span>
-          </button>
+          <span class="preview-btn primary-btn">
+            <mat-icon aria-hidden="true">add</mat-icon>
+            <span>New Recipe</span>
+          </span>
+          <span class="preview-btn secondary-btn">
+            <mat-icon aria-hidden="true">skillet</mat-icon>
+            <span>Cook Mode</span>
+          </span>
         </div>
       </div>
     </section>

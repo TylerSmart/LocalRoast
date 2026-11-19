@@ -1,12 +1,23 @@
 <div class="reset-dialog-container">
   <div class="dialog-header" mat-dialog-title>
-    <div class="danger-header-badge">
-      <mat-icon aria-hidden="true">warning</mat-icon>
+    <div class="header-title-group">
+      <div class="danger-header-badge">
+        <mat-icon aria-hidden="true">warning</mat-icon>
+      </div>
+      <div class="header-text">
+        <h2 class="dialog-title">Reset All Application Data?</h2>
+        <p class="dialog-subtitle">This action is irreversible and permanently deletes data.</p>
+      </div>
     </div>
-    <div class="header-text">
-      <h2 class="dialog-title">Reset All Application Data?</h2>
-      <p class="dialog-subtitle">This action is irreversible and permanently deletes data.</p>
-    </div>
+    <button
+      mat-icon-button
+      type="button"
+      aria-label="Close reset dialog"
+      [disabled]="isResetting()"
+      (click)="close()"
+    >
+      <mat-icon>close</mat-icon>
+    </button>
   </div>
 
   <mat-dialog-content class="dialog-content">

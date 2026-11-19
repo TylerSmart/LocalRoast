@@ -11,11 +11,15 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   AbstractControl,
   FormBuilder,
+  FormControl,
+  FormGroupDirective,
+  NgForm,
   ReactiveFormsModule,
   ValidationErrors,
   Validators,
 } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
+import { ErrorStateMatcher } from '@angular/material/core';
 import {
   MAT_DIALOG_DATA,
   MatDialog,
@@ -53,6 +57,17 @@ function passwordsMatchValidator(group: AbstractControl): ValidationErrors | nul
   return null;
 }
 
+class ConfirmPasswordErrorStateMatcher implements ErrorStateMatcher {
+  isErrorState(control: FormControl | null, form: FormGroupDirective | NgForm | null): boolean {
+    if (!control) {
+      return false;
+    }
+    const isInteracted = Boolean(control.touched || control.dirty || form?.submitted);
+    const hasMismatch = Boolean(control.parent?.hasError('passwordMismatch'));
+    return isInteracted && (control.invalid || hasMismatch);
+  }
+}
+
 @Component({
   selector: 'app-account-settings-dialog',
   imports: [
@@ -84,6 +99,8 @@ export class AccountSettingsDialogComponent implements OnInit {
   private readonly dialogData = inject<AccountSettingsDialogData | null>(MAT_DIALOG_DATA, {
     optional: true,
   });
+
+  protected readonly confirmPasswordErrorMatcher = new ConfirmPasswordErrorStateMatcher();
 
   protected readonly selectedTabIndex = signal<number>(
     this.getInitialTabIndex(this.dialogData?.initialTab),

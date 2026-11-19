@@ -32,7 +32,7 @@
   display: flex;
   align-items: center;
   gap: 1rem;
-  padding: 0.75rem var(--app-page-gutter);
+  padding: 0.65rem var(--app-page-gutter);
   background: var(--mat-sys-surface-container);
   border-bottom: 1px solid var(--mat-sys-outline-variant);
   position: sticky;
@@ -41,21 +41,40 @@
 }
 
 .brand-section {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.55rem;
+  flex-shrink: 0;
+  text-decoration: none;
+  color: var(--mat-sys-on-surface);
+  border-radius: 0.65rem;
+  padding: 0.15rem 0.3rem 0.15rem 0.15rem;
+  transition: opacity 0.15s ease;
+
+  &:hover {
+    opacity: 0.9;
+  }
+}
+
+.brand-badge {
+  width: 34px;
+  height: 34px;
+  border-radius: 0.6rem;
+  display: grid;
+  place-items: center;
+  background: var(--mat-sys-primary-container);
+  color: var(--mat-sys-on-primary-container);
   flex-shrink: 0;
 }
 
 .brand-icon {
-  color: var(--mat-sys-primary);
-  font-size: 1.75rem;
-  width: 1.75rem;
-  height: 1.75rem;
+  font-size: 1.25rem;
+  width: 1.25rem;
+  height: 1.25rem;
 }
 
 .brand-title {
-  font-size: 1.25rem;
+  font-size: 1.18rem;
   font-weight: 750;
   letter-spacing: -0.025em;
 }
@@ -69,7 +88,7 @@
   min-width: 0;
 
   .nav-link {
-    --mat-button-text-container-height: 44px;
+    --mat-button-text-container-height: 40px;
     --mat-button-text-horizontal-padding: 0.75rem;
     --mat-button-text-with-icon-horizontal-padding: 0.75rem;
     --mat-button-text-leading-icon-leading-space: 0;
@@ -78,12 +97,25 @@
     min-width: 0;
     flex-shrink: 0;
     font-size: 0.875rem;
+    font-weight: 500;
     white-space: nowrap;
+    border-radius: 9999px;
     color: var(--mat-sys-on-surface-variant);
+    transition:
+      background-color 0.15s ease,
+      color 0.15s ease;
 
     mat-icon {
       margin-left: 0;
       margin-right: 0.35rem;
+      font-size: 19px;
+      width: 19px;
+      height: 19px;
+    }
+
+    &:hover:not(.active-nav-link) {
+      background: var(--mat-sys-surface-container-high);
+      color: var(--mat-sys-on-surface);
     }
 
     &.active-nav-link {
@@ -101,9 +133,10 @@
   min-width: 1.15rem;
   height: 1.15rem;
   padding-inline: 0.3rem;
-  border-radius: 1rem;
+  border-radius: 9999px;
   font-size: 0.7rem;
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
   background: var(--mat-sys-primary);
   color: var(--mat-sys-on-primary);
 }
@@ -111,22 +144,34 @@
 .top-actions {
   display: flex;
   align-items: center;
-  gap: 0.25rem;
+  gap: 0.3rem;
   flex-shrink: 0;
 }
 
 .search-trigger-btn,
 .active-timer-nav-pill {
-  min-height: 44px;
+  min-height: 40px;
+  border-radius: 9999px;
   border: 1px solid var(--mat-sys-outline-variant);
   color: var(--mat-sys-on-surface-variant);
   background: var(--mat-sys-surface);
   white-space: nowrap;
+  padding-inline: 0.8rem;
+  transition:
+    border-color 0.15s ease,
+    background-color 0.15s ease,
+    color 0.15s ease;
+
+  &:hover {
+    border-color: var(--mat-sys-outline);
+    color: var(--mat-sys-on-surface);
+  }
 }
 
 .active-timer-nav-pill {
   background: var(--mat-sys-secondary-container);
   color: var(--mat-sys-on-secondary-container);
+  border-color: color-mix(in srgb, var(--mat-sys-secondary) 30%, transparent);
 
   .timer-nav-time {
     font-variant-numeric: tabular-nums;
@@ -139,11 +184,15 @@
 }
 
 .shortcut-kbd {
-  padding: 0.1rem 0.3rem;
+  padding: 0.1rem 0.38rem;
   border: 1px solid var(--mat-sys-outline-variant);
-  border-radius: 0.25rem;
+  border-radius: 0.35rem;
+  background: var(--mat-sys-surface-container-low);
+  color: var(--mat-sys-on-surface-variant);
   font: inherit;
   font-size: 0.7rem;
+  font-weight: 600;
+  margin-left: 0.25rem;
 }
 
 .mobile-search-btn {
@@ -151,9 +200,10 @@
 }
 
 .user-profile-btn {
-  min-width: 48px;
-  min-height: 44px;
-  padding-inline: 0.75rem;
+  min-width: 44px;
+  min-height: 40px;
+  padding-inline: 0.6rem;
+  border-radius: 9999px;
 }
 
 .user-avatar-icon {
@@ -164,20 +214,72 @@
   display: none;
 }
 
+.active-menu-item {
+  background-color: color-mix(in srgb, var(--mat-sys-primary-container) 50%, transparent);
+  color: var(--mat-sys-on-primary-container);
+
+  mat-icon {
+    color: var(--mat-sys-primary);
+  }
+}
+
+.menu-check-icon {
+  margin-left: auto;
+  margin-right: 0 !important;
+  font-size: 18px;
+  width: 18px;
+  height: 18px;
+}
+
 .user-menu-header {
   display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
+  align-items: center;
+  gap: 0.75rem;
   padding: 0.75rem 1rem;
   max-width: 280px;
 
+  .user-menu-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    background: var(--mat-sys-primary-container);
+    color: var(--mat-sys-on-primary-container);
+    font-weight: 700;
+    font-size: 0.95rem;
+  }
+
+  .user-menu-identity {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    min-width: 0;
+  }
+
   .user-menu-name {
-    font-weight: 600;
+    font-weight: 650;
+    color: var(--mat-sys-on-surface);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .user-menu-email {
-    font-size: 0.8rem;
+    font-size: 0.78rem;
     color: var(--mat-sys-on-surface-variant);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.logout-menu-item {
+  color: var(--mat-sys-error);
+
+  mat-icon {
+    color: var(--mat-sys-error);
   }
 }
 
@@ -236,12 +338,13 @@
 
 @media (min-width: 769px) and (max-width: 1439px) {
   :host {
-    --app-sticky-offset: 8rem;
+    --app-sticky-offset: 7.5rem;
   }
 
   .top-bar {
     flex-wrap: wrap;
-    gap: 0.5rem 1rem;
+    gap: 0.45rem 1rem;
+    padding-bottom: 0.55rem;
   }
 
   .top-actions {
@@ -252,22 +355,36 @@
     order: 1;
     flex-basis: 100%;
     justify-content: space-between;
+    padding-top: 0.4rem;
+    border-top: 1px solid color-mix(in srgb, var(--mat-sys-outline-variant) 55%, transparent);
   }
 }
 
 @media (max-width: 768px) {
   :host {
-    --app-sticky-offset: 5rem;
+    --app-sticky-offset: 4.75rem;
   }
 
   .top-bar {
     justify-content: space-between;
     gap: 0.25rem;
-    padding: 0.5rem var(--app-page-gutter);
+    padding: 0.45rem var(--app-page-gutter);
+  }
+
+  .brand-badge {
+    width: 30px;
+    height: 30px;
+    border-radius: 0.5rem;
+  }
+
+  .brand-icon {
+    font-size: 1.1rem;
+    width: 1.1rem;
+    height: 1.1rem;
   }
 
   .brand-title {
-    font-size: 1.1rem;
+    font-size: 1.05rem;
   }
 
   .desktop-nav,
@@ -281,7 +398,7 @@
 
   .user-profile-btn {
     padding: 0 !important;
-    min-width: 36px !important;
+    min-width: 40px !important;
     width: 40px;
     height: 40px;
 
@@ -304,12 +421,12 @@
     grid-template-columns: repeat(6, minmax(0, 1fr));
     position: fixed;
     inset: auto 0 0;
-    padding: 0.35rem max(0.25rem, env(safe-area-inset-right))
+    padding: 0.3rem max(0.25rem, env(safe-area-inset-right))
       calc(0.35rem + env(safe-area-inset-bottom)) max(0.25rem, env(safe-area-inset-left));
     background: var(--mat-sys-surface-container);
     border-top: 1px solid var(--mat-sys-outline-variant);
     z-index: 100;
-    gap: 0.15rem;
+    gap: 0.1rem;
 
     .mobile-tab {
       display: flex;
@@ -319,14 +436,23 @@
       position: relative;
       min-width: 0;
       min-height: 52px;
-      gap: 0.25rem;
-      padding: 0.25rem 0;
+      gap: 0.2rem;
+      padding: 0.25rem 0.1rem;
       border-radius: 0.75rem;
-      font-size: 0.65rem;
-      line-height: 1.2;
+      font-size: 0.64rem;
+      font-weight: 500;
+      letter-spacing: -0.015em;
+      line-height: 1.15;
+      white-space: nowrap;
       text-decoration: none;
       text-align: center;
       color: var(--mat-sys-on-surface-variant);
+
+      mat-icon {
+        font-size: 21px;
+        width: 21px;
+        height: 21px;
+      }
 
       &.active-tab {
         background: var(--mat-sys-secondary-container);
@@ -337,8 +463,12 @@
 
     .mobile-badge {
       position: absolute;
-      top: 0;
-      right: 0;
+      top: 2px;
+      right: 4px;
+      min-width: 1rem;
+      height: 1rem;
+      padding-inline: 0.22rem;
+      font-size: 0.64rem;
     }
   }
 }

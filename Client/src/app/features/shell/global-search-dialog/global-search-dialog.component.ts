@@ -193,6 +193,12 @@ export class GlobalSearchDialogComponent implements OnInit {
     }
   }
 
+  clearSearch(): void {
+    this.searchControl.setValue('');
+    this.activeIndex.set(0);
+    this.searchInputRef?.nativeElement.focus();
+  }
+
   onEnter(event: Event): void {
     event.preventDefault();
     const results = this.searchResults();

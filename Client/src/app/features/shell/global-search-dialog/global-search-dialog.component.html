@@ -1,17 +1,28 @@
 <div class="search-dialog-container">
   <div class="search-input-wrapper">
-    <mat-icon class="search-icon">search</mat-icon>
+    <mat-icon class="search-icon" aria-hidden="true">search</mat-icon>
     <input
       #searchInput
       type="text"
       class="dialog-search-input"
       [formControl]="searchControl"
-      placeholder="Search recipes, collections, actions..."
+      placeholder="Search recipes, collections..."
       aria-label="Search recipes, collections, actions"
       cdkFocusInitial
     />
     @if (isSearching()) {
       <mat-spinner diameter="20" class="search-spinner"></mat-spinner>
+    } @else if (searchQuery().trim().length > 0) {
+      <button
+        mat-icon-button
+        type="button"
+        class="clear-query-btn"
+        aria-label="Clear search"
+        (click)="clearSearch()"
+        (keydown.enter)="$event.stopPropagation()"
+      >
+        <mat-icon>backspace</mat-icon>
+      </button>
     }
     <button
       mat-icon-button
@@ -37,7 +48,7 @@
         (keydown.enter)="selectResult(item)"
       >
         <div class="item-icon-wrapper" [class]="'type-' + item.type">
-          <mat-icon>{{ item.icon }}</mat-icon>
+          <mat-icon aria-hidden="true">{{ item.icon }}</mat-icon>
         </div>
         <div class="item-content">
           <span class="item-title">{{ item.title }}</span>
@@ -53,8 +64,11 @@
 
     @if (searchResults().length === 0 && !isSearching()) {
       <div class="empty-state">
-        <mat-icon class="empty-icon">search_off</mat-icon>
-        <p>No results found for "{{ searchQuery() }}"</p>
+        <div class="empty-icon-wrap" aria-hidden="true">
+          <mat-icon class="empty-icon">search_off</mat-icon>
+        </div>
+        <p class="empty-title">No matches for "{{ searchQuery() }}"</p>
+        <p class="empty-hint">Try searching by recipe name, ingredient, or collection.</p>
       </div>
     }
   </div>

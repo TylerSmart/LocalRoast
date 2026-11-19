@@ -6,9 +6,7 @@
       </div>
       <div>
         <h2 class="dialog-title">Account Settings</h2>
-        <p class="dialog-subtitle">
-          Manage your profile, password, and MCP personal access tokens.
-        </p>
+        <p class="dialog-subtitle">Manage your profile, password, tokens, and app data.</p>
       </div>
     </div>
     <button mat-icon-button type="button" aria-label="Close account settings" (click)="close()">
@@ -48,7 +46,7 @@
 
             <mat-form-field appearance="outline" class="full-width">
               <mat-label>Username</mat-label>
-              <mat-icon matPrefix aria-hidden="true">person_outline</mat-icon>
+              <mat-icon matPrefix class="field-prefix-icon" aria-hidden="true">person</mat-icon>
               <input matInput formControlName="username" autocomplete="username" />
               @if (profileForm.controls.username.hasError('required')) {
                 <mat-error>Username is required</mat-error>
@@ -59,7 +57,7 @@
 
             <mat-form-field appearance="outline" class="full-width">
               <mat-label>Email address</mat-label>
-              <mat-icon matPrefix aria-hidden="true">mail_outline</mat-icon>
+              <mat-icon matPrefix class="field-prefix-icon" aria-hidden="true">mail</mat-icon>
               <input matInput type="email" formControlName="email" autocomplete="email" />
               @if (!hasPassword()) {
                 <mat-hint>
@@ -76,13 +74,14 @@
 
             @if (requiresPasswordForEmail()) {
               <mat-form-field appearance="outline" class="full-width">
-                <mat-label>Current password (required to change email)</mat-label>
-                <mat-icon matPrefix aria-hidden="true">lock_outline</mat-icon>
+                <mat-label>Current password</mat-label>
+                <mat-icon matPrefix class="field-prefix-icon" aria-hidden="true">lock</mat-icon>
                 <input
                   matInput
                   [type]="hideProfilePassword() ? 'password' : 'text'"
                   formControlName="currentPassword"
                   autocomplete="current-password"
+                  required
                 />
                 <button
                   mat-icon-button
@@ -91,8 +90,9 @@
                   (click)="hideProfilePassword.set(!hideProfilePassword())"
                   [attr.aria-label]="hideProfilePassword() ? 'Show password' : 'Hide password'"
                 >
-                  <mat-icon>{{ hideProfilePassword() ? 'visibility_off' : 'visibility' }}</mat-icon>
+                  <mat-icon>{{ hideProfilePassword() ? 'visibility' : 'visibility_off' }}</mat-icon>
                 </button>
+                <mat-hint>Required to confirm changing your email address</mat-hint>
               </mat-form-field>
             }
 
@@ -136,12 +136,13 @@
             @if (hasPassword()) {
               <mat-form-field appearance="outline" class="full-width">
                 <mat-label>Current password</mat-label>
-                <mat-icon matPrefix aria-hidden="true">lock_outline</mat-icon>
+                <mat-icon matPrefix class="field-prefix-icon" aria-hidden="true">lock</mat-icon>
                 <input
                   matInput
                   [type]="hideCurrentPassword() ? 'password' : 'text'"
                   formControlName="currentPassword"
                   autocomplete="current-password"
+                  required
                 />
                 <button
                   mat-icon-button
@@ -150,19 +151,20 @@
                   (click)="hideCurrentPassword.set(!hideCurrentPassword())"
                   [attr.aria-label]="hideCurrentPassword() ? 'Show password' : 'Hide password'"
                 >
-                  <mat-icon>{{ hideCurrentPassword() ? 'visibility_off' : 'visibility' }}</mat-icon>
+                  <mat-icon>{{ hideCurrentPassword() ? 'visibility' : 'visibility_off' }}</mat-icon>
                 </button>
               </mat-form-field>
             }
 
             <mat-form-field appearance="outline" class="full-width">
               <mat-label>New password</mat-label>
-              <mat-icon matPrefix aria-hidden="true">key</mat-icon>
+              <mat-icon matPrefix class="field-prefix-icon" aria-hidden="true">key</mat-icon>
               <input
                 matInput
                 [type]="hideNewPassword() ? 'password' : 'text'"
                 formControlName="newPassword"
                 autocomplete="new-password"
+                required
               />
               <button
                 mat-icon-button
@@ -171,7 +173,7 @@
                 (click)="hideNewPassword.set(!hideNewPassword())"
                 [attr.aria-label]="hideNewPassword() ? 'Show password' : 'Hide password'"
               >
-                <mat-icon>{{ hideNewPassword() ? 'visibility_off' : 'visibility' }}</mat-icon>
+                <mat-icon>{{ hideNewPassword() ? 'visibility' : 'visibility_off' }}</mat-icon>
               </button>
               @if (passwordForm.controls.newPassword.hasError('required')) {
                 <mat-error>New password is required</mat-error>
@@ -181,13 +183,17 @@
             </mat-form-field>
 
             <mat-form-field appearance="outline" class="full-width">
-              <mat-label>Confirm new password</mat-label>
-              <mat-icon matPrefix aria-hidden="true">key</mat-icon>
+              <mat-label>Confirm password</mat-label>
+              <mat-icon matPrefix class="field-prefix-icon" aria-hidden="true">
+                verified_user
+              </mat-icon>
               <input
                 matInput
                 [type]="hideConfirmPassword() ? 'password' : 'text'"
                 formControlName="confirmPassword"
+                [errorStateMatcher]="confirmPasswordErrorMatcher"
                 autocomplete="new-password"
+                required
               />
               <button
                 mat-icon-button
@@ -196,19 +202,18 @@
                 (click)="hideConfirmPassword.set(!hideConfirmPassword())"
                 [attr.aria-label]="hideConfirmPassword() ? 'Show password' : 'Hide password'"
               >
-                <mat-icon>{{ hideConfirmPassword() ? 'visibility_off' : 'visibility' }}</mat-icon>
+                <mat-icon>{{ hideConfirmPassword() ? 'visibility' : 'visibility_off' }}</mat-icon>
               </button>
               @if (passwordForm.controls.confirmPassword.hasError('required')) {
                 <mat-error>Please confirm your new password</mat-error>
+              } @else if (
+                passwordForm.hasError('passwordMismatch') &&
+                (passwordForm.controls.confirmPassword.touched ||
+                  passwordForm.controls.confirmPassword.dirty)
+              ) {
+                <mat-error>Passwords do not match</mat-error>
               }
             </mat-form-field>
-
-            @if (
-              passwordForm.hasError('passwordMismatch') &&
-              passwordForm.controls.confirmPassword.touched
-            ) {
-              <div class="field-mismatch-error" role="alert">Passwords do not match.</div>
-            }
 
             <div class="tab-actions">
               <button

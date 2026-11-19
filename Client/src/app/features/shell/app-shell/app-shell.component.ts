@@ -157,6 +157,7 @@ export class AppShellComponent implements OnInit {
     this.dialog.open(GlobalSearchDialogComponent, {
       width: '600px',
       maxWidth: '95vw',
+      position: { top: 'min(8vh, 64px)' },
       panelClass: 'search-dialog-panel',
     });
   }

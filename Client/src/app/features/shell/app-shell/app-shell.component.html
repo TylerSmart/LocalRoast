@@ -2,10 +2,12 @@
   <a class="skip-link" href="#main-content">Skip to content</a>
   <!-- Desktop / Header Top Bar -->
   <header class="top-bar">
-    <div class="brand-section">
-      <mat-icon class="brand-icon" aria-hidden="true">{{ brandIcon }}</mat-icon>
+    <a class="brand-section" routerLink="/recipes" [attr.aria-label]="appName + ' home'">
+      <span class="brand-badge" aria-hidden="true">
+        <mat-icon class="brand-icon">{{ brandIcon }}</mat-icon>
+      </span>
       <span class="brand-title">{{ appName }}</span>
-    </div>
+    </a>
 
     <!-- Desktop Navigation Links -->
     <nav class="desktop-nav" aria-label="Main Navigation">
@@ -66,7 +68,7 @@
         aria-label="Open quick search"
       >
         <mat-icon>search</mat-icon>
-        <span class="search-label">Search...</span>
+        <span class="search-label">Search</span>
         <kbd class="shortcut-kbd">Ctrl+K</kbd>
       </button>
 
@@ -90,17 +92,38 @@
         <mat-icon>{{ themeIcon() }}</mat-icon>
       </button>
       <mat-menu #themeMenu="matMenu">
-        <button mat-menu-item (click)="themeService.setMode('light')">
+        <button
+          mat-menu-item
+          [class.active-menu-item]="themeService.mode() === 'light'"
+          (click)="themeService.setMode('light')"
+        >
           <mat-icon>light_mode</mat-icon>
           <span>Light</span>
+          @if (themeService.mode() === 'light') {
+            <mat-icon class="menu-check-icon" aria-hidden="true">check</mat-icon>
+          }
         </button>
-        <button mat-menu-item (click)="themeService.setMode('dark')">
+        <button
+          mat-menu-item
+          [class.active-menu-item]="themeService.mode() === 'dark'"
+          (click)="themeService.setMode('dark')"
+        >
           <mat-icon>dark_mode</mat-icon>
           <span>Dark</span>
+          @if (themeService.mode() === 'dark') {
+            <mat-icon class="menu-check-icon" aria-hidden="true">check</mat-icon>
+          }
         </button>
-        <button mat-menu-item (click)="themeService.setMode('system')">
+        <button
+          mat-menu-item
+          [class.active-menu-item]="themeService.mode() === 'system'"
+          (click)="themeService.setMode('system')"
+        >
           <mat-icon>brightness_auto</mat-icon>
           <span>System</span>
+          @if (themeService.mode() === 'system') {
+            <mat-icon class="menu-check-icon" aria-hidden="true">check</mat-icon>
+          }
         </button>
         <mat-divider></mat-divider>
         <button mat-menu-item (click)="themeService.openThemeSettingsDialog()">
@@ -121,8 +144,13 @@
       </button>
       <mat-menu #userMenu="matMenu">
         <div class="user-menu-header">
-          <span class="user-menu-name">{{ authService.currentUser()?.username }}</span>
-          <span class="user-menu-email">{{ authService.currentUser()?.email }}</span>
+          <div class="user-menu-avatar" aria-hidden="true">
+            {{ (authService.currentUser()?.username || 'U').charAt(0).toUpperCase() }}
+          </div>
+          <div class="user-menu-identity">
+            <span class="user-menu-name">{{ authService.currentUser()?.username }}</span>
+            <span class="user-menu-email">{{ authService.currentUser()?.email }}</span>
+          </div>
         </div>
         <mat-divider></mat-divider>
         <button mat-menu-item (click)="llmSettingsService.openLlmSettingsDialog()">
@@ -137,7 +165,8 @@
           <mat-icon>manage_accounts</mat-icon>
           <span>Account Settings</span>
         </button>
-        <button mat-menu-item (click)="onLogout()">
+        <mat-divider></mat-divider>
+        <button mat-menu-item class="logout-menu-item" (click)="onLogout()">
           <mat-icon>logout</mat-icon>
           <span>Log Out</span>
         </button>
