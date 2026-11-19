@@ -126,7 +126,7 @@ public sealed class MockKitchenAiOllamaServer : IAsyncDisposable
                                 new
                                 {
                                     bucketName = "Weeknight dinners",
-                                    semanticQuery = "quick weeknight dinner",
+                                    semanticQuery = "tuscan garlic chicken veggie stir fry lentil soup",
                                     suggestedTags = Array.Empty<string>(),
                                     maxTotalTimeMinutes = (int?)null,
                                     desiredCount,
