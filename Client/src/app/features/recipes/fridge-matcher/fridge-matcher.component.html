@@ -10,19 +10,28 @@
 
   @if (errorMessage()) {
     <div class="error-banner" role="alert">
-      <mat-icon>error</mat-icon>
+      <mat-icon>error_outline</mat-icon>
       <span>{{ errorMessage() }}</span>
     </div>
   }
 
   <!-- Selection Card -->
   <mat-card class="picker-card" appearance="outlined">
-    <mat-card-header>
-      <mat-card-title>What do you have on hand?</mat-card-title>
-    </mat-card-header>
-    <mat-card-content>
+    <div class="picker-card-body">
+      <div class="picker-heading">
+        <span class="picker-icon-badge" aria-hidden="true">
+          <mat-icon>kitchen</mat-icon>
+        </span>
+        <div>
+          <h2 class="picker-title">What do you have on hand?</h2>
+          <p class="picker-hint">
+            Pick one or more ingredients below — pantry staples are automatically assumed on hand.
+          </p>
+        </div>
+      </div>
+
       <!-- Autocomplete Input -->
-      <mat-form-field appearance="outline" class="search-field">
+      <mat-form-field appearance="outline" subscriptSizing="dynamic" class="search-field">
         <mat-label>Search ingredients...</mat-label>
         <mat-icon matPrefix>search</mat-icon>
         <input
@@ -70,17 +79,18 @@
         <div class="selected-section">
           <div class="selected-header">
             <span class="section-label"
-              >Selected Ingredients ({{ selectedFoodItems().length }}):</span
+              >Selected Ingredients ({{ selectedFoodItems().length }})</span
             >
-            <button mat-button color="warn" class="clear-btn" (click)="clearSelected()">
-              Clear All
+            <button mat-button type="button" class="clear-btn" (click)="clearSelected()">
+              <mat-icon>clear_all</mat-icon>
+              <span>Clear All</span>
             </button>
           </div>
           <mat-chip-set aria-label="Selected ingredients">
             @for (item of selectedFoodItems(); track item.id) {
               <mat-chip-row (removed)="removeFoodItem(item)">
-                {{ item.name }}
-                <button matChipRemove aria-label="Remove ingredient">
+                <span class="selected-chip-text">{{ item.name }}</span>
+                <button matChipRemove [attr.aria-label]="'Remove ' + item.name">
                   <mat-icon>cancel</mat-icon>
                 </button>
               </mat-chip-row>
@@ -92,18 +102,18 @@
       <!-- Suggested Items -->
       @if (suggestedFoodItems().length > 0) {
         <div class="suggested-section">
-          <span class="section-label">Popular Suggestions:</span>
+          <span class="section-label">Popular Suggestions</span>
           <div class="suggested-chips">
             @for (item of suggestedFoodItems(); track item.id) {
               <button type="button" class="suggestion-pill" (click)="addFoodItem(item)">
                 <mat-icon class="pill-icon">add</mat-icon>
-                <span>{{ item.name }}</span>
+                <span class="pill-text">{{ item.name }}</span>
               </button>
             }
           </div>
         </div>
       }
-    </mat-card-content>
+    </div>
   </mat-card>
 
   <!-- Results Section -->
@@ -132,7 +142,12 @@
           <mat-card
             class="matcher-result-card"
             appearance="outlined"
+            tabindex="0"
+            role="link"
+            [attr.aria-label]="'Open recipe ' + result.recipe.title"
             (click)="navigateToRecipe(result.recipe.id)"
+            (keydown.enter)="navigateToRecipe(result.recipe.id)"
+            (keydown.space)="$event.preventDefault(); navigateToRecipe(result.recipe.id)"
           >
             <div class="card-inner">
               @if (result.recipe.thumbnailImagePath) {
@@ -154,7 +169,7 @@
                     @if (result.additionalNonStapleCount === 0) {
                       <span class="readiness-badge ready">
                         <mat-icon>check_circle</mat-icon>
-                        Ready to cook!
+                        <span>Ready to cook!</span>
                       </span>
                     } @else {
                       <span class="readiness-badge needs-more">
@@ -204,21 +219,25 @@
                   }
                 </div>
 
-                <div class="meta-row">
-                  @if (result.recipe.totalTimeMinutes) {
-                    <span class="meta-item">
-                      <mat-icon>schedule</mat-icon>
-                      {{ formatMinutes(result.recipe.totalTimeMinutes) }}
-                    </span>
-                  }
-                  @if (result.recipe.difficulty) {
-                    <span class="meta-item">
-                      <mat-icon>signal_cellular_alt</mat-icon>
-                      {{ result.recipe.difficulty }}
-                    </span>
-                  }
-                </div>
+                @if (result.recipe.totalTimeMinutes || result.recipe.difficulty) {
+                  <div class="meta-row">
+                    @if (result.recipe.totalTimeMinutes) {
+                      <span class="meta-item">
+                        <mat-icon>schedule</mat-icon>
+                        <span>{{ formatMinutes(result.recipe.totalTimeMinutes) }}</span>
+                      </span>
+                    }
+                    @if (result.recipe.difficulty) {
+                      <span class="meta-item">
+                        <mat-icon>signal_cellular_alt</mat-icon>
+                        <span>{{ result.recipe.difficulty }}</span>
+                      </span>
+                    }
+                  </div>
+                }
               </div>
+
+              <mat-icon class="card-chevron" aria-hidden="true">chevron_right</mat-icon>
             </div>
           </mat-card>
         }
