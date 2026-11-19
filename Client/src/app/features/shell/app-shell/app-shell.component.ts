@@ -1,11 +1,11 @@
-import { Component, OnInit, computed, inject } from '@angular/core';
+import { Component, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
 import { MatButtonModule } from '@angular/material/button';
 import { MatDialog } from '@angular/material/dialog';
 import { MatDividerModule } from '@angular/material/divider';
 import { MatIconModule } from '@angular/material/icon';
 import { MatMenuModule } from '@angular/material/menu';
 import { MatTooltipModule } from '@angular/material/tooltip';
-import { toSignal } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import {
   ActivatedRouteSnapshot,
   NavigationEnd,
@@ -77,6 +77,32 @@ export class AppShellComponent implements OnInit {
   protected readonly kitchenTimerService = inject(KitchenTimerService);
   private readonly dialog = inject(MatDialog);
   private readonly router = inject(Router);
+  private readonly destroyRef = inject(DestroyRef);
+
+  protected readonly isRemountingOutlet = signal<boolean>(false);
+  private remountTimerId: ReturnType<typeof setTimeout> | null = null;
+
+  constructor() {
+    this.authService.backendRecovered$
+      ?.pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((bootedWhileOffline) => {
+        this.ingestionService.refreshSummary();
+        if (
+          bootedWhileOffline &&
+          this.dialog.openDialogs.length === 0 &&
+          !this.router.url.startsWith('/recipes/new')
+        ) {
+          this.remountActiveView();
+        }
+      });
+
+    this.destroyRef.onDestroy(() => {
+      if (this.remountTimerId !== null) {
+        clearTimeout(this.remountTimerId);
+        this.remountTimerId = null;
+      }
+    });
+  }
 
   /** Routes opt out of the centered max-width layout with `data: { fullWidth: true }`. */
   protected readonly isFullWidthRoute = toSignal(
@@ -137,5 +163,16 @@ export class AppShellComponent implements OnInit {
 
   onLogout(): void {
     this.authService.logout();
+  }
+
+  private remountActiveView(): void {
+    if (this.remountTimerId !== null) {
+      clearTimeout(this.remountTimerId);
+    }
+    this.isRemountingOutlet.set(true);
+    this.remountTimerId = setTimeout(() => {
+      this.remountTimerId = null;
+      this.isRemountingOutlet.set(false);
+    }, 0);
   }
 }

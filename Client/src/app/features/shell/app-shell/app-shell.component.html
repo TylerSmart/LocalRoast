@@ -145,6 +145,27 @@
     </div>
   </header>
 
+  <!-- Server Reconnection Banner -->
+  @if (authService.isBackendUnreachable()) {
+    <div class="connection-banner" role="status" aria-live="polite" data-testid="connection-banner">
+      <div class="connection-banner-content">
+        <mat-icon class="connection-banner-icon" aria-hidden="true">cloud_off</mat-icon>
+        <span class="connection-banner-text">
+          Waiting for server connection — you're still signed in and will reconnect automatically.
+        </span>
+      </div>
+      <button
+        type="button"
+        mat-stroked-button
+        class="connection-retry-btn"
+        [disabled]="authService.isRetryingConnection()"
+        (click)="authService.retryConnectionNow()"
+      >
+        {{ authService.isRetryingConnection() ? 'Retrying...' : 'Retry now' }}
+      </button>
+    </div>
+  }
+
   <!-- Main View Area -->
   <main
     class="main-content"
@@ -152,7 +173,9 @@
     tabindex="-1"
     [class.full-width]="isFullWidthRoute()"
   >
-    <router-outlet></router-outlet>
+    @if (!isRemountingOutlet()) {
+      <router-outlet></router-outlet>
+    }
   </main>
 
   <!-- Mobile Bottom Navigation Bar (Visible on mobile viewports <= 768px / 360px) -->

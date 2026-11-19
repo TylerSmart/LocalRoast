@@ -2,6 +2,7 @@ import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { MatDialog } from '@angular/material/dialog';
 import { provideRouter } from '@angular/router';
+import { Subject } from 'rxjs';
 import { APP_NAME } from '../../../app.branding';
 import { AccountService } from '../../../core/services/account/account.service';
 import { AuthService } from '../../../core/services/auth/auth.service';
@@ -19,8 +20,15 @@ describe('AppShellComponent', () => {
   let fixture: ComponentFixture<AppShellComponent>;
   let mockDialog: { open: ReturnType<typeof vi.fn>; openDialogs: unknown[] };
 
+  const mockIsBackendUnreachable = signal<boolean>(false);
+  const mockIsRetryingConnection = signal<boolean>(false);
+  const mockBackendRecovered$ = new Subject<boolean>();
   const mockAuthService = {
     currentUser: () => ({ id: '1', username: 'chef', email: 'chef@example.com' }),
+    isBackendUnreachable: mockIsBackendUnreachable.asReadonly(),
+    isRetryingConnection: mockIsRetryingConnection.asReadonly(),
+    backendRecovered$: mockBackendRecovered$,
+    retryConnectionNow: vi.fn(),
     logout: vi.fn(),
   };
 
@@ -51,6 +59,10 @@ describe('AppShellComponent', () => {
 
   beforeEach(async () => {
     mockTimers.set([]);
+    mockIsBackendUnreachable.set(false);
+    mockIsRetryingConnection.set(false);
+    mockAuthService.retryConnectionNow.mockClear();
+    mockIngestionService.refreshSummary.mockClear();
     mockDialog = {
       open: vi.fn(),
       openDialogs: [],
@@ -140,5 +152,28 @@ describe('AppShellComponent', () => {
     expect(pill.textContent).toContain('02:05');
     expect(pill.textContent).toContain('Sear Pork');
     expect(pill.getAttribute('href')).toBe('/recipes/rec-123/cook');
+  });
+
+  it('shows reconnection banner when backend is unreachable and retries on button click', () => {
+    expect(fixture.nativeElement.querySelector('[data-testid="connection-banner"]')).toBeNull();
+
+    mockIsBackendUnreachable.set(true);
+    fixture.detectChanges();
+
+    const banner = fixture.nativeElement.querySelector('[data-testid="connection-banner"]');
+    expect(banner).toBeTruthy();
+    expect(banner.textContent).toContain("you're still signed in");
+
+    const retryBtn = banner.querySelector('button') as HTMLButtonElement;
+    retryBtn.click();
+    expect(mockAuthService.retryConnectionNow).toHaveBeenCalledTimes(1);
+  });
+
+  it('refreshes ingestion summary when backend recovers', () => {
+    mockIngestionService.refreshSummary.mockClear();
+
+    mockBackendRecovered$.next(false);
+
+    expect(mockIngestionService.refreshSummary).toHaveBeenCalledTimes(1);
   });
 });

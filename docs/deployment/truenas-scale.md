@@ -112,7 +112,8 @@ services:
       Authentication__Jwt__Secret: "ReplaceWithAStrongSecretKeyAtLeast32CharactersLong!"
       Authentication__Jwt__Issuer: "LocalRoast"
       Authentication__Jwt__Audience: "LocalRoast"
-      Authentication__Jwt__ExpirationMinutes: 1440
+      # 0 = persistent sign-in until logout/browser data clear; set positive minutes for finite expiry
+      Authentication__Jwt__ExpirationMinutes: 0
 
       # Optional: External OIDC / SSO (Google, Authentik, Keycloak, Entra ID)
       # Authentication__Oidc__Enabled: "true"

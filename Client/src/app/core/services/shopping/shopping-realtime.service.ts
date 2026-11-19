@@ -48,11 +48,20 @@ export class ShoppingRealtimeService {
 
     this.syncState.set('connecting');
 
+    const reconnectDelaysMs = [0, 1000, 2000, 5000, 10000, 15000];
     const builder = new HubConnectionBuilder()
       .withUrl(apiUrl('/hubs/shopping'), {
         accessTokenFactory: () => this.authService.token() ?? '',
       })
-      .withAutomaticReconnect([0, 1000, 2000, 5000, 10000, 15000])
+      .withAutomaticReconnect({
+        nextRetryDelayInMilliseconds: (retryContext) => {
+          if (!this.authService.token()) {
+            return null;
+          }
+          const idx = Math.min(retryContext.previousRetryCount, reconnectDelaysMs.length - 1);
+          return reconnectDelaysMs[idx];
+        },
+      })
       .configureLogging(LogLevel.None);
 
     const hub = builder.build();

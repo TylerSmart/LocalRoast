@@ -14,7 +14,7 @@ export interface AuthResponse {
   id: string;
   email: string;
   username: string;
-  expiresAt: string;
+  expiresAt: string | null;
   themeSettings?: string | null;
 }
 
