@@ -325,6 +325,101 @@ public static partial class StepTokenValidator
     )]
     private static partial Regex ToolVesselSuffixRegex();
 
+    [GeneratedRegex(
+        @"(?:°\s*C\b|\bCelsius\b|\b\d+\s*C\b)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex ExplicitCelsiusInSourceRegex();
+
+    public static bool HasPrintedNumericRangeInSource(
+        string sourceText,
+        decimal minQty,
+        decimal maxQty
+    )
+    {
+        if (string.IsNullOrWhiteSpace(sourceText))
+        {
+            return false;
+        }
+
+        var minPatterns = GetQuantitySourcePatterns(minQty);
+        var maxPatterns = GetQuantitySourcePatterns(maxQty);
+        if (minPatterns.Count == 0 || maxPatterns.Count == 0)
+        {
+            return false;
+        }
+
+        var pattern =
+            $@"(?<![\d./])(?<!\d\s)(?:{string.Join('|', minPatterns)})(?:\s+[a-zA-Z]{{2,14}})?\s*-?\s*(?:to|or|and|-|–|—)\s*(?:{string.Join('|', maxPatterns)})(?![\d./])";
+        return Regex.IsMatch(
+            sourceText,
+            pattern,
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+        );
+    }
+
+    private static List<string> GetQuantitySourcePatterns(decimal val)
+    {
+        var patterns = new List<string>
+        {
+            Regex.Escape(val.ToString("0.####", CultureInfo.InvariantCulture)),
+        };
+
+        var whole = (int)Math.Truncate(val);
+        var frac = val - whole;
+        (int Num, int Den, decimal Approx)[] fractions =
+        [
+            (1, 8, 0.125m),
+            (1, 4, 0.25m),
+            (1, 3, 0.3333m),
+            (3, 8, 0.375m),
+            (1, 2, 0.5m),
+            (5, 8, 0.625m),
+            (2, 3, 0.6667m),
+            (3, 4, 0.75m),
+            (7, 8, 0.875m),
+        ];
+
+        foreach (var (num, den, approx) in fractions)
+        {
+            if (Math.Abs(frac - approx) <= 0.002m)
+            {
+                if (whole == 0)
+                {
+                    patterns.Add($@"{num}/{den}");
+                }
+                else
+                {
+                    patterns.Add($@"{whole}(?:\s+|-){num}/{den}");
+                }
+                break;
+            }
+        }
+
+        if (val == whole && whole is >= 1 and <= 12)
+        {
+            string[] words =
+            [
+                "",
+                "one",
+                "two",
+                "three",
+                "four",
+                "five",
+                "six",
+                "seven",
+                "eight",
+                "nine",
+                "ten",
+                "eleven",
+                "twelve",
+            ];
+            patterns.Add(Regex.Escape(words[whole]));
+        }
+
+        return patterns;
+    }
+
     public static JsonArray SanitizeRawTokens(JsonArray tokensArray)
     {
         static JsonArray MergeAdjacentStrings(JsonArray source)
@@ -513,6 +608,43 @@ public static partial class StepTokenValidator
             }
 
             if (
+                tokType is "ingredient" or "mixture"
+                && GetNullableString(tokObj["unit"]) is string rawUnitStr
+                && !string.IsNullOrWhiteSpace(rawUnitStr)
+                && GetNullableString(tokObj["name"]) is string rawSelfName
+                && !string.IsNullOrWhiteSpace(rawSelfName)
+            )
+            {
+                var (uKind, customU) = RecipeUnitAndSectionHelpers.NormalizeUnit(rawUnitStr);
+                if (
+                    uKind == MeasurementUnit.Custom
+                    && RecipeUnitAndSectionHelpers.IsRedundantSelfCustomUnit(customU, rawSelfName)
+                )
+                {
+                    tokObj.Remove("unit");
+                    if (
+                        GetNullableDecimal(tokObj["quantity"]) == 1m
+                        && GetNullableDecimal(tokObj["maxQuantity"]) is null
+                    )
+                    {
+                        var trimmedSelf = rawSelfName.Trim();
+                        var lastSpace = trimmedSelf.LastIndexOf(' ');
+                        var lastWord =
+                            lastSpace >= 0 ? trimmedSelf[(lastSpace + 1)..] : trimmedSelf;
+                        var singLast = SimpleSingular(lastWord);
+                        if (!string.Equals(lastWord, singLast, StringComparison.OrdinalIgnoreCase))
+                        {
+                            var updatedName =
+                                lastSpace >= 0
+                                    ? $"{trimmedSelf[..lastSpace]} {singLast}"
+                                    : singLast;
+                            tokObj["name"] = updatedName;
+                        }
+                    }
+                }
+            }
+
+            if (
                 i + 1 >= sanitized.Count
                 || sanitized[i + 1] is not JsonValue textVal
                 || !textVal.TryGetValue<string>(out var nextText)
@@ -658,6 +790,61 @@ public static partial class StepTokenValidator
             )
             {
                 sanitized[^1] = JsonValue.Create(trimmedEnd[..^2] + ".)" + trailingWs);
+            }
+        }
+
+        if (!ExplicitCelsiusInSourceRegex().IsMatch(originalInstruction))
+        {
+            foreach (var node in sanitized)
+            {
+                if (
+                    node is JsonObject tObj
+                    && string.Equals(
+                        GetNullableString(tObj["type"]),
+                        "temperature",
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                    && GetNullableString(tObj["unit"]) is string tUnit
+                    && (
+                        tUnit.Trim().Equals("c", StringComparison.OrdinalIgnoreCase)
+                        || tUnit.Trim().Equals("celsius", StringComparison.OrdinalIgnoreCase)
+                    )
+                    && GetNullableDecimal(tObj["amount"]) is >= 115m
+                )
+                {
+                    tObj["unit"] = "fahrenheit";
+                }
+            }
+        }
+
+        var origCommas = originalInstruction.Count(c => c == ',');
+        var sanitizedCommas = sanitized
+            .OfType<JsonValue>()
+            .Sum(v => v.TryGetValue<string>(out var s) ? s.Count(c => c == ',') : 0);
+        if (origCommas > sanitizedCommas)
+        {
+            for (var i = 0; i + 2 < sanitized.Count && origCommas > sanitizedCommas; i++)
+            {
+                if (
+                    sanitized[i] is JsonObject leftTok
+                    && GetNullableString(leftTok["type"])?.Trim().ToLowerInvariant()
+                        is "ingredient"
+                            or "mixture"
+                            or null
+                    && sanitized[i + 1] is JsonValue wsVal
+                    && wsVal.TryGetValue<string>(out var wsStr)
+                    && wsStr.Length > 0
+                    && string.IsNullOrWhiteSpace(wsStr)
+                    && sanitized[i + 2] is JsonObject rightTok
+                    && GetNullableString(rightTok["type"])?.Trim().ToLowerInvariant()
+                        is "ingredient"
+                            or "mixture"
+                            or null
+                )
+                {
+                    sanitized[i + 1] = JsonValue.Create(", ");
+                    sanitizedCommas++;
+                }
             }
         }
 
@@ -1403,6 +1590,18 @@ public static partial class StepTokenValidator
             {
                 warnings.Add(
                     $"Adjacent non-text tokens [{i}] ({tokens[i].Type}) and [{i + 1}] ({tokens[i + 1].Type}) with no separator string."
+                );
+            }
+            else if (
+                i + 2 < tokens.Count
+                && tokens[i] is not Stage4TextToken
+                && tokens[i + 1] is Stage4TextToken wsMidTxt
+                && string.IsNullOrWhiteSpace(wsMidTxt.Text)
+                && tokens[i + 2] is not Stage4TextToken
+            )
+            {
+                warnings.Add(
+                    $"Adjacent quantitative tokens [{i}] ({tokens[i].Type}) and [{i + 2}] ({tokens[i + 2].Type}) are separated only by whitespace with no comma, 'by', or prose connector between them; restore missing punctuation/words from original instruction."
                 );
             }
             else if (

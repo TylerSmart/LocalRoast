@@ -1199,4 +1199,175 @@ public sealed class StepTokenValidatorTests
         Assert.AreEqual(2m, scoopFixed.Amount);
         Assert.AreEqual("portion scoop", scoopFixed.Name);
     }
+
+    [TestMethod]
+    public void HasPrintedNumericRangeInSource_RejectsFabricatedAndAcceptsRealRanges()
+    {
+        Assert.IsFalse(
+            StepTokenValidator.HasPrintedNumericRangeInSource(
+                "1 pound extra-large shrimp (21 to 25 per pound)",
+                1m,
+                25m
+            )
+        );
+        Assert.IsFalse(
+            StepTokenValidator.HasPrintedNumericRangeInSource(
+                "2 (12- to 14-ounce) duck leg quarters",
+                2m,
+                28m
+            )
+        );
+        Assert.IsFalse(
+            StepTokenValidator.HasPrintedNumericRangeInSource(
+                "1 (5- to 7-ounce) jar/can olive oil-packed tuna",
+                1m,
+                7m
+            )
+        );
+        Assert.IsFalse(
+            StepTokenValidator.HasPrintedNumericRangeInSource(
+                "1/2 cup extra-virgin olive oil, plus extra for serving",
+                0.5m,
+                2m
+            )
+        );
+        Assert.IsTrue(
+            StepTokenValidator.HasPrintedNumericRangeInSource("1–16 large eggs, chilled", 1m, 16m)
+        );
+        Assert.IsTrue(
+            StepTokenValidator.HasPrintedNumericRangeInSource(
+                "1 1/2–2 tablespoons lime juice",
+                1.5m,
+                2m
+            )
+        );
+        Assert.IsTrue(
+            StepTokenValidator.HasPrintedNumericRangeInSource(
+                "1/4 to 1/2 teaspoon red pepper flakes",
+                0.25m,
+                0.5m
+            )
+        );
+    }
+
+    [TestMethod]
+    public void SanitizeAndValidate_StripsSelfUnit_ConvertsSpuriousCelsius_RestoresComma_AndFlagsWhitespaceTokens()
+    {
+        var selfUnitRaw = new JsonArray
+        {
+            "Mince ",
+            new JsonObject
+            {
+                ["type"] = "ingredient",
+                ["ingredientIndex"] = 0,
+                ["name"] = "lemon zest strips",
+                ["quantity"] = 1,
+                ["unit"] = "strip",
+            },
+            ".",
+        };
+        var resSelf = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 1,
+            sectionName: null,
+            originalInstruction: "Mince 1 lemon zest strip.",
+            rawTokensJson: selfUnitRaw,
+            ingredientCount: 1
+        );
+        Assert.IsEmpty(resSelf.ValidationWarnings, string.Join(" | ", resSelf.ValidationWarnings));
+        var ingTok = resSelf.ParsedTokens.OfType<Stage4IngredientToken>().Single();
+        Assert.IsNull(ingTok.Unit);
+        Assert.AreEqual("lemon zest strip", ingTok.Name);
+
+        var celsiusRaw = new JsonArray
+        {
+            "Simmer until breast pieces register ",
+            new JsonObject
+            {
+                ["type"] = "temperature",
+                ["amount"] = 160,
+                ["unit"] = "celsius",
+            },
+            ".",
+        };
+        var resTemp = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 4,
+            sectionName: null,
+            originalInstruction: "Simmer until breast pieces register 160 degrees.",
+            rawTokensJson: celsiusRaw,
+            ingredientCount: 0
+        );
+        Assert.Contains("160°F", StepTokenValidator.RenderForValidation(resTemp.ParsedTokens));
+
+        var missingCommaRaw = new JsonArray
+        {
+            "Toss shrimp, ",
+            new JsonObject
+            {
+                ["type"] = "ingredient",
+                ["ingredientIndex"] = 0,
+                ["name"] = "oil",
+                ["quantity"] = 1,
+                ["unit"] = "tablespoon",
+            },
+            " ",
+            new JsonObject
+            {
+                ["type"] = "ingredient",
+                ["ingredientIndex"] = 1,
+                ["name"] = "garlic",
+                ["quantity"] = 2,
+                ["unit"] = "teaspoon",
+            },
+            ", and salt.",
+        };
+        var resComma = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 1,
+            sectionName: null,
+            originalInstruction: "Toss shrimp, 1 tablespoon oil, 2 teaspoons garlic, and salt.",
+            rawTokensJson: missingCommaRaw,
+            ingredientCount: 2
+        );
+        Assert.IsEmpty(
+            resComma.ValidationWarnings,
+            string.Join(" | ", resComma.ValidationWarnings)
+        );
+        Assert.Contains(
+            "1 tablespoon oil, 2 teaspoons garlic",
+            StepTokenValidator.RenderForValidation(resComma.ParsedTokens)
+        );
+
+        var adjacentDimRaw = new JsonArray
+        {
+            "Place in ",
+            new JsonObject
+            {
+                ["type"] = "dimension",
+                ["amount"] = 13,
+                ["unit"] = "inch",
+                ["hyphenated"] = true,
+            },
+            " ",
+            new JsonObject
+            {
+                ["type"] = "dimension",
+                ["amount"] = 9,
+                ["unit"] = "inch",
+                ["hyphenated"] = true,
+            },
+            " baking dish.",
+        };
+        var resAdjacentDim = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 3,
+            sectionName: null,
+            originalInstruction: "Place in 13 by 9-inch baking dish.",
+            rawTokensJson: adjacentDimRaw,
+            ingredientCount: 0
+        );
+        Assert.IsTrue(
+            resAdjacentDim.ValidationWarnings.Any(w =>
+                w.Contains("separated only by whitespace", StringComparison.OrdinalIgnoreCase)
+            ),
+            string.Join(" | ", resAdjacentDim.ValidationWarnings)
+        );
+    }
 }

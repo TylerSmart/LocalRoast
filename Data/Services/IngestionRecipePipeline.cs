@@ -1729,6 +1729,7 @@ public sealed partial class IngestionRecipePipeline(
             {
                 var ingName = ing.Name?.Trim() ?? string.Empty;
                 var ingQty = ing.Quantity;
+                var ingMaxQty = ing.MaxQuantity;
                 var ingUnit = ing.Unit;
                 var (uKind, uCustom) = RecipeUnitAndSectionHelpers.NormalizeUnit(ingUnit);
                 if (
@@ -1737,6 +1738,20 @@ public sealed partial class IngestionRecipePipeline(
                 )
                 {
                     ingUnit = null;
+                }
+
+                if (
+                    ingQty.HasValue
+                    && ingMaxQty.HasValue
+                    && ingMaxQty.Value > ingQty.Value
+                    && !StepTokenValidator.HasPrintedNumericRangeInSource(
+                        sourceText,
+                        ingQty.Value,
+                        ingMaxQty.Value
+                    )
+                )
+                {
+                    ingMaxQty = null;
                 }
 
                 if (
@@ -1755,7 +1770,7 @@ public sealed partial class IngestionRecipePipeline(
 
                 if (
                     ingQty == 1m
-                    && ing.MaxQuantity is null
+                    && ingMaxQty is null
                     && string.IsNullOrWhiteSpace(ingUnit)
                     && (ing.AlternateMeasurements is null || ing.AlternateMeasurements.Count == 0)
                     && UnquantifiedSeasoningOrSprayRegex().IsMatch(ingName)
@@ -1766,7 +1781,7 @@ public sealed partial class IngestionRecipePipeline(
 
                 if (
                     ingQty is null
-                    && ing.MaxQuantity is null
+                    && ingMaxQty is null
                     && string.IsNullOrWhiteSpace(ingUnit)
                     && (ing.AlternateMeasurements is null || ing.AlternateMeasurements.Count == 0)
                     && SaltAndPepperSplitRegex().Match(ingName) is { Success: true } spMatch
@@ -1818,7 +1833,7 @@ public sealed partial class IngestionRecipePipeline(
                         SectionName = secName,
                         Name = ingName,
                         Quantity = ingQty,
-                        MaxQuantity = ing.MaxQuantity,
+                        MaxQuantity = ingMaxQty,
                         Unit = ingUnit,
                         PrepNote = ing.PrepNote,
                         IsOptional = ing.IsOptional,
@@ -2227,6 +2242,21 @@ public sealed partial class IngestionRecipePipeline(
                         $"'{ingName}' has invalid range quantity={ing.Quantity}..maxQuantity={ing.MaxQuantity} (put parenthetical weight/stick conversions in alternateMeasurements and leave maxQuantity=null)."
                     );
                 }
+                else if (
+                    ing.Quantity.HasValue
+                    && ing.MaxQuantity.HasValue
+                    && ing.MaxQuantity.Value > ing.Quantity.Value
+                    && !StepTokenValidator.HasPrintedNumericRangeInSource(
+                        sourceText,
+                        ing.Quantity.Value,
+                        ing.MaxQuantity.Value
+                    )
+                )
+                {
+                    issues.Add(
+                        $"'{ingName}' has fabricated range {ing.Quantity}..{ing.MaxQuantity} {ing.Unit} that does not appear as a range in the source text; NEVER place per-pound counts ('21 to 25 per pound'), pack weights ('1 (5- to 7-ounce) can' or '2 (12- to 14-ounce) legs'), or fraction denominators into maxQuantity — set maxQuantity=null and use alternateMeasurements for pack weights or prepNote for size grades."
+                    );
+                }
 
                 if (OrAlternativeRegex().IsMatch(ingName))
                 {
@@ -2465,7 +2495,7 @@ public sealed partial class IngestionRecipePipeline(
     )]
     private static partial Regex EggPartWordRegex();
 
-    [GeneratedRegex(@"\s+or\s+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"\s+(?:and/)?or\s+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex OrAlternativeRegex();
 
     [GeneratedRegex(@"[^a-z0-9]+", RegexOptions.CultureInvariant)]
