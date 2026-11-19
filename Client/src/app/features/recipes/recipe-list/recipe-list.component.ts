@@ -142,6 +142,8 @@ export class RecipeListComponent implements OnInit {
   protected readonly minRating = signal<number | null>(null);
   protected readonly filtersExpanded = signal<boolean>(false);
   protected readonly tagsManagerExpanded = signal<boolean>(false);
+  protected readonly tagManagerSearch = signal<string>('');
+  protected readonly maxVisibleCardTags = 4;
   private searchTimer: ReturnType<typeof setTimeout> | null = null;
   private recipesRequest: Subscription | null = null;
   private loadMoreRequest: Subscription | null = null;
@@ -178,6 +180,68 @@ export class RecipeListComponent implements OnInit {
       this.forgottenFavoritesOnly() ||
       this.minRating() !== null
     );
+  });
+
+  protected readonly activeFilterChips = computed(() => {
+    const chips: { key: string; label: string; remove: () => void }[] = [];
+    const status = this.selectedStatus();
+    if (status !== 'Published') {
+      const statusLabel =
+        status === 'DraftReview' ? 'Draft / Review' : status === 'All' ? 'All Recipes' : status;
+      chips.push({
+        key: 'status',
+        label: `Status: ${statusLabel}`,
+        remove: () => this.onStatusChange('Published'),
+      });
+    }
+    const diff = this.selectedDifficulty();
+    if (diff !== 'All') {
+      chips.push({
+        key: 'difficulty',
+        label: `Difficulty: ${diff}`,
+        remove: () => this.onDifficultyChange('All'),
+      });
+    }
+    const maxTime = this.maxTimeMinutes();
+    if (maxTime !== null) {
+      chips.push({
+        key: 'maxTime',
+        label: maxTime >= 120 ? 'Under 2 hours' : `Under ${maxTime} min`,
+        remove: () => this.onMaxTimeChange(null),
+      });
+    }
+    const rating = this.minRating();
+    if (rating !== null) {
+      chips.push({
+        key: 'rating',
+        label: `${rating}${rating < 5 ? '+' : ''} Stars`,
+        remove: () => this.onMinRatingChange(null),
+      });
+    }
+    const tagMap = new Map(this.tags().map((t) => [t.id, t.name]));
+    for (const tagId of this.selectedTagIds()) {
+      chips.push({
+        key: `tag-${tagId}`,
+        label: tagMap.get(tagId) ?? 'Tag',
+        remove: () => this.onTagSelectionChange(this.selectedTagIds().filter((id) => id !== tagId)),
+      });
+    }
+    if (this.forgottenFavoritesOnly()) {
+      chips.push({
+        key: 'forgotten',
+        label: 'Forgotten Favorites',
+        remove: () => this.toggleForgottenFavorites(),
+      });
+    }
+    return chips;
+  });
+
+  protected readonly hasFilteredManagerTags = computed(() => {
+    const q = this.tagManagerSearch().trim().toLowerCase();
+    if (!q) {
+      return this.tags().length > 0;
+    }
+    return this.tags().some((t) => t.name.toLowerCase().includes(q));
   });
 
   protected readonly filteredRecipes = computed(() => this.recipes());
@@ -307,7 +371,17 @@ export class RecipeListComponent implements OnInit {
   }
 
   tagsByCategory(category: TagCategory): TagDto[] {
-    return this.tags().filter((t) => t.category === category);
+    const q = this.tagManagerSearch().trim().toLowerCase();
+    return this.tags().filter(
+      (t) => t.category === category && (!q || t.name.toLowerCase().includes(q)),
+    );
+  }
+
+  hiddenTagsTooltip(recipe: RecipeSummaryDto): string {
+    return recipe.tags
+      .slice(this.maxVisibleCardTags)
+      .map((t) => t.name)
+      .join(', ');
   }
 
   onSearchChange(val: string): void {

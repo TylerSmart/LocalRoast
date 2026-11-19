@@ -23,17 +23,15 @@
     [attr.aria-label]="ariaLabel() || label() || placeholder()"
   />
 
-  @if (isLoading()) {
-    <div matSuffix class="suffix-action-wrapper">
+  <div matSuffix class="suffix-action-wrapper">
+    @if (isLoading()) {
       <mat-progress-spinner
         mode="indeterminate"
         diameter="18"
         class="loading-spinner"
         aria-label="Loading options"
       ></mat-progress-spinner>
-    </div>
-  } @else if (clearable() && hasValue() && !disabled()) {
-    <div matSuffix class="suffix-action-wrapper">
+    } @else if (clearable() && hasValue() && !disabled()) {
       <button
         mat-icon-button
         type="button"
@@ -43,10 +41,8 @@
       >
         <mat-icon>close</mat-icon>
       </button>
-    </div>
-  }
+    }
 
-  <div matSuffix class="suffix-action-wrapper">
     <button
       mat-icon-button
       type="button"

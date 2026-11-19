@@ -1,13 +1,70 @@
+.taxonomy-dialog-container {
+  display: flex;
+  flex-direction: column;
+  max-width: 100%;
+}
+
+.dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 20px 12px;
+  margin: 0;
+  border-bottom: 1px solid var(--mat-sys-outline-variant);
+
+  .header-title-group {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+  }
+
+  .header-icon-badge {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+    background-color: var(--mat-sys-primary-container);
+    color: var(--mat-sys-on-primary-container);
+    flex-shrink: 0;
+
+    mat-icon {
+      font-size: 22px;
+      width: 22px;
+      height: 22px;
+    }
+  }
+
+  .dialog-title {
+    margin: 0;
+    font-size: 1.15rem;
+    font-weight: 700;
+    line-height: 1.25;
+    letter-spacing: -0.015em;
+    color: var(--mat-sys-on-surface);
+  }
+
+  .dialog-subtitle {
+    margin: 2px 0 0;
+    font-size: 0.8125rem;
+    line-height: 1.35;
+    font-weight: 400;
+    color: var(--mat-sys-on-surface-variant);
+  }
+}
+
+.dialog-content {
+  padding: 16px 20px !important;
+}
+
 .collection-form {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 1rem;
   min-width: 0;
-  padding-top: 8px;
-
-  @media (max-width: 480px) {
-    min-width: 100%;
-  }
 }
 
 .full-width {
@@ -16,24 +73,39 @@
 
 .error-banner {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   padding: 10px 14px;
-  margin-bottom: 12px;
-  border-radius: 8px;
-  background-color: var(--mat-sys-error-container, #ffdad6);
-  color: var(--mat-sys-on-error-container, #410002);
+  margin-bottom: 14px;
+  border-radius: 10px;
+  background-color: var(--mat-sys-error-container);
+  color: var(--mat-sys-on-error-container);
+  border: 1px solid color-mix(in srgb, var(--mat-sys-error) 35%, transparent);
   font-size: 0.875rem;
+  line-height: 1.4;
 
   mat-icon {
     font-size: 20px;
     width: 20px;
     height: 20px;
     flex-shrink: 0;
+    margin-top: 1px;
   }
+}
+
+.dialog-actions {
+  padding: 10px 20px 14px !important;
+  border-top: 1px solid var(--mat-sys-outline-variant);
 }
 
 .btn-spinner {
   display: inline-block;
   margin-right: 8px;
+}
+
+@media (max-width: 600px) {
+  .dialog-header {
+    padding: 12px 14px 10px;
+    gap: 8px;
+  }
 }

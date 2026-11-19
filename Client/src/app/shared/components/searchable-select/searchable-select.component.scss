@@ -7,12 +7,15 @@
 .searchable-select-field {
   width: 100%;
 
-  // Suffix icons alignment
+  // Suffix icons alignment (single horizontal row)
   .suffix-action-wrapper {
     display: inline-flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
     align-items: center;
     justify-content: center;
-    height: 100%;
+    gap: 0;
+    padding-right: 4px;
   }
 
   .loading-spinner {
@@ -20,14 +23,16 @@
   }
 
   .action-btn {
-    width: 44px;
-    height: 44px;
-    line-height: 28px;
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    min-height: 36px;
+    line-height: 24px;
     padding: 0;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    color: var(--mat-sys-on-surface-variant, #79747e);
+    color: var(--mat-sys-on-surface-variant);
 
     mat-icon {
       font-size: 18px;
@@ -37,7 +42,7 @@
     }
 
     &:hover:not([disabled]) {
-      color: var(--mat-sys-on-surface, #1d1b20);
+      color: var(--mat-sys-on-surface);
     }
   }
 

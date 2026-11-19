@@ -1,73 +1,93 @@
-<h2 mat-dialog-title>
-  {{ isEdit() ? 'Edit Collection' : 'New Collection' }}
-</h2>
-
-<mat-dialog-content>
-  @if (errorMessage()) {
-    <div class="error-banner" role="alert">
-      <mat-icon>error</mat-icon>
-      <span>{{ errorMessage() }}</span>
+<div class="taxonomy-dialog-container">
+  <div class="dialog-header" mat-dialog-title>
+    <div class="header-title-group">
+      <div class="header-icon-badge" aria-hidden="true">
+        <mat-icon>collections_bookmark</mat-icon>
+      </div>
+      <div class="header-titles">
+        <h2 class="dialog-title">{{ isEdit() ? 'Edit Collection' : 'New Collection' }}</h2>
+        <p class="dialog-subtitle">Group recipes by cookbook, theme, or household favorite.</p>
+      </div>
     </div>
-  }
+    <button
+      mat-icon-button
+      type="button"
+      aria-label="Close collection dialog"
+      [disabled]="isSubmitting()"
+      (click)="dialogRef.close()"
+    >
+      <mat-icon>close</mat-icon>
+    </button>
+  </div>
 
-  <form [formGroup]="form" class="collection-form" (ngSubmit)="onSave()">
-    <mat-form-field appearance="outline" class="full-width">
-      <mat-label>Collection Name</mat-label>
-      <input
-        matInput
-        formControlName="name"
-        placeholder="e.g. Weeknight Dinners"
-        maxlength="100"
-        required
-      />
-      @if (form.controls.name.hasError('required')) {
-        <mat-error>Name is required</mat-error>
-      }
-      @if (form.controls.name.hasError('maxlength')) {
-        <mat-error>Name cannot exceed 100 characters</mat-error>
-      }
-    </mat-form-field>
-
-    <mat-form-field appearance="outline" class="full-width">
-      <mat-label>Description (Optional)</mat-label>
-      <textarea
-        matInput
-        formControlName="description"
-        rows="3"
-        placeholder="Brief description of this collection..."
-        maxlength="500"
-      ></textarea>
-      @if (form.controls.description.hasError('maxlength')) {
-        <mat-error>Description cannot exceed 500 characters</mat-error>
-      }
-    </mat-form-field>
-
-    <mat-form-field appearance="outline" class="full-width">
-      <mat-label>Display Order</mat-label>
-      <input matInput type="number" formControlName="sortOrder" placeholder="0" />
-    </mat-form-field>
-  </form>
-</mat-dialog-content>
-
-<mat-dialog-actions align="end">
-  <button
-    type="button"
-    mat-button
-    mat-dialog-close
-    (click)="dialogRef.close()"
-    [disabled]="isSubmitting()"
-  >
-    Cancel
-  </button>
-  <button
-    mat-flat-button
-    color="primary"
-    (click)="onSave()"
-    [disabled]="isSubmitting() || form.invalid"
-  >
-    @if (isSubmitting()) {
-      <mat-spinner diameter="18" class="btn-spinner"></mat-spinner>
+  <mat-dialog-content class="dialog-content">
+    @if (errorMessage()) {
+      <div class="error-banner" role="alert">
+        <mat-icon aria-hidden="true">error_outline</mat-icon>
+        <span>{{ errorMessage() }}</span>
+      </div>
     }
-    {{ isEdit() ? 'Save Changes' : 'Create Collection' }}
-  </button>
-</mat-dialog-actions>
+
+    <form [formGroup]="form" class="collection-form" (ngSubmit)="onSave()">
+      <mat-form-field appearance="outline" class="full-width">
+        <mat-label>Collection Name</mat-label>
+        <input
+          matInput
+          formControlName="name"
+          placeholder="e.g. Weeknight Dinners"
+          maxlength="100"
+          required
+        />
+        @if (form.controls.name.hasError('required')) {
+          <mat-error>Name is required</mat-error>
+        }
+        @if (form.controls.name.hasError('maxlength')) {
+          <mat-error>Name cannot exceed 100 characters</mat-error>
+        }
+      </mat-form-field>
+
+      <mat-form-field appearance="outline" class="full-width">
+        <mat-label>Description (Optional)</mat-label>
+        <textarea
+          matInput
+          formControlName="description"
+          rows="3"
+          placeholder="Brief description of this collection..."
+          maxlength="500"
+        ></textarea>
+        @if (form.controls.description.hasError('maxlength')) {
+          <mat-error>Description cannot exceed 500 characters</mat-error>
+        }
+      </mat-form-field>
+
+      <mat-form-field appearance="outline" class="full-width">
+        <mat-label>Display Order</mat-label>
+        <input matInput type="number" formControlName="sortOrder" placeholder="0" />
+        <mat-hint>Lower numbers appear first in the cookbook strip (default: 0)</mat-hint>
+      </mat-form-field>
+    </form>
+  </mat-dialog-content>
+
+  <mat-dialog-actions align="end" class="dialog-actions">
+    <button
+      type="button"
+      mat-button
+      mat-dialog-close
+      (click)="dialogRef.close()"
+      [disabled]="isSubmitting()"
+    >
+      Cancel
+    </button>
+    <button
+      mat-flat-button
+      color="primary"
+      (click)="onSave()"
+      [disabled]="isSubmitting() || form.invalid"
+    >
+      @if (isSubmitting()) {
+        <mat-spinner diameter="18" class="btn-spinner"></mat-spinner>
+      }
+      {{ isEdit() ? 'Save Changes' : 'Create Collection' }}
+    </button>
+  </mat-dialog-actions>
+</div>

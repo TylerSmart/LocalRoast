@@ -2,7 +2,14 @@
   <!-- Header Bar -->
   <div class="page-header">
     <div class="header-titles">
-      <h1 class="page-title">Cookbook</h1>
+      <div class="title-row">
+        <h1 class="page-title">Cookbook</h1>
+        @if (!isLoading() && totalCount() > 0) {
+          <span class="recipe-count-pill" aria-label="Total matching recipes">
+            {{ totalCount() }}
+          </span>
+        }
+      </div>
       <p class="page-subtitle">
         Your household collection of structured recipes, culinary scaling, and kitchen instructions.
       </p>
@@ -26,7 +33,13 @@
         <mat-icon>blender</mat-icon>
         <span>Use Up Ingredients</span>
       </a>
-      <a mat-flat-button color="primary" routerLink="/recipes/new" aria-label="Create new recipe">
+      <a
+        mat-flat-button
+        color="primary"
+        routerLink="/recipes/new"
+        class="new-recipe-btn"
+        aria-label="Create new recipe"
+      >
         <mat-icon>add</mat-icon>
         <span>New Recipe</span>
       </a>
@@ -41,7 +54,7 @@
       [class.active]="selectedCollectionId() === null"
       (click)="selectCollection(null)"
     >
-      All Cookbooks
+      <span>All Cookbooks</span>
     </button>
     @for (c of collections(); track c.id) {
       <div class="collection-pill-group" [class.active]="selectedCollectionId() === c.id">
@@ -90,17 +103,23 @@
     <div class="search-and-filter-bar">
       <!-- Search Input -->
       <mat-form-field appearance="outline" class="search-field" subscriptSizing="dynamic">
-        <mat-label>Search recipes, ingredients, sources, tags...</mat-label>
-        <mat-icon matPrefix>search</mat-icon>
+        <mat-label>Search recipes...</mat-label>
+        <mat-icon matPrefix class="search-prefix-icon" aria-hidden="true">search</mat-icon>
         <input
           matInput
           [ngModel]="searchQuery()"
           (ngModelChange)="onSearchChange($event)"
-          placeholder="e.g. Lasagna, Vegetarian, Sheet Pan"
+          placeholder="Title, ingredient, source, or tag"
           autocomplete="off"
         />
         @if (searchQuery()) {
-          <button mat-icon-button matSuffix (click)="onSearchChange('')" aria-label="Clear search">
+          <button
+            type="button"
+            mat-icon-button
+            matSuffix
+            (click)="onSearchChange('')"
+            aria-label="Clear search"
+          >
             <mat-icon>close</mat-icon>
           </button>
         }
@@ -152,31 +171,82 @@
       </div>
     </div>
 
+    <!-- Active Filter Chips Strip -->
+    @if (activeFilterChips().length > 0) {
+      <div class="active-filters-strip" role="list" aria-label="Active filters">
+        @for (chip of activeFilterChips(); track chip.key) {
+          <button
+            type="button"
+            class="active-filter-chip"
+            role="listitem"
+            (click)="chip.remove()"
+            [attr.aria-label]="'Remove filter ' + chip.label"
+          >
+            <span>{{ chip.label }}</span>
+            <mat-icon aria-hidden="true">close</mat-icon>
+          </button>
+        }
+      </div>
+    }
+
     <!-- Expandable Tag Manager Panel -->
     @if (tagsManagerExpanded()) {
       <div class="tags-manager-panel" role="region" aria-label="Manage Tags">
         <div class="tags-manager-header">
           <div class="tags-manager-title">
-            <mat-icon>label</mat-icon>
+            <mat-icon aria-hidden="true">label</mat-icon>
             <span>Household Tags</span>
+            <span class="tag-total-pill">{{ tags().length }}</span>
           </div>
-          <button
-            type="button"
-            mat-stroked-button
-            color="primary"
-            class="new-tag-btn"
-            (click)="openNewTagDialog()"
-            aria-label="Create new tag"
-          >
-            <mat-icon>add</mat-icon>
-            <span>New Tag</span>
-          </button>
+          <div class="tags-manager-controls">
+            @if (tags().length > 0) {
+              <mat-form-field
+                appearance="outline"
+                class="tag-manager-search"
+                subscriptSizing="dynamic"
+              >
+                <mat-icon matPrefix class="search-prefix-icon" aria-hidden="true">search</mat-icon>
+                <input
+                  matInput
+                  [ngModel]="tagManagerSearch()"
+                  (ngModelChange)="tagManagerSearch.set($event)"
+                  placeholder="Filter tags..."
+                  aria-label="Filter household tags"
+                  autocomplete="off"
+                />
+                @if (tagManagerSearch()) {
+                  <button
+                    type="button"
+                    mat-icon-button
+                    matSuffix
+                    (click)="tagManagerSearch.set('')"
+                    aria-label="Clear tag filter"
+                  >
+                    <mat-icon>close</mat-icon>
+                  </button>
+                }
+              </mat-form-field>
+            }
+            <button
+              type="button"
+              mat-stroked-button
+              color="primary"
+              class="new-tag-btn"
+              (click)="openNewTagDialog()"
+              aria-label="Create new tag"
+            >
+              <mat-icon>add</mat-icon>
+              <span>New Tag</span>
+            </button>
+          </div>
         </div>
 
         @if (tags().length === 0) {
           <p class="empty-tags-hint">
             No tags created yet. Click "New Tag" to create your first tag.
           </p>
+        } @else if (!hasFilteredManagerTags()) {
+          <p class="empty-tags-hint">No tags match "{{ tagManagerSearch() }}".</p>
         } @else {
           <div class="tags-manager-categories">
             @for (cat of tagCategories; track cat) {
@@ -216,11 +286,10 @@
       </div>
     }
 
-    <!-- Expandable Filters Stack (Each input & toggle on its own dedicated line) -->
+    <!-- Expandable Filters Grid (Compact 4-col on desktop, 2-col tablet, 1-col mobile) -->
     @if (filtersExpanded()) {
       <div class="expanded-filters-stack" role="region" aria-label="Recipe Filters">
-        <!-- Line 1: Status Filter -->
-        <div class="filter-line">
+        <div class="filters-grid-primary">
           <mat-form-field appearance="outline" class="filter-field" subscriptSizing="dynamic">
             <mat-label>Status</mat-label>
             <mat-select [ngModel]="selectedStatus()" (ngModelChange)="onStatusChange($event)">
@@ -230,10 +299,7 @@
               <mat-option value="All">All Recipes</mat-option>
             </mat-select>
           </mat-form-field>
-        </div>
 
-        <!-- Line 2: Difficulty Filter -->
-        <div class="filter-line">
           <mat-form-field appearance="outline" class="filter-field" subscriptSizing="dynamic">
             <mat-label>Difficulty</mat-label>
             <mat-select
@@ -246,10 +312,7 @@
               <mat-option value="Project">Project</mat-option>
             </mat-select>
           </mat-form-field>
-        </div>
 
-        <!-- Line 3: Max Total Time Filter -->
-        <div class="filter-line">
           <mat-form-field appearance="outline" class="filter-field" subscriptSizing="dynamic">
             <mat-label>Max Time</mat-label>
             <mat-select [ngModel]="maxTimeMinutes()" (ngModelChange)="onMaxTimeChange($event)">
@@ -260,10 +323,7 @@
               <mat-option [value]="120">Under 2 hours</mat-option>
             </mat-select>
           </mat-form-field>
-        </div>
 
-        <!-- Line 4: Min Rating Filter -->
-        <div class="filter-line">
           <mat-form-field appearance="outline" class="filter-field" subscriptSizing="dynamic">
             <mat-label>Rating</mat-label>
             <mat-select [ngModel]="minRating()" (ngModelChange)="onMinRatingChange($event)">
@@ -275,8 +335,7 @@
           </mat-form-field>
         </div>
 
-        <!-- Line 5: Tags Multi-Select -->
-        <div class="filter-line">
+        <div class="filters-grid-secondary">
           <app-searchable-select
             class="filter-field tag-filter-field"
             [options]="tagOptions()"
@@ -286,10 +345,7 @@
             [ngModel]="selectedTagIds()"
             (selectionChange)="onTagSelectionChange($event)"
           />
-        </div>
 
-        <!-- Line 6: Forgotten Favorites Toggle Pill -->
-        <div class="filter-line filter-toggle-line">
           <button
             type="button"
             class="forgotten-favorites-pill"
@@ -297,8 +353,13 @@
             (click)="toggleForgottenFavorites()"
             aria-label="Filter by forgotten favorites"
           >
-            <mat-icon>favorite</mat-icon>
-            <span>Forgotten Favorites (High-rated or cooked 2+ times, not made recently)</span>
+            <mat-icon aria-hidden="true">favorite</mat-icon>
+            <span class="forgotten-label-group">
+              <span class="forgotten-title">Forgotten Favorites</span>
+              <span class="forgotten-subtitle"
+                >Highly rated or cooked 2+ times, not made recently</span
+              >
+            </span>
           </button>
         </div>
       </div>
@@ -308,9 +369,9 @@
   <!-- Error Message Banner -->
   @if (errorMessage()) {
     <div class="recipe-error-banner" role="alert">
-      <mat-icon>error</mat-icon>
+      <mat-icon aria-hidden="true">error_outline</mat-icon>
       <span>{{ errorMessage() }}</span>
-      <button mat-button (click)="loadRecipes()">Retry</button>
+      <button mat-button type="button" (click)="loadRecipes()">Retry</button>
     </div>
   }
 
@@ -324,19 +385,34 @@
     <!-- Empty State -->
     @if (filteredRecipes().length === 0) {
       <div class="empty-state">
-        <mat-icon class="empty-icon">menu_book</mat-icon>
+        <div class="empty-icon-wrap" aria-hidden="true">
+          <mat-icon class="empty-icon">menu_book</mat-icon>
+        </div>
         <h3>No recipes found</h3>
         <p>
           @if (hasActiveFilters()) {
-            Try adjusting your search query or filters.
+            Try adjusting or clearing your active search query and filters.
           } @else {
             Start creating delicious meals by adding your first structured recipe!
           }
         </p>
-        <a mat-flat-button color="primary" routerLink="/recipes/new">
-          <mat-icon>add</mat-icon>
-          <span>Create New Recipe</span>
-        </a>
+        <div class="empty-state-actions">
+          @if (hasActiveFilters()) {
+            <button mat-flat-button color="primary" type="button" (click)="clearFilters()">
+              <mat-icon>clear_all</mat-icon>
+              <span>Clear Filters</span>
+            </button>
+            <a mat-stroked-button routerLink="/recipes/new">
+              <mat-icon>add</mat-icon>
+              <span>Create New Recipe</span>
+            </a>
+          } @else {
+            <a mat-flat-button color="primary" routerLink="/recipes/new">
+              <mat-icon>add</mat-icon>
+              <span>Create New Recipe</span>
+            </a>
+          }
+        </div>
       </div>
     } @else {
       <!-- Recipe Grid -->
@@ -344,12 +420,14 @@
         @for (recipe of filteredRecipes(); track recipe.id) {
           <mat-card class="recipe-card">
             @if (recipe.thumbnailImagePath) {
-              <img
-                [src]="recipe.thumbnailImagePath"
-                [alt]="recipe.title"
-                class="recipe-card-thumb"
-                loading="lazy"
-              />
+              <div class="recipe-card-media">
+                <img
+                  [src]="recipe.thumbnailImagePath"
+                  [alt]="recipe.title"
+                  class="recipe-card-thumb"
+                  loading="lazy"
+                />
+              </div>
             }
 
             <div class="recipe-card-body">
@@ -370,6 +448,7 @@
                 <div class="card-actions-quick">
                   <a
                     mat-icon-button
+                    class="card-action-icon edit-action"
                     [routerLink]="['/recipes', recipe.id, 'edit']"
                     (click)="$event.stopPropagation()"
                     aria-label="Edit recipe"
@@ -379,12 +458,13 @@
                   </a>
                   <button
                     mat-icon-button
-                    color="warn"
+                    type="button"
+                    class="card-action-icon delete-action"
                     (click)="deleteRecipe(recipe, $event)"
                     aria-label="Delete recipe"
                     matTooltip="Delete Recipe"
                   >
-                    <mat-icon>delete</mat-icon>
+                    <mat-icon>delete_outline</mat-icon>
                   </button>
                 </div>
               </div>
@@ -403,60 +483,85 @@
               @if (recipe.collections.length > 0 || recipe.tags.length > 0) {
                 <div class="card-badges-row">
                   @for (c of recipe.collections; track c.id) {
-                    <span class="collection-badge-chip">{{ c.name }}</span>
+                    <span class="collection-badge-chip">
+                      <mat-icon aria-hidden="true">collections_bookmark</mat-icon>
+                      <span>{{ c.name }}</span>
+                    </span>
                   }
-                  @for (t of recipe.tags; track t.id) {
+                  @for (t of recipe.tags.slice(0, maxVisibleCardTags); track t.id) {
                     <span class="tag-badge-chip" [class]="'cat-' + t.category.toLowerCase()">
                       {{ t.name }}
+                    </span>
+                  }
+                  @if (recipe.tags.length > maxVisibleCardTags) {
+                    <span
+                      class="tag-overflow-chip"
+                      [matTooltip]="hiddenTagsTooltip(recipe)"
+                      [attr.aria-label]="
+                        recipe.tags.length -
+                        maxVisibleCardTags +
+                        ' more tags: ' +
+                        hiddenTagsTooltip(recipe)
+                      "
+                    >
+                      +{{ recipe.tags.length - maxVisibleCardTags }}
                     </span>
                   }
                 </div>
               }
 
-              <!-- Meta specs row -->
+              <!-- Meta specs row (pinned toward bottom so cards stay balanced) -->
               <div class="card-meta-row">
                 @if (recipe.totalTimeMinutes) {
                   <span class="meta-item">
-                    <mat-icon class="meta-icon">schedule</mat-icon>
+                    <mat-icon class="meta-icon" aria-hidden="true">schedule</mat-icon>
                     <span>{{ formatMinutes(recipe.totalTimeMinutes) }}</span>
                   </span>
                 }
                 <span class="meta-item">
-                  <mat-icon class="meta-icon">restaurant</mat-icon>
-                  <span>{{ recipe.baseServings }} servings</span>
+                  <mat-icon class="meta-icon" aria-hidden="true">restaurant</mat-icon>
+                  <span>
+                    {{ recipe.baseServings }}
+                    {{ recipe.baseServings === 1 ? 'serving' : 'servings' }}
+                  </span>
                 </span>
                 <span class="meta-item">
-                  <mat-icon class="meta-icon">format_list_bulleted</mat-icon>
-                  <span>{{ recipe.ingredientCount }} ing / {{ recipe.stepCount }} steps</span>
+                  <mat-icon class="meta-icon" aria-hidden="true">format_list_bulleted</mat-icon>
+                  <span>
+                    {{ recipe.ingredientCount }} ing · {{ recipe.stepCount }}
+                    {{ recipe.stepCount === 1 ? 'step' : 'steps' }}
+                  </span>
                 </span>
               </div>
 
               <!-- Footer with Cooked count & Source -->
-              <div class="card-footer-row">
-                @if (recipe.sourceName) {
-                  <span class="source-tag">
-                    <mat-icon class="source-icon">auto_stories</mat-icon>
-                    <span>{{ recipe.sourceName }}</span>
-                  </span>
-                } @else {
-                  <span></span>
-                }
+              @if (recipe.sourceName || recipe.averageRating || recipe.timesCooked > 0) {
+                <div class="card-footer-row">
+                  @if (recipe.sourceName) {
+                    <span class="source-tag">
+                      <mat-icon class="source-icon" aria-hidden="true">auto_stories</mat-icon>
+                      <span class="source-name">{{ recipe.sourceName }}</span>
+                    </span>
+                  } @else {
+                    <span></span>
+                  }
 
-                <div class="card-badges-footer">
-                  @if (recipe.averageRating) {
-                    <span class="rating-badge">
-                      <mat-icon class="rating-icon">star</mat-icon>
-                      <span>★ {{ recipe.averageRating }}</span>
-                    </span>
-                  }
-                  @if (recipe.timesCooked > 0) {
-                    <span class="cooked-badge">
-                      <mat-icon class="cooked-icon">skillet</mat-icon>
-                      <span>Cooked {{ recipe.timesCooked }}x</span>
-                    </span>
-                  }
+                  <div class="card-badges-footer">
+                    @if (recipe.averageRating) {
+                      <span class="rating-badge">
+                        <mat-icon class="rating-icon" aria-hidden="true">star</mat-icon>
+                        <span>{{ recipe.averageRating }}</span>
+                      </span>
+                    }
+                    @if (recipe.timesCooked > 0) {
+                      <span class="cooked-badge">
+                        <mat-icon class="cooked-icon" aria-hidden="true">skillet</mat-icon>
+                        <span>Cooked {{ recipe.timesCooked }}x</span>
+                      </span>
+                    }
+                  </div>
                 </div>
-              </div>
+              }
             </div>
           </mat-card>
         }

@@ -221,4 +221,16 @@ describe('RecipeListComponent', () => {
       expect.not.objectContaining({ difficulty: expect.anything() }),
     );
   });
+
+  it('exposes dismissible activeFilterChips for active drawer filters', () => {
+    component.onDifficultyChange('Easy');
+    component.onMaxTimeChange(30);
+
+    const chips = component['activeFilterChips']();
+    expect(chips.map((c) => c.label)).toEqual(['Difficulty: Easy', 'Under 30 min']);
+
+    chips[0].remove();
+    expect(component['selectedDifficulty']()).toBe('All');
+    expect(component['activeFilterChips']().map((c) => c.label)).toEqual(['Under 30 min']);
+  });
 });

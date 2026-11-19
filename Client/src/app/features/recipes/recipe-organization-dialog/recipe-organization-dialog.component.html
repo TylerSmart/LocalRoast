@@ -1,174 +1,259 @@
-<div class="org-dialog-header">
-  <div class="org-header-text">
-    <h2 mat-dialog-title>Organize Recipe</h2>
-    <p class="org-subtitle">{{ data.recipeTitle }}</p>
+<div class="org-dialog-container">
+  <div class="org-dialog-header" mat-dialog-title>
+    <div class="header-title-group">
+      <div class="header-icon-badge" aria-hidden="true">
+        <mat-icon>bookmarks</mat-icon>
+      </div>
+      <div class="org-header-text">
+        <h2 class="dialog-title">Organize Recipe</h2>
+        <p class="org-subtitle">{{ data.recipeTitle }}</p>
+      </div>
+    </div>
+    <button
+      type="button"
+      mat-icon-button
+      (click)="dialogRef.close()"
+      aria-label="Close organize recipe dialog"
+    >
+      <mat-icon>close</mat-icon>
+    </button>
   </div>
-  <button
-    type="button"
-    mat-icon-button
-    (click)="dialogRef.close()"
-    aria-label="Close organize recipe dialog"
-  >
-    <mat-icon>close</mat-icon>
-  </button>
-</div>
 
-<mat-dialog-content>
-  @if (errorMessage()) {
-    <div class="error-banner" role="alert">
-      <mat-icon>error</mat-icon>
-      <span>{{ errorMessage() }}</span>
-    </div>
-  }
+  <mat-dialog-content class="org-dialog-content">
+    @if (errorMessage()) {
+      <div class="error-banner" role="alert">
+        <mat-icon aria-hidden="true">error_outline</mat-icon>
+        <span>{{ errorMessage() }}</span>
+      </div>
+    }
 
-  @if (isLoading()) {
-    <div class="loading-state">
-      <mat-spinner diameter="32"></mat-spinner>
-      <span>Loading collections and tags...</span>
-    </div>
-  } @else {
-    <!-- Collections Section -->
-    <section class="org-section">
-      <div class="section-header">
-        <h3 class="section-title">
-          <mat-icon>collections_bookmark</mat-icon>
-          Collections
-        </h3>
+    @if (isLoading()) {
+      <div class="loading-state">
+        <mat-spinner diameter="32"></mat-spinner>
+        <span>Loading collections and tags...</span>
+      </div>
+    } @else {
+      <!-- Toolbar: Search + Manage Mode Toggle -->
+      <div class="org-toolbar">
+        <mat-form-field appearance="outline" class="org-filter-field" subscriptSizing="dynamic">
+          <mat-icon matPrefix class="filter-prefix-icon" aria-hidden="true">search</mat-icon>
+          <input
+            matInput
+            [ngModel]="filterQuery()"
+            (ngModelChange)="filterQuery.set($event)"
+            placeholder="Filter collections & tags..."
+            aria-label="Filter collections and tags"
+            autocomplete="off"
+          />
+          @if (filterQuery()) {
+            <button
+              type="button"
+              mat-icon-button
+              matSuffix
+              (click)="filterQuery.set('')"
+              aria-label="Clear filter"
+            >
+              <mat-icon>close</mat-icon>
+            </button>
+          }
+        </mat-form-field>
+
         <button
           type="button"
-          mat-button
-          color="primary"
-          class="add-taxonomy-btn"
-          (click)="openNewCollection()"
+          mat-stroked-button
+          class="manage-toggle-btn"
+          [class.is-active]="manageMode()"
+          (click)="toggleManageMode()"
+          [attr.aria-pressed]="manageMode()"
         >
-          <mat-icon>add</mat-icon>
-          New Collection
+          <mat-icon>{{ manageMode() ? 'done' : 'tune' }}</mat-icon>
+          <span>{{ manageMode() ? 'Done Editing' : 'Manage' }}</span>
         </button>
       </div>
 
-      <div class="chip-container">
-        @for (coll of collections(); track coll.id) {
-          <div
-            class="collection-chip-item"
-            [class.is-selected]="selectedCollectionIds().has(coll.id)"
+      <!-- Selected Summary Strip -->
+      @if (totalSelectedCount() > 0) {
+        <div class="selected-taxonomy-bar" aria-label="Currently selected">
+          <span class="selected-label">Selected ({{ totalSelectedCount() }}):</span>
+          @for (c of selectedCollectionsList(); track c.id) {
+            <button
+              type="button"
+              class="selected-pill selected-collection-pill"
+              (click)="toggleCollection(c.id)"
+              [attr.aria-label]="'Remove collection ' + c.name"
+            >
+              <mat-icon aria-hidden="true">collections_bookmark</mat-icon>
+              <span>{{ c.name }}</span>
+              <mat-icon class="remove-icon" aria-hidden="true">close</mat-icon>
+            </button>
+          }
+          @for (t of selectedTagsList(); track t.id) {
+            <button
+              type="button"
+              class="selected-pill"
+              (click)="toggleTag(t.id)"
+              [attr.aria-label]="'Remove tag ' + t.name"
+            >
+              <span>{{ t.name }}</span>
+              <mat-icon class="remove-icon" aria-hidden="true">close</mat-icon>
+            </button>
+          }
+        </div>
+      }
+
+      <!-- Collections Section -->
+      <section class="org-section">
+        <div class="section-header">
+          <h3 class="section-title">
+            <mat-icon aria-hidden="true">collections_bookmark</mat-icon>
+            <span>Collections</span>
+          </h3>
+          <button
+            type="button"
+            mat-button
+            color="primary"
+            class="add-taxonomy-btn"
+            (click)="openNewCollection()"
           >
-            <mat-chip-option
-              [selected]="selectedCollectionIds().has(coll.id)"
-              (click)="toggleCollection(coll.id)"
-            >
-              {{ coll.name }}
-            </mat-chip-option>
-            <button
-              type="button"
-              class="chip-manage-btn"
-              (click)="openEditCollection(coll, $event)"
-              [attr.aria-label]="'Edit collection ' + coll.name"
-              matTooltip="Edit collection"
-            >
-              <mat-icon>edit</mat-icon>
-            </button>
-            <button
-              type="button"
-              class="chip-manage-btn delete-btn"
-              (click)="deleteCollection(coll, $event)"
-              [attr.aria-label]="'Delete collection ' + coll.name"
-              matTooltip="Delete collection"
-            >
-              <mat-icon>delete_outline</mat-icon>
-            </button>
-          </div>
-        }
-        @if (collections().length === 0) {
-          <span class="empty-hint">No collections created yet.</span>
-        }
-      </div>
-    </section>
+            <mat-icon>add</mat-icon>
+            <span>New Collection</span>
+          </button>
+        </div>
 
-    <!-- Tags Section -->
-    <section class="org-section">
-      <div class="section-header">
-        <h3 class="section-title">
-          <mat-icon>label</mat-icon>
-          Tags
-        </h3>
-        <button
-          type="button"
-          mat-button
-          color="primary"
-          class="add-taxonomy-btn"
-          (click)="openNewTag()"
-        >
-          <mat-icon>add</mat-icon>
-          New Tag
-        </button>
-      </div>
-
-      @for (cat of tagCategories; track cat) {
-        @if (tagsByCategory()[cat]?.length) {
-          <div class="category-block">
-            <span class="category-name">{{ categoryLabel(cat) }}</span>
-            <div class="chip-container">
-              @for (tag of tagsByCategory()[cat]; track tag.id) {
-                <div
-                  class="collection-chip-item tag-chip-item"
-                  [class.is-selected]="selectedTagIds().has(tag.id)"
+        <div class="chip-container">
+          @for (coll of filteredCollections(); track coll.id) {
+            <div
+              class="collection-chip-item"
+              [class.is-selected]="selectedCollectionIds().has(coll.id)"
+              [class.has-manage-actions]="manageMode()"
+            >
+              <mat-chip-option
+                [selected]="selectedCollectionIds().has(coll.id)"
+                (click)="toggleCollection(coll.id)"
+              >
+                {{ coll.name }}
+              </mat-chip-option>
+              @if (manageMode()) {
+                <button
+                  type="button"
+                  class="chip-manage-btn"
+                  (click)="openEditCollection(coll, $event)"
+                  [attr.aria-label]="'Edit collection ' + coll.name"
+                  matTooltip="Edit collection"
                 >
-                  <mat-chip-option
-                    [selected]="selectedTagIds().has(tag.id)"
-                    (click)="toggleTag(tag.id)"
-                  >
-                    {{ tag.name }}
-                  </mat-chip-option>
-                  <button
-                    type="button"
-                    class="chip-manage-btn"
-                    (click)="openEditTag(tag, $event)"
-                    [attr.aria-label]="'Edit tag ' + tag.name"
-                    matTooltip="Edit tag"
-                  >
-                    <mat-icon>edit</mat-icon>
-                  </button>
-                  <button
-                    type="button"
-                    class="chip-manage-btn delete-btn"
-                    (click)="deleteTag(tag, $event)"
-                    [attr.aria-label]="'Delete tag ' + tag.name"
-                    matTooltip="Delete tag"
-                  >
-                    <mat-icon>delete_outline</mat-icon>
-                  </button>
-                </div>
+                  <mat-icon>edit</mat-icon>
+                </button>
+                <button
+                  type="button"
+                  class="chip-manage-btn delete-btn"
+                  (click)="deleteCollection(coll, $event)"
+                  [attr.aria-label]="'Delete collection ' + coll.name"
+                  matTooltip="Delete collection"
+                >
+                  <mat-icon>delete_outline</mat-icon>
+                </button>
               }
             </div>
-          </div>
-        }
-      }
-      @if (tags().length === 0) {
-        <span class="empty-hint">No tags created yet.</span>
-      }
-    </section>
-  }
-</mat-dialog-content>
+          }
+          @if (collections().length === 0) {
+            <span class="empty-hint">No collections created yet.</span>
+          } @else if (filteredCollections().length === 0) {
+            <span class="empty-hint">No collections match "{{ filterQuery() }}".</span>
+          }
+        </div>
+      </section>
 
-<mat-dialog-actions align="end">
-  <button
-    type="button"
-    mat-button
-    mat-dialog-close
-    (click)="dialogRef.close()"
-    [disabled]="isSubmitting()"
-  >
-    Cancel
-  </button>
-  <button
-    mat-flat-button
-    color="primary"
-    (click)="onSave()"
-    [disabled]="isSubmitting() || isLoading()"
-  >
-    @if (isSubmitting()) {
-      <mat-spinner diameter="18" class="btn-spinner"></mat-spinner>
+      <!-- Tags Section -->
+      <section class="org-section">
+        <div class="section-header">
+          <h3 class="section-title">
+            <mat-icon aria-hidden="true">label</mat-icon>
+            <span>Tags</span>
+          </h3>
+          <button
+            type="button"
+            mat-button
+            color="primary"
+            class="add-taxonomy-btn"
+            (click)="openNewTag()"
+          >
+            <mat-icon>add</mat-icon>
+            <span>New Tag</span>
+          </button>
+        </div>
+
+        @for (cat of tagCategories; track cat) {
+          @if (tagsByCategory()[cat]?.length) {
+            <div class="category-block">
+              <span class="category-name">{{ categoryLabel(cat) }}</span>
+              <div class="chip-container">
+                @for (tag of tagsByCategory()[cat]; track tag.id) {
+                  <div
+                    class="collection-chip-item tag-chip-item"
+                    [class.is-selected]="selectedTagIds().has(tag.id)"
+                    [class.has-manage-actions]="manageMode()"
+                  >
+                    <mat-chip-option
+                      [selected]="selectedTagIds().has(tag.id)"
+                      (click)="toggleTag(tag.id)"
+                    >
+                      {{ tag.name }}
+                    </mat-chip-option>
+                    @if (manageMode()) {
+                      <button
+                        type="button"
+                        class="chip-manage-btn"
+                        (click)="openEditTag(tag, $event)"
+                        [attr.aria-label]="'Edit tag ' + tag.name"
+                        matTooltip="Edit tag"
+                      >
+                        <mat-icon>edit</mat-icon>
+                      </button>
+                      <button
+                        type="button"
+                        class="chip-manage-btn delete-btn"
+                        (click)="deleteTag(tag, $event)"
+                        [attr.aria-label]="'Delete tag ' + tag.name"
+                        matTooltip="Delete tag"
+                      >
+                        <mat-icon>delete_outline</mat-icon>
+                      </button>
+                    }
+                  </div>
+                }
+              </div>
+            </div>
+          }
+        }
+        @if (tags().length === 0) {
+          <span class="empty-hint">No tags created yet.</span>
+        } @else if (!hasVisibleTags()) {
+          <span class="empty-hint">No tags match "{{ filterQuery() }}".</span>
+        }
+      </section>
     }
-    Save
-  </button>
-</mat-dialog-actions>
+  </mat-dialog-content>
+
+  <mat-dialog-actions align="end" class="org-dialog-actions">
+    <button
+      type="button"
+      mat-button
+      mat-dialog-close
+      (click)="dialogRef.close()"
+      [disabled]="isSubmitting()"
+    >
+      Cancel
+    </button>
+    <button
+      mat-flat-button
+      color="primary"
+      (click)="onSave()"
+      [disabled]="isSubmitting() || isLoading()"
+    >
+      @if (isSubmitting()) {
+        <mat-spinner diameter="18" class="btn-spinner"></mat-spinner>
+      }
+      Save
+    </button>
+  </mat-dialog-actions>
+</div>

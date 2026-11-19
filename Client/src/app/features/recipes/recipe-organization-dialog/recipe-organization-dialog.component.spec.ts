@@ -105,4 +105,18 @@ describe('RecipeOrganizationDialogComponent', () => {
     });
     expect(mockDialogRef.close).toHaveBeenCalledWith(updatedRecipe);
   });
+
+  it('filters collections and tags by query and hides manage buttons until toggled', () => {
+    const el = fixture.nativeElement as HTMLElement;
+    expect(el.querySelectorAll('.chip-manage-btn').length).toBe(0);
+
+    component['filterQuery'].set('quick');
+    fixture.detectChanges();
+    expect(component['filteredCollections']().length).toBe(0);
+    expect(component['tagsByCategory']().Custom.length).toBe(1);
+
+    component.toggleManageMode();
+    fixture.detectChanges();
+    expect(el.querySelectorAll('.chip-manage-btn').length).toBeGreaterThan(0);
+  });
 });

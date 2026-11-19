@@ -1,4 +1,5 @@
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
+import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatChipsModule } from '@angular/material/chips';
 import {
@@ -10,7 +11,9 @@ import {
   MatDialogRef,
   MatDialogTitle,
 } from '@angular/material/dialog';
+import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
+import { MatInputModule } from '@angular/material/input';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { RecipeDetailDto } from '../../../core/models/recipe.models';
@@ -39,13 +42,16 @@ export interface RecipeOrganizationDialogData {
 
 @Component({
   imports: [
+    FormsModule,
     MatDialogTitle,
     MatDialogContent,
     MatDialogActions,
     MatDialogClose,
     MatButtonModule,
     MatChipsModule,
+    MatFormFieldModule,
     MatIconModule,
+    MatInputModule,
     MatProgressSpinnerModule,
     MatTooltipModule,
   ],
@@ -63,6 +69,8 @@ export class RecipeOrganizationDialogComponent implements OnInit {
   protected readonly isLoading = signal<boolean>(true);
   protected readonly isSubmitting = signal<boolean>(false);
   protected readonly errorMessage = signal<string | null>(null);
+  protected readonly filterQuery = signal<string>('');
+  protected readonly manageMode = signal<boolean>(false);
 
   protected readonly collections = signal<CollectionDto[]>([]);
   protected readonly tags = signal<TagDto[]>([]);
@@ -78,7 +86,28 @@ export class RecipeOrganizationDialogComponent implements OnInit {
     return TagCategoryLabels[cat] ?? cat;
   }
 
+  protected readonly selectedCollectionsList = computed(() =>
+    this.collections().filter((c) => this.selectedCollectionIds().has(c.id)),
+  );
+
+  protected readonly selectedTagsList = computed(() =>
+    this.tags().filter((t) => this.selectedTagIds().has(t.id)),
+  );
+
+  protected readonly totalSelectedCount = computed(
+    () => this.selectedCollectionIds().size + this.selectedTagIds().size,
+  );
+
+  protected readonly filteredCollections = computed(() => {
+    const q = this.filterQuery().trim().toLowerCase();
+    if (!q) {
+      return this.collections();
+    }
+    return this.collections().filter((c) => c.name.toLowerCase().includes(q));
+  });
+
   protected readonly tagsByCategory = computed(() => {
+    const q = this.filterQuery().trim().toLowerCase();
     const map: Record<TagCategory, TagDto[]> = {
       Course: [],
       Cuisine: [],
@@ -90,15 +119,24 @@ export class RecipeOrganizationDialogComponent implements OnInit {
       Custom: [],
     };
     for (const t of this.tags()) {
-      if (map[t.category]) {
+      if (map[t.category] && (!q || t.name.toLowerCase().includes(q))) {
         map[t.category].push(t);
       }
     }
     return map;
   });
 
+  protected readonly hasVisibleTags = computed(() => {
+    const map = this.tagsByCategory();
+    return this.tagCategories.some((cat) => (map[cat]?.length ?? 0) > 0);
+  });
+
   ngOnInit(): void {
     this.loadTaxonomy();
+  }
+
+  toggleManageMode(): void {
+    this.manageMode.update((v) => !v);
   }
 
   loadTaxonomy(): void {
@@ -160,7 +198,7 @@ export class RecipeOrganizationDialogComponent implements OnInit {
   openNewCollection(): void {
     const ref = this.dialog.open<CollectionDialogComponent, CollectionDialogData, CollectionDto>(
       CollectionDialogComponent,
-      { width: '420px', data: {} },
+      { width: '440px', data: {} },
     );
     ref.afterClosed().subscribe((created) => {
       if (created) {
@@ -174,7 +212,7 @@ export class RecipeOrganizationDialogComponent implements OnInit {
     event.stopPropagation();
     const ref = this.dialog.open<CollectionDialogComponent, CollectionDialogData, CollectionDto>(
       CollectionDialogComponent,
-      { width: '420px', data: { collection } },
+      { width: '440px', data: { collection } },
     );
     ref.afterClosed().subscribe((updated) => {
       if (updated) {
@@ -213,7 +251,7 @@ export class RecipeOrganizationDialogComponent implements OnInit {
 
   openNewTag(defaultCategory: TagCategory = 'Custom'): void {
     const ref = this.dialog.open<TagDialogComponent, TagDialogData, TagDto>(TagDialogComponent, {
-      width: '420px',
+      width: '440px',
       data: { defaultCategory },
     });
     ref.afterClosed().subscribe((created) => {
@@ -227,7 +265,7 @@ export class RecipeOrganizationDialogComponent implements OnInit {
   openEditTag(tag: TagDto, event: Event): void {
     event.stopPropagation();
     const ref = this.dialog.open<TagDialogComponent, TagDialogData, TagDto>(TagDialogComponent, {
-      width: '420px',
+      width: '440px',
       data: { tag },
     });
     ref.afterClosed().subscribe((updated) => {
