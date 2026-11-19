@@ -711,23 +711,26 @@
                     </mat-checkbox>
 
                     @if (ingGroup.get('isRecipeReference')?.value) {
-                      <mat-form-field appearance="outline" class="form-field proposed-name-field">
-                        <mat-label>Referenced Recipe Title</mat-label>
-                        <input
-                          matInput
-                          formControlName="referencedRecipeTitle"
-                          placeholder="e.g. Foolproof All-Butter Dough"
-                          required
-                        />
-                        <mat-hint>
-                          @if (ingGroup.get('matchedRecipeId')?.value) {
-                            Matched in your cookbook:
-                            {{ ingGroup.get('matchedRecipeTitle')?.value }}
-                          } @else {
-                            It will link automatically if this recipe is already in your cookbook.
-                          }
-                        </mat-hint>
-                      </mat-form-field>
+                      <app-recipe-autocomplete
+                        class="form-field proposed-name-field"
+                        [excludeRecipeId]="job()?.resultingRecipeId ?? null"
+                        [linkedRecipeId]="ingGroup.get('matchedRecipeId')?.value"
+                        [linkedRecipeTitle]="ingGroup.get('matchedRecipeTitle')?.value"
+                        [textValue]="ingGroup.get('referencedRecipeTitle')?.value || ''"
+                        label="Referenced Recipe Title"
+                        placeholder="Start typing a recipe title to autofill..."
+                        [hint]="
+                          ingGroup.get('matchedRecipeId')?.value
+                            ? 'Matched in your cookbook: ' +
+                              (ingGroup.get('matchedRecipeTitle')?.value ||
+                                ingGroup.get('referencedRecipeTitle')?.value)
+                            : 'Pick a cookbook recipe above, or type a title to link automatically once published.'
+                        "
+                        subscriptSizing="fixed"
+                        (recipeSelected)="onReferencedRecipeSelected($index, $event)"
+                        (textChange)="onReferencedRecipeTextChanged($index, $event)"
+                        (recipeCleared)="onReferencedRecipeCleared($index)"
+                      />
                     }
 
                     <!-- New Food Item Configuration Fields -->

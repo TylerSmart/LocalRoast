@@ -11,4 +11,6 @@ public interface IIngestionProcessor
     Task<int> ProbeAndPromoteWaitingJobsAsync(CancellationToken cancellationToken = default);
 
     Task<bool> ProcessNextIdleRefinementAsync(CancellationToken cancellationToken = default);
+
+    Task<int> SyncPendingRecipeEmbeddingsAsync(CancellationToken cancellationToken = default);
 }

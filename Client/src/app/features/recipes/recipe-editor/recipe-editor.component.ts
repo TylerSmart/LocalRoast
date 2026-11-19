@@ -19,6 +19,7 @@ import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { FoodItemDto } from '../../../core/models/food-catalog.models';
 import {
   MeasurementUnit,
+  RecipeAutocompleteItemDto,
   RecipeDetailDto,
   RecipeDifficulty,
   RecipeIngredientInput,
@@ -27,7 +28,6 @@ import {
   RecipeMeasurement,
   RecipeStatus,
   RecipeStepInput,
-  RecipeSummaryDto,
   UpsertRecipeRequest,
 } from '../../../core/models/recipe.models';
 import { StepDialogIngredientOption } from '../../../core/models/step-token.models';
@@ -51,13 +51,8 @@ import { TaxonomyService } from '../../../core/services/taxonomy/taxonomy.servic
 import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialog/confirm-dialog.component';
 import { MeasurementEditorComponent } from '../../../shared/components/measurement-editor/measurement-editor.component';
 import { ingredientMeasurementValidator } from '../../../core/utils/recipe-measurement-forms';
-import {
-  SearchableSelectComponent,
-  SearchableSelectOption,
-} from '../../../shared/components/searchable-select/searchable-select.component';
+import { RecipeAutocompleteComponent } from '../../../shared/components/recipe-autocomplete/recipe-autocomplete.component';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { Observable } from 'rxjs';
-import { map } from 'rxjs/operators';
 import { FoodItemDialogComponent } from '../../food-catalog/food-item-dialog/food-item-dialog.component';
 import {
   CollectionDialogComponent,
@@ -86,6 +81,7 @@ interface IngredientFormValue {
   customUnitName?: string | null;
   foodItemId?: string | null;
   linkedRecipeId?: string | null;
+  linkedRecipeTitle?: string | null;
   unresolvedRecipeTitle?: string | null;
   displayName: string;
   preparationNote?: string | null;
@@ -151,7 +147,7 @@ export const MEASUREMENT_UNITS: { value: MeasurementUnit; label: string }[] = [
     MatAutocompleteModule,
     MatTooltipModule,
     MatProgressSpinnerModule,
-    SearchableSelectComponent,
+    RecipeAutocompleteComponent,
     MeasurementEditorComponent,
     StepInstructionEditorComponent,
   ],
@@ -180,39 +176,6 @@ export class RecipeEditorComponent implements OnInit {
   private readonly loadedStepTokenOrigins = new WeakMap<FormGroup, StepTokenOriginFlags>();
 
   protected readonly foodItems = signal<FoodItemDto[]>([]);
-  protected readonly availableSubRecipes = signal<RecipeSummaryDto[]>([]);
-
-  protected readonly subRecipeOptions = computed<SearchableSelectOption[]>(() =>
-    this.availableSubRecipes().map((sub) => ({
-      value: sub.id,
-      label: sub.title,
-      sublabel: `${sub.baseServings} servings`,
-    })),
-  );
-
-  protected readonly subRecipeSearchFn = (query: string): Observable<SearchableSelectOption[]> => {
-    const currentId = this.recipeId();
-    return this.recipeService.getRecipes({ search: query }).pipe(
-      map((list) => {
-        this.availableSubRecipes.update((existing) => {
-          const map = new Map(existing.map((e) => [e.id, e]));
-          for (const item of list) {
-            if (item.id !== currentId) {
-              map.set(item.id, item);
-            }
-          }
-          return Array.from(map.values());
-        });
-        return list
-          .filter((r) => r.id !== currentId)
-          .map((r) => ({
-            value: r.id,
-            label: r.title,
-            sublabel: `${r.baseServings} servings`,
-          }));
-      }),
-    );
-  };
 
   // Media signals
   protected readonly coverImagePath = signal<string | null>(null);
@@ -270,7 +233,6 @@ export class RecipeEditorComponent implements OnInit {
 
   ngOnInit(): void {
     this.loadCatalogItems();
-    this.loadSubRecipes();
     this.loadTaxonomy();
 
     this.route.paramMap.subscribe((params) => {
@@ -290,16 +252,6 @@ export class RecipeEditorComponent implements OnInit {
   loadCatalogItems(): void {
     this.catalogService.getFoodItems().subscribe({
       next: (items) => this.foodItems.set(items),
-    });
-  }
-
-  loadSubRecipes(): void {
-    this.recipeService.getRecipes().subscribe({
-      next: (recipes) => {
-        // Exclude current recipe id if in edit mode
-        const currentId = this.recipeId();
-        this.availableSubRecipes.set(recipes.filter((r) => r.id !== currentId));
-      },
     });
   }
 
@@ -368,6 +320,7 @@ export class RecipeEditorComponent implements OnInit {
           customUnitName: [ing.customUnitName ?? '', Validators.maxLength(50)],
           foodItemId: [ing.foodItemId],
           linkedRecipeId: [ing.linkedRecipeId],
+          linkedRecipeTitle: [ing.linkedRecipeTitle ?? null],
           unresolvedRecipeTitle: [ing.unresolvedRecipeTitle ?? null],
           displayName: [ing.displayName, [Validators.required, Validators.maxLength(200)]],
           preparationNote: [ing.preparationNote ?? '', Validators.maxLength(200)],
@@ -680,6 +633,7 @@ export class RecipeEditorComponent implements OnInit {
         customUnitName: ['', Validators.maxLength(50)],
         foodItemId: [null],
         linkedRecipeId: [null],
+        linkedRecipeTitle: [null],
         unresolvedRecipeTitle: [null],
         displayName: ['', [Validators.required, Validators.maxLength(200)]],
         preparationNote: ['', Validators.maxLength(200)],
@@ -722,24 +676,79 @@ export class RecipeEditorComponent implements OnInit {
         foodItemId: item.id,
         displayName: item.name,
         linkedRecipeId: null,
+        linkedRecipeTitle: null,
         unresolvedRecipeTitle: null,
         isSubRecipe: false,
       });
     }
   }
 
-  onSubRecipeSelected(index: number, recipeId: string): void {
-    const recipe = this.availableSubRecipes().find((r) => r.id === recipeId);
+  onSubRecipeToggled(index: number, isSubRecipe: boolean): void {
+    const ingGroup = this.ingredientsArray.at(index);
+    if (!ingGroup) {
+      return;
+    }
+
+    if (isSubRecipe) {
+      const existingDisplay = (ingGroup.get('displayName')?.value || '').trim();
+      const hasLinked = !!ingGroup.get('linkedRecipeId')?.value;
+      ingGroup.patchValue({
+        foodItemId: null,
+        unresolvedRecipeTitle: hasLinked
+          ? null
+          : ingGroup.get('unresolvedRecipeTitle')?.value || existingDisplay || null,
+      });
+      this.getReplacementsArray(index).clear();
+    } else {
+      ingGroup.patchValue({
+        linkedRecipeId: null,
+        linkedRecipeTitle: null,
+        unresolvedRecipeTitle: null,
+      });
+    }
+  }
+
+  onSubRecipeSelected(index: number, recipe: RecipeAutocompleteItemDto): void {
     const ingGroup = this.ingredientsArray.at(index);
     if (recipe && ingGroup) {
       ingGroup.patchValue({
         linkedRecipeId: recipe.id,
+        linkedRecipeTitle: recipe.title,
         unresolvedRecipeTitle: null,
         displayName: recipe.title,
         foodItemId: null,
         isSubRecipe: true,
       });
     }
+  }
+
+  onSubRecipeTextChanged(index: number, text: string): void {
+    const ingGroup = this.ingredientsArray.at(index);
+    if (!ingGroup) {
+      return;
+    }
+
+    const trimmed = text.trim();
+    ingGroup.patchValue({
+      displayName: text,
+      linkedRecipeId: null,
+      linkedRecipeTitle: null,
+      unresolvedRecipeTitle: trimmed || null,
+      foodItemId: null,
+    });
+  }
+
+  onSubRecipeCleared(index: number): void {
+    const ingGroup = this.ingredientsArray.at(index);
+    if (!ingGroup) {
+      return;
+    }
+
+    ingGroup.patchValue({
+      linkedRecipeId: null,
+      linkedRecipeTitle: null,
+      unresolvedRecipeTitle: null,
+    });
   }
 
   openCreateFoodItemForIngredient(index: number, initialText: string): void {

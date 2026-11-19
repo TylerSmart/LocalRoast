@@ -149,6 +149,9 @@ public sealed class AppDataMaintenanceService(
             var shareLinks = await dbContext.ShareLinks.ToListAsync(cancellationToken);
             dbContext.ShareLinks.RemoveRange(shareLinks);
 
+            var recipeEmbeddings = await dbContext.RecipeEmbeddings.ToListAsync(cancellationToken);
+            dbContext.RecipeEmbeddings.RemoveRange(recipeEmbeddings);
+
             await dbContext.SaveChangesAsync(cancellationToken);
 
             // Stage 4: Recipes

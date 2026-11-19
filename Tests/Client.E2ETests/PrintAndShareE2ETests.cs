@@ -47,11 +47,11 @@ public sealed class PrintAndShareE2ETests : E2ETestBase
         var secondIng = Page.Locator(".builder-item-card").Nth(1);
         await secondIng.Locator("mat-checkbox.mode-checkbox").ClickAsync();
 
-        var subSelect = secondIng.Locator(
-            "app-searchable-select[formcontrolname='linkedRecipeId'], mat-select[formcontrolname='linkedRecipeId']"
+        var subInput = secondIng.Locator(
+            "app-recipe-autocomplete input, app-searchable-select[formcontrolname='linkedRecipeId'] input"
         );
-        await Expect(subSelect).ToBeVisibleAsync();
-        await subSelect.ClickAsync(new() { Force = true });
+        await Expect(subInput).ToBeVisibleAsync();
+        await subInput.FillAsync(subRecipeTitle);
         await Page.Locator("mat-option", new() { HasText = subRecipeTitle }).First.ClickAsync();
 
         await secondIng.Locator("input[formcontrolname='quantity']").FillAsync("1");

@@ -393,7 +393,11 @@
                 <span class="item-order-pill">#{{ $index + 1 }}</span>
 
                 <!-- Mode Selector (Food Item vs Sub-Recipe) -->
-                <mat-checkbox formControlName="isSubRecipe" class="mode-checkbox">
+                <mat-checkbox
+                  formControlName="isSubRecipe"
+                  class="mode-checkbox"
+                  (change)="onSubRecipeToggled($index, $event.checked)"
+                >
                   Sub-Recipe Component
                 </mat-checkbox>
 
@@ -474,15 +478,23 @@
 
                 <!-- Linked Entity / Display Name -->
                 @if (ingGroup.get('isSubRecipe')?.value) {
-                  <!-- Sub-Recipe Selector -->
-                  <app-searchable-select
+                  <!-- Sub-Recipe Autofill Selector -->
+                  <app-recipe-autocomplete
                     class="field-display-name"
-                    formControlName="linkedRecipeId"
-                    [searchFn]="subRecipeSearchFn"
-                    [initialOptions]="subRecipeOptions()"
+                    [excludeRecipeId]="recipeId()"
+                    [linkedRecipeId]="ingGroup.get('linkedRecipeId')?.value"
+                    [linkedRecipeTitle]="ingGroup.get('linkedRecipeTitle')?.value"
+                    [textValue]="
+                      ingGroup.get('linkedRecipeTitle')?.value ||
+                      ingGroup.get('unresolvedRecipeTitle')?.value ||
+                      ingGroup.get('displayName')?.value ||
+                      ''
+                    "
                     label="Select Linked Sub-Recipe"
-                    placeholder="Search sub-recipes..."
-                    (selectionChange)="onSubRecipeSelected($index, $event)"
+                    placeholder="Type a recipe name to autofill..."
+                    (recipeSelected)="onSubRecipeSelected($index, $event)"
+                    (textChange)="onSubRecipeTextChanged($index, $event)"
+                    (recipeCleared)="onSubRecipeCleared($index)"
                   />
                   @if (
                     ingGroup.get('unresolvedRecipeTitle')?.value &&
@@ -490,8 +502,8 @@
                   ) {
                     <p class="unresolved-recipe-hint">
                       Not in the cookbook yet:
-                      {{ ingGroup.get('unresolvedRecipeTitle')?.value }}. Search for it here after
-                      adding the recipe.
+                      {{ ingGroup.get('unresolvedRecipeTitle')?.value }}. It will link automatically
+                      once that recipe is added, or pick an existing recipe above.
                     </p>
                   }
                 } @else {

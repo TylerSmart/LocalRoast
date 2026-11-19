@@ -155,6 +155,10 @@ public sealed class MultiStageIngestionAndReplacementsIntegrationTests
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var cachedEmbeddings = await db.CatalogEmbeddings.ToListAsync();
             Assert.IsNotEmpty(cachedEmbeddings);
+            var recipeEmbeddings = await db.RecipeEmbeddings.ToListAsync();
+            Assert.HasCount(1, recipeEmbeddings);
+            Assert.AreEqual("embeddinggemma", recipeEmbeddings[0].ModelTag);
+            StringAssert.Contains(recipeEmbeddings[0].EmbeddingText, "Toasted Butter Bread");
         }
 
         var jobDetail = await client.GetFromJsonAsync<IngestionJobDetailDto>(
@@ -222,6 +226,153 @@ public sealed class MultiStageIngestionAndReplacementsIntegrationTests
 
         Assert.AreEqual(0, mockLlm.EmbeddingCallCount);
         Assert.IsTrue(mockLlm.StageCalls.Contains("stage3a_ingredient_search_terms"));
+    }
+
+    [TestMethod]
+    public async Task ManualCreateEditAndArchive_SyncsAndPrunesRecipeEmbeddings_ViaProcessor()
+    {
+        var mockLlm = new FallbackExercisingLlmClient();
+
+        await using var customFactory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Llm:TextModel", "qwen2.5:14b");
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ILlmExtractionClient>();
+                services.AddSingleton<ILlmExtractionClient>(mockLlm);
+            });
+        });
+
+        using var client = customFactory.CreateClient();
+        await AuthenticateAsync(client);
+
+        var connRes = await client.PostAsJsonAsync(
+            "/api/llm-settings/connections",
+            new UpsertLlmConnectionRequest(
+                Name: "Local GPU",
+                Provider: LlmProvider.Ollama,
+                BaseUrl: "http://localhost:11434"
+            )
+        );
+        connRes.EnsureSuccessStatusCode();
+        var conn = (await connRes.Content.ReadFromJsonAsync<LlmConnectionDto>())!;
+
+        var textCfg = (
+            await (
+                await client.PostAsJsonAsync(
+                    "/api/llm-settings/model-configurations",
+                    new UpsertLlmModelConfigurationRequest("Qwen Text", conn.Id, "qwen2.5:14b")
+                )
+            ).Content.ReadFromJsonAsync<LlmModelConfigurationDto>()
+        )!;
+        var embedCfg = (
+            await (
+                await client.PostAsJsonAsync(
+                    "/api/llm-settings/model-configurations",
+                    new UpsertLlmModelConfigurationRequest("EmbedModel", conn.Id, "embeddinggemma")
+                )
+            ).Content.ReadFromJsonAsync<LlmModelConfigurationDto>()
+        )!;
+
+        var wfRes = await client.PutAsJsonAsync(
+            "/api/llm-settings/workflows",
+            new UpdateLlmWorkflowsRequest(
+                TextModelProfileId: textCfg.DefaultProfileId,
+                EmbeddingModelProfileId: embedCfg.DefaultProfileId,
+                EnableIngestion: true
+            )
+        );
+        wfRes.EnsureSuccessStatusCode();
+
+        // 1. Manually create published recipe
+        var createRes = await client.PostAsJsonAsync(
+            "/api/recipes",
+            new UpsertRecipeRequest(
+                Title: "Weeknight Chickpea Curry",
+                Description: "Quick spiced coconut curry.",
+                Status: RecipeStatus.Published,
+                BaseServings: 4m,
+                TotalTimeMinutes: 30,
+                Ingredients: [new RecipeIngredientInput(DisplayName: "chickpeas")],
+                Steps: [new RecipeStepInput(Instruction: "Simmer chickpeas in coconut milk.")]
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Created, createRes.StatusCode);
+        var created = (await createRes.Content.ReadFromJsonAsync<RecipeDetailDto>())!;
+
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            var embeddedCount = await scope
+                .ServiceProvider.GetRequiredService<IIngestionProcessor>()
+                .SyncPendingRecipeEmbeddingsAsync();
+            Assert.AreEqual(1, embeddedCount);
+        }
+
+        string initialHash;
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var row = await db.RecipeEmbeddings.SingleAsync(e => e.RecipeId == created.Id);
+            initialHash = row.ContentHash;
+            StringAssert.Contains(row.EmbeddingText, "Weeknight Chickpea Curry");
+        }
+
+        // 2. Second sync with no edits is a no-op
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            var embeddedAgain = await scope
+                .ServiceProvider.GetRequiredService<IIngestionProcessor>()
+                .SyncPendingRecipeEmbeddingsAsync();
+            Assert.AreEqual(0, embeddedAgain);
+        }
+
+        // 3. Edit recipe -> hash drifts -> next sync updates embedding in place
+        var editRes = await client.PutAsJsonAsync(
+            $"/api/recipes/{created.Id}",
+            new UpsertRecipeRequest(
+                Title: "Smoky Lentil & Chickpea Curry",
+                Description: "Quick spiced coconut curry with lentils.",
+                Status: RecipeStatus.Published,
+                BaseServings: 4m,
+                TotalTimeMinutes: 30,
+                Ingredients: [new RecipeIngredientInput(DisplayName: "red lentils")],
+                Steps: [new RecipeStepInput(Instruction: "Simmer lentils.")]
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.OK, editRes.StatusCode);
+
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            var updatedCount = await scope
+                .ServiceProvider.GetRequiredService<IIngestionProcessor>()
+                .SyncPendingRecipeEmbeddingsAsync();
+            Assert.AreEqual(1, updatedCount);
+        }
+
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var row = await db.RecipeEmbeddings.SingleAsync(e => e.RecipeId == created.Id);
+            Assert.AreNotEqual(initialHash, row.ContentHash);
+            StringAssert.Contains(row.EmbeddingText, "Smoky Lentil & Chickpea Curry");
+        }
+
+        // 4. Archive recipe -> RecipeEmbedding is pruned immediately
+        var archiveRes = await client.PutAsJsonAsync(
+            $"/api/recipes/{created.Id}",
+            new UpsertRecipeRequest(
+                Title: "Smoky Lentil & Chickpea Curry",
+                Status: RecipeStatus.Archived,
+                BaseServings: 4m
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.OK, archiveRes.StatusCode);
+
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            Assert.AreEqual(0, await db.RecipeEmbeddings.CountAsync(e => e.RecipeId == created.Id));
+        }
     }
 
     [TestMethod]

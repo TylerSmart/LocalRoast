@@ -20,6 +20,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
 
     public DbSet<CatalogEmbedding> CatalogEmbeddings => Set<CatalogEmbedding>();
 
+    public DbSet<RecipeEmbedding> RecipeEmbeddings => Set<RecipeEmbedding>();
+
     public DbSet<RecipeStep> RecipeSteps => Set<RecipeStep>();
 
     public DbSet<RecipeStepTimer> RecipeStepTimers => Set<RecipeStepTimer>();

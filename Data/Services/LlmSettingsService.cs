@@ -284,6 +284,17 @@ public sealed class LlmSettingsService(
             cancellationToken
         );
 
+        if (
+            entity.EnableIngestion
+            && (
+                !string.IsNullOrWhiteSpace(entity.EmbeddingModel)
+                || entity.EmbeddingModelProfileId is not null
+            )
+        )
+        {
+            queueSignal.NotifyBackgroundWorkAvailable();
+        }
+
         return await GetSettingsAsync(cancellationToken);
     }
 
@@ -380,6 +391,11 @@ public sealed class LlmSettingsService(
                 && (!wasRefineDuringIdle || previousRefineProfileId != entity.RefineModelProfileId),
             cancellationToken
         );
+
+        if (entity.EnableIngestion && request.EmbeddingModelProfileId is not null)
+        {
+            queueSignal.NotifyBackgroundWorkAvailable();
+        }
 
         return await GetSettingsAsync(cancellationToken);
     }

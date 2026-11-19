@@ -1,12 +1,16 @@
 using System.Text.RegularExpressions;
 using App.Core.Exceptions;
+using App.Core.Ingestion;
 using App.Core.Recipes;
 using App.Data.Entities;
 using Microsoft.EntityFrameworkCore;
 
 namespace App.Data.Services;
 
-public sealed class TaxonomyService(AppDbContext dbContext) : ITaxonomyService
+public sealed class TaxonomyService(
+    AppDbContext dbContext,
+    IIngestionQueueSignal? queueSignal = null
+) : ITaxonomyService
 {
     public async Task<IReadOnlyList<CollectionDto>> GetCollectionsAsync(
         CancellationToken cancellationToken = default
@@ -125,6 +129,7 @@ public sealed class TaxonomyService(AppDbContext dbContext) : ITaxonomyService
         collection.SortOrder = request.SortOrder;
 
         await dbContext.SaveChangesAsync(cancellationToken);
+        queueSignal?.NotifyBackgroundWorkAvailable();
 
         var recipeCount = await dbContext.RecipeCollections.CountAsync(
             rc => rc.CollectionId == id && rc.Recipe.Status != RecipeStatus.Archived,
@@ -158,6 +163,7 @@ public sealed class TaxonomyService(AppDbContext dbContext) : ITaxonomyService
 
         dbContext.Collections.Remove(collection);
         await dbContext.SaveChangesAsync(cancellationToken);
+        queueSignal?.NotifyBackgroundWorkAvailable();
         return true;
     }
 
@@ -285,6 +291,7 @@ public sealed class TaxonomyService(AppDbContext dbContext) : ITaxonomyService
         tag.SortOrder = request.SortOrder;
 
         await dbContext.SaveChangesAsync(cancellationToken);
+        queueSignal?.NotifyBackgroundWorkAvailable();
 
         var recipeCount = await dbContext.RecipeTags.CountAsync(
             rt => rt.TagId == id && rt.Recipe.Status != RecipeStatus.Archived,
@@ -312,6 +319,7 @@ public sealed class TaxonomyService(AppDbContext dbContext) : ITaxonomyService
 
         dbContext.Tags.Remove(tag);
         await dbContext.SaveChangesAsync(cancellationToken);
+        queueSignal?.NotifyBackgroundWorkAvailable();
         return true;
     }
 

@@ -10,10 +10,11 @@ import type {
   IngestionJobDetailDto,
   IngestionReviewDiagnosticsDto,
 } from '../../../core/models/ingestion.models';
-import { RecipeDetailDto } from '../../../core/models/recipe.models';
+import { RecipeAutocompleteItemDto, RecipeDetailDto } from '../../../core/models/recipe.models';
 import { CollectionDto, TagDto } from '../../../core/models/taxonomy.models';
 import { FoodCatalogService } from '../../../core/services/food-catalog/food-catalog.service';
 import { IngestionService } from '../../../core/services/ingestion/ingestion.service';
+import { RecipeService } from '../../../core/services/recipe/recipe.service';
 import { TaxonomyService } from '../../../core/services/taxonomy/taxonomy.service';
 import { IngestionReviewComponent } from './ingestion-review.component';
 
@@ -253,6 +254,12 @@ describe('IngestionReviewComponent', () => {
         },
         { provide: IngestionService, useValue: mockIngestionService },
         { provide: FoodCatalogService, useValue: mockFoodCatalogService },
+        {
+          provide: RecipeService,
+          useValue: {
+            autocompleteRecipes: vi.fn().mockReturnValue(of([] as RecipeAutocompleteItemDto[])),
+          },
+        },
         { provide: TaxonomyService, useValue: mockTaxonomyService },
         { provide: MatDialog, useValue: mockDialog },
         { provide: MatSnackBar, useValue: mockSnackBar },
@@ -419,6 +426,46 @@ describe('IngestionReviewComponent', () => {
     expect(previewIng.linkedRecipeId).toBe(matchedRecipeId);
     expect(previewIng.linkedRecipeTitle).toBe('Foolproof All-Butter Dough');
     expect(previewIng.unresolvedRecipeTitle).toBeNull();
+  });
+
+  it('links and unlinks referenced recipes via autocomplete handlers', () => {
+    component.addIngredient({
+      displayName: '',
+      isRecipeReference: true,
+      referencedRecipeTitle: '',
+    });
+
+    const newIndex = component.ingredientsArray.length - 1;
+    component.onReferencedRecipeSelected(newIndex, {
+      id: 'matched-sub-1',
+      title: 'Ultracreamy Hummus',
+      slug: 'ultracreamy-hummus',
+      status: 'Published',
+      baseServings: 6,
+      yieldDisplay: '2 cups',
+    });
+
+    const linkedPayload = component.buildDraftPayload().ingredients[newIndex];
+    expect(linkedPayload).toMatchObject({
+      isRecipeReference: true,
+      referencedRecipeTitle: 'Ultracreamy Hummus',
+      displayName: 'Ultracreamy Hummus',
+      matchedRecipeId: 'matched-sub-1',
+      matchedRecipeTitle: 'Ultracreamy Hummus',
+      matchedRecipeSlug: 'ultracreamy-hummus',
+    });
+
+    component.onReferencedRecipeTextChanged(newIndex, 'Homemade Pita Chips');
+
+    const editedPayload = component.buildDraftPayload().ingredients[newIndex];
+    expect(editedPayload).toMatchObject({
+      isRecipeReference: true,
+      referencedRecipeTitle: 'Homemade Pita Chips',
+      displayName: 'Homemade Pita Chips',
+      matchedRecipeId: null,
+      matchedRecipeTitle: null,
+      matchedRecipeSlug: null,
+    });
   });
 
   it('adds and removes steps and timers', () => {

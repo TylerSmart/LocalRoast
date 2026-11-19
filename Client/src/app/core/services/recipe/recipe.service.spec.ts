@@ -83,6 +83,28 @@ describe('RecipeService', () => {
     expect((await promise).totalCount).toBeNull();
   });
 
+  it('fetches autocomplete recipe candidates via GET /api/recipes/autocomplete', async () => {
+    const promise = firstValueFrom(service.autocompleteRecipes('pie dough', 'recipe-self', 15));
+    const req = httpMock.expectOne(
+      '/api/recipes/autocomplete?limit=15&query=pie%20dough&excludeRecipeId=recipe-self',
+    );
+    expect(req.request.method).toBe('GET');
+    req.flush([
+      {
+        id: 'sub-1',
+        title: 'Foolproof All-Butter Pie Dough',
+        slug: 'foolproof-all-butter-pie-dough',
+        status: 'Published',
+        baseServings: 8,
+        yieldDisplay: '1 double-crust pie',
+      },
+    ]);
+
+    const result = await promise;
+    expect(result).toHaveLength(1);
+    expect(result[0].title).toBe('Foolproof All-Butter Pie Dough');
+  });
+
   it('fetches recipe detail via GET /api/recipes/:id', async () => {
     const detail: RecipeDetailDto = {
       id: 'r-1',

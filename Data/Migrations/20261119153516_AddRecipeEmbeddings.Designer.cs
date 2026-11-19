@@ -12,8 +12,8 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace App.Data.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20261119153458_AddRefinementTogglesAndTracking")]
-    partial class AddRefinementTogglesAndTracking
+    [Migration("20261119153516_AddRecipeEmbeddings")]
+    partial class AddRecipeEmbeddings
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -396,16 +396,6 @@ namespace App.Data.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("nvarchar(32)");
 
-                    b.Property<bool>("RefineDuringIdle")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bit")
-                        .HasDefaultValue(false);
-
-                    b.Property<bool>("RefineDuringIngestion")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bit")
-                        .HasDefaultValue(false);
-
                     b.Property<bool>("RefineEnableThinking")
                         .HasColumnType("bit");
 
@@ -558,21 +548,6 @@ namespace App.Data.Migrations
                         .HasMaxLength(100000)
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<DateTimeOffset?>("RefinedAt")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<string>("RefinedModel")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<int>("RefinementAttemptCount")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int")
-                        .HasDefaultValue(0);
-
-                    b.Property<DateTimeOffset?>("RefinementNextRetryAt")
-                        .HasColumnType("datetimeoffset");
-
                     b.Property<Guid?>("ResultingRecipeId")
                         .HasColumnType("uniqueidentifier");
 
@@ -624,8 +599,6 @@ namespace App.Data.Migrations
                     b.HasIndex("Status");
 
                     b.HasIndex("Status", "NextRetryAt");
-
-                    b.HasIndex("Status", "RefinedAt", "CreatedAt");
 
                     b.ToTable("IngestionJobs", (string)null);
                 });
@@ -1166,10 +1139,6 @@ namespace App.Data.Migrations
                     b.Property<int>("RatingCount")
                         .HasColumnType("int");
 
-                    b.Property<string>("RefinedModel")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
                     b.Property<string>("Slug")
                         .IsRequired()
                         .HasMaxLength(220)
@@ -1324,6 +1293,63 @@ namespace App.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("RecipeCollections", (string)null);
+                });
+
+            modelBuilder.Entity("App.Data.Entities.RecipeEmbedding", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ContentHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<int>("Dimensions")
+                        .HasColumnType("int");
+
+                    b.Property<string>("EmbeddingText")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<string>("ModelTag")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTimeOffset>("ModifiedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("ModifiedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<Guid>("RecipeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<byte[]>("VectorBytes")
+                        .IsRequired()
+                        .HasColumnType("varbinary(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ModelTag");
+
+                    b.HasIndex("RecipeId", "ModelTag")
+                        .IsUnique();
+
+                    b.ToTable("RecipeEmbeddings", (string)null);
                 });
 
             modelBuilder.Entity("App.Data.Entities.RecipeIngredient", b =>
@@ -2172,6 +2198,17 @@ namespace App.Data.Migrations
                     b.Navigation("Recipe");
                 });
 
+            modelBuilder.Entity("App.Data.Entities.RecipeEmbedding", b =>
+                {
+                    b.HasOne("App.Data.Entities.Recipe", "Recipe")
+                        .WithMany("Embeddings")
+                        .HasForeignKey("RecipeId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Recipe");
+                });
+
             modelBuilder.Entity("App.Data.Entities.RecipeIngredient", b =>
                 {
                     b.HasOne("App.Data.Entities.FoodItem", "FoodItem")
@@ -2335,6 +2372,8 @@ namespace App.Data.Migrations
                     b.Navigation("Attachments");
 
                     b.Navigation("CookLogs");
+
+                    b.Navigation("Embeddings");
 
                     b.Navigation("IngestionJobs");
 

@@ -12,6 +12,13 @@ public interface IRecipeService
         CancellationToken cancellationToken = default
     );
 
+    Task<IReadOnlyList<RecipeAutocompleteItemDto>> SearchRecipeAutocompleteAsync(
+        string? query = null,
+        Guid? excludeRecipeId = null,
+        int limit = 20,
+        CancellationToken cancellationToken = default
+    );
+
     Task<RecipeDetailDto?> GetRecipeByIdAsync(
         Guid id,
         CancellationToken cancellationToken = default

@@ -66,6 +66,9 @@ public sealed class AiKitchenHelpersIntegrationTests
                     FlavorOrTextureImpact: "Creamy finish"
                 ),
             ]);
+        public LlmMealPlanQueryAnalysisPayload? QueryAnalysisResult { get; set; }
+        public Func<IReadOnlyList<string>, float[][]>? EmbeddingFactory { get; set; }
+        public LlmDraftMealPlanContext? LastDraftContext { get; private set; }
         public LlmDraftMealPlanPayload DraftResult { get; set; } =
             new([
                 new LlmDraftMealProposalItem(
@@ -120,7 +123,51 @@ public sealed class AiKitchenHelpersIntegrationTests
             EffectiveLlmConnectionConfig config,
             IReadOnlyList<string> inputs,
             CancellationToken cancellationToken = default
-        ) => Task.FromResult(Array.Empty<float[]>());
+        )
+        {
+            if (ThrowUnavailable)
+            {
+                throw new LlmHostUnavailableException("Host offline");
+            }
+            return Task.FromResult(
+                EmbeddingFactory is not null ? EmbeddingFactory(inputs) : Array.Empty<float[]>()
+            );
+        }
+
+        public Task<LlmMealPlanQueryAnalysisPayload> DecomposeMealPlanPromptAsync(
+            EffectiveLlmConnectionConfig config,
+            LlmMealPlanQueryAnalysisContext context,
+            CancellationToken cancellationToken = default
+        )
+        {
+            if (ThrowUnavailable)
+            {
+                throw new LlmHostUnavailableException("Host offline");
+            }
+
+            if (QueryAnalysisResult is not null)
+            {
+                return Task.FromResult(QueryAnalysisResult);
+            }
+
+            return Task.FromResult(
+                new LlmMealPlanQueryAnalysisPayload(
+                    ExcludedTerms: [],
+                    PrioritizeIngredients: [],
+                    MaxTotalTimeMinutes: null,
+                    SearchBuckets:
+                    [
+                        new LlmMealPlanSearchBucketItem(
+                            BucketName: "Requested meals",
+                            SemanticQuery: context.UserPrompt,
+                            SuggestedTags: [],
+                            MaxTotalTimeMinutes: null,
+                            DesiredCount: context.RequestedMealCount
+                        ),
+                    ]
+                )
+            );
+        }
 
         public Task<string?> TranscribeRecipeImagesAsync(
             EffectiveLlmConnectionConfig config,
@@ -151,6 +198,7 @@ public sealed class AiKitchenHelpersIntegrationTests
             {
                 throw new LlmHostUnavailableException("Host offline");
             }
+            LastDraftContext = context;
             return Task.FromResult(DraftResult);
         }
 
@@ -688,5 +736,123 @@ public sealed class AiKitchenHelpersIntegrationTests
             )
         );
         Assert.AreEqual(HttpStatusCode.BadRequest, invalidApplyRes.StatusCode);
+    }
+
+    [TestMethod]
+    public async Task DraftWeeklyMealPlan_ThreeStageRagWithEmbeddings_ExcludesForbiddenAndReturnsNotes()
+    {
+        var fakeLlm = new MockLlmExtractionClient
+        {
+            ThrowUnavailable = false,
+            EmbeddingFactory = inputs =>
+                inputs
+                    .Select(t =>
+                        t.Contains("taco", StringComparison.OrdinalIgnoreCase)
+                            ? new[] { 1f, 0f }
+                            : new[] { 0f, 1f }
+                    )
+                    .ToArray(),
+            QueryAnalysisResult = new LlmMealPlanQueryAnalysisPayload(
+                ExcludedTerms: ["seafood"],
+                PrioritizeIngredients: ["cilantro"],
+                MaxTotalTimeMinutes: 35,
+                SearchBuckets:
+                [
+                    new LlmMealPlanSearchBucketItem(
+                        "Mexican tacos",
+                        "quick chicken tacos with cilantro",
+                        ["Mexican"],
+                        35,
+                        1
+                    ),
+                ]
+            ),
+            DraftResult = new LlmDraftMealPlanPayload(
+                Proposals:
+                [
+                    new LlmDraftMealProposalItem(
+                        CatalogIndex: 1,
+                        RecipeTitle: "Cilantro Lime Chicken Tacos",
+                        DayOffset: 0,
+                        Slot: "Dinner",
+                        IsOnDeck: false,
+                        TargetServings: 4,
+                        Rationale: "Quick Mexican dinner using cilantro."
+                    ),
+                ],
+                UnmetCravingNotes: ["No Thai curry recipes found in your cookbook."]
+            ),
+        };
+
+        await using var factory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureServices(services =>
+            {
+                var descriptor = services.FirstOrDefault(d =>
+                    d.ServiceType == typeof(ILlmExtractionClient)
+                );
+                if (descriptor != null)
+                {
+                    services.Remove(descriptor);
+                }
+                services.AddSingleton<ILlmExtractionClient>(fakeLlm);
+            });
+        });
+
+        using var client = factory.CreateClient();
+        await AuthenticateAsync(client);
+
+        await client.PutAsJsonAsync(
+            "/api/llm-settings",
+            new UpdateLlmSettingsRequest(
+                Provider: LlmProvider.Ollama,
+                BaseUrl: "http://localhost:11434",
+                ApiKey: null,
+                TextModel: "qwen2.5:14b",
+                VisionModel: null,
+                RequestTimeoutSeconds: 30,
+                EmbeddingModel: "nomic-embed-text"
+            )
+        );
+
+        var shrimpRes = await client.PostAsJsonAsync(
+            "/api/recipes",
+            new UpsertRecipeRequest(
+                Title: "Spicy Shrimp Bowl",
+                BaseServings: 4m,
+                Ingredients: [new RecipeIngredientInput(DisplayName: "shrimp")]
+            )
+        );
+        shrimpRes.EnsureSuccessStatusCode();
+
+        var tacosRes = await client.PostAsJsonAsync(
+            "/api/recipes",
+            new UpsertRecipeRequest(
+                Title: "Cilantro Lime Chicken Tacos",
+                BaseServings: 4m,
+                TotalTimeMinutes: 25,
+                Ingredients: [new RecipeIngredientInput(DisplayName: "cilantro")]
+            )
+        );
+        tacosRes.EnsureSuccessStatusCode();
+        var tacos = (await tacosRes.Content.ReadFromJsonAsync<RecipeDetailDto>())!;
+
+        var draftRes = await client.PostAsJsonAsync(
+            "/api/ai-helpers/draft-meal-plan",
+            new DraftWeeklyMealPlanRequest(
+                Prompt: "Mexican dinner with cilantro, no seafood",
+                MealCount: 1,
+                ServingsPerMeal: 2
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.OK, draftRes.StatusCode);
+        var draft = await draftRes.Content.ReadFromJsonAsync<DraftMealPlanResponseDto>();
+        Assert.IsNotNull(draft);
+        Assert.IsTrue(draft.UsedEmbeddings);
+        Assert.AreEqual(2, draft.ConsideredCookbookRecipeCount);
+        Assert.AreEqual(1, fakeLlm.LastDraftContext!.CookbookCatalog.Count);
+        Assert.AreEqual(tacos.Id, draft.Candidates[0].RecipeId);
+        Assert.IsNotNull(draft.UnmetCravingNotes);
+        Assert.AreEqual(1, draft.UnmetCravingNotes!.Count);
     }
 }

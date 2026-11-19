@@ -140,7 +140,9 @@ public sealed class RecipeCookbookE2ETests : E2ETestBase
         await Page.GotoAsync($"{ServerUrl}/recipes/{recipeId}/edit");
         await Expect(Page.Locator(".unresolved-recipe-hint"))
             .ToContainTextAsync(referencedRecipeTitle);
-        await Expect(Page.Locator("app-searchable-select").First).ToBeVisibleAsync();
+        var autoInput = Page.Locator("app-recipe-autocomplete input").First;
+        await Expect(autoInput).ToBeVisibleAsync();
+        await Expect(autoInput).ToHaveValueAsync(referencedRecipeTitle);
     }
 
     [TestMethod]
@@ -311,5 +313,90 @@ public sealed class RecipeCookbookE2ETests : E2ETestBase
             .ToBeVisibleAsync();
         await Expect(Page.Locator(".ingredient-row", new() { HasText = "Buttermilk" }))
             .ToBeVisibleAsync();
+    }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task RecipeEditor_SubRecipeAutofill_FiltersByTypedTitleAndLinksOnSelection()
+    {
+        await RegisterAndLoginAsync();
+
+        var suffix = Guid.NewGuid().ToString("N")[..6];
+        var targetSubTitle = $"All-Butter Pie Dough {suffix}";
+        var unrelatedTitle = $"Spicy Black Bean Chili {suffix}";
+
+        await Page.EvaluateAsync(
+            """
+            async ({ targetSubTitle, unrelatedTitle }) => {
+              const tokenKey = Object.keys(localStorage).find((key) => key.endsWith('-token'));
+              const token = tokenKey ? localStorage.getItem(tokenKey) : null;
+              for (const title of [targetSubTitle, unrelatedTitle]) {
+                const response = await fetch('/api/recipes', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`,
+                  },
+                  body: JSON.stringify({
+                    title,
+                    status: 'Published',
+                    baseServings: 6,
+                    yieldDisplay: '1 batch',
+                    ingredients: [{ quantity: 1, unit: 'Cup', displayName: 'Flour' }],
+                    steps: [{ instruction: 'Mix thoroughly.' }],
+                  }),
+                });
+                if (!response.ok) {
+                  throw new Error(`Failed to seed recipe: ${await response.text()}`);
+                }
+              }
+            }
+            """,
+            new { targetSubTitle, unrelatedTitle }
+        );
+
+        await Page.SetViewportSizeAsync(360, 800);
+        await Page.GotoAsync($"{ServerUrl}/recipes/new");
+
+        var parentTitle = $"Apple Galette {suffix}";
+        await Page.Locator("input[formcontrolname='title']").FillAsync(parentTitle);
+        await Page.Locator("input[formcontrolname='baseServings']").FillAsync("6");
+
+        var firstIng = Page.Locator(".builder-item-card").First;
+        await firstIng.Locator("mat-checkbox.mode-checkbox").ClickAsync();
+
+        var subInput = firstIng.Locator("app-recipe-autocomplete input");
+        await Expect(subInput).ToBeVisibleAsync();
+        await subInput.FillAsync($"butter dough {suffix}");
+
+        var matchingOption = Page.Locator("mat-option", new() { HasText = targetSubTitle }).First;
+        await Expect(matchingOption).ToBeVisibleAsync();
+        await Expect(Page.Locator("mat-option", new() { HasText = unrelatedTitle }))
+            .ToHaveCountAsync(0);
+
+        await matchingOption.ClickAsync();
+        await Expect(subInput).ToHaveValueAsync(targetSubTitle);
+
+        await firstIng.Locator("input[formcontrolname='quantity']").FillAsync("1");
+        await Page.Locator("[formcontrolname='instruction'] .step-instruction-editable")
+            .First.FillAsync("Roll out the dough and bake.");
+
+        Assert.IsTrue(
+            await Page.EvaluateAsync<bool>(
+                "document.documentElement.scrollWidth <= window.innerWidth"
+            ),
+            "Viewport horizontal overflow detected at 360px on Recipe Editor."
+        );
+
+        await Page.Locator("button[type='submit']", new() { HasText = "Save Recipe" })
+            .First.ClickAsync();
+        await Expect(Page).ToHaveURLAsync(new Regex(".*/recipes/[a-f0-9-]+$"));
+        await Expect(Page.Locator(".sub-recipe-inline-panel")).ToContainTextAsync(targetSubTitle);
+
+        // Verify Edit Recipe loads the linked recipe title right in the autofill input
+        await Page.GotoAsync($"{Page.Url}/edit");
+        var editSubInput = Page.Locator("app-recipe-autocomplete input").First;
+        await Expect(editSubInput).ToBeVisibleAsync();
+        await Expect(editSubInput).ToHaveValueAsync(targetSubTitle);
     }
 }

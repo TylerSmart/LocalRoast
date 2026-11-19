@@ -1321,14 +1321,15 @@ public sealed class IngestionService(
 
                 if (!string.IsNullOrWhiteSpace(recipeTitle))
                 {
-                    linkedRecipeId =
-                        ing.MatchedRecipeId
-                        ?? await IngestionCatalogMaterializer.ResolveRecipeReferenceAsync(
+                    linkedRecipeId = (
+                        await IngestionCatalogMaterializer.ResolveExplicitOrMatchedRecipeAsync(
                             dbContext,
+                            ing,
                             recipeTitle,
                             job.ResultingRecipeId,
                             cancellationToken
-                        );
+                        )
+                    )?.Id;
                 }
 
                 if (

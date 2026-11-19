@@ -1,0 +1,99 @@
+<mat-form-field
+  [appearance]="appearance()"
+  [subscriptSizing]="subscriptSizing()"
+  class="recipe-autocomplete-field"
+  [class.is-linked]="isLinked()"
+>
+  @if (label()) {
+    <mat-label>{{ label() }}</mat-label>
+  }
+
+  @if (isLinked()) {
+    <mat-icon matPrefix class="linked-status-icon" aria-hidden="true">menu_book</mat-icon>
+  }
+
+  <input
+    matInput
+    #inputRef
+    #autocompleteTrigger="matAutocompleteTrigger"
+    type="text"
+    autocomplete="off"
+    [value]="inputText()"
+    (input)="onInput($event)"
+    (focus)="onFocus()"
+    (blur)="onBlur()"
+    [placeholder]="placeholder()"
+    [required]="required()"
+    [disabled]="disabled()"
+    [matAutocomplete]="auto"
+    [attr.aria-label]="ariaLabel() || label() || placeholder()"
+  />
+
+  @if (isLoading()) {
+    <div matSuffix class="suffix-action-wrapper">
+      <mat-progress-spinner
+        mode="indeterminate"
+        diameter="18"
+        class="loading-spinner"
+        aria-label="Searching recipes"
+      ></mat-progress-spinner>
+    </div>
+  } @else if ((hasText() || isLinked()) && !disabled()) {
+    <div matSuffix class="suffix-action-wrapper">
+      <button
+        mat-icon-button
+        type="button"
+        (click)="clearInput($event)"
+        aria-label="Clear recipe selection"
+        class="action-btn clear-btn"
+      >
+        <mat-icon>close</mat-icon>
+      </button>
+    </div>
+  }
+
+  <div matSuffix class="suffix-action-wrapper">
+    <button
+      mat-icon-button
+      type="button"
+      (click)="togglePanel($event)"
+      [attr.aria-label]="'Toggle ' + (label() || 'recipe options')"
+      class="action-btn dropdown-chevron-btn"
+      [disabled]="disabled()"
+      tabindex="-1"
+    >
+      <mat-icon class="dropdown-chevron">arrow_drop_down</mat-icon>
+    </button>
+  </div>
+
+  @if (hint()) {
+    <mat-hint>{{ hint() }}</mat-hint>
+  }
+</mat-form-field>
+
+<mat-autocomplete
+  #auto="matAutocomplete"
+  [displayWith]="displayRecipeTitle"
+  [autoActiveFirstOption]="true"
+  (optionSelected)="onOptionSelected($event)"
+>
+  @for (recipe of displayedSuggestions(); track recipe.id) {
+    <mat-option [value]="recipe" [class.is-selected]="linkedRecipeId() === recipe.id">
+      <div class="option-content">
+        <div class="option-title-row">
+          <span class="option-label">{{ recipe.title }}</span>
+          @if (recipe.status === 'DraftReview') {
+            <span class="option-status-badge">Draft</span>
+          }
+        </div>
+        <span class="option-sublabel">{{ formatRecipeMeta(recipe) }}</span>
+      </div>
+    </mat-option>
+  }
+
+  @if (!isLoading() && !isSearching() && hasLoadedOnce() && displayedSuggestions().length === 0) {
+    <mat-option disabled class="no-options-message">
+      {{ hasText() ? emptySearchMessage() : emptyCatalogMessage() }}
+    </mat-option>
+  }
+</mat-autocomplete>

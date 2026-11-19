@@ -28,6 +28,27 @@ public sealed class RecipesController(IRecipeService recipeService) : Controller
         return Ok(recipes);
     }
 
+    [HttpGet("autocomplete")]
+    [ProducesResponseType(
+        typeof(IReadOnlyList<RecipeAutocompleteItemDto>),
+        StatusCodes.Status200OK
+    )]
+    public async Task<IActionResult> AutocompleteRecipes(
+        [FromQuery] string? query = null,
+        [FromQuery] Guid? excludeRecipeId = null,
+        [FromQuery] int limit = 20,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var results = await recipeService.SearchRecipeAutocompleteAsync(
+            query,
+            excludeRecipeId,
+            limit,
+            cancellationToken
+        );
+        return Ok(results);
+    }
+
     [HttpGet("{id:guid}")]
     [ProducesResponseType(typeof(RecipeDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]

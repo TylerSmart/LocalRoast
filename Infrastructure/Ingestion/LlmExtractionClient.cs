@@ -556,6 +556,90 @@ public sealed class LlmExtractionClient(
         }
     }
 
+    public async Task<LlmMealPlanQueryAnalysisPayload> DecomposeMealPlanPromptAsync(
+        EffectiveLlmConnectionConfig config,
+        LlmMealPlanQueryAnalysisContext context,
+        CancellationToken cancellationToken = default
+    )
+    {
+        if (string.IsNullOrWhiteSpace(config.TextModel))
+        {
+            throw new LlmHostUnavailableException(
+                "No Text LLM model is configured in LLM Settings. Please select a Text Model and retry."
+            );
+        }
+
+        var fallback = new LlmMealPlanQueryAnalysisPayload(
+            ExcludedTerms: [],
+            PrioritizeIngredients: [],
+            MaxTotalTimeMinutes: null,
+            SearchBuckets:
+            [
+                new LlmMealPlanSearchBucketItem(
+                    BucketName: "Requested meals",
+                    SemanticQuery: context.UserPrompt,
+                    SuggestedTags: [],
+                    MaxTotalTimeMinutes: null,
+                    DesiredCount: context.RequestedMealCount
+                ),
+            ]
+        );
+
+        try
+        {
+            var responseContent = await SendStructuredTextChatAsync(
+                config,
+                "meal_plan_query_analysis",
+                GetMealPlanQueryAnalysisJsonSchema(),
+                BuildMealPlanQueryAnalysisSystemPrompt(),
+                BuildMealPlanQueryAnalysisUserPrompt(context),
+                temperature: 0.0,
+                cancellationToken,
+                maxTokens: 2048,
+                enableThinking: false
+            );
+
+            var cleanedJson = CleanMarkdownJsonFences(responseContent);
+            if (string.IsNullOrWhiteSpace(cleanedJson))
+            {
+                return fallback;
+            }
+
+            var parsed = JsonSerializer.Deserialize<LlmMealPlanQueryAnalysisPayload>(
+                cleanedJson,
+                JsonOptions
+            );
+            if (parsed is null)
+            {
+                return fallback;
+            }
+
+            if (parsed.SearchBuckets is null || parsed.SearchBuckets.Count == 0)
+            {
+                return parsed with { SearchBuckets = fallback.SearchBuckets };
+            }
+
+            return parsed;
+        }
+        catch (LlmHostUnavailableException)
+        {
+            throw;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger?.LogWarning(
+                ex,
+                "Stage 1 meal-plan prompt decomposition failed on model '{Model}'; falling back to single search bucket.",
+                config.TextModel
+            );
+            return fallback;
+        }
+    }
+
     public async Task<LlmDraftMealPlanPayload> DraftWeeklyMealPlanAsync(
         EffectiveLlmConnectionConfig config,
         LlmDraftMealPlanContext context,
@@ -1700,6 +1784,36 @@ Return the explanation in the "answer" field of the requested JSON object.
 """;
     }
 
+    private static string BuildMealPlanQueryAnalysisSystemPrompt()
+    {
+        return """
+You are a meal-planning search query analyzer for a personal household recipe database.
+Translate the user's natural-language meal plan prompt into deterministic search criteria for database and vector retrieval.
+
+Rules:
+1. "excludedTerms": Ingredients, allergens, proteins, or dietary dislikes the user explicitly wants to AVOID (e.g., "no seafood" -> ["seafood", "fish", "shrimp", "salmon", "shellfish"]; "no mushrooms" -> ["mushroom"]). Leave empty if none. NEVER put excluded terms inside searchBuckets.
+2. "prioritizeIngredients": Ingredients the user already has on hand and wants to use up (e.g., "use up spinach and chicken thighs" -> ["spinach", "chicken thigh"]). Leave empty if none.
+3. "maxTotalTimeMinutes": A global maximum total time in minutes ONLY if it applies to all requested meals (e.g., "all under 30 minutes" -> 30), otherwise null.
+4. "searchBuckets": 1 to 4 distinct positive search buckets covering every cuisine, style, or craving requested (so a multi-craving prompt gets distinct candidate pools):
+   - "bucketName": Short human label (e.g., "Italian pasta", "Quick weeknight chicken").
+   - "semanticQuery": Rich positive semantic search phrase describing the flavor profile, cuisine, dish type, and key ingredients (exclude negative words like "no seafood").
+   - "suggestedTags": 0 to 5 concise cuisine, course, dietary, or equipment tags (e.g., ["Italian", "Quick", "One-Pot"]).
+   - "maxTotalTimeMinutes": Bucket-specific max total minutes if mentioned (e.g., 30 for weeknights, null for weekend slow cook).
+   - "desiredCount": Approximate number of cooking occasions for this bucket (positive integer, summing roughly to the requested meal count).
+""";
+    }
+
+    private static string BuildMealPlanQueryAnalysisUserPrompt(
+        LlmMealPlanQueryAnalysisContext context
+    )
+    {
+        return $$"""
+Requested Number of Cooking Occasions: {{context.RequestedMealCount}}
+Default Meal Slot: {{context.DefaultSlotName}}
+User Prompt: {{context.UserPrompt}}
+""";
+    }
+
     private static string BuildDraftMealPlanSystemPrompt()
     {
         return """
@@ -1709,16 +1823,18 @@ Your goal is to suggest a cohesive, satisfying weekly meal plan for a household 
 Strict Rules:
 1. You MUST ONLY propose recipes from the provided Household Cookbook Catalog using their exact integer "catalogIndex".
 2. NEVER invent, hallucinate, or suggest any recipe that is not listed in the catalog.
-3. Respect the user's prompt constraints (e.g. max time, vegetarian, high-rated, specific proteins, busy weeknights).
-4. For each proposal:
+3. Respect the user's prompt constraints (e.g. max time, vegetarian, high-rated, specific proteins, busy weeknights, prioritized on-hand ingredients).
+4. Minimize grocery waste by favoring combinations of recipes that share perishable ingredients (produce, fresh herbs, proteins, dairy) while keeping the week varied and avoiding recipes cooked very recently.
+5. For each proposal:
    - "catalogIndex": The integer index of the recipe from the catalog (1-based).
    - "recipeTitle": Title of the recipe matching the catalog.
    - "dayOffset": Offset from the supplied start date: 0 is the start date, through 6 (or null if placed on-deck). Never propose a past date.
    - "slot": Meal slot ("Breakfast", "Lunch", "Dinner", or "SnackPrep").
    - "isOnDeck": True if placed in the flexible weekly On-Deck tray, otherwise false.
    - "targetServings": Servings to cook (defaults to the recipe's base servings).
-   - "rationale": Short explanation of why this recipe fits the plan and prompt.
-5. Return exactly the requested number of cooking suggestions, preferably distinct recipes. The application schedules cooking and leftover days and scales servings; do not add extra proposals for leftovers.
+   - "rationale": Short explanation of why this recipe fits the plan, prompt, or shared ingredients.
+6. Return exactly the requested number of cooking suggestions, preferably distinct recipes. The application schedules cooking and leftover days and scales servings; do not add extra proposals for leftovers.
+7. Optionally include "unmetCravingNotes": short notes ONLY when a specific cuisine or craving in the user's prompt had no strong matches in the provided cookbook candidates. Leave empty when the prompt is well satisfied.
 """;
     }
 
@@ -1728,22 +1844,49 @@ Strict Rules:
             $"[{c.CatalogIndex}] {c.Title} | BaseServings: {c.BaseServings} | Time: {(c.TotalTimeMinutes.HasValue ? $"{c.TotalTimeMinutes}m" : "N/A")} | Difficulty: {c.Difficulty ?? "N/A"} | Rating: {(c.AverageRating.HasValue ? $"★{c.AverageRating:F1}" : "Unrated")} | Cooked: {c.TimesCooked}x (Last: {(c.DaysSinceLastCooked.HasValue ? $"{c.DaysSinceLastCooked}d ago" : "Never")}) | Tags: {(c.Tags.Count > 0 ? string.Join(", ", c.Tags) : "None")} | Ingredients: {(c.KeyIngredients.Count > 0 ? string.Join(", ", c.KeyIngredients) : "N/A")}"
         );
 
-        return $$"""
-Seven-Day Period Starts: {{context.WeekStartDate:yyyy-MM-dd}}
-User Request / Constraints: {{context.UserPrompt}}
-Requested Number of Cooking Occasions (not counting leftovers): {{context.RequestedMealCount}}
-Default Meal Slot: {{context.DefaultSlotName}}
-Place in On-Deck Tray by Default: {{context.PlaceOnDeck}}
-Existing Scheduled Meals This Week:
-{{(
-                context.ExistingWeekScheduleLines.Count > 0
-                    ? string.Join("\n", context.ExistingWeekScheduleLines)
-                    : "None scheduled yet"
-            )}}
+        var sb = new StringBuilder();
+        sb.AppendLine($"Seven-Day Period Starts: {context.WeekStartDate:yyyy-MM-dd}");
+        sb.AppendLine($"User Request / Constraints: {context.UserPrompt}");
+        sb.AppendLine(
+            $"Requested Number of Cooking Occasions (not counting leftovers): {context.RequestedMealCount}"
+        );
+        sb.AppendLine($"Default Meal Slot: {context.DefaultSlotName}");
+        sb.AppendLine($"Place in On-Deck Tray by Default: {context.PlaceOnDeck}");
 
-Household Cookbook Catalog:
-{{string.Join("\n", catalogLines)}}
-""";
+        if (context.PrioritizeIngredients is { Count: > 0 })
+        {
+            sb.AppendLine(
+                $"On-Hand Ingredients to Prioritize: {string.Join(", ", context.PrioritizeIngredients)}"
+            );
+        }
+
+        if (context.BucketSummaries is { Count: > 0 })
+        {
+            sb.AppendLine("Requested Meal Buckets:");
+            foreach (var bucket in context.BucketSummaries)
+            {
+                sb.AppendLine($"- {bucket}");
+            }
+        }
+
+        if (context.UnmatchedBuckets is { Count: > 0 })
+        {
+            sb.AppendLine(
+                $"Weakly Matched Buckets in Cookbook: {string.Join(", ", context.UnmatchedBuckets)}"
+            );
+        }
+
+        sb.AppendLine("Existing Scheduled Meals This Week:");
+        sb.AppendLine(
+            context.ExistingWeekScheduleLines.Count > 0
+                ? string.Join("\n", context.ExistingWeekScheduleLines)
+                : "None scheduled yet"
+        );
+        sb.AppendLine();
+        sb.AppendLine("Household Cookbook Catalog:");
+        sb.Append(string.Join("\n", catalogLines));
+
+        return sb.ToString();
     }
 
     private static object GetIngredientSubstitutionJsonSchema()
@@ -1791,6 +1934,38 @@ Household Cookbook Catalog:
         };
     }
 
+    private static object GetMealPlanQueryAnalysisJsonSchema()
+    {
+        return new
+        {
+            type = "object",
+            properties = new
+            {
+                excludedTerms = new { type = "array", items = new { type = "string" } },
+                prioritizeIngredients = new { type = "array", items = new { type = "string" } },
+                maxTotalTimeMinutes = new { type = new[] { "integer", "null" } },
+                searchBuckets = new
+                {
+                    type = "array",
+                    items = new
+                    {
+                        type = "object",
+                        properties = new
+                        {
+                            bucketName = new { type = "string" },
+                            semanticQuery = new { type = "string" },
+                            suggestedTags = new { type = "array", items = new { type = "string" } },
+                            maxTotalTimeMinutes = new { type = new[] { "integer", "null" } },
+                            desiredCount = new { type = "integer" },
+                        },
+                        required = new[] { "bucketName", "semanticQuery", "desiredCount" },
+                    },
+                },
+            },
+            required = new[] { "excludedTerms", "prioritizeIngredients", "searchBuckets" },
+        };
+    }
+
     private static object GetDraftMealPlanJsonSchema()
     {
         return new
@@ -1817,6 +1992,7 @@ Household Cookbook Catalog:
                         required = new[] { "catalogIndex", "rationale" },
                     },
                 },
+                unmetCravingNotes = new { type = "array", items = new { type = "string" } },
             },
             required = new[] { "proposals" },
         };

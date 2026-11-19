@@ -14,7 +14,8 @@ namespace App.Data.Services;
 public sealed partial class RecipeService(
     AppDbContext dbContext,
     IMediaStorageService mediaStorageService,
-    TimeProvider? timeProvider = null
+    TimeProvider? timeProvider = null,
+    IIngestionQueueSignal? queueSignal = null
 ) : IRecipeService
 {
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
@@ -80,6 +81,219 @@ public sealed partial class RecipeService(
         }
 
         return new RecipePagedResultDto(items, totalCount, page, pageSize, hasMore);
+    }
+
+    public async Task<IReadOnlyList<RecipeAutocompleteItemDto>> SearchRecipeAutocompleteAsync(
+        string? query = null,
+        Guid? excludeRecipeId = null,
+        int limit = 20,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var effectiveLimit = Math.Clamp(limit, 1, 50);
+
+        var excludedIds = new HashSet<Guid>();
+        if (excludeRecipeId.HasValue)
+        {
+            excludedIds.Add(excludeRecipeId.Value);
+
+            var edges = await dbContext
+                .RecipeIngredients.AsNoTracking()
+                .Where(ri => ri.LinkedRecipeId != null)
+                .Select(ri => new { ri.RecipeId, LinkedId = ri.LinkedRecipeId!.Value })
+                .ToListAsync(cancellationToken);
+
+            var parentsByChild = new Dictionary<Guid, List<Guid>>();
+            foreach (var edge in edges)
+            {
+                if (!parentsByChild.TryGetValue(edge.LinkedId, out var parents))
+                {
+                    parents = [];
+                    parentsByChild[edge.LinkedId] = parents;
+                }
+                parents.Add(edge.RecipeId);
+            }
+
+            var queue = new Queue<Guid>();
+            queue.Enqueue(excludeRecipeId.Value);
+            while (queue.Count > 0)
+            {
+                var current = queue.Dequeue();
+                if (parentsByChild.TryGetValue(current, out var parents))
+                {
+                    foreach (var parentId in parents)
+                    {
+                        if (excludedIds.Add(parentId))
+                        {
+                            queue.Enqueue(parentId);
+                        }
+                    }
+                }
+            }
+        }
+
+        var baseQuery = dbContext
+            .Recipes.AsNoTracking()
+            .Where(r => r.Status != RecipeStatus.Archived);
+
+        if (excludedIds.Count > 0)
+        {
+            baseQuery = baseQuery.Where(r => !excludedIds.Contains(r.Id));
+        }
+
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return await baseQuery
+                .OrderBy(r => r.Status == RecipeStatus.Published ? 0 : 1)
+                .ThenBy(r => r.Title)
+                .Take(effectiveLimit)
+                .Select(r => new RecipeAutocompleteItemDto(
+                    r.Id,
+                    r.Title,
+                    r.Slug,
+                    r.Status,
+                    r.BaseServings,
+                    r.YieldDisplay
+                ))
+                .ToListAsync(cancellationToken);
+        }
+
+        var trimmed = query.Trim();
+        var normalizedQuery = NormalizeAutocompleteTitle(trimmed);
+        var searchTokens = NormalizeSearchTokens(trimmed);
+
+        var sqlFiltered = baseQuery;
+        if (searchTokens.Length > 0)
+        {
+            foreach (var token in searchTokens)
+            {
+                var currentToken = token;
+                sqlFiltered = sqlFiltered.Where(r => r.Title.ToLower().Contains(currentToken));
+            }
+        }
+        else
+        {
+            var lower = trimmed.ToLowerInvariant();
+            sqlFiltered = sqlFiltered.Where(r => r.Title.ToLower().Contains(lower));
+        }
+
+        var matched = await sqlFiltered
+            .Select(r => new RecipeAutocompleteItemDto(
+                r.Id,
+                r.Title,
+                r.Slug,
+                r.Status,
+                r.BaseServings,
+                r.YieldDisplay
+            ))
+            .ToListAsync(cancellationToken);
+
+        if (matched.Count == 0 && searchTokens.Length > 0)
+        {
+            var allCandidates = await baseQuery
+                .Select(r => new RecipeAutocompleteItemDto(
+                    r.Id,
+                    r.Title,
+                    r.Slug,
+                    r.Status,
+                    r.BaseServings,
+                    r.YieldDisplay
+                ))
+                .ToListAsync(cancellationToken);
+
+            return allCandidates
+                .Select(candidate => new
+                {
+                    Candidate = candidate,
+                    Rank = GetFallbackAutocompleteRank(
+                        candidate.Title,
+                        normalizedQuery,
+                        searchTokens
+                    ),
+                })
+                .Where(x => x.Rank.HasValue)
+                .OrderBy(x => x.Rank!.Value)
+                .ThenBy(x => x.Candidate.Status == RecipeStatus.Published ? 0 : 1)
+                .ThenBy(x => x.Candidate.Title.Length)
+                .ThenBy(x => x.Candidate.Title, StringComparer.OrdinalIgnoreCase)
+                .Take(effectiveLimit)
+                .Select(x => x.Candidate)
+                .ToList();
+        }
+
+        return matched
+            .OrderBy(r => GetAutocompleteMatchRank(r.Title, normalizedQuery, searchTokens))
+            .ThenBy(r => r.Status == RecipeStatus.Published ? 0 : 1)
+            .ThenBy(r => r.Title.Length)
+            .ThenBy(r => r.Title, StringComparer.OrdinalIgnoreCase)
+            .Take(effectiveLimit)
+            .ToList();
+    }
+
+    private static string NormalizeAutocompleteTitle(string value) =>
+        string.Join(' ', NormalizeSearchTokens(value));
+
+    private static int GetAutocompleteMatchRank(
+        string title,
+        string normalizedQuery,
+        string[] searchTokens
+    )
+    {
+        var normalizedTitle = NormalizeAutocompleteTitle(title);
+        if (string.Equals(normalizedTitle, normalizedQuery, StringComparison.Ordinal))
+        {
+            return 0;
+        }
+
+        if (
+            !string.IsNullOrEmpty(normalizedQuery)
+            && normalizedTitle.StartsWith(normalizedQuery, StringComparison.Ordinal)
+        )
+        {
+            return 1;
+        }
+
+        if (
+            !string.IsNullOrEmpty(normalizedQuery)
+            && normalizedTitle.Contains(normalizedQuery, StringComparison.Ordinal)
+        )
+        {
+            return 2;
+        }
+
+        if (
+            searchTokens.Length > 0
+            && searchTokens.All(token => normalizedTitle.Contains(token, StringComparison.Ordinal))
+        )
+        {
+            return 3;
+        }
+
+        return 4;
+    }
+
+    private static int? GetFallbackAutocompleteRank(
+        string title,
+        string normalizedQuery,
+        string[] searchTokens
+    )
+    {
+        var normalizedTitle = NormalizeAutocompleteTitle(title);
+        if (
+            searchTokens.Length > 0
+            && searchTokens.All(token => normalizedTitle.Contains(token, StringComparison.Ordinal))
+        )
+        {
+            return GetAutocompleteMatchRank(title, normalizedQuery, searchTokens);
+        }
+
+        if (searchTokens.All(token => token.Length < 5))
+        {
+            return null;
+        }
+
+        var editDistance = GetTitleMatchDistance(searchTokens, title);
+        return editDistance.HasValue ? 5 + editDistance.Value : null;
     }
 
     private async Task<IReadOnlyList<RecipeSummaryDto>> GetFuzzyRecipeMatchesAsync(
@@ -735,6 +949,11 @@ public sealed partial class RecipeService(
             cancellationToken
         );
 
+        if (recipe.Status == RecipeStatus.Published)
+        {
+            queueSignal?.NotifyBackgroundWorkAvailable();
+        }
+
         return (await GetRecipeByIdAsync(recipe.Id, cancellationToken))!;
     }
 
@@ -838,6 +1057,22 @@ public sealed partial class RecipeService(
             recipe.Title,
             cancellationToken
         );
+
+        if (recipe.Status == RecipeStatus.Published)
+        {
+            queueSignal?.NotifyBackgroundWorkAvailable();
+        }
+        else
+        {
+            var staleEmbeddings = await dbContext
+                .RecipeEmbeddings.Where(e => e.RecipeId == recipe.Id)
+                .ToListAsync(cancellationToken);
+            if (staleEmbeddings.Count > 0)
+            {
+                dbContext.RecipeEmbeddings.RemoveRange(staleEmbeddings);
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
+        }
 
         // Clean up media files removed
         if (!string.IsNullOrEmpty(oldCover) && oldCover != recipe.CoverImagePath)
@@ -1007,6 +1242,12 @@ public sealed partial class RecipeService(
         await SyncTaxonomyAsync(recipe, request.CollectionIds, request.TagIds, cancellationToken);
 
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        if (recipe.Status == RecipeStatus.Published)
+        {
+            queueSignal?.NotifyBackgroundWorkAvailable();
+        }
+
         return await GetRecipeByIdAsync(id, cancellationToken);
     }
 

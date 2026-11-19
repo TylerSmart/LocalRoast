@@ -84,4 +84,6 @@ public sealed class Recipe : IAuditable
         new List<MealPlanTemplateItem>();
 
     public ICollection<CookLog> CookLogs { get; set; } = new List<CookLog>();
+
+    public ICollection<RecipeEmbedding> Embeddings { get; set; } = new List<RecipeEmbedding>();
 }

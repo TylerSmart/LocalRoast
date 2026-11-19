@@ -13,7 +13,8 @@ public sealed class FoodCatalogService(
     AppDbContext dbContext,
     IShoppingListService? shoppingListService = null,
     IShoppingRealtimeNotifier? shoppingRealtimeNotifier = null,
-    TimeProvider? timeProvider = null
+    TimeProvider? timeProvider = null,
+    IIngestionQueueSignal? queueSignal = null
 ) : IFoodCatalogService
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -344,6 +345,8 @@ public sealed class FoodCatalogService(
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        queueSignal?.NotifyBackgroundWorkAvailable();
 
         return await GetFoodItemByIdAsync(id, cancellationToken);
     }
@@ -851,6 +854,8 @@ public sealed class FoodCatalogService(
         {
             await tx.CommitAsync(cancellationToken);
         }
+
+        queueSignal?.NotifyBackgroundWorkAvailable();
 
         // Broadcast realtime SignalR updates if affected
         if (

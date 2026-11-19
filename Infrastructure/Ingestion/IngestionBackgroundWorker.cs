@@ -1,3 +1,4 @@
+using App.Core.Exceptions;
 using App.Core.Ingestion;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -148,7 +149,19 @@ public sealed class IngestionBackgroundWorker(
                     );
                 }
 
-                // 4. Idle refinement pass when queue is empty and RefineDuringIdle is enabled
+                // 4. Sync pending/stale RecipeEmbeddings in preemptible batches (only when
+                // ingestion is enabled and an Embedding workflow is assigned)
+                if (
+                    ingestionEnabled
+                    && promotedWaiting == 0
+                    && config.ForEmbedding() is not null
+                    && !stoppingToken.IsCancellationRequested
+                )
+                {
+                    await DrainPendingRecipeEmbeddingsAsync(stoppingToken);
+                }
+
+                // 5. Idle refinement pass when queue is empty and RefineDuringIdle is enabled
                 if (
                     ingestionEnabled
                     && promotedWaiting == 0
@@ -185,5 +198,57 @@ public sealed class IngestionBackgroundWorker(
         }
 
         logger.LogInformation("IngestionBackgroundWorker stopped.");
+    }
+
+    private async Task DrainPendingRecipeEmbeddingsAsync(CancellationToken stoppingToken)
+    {
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            using var bgCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+            using var registration = queueSignal.RegisterPreemptibleExecution(
+                Guid.NewGuid(),
+                bgCts
+            );
+
+            try
+            {
+                using var scope = scopeFactory.CreateScope();
+                var processor = scope.ServiceProvider.GetRequiredService<IIngestionProcessor>();
+                var embeddedCount = await processor.SyncPendingRecipeEmbeddingsAsync(bgCts.Token);
+                if (embeddedCount <= 0)
+                {
+                    break;
+                }
+
+                logger.LogInformation(
+                    "Indexed {Count} recipe embedding(s) in background sync batch.",
+                    embeddedCount
+                );
+            }
+            catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
+            {
+                // Preempted by a newly queued ingestion job or interactive Kitchen AI call.
+                logger.LogDebug(
+                    "Background recipe embedding sync preempted by higher-priority work."
+                );
+                break;
+            }
+            catch (LlmHostUnavailableException ex)
+            {
+                logger.LogWarning(
+                    ex,
+                    "Embedding host unavailable during background recipe sync; will retry on next worker cycle."
+                );
+                break;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogWarning(
+                    ex,
+                    "Error during background recipe embedding sync batch; will retry on next worker cycle."
+                );
+                break;
+            }
+        }
     }
 }

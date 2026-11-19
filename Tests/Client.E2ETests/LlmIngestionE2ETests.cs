@@ -2178,4 +2178,115 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
             "Viewport horizontal overflow detected at 360px on Recipe Detail."
         );
     }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task IngestionReview_RecipeReferenceAutofill_FiltersAndLinksCookbookRecipe()
+    {
+        var suffix = Guid.NewGuid().ToString("N")[..6];
+        var existingSubRecipeTitle = $"Foolproof Herb Pesto {suffix}";
+
+        await using var mockServer = await MockLanLlmAndBlogServer.StartAsync();
+        mockServer.ResponsePayload = """
+            {
+              "title": "Roasted Gnocchi Bowl",
+              "description": "Crispy gnocchi tossed with pesto.",
+              "baseServings": 4,
+              "prepTimeMinutes": 10,
+              "cookTimeMinutes": 20,
+              "totalTimeMinutes": 30,
+              "ingredients": [
+                {
+                  "displayName": "herb pesto",
+                  "canonicalFoodName": "herb pesto",
+                  "quantity": 1,
+                  "unit": "Cup",
+                  "originalRawText": "1 cup herb pesto"
+                }
+              ],
+              "steps": [
+                {
+                  "instruction": "Toss warm gnocchi with pesto."
+                }
+              ],
+              "suggestedTagNames": ["Dinner"]
+            }
+            """;
+
+        await RegisterAndLoginAsync();
+
+        // Seed existing cookbook recipe to autofill
+        await Page.EvaluateAsync(
+            """
+            async (title) => {
+              const tokenKey = Object.keys(localStorage).find((key) => key.endsWith('-token'));
+              const token = tokenKey ? localStorage.getItem(tokenKey) : null;
+              const response = await fetch('/api/recipes', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({
+                  title,
+                  status: 'Published',
+                  baseServings: 4,
+                  yieldDisplay: '1 cup',
+                  ingredients: [{ quantity: 2, unit: 'Cup', displayName: 'Fresh Basil' }],
+                  steps: [{ instruction: 'Blend until smooth.' }],
+                }),
+              });
+              if (!response.ok) {
+                throw new Error(`Failed to seed cookbook recipe: ${await response.text()}`);
+              }
+            }
+            """,
+            existingSubRecipeTitle
+        );
+
+        await Page.GotoAsync($"{ServerUrl}/ingest");
+        await Page.Locator(".llm-settings-btn").ClickAsync();
+        var dialog = Page.Locator("app-llm-settings-dialog");
+        await AddLlmConnectionInDialogAsync(dialog, mockServer.BaseUrl);
+        await AddLlmModelInDialogAsync(dialog, "qwen2.5:14b");
+        await AssignLlmWorkflowAsync(dialog, "text", "qwen2.5:14b");
+        await SaveLlmWorkflowsAsync(dialog);
+
+        await Page.Locator("button.tab-pill", new() { HasText = "Paste Raw Text" }).ClickAsync();
+        await Page.Locator("textarea[formcontrolname='rawText']")
+            .FillAsync("Roasted Gnocchi Bowl\nIngredients:\n- 1 cup herb pesto\nSteps:\n1. Toss.");
+
+        var queuedRes = await Page.RunAndWaitForResponseAsync(
+            () => Page.Locator("button[aria-label='Queue raw text recipe']").ClickAsync(),
+            r => r.Url.EndsWith("/api/ingestion/jobs/text", StringComparison.Ordinal) && r.Ok
+        );
+        using var queuedDoc = JsonDocument.Parse(await queuedRes.TextAsync());
+        var jobId = queuedDoc.RootElement.GetProperty("id").GetGuid();
+
+        var reviewButton = Page.Locator($"a.review-action-btn[href$='{jobId}']");
+        await WaitForLocatorWithRefreshAsync(reviewButton);
+        await reviewButton.ClickAsync();
+
+        var ingredientCard = Page.Locator(".ingredient-row-card").First;
+        await ingredientCard
+            .Locator("mat-checkbox[formcontrolname='isRecipeReference'] input[type='checkbox']")
+            .CheckAsync();
+
+        var refAutoInput = ingredientCard.Locator("app-recipe-autocomplete input");
+        await Expect(refAutoInput).ToBeVisibleAsync();
+        await refAutoInput.FillAsync($"herb pesto {suffix}");
+
+        var option = Page.Locator("mat-option", new() { HasText = existingSubRecipeTitle }).First;
+        await Expect(option).ToBeVisibleAsync();
+        await option.ClickAsync();
+
+        await Expect(refAutoInput).ToHaveValueAsync(existingSubRecipeTitle);
+        await Expect(ingredientCard.Locator(".recipe-reference-pill"))
+            .ToContainTextAsync($"Linked Recipe: {existingSubRecipeTitle}");
+
+        await Page.Locator("button[aria-label='Approve and publish recipe']").ClickAsync();
+        await Expect(Page).ToHaveURLAsync(new Regex(".*/recipes/[a-f0-9-]+$"));
+        await Expect(Page.Locator(".sub-recipe-inline-panel"))
+            .ToContainTextAsync(existingSubRecipeTitle);
+    }
 }

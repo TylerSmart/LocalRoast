@@ -6,6 +6,15 @@ public record RecipeCollectionBadgeDto(Guid Id, string Name, string Slug);
 
 public record RecipeTagBadgeDto(Guid Id, string Name, string Slug, TagCategory Category);
 
+public record RecipeAutocompleteItemDto(
+    Guid Id,
+    string Title,
+    string Slug,
+    RecipeStatus Status,
+    decimal BaseServings,
+    string? YieldDisplay
+);
+
 public record RecipeSummaryDto(
     Guid Id,
     string Title,
