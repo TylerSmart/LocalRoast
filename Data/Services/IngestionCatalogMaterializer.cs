@@ -231,6 +231,51 @@ public static partial class IngestionCatalogMaterializer
         CancellationToken cancellationToken
     ) => (await FindMatchingRecipeAsync(dbContext, title, excludedRecipeId, cancellationToken))?.Id;
 
+    public static async Task<MatchedRecipeReference?> ResolveExplicitOrMatchedRecipeAsync(
+        AppDbContext dbContext,
+        IngestionDraftIngredientDto ing,
+        string recipeTitle,
+        Guid? excludedRecipeId,
+        CancellationToken cancellationToken
+    )
+    {
+        if (
+            ing.MatchedRecipeId.HasValue
+            && (!excludedRecipeId.HasValue || ing.MatchedRecipeId.Value != excludedRecipeId.Value)
+        )
+        {
+            var titleMatchesSavedMatch =
+                string.IsNullOrWhiteSpace(ing.MatchedRecipeTitle)
+                || IsRecipeReferenceTitleMatch(ing.MatchedRecipeTitle, recipeTitle);
+
+            if (titleMatchesSavedMatch)
+            {
+                var explicitMatch = await dbContext
+                    .Recipes.AsNoTracking()
+                    .Where(r =>
+                        r.Id == ing.MatchedRecipeId.Value && r.Status != RecipeStatus.Archived
+                    )
+                    .Select(r => new MatchedRecipeReference(r.Id, r.Title, r.Slug))
+                    .FirstOrDefaultAsync(cancellationToken);
+
+                if (
+                    explicitMatch is not null
+                    && IsRecipeReferenceTitleMatch(explicitMatch.Title, recipeTitle)
+                )
+                {
+                    return explicitMatch;
+                }
+            }
+        }
+
+        return await FindMatchingRecipeAsync(
+            dbContext,
+            recipeTitle,
+            excludedRecipeId,
+            cancellationToken
+        );
+    }
+
     public static async Task<int> BacklinkUnresolvedRecipeReferencesAsync(
         AppDbContext dbContext,
         Guid recipeId,
@@ -373,20 +418,31 @@ public static partial class IngestionCatalogMaterializer
             if (ing.IsRecipeReference && !string.IsNullOrWhiteSpace(ing.ReferencedRecipeTitle))
             {
                 var candidates = BuildRecipeReferenceTitleCandidates(ing);
-                MatchedRecipeReference? matchedRecipe = null;
-                string? matchedCandidate = null;
-                foreach (var candidate in candidates)
+                MatchedRecipeReference? matchedRecipe = await ResolveExplicitOrMatchedRecipeAsync(
+                    dbContext,
+                    ing,
+                    ing.ReferencedRecipeTitle.Trim(),
+                    excludedRecipeId,
+                    cancellationToken
+                );
+                string? matchedCandidate = matchedRecipe is not null
+                    ? ing.ReferencedRecipeTitle.Trim()
+                    : null;
+                if (matchedRecipe is null)
                 {
-                    matchedRecipe = await FindMatchingRecipeAsync(
-                        dbContext,
-                        candidate,
-                        excludedRecipeId,
-                        cancellationToken
-                    );
-                    if (matchedRecipe is not null)
+                    foreach (var candidate in candidates)
                     {
-                        matchedCandidate = candidate;
-                        break;
+                        matchedRecipe = await FindMatchingRecipeAsync(
+                            dbContext,
+                            candidate,
+                            excludedRecipeId,
+                            cancellationToken
+                        );
+                        if (matchedRecipe is not null)
+                        {
+                            matchedCandidate = candidate;
+                            break;
+                        }
                     }
                 }
 
@@ -423,6 +479,9 @@ public static partial class IngestionCatalogMaterializer
                         ing.ReferencedRecipeTitle.Trim(),
                         StringComparison.OrdinalIgnoreCase
                     )
+                    || ing.MatchedRecipeId.HasValue
+                    || !string.IsNullOrWhiteSpace(ing.MatchedRecipeTitle)
+                    || !string.IsNullOrWhiteSpace(ing.MatchedRecipeSlug)
                 )
                 {
                     updatedIngredients.Add(
@@ -433,6 +492,9 @@ public static partial class IngestionCatalogMaterializer
                                 ing.PreparationNote,
                                 unlinkedTitle
                             ),
+                            MatchedRecipeId = null,
+                            MatchedRecipeTitle = null,
+                            MatchedRecipeSlug = null,
                         }
                     );
                     continue;
@@ -740,14 +802,15 @@ public static partial class IngestionCatalogMaterializer
 
                 if (!string.IsNullOrWhiteSpace(recipeTitle))
                 {
-                    linkedRecipeId =
-                        ing.MatchedRecipeId
-                        ?? await ResolveRecipeReferenceAsync(
+                    linkedRecipeId = (
+                        await ResolveExplicitOrMatchedRecipeAsync(
                             dbContext,
+                            ing,
                             recipeTitle,
                             job.ResultingRecipeId,
                             cancellationToken
-                        );
+                        )
+                    )?.Id;
                 }
 
                 if (

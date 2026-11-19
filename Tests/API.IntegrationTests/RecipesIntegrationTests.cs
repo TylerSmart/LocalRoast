@@ -573,4 +573,105 @@ public sealed class RecipesIntegrationTests
         Assert.AreEqual(updatedTagIds.Count, updated.Tags.Count);
         Assert.AreEqual(1, updated.Collections.Count);
     }
+
+    [TestMethod]
+    public async Task AutocompleteRecipes_RanksTitleMatchesExcludesArchivedSelfAndCircularAncestors()
+    {
+        await RegisterAndAuthenticateAsync(_client, "auto_chef@example.com", "autochef");
+
+        var doughRes = await _client.PostAsJsonAsync(
+            "/api/recipes",
+            new UpsertRecipeRequest(
+                Title: "Foolproof All-Butter Pie Dough",
+                Status: RecipeStatus.Published,
+                BaseServings: 8m,
+                YieldDisplay: "1 double-crust pie"
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Created, doughRes.StatusCode);
+        var dough = await doughRes.Content.ReadFromJsonAsync<RecipeDetailDto>();
+        Assert.IsNotNull(dough);
+
+        var exactRes = await _client.PostAsJsonAsync(
+            "/api/recipes",
+            new UpsertRecipeRequest(
+                Title: "Pie Dough",
+                Status: RecipeStatus.Published,
+                BaseServings: 6m
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Created, exactRes.StatusCode);
+
+        var draftPrefixRes = await _client.PostAsJsonAsync(
+            "/api/recipes",
+            new UpsertRecipeRequest(
+                Title: "Pie Dough for Double-Crust",
+                Status: RecipeStatus.DraftReview,
+                BaseServings: 8m
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Created, draftPrefixRes.StatusCode);
+
+        var archivedRes = await _client.PostAsJsonAsync(
+            "/api/recipes",
+            new UpsertRecipeRequest(
+                Title: "Archived Pie Dough",
+                Status: RecipeStatus.Archived,
+                BaseServings: 4m
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Created, archivedRes.StatusCode);
+
+        // Parent recipe mentions "pie dough" in description and links to dough (ancestor of dough)
+        var parentRes = await _client.PostAsJsonAsync(
+            "/api/recipes",
+            new UpsertRecipeRequest(
+                Title: "Blueberry Pie",
+                Description: "Baked with flaky pie dough.",
+                Status: RecipeStatus.Published,
+                BaseServings: 8m,
+                Ingredients:
+                [
+                    new RecipeIngredientInput(
+                        Quantity: 1m,
+                        Unit: MeasurementUnit.Custom,
+                        CustomUnitName: "recipe",
+                        LinkedRecipeId: dough.Id,
+                        DisplayName: dough.Title
+                    ),
+                ]
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Created, parentRes.StatusCode);
+        var parent = await parentRes.Content.ReadFromJsonAsync<RecipeDetailDto>();
+        Assert.IsNotNull(parent);
+
+        // 1. Title-focused ranking: exact -> prefix -> contains; excludes Archived and description-only matches
+        var searchResults = await _client.GetFromJsonAsync<
+            IReadOnlyList<RecipeAutocompleteItemDto>
+        >("/api/recipes/autocomplete?query=pie%20dough");
+        Assert.IsNotNull(searchResults);
+        Assert.HasCount(3, searchResults);
+        Assert.AreEqual("Pie Dough", searchResults[0].Title);
+        Assert.AreEqual("Pie Dough for Double-Crust", searchResults[1].Title);
+        Assert.AreEqual("Foolproof All-Butter Pie Dough", searchResults[2].Title);
+        Assert.IsFalse(searchResults.Any(r => r.Title == "Archived Pie Dough"));
+        Assert.IsFalse(searchResults.Any(r => r.Title == "Blueberry Pie"));
+
+        // 2. Non-contiguous multi-word token match handles hyphens cleanly
+        var tokenResults = await _client.GetFromJsonAsync<IReadOnlyList<RecipeAutocompleteItemDto>>(
+            "/api/recipes/autocomplete?query=butter%20dough"
+        );
+        Assert.IsNotNull(tokenResults);
+        Assert.IsTrue(tokenResults.Any(r => r.Id == dough.Id));
+
+        // 3. Excluding dough excludes both dough itself and Blueberry Pie (which depends on dough)
+        var cycleSafeResults = await _client.GetFromJsonAsync<
+            IReadOnlyList<RecipeAutocompleteItemDto>
+        >($"/api/recipes/autocomplete?excludeRecipeId={dough.Id}");
+        Assert.IsNotNull(cycleSafeResults);
+        Assert.IsFalse(cycleSafeResults.Any(r => r.Id == dough.Id));
+        Assert.IsFalse(cycleSafeResults.Any(r => r.Id == parent.Id));
+        Assert.IsTrue(cycleSafeResults.Any(r => r.Title == "Pie Dough"));
+    }
 }

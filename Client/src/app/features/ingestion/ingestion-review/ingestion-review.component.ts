@@ -47,6 +47,7 @@ import type {
 } from '../../../core/models/ingestion.models';
 import {
   MEASUREMENT_UNITS,
+  RecipeAutocompleteItemDto,
   RecipeDifficulty,
   RecipeMeasurement,
   RecipePreviewData,
@@ -65,6 +66,7 @@ import { IngestionService } from '../../../core/services/ingestion/ingestion.ser
 import { TaxonomyService } from '../../../core/services/taxonomy/taxonomy.service';
 import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialog/confirm-dialog.component';
 import { MeasurementEditorComponent } from '../../../shared/components/measurement-editor/measurement-editor.component';
+import { RecipeAutocompleteComponent } from '../../../shared/components/recipe-autocomplete/recipe-autocomplete.component';
 import { ingredientMeasurementValidator } from '../../../core/utils/recipe-measurement-forms';
 import { RecipeDetailPreviewComponent } from '../recipe-detail-preview/recipe-detail-preview.component';
 import {
@@ -100,6 +102,7 @@ export interface DiagnosticJumpTarget {
     SourceViewerComponent,
     RecipeDetailPreviewComponent,
     MeasurementEditorComponent,
+    RecipeAutocompleteComponent,
     StepInstructionEditorComponent,
   ],
   templateUrl: './ingestion-review.component.html',
@@ -645,6 +648,52 @@ export class IngestionReviewComponent implements OnInit {
       titleControl?.setValidators([Validators.maxLength(200)]);
     }
     titleControl?.updateValueAndValidity({ emitEvent: false });
+  }
+
+  onReferencedRecipeSelected(index: number, recipe: RecipeAutocompleteItemDto): void {
+    const group = this.ingredientsArray.at(index);
+    if (!group || !recipe) return;
+
+    const prevRefTitle = (group.get('referencedRecipeTitle')?.value || '').trim();
+    const currentDisplay = (group.get('displayName')?.value || '').trim();
+    const nextDisplay =
+      !currentDisplay || currentDisplay === prevRefTitle ? recipe.title : currentDisplay;
+
+    group.patchValue({
+      referencedRecipeTitle: recipe.title,
+      matchedRecipeId: recipe.id,
+      matchedRecipeTitle: recipe.title,
+      matchedRecipeSlug: recipe.slug,
+      displayName: nextDisplay,
+    });
+  }
+
+  onReferencedRecipeTextChanged(index: number, text: string): void {
+    const group = this.ingredientsArray.at(index);
+    if (!group) return;
+
+    const prevRefTitle = (group.get('referencedRecipeTitle')?.value || '').trim();
+    const currentDisplay = (group.get('displayName')?.value || '').trim();
+    const nextDisplay = !currentDisplay || currentDisplay === prevRefTitle ? text : currentDisplay;
+
+    group.patchValue({
+      referencedRecipeTitle: text,
+      matchedRecipeId: null,
+      matchedRecipeTitle: null,
+      matchedRecipeSlug: null,
+      displayName: nextDisplay,
+    });
+  }
+
+  onReferencedRecipeCleared(index: number): void {
+    const group = this.ingredientsArray.at(index);
+    if (!group) return;
+
+    group.patchValue({
+      matchedRecipeId: null,
+      matchedRecipeTitle: null,
+      matchedRecipeSlug: null,
+    });
   }
 
   addStep(step?: Partial<IngestionDraftStepDto>): void {

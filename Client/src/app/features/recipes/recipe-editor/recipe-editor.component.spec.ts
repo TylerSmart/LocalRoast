@@ -4,7 +4,11 @@ import { MatSnackBar } from '@angular/material/snack-bar';
 import { provideRouter } from '@angular/router';
 import { of } from 'rxjs';
 import { FoodItemDto } from '../../../core/models/food-catalog.models';
-import { RecipeDetailDto, RecipeSummaryDto } from '../../../core/models/recipe.models';
+import {
+  RecipeAutocompleteItemDto,
+  RecipeDetailDto,
+  RecipeSummaryDto,
+} from '../../../core/models/recipe.models';
 import { CollectionDto, TagDto } from '../../../core/models/taxonomy.models';
 import { FoodCatalogService } from '../../../core/services/food-catalog/food-catalog.service';
 import { MediaService } from '../../../core/services/media/media.service';
@@ -18,6 +22,7 @@ describe('RecipeEditorComponent', () => {
 
   const mockRecipeService = {
     getRecipes: vi.fn().mockReturnValue(of([] as RecipeSummaryDto[])),
+    autocompleteRecipes: vi.fn().mockReturnValue(of([] as RecipeAutocompleteItemDto[])),
     getRecipeById: vi.fn(),
     createRecipe: vi.fn(),
     updateRecipe: vi.fn(),
@@ -134,33 +139,16 @@ describe('RecipeEditorComponent', () => {
       collections: [],
       tags: [],
     };
-    const savedSubRecipe: RecipeSummaryDto = {
+    const savedSubRecipe: RecipeAutocompleteItemDto = {
       id: 'saved-sub-recipe',
       title: referencedTitle,
       slug: 'foolproof-all-butter-dough',
-      description: null,
       status: 'Published',
       baseServings: 1,
-      yieldDisplay: null,
-      prepTimeMinutes: null,
-      cookTimeMinutes: null,
-      totalTimeMinutes: null,
-      difficulty: null,
-      sourceName: null,
-      thumbnailImagePath: null,
-      ingredientCount: 0,
-      stepCount: 0,
-      timesCooked: 0,
-      averageRating: null,
-      createdAt: '2026-01-01T00:00:00Z',
-      modifiedAt: '2026-01-01T00:00:00Z',
-      collections: [],
-      tags: [],
+      yieldDisplay: '1 double-crust pie',
     };
 
-    mockRecipeService.getRecipes.mockReturnValueOnce(of([savedSubRecipe]));
     component.populateForm(recipeDetail);
-    component.loadSubRecipes();
     fixture.detectChanges();
 
     expect(fixture.nativeElement.textContent).toContain('Not in the cookbook yet');
@@ -168,11 +156,38 @@ describe('RecipeEditorComponent', () => {
       referencedTitle,
     );
 
-    component.onSubRecipeSelected(0, savedSubRecipe.id);
+    component.onSubRecipeSelected(0, savedSubRecipe);
     fixture.detectChanges();
 
     expect(component.ingredientsArray.at(0).get('linkedRecipeId')?.value).toBe(savedSubRecipe.id);
+    expect(component.ingredientsArray.at(0).get('linkedRecipeTitle')?.value).toBe(
+      savedSubRecipe.title,
+    );
     expect(component.ingredientsArray.at(0).get('unresolvedRecipeTitle')?.value).toBeNull();
+  });
+
+  it('supports unlinked sub-recipe typing and unlinks when editing away from a selected recipe', () => {
+    const ing = component.ingredientsArray.at(0);
+    ing.get('isSubRecipe')?.setValue(true);
+    component.onSubRecipeToggled(0, true);
+
+    component.onSubRecipeSelected(0, {
+      id: 'sub-1',
+      title: 'Quick Pickled Onions',
+      slug: 'quick-pickled-onions',
+      status: 'Published',
+      baseServings: 4,
+      yieldDisplay: '1 jar',
+    });
+
+    expect(ing.get('linkedRecipeId')?.value).toBe('sub-1');
+    expect(ing.get('displayName')?.value).toBe('Quick Pickled Onions');
+
+    component.onSubRecipeTextChanged(0, 'Future Sauce Recipe');
+
+    expect(ing.get('linkedRecipeId')?.value).toBeNull();
+    expect(ing.get('unresolvedRecipeTitle')?.value).toBe('Future Sauce Recipe');
+    expect(ing.get('displayName')?.value).toBe('Future Sauce Recipe');
   });
 
   it('loads and saves inline step tokens', () => {

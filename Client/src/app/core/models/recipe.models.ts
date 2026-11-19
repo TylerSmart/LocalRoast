@@ -95,6 +95,15 @@ export interface RecipeSummaryDto {
   latestCookNote?: string | null;
 }
 
+export interface RecipeAutocompleteItemDto {
+  id: string;
+  title: string;
+  slug: string;
+  status: RecipeStatus;
+  baseServings: number;
+  yieldDisplay: string | null;
+}
+
 export interface RecipeIngredientReplacementDto {
   id: string;
   sortOrder: number;

@@ -9,6 +9,7 @@ import {
   IngredientMatchRequest,
   IngredientMatchResultDto,
   RecipeAttachmentDto,
+  RecipeAutocompleteItemDto,
   RecipeDetailDto,
   RecipePagedResultDto,
   RecipeQueryParameters,
@@ -108,6 +109,22 @@ export class RecipeService {
     }
 
     return this.http.get<RecipeSummaryDto[]>(apiUrl('/recipes'), { params });
+  }
+
+  autocompleteRecipes(
+    query?: string | null,
+    excludeRecipeId?: string | null,
+    limit = 20,
+  ): Observable<RecipeAutocompleteItemDto[]> {
+    let params = new HttpParams().set('limit', limit.toString());
+    if (query?.trim()) {
+      params = params.set('query', query.trim());
+    }
+    if (excludeRecipeId) {
+      params = params.set('excludeRecipeId', excludeRecipeId);
+    }
+
+    return this.http.get<RecipeAutocompleteItemDto[]>(apiUrl('/recipes/autocomplete'), { params });
   }
 
   getRecipeById(id: string): Observable<RecipeDetailDto> {

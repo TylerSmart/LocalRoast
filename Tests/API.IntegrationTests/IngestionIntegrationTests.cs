@@ -2880,6 +2880,108 @@ public sealed class IngestionIntegrationTests
         Assert.IsNull(published.Ingredients[1].UnresolvedRecipeTitle);
     }
 
+    [TestMethod]
+    public async Task ApproveDraft_WhenReferencedRecipeTitleIsEdited_ReResolvesInsteadOfUsingStaleMatchedRecipeId()
+    {
+        await AuthenticateAsync(_client);
+
+        var oldSauceRes = await _client.PostAsJsonAsync(
+            "/api/recipes",
+            new UpsertRecipeRequest(
+                Title: "Old Tomato Sauce",
+                Status: RecipeStatus.Published,
+                BaseServings: 4m
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Created, oldSauceRes.StatusCode);
+        var oldSauce = await oldSauceRes.Content.ReadFromJsonAsync<RecipeDetailDto>();
+        Assert.IsNotNull(oldSauce);
+
+        var newMarinaraRes = await _client.PostAsJsonAsync(
+            "/api/recipes",
+            new UpsertRecipeRequest(
+                Title: "Fresh Basil Marinara",
+                Status: RecipeStatus.Published,
+                BaseServings: 4m
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Created, newMarinaraRes.StatusCode);
+        var newMarinara = await newMarinaraRes.Content.ReadFromJsonAsync<RecipeDetailDto>();
+        Assert.IsNotNull(newMarinara);
+
+        var enqueueRes = await _client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest(
+                RawText: "Baked Ziti\nIngredients:\n- 1 recipe Fresh Basil Marinara\nSteps:\n1. Bake.",
+                TitleHint: "Baked Ziti"
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Accepted, enqueueRes.StatusCode);
+        var job = await enqueueRes.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
+        Assert.IsNotNull(job);
+
+        // Save draft where title was changed to an unpublished recipe but stale MatchedRecipeId remained
+        var unlinkedDraft = new IngestionExtractedDraftDto(
+            Title: "Baked Ziti",
+            BaseServings: 4m,
+            Ingredients:
+            [
+                new IngestionDraftIngredientDto(
+                    DisplayName: "Unpublished Vodka Sauce",
+                    Quantity: 1m,
+                    Unit: MeasurementUnit.Custom,
+                    CustomUnitName: "recipe",
+                    IsRecipeReference: true,
+                    ReferencedRecipeTitle: "Unpublished Vodka Sauce",
+                    MatchedRecipeId: oldSauce.Id,
+                    MatchedRecipeTitle: oldSauce.Title,
+                    MatchedRecipeSlug: oldSauce.Slug,
+                    CreateNewFoodItem: false
+                ),
+            ],
+            Steps:
+            [
+                new IngestionDraftStepDto(SectionName: null, Instruction: "Bake ziti with sauce."),
+            ]
+        );
+
+        var saveUnlinkedRes = await _client.PutAsJsonAsync(
+            $"/api/ingestion/jobs/{job.Id}/draft",
+            unlinkedDraft
+        );
+        Assert.AreEqual(HttpStatusCode.OK, saveUnlinkedRes.StatusCode);
+        var unlinkedDetail =
+            await saveUnlinkedRes.Content.ReadFromJsonAsync<IngestionJobDetailDto>();
+        Assert.IsNotNull(unlinkedDetail?.ExtractedDraft?.Ingredients);
+        Assert.IsNull(unlinkedDetail.ExtractedDraft.Ingredients[0].MatchedRecipeId);
+
+        // Approve draft where title was edited to Fresh Basil Marinara while stale MatchedRecipeId still pointed at Old Tomato Sauce
+        var editedDraft = unlinkedDraft with
+        {
+            Ingredients =
+            [
+                unlinkedDraft.Ingredients![0] with
+                {
+                    DisplayName = newMarinara.Title,
+                    ReferencedRecipeTitle = newMarinara.Title,
+                    MatchedRecipeId = oldSauce.Id,
+                    MatchedRecipeTitle = oldSauce.Title,
+                    MatchedRecipeSlug = oldSauce.Slug,
+                },
+            ],
+        };
+
+        var approveRes = await _client.PostAsJsonAsync(
+            $"/api/ingestion/jobs/{job.Id}/approve",
+            editedDraft
+        );
+        Assert.AreEqual(HttpStatusCode.Created, approveRes.StatusCode);
+        var published = await approveRes.Content.ReadFromJsonAsync<RecipeDetailDto>();
+        Assert.IsNotNull(published);
+        Assert.AreEqual(newMarinara.Id, published.Ingredients[0].LinkedRecipeId);
+        Assert.IsNull(published.Ingredients[0].UnresolvedRecipeTitle);
+    }
+
     private class ThrowingCreateRecipeServiceProxy : System.Reflection.DispatchProxy
     {
         protected override object? Invoke(
