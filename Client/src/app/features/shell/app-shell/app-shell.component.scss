@@ -199,17 +199,6 @@
   display: none;
 }
 
-.user-profile-btn {
-  min-width: 44px;
-  min-height: 40px;
-  padding-inline: 0.6rem;
-  border-radius: 9999px;
-}
-
-.user-avatar-icon {
-  margin: 0 !important;
-}
-
 .user-name {
   display: none;
 }
@@ -394,18 +383,6 @@
 
   .mobile-search-btn {
     display: inline-flex;
-  }
-
-  .user-profile-btn {
-    padding: 0 !important;
-    min-width: 40px !important;
-    width: 40px;
-    height: 40px;
-
-    .user-avatar-icon,
-    mat-icon {
-      margin: 0 !important;
-    }
   }
 
   .top-bar:has(.active-timer-nav-pill) .brand-title {

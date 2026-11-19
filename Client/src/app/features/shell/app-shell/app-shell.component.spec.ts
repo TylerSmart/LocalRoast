@@ -169,6 +169,16 @@ describe('AppShellComponent', () => {
     expect(mockAuthService.retryConnectionNow).toHaveBeenCalledTimes(1);
   });
 
+  it('renders account menu trigger as a mat-icon-button matching the theme switcher', () => {
+    const accountBtn = fixture.nativeElement.querySelector(
+      'button.user-profile-btn',
+    ) as HTMLButtonElement | null;
+    expect(accountBtn).toBeTruthy();
+    expect(accountBtn?.hasAttribute('mat-icon-button')).toBe(true);
+    expect(accountBtn?.querySelector('mat-icon')?.textContent?.trim()).toBe('account_circle');
+    expect(accountBtn?.querySelector('.user-name')?.textContent?.trim()).toBe('chef');
+  });
+
   it('refreshes ingestion summary when backend recovers', () => {
     mockIngestionService.refreshSummary.mockClear();
 

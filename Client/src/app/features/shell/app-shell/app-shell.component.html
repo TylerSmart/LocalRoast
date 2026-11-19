@@ -134,12 +134,13 @@
 
       <!-- User Menu -->
       <button
-        mat-button
+        mat-icon-button
         class="user-profile-btn"
         [matMenuTriggerFor]="userMenu"
         aria-label="User profile and account options"
+        [matTooltip]="authService.currentUser()?.username || 'Account'"
       >
-        <mat-icon class="user-avatar-icon">account_circle</mat-icon>
+        <mat-icon>account_circle</mat-icon>
         <span class="user-name">{{ authService.currentUser()?.username || 'User' }}</span>
       </button>
       <mat-menu #userMenu="matMenu">
