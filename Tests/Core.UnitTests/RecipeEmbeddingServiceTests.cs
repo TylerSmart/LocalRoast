@@ -1,6 +1,7 @@
 using App.Core.Exceptions;
 using App.Core.FoodCatalog;
 using App.Core.Ingestion;
+using App.Core.MealPlans;
 using App.Core.Recipes;
 using App.Data;
 using App.Data.Entities;
@@ -649,6 +650,199 @@ public sealed class RecipeEmbeddingServiceTests
         Assert.AreEqual(1, result.Candidates.Count);
         Assert.AreEqual(1, result.UnmatchedBuckets.Count);
         Assert.AreEqual("Moroccan tagine", result.UnmatchedBuckets[0]);
+    }
+
+    [TestMethod]
+    public async Task RetrieveMealPlanCandidatesAsync_RandomizedSelection_FiltersNonEntreesForDinnerAndVariesAcrossRuns()
+    {
+        var dinnerTag = new Tag
+        {
+            Id = Guid.NewGuid(),
+            Name = "Dinner",
+            NormalizedName = "dinner",
+            Slug = "dinner",
+            Category = TagCategory.Course,
+        };
+        var dipTag = new Tag
+        {
+            Id = Guid.NewGuid(),
+            Name = "Dip",
+            NormalizedName = "dip",
+            Slug = "dip",
+            Category = TagCategory.Course,
+        };
+        var dessertTag = new Tag
+        {
+            Id = Guid.NewGuid(),
+            Name = "Dessert",
+            NormalizedName = "dessert",
+            Slug = "dessert",
+            Category = TagCategory.Course,
+        };
+        var sideTag = new Tag
+        {
+            Id = Guid.NewGuid(),
+            Name = "Side Dish",
+            NormalizedName = "side-dish",
+            Slug = "side-dish",
+            Category = TagCategory.Course,
+        };
+        _dbContext.Tags.AddRange(dinnerTag, dipTag, dessertTag, sideTag);
+
+        var dinnerIds = new HashSet<Guid>();
+        for (var i = 1; i <= 50; i++)
+        {
+            var r = new Recipe
+            {
+                Id = Guid.NewGuid(),
+                Title = $"Savory Dinner Entree #{i}",
+                Slug = $"savory-dinner-entree-{i}",
+                Status = RecipeStatus.Published,
+            };
+            r.RecipeTags.Add(new RecipeTag { Recipe = r, Tag = dinnerTag });
+            dinnerIds.Add(r.Id);
+            _dbContext.Recipes.Add(r);
+        }
+
+        var hummus = new Recipe
+        {
+            Id = Guid.NewGuid(),
+            Title = "Ultracreamy Hummus",
+            Slug = "ultracreamy-hummus",
+            Status = RecipeStatus.Published,
+        };
+        hummus.RecipeTags.Add(new RecipeTag { Recipe = hummus, Tag = dipTag });
+
+        var pie = new Recipe
+        {
+            Id = Guid.NewGuid(),
+            Title = "Blueberry Pie",
+            Slug = "blueberry-pie",
+            Status = RecipeStatus.Published,
+        };
+        pie.RecipeTags.Add(new RecipeTag { Recipe = pie, Tag = dessertTag });
+
+        var side = new Recipe
+        {
+            Id = Guid.NewGuid(),
+            Title = "Garlic Roasted Asparagus",
+            Slug = "garlic-roasted-asparagus",
+            Status = RecipeStatus.Published,
+        };
+        side.RecipeTags.Add(new RecipeTag { Recipe = side, Tag = sideTag });
+
+        _dbContext.Recipes.AddRange(hummus, pie, side);
+        await _dbContext.SaveChangesAsync();
+
+        var serviceA = new RecipeEmbeddingService(_dbContext, _llmClient, random: new Random(17));
+        var serviceB = new RecipeEmbeddingService(_dbContext, _llmClient, random: new Random(99));
+
+        var request = new MealPlanRetrievalRequest(
+            RawUserPrompt: string.Empty,
+            RequestedMealCount: 4,
+            ExcludedRecipeIds: [],
+            RecentlyScheduledRecipeIds: [],
+            ExcludedTerms: [],
+            PrioritizeIngredients: [],
+            GlobalMaxTotalTimeMinutes: null,
+            SearchBuckets: [],
+            UtcNow: DateTimeOffset.UtcNow,
+            DefaultSlot: MealSlot.Dinner,
+            RandomizeSelection: true
+        );
+
+        var runA = await serviceA.RetrieveMealPlanCandidatesAsync(_configWithEmbedding, request);
+        var runB = await serviceB.RetrieveMealPlanCandidatesAsync(_configWithEmbedding, request);
+
+        Assert.AreEqual(0, _llmClient.EmbeddingCallCount);
+        Assert.IsFalse(runA.UsedEmbeddings);
+        Assert.AreEqual(53, runA.TotalEligiblePublishedCount);
+        Assert.AreEqual(36, runA.Candidates.Count);
+        Assert.AreEqual(36, runB.Candidates.Count);
+        Assert.IsTrue(runA.Candidates.All(c => dinnerIds.Contains(c.RecipeId)));
+        Assert.IsFalse(
+            runA.Candidates.Any(c =>
+                c.RecipeId == hummus.Id || c.RecipeId == pie.Id || c.RecipeId == side.Id
+            )
+        );
+        CollectionAssert.AreNotEqual(
+            runA.Candidates.Select(c => c.RecipeId).ToArray(),
+            runB.Candidates.Select(c => c.RecipeId).ToArray()
+        );
+
+        // Hummus IS eligible when explicitly planning SnackPrep
+        var snackRun = await serviceA.RetrieveMealPlanCandidatesAsync(
+            _configWithEmbedding,
+            request with
+            {
+                DefaultSlot = MealSlot.SnackPrep,
+            }
+        );
+        Assert.IsTrue(snackRun.Candidates.Any(c => c.RecipeId == hummus.Id));
+    }
+
+    [TestMethod]
+    public async Task RetrieveMealPlanCandidatesAsync_RandomizedSelection_FallsBackToTier3OnSmallCookbook()
+    {
+        var dinnerTag = new Tag
+        {
+            Id = Guid.NewGuid(),
+            Name = "Dinner",
+            NormalizedName = "dinner",
+            Slug = "dinner",
+            Category = TagCategory.Course,
+        };
+        var dipTag = new Tag
+        {
+            Id = Guid.NewGuid(),
+            Name = "Dip",
+            NormalizedName = "dip",
+            Slug = "dip",
+            Category = TagCategory.Course,
+        };
+        _dbContext.Tags.AddRange(dinnerTag, dipTag);
+
+        var chicken = new Recipe
+        {
+            Id = Guid.NewGuid(),
+            Title = "Roast Chicken",
+            Slug = "roast-chicken",
+            Status = RecipeStatus.Published,
+        };
+        chicken.RecipeTags.Add(new RecipeTag { Recipe = chicken, Tag = dinnerTag });
+
+        var hummus = new Recipe
+        {
+            Id = Guid.NewGuid(),
+            Title = "Ultracreamy Hummus",
+            Slug = "ultracreamy-hummus",
+            Status = RecipeStatus.Published,
+        };
+        hummus.RecipeTags.Add(new RecipeTag { Recipe = hummus, Tag = dipTag });
+
+        _dbContext.Recipes.AddRange(chicken, hummus);
+        await _dbContext.SaveChangesAsync();
+
+        var result = await _service.RetrieveMealPlanCandidatesAsync(
+            _configWithEmbedding,
+            new MealPlanRetrievalRequest(
+                RawUserPrompt: string.Empty,
+                RequestedMealCount: 2,
+                ExcludedRecipeIds: [],
+                RecentlyScheduledRecipeIds: [],
+                ExcludedTerms: [],
+                PrioritizeIngredients: [],
+                GlobalMaxTotalTimeMinutes: null,
+                SearchBuckets: [],
+                UtcNow: DateTimeOffset.UtcNow,
+                DefaultSlot: MealSlot.Dinner,
+                RandomizeSelection: true
+            )
+        );
+
+        Assert.AreEqual(2, result.Candidates.Count);
+        Assert.IsTrue(result.Candidates.Any(c => c.RecipeId == chicken.Id));
+        Assert.IsTrue(result.Candidates.Any(c => c.RecipeId == hummus.Id));
     }
 
     private static float[] BuildSemanticVector(string text)

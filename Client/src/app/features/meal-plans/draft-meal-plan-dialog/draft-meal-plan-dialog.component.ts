@@ -128,12 +128,13 @@ export class DraftMealPlanDialogComponent {
   );
 
   selectPreset(preset: string): void {
-    this.prompt.set(preset);
+    this.prompt.set(this.prompt() === preset ? '' : preset);
   }
 
   submitDraft(): void {
+    if (this.isBusy()) return;
+
     const promptText = this.prompt().trim();
-    if (!promptText || this.isBusy()) return;
 
     this.isLoading.set(true);
     this.errorMessage.set(null);

@@ -873,6 +873,55 @@ public sealed class AiKitchenHelperServiceTests
         );
     }
 
+    [TestMethod]
+    public async Task DraftWeeklyMealPlanAsync_BlankPrompt_SkipsStage1DecompositionAndSuppressesUnmetNotes()
+    {
+        var recipes = await SeedDraftRecipesAsync();
+        _llmClient.DraftResult = new LlmDraftMealPlanPayload(
+            Proposals:
+            [
+                new LlmDraftMealProposalItem(
+                    CatalogIndex: 0,
+                    RecipeTitle: recipes[0].Title,
+                    DayOffset: 0,
+                    Slot: "Dinner",
+                    IsOnDeck: false,
+                    TargetServings: 4,
+                    Rationale: ""
+                ),
+            ],
+            UnmetCravingNotes: ["Spurious note that should be suppressed when no cravings exist."]
+        );
+
+        var response = await _service.DraftWeeklyMealPlanAsync(
+            new DraftWeeklyMealPlanRequest(Prompt: null, MealCount: 1, ServingsPerMeal: 2)
+        );
+
+        Assert.IsNull(_llmClient.LastQueryAnalysisContext);
+        Assert.IsNotNull(_llmClient.LastDraftContext);
+        Assert.AreEqual(string.Empty, _llmClient.LastDraftContext.UserPrompt);
+        Assert.IsNull(_llmClient.LastDraftContext.BucketSummaries);
+        Assert.AreEqual(1, response.Candidates.Count);
+        Assert.AreEqual(recipes[0].Id, response.Candidates[0].RecipeId);
+        Assert.AreEqual(
+            "Selected as a varied Dinner pick from your cookbook.",
+            response.Candidates[0].Rationale
+        );
+        Assert.IsNull(response.UnmetCravingNotes);
+
+        var whitespaceResponse = await _service.DraftWeeklyMealPlanAsync(
+            new DraftWeeklyMealPlanRequest(Prompt: "   ", MealCount: 1, ServingsPerMeal: 2)
+        );
+        Assert.IsNull(_llmClient.LastQueryAnalysisContext);
+        Assert.AreEqual(1, whitespaceResponse.Candidates.Count);
+
+        await Assert.ThrowsAsync<DomainValidationException>(() =>
+            _service.DraftWeeklyMealPlanAsync(
+                new DraftWeeklyMealPlanRequest(Prompt: new string('a', 601), MealCount: 1)
+            )
+        );
+    }
+
     private async Task<Recipe[]> SeedDraftRecipesAsync()
     {
         var recipes = Enumerable

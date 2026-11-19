@@ -655,6 +655,7 @@ public sealed class LlmExtractionClient(
 
         var systemPrompt = BuildDraftMealPlanSystemPrompt();
         var userPrompt = BuildDraftMealPlanUserPrompt(context);
+        var isSurpriseDraft = string.IsNullOrWhiteSpace(context.UserPrompt);
 
         var responseContent = await SendStructuredTextChatAsync(
             config,
@@ -662,7 +663,7 @@ public sealed class LlmExtractionClient(
             GetDraftMealPlanJsonSchema(),
             systemPrompt,
             userPrompt,
-            temperature: 0.2,
+            temperature: isSurpriseDraft ? 0.6 : 0.2,
             cancellationToken
         );
 
@@ -1823,9 +1824,10 @@ Your goal is to suggest a cohesive, satisfying weekly meal plan for a household 
 Strict Rules:
 1. You MUST ONLY propose recipes from the provided Household Cookbook Catalog using their exact integer "catalogIndex".
 2. NEVER invent, hallucinate, or suggest any recipe that is not listed in the catalog.
-3. Respect the user's prompt constraints (e.g. max time, vegetarian, high-rated, specific proteins, busy weeknights, prioritized on-hand ingredients).
-4. Minimize grocery waste by favoring combinations of recipes that share perishable ingredients (produce, fresh herbs, proteins, dairy) while keeping the week varied and avoiding recipes cooked very recently.
-5. For each proposal:
+3. Respect the user's prompt constraints when provided (e.g. max time, vegetarian, high-rated, specific proteins, busy weeknights, prioritized on-hand ingredients). When no specific preferences are provided, surprise the household with a varied, well-balanced mix of cuisines, proteins, and cooking styles.
+4. Choose complete, satisfying meals appropriate for the requested Default Meal Slot (for example, for Dinner or Lunch pick hearty main dishes/entrees and NEVER suggest standalone dips, sauces, condiments, dressings, desserts, beverages, or small side dishes as a meal unless explicitly requested).
+5. Minimize grocery waste by favoring combinations of recipes that share perishable ingredients (produce, fresh herbs, proteins, dairy) while keeping the week varied and avoiding recipes cooked very recently.
+6. For each proposal:
    - "catalogIndex": The integer index of the recipe from the catalog (1-based).
    - "recipeTitle": Title of the recipe matching the catalog.
    - "dayOffset": Offset from the supplied start date: 0 is the start date, through 6 (or null if placed on-deck). Never propose a past date.
@@ -1833,8 +1835,8 @@ Strict Rules:
    - "isOnDeck": True if placed in the flexible weekly On-Deck tray, otherwise false.
    - "targetServings": Servings to cook (defaults to the recipe's base servings).
    - "rationale": Short explanation of why this recipe fits the plan, prompt, or shared ingredients.
-6. Return exactly the requested number of cooking suggestions, preferably distinct recipes. The application schedules cooking and leftover days and scales servings; do not add extra proposals for leftovers.
-7. Optionally include "unmetCravingNotes": short notes ONLY when a specific cuisine or craving in the user's prompt had no strong matches in the provided cookbook candidates. Leave empty when the prompt is well satisfied.
+7. Return exactly the requested number of cooking suggestions, preferably distinct recipes. The application schedules cooking and leftover days and scales servings; do not add extra proposals for leftovers.
+8. Optionally include "unmetCravingNotes": short notes ONLY when a specific cuisine or craving in the user's prompt had no strong matches in the provided cookbook candidates. Leave empty when no preferences were provided or when the prompt is well satisfied.
 """;
     }
 
@@ -1844,9 +1846,13 @@ Strict Rules:
             $"[{c.CatalogIndex}] {c.Title} | BaseServings: {c.BaseServings} | Time: {(c.TotalTimeMinutes.HasValue ? $"{c.TotalTimeMinutes}m" : "N/A")} | Difficulty: {c.Difficulty ?? "N/A"} | Rating: {(c.AverageRating.HasValue ? $"★{c.AverageRating:F1}" : "Unrated")} | Cooked: {c.TimesCooked}x (Last: {(c.DaysSinceLastCooked.HasValue ? $"{c.DaysSinceLastCooked}d ago" : "Never")}) | Tags: {(c.Tags.Count > 0 ? string.Join(", ", c.Tags) : "None")} | Ingredients: {(c.KeyIngredients.Count > 0 ? string.Join(", ", c.KeyIngredients) : "N/A")}"
         );
 
+        var effectivePrompt = string.IsNullOrWhiteSpace(context.UserPrompt)
+            ? $"No specific preferences — surprise the household with a varied, well-balanced set of complete {context.DefaultSlotName} meals from the catalog."
+            : context.UserPrompt.Trim();
+
         var sb = new StringBuilder();
         sb.AppendLine($"Seven-Day Period Starts: {context.WeekStartDate:yyyy-MM-dd}");
-        sb.AppendLine($"User Request / Constraints: {context.UserPrompt}");
+        sb.AppendLine($"User Request / Constraints: {effectivePrompt}");
         sb.AppendLine(
             $"Requested Number of Cooking Occasions (not counting leftovers): {context.RequestedMealCount}"
         );

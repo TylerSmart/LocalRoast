@@ -1,4 +1,5 @@
 using App.Core.Ingestion;
+using App.Core.MealPlans;
 
 namespace App.Core.Recipes;
 
@@ -19,7 +20,9 @@ public record MealPlanRetrievalRequest(
     IReadOnlyList<string> PrioritizeIngredients,
     int? GlobalMaxTotalTimeMinutes,
     IReadOnlyList<MealPlanSearchBucketInput> SearchBuckets,
-    DateTimeOffset UtcNow
+    DateTimeOffset UtcNow,
+    MealSlot? DefaultSlot = null,
+    bool RandomizeSelection = false
 );
 
 public record MealPlanRetrievalResult(

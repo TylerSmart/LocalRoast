@@ -108,17 +108,42 @@ describe('DraftMealPlanDialogComponent', () => {
   });
   afterEach(() => vi.useRealTimers());
 
-  it('initializes with default values', () => {
+  it('initializes with default values and enables Draft Plan without a prompt', () => {
     expect(component.prompt()).toBe('');
     expect(component.mealCount()).toBe(4);
     expect(component.defaultSlot()).toBe('Dinner');
     expect(component.placeOnDeck()).toBe(false);
     expect(component.candidateItems().length).toBe(0);
+
+    const submitBtn = (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>(
+      '.draft-submit-btn',
+    );
+    expect(submitBtn?.disabled).toBe(false);
   });
 
-  it('sets prompt when selecting a preset chip', () => {
+  it('toggles prompt when selecting and deselecting a preset chip', () => {
     component.selectPreset('Quick weeknight dinners (<30 min)');
     expect(component.prompt()).toBe('Quick weeknight dinners (<30 min)');
+
+    component.selectPreset('Quick weeknight dinners (<30 min)');
+    expect(component.prompt()).toBe('');
+  });
+
+  it('submits a surprise draft when preferences prompt is left blank', () => {
+    component.submitDraft();
+
+    expect(mockAiHelperService.draftWeeklyMealPlan).toHaveBeenCalledWith({
+      weekStartDate: '2026-11-02',
+      prompt: '',
+      mealCount: 4,
+      defaultSlot: 'Dinner',
+      placeOnDeck: false,
+      servingsPerMeal: 4,
+      todayDate: '2026-11-01',
+    });
+
+    expect(component.candidateItems().length).toBe(2);
+    expect(component.selectedCount()).toBe(2);
   });
 
   it('calls aiHelper.draftWeeklyMealPlan on submit and populates candidates', () => {

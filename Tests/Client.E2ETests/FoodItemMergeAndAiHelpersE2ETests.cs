@@ -16,6 +16,8 @@ public sealed class MockKitchenAiOllamaServer : IAsyncDisposable
     public string BaseUrl { get; }
     public bool SimulateOffline { get; set; }
     public string? LastKitchenPrompt { get; private set; }
+    public string? LastDraftUserPrompt { get; private set; }
+    public int DecomposeCallCount { get; private set; }
     public string[]? UnmetCravingNotes { get; set; }
 
     private MockKitchenAiOllamaServer(WebApplication app, string baseUrl)
@@ -104,6 +106,7 @@ public sealed class MockKitchenAiOllamaServer : IAsyncDisposable
                 }
                 else if (formatProperties.TryGetProperty("searchBuckets", out _))
                 {
+                    server.DecomposeCallCount++;
                     var userMsg = body
                         .RootElement.GetProperty("messages")
                         .EnumerateArray()
@@ -147,6 +150,7 @@ public sealed class MockKitchenAiOllamaServer : IAsyncDisposable
                         .Last(m => m.GetProperty("role").GetString() == "user")
                         .GetProperty("content")
                         .GetString()!;
+                    server.LastDraftUserPrompt = prompt;
                     var requested = int.Parse(
                         Regex
                             .Match(
@@ -664,21 +668,25 @@ public sealed class FoodItemMergeAndAiHelpersE2ETests : E2ETestBase
         var draftDialog = Page.Locator("app-draft-meal-plan-dialog");
         await Expect(draftDialog).ToBeVisibleAsync();
 
-        // 2. Select Preset Idea Chip
-        var presetChip = draftDialog.Locator(".preset-chip").First;
-        await presetChip.ClickAsync();
+        // 2. Verify Draft Plan is immediately enabled with blank preferences and runs surprise draft (skipping Stage 1)
+        var draftSubmitBtn = draftDialog.Locator(".draft-submit-btn");
+        await Expect(draftSubmitBtn).ToBeEnabledAsync();
         await draftDialog.Locator(".meal-count-field mat-select").ClickAsync();
         await Page.GetByRole(AriaRole.Option, new() { Name = "2", Exact = true }).ClickAsync();
         await draftDialog.Locator(".household-servings-input").FillAsync("2");
 
-        // Click Draft Plan
-        var draftSubmitBtn = draftDialog.Locator(".draft-submit-btn");
-        await Expect(draftSubmitBtn).ToBeEnabledAsync();
+        // Click Draft Plan without entering a prompt
         await draftSubmitBtn.ClickAsync();
 
         // Verify Candidate Cards are rendered
         var candidateCards = draftDialog.Locator(".candidate-card");
         await Expect(candidateCards).ToHaveCountAsync(2, new() { Timeout = 10000 });
+        Assert.AreEqual(0, mockServer.DecomposeCallCount);
+        Assert.IsNotNull(mockServer.LastDraftUserPrompt);
+        StringAssert.Contains(
+            mockServer.LastDraftUserPrompt,
+            "No specific preferences — surprise the household"
+        );
         await Expect(draftDialog.Locator(".candidate-title").First)
             .ToContainTextAsync("Tuscan Garlic Chicken");
         await Expect(draftDialog.Locator(".candidate-rationale").First)
@@ -757,6 +765,7 @@ public sealed class FoodItemMergeAndAiHelpersE2ETests : E2ETestBase
         await Page.GetByRole(AriaRole.Option, new() { Name = "1", Exact = true }).ClickAsync();
         await draftDialog.Locator(".draft-submit-btn").ClickAsync();
         await Expect(draftDialog.Locator(".candidate-card")).ToHaveCountAsync(1);
+        Assert.IsGreaterThanOrEqualTo(1, mockServer.DecomposeCallCount);
         await Expect(draftDialog.Locator("[data-testid='unmet-cravings-banner']"))
             .ToContainTextAsync("Thai curry");
         mockServer.UnmetCravingNotes = null;

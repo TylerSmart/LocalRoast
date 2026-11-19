@@ -20,7 +20,8 @@
   <mat-dialog-content class="dialog-content">
     <div class="generator-section">
       <p class="section-desc">
-        Ask your local AI assistant to recommend a grounded schedule from your cookbook recipes.
+        Let your local AI assistant draft a grounded, varied meal schedule from your cookbook. Leave
+        preferences blank for a surprise mix, or describe what you're in the mood for.
       </p>
 
       <div class="preset-chips-section">
@@ -32,6 +33,7 @@
               class="preset-chip"
               (click)="selectPreset(preset)"
               [class.is-active]="prompt() === preset"
+              [attr.aria-pressed]="prompt() === preset"
             >
               {{ preset }}
             </button>
@@ -41,14 +43,14 @@
 
       <div class="prompt-box">
         <mat-form-field appearance="outline" class="w-full" subscriptSizing="dynamic">
-          <mat-label>Plan preferences or dietary prompt</mat-label>
+          <mat-label>Preferences or cravings (optional)</mat-label>
           <textarea
             matInput
             rows="2"
             class="prompt-input"
             [ngModel]="prompt()"
             (ngModelChange)="prompt.set($event)"
-            placeholder="e.g. Quick 30-minute meals for busy weeknights with high protein..."
+            placeholder="Leave blank for a varied surprise plan, or e.g. quick 30-minute dinners..."
           ></textarea>
         </mat-form-field>
       </div>
@@ -106,7 +108,7 @@
           color="primary"
           class="draft-submit-btn"
           (click)="submitDraft()"
-          [disabled]="isBusy() || !prompt().trim()"
+          [disabled]="isBusy()"
         >
           @if (isLoading()) {
             <mat-spinner diameter="18" class="inline-spinner"></mat-spinner>

@@ -50,7 +50,7 @@ public record KitchenAnswerDto(string Answer, string ModelUsed);
 
 public record DraftWeeklyMealPlanRequest(
     DateOnly? WeekStartDate = null,
-    [Required, MaxLength(600)] string Prompt = "",
+    [MaxLength(600)] string? Prompt = null,
     [Range(1, 14)] int MealCount = 4,
     MealSlot DefaultSlot = MealSlot.Dinner,
     bool PlaceOnDeck = false,

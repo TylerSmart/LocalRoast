@@ -2009,4 +2009,93 @@ public sealed class LlmExtractionClientTests
         Assert.AreEqual(1, payload.UnmetCravingNotes!.Count);
         StringAssert.Contains(payload.UnmetCravingNotes[0], "Moroccan");
     }
+
+    [TestMethod]
+    public async Task DraftWeeklyMealPlanAsync_BlankPrompt_UsesSurpriseGuidanceAndHigherDefaultTemperature()
+    {
+        string? capturedSystemPrompt = null;
+        string? capturedUserPrompt = null;
+        double capturedTemperature = 0;
+
+        var handler = new MockHttpMessageHandler(req =>
+        {
+            using var body = JsonDocument.Parse(req.Content!.ReadAsStringAsync().Result);
+            capturedTemperature = body
+                .RootElement.GetProperty("options")
+                .GetProperty("temperature")
+                .GetDouble();
+            var messages = body.RootElement.GetProperty("messages");
+            capturedSystemPrompt = messages[0].GetProperty("content").GetString();
+            capturedUserPrompt = messages[1].GetProperty("content").GetString();
+
+            return OllamaReply(
+                """
+                {
+                  "proposals": [
+                    {
+                      "catalogIndex": 1,
+                      "recipeTitle": "Tuscan Chicken",
+                      "dayOffset": 0,
+                      "slot": "Dinner",
+                      "isOnDeck": false,
+                      "targetServings": 4,
+                      "rationale": "Balanced main dish for weeknight dinner."
+                    }
+                  ],
+                  "unmetCravingNotes": []
+                }
+                """
+            );
+        });
+
+        var client = new LlmExtractionClient(new HttpClient(handler));
+        var config = new EffectiveLlmConnectionConfig(
+            LlmProvider.Ollama,
+            "http://localhost:11434",
+            null,
+            "qwen2.5:14b",
+            null,
+            "5m",
+            30,
+            false
+        );
+
+        var payload = await client.DraftWeeklyMealPlanAsync(
+            config,
+            new LlmDraftMealPlanContext(
+                WeekStartDate: new DateOnly(2026, 11, 5),
+                UserPrompt: string.Empty,
+                RequestedMealCount: 1,
+                DefaultSlotName: "Dinner",
+                PlaceOnDeck: false,
+                ExistingWeekScheduleLines: [],
+                CookbookCatalog:
+                [
+                    new LlmCookbookRecipeCandidate(
+                        1,
+                        Guid.NewGuid(),
+                        "Tuscan Chicken",
+                        4m,
+                        30,
+                        "Easy",
+                        ["Dinner", "Main Course"],
+                        ["Spinach", "Chicken Breast"],
+                        4.8m,
+                        3,
+                        18
+                    ),
+                ]
+            )
+        );
+
+        Assert.AreEqual(0.6, capturedTemperature, 0.001);
+        Assert.IsNotNull(capturedSystemPrompt);
+        StringAssert.Contains(capturedSystemPrompt, "NEVER suggest standalone dips");
+        Assert.IsNotNull(capturedUserPrompt);
+        StringAssert.Contains(
+            capturedUserPrompt,
+            "No specific preferences — surprise the household"
+        );
+        Assert.AreEqual(1, payload.Proposals!.Count);
+    }
 }

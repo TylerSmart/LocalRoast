@@ -311,10 +311,7 @@ public sealed class AiKitchenHelperService(
         ArgumentNullException.ThrowIfNull(request);
 
         var prompt = request.Prompt?.Trim() ?? string.Empty;
-        if (string.IsNullOrWhiteSpace(prompt))
-        {
-            throw new DomainValidationException("Prompt is required.");
-        }
+        var isSurpriseDraft = string.IsNullOrWhiteSpace(prompt);
 
         if (prompt.Length > 600)
         {
@@ -411,79 +408,87 @@ public sealed class AiKitchenHelperService(
 
         queueSignal?.PreemptBackgroundWork();
 
-        // Stage 1: Decompose natural-language mood prompt into exclusions, priorities, and search buckets
-        var analysis = await llmClient.DecomposeMealPlanPromptAsync(
-            config,
-            new LlmMealPlanQueryAnalysisContext(
-                UserPrompt: prompt,
-                RequestedMealCount: requestedMealCount,
-                DefaultSlotName: request.DefaultSlot.ToString()
-            ),
-            cancellationToken
-        );
+        List<string> excludedTerms = [];
+        List<string> prioritizeIngredients = [];
+        int? globalMaxTime = null;
+        List<MealPlanSearchBucketInput> searchBuckets = [];
 
-        var excludedTerms = (analysis.ExcludedTerms ?? [])
-            .Where(t => !string.IsNullOrWhiteSpace(t))
-            .Select(t => t.Trim())
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Take(20)
-            .ToList();
-
-        var prioritizeIngredients = (analysis.PrioritizeIngredients ?? [])
-            .Where(t => !string.IsNullOrWhiteSpace(t))
-            .Select(t => t.Trim())
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Take(12)
-            .ToList();
-
-        var globalMaxTime = analysis.MaxTotalTimeMinutes is int gMax and > 0 and <= 1440
-            ? gMax
-            : (int?)null;
-
-        var searchBuckets = (analysis.SearchBuckets ?? [])
-            .Where(b =>
-                b is not null
-                && (
-                    !string.IsNullOrWhiteSpace(b.SemanticQuery)
-                    || !string.IsNullOrWhiteSpace(b.BucketName)
-                    || (b.SuggestedTags?.Count ?? 0) > 0
-                )
-            )
-            .Take(4)
-            .Select(b => new MealPlanSearchBucketInput(
-                BucketName: !string.IsNullOrWhiteSpace(b.BucketName)
-                    ? b.BucketName.Trim()
-                    : (b.SemanticQuery?.Trim() ?? "Requested meals"),
-                SemanticQuery: !string.IsNullOrWhiteSpace(b.SemanticQuery)
-                    ? b.SemanticQuery.Trim()
-                    : (b.BucketName?.Trim() ?? prompt),
-                SuggestedTags: (b.SuggestedTags ?? [])
-                    .Where(t => !string.IsNullOrWhiteSpace(t))
-                    .Select(t => t.Trim())
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .Take(6)
-                    .ToList(),
-                MaxTotalTimeMinutes: b.MaxTotalTimeMinutes is int bMax and > 0 and <= 1440
-                    ? bMax
-                    : null,
-                DesiredCount: Math.Clamp(b.DesiredCount ?? 1, 1, requestedMealCount)
-            ))
-            .ToList();
-
-        if (searchBuckets.Count == 0)
+        if (!isSurpriseDraft)
         {
-            searchBuckets.Add(
-                new MealPlanSearchBucketInput(
-                    BucketName: "Requested meals",
-                    SemanticQuery: prompt,
-                    SuggestedTags: [],
-                    MaxTotalTimeMinutes: globalMaxTime,
-                    DesiredCount: requestedMealCount
-                )
+            // Stage 1: Decompose natural-language mood prompt into exclusions, priorities, and search buckets
+            var analysis = await llmClient.DecomposeMealPlanPromptAsync(
+                config,
+                new LlmMealPlanQueryAnalysisContext(
+                    UserPrompt: prompt,
+                    RequestedMealCount: requestedMealCount,
+                    DefaultSlotName: request.DefaultSlot.ToString()
+                ),
+                cancellationToken
             );
+
+            excludedTerms = (analysis.ExcludedTerms ?? [])
+                .Where(t => !string.IsNullOrWhiteSpace(t))
+                .Select(t => t.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(20)
+                .ToList();
+
+            prioritizeIngredients = (analysis.PrioritizeIngredients ?? [])
+                .Where(t => !string.IsNullOrWhiteSpace(t))
+                .Select(t => t.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(12)
+                .ToList();
+
+            globalMaxTime = analysis.MaxTotalTimeMinutes is int gMax and > 0 and <= 1440
+                ? gMax
+                : null;
+
+            searchBuckets = (analysis.SearchBuckets ?? [])
+                .Where(b =>
+                    b is not null
+                    && (
+                        !string.IsNullOrWhiteSpace(b.SemanticQuery)
+                        || !string.IsNullOrWhiteSpace(b.BucketName)
+                        || (b.SuggestedTags?.Count ?? 0) > 0
+                    )
+                )
+                .Take(4)
+                .Select(b => new MealPlanSearchBucketInput(
+                    BucketName: !string.IsNullOrWhiteSpace(b.BucketName)
+                        ? b.BucketName.Trim()
+                        : (b.SemanticQuery?.Trim() ?? "Requested meals"),
+                    SemanticQuery: !string.IsNullOrWhiteSpace(b.SemanticQuery)
+                        ? b.SemanticQuery.Trim()
+                        : (b.BucketName?.Trim() ?? prompt),
+                    SuggestedTags: (b.SuggestedTags ?? [])
+                        .Where(t => !string.IsNullOrWhiteSpace(t))
+                        .Select(t => t.Trim())
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .Take(6)
+                        .ToList(),
+                    MaxTotalTimeMinutes: b.MaxTotalTimeMinutes is int bMax and > 0 and <= 1440
+                        ? bMax
+                        : null,
+                    DesiredCount: Math.Clamp(b.DesiredCount ?? 1, 1, requestedMealCount)
+                ))
+                .ToList();
+
+            if (searchBuckets.Count == 0)
+            {
+                searchBuckets.Add(
+                    new MealPlanSearchBucketInput(
+                        BucketName: "Requested meals",
+                        SemanticQuery: prompt,
+                        SuggestedTags: [],
+                        MaxTotalTimeMinutes: globalMaxTime,
+                        DesiredCount: requestedMealCount
+                    )
+                );
+            }
         }
 
-        // Stage 2: Deterministic exclusions + hybrid RecipeEmbedding search + perishable synergy
+        // Stage 2: Deterministic exclusions + hybrid RecipeEmbedding search (or slot-aware randomized sample when prompt is blank) + perishable synergy
         var retrieval = await _recipeEmbeddingService.RetrieveMealPlanCandidatesAsync(
             config,
             new MealPlanRetrievalRequest(
@@ -495,7 +500,9 @@ public sealed class AiKitchenHelperService(
                 PrioritizeIngredients: prioritizeIngredients,
                 GlobalMaxTotalTimeMinutes: globalMaxTime,
                 SearchBuckets: searchBuckets,
-                UtcNow: now
+                UtcNow: now,
+                DefaultSlot: request.DefaultSlot,
+                RandomizeSelection: isSurpriseDraft
             ),
             cancellationToken
         );
@@ -535,9 +542,11 @@ public sealed class AiKitchenHelperService(
             PlaceOnDeck: request.PlaceOnDeck,
             ExistingWeekScheduleLines: existingLines,
             CookbookCatalog: catalogList,
-            BucketSummaries: bucketSummaries,
-            PrioritizeIngredients: prioritizeIngredients,
-            UnmatchedBuckets: retrieval.UnmatchedBuckets
+            BucketSummaries: bucketSummaries.Count > 0 ? bucketSummaries : null,
+            PrioritizeIngredients: prioritizeIngredients.Count > 0 ? prioritizeIngredients : null,
+            UnmatchedBuckets: retrieval.UnmatchedBuckets.Count > 0
+                ? retrieval.UnmatchedBuckets
+                : null
         );
 
         var payload = await llmClient.DraftWeeklyMealPlanAsync(
@@ -636,7 +645,11 @@ public sealed class AiKitchenHelperService(
 
             var rationale = !string.IsNullOrWhiteSpace(p.Rationale)
                 ? p.Rationale.Trim()
-                : $"Selected based on your request: {prompt}";
+                : (
+                    isSurpriseDraft
+                        ? $"Selected as a varied {request.DefaultSlot} pick from your cookbook."
+                        : $"Selected based on your request: {prompt}"
+                );
 
             resultCandidates.Add(
                 new DraftMealPlanCandidateDto(
@@ -665,24 +678,29 @@ public sealed class AiKitchenHelperService(
             );
         }
 
-        var unmetCravingNotes = (payload.UnmetCravingNotes ?? [])
-            .Where(n => !string.IsNullOrWhiteSpace(n))
-            .Select(n => n.Trim())
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        var unmetCravingNotes = isSurpriseDraft
+            ? []
+            : (payload.UnmetCravingNotes ?? [])
+                .Where(n => !string.IsNullOrWhiteSpace(n))
+                .Select(n => n.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
 
-        foreach (var bucket in retrieval.UnmatchedBuckets)
+        if (!isSurpriseDraft)
         {
-            if (
-                !string.IsNullOrWhiteSpace(bucket)
-                && !unmetCravingNotes.Any(n =>
-                    n.Contains(bucket, StringComparison.OrdinalIgnoreCase)
-                )
-            )
+            foreach (var bucket in retrieval.UnmatchedBuckets)
             {
-                unmetCravingNotes.Add(
-                    $"Limited cookbook matches found for \"{bucket}\"; substituted the closest available recipes."
-                );
+                if (
+                    !string.IsNullOrWhiteSpace(bucket)
+                    && !unmetCravingNotes.Any(n =>
+                        n.Contains(bucket, StringComparison.OrdinalIgnoreCase)
+                    )
+                )
+                {
+                    unmetCravingNotes.Add(
+                        $"Limited cookbook matches found for \"{bucket}\"; substituted the closest available recipes."
+                    );
+                }
             }
         }
 

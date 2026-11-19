@@ -48,7 +48,7 @@ export interface KitchenAnswerDto {
 
 export interface DraftWeeklyMealPlanRequest {
   weekStartDate?: string | null;
-  prompt: string;
+  prompt?: string | null;
   mealCount?: number;
   defaultSlot?: MealSlot;
   placeOnDeck?: boolean;

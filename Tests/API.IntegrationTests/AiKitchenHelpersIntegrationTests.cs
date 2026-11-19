@@ -67,6 +67,7 @@ public sealed class AiKitchenHelpersIntegrationTests
                 ),
             ]);
         public LlmMealPlanQueryAnalysisPayload? QueryAnalysisResult { get; set; }
+        public int DecomposeCallCount { get; private set; }
         public Func<IReadOnlyList<string>, float[][]>? EmbeddingFactory { get; set; }
         public LlmDraftMealPlanContext? LastDraftContext { get; private set; }
         public LlmDraftMealPlanPayload DraftResult { get; set; } =
@@ -140,6 +141,7 @@ public sealed class AiKitchenHelpersIntegrationTests
             CancellationToken cancellationToken = default
         )
         {
+            DecomposeCallCount++;
             if (ThrowUnavailable)
             {
                 throw new LlmHostUnavailableException("Host offline");
@@ -854,5 +856,67 @@ public sealed class AiKitchenHelpersIntegrationTests
         Assert.AreEqual(tacos.Id, draft.Candidates[0].RecipeId);
         Assert.IsNotNull(draft.UnmetCravingNotes);
         Assert.AreEqual(1, draft.UnmetCravingNotes!.Count);
+    }
+
+    [TestMethod]
+    public async Task DraftWeeklyMealPlan_BlankOrOmittedPrompt_ReturnsOkAndSkipsStage1Decomposition()
+    {
+        var fakeLlm = new MockLlmExtractionClient { ThrowUnavailable = false };
+
+        await using var factory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureServices(services =>
+            {
+                var descriptor = services.FirstOrDefault(d =>
+                    d.ServiceType == typeof(ILlmExtractionClient)
+                );
+                if (descriptor != null)
+                {
+                    services.Remove(descriptor);
+                }
+                services.AddSingleton<ILlmExtractionClient>(fakeLlm);
+            });
+        });
+
+        using var client = factory.CreateClient();
+        await AuthenticateAsync(client);
+
+        await client.PutAsJsonAsync(
+            "/api/llm-settings",
+            new UpdateLlmSettingsRequest(
+                Provider: LlmProvider.Ollama,
+                BaseUrl: "http://localhost:11434",
+                ApiKey: null,
+                TextModel: "llama3",
+                VisionModel: null,
+                RequestTimeoutSeconds: 30
+            )
+        );
+
+        var recipeRes = await client.PostAsJsonAsync(
+            "/api/recipes",
+            new UpsertRecipeRequest(Title: "Test Grounded Recipe", BaseServings: 4m)
+        );
+        Assert.AreEqual(HttpStatusCode.Created, recipeRes.StatusCode);
+        var recipe = (await recipeRes.Content.ReadFromJsonAsync<RecipeDetailDto>())!;
+
+        var omittedPromptRes = await client.PostAsJsonAsync(
+            "/api/ai-helpers/draft-meal-plan",
+            new { mealCount = 1, servingsPerMeal = 2 }
+        );
+        Assert.AreEqual(HttpStatusCode.OK, omittedPromptRes.StatusCode);
+        var omittedDraft =
+            await omittedPromptRes.Content.ReadFromJsonAsync<DraftMealPlanResponseDto>();
+        Assert.IsNotNull(omittedDraft);
+        Assert.AreEqual(1, omittedDraft.Candidates.Count);
+        Assert.AreEqual(recipe.Id, omittedDraft.Candidates[0].RecipeId);
+        Assert.AreEqual(0, fakeLlm.DecomposeCallCount);
+
+        var emptyPromptRes = await client.PostAsJsonAsync(
+            "/api/ai-helpers/draft-meal-plan",
+            new DraftWeeklyMealPlanRequest(Prompt: "", MealCount: 1, ServingsPerMeal: 2)
+        );
+        Assert.AreEqual(HttpStatusCode.OK, emptyPromptRes.StatusCode);
+        Assert.AreEqual(0, fakeLlm.DecomposeCallCount);
     }
 }
