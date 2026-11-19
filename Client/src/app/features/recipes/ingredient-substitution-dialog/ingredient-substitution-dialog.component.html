@@ -1,6 +1,8 @@
 <div class="dialog-header">
   <div class="title-row">
-    <mat-icon class="ai-spark-icon">auto_awesome</mat-icon>
+    <span class="dialog-icon-badge" aria-hidden="true">
+      <mat-icon class="ai-spark-icon">auto_awesome</mat-icon>
+    </span>
     <h2 mat-dialog-title class="dialog-title">Ingredient Substitutions</h2>
   </div>
   <button
@@ -16,7 +18,7 @@
 
 <mat-dialog-content class="dialog-content">
   <div class="ingredient-target-banner">
-    <span class="target-label">Target Ingredient:</span>
+    <span class="target-label">Target Ingredient</span>
     <span class="target-value">
       @if (data.scaledAmountDisplay) {
         <strong>{{ data.scaledAmountDisplay }}</strong>
@@ -28,7 +30,7 @@
   <!-- Optional Dietary/Allergy Constraint Input -->
   <div class="constraint-bar">
     <mat-form-field appearance="outline" class="constraint-field" subscriptSizing="dynamic">
-      <mat-label>Dietary preference or pantry constraint (optional)</mat-label>
+      <mat-label>Dietary or pantry note (optional)</mat-label>
       <input
         matInput
         [ngModel]="dietaryNote()"

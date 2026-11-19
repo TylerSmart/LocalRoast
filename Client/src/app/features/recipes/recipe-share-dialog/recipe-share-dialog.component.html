@@ -1,12 +1,14 @@
 <div class="share-dialog-header">
   <div class="header-left">
-    <mat-icon class="header-icon">share</mat-icon>
+    <span class="dialog-icon-badge" aria-hidden="true">
+      <mat-icon class="header-icon">share</mat-icon>
+    </span>
     <div class="header-titles">
       <h2 mat-dialog-title class="dialog-title">Share Recipe</h2>
       <span class="recipe-subtitle">{{ data.recipeTitle }}</span>
     </div>
   </div>
-  <button mat-icon-button (click)="close()" aria-label="Close share dialog">
+  <button mat-icon-button class="close-btn" (click)="close()" aria-label="Close share dialog">
     <mat-icon>close</mat-icon>
   </button>
 </div>

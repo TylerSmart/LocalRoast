@@ -263,7 +263,7 @@
           </div>
         }
         @if (recipe()!.averageRating) {
-          <div class="stat-pill">
+          <div class="stat-pill stat-rating">
             <span class="stat-label">Rating</span>
             <span class="stat-value"
               >★ {{ recipe()!.averageRating | number: '1.1-1' }} ({{
@@ -740,80 +740,88 @@
     </section>
 
     <!-- Cook History Section -->
-    <section class="cook-history-section no-print">
-      <div class="section-header">
-        <div class="header-left">
-          <mat-icon class="section-icon">history_edu</mat-icon>
-          <h2>Household Cook History ({{ recipe()!.cookLogs?.length ?? 0 }})</h2>
+    <section class="cook-history-section no-print" aria-label="Household Cook History">
+      <mat-card class="cook-history-card">
+        <div class="section-header">
+          <div class="header-left">
+            <mat-icon class="section-icon">history_edu</mat-icon>
+            <h2 class="section-title">Household Cook History</h2>
+            <span class="section-count-badge">{{ recipe()!.cookLogs?.length ?? 0 }}</span>
+          </div>
+          <button mat-stroked-button (click)="openCookLogDialog()" aria-label="Log another cook">
+            <mat-icon>add</mat-icon>
+            <span>Log a Cook</span>
+          </button>
         </div>
-        <button mat-stroked-button (click)="openCookLogDialog()" aria-label="Log another cook">
-          <mat-icon>add</mat-icon>
-          <span>Log a Cook</span>
-        </button>
-      </div>
 
-      @if ((recipe()!.cookLogs?.length ?? 0) === 0) {
-        <p class="empty-cook-logs">
-          No cook logs yet. Click "I Made This!" when you cook this dish to track notes and ratings!
-        </p>
-      } @else {
-        <div class="cook-logs-timeline">
-          @for (log of recipe()!.cookLogs!; track log.id) {
-            <div class="cook-log-card">
-              <div class="log-card-header">
-                <div class="log-author-info">
-                  <span class="log-author">{{ log.cookedByDisplayName }}</span>
-                  <span class="log-date">{{ log.cookedAt | date: 'mediumDate' }}</span>
-                  @if (log.servingsMade) {
-                    <span class="log-servings">· Made {{ log.servingsMade }} servings</span>
+        <mat-card-content class="cook-history-content">
+          @if ((recipe()!.cookLogs?.length ?? 0) === 0) {
+            <p class="empty-cook-logs">
+              No cook logs yet. Click "I Made This!" when you cook this dish to track notes and
+              ratings!
+            </p>
+          } @else {
+            <div class="cook-logs-timeline">
+              @for (log of recipe()!.cookLogs!; track log.id) {
+                <div class="cook-log-card">
+                  <div class="log-card-header">
+                    <div class="log-author-info">
+                      <span class="log-author">{{ log.cookedByDisplayName }}</span>
+                      <span class="log-date">{{ log.cookedAt | date: 'mediumDate' }}</span>
+                      @if (log.servingsMade) {
+                        <span class="log-servings">· Made {{ log.servingsMade }} servings</span>
+                      }
+                    </div>
+                    <div class="log-rating-actions">
+                      @if (log.rating) {
+                        <span class="log-rating-stars">★ {{ log.rating }}</span>
+                      }
+                      <button
+                        mat-icon-button
+                        (click)="openCookLogDialog(log)"
+                        aria-label="Edit cook log"
+                        matTooltip="Edit cook log"
+                      >
+                        <mat-icon>edit</mat-icon>
+                      </button>
+                      <button
+                        mat-icon-button
+                        class="delete-log-btn"
+                        (click)="deleteCookLog(log.id)"
+                        aria-label="Delete cook log"
+                        matTooltip="Delete cook log"
+                      >
+                        <mat-icon>delete</mat-icon>
+                      </button>
+                    </div>
+                  </div>
+
+                  @if (log.notes) {
+                    <p class="log-notes">{{ log.notes }}</p>
                   }
-                </div>
-                <div class="log-rating-actions">
-                  @if (log.rating) {
-                    <span class="log-rating-stars">★ {{ log.rating }}</span>
+
+                  @if (log.photoImagePath) {
+                    <div class="log-photo-wrap">
+                      <button
+                        type="button"
+                        class="photo-lightbox-trigger"
+                        (click)="openPhotoLightbox(log.photoImagePath!)"
+                        aria-label="View dish photo full size"
+                      >
+                        <img
+                          [src]="log.photoThumbnailPath || log.photoImagePath"
+                          alt="Cooked dish photo"
+                          class="log-thumb-img"
+                        />
+                      </button>
+                    </div>
                   }
-                  <button
-                    mat-icon-button
-                    (click)="openCookLogDialog(log)"
-                    aria-label="Edit cook log"
-                  >
-                    <mat-icon>edit</mat-icon>
-                  </button>
-                  <button
-                    mat-icon-button
-                    color="warn"
-                    (click)="deleteCookLog(log.id)"
-                    aria-label="Delete cook log"
-                  >
-                    <mat-icon>delete</mat-icon>
-                  </button>
-                </div>
-              </div>
-
-              @if (log.notes) {
-                <p class="log-notes">{{ log.notes }}</p>
-              }
-
-              @if (log.photoImagePath) {
-                <div class="log-photo-wrap">
-                  <button
-                    type="button"
-                    class="photo-lightbox-trigger"
-                    (click)="openPhotoLightbox(log.photoImagePath!)"
-                    aria-label="View dish photo full size"
-                  >
-                    <img
-                      [src]="log.photoThumbnailPath || log.photoImagePath"
-                      alt="Cooked dish photo"
-                      class="log-thumb-img"
-                    />
-                  </button>
                 </div>
               }
             </div>
           }
-        </div>
-      }
+        </mat-card-content>
+      </mat-card>
     </section>
 
     @if (previewPhotoUrl()) {

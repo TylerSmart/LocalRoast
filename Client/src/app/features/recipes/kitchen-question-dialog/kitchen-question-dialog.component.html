@@ -1,9 +1,17 @@
 <div class="dialog-header">
   <div class="title-row">
-    <mat-icon>auto_awesome</mat-icon>
+    <span class="dialog-icon-badge" aria-hidden="true">
+      <mat-icon>auto_awesome</mat-icon>
+    </span>
     <h2 mat-dialog-title>Ask Kitchen AI</h2>
   </div>
-  <button type="button" mat-icon-button (click)="close()" aria-label="Close Kitchen AI">
+  <button
+    type="button"
+    mat-icon-button
+    class="close-btn"
+    (click)="close()"
+    aria-label="Close Kitchen AI"
+  >
     <mat-icon>close</mat-icon>
   </button>
 </div>

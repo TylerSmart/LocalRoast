@@ -2,7 +2,9 @@
   <!-- Minimal Public Top Bar (Hidden in @media print) -->
   <header class="public-top-bar no-print">
     <div class="brand-strip">
-      <mat-icon class="brand-icon" aria-hidden="true">{{ brandIcon }}</mat-icon>
+      <span class="brand-badge" aria-hidden="true">
+        <mat-icon class="brand-icon">{{ brandIcon }}</mat-icon>
+      </span>
       <span class="brand-title">{{ appName }}</span>
       <span class="shared-badge">Shared Recipe</span>
     </div>
@@ -111,7 +113,7 @@
             }}</span>
           </div>
           @if (recipe()!.averageRating) {
-            <div class="stat-pill">
+            <div class="stat-pill stat-rating">
               <span class="stat-label">Rating</span>
               <span class="stat-value">★ {{ recipe()!.averageRating | number: '1.1-1' }}</span>
             </div>

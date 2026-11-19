@@ -2,15 +2,17 @@
   <!-- Dialog Header -->
   <div class="dialog-header">
     <div class="header-left">
-      <mat-icon class="header-icon">
-        @if (isPdf()) {
-          picture_as_pdf
-        } @else if (isText()) {
-          description
-        } @else {
-          image
-        }
-      </mat-icon>
+      <span class="dialog-icon-badge" aria-hidden="true">
+        <mat-icon class="header-icon">
+          @if (isPdf()) {
+            picture_as_pdf
+          } @else if (isText()) {
+            description
+          } @else {
+            image
+          }
+        </mat-icon>
+      </span>
       <div class="header-titles">
         <h2 class="dialog-title">
           {{ currentAttachment()?.label || currentAttachment()?.fileName || 'Recipe Attachment' }}
@@ -23,7 +25,7 @@
       </div>
     </div>
 
-    <!-- Header Actions -->
+    <!-- Header Tool Actions -->
     <div class="header-actions">
       @if (!isPdf() && !isText()) {
         <button
@@ -94,21 +96,22 @@
           <mat-icon>download</mat-icon>
         </a>
       }
-
-      <button
-        mat-icon-button
-        type="button"
-        (click)="close()"
-        matTooltip="Close Viewer"
-        aria-label="Close attachment viewer"
-      >
-        <mat-icon>close</mat-icon>
-      </button>
     </div>
+
+    <button
+      mat-icon-button
+      type="button"
+      class="close-viewer-btn"
+      (click)="close()"
+      matTooltip="Close Viewer"
+      aria-label="Close attachment viewer"
+    >
+      <mat-icon>close</mat-icon>
+    </button>
   </div>
 
   <!-- Stage -->
-  <div class="stage-container">
+  <div class="stage-container" [class.has-nav]="totalCount() > 1">
     @if (totalCount() > 1) {
       <button
         mat-icon-button

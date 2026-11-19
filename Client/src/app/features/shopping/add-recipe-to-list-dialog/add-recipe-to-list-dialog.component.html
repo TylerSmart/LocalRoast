@@ -1,22 +1,35 @@
-<h2 mat-dialog-title class="dialog-title">
-  <mat-icon>add_shopping_cart</mat-icon>
-  <span>Add to Shopping List</span>
-</h2>
+<div class="dialog-header">
+  <div class="header-title-wrap">
+    <span class="dialog-icon-badge" aria-hidden="true">
+      <mat-icon>add_shopping_cart</mat-icon>
+    </span>
+    <div class="header-text">
+      <h2 mat-dialog-title class="dialog-title">Add to Shopping List</h2>
+      <p class="recipe-subtitle">{{ data.recipeTitle }}</p>
+    </div>
+  </div>
+  <button
+    mat-icon-button
+    type="button"
+    class="close-btn"
+    (click)="onCancel()"
+    [disabled]="isSubmitting()"
+    aria-label="Close dialog"
+  >
+    <mat-icon>close</mat-icon>
+  </button>
+</div>
 
 <mat-dialog-content class="dialog-content">
-  <p class="recipe-name-pill">
-    <strong>{{ data.recipeTitle }}</strong>
-  </p>
-
   @if (errorMessage()) {
     <div class="error-banner" role="alert">
-      <mat-icon>error</mat-icon>
+      <mat-icon>error_outline</mat-icon>
       <span>{{ errorMessage() }}</span>
     </div>
   }
 
   <form [formGroup]="form" class="add-form">
-    <mat-form-field appearance="outline" class="full-width">
+    <mat-form-field appearance="outline" class="full-width" subscriptSizing="dynamic">
       <mat-label>Target Shopping List</mat-label>
       <mat-select formControlName="targetShoppingListId">
         @for (l of shoppingLists(); track l.id) {
@@ -33,7 +46,7 @@
       }
     </mat-form-field>
 
-    <mat-form-field appearance="outline" class="full-width">
+    <mat-form-field appearance="outline" class="full-width" subscriptSizing="dynamic">
       <mat-label>Target Servings</mat-label>
       <input matInput type="number" step="0.5" min="0.25" formControlName="targetServings" />
     </mat-form-field>
@@ -42,14 +55,14 @@
       @if (data.hasSubRecipes) {
         <mat-checkbox formControlName="includeSubRecipes">Include Sub-Recipes</mat-checkbox>
       }
-      <mat-checkbox formControlName="includeOptionalIngredients"
-        >Include Optional Ingredients</mat-checkbox
-      >
+      <mat-checkbox formControlName="includeOptionalIngredients">
+        Include Optional Ingredients
+      </mat-checkbox>
     </div>
   </form>
 </mat-dialog-content>
 
-<mat-dialog-actions align="end">
+<mat-dialog-actions align="end" class="dialog-actions">
   <button mat-button type="button" (click)="onCancel()" [disabled]="isSubmitting()">Cancel</button>
   <button
     mat-flat-button
