@@ -138,10 +138,375 @@ def parse_servings_from_yield(yield_text):
     return 4.0
 
 
+SKIP_XHTML_PARTS = (
+    "Cover",
+    "Also_by",
+    "Title_Page",
+    "Copyright",
+    "Index",
+    "Contents",
+    "Welcome",
+    "idx",
+    "bm_1",
+    "bm_2",
+)
+
+
+def _norm_recipe_key(text, strip_leading_the=False):
+    key = re.sub(r"[^a-z0-9]", "", (text or "").lower())
+    if strip_leading_the and key.startswith("the") and len(key) > 5:
+        key = key[3:]
+    return key
+
+
+def _hyphen_space_lower(text):
+    return re.sub(r"\s+", " ", re.sub(r"[-–—]", " ", (text or "").lower())).strip()
+
+
+def _significant_words(text):
+    stop_words = {
+        "with", "and", "for", "from", "into", "over", "style", "easy", "quick",
+        "best", "classic", "foolproof", "simple", "basic", "make", "ahead",
+        "optional", "recipe", "recipes", "follow", "follows", "page", "this",
+    }
+    return {
+        w for w in re.findall(r"[a-z]{4,}", (text or "").lower())
+        if w not in stop_words
+    }
+
+
+def _should_skip_epub_xhtml(filename):
+    if not filename.startswith("OEBPS/xhtml/") or not filename.endswith(".xhtml"):
+        return True
+    base = filename.replace("OEBPS/xhtml/", "")
+    return any(skip in base for skip in SKIP_XHTML_PARTS)
+
+
+def _element_heading_flags(elem, ns_x):
+    tag = elem.tag.replace("{http://www.w3.org/1999/xhtml}", "")
+    cls = elem.get("class", "")
+    h2 = elem if (tag == "h2" and "recipe_title" in cls) else elem.find(".//x:h2[@class]", ns_x)
+    h3 = elem if (tag == "h3" and "subrecipe_title" in cls) else elem.find(".//x:h3[@class]", ns_x)
+    is_h2 = h2 is not None and "recipe_title" in h2.get("class", "")
+    is_h3 = h3 is not None and "subrecipe_title" in h3.get("class", "")
+    return tag, cls, h2, h3, is_h2, is_h3
+
+
+def _build_id_to_recipe_target(z, ns_x):
+    """Index XHTML element IDs to their owning recipe title and whether the block is a technique sidebar."""
+    id_to_recipe_target = {}
+
+    for filename in sorted(z.namelist()):
+        if _should_skip_epub_xhtml(filename):
+            continue
+        base = filename.replace("OEBPS/xhtml/", "")
+        root = ET.fromstring(z.read(filename))
+        body = root.find("x:body", ns_x)
+        if body is None:
+            continue
+        children = body[0] if (len(body) == 1 and body[0].tag.endswith("div")) else body
+
+        cur_title = None
+        parent_master_title = None
+        parent_has_content = False
+
+        for elem in children:
+            tag, cls, h2, h3, is_h2, is_h3 = _element_heading_flags(elem, ns_x)
+
+            h3_head = (
+                elem
+                if (tag == "h3" and "head" in cls and "subrecipe_title" not in cls)
+                else elem.find(".//x:h3[@class]", ns_x)
+            )
+            is_sidebar_elem = "recipe_note" in cls or (
+                h3_head is not None
+                and "head" in h3_head.get("class", "")
+                and "subrecipe_title" not in h3_head.get("class", "")
+                and not is_h2
+                and not is_h3
+            )
+
+            if is_h2 or is_h3:
+                t_elem = h2 if is_h2 else h3
+                title = extract_node_text(t_elem)
+                if (
+                    is_h3
+                    and cur_title is not None
+                    and re.match(
+                        r"^(Day\s+(One|Two|Three|Four|Five|\d+)|Stage\s+\d+|Part\s+\d+)",
+                        title,
+                        re.IGNORECASE,
+                    )
+                ):
+                    pass
+                elif (
+                    is_h3
+                    and parent_master_title is not None
+                    and not parent_has_content
+                    and title.lower() in parent_master_title.lower()
+                ):
+                    cur_title = parent_master_title
+                else:
+                    cur_title = title
+                    if is_h2:
+                        parent_master_title = title
+                        parent_has_content = False
+            elif cur_title == parent_master_title and (
+                "ing_list" in cls or "method" in cls or "indent" in cls
+            ):
+                parent_has_content = True
+
+            if cur_title:
+                entry = {"title": cur_title, "is_sidebar": is_sidebar_elem}
+                eid = elem.get("id")
+                if eid:
+                    id_to_recipe_target[f"{base}#{eid}"] = entry
+                    id_to_recipe_target.setdefault(eid, entry)
+                for sub in elem.findall(".//*[@id]"):
+                    sid = sub.get("id")
+                    if sid:
+                        sub_cls = sub.get("class", "")
+                        sub_is_sidebar = is_sidebar_elem or (
+                            sub.tag.endswith("h3")
+                            and "head" in sub_cls
+                            and "subrecipe_title" not in sub_cls
+                        )
+                        sub_entry = {"title": cur_title, "is_sidebar": sub_is_sidebar}
+                        id_to_recipe_target[f"{base}#{sid}"] = sub_entry
+                        id_to_recipe_target.setdefault(sid, sub_entry)
+
+    return id_to_recipe_target
+
+
+def extract_ingredient_links_and_text(
+    p, base_xhtml, current_recipe_title, id_to_recipe_target, ns_x
+):
+    """Extract ingredient text and resolve EPUB <a href> cross-references to target recipe titles."""
+    ptext = extract_node_text(p)
+    if not ptext:
+        return "", []
+
+    low = ptext.lower()
+    if "(see this page)" in low or "; see this page)" in low:
+        return ptext, []
+
+    linked_titles = []
+    seen_titles = set()
+    cur_norm = _norm_recipe_key(current_recipe_title)
+
+    for a in p.findall(".//x:a", ns_x):
+        href = (a.get("href") or "").strip()
+        if not href:
+            continue
+        frag = href.split("#")[-1] if "#" in href else ""
+        before_hash = href.split("#")[0] if "#" in href else href
+        file_part = before_hash.split("/")[-1] if before_hash else base_xhtml
+        if not frag:
+            continue
+        target = id_to_recipe_target.get(f"{file_part}#{frag}") or id_to_recipe_target.get(frag)
+        if not target or target.get("is_sidebar"):
+            continue
+        t_title = target["title"]
+        if _norm_recipe_key(t_title) == cur_norm:
+            continue
+        if t_title not in seen_titles:
+            seen_titles.add(t_title)
+            linked_titles.append(t_title)
+
+    if linked_titles:
+        primary = linked_titles[0]
+        text_norm = _norm_recipe_key(ptext)
+        prim_norm = _norm_recipe_key(primary, strip_leading_the=True)
+
+        m = re.match(
+            r"^(\s*(?:\d+[\d\s/\.]*\s+)?(?:recipes?|batches?)\s+)(.+?)\s*\(([^()]*\bthis page\b[^()]*)\)(.*)$",
+            ptext,
+            flags=re.IGNORECASE,
+        )
+        if prim_norm and prim_norm not in text_norm:
+            if m:
+                prefix, raw_ref, paren_inner, suffix = m.groups()
+                raw_ref_clean = re.sub(
+                    r"\s*\(\s*optional\s*\)\s*$", "", raw_ref, flags=re.IGNORECASE
+                ).strip()
+                notes = []
+                if "optional" in paren_inner.lower() or "(optional)" in raw_ref.lower():
+                    notes.append("optional")
+                all_words = set(re.findall(r"[a-z]{4,}", raw_ref_clean.lower()))
+                prim_low = primary.lower()
+                if all_words and not all(w in prim_low for w in all_words):
+                    notes.append(raw_ref_clean)
+                notes.append("this page")
+                if len(linked_titles) > 1:
+                    notes.append(f"or see {'; '.join(linked_titles[1:])}")
+                ptext = f"{prefix}{primary} ({'; '.join(notes)}){suffix}".strip()
+            else:
+                ptext = re.sub(
+                    r"\(([^()]*)\bthis page\b([^()]*)\)",
+                    lambda pm: (
+                        f"({pm.group(1)}this page; see {'; or see '.join(linked_titles)}{pm.group(2)})"
+                    ),
+                    ptext,
+                    count=1,
+                    flags=re.IGNORECASE,
+                )
+
+    return ptext, linked_titles
+
+
+def _resolve_sibling_subrecipe_references(final_recipes):
+    """Link standalone sibling component sub-recipes referenced by title or generic cues."""
+    groups_by_master = {}
+    master_order = []
+    variations_by_master = {}
+
+    for r in final_recipes:
+        if r.get("type") == "master":
+            mid = id(r)
+            groups_by_master[mid] = {"master": r, "subs": []}
+            variations_by_master[mid] = []
+            master_order.append(mid)
+        elif r.get("type") == "sub":
+            parent = r.get("source_parent_recipe")
+            if parent is not None and id(parent) in groups_by_master:
+                groups_by_master[id(parent)]["subs"].append(r)
+                if r.get("parent_recipe_title"):
+                    variations_by_master[id(parent)].append(r)
+
+    all_norm_titles = set()
+    for r in final_recipes:
+        n1 = _norm_recipe_key(r["title"], strip_leading_the=False)
+        n2 = _norm_recipe_key(r["title"], strip_leading_the=True)
+        stripped = re.sub(r"\s*\([^()]+\)\s*$", "", r["title"]).strip()
+        n3 = _norm_recipe_key(stripped, strip_leading_the=True)
+        for n in (n1, n2, n3):
+            if n:
+                all_norm_titles.add(n)
+
+    generic_recipe_re = re.compile(
+        r"^(\s*(?:\d+[\d\s/\.]*\s+)?(?:recipes?|batches?)\s+)([^,(;]+)(.*)$",
+        re.IGNORECASE,
+    )
+    generic_qty_follows_re = re.compile(
+        r"^(\s*(?:\d+[\d\s/\.]*\s+)?(?:cups?|tablespoons?|teaspoons?|ounces?|pounds?)\s+)([^,(;]+?)(\s*\((?:optional[;\s]*)?recipes?\s+follows?\b.*)$",
+        re.IGNORECASE,
+    )
+
+    for mid in master_order:
+        grp = groups_by_master[mid]
+        master = grp["master"]
+        subs = grp["subs"]
+        component_subs = [s for s in subs if not s.get("parent_recipe_title")]
+        if not component_subs:
+            continue
+
+        all_group_recipes = [master] + subs
+        for src in all_group_recipes:
+            src_is_variation = bool(src.get("parent_recipe_title"))
+            for ing in src.get("ingredients", []):
+                ing_low = _hyphen_space_lower(ing.get("text", ""))
+                links = ing.setdefault("linked_recipes", [])
+                for comp in component_subs:
+                    if comp is src:
+                        continue
+                    if src_is_variation and any(
+                        _hyphen_space_lower(src["title"]) in _hyphen_space_lower(ci.get("text", ""))
+                        or src["title"] in ci.get("linked_recipes", [])
+                        for ci in comp.get("ingredients", [])
+                    ):
+                        continue
+                    ctitle = comp["title"]
+                    c_stripped = re.sub(r"\s*\([^()]+\)\s*$", "", ctitle).strip()
+                    candidates_low = [_hyphen_space_lower(ctitle)]
+                    if (
+                        len(c_stripped) >= 5
+                        and _hyphen_space_lower(c_stripped) != candidates_low[0]
+                    ):
+                        candidates_low.append(_hyphen_space_lower(c_stripped))
+                    if any(
+                        cand
+                        and re.search(rf"(?<![a-z0-9]){re.escape(cand)}(?![a-z0-9])", ing_low)
+                        for cand in candidates_low
+                    ):
+                        if ctitle not in links:
+                            links.append(ctitle)
+
+        claimed_titles = {
+            lt
+            for ing in master.get("ingredients", [])
+            for lt in ing.get("linked_recipes", [])
+        }
+        unclaimed_subs = [s for s in component_subs if s["title"] not in claimed_titles]
+
+        for idx, ing in enumerate(master.get("ingredients", [])):
+            if ing.get("linked_recipes"):
+                continue
+            text = ing.get("text", "")
+            if re.search(r"\bor\s+(?:\d+[\d\s/\.]*\s+)?(?:recipes?|batches?)\b", text, re.IGNORECASE):
+                continue
+
+            m_gen = generic_recipe_re.match(text) or generic_qty_follows_re.match(text)
+            if not m_gen:
+                continue
+
+            prefix, raw_cand, suffix = m_gen.groups()
+            raw_cand_clean = re.sub(
+                r"\s*\(\s*optional\s*\)\s*$", "", raw_cand, flags=re.IGNORECASE
+            ).strip()
+            raw_cand_norm = _norm_recipe_key(raw_cand_clean, strip_leading_the=True)
+            if raw_cand_norm in all_norm_titles:
+                continue
+
+            pool = unclaimed_subs if unclaimed_subs else component_subs
+            cand_words = _significant_words(raw_cand_clean)
+            matched_subs = [
+                s for s in pool if cand_words and (cand_words & _significant_words(s["title"]))
+            ]
+            has_follows = bool(re.search(r"\brecipes?\s+follows?\b", text, re.IGNORECASE))
+            if not matched_subs and has_follows:
+                matched_subs = list(pool)
+
+            if matched_subs:
+                links = ing.setdefault("linked_recipes", [])
+                for ms in matched_subs:
+                    if ms["title"] not in links:
+                        links.append(ms["title"])
+                        if ms in unclaimed_subs:
+                            unclaimed_subs.remove(ms)
+                primary_title = matched_subs[0]["title"]
+                optional_tag = (
+                    " (optional)"
+                    if "(optional)" in raw_cand.lower() and "(optional" not in suffix.lower()
+                    else ""
+                )
+                suffix_text = suffix
+                if (
+                    suffix_text
+                    and not suffix_text[0].isspace()
+                    and suffix_text[0] not in ",;.:"
+                ):
+                    suffix_text = " " + suffix_text
+                alt_note = ""
+                if len(matched_subs) > 1:
+                    alt_note = f" (or see {'; '.join(s['title'] for s in matched_subs[1:])})"
+                rewritten = (
+                    f"{prefix}{primary_title}{optional_tag}{suffix_text}{alt_note}".strip()
+                )
+                ing["text"] = rewritten
+
+                for var in variations_by_master.get(mid, []):
+                    if idx < len(var.get("ingredients", [])) and var["ingredients"][idx].get("text") == text:
+                        var["ingredients"][idx]["text"] = rewritten
+                        var_links = var["ingredients"][idx].setdefault("linked_recipes", [])
+                        for ms in matched_subs:
+                            if ms["title"] not in var_links:
+                                var_links.append(ms["title"])
+
+
 def parse_atk_epub(epub_path):
     """
     Parse the ATK EPUB archive into structured recipe dictionaries.
-    Returns: (recipes, image_map, chapters)
+    Returns: list of parsed recipe dicts
     """
     if not os.path.exists(epub_path):
         raise FileNotFoundError(f"EPUB file not found at: {epub_path}")
@@ -204,29 +569,16 @@ def parse_atk_epub(epub_path):
 
         print(f"Indexed {len(image_map)} recipe dish images from EPUB figures.")
 
+        # Step 2b: Index XHTML IDs -> target recipe titles so cross-chapter <a href> links resolve
+        id_to_recipe_target = _build_id_to_recipe_target(z, ns_x)
+
         # Step 3: Parse recipe chapters in reading order
         current_chapter_name = "General"
 
         for filename in sorted(z.namelist()):
-            if not filename.startswith("OEBPS/xhtml/") or not filename.endswith(".xhtml"):
+            if _should_skip_epub_xhtml(filename):
                 continue
             base = filename.replace("OEBPS/xhtml/", "")
-            if any(
-                skip in base
-                for skip in [
-                    "Cover",
-                    "Also_by",
-                    "Title_Page",
-                    "Copyright",
-                    "Index",
-                    "Contents",
-                    "Welcome",
-                    "idx",
-                    "bm_1",
-                    "bm_2",
-                ]
-            ):
-                continue
 
             if base in chapter_map:
                 current_chapter_name = chapter_map[base]
@@ -244,22 +596,7 @@ def parse_atk_epub(epub_path):
             current_step_phase = None
 
             for elem in children:
-                tag = elem.tag.replace("{http://www.w3.org/1999/xhtml}", "")
-                cls = elem.get("class", "")
-
-                h2 = (
-                    elem
-                    if (tag == "h2" and "recipe_title" in cls)
-                    else elem.find(".//x:h2[@class]", ns_x)
-                )
-                h3 = (
-                    elem
-                    if (tag == "h3" and "subrecipe_title" in cls)
-                    else elem.find(".//x:h3[@class]", ns_x)
-                )
-
-                is_h2 = h2 is not None and "recipe_title" in h2.get("class", "")
-                is_h3 = h3 is not None and "subrecipe_title" in h3.get("class", "")
+                tag, cls, h2, h3, is_h2, is_h3 = _element_heading_flags(elem, ns_x)
 
                 if is_h2 or is_h3:
                     t_elem = h2 if is_h2 else h3
@@ -330,11 +667,12 @@ def parse_atk_epub(epub_path):
                         "base_servings": base_servings,
                         "chapter": current_chapter_name,
                         "description": desc_init,
-                        "ingredients": [],  # list of { section, text }
+                        "ingredients": [],  # list of { section, text, linked_recipes }
                         "steps": [],
                         "variations": [],
                         "image_path": matched_img,
                         "parent_recipe": parent_master_recipe if is_h3 else None,
+                        "source_parent_recipe": parent_master_recipe if is_h3 else None,
                     }
 
                     current_recipe = new_recipe
@@ -361,14 +699,26 @@ def parse_atk_epub(epub_path):
                         current_section = None
                         for p in elem.findall(".//x:p", ns_x):
                             pcls = p.get("class", "")
-                            ptext = extract_node_text(p)
-                            if not ptext:
-                                continue
                             if "head" in pcls or "section" in pcls:
-                                current_section = ptext
+                                ptext = extract_node_text(p)
+                                if ptext:
+                                    current_section = ptext
                             else:
+                                ptext, linked = extract_ingredient_links_and_text(
+                                    p,
+                                    base,
+                                    current_recipe["title"],
+                                    id_to_recipe_target,
+                                    ns_x,
+                                )
+                                if not ptext:
+                                    continue
                                 current_recipe["ingredients"].append(
-                                    {"section": current_section, "text": ptext}
+                                    {
+                                        "section": current_section,
+                                        "text": ptext,
+                                        "linked_recipes": linked,
+                                    }
                                 )
                     elif "method" in cls or "indent" in cls:
                         mtext = extract_node_text(elem)
@@ -411,7 +761,13 @@ def parse_atk_epub(epub_path):
                 if not r["image_path"] and parent.get("image_path"):
                     r["image_path"] = parent["image_path"]
 
-                r["ingredients"] = [dict(ing) for ing in parent.get("ingredients", [])]
+                r["ingredients"] = [
+                    {
+                        **ing,
+                        "linked_recipes": list(ing.get("linked_recipes", [])),
+                    }
+                    for ing in parent.get("ingredients", [])
+                ]
                 r["parent_recipe_title"] = parent["title"]
                 r["parent_recipe_id"] = parent.get("id")
                 r["parent_steps"] = list(parent.get("steps", []))
@@ -433,6 +789,8 @@ def parse_atk_epub(epub_path):
             empty_pruned_count += 1
         else:
             final_recipes.append(r)
+
+    _resolve_sibling_subrecipe_references(final_recipes)
 
     print(
         f"Parsed {len(final_recipes)} complete recipes ({variation_count} variations extracted as standalone recipes, {empty_pruned_count} empty placeholders pruned)."
@@ -751,73 +1109,157 @@ def upload_source_text_attachment(api_base, token, recipe_id, recipe_dict):
 
 def sort_recipes_topologically(recipes):
     """Sort recipes so component/prerequisite recipes come before composite recipes, and parent recipes come before variations."""
-    norm_to_idx = {}
-    for i, r in enumerate(recipes):
-        norm = re.sub(r"[^a-z0-9]", "", r["title"].lower())
-        norm_to_idx[norm] = i
+    title_to_indices = defaultdict(list)
+    norm_to_indices = defaultdict(list)
 
-    def find_referenced_recipes(text):
+    def _add_norm(key, idx):
+        if key and idx not in norm_to_indices[key]:
+            norm_to_indices[key].append(idx)
+
+    for i, r in enumerate(recipes):
+        t = r["title"]
+        title_to_indices[t.strip().lower()].append(i)
+        _add_norm(_norm_recipe_key(t, strip_leading_the=False), i)
+        _add_norm(_norm_recipe_key(t, strip_leading_the=True), i)
+        stripped = re.sub(r"\s*\([^()]+\)\s*$", "", t).strip()
+        stripped_norm = _norm_recipe_key(stripped, strip_leading_the=True)
+        if len(stripped_norm) >= 4:
+            _add_norm(stripped_norm, i)
+
+    def pick_best_target_idx(indices, src_idx):
+        candidates = [idx for idx in indices if idx != src_idx]
+        if not candidates:
+            return None
+        src = recipes[src_idx]
+        src_group = src.get("source_parent_recipe") or src.get("parent_recipe") or src
+        src_chapter = src.get("chapter")
+
+        def rank(idx):
+            tgt = recipes[idx]
+            tgt_group = tgt.get("source_parent_recipe") or tgt.get("parent_recipe") or tgt
+            same_group = 0 if tgt_group is src_group else 1
+            same_chapter = 0 if (src_chapter and tgt.get("chapter") == src_chapter) else 1
+            not_preceding = 0 if idx < src_idx else 1
+            return (same_group, same_chapter, not_preceding, abs(src_idx - idx), idx)
+
+        return min(candidates, key=rank)
+
+    def resolve_title_to_idx(title_str, src_idx):
+        if not title_str:
+            return None
+        exact_list = title_to_indices.get(title_str.strip().lower())
+        if exact_list:
+            picked = pick_best_target_idx(exact_list, src_idx)
+            if picked is not None:
+                return picked
+        for strip_the in (False, True):
+            k = _norm_recipe_key(title_str, strip_leading_the=strip_the)
+            if k and k in norm_to_indices:
+                picked = pick_best_target_idx(norm_to_indices[k], src_idx)
+                if picked is not None:
+                    return picked
+        return None
+
+    trailing_prep_re = re.compile(
+        r",\s*(?:for\s+(?:serving|garnish\w*)|warmed|cooled|chilled|softened|melted|room temperature|plus\s+.*|broken\s+.*|rolled\s+.*|fitted\s+.*|baked\s+.*|peeled\s+.*|cut\s+.*|at\s+room\s+temperature.*)$",
+        re.IGNORECASE,
+    )
+    leading_qty_unit_re = re.compile(
+        r"^(?:(?:\d+[\d\s\/\.]*|\b(?:one|two|three|four|five|six|seven|eight|nine|ten)\b)\s*)?(?:recipes?|batches?|cups?|teaspoons?|tsps?|tablespoons?|tbsps?|ounces?|oz|pounds?|lbs?|packages?|cans?|bottles?|pinches?|cloves?|slices?|stalks?|sprigs?|heads?|pieces?)\s+(?:of\s+)?",
+        re.IGNORECASE,
+    )
+
+    def find_referenced_recipes(text, src_idx):
         matched_indices = set()
         candidates = []
 
         m = re.search(
-            r"([A-Za-z0-9\s\'-]+?)\s*\((?:optional;\s*)?(?:this page|recipe follows|recipe on page|\bsee page)\b",
+            r"([A-Za-z0-9\s\',–—-]+?)\s*(?:\(optional\)\s*)?\((?:optional[;\s]*)?(?:this page|recipes?\s+follows?|recipe on page|\bsee page)\b",
             text,
             re.IGNORECASE,
         )
         if m:
-            candidates.append(m.group(1).strip())
+            cand_m = re.sub(r"\s*\(\s*optional\s*\)\s*$", "", m.group(1), flags=re.IGNORECASE).strip()
+            if cand_m:
+                candidates.append(cand_m)
 
-        m2 = re.search(r"\b(?:recipe|batch)\s+([^,(;]+)", text, re.IGNORECASE)
+        m2 = re.search(r"\b(?:recipes?|batches?)\s+([^;(]+)", text, re.IGNORECASE)
         if m2:
-            candidates.append(m2.group(1).strip())
+            raw_m2 = m2.group(1).strip()
+            # Apply repeatedly in case multiple trailing prep clauses are chained with commas
+            cleaned_m2 = raw_m2
+            while True:
+                next_m2 = trailing_prep_re.sub("", cleaned_m2).strip()
+                if next_m2 == cleaned_m2:
+                    break
+                cleaned_m2 = next_m2
+            if cleaned_m2:
+                candidates.append(cleaned_m2)
 
         for cand in list(candidates):
             if " or " in cand:
                 candidates.append(cand.split(" or ")[-1].strip())
 
         for cand in candidates:
-            cand_clean = re.sub(
-                r"^(?:(?:\d+[\d\s\/\.]*|\b(?:one|two|three|four|five|six|seven|eight|nine|ten)\b)\s*)?(?:cups?|teaspoons?|tsps?|tablespoons?|tbsps?|ounces?|oz|pounds?|lbs?|packages?|cans?|bottles?|pinches?|cloves?|slices?|stalks?|sprigs?|heads?|pieces?)\s+(?:of\s+)?",
-                "",
-                cand,
-                flags=re.IGNORECASE,
-            ).strip()
-            cand_norm = re.sub(r"[^a-z0-9]", "", cand_clean.lower())
+            cand_clean = leading_qty_unit_re.sub("", cand).strip()
+            cand_norm = _norm_recipe_key(cand_clean, strip_leading_the=False)
+            cand_norm_no_the = _norm_recipe_key(cand_clean, strip_leading_the=True)
             if not cand_norm or len(cand_norm) < 3:
                 continue
-            if cand_norm in norm_to_idx:
-                matched_indices.add(norm_to_idx[cand_norm])
+
+            exact_picked = None
+            for k in (cand_norm, cand_norm_no_the):
+                if k in norm_to_indices:
+                    exact_picked = pick_best_target_idx(norm_to_indices[k], src_idx)
+                    if exact_picked is not None:
+                        matched_indices.add(exact_picked)
+                        break
+            if exact_picked is not None:
                 continue
-            for norm, idx in norm_to_idx.items():
-                if norm == cand_norm:
-                    matched_indices.add(idx)
-                    break
-                if len(cand_norm) >= 6 and (norm.startswith(cand_norm) or cand_norm.startswith(norm)):
-                    matched_indices.add(idx)
-                    break
+
+            if len(cand_norm_no_the) >= 6:
+                prefix_matches = []
+                for norm, idx_list in norm_to_indices.items():
+                    if len(norm) >= 6 and (
+                        norm.startswith(cand_norm_no_the) or cand_norm_no_the.startswith(norm)
+                    ):
+                        prefix_matches.extend(idx_list)
+                picked = pick_best_target_idx(prefix_matches, src_idx)
+                if picked is not None:
+                    matched_indices.add(picked)
 
         return matched_indices
 
-    in_degree = [0] * len(recipes)
+    deps_of = [set() for _ in range(len(recipes))]
     dependents = defaultdict(list)
 
     for i, r in enumerate(recipes):
-        deps_for_i = set()
+        deps_for_i = deps_of[i]
         if r.get("parent_recipe_title"):
-            parent_norm = re.sub(r"[^a-z0-9]", "", r["parent_recipe_title"].lower())
-            if parent_norm in norm_to_idx and norm_to_idx[parent_norm] != i:
-                deps_for_i.add(norm_to_idx[parent_norm])
+            parent_idx = resolve_title_to_idx(r["parent_recipe_title"], i)
+            if parent_idx is not None and parent_idx != i:
+                deps_for_i.add(parent_idx)
 
         for ing in r.get("ingredients", []):
-            ref_indices = find_referenced_recipes(ing.get("text", ""))
-            for ref_idx in ref_indices:
-                if ref_idx != i:
+            for linked_title in ing.get("linked_recipes", []):
+                ref_idx = resolve_title_to_idx(linked_title, i)
+                if ref_idx is not None and ref_idx != i and i not in deps_of[ref_idx]:
                     deps_for_i.add(ref_idx)
 
-        in_degree[i] = len(deps_for_i)
+            ref_indices = find_referenced_recipes(ing.get("text", ""), i)
+            for ref_idx in ref_indices:
+                if ref_idx != i and i not in deps_of[ref_idx]:
+                    deps_for_i.add(ref_idx)
+
+    # Guard against two-way cycles where an earlier processed node added i before i processed it
+    for i, deps_for_i in enumerate(deps_of):
+        to_drop = {u for u in deps_for_i if i in deps_of[u]}
+        if to_drop:
+            deps_for_i -= to_drop
         for u in deps_for_i:
             dependents[u].append(i)
+
+    in_degree = [len(d) for d in deps_of]
 
     # Min-heap ordered by original reading index ensures recipes without dependencies
     # maintain their natural chapter/reading order
@@ -833,9 +1275,13 @@ def sort_recipes_topologically(recipes):
             if in_degree[v] == 0:
                 heapq.heappush(heap, v)
 
-    # If any unexpected dependency cycle prevented visiting all recipes, append remaining in original order
+    # If any unexpected dependency cycle prevented visiting all recipes, warn and append remaining in original order
     if len(sorted_indices) < len(recipes):
         seen = set(sorted_indices)
+        cycle_titles = [recipes[i]["title"] for i in range(len(recipes)) if i not in seen]
+        print(
+            f"Warning: topological sort detected dependency cycle involving {len(cycle_titles)} recipe(s): {cycle_titles[:10]}"
+        )
         for i in range(len(recipes)):
             if i not in seen:
                 sorted_indices.append(i)

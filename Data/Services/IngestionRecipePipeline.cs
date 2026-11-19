@@ -1230,7 +1230,23 @@ public sealed partial class IngestionRecipePipeline(
                 for (var r = 0; r < ing.Replacements.Count; r++)
                 {
                     var rep = ing.Replacements[r];
-                    if (string.IsNullOrWhiteSpace(rep.Name))
+                    if (
+                        string.IsNullOrWhiteSpace(rep.Name)
+                        || string.Equals(
+                            rep.Unit?.Trim(),
+                            "recipe",
+                            StringComparison.OrdinalIgnoreCase
+                        )
+                        || string.Equals(
+                            rep.Unit?.Trim(),
+                            "batch",
+                            StringComparison.OrdinalIgnoreCase
+                        )
+                        || (
+                            !string.IsNullOrWhiteSpace(rep.PrepNote)
+                            && RecipeCueRegex().IsMatch(rep.PrepNote)
+                        )
+                    )
                     {
                         continue;
                     }

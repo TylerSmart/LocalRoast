@@ -357,9 +357,109 @@ public sealed class MultiStageIngestionAndReplacementsIntegrationTests
         }
     }
 
+    [TestMethod]
+    public async Task Stage1SubRecipeReplacement_IsDroppedInsteadOfCreatingPlaceholderFoodItem()
+    {
+        var mockLlm = new FallbackExercisingLlmClient
+        {
+            ForceSimpleBatch = true,
+            Stage1JsonOverride = """
+                {
+                    "title": "Crunchy Kettle Potato Chips",
+                    "description": null,
+                    "servings": 4,
+                    "yield": null,
+                    "sections": [
+                        {
+                            "name": null,
+                            "ingredients": [
+                                {
+                                    "name": "table salt",
+                                    "quantity": 0.5,
+                                    "maxQuantity": null,
+                                    "unit": "teaspoon",
+                                    "prepNote": null,
+                                    "isOptional": false,
+                                    "replacements": [
+                                        { "name": "topping", "quantity": 1, "unit": "recipe", "prepNote": "recipes follow" }
+                                    ],
+                                    "alternateMeasurements": []
+                                }
+                            ],
+                            "instructions": ["Sprinkle 1/2 teaspoon table salt over warm chips."]
+                        }
+                    ],
+                    "timing": { "prep": null, "cook": null, "total": null },
+                    "tags": ["Snack"]
+                }
+                """,
+            Stage4BatchJsonOverride = """
+                {"steps":[{"stepNumber":1,"tokens":["Sprinkle ",{"type":"ingredient","ingredientIndex":0,"name":"table salt","quantity":0.5,"maxQuantity":null,"unit":"teaspoon"}," over warm chips."]}]}
+                """,
+        };
+
+        await using var customFactory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Llm:TextModel", "qwen2.5:14b");
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ILlmExtractionClient>();
+                services.AddSingleton<ILlmExtractionClient>(mockLlm);
+            });
+        });
+
+        using var client = customFactory.CreateClient();
+        await AuthenticateAsync(client);
+
+        var enqueueRes = await client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest(
+                "Crunchy Kettle Potato Chips\nIngredients:\n- 1/2 teaspoon table salt or 1 recipe topping (recipes follow)\nInstructions:\n1. Sprinkle 1/2 teaspoon table salt over warm chips.",
+                AutoPublish: true
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Accepted, enqueueRes.StatusCode);
+        var job = await enqueueRes.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
+        Assert.IsNotNull(job);
+
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            var processed = await scope
+                .ServiceProvider.GetRequiredService<IIngestionProcessor>()
+                .ProcessNextQueuedJobAsync();
+            Assert.IsTrue(processed);
+        }
+
+        var jobDetail = await client.GetFromJsonAsync<IngestionJobDetailDto>(
+            $"/api/ingestion/jobs/{job.Id}"
+        );
+        Assert.IsNotNull(jobDetail);
+        Assert.AreEqual(IngestionJobStatus.Published, jobDetail.Status, jobDetail.StatusDetail);
+        Assert.IsNotNull(jobDetail.ResultingRecipeId);
+
+        var published = await client.GetFromJsonAsync<RecipeDetailDto>(
+            $"/api/recipes/{jobDetail.ResultingRecipeId}"
+        );
+        Assert.IsNotNull(published);
+        Assert.HasCount(1, published.Ingredients);
+        Assert.IsTrue(
+            published.Ingredients[0].Replacements is null
+                || published.Ingredients[0].Replacements!.Count == 0
+        );
+
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            Assert.IsFalse(await db.FoodItems.AnyAsync(f => f.NormalizedName == "topping"));
+            Assert.IsFalse(await db.CatalogEmbeddings.AnyAsync(e => e.NormalizedText == "topping"));
+        }
+    }
+
     private sealed class FallbackExercisingLlmClient : ILlmExtractionClient
     {
         public bool ForceSimpleBatch { get; set; }
+        public string? Stage1JsonOverride { get; set; }
+        public string? Stage4BatchJsonOverride { get; set; }
         public int EmbeddingCallCount { get; private set; }
         public List<string> StageCalls { get; } = [];
 
@@ -431,41 +531,42 @@ public sealed class MultiStageIngestionAndReplacementsIntegrationTests
 
             var raw = stageName switch
             {
-                "stage1_extract_recipe" => """
-                    {
-                        "title": "Toasted Butter Bread",
-                        "description": null,
-                        "servings": 2,
-                        "yield": null,
-                        "sections": [
-                            {
-                                "name": null,
-                                "ingredients": [
-                                    {
-                                        "name": "butter",
-                                        "quantity": 2,
-                                        "maxQuantity": null,
-                                        "unit": "tbsp",
-                                        "prepNote": null,
-                                        "isOptional": false,
-                                        "replacements": [
-                                            { "name": "margarine", "quantity": 2, "unit": "tbsp", "prepNote": null }
-                                        ],
-                                        "alternateMeasurements": []
-                                    }
-                                ],
-                                "instructions": ["Melt 2 tablespoons butter."]
-                            }
-                        ],
-                        "timing": { "prep": null, "cook": null, "total": null },
-                        "tags": ["Breakfast"]
-                    }
-                    """,
+                "stage1_extract_recipe" => Stage1JsonOverride
+                    ?? """
+                        {
+                            "title": "Toasted Butter Bread",
+                            "description": null,
+                            "servings": 2,
+                            "yield": null,
+                            "sections": [
+                                {
+                                    "name": null,
+                                    "ingredients": [
+                                        {
+                                            "name": "butter",
+                                            "quantity": 2,
+                                            "maxQuantity": null,
+                                            "unit": "tbsp",
+                                            "prepNote": null,
+                                            "isOptional": false,
+                                            "replacements": [
+                                                { "name": "margarine", "quantity": 2, "unit": "tbsp", "prepNote": null }
+                                            ],
+                                            "alternateMeasurements": []
+                                        }
+                                    ],
+                                    "instructions": ["Melt 2 tablespoons butter."]
+                                }
+                            ],
+                            "timing": { "prep": null, "cook": null, "total": null },
+                            "tags": ["Breakfast"]
+                        }
+                        """,
                 "stage3a_ingredient_search_terms" => """{"searchTerms":["butter","margarine"]}""",
                 "stage3c_match_batch" => BuildStage3cResponse(userContent),
                 "stage3b_match_ingredient" => BuildStage3bResponse(userContent),
                 "stage4b_tokenize_batch" => ForceSimpleBatch
-                    ? BuildStage4BatchValid()
+                    ? (Stage4BatchJsonOverride ?? BuildStage4BatchValid())
                     : """{"steps":[]}""",
                 "stage4_tokenize_step" => """
                     {
