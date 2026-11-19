@@ -725,8 +725,14 @@
         cdkTrapFocus
         [cdkTrapFocusAutoCapture]="true"
       >
+        <div class="drawer-handle" aria-hidden="true"></div>
         <div class="drawer-header">
-          <h3 id="cook-ingredients-title">Ingredients</h3>
+          <div class="drawer-title-group">
+            <h3 id="cook-ingredients-title">Ingredients</h3>
+            <span class="count-badge"
+              >{{ checkedIngredientsCount() }}/{{ totalIngredientsCount() }}</span
+            >
+          </div>
           <button
             mat-icon-button
             (click)="closeMobileDrawer()"
