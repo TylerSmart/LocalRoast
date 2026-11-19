@@ -167,7 +167,11 @@
                       class="usage-btn"
                       (click)="viewReferencedRecipes(item)"
                       [matTooltip]="
-                        'View ' + item.referencedRecipeCount + ' recipes using this ingredient'
+                        'View ' +
+                        item.referencedRecipeCount +
+                        (item.referencedRecipeCount === 1
+                          ? ' recipe using this ingredient'
+                          : ' recipes using this ingredient')
                       "
                       aria-label="View recipes using this item"
                     >

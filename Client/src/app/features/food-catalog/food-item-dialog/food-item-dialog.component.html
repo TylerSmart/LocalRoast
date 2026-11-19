@@ -1,18 +1,35 @@
-<h2 mat-dialog-title>
-  {{ isEdit() ? 'Edit Food Item' : 'New Food Item' }}
-</h2>
+<div class="dialog-header">
+  <div class="title-wrap">
+    <span class="dialog-icon-badge" aria-hidden="true">
+      <mat-icon>{{ isEdit() ? 'edit' : 'inventory_2' }}</mat-icon>
+    </span>
+    <h2 mat-dialog-title class="dialog-title">
+      {{ isEdit() ? 'Edit Food Item' : 'New Food Item' }}
+    </h2>
+  </div>
+  <button
+    mat-icon-button
+    type="button"
+    class="close-btn"
+    (click)="dialogRef.close(null)"
+    [disabled]="isSubmitting()"
+    aria-label="Close dialog"
+  >
+    <mat-icon>close</mat-icon>
+  </button>
+</div>
 
-<mat-dialog-content>
+<mat-dialog-content class="dialog-content">
   <form [formGroup]="form" class="dialog-form" (ngSubmit)="onSave()">
     @if (errorMessage()) {
       <div class="form-error-banner" role="alert">
-        <mat-icon>error</mat-icon>
+        <mat-icon>error_outline</mat-icon>
         <span>{{ errorMessage() }}</span>
       </div>
     }
 
     <!-- Item Name -->
-    <mat-form-field appearance="outline" class="full-width">
+    <mat-form-field appearance="outline" class="full-width" subscriptSizing="dynamic">
       <mat-label>Item Name</mat-label>
       <input
         matInput
@@ -20,6 +37,7 @@
         placeholder="e.g. Extra Virgin Olive Oil"
         required
         autocomplete="off"
+        cdkFocusInitial
       />
       @if (form.controls.name.hasError('required')) {
         <mat-error>Name is required</mat-error>
@@ -30,7 +48,7 @@
     </mat-form-field>
 
     <!-- Shopping Category -->
-    <mat-form-field appearance="outline" class="full-width">
+    <mat-form-field appearance="outline" class="full-width" subscriptSizing="dynamic">
       <mat-label>Shopping category</mat-label>
       <mat-select formControlName="category" data-testid="food-item-category-select">
         @if (!isEdit()) {
@@ -45,11 +63,11 @@
 
     <!-- Pantry Staple Toggle -->
     <div class="checkbox-row">
-      <mat-checkbox formControlName="isPantryStaple"> Always stocked pantry staple </mat-checkbox>
+      <mat-checkbox formControlName="isPantryStaple">Always stocked pantry staple</mat-checkbox>
     </div>
 
     <!-- Aliases (Comma separated) -->
-    <mat-form-field appearance="outline" class="full-width">
+    <mat-form-field appearance="outline" class="full-width" subscriptSizing="dynamic">
       <mat-label>Aliases / Synonyms</mat-label>
       <input
         matInput
@@ -62,7 +80,7 @@
   </form>
 </mat-dialog-content>
 
-<mat-dialog-actions align="end">
+<mat-dialog-actions align="end" class="dialog-actions">
   <button mat-button type="button" (click)="dialogRef.close(null)" [disabled]="isSubmitting()">
     Cancel
   </button>

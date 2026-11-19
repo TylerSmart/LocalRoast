@@ -145,7 +145,9 @@ public sealed class FoodCatalogE2ETests : E2ETestBase
         await Expect(recipesDialog.Locator(".success-banner")).ToBeVisibleAsync();
 
         // Close dialog
-        await recipesDialog.Locator("button", new() { HasText = "Close" }).ClickAsync();
+        await recipesDialog
+            .Locator("mat-dialog-actions button", new() { HasText = "Close" })
+            .ClickAsync();
         await Expect(recipesDialog).Not.ToBeVisibleAsync();
 
         // Card should now display "0 recipes"

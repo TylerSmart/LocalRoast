@@ -1,19 +1,34 @@
-<h2 mat-dialog-title class="dialog-title">
-  <div class="title-with-badge">
-    <mat-icon class="title-icon">menu_book</mat-icon>
-    <span>Recipes using "{{ data.foodItem.name }}"</span>
-    @if (!isLoading() && totalCount() > 0) {
-      <span class="count-badge">{{ totalCount() }}</span>
-    }
+<div class="dialog-header">
+  <div class="title-wrap">
+    <span class="dialog-icon-badge" aria-hidden="true">
+      <mat-icon>menu_book</mat-icon>
+    </span>
+    <div class="title-stack">
+      <div class="title-heading-row">
+        <h2 mat-dialog-title class="dialog-title">Recipes using "{{ data.foodItem.name }}"</h2>
+        @if (!isLoading() && totalCount() > 0) {
+          <span class="count-badge">{{ totalCount() }}</span>
+        }
+      </div>
+    </div>
   </div>
-</h2>
+  <button
+    mat-icon-button
+    type="button"
+    class="close-btn"
+    (click)="close()"
+    aria-label="Close dialog"
+  >
+    <mat-icon>close</mat-icon>
+  </button>
+</div>
 
 <mat-dialog-content class="dialog-content">
   @if (errorMessage()) {
     <div class="error-banner" role="alert">
-      <mat-icon>error</mat-icon>
+      <mat-icon>error_outline</mat-icon>
       <span>{{ errorMessage() }}</span>
-      <button mat-button (click)="loadRecipes()">Retry</button>
+      <button mat-button type="button" (click)="loadRecipes()">Retry</button>
     </div>
   }
 
@@ -28,7 +43,7 @@
           {{ unlinkedResult()?.unlinkedRecipeCount === 1 ? 'recipe' : 'recipes' }} ({{
             unlinkedResult()?.unlinkedIngredientCount
           }}
-          ingredients).
+          {{ unlinkedResult()?.unlinkedIngredientCount === 1 ? 'ingredient' : 'ingredients' }}).
         </p>
       </div>
     </div>
@@ -85,6 +100,7 @@
           <div class="recipe-actions">
             <button
               mat-stroked-button
+              type="button"
               (click)="navigateToRecipe(recipe.recipeId)"
               aria-label="Open recipe"
             >
@@ -126,7 +142,7 @@
   @if (recipes().length > 0 && !unlinkedResult()) {
     <button
       mat-stroked-button
-      color="warn"
+      type="button"
       class="unlink-all-btn"
       [disabled]="isUnlinking()"
       (click)="unlinkAll()"
@@ -141,5 +157,5 @@
     </button>
   }
   <span class="actions-spacer"></span>
-  <button mat-button (click)="close()">Close</button>
+  <button mat-button type="button" (click)="close()">Close</button>
 </mat-dialog-actions>

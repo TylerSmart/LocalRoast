@@ -1,7 +1,21 @@
-<h2 mat-dialog-title class="dialog-title">
-  <mat-icon class="title-icon">call_merge</mat-icon>
-  <span>Merge Food Items</span>
-</h2>
+<div class="dialog-header">
+  <div class="title-wrap">
+    <span class="dialog-icon-badge" aria-hidden="true">
+      <mat-icon>call_merge</mat-icon>
+    </span>
+    <h2 mat-dialog-title class="dialog-title">Merge Food Items</h2>
+  </div>
+  <button
+    mat-icon-button
+    type="button"
+    class="close-btn"
+    (click)="onCancel()"
+    [disabled]="isSaving()"
+    aria-label="Close dialog"
+  >
+    <mat-icon>close</mat-icon>
+  </button>
+</div>
 
 <mat-dialog-content class="dialog-content">
   <p class="dialog-description">
@@ -11,7 +25,7 @@
 
   @if (errorMessage()) {
     <div class="form-error-banner" role="alert">
-      <mat-icon>error</mat-icon>
+      <mat-icon>error_outline</mat-icon>
       <span>{{ errorMessage() }}</span>
     </div>
   }
@@ -28,7 +42,7 @@
         <span class="badge target-badge">Target (Keep)</span>
         <span class="section-label">Canonical item to preserve</span>
       </div>
-      <mat-form-field appearance="outline" class="full-width">
+      <mat-form-field appearance="outline" class="full-width" subscriptSizing="dynamic">
         <mat-label>Canonical Food Item</mat-label>
         <mat-select
           [value]="targetItemId()"
@@ -56,7 +70,7 @@
           title="Swap target and source"
         >
           <mat-icon>swap_vert</mat-icon>
-          <span>Swap Target & Source</span>
+          <span>Swap Target &amp; Source</span>
         </button>
       </div>
     }
@@ -64,10 +78,10 @@
     <!-- Sources Item Selector -->
     <div class="selector-section">
       <div class="section-header">
-        <span class="badge source-badge">Sources (Merge & Delete)</span>
+        <span class="badge source-badge">Sources (Merge &amp; Delete)</span>
         <span class="section-label">Duplicate items to absorb into target</span>
       </div>
-      <mat-form-field appearance="outline" class="full-width">
+      <mat-form-field appearance="outline" class="full-width" subscriptSizing="dynamic">
         <mat-label>Duplicate Source Items</mat-label>
         <mat-select
           multiple
@@ -80,7 +94,10 @@
             <mat-option [value]="item.id">
               {{ item.name }}
               @if (item.referencedRecipeCount > 0) {
-                <span class="count-hint">({{ item.referencedRecipeCount }} recipes)</span>
+                <span class="count-hint"
+                  >({{ item.referencedRecipeCount }}
+                  {{ item.referencedRecipeCount === 1 ? 'recipe' : 'recipes' }})</span
+                >
               }
             </mat-option>
           }
@@ -111,22 +128,23 @@
             <mat-icon class="bullet-icon">check_circle</mat-icon>
             <span>
               <strong>{{ selectedSourceIds().length }}</strong>
-              duplicate item(s) will be merged into <strong>{{ targetItem()?.name }}</strong
+              duplicate {{ selectedSourceIds().length === 1 ? 'item' : 'items' }} will be merged
+              into <strong>{{ targetItem()?.name }}</strong
               >.
             </span>
           </div>
           <div class="summary-line">
             <mat-icon class="bullet-icon">menu_book</mat-icon>
             <span>
-              <strong>{{ affectedRecipesCount() }}</strong> recipe ingredient reference(s) will be
-              repointed.
+              <strong>{{ affectedRecipesCount() }}</strong> recipe ingredient
+              {{ affectedRecipesCount() === 1 ? 'reference' : 'references' }} will be repointed.
             </span>
           </div>
           <div class="summary-line">
             <mat-icon class="bullet-icon">shopping_cart</mat-icon>
             <span>
-              <strong>{{ affectedShoppingItemsCount() }}</strong> shopping list item(s) will be
-              consolidated.
+              <strong>{{ affectedShoppingItemsCount() }}</strong> shopping list
+              {{ affectedShoppingItemsCount() === 1 ? 'item' : 'items' }} will be consolidated.
             </span>
           </div>
         </div>
