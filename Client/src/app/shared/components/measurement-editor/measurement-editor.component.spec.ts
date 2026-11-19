@@ -34,4 +34,18 @@ describe('MeasurementEditorComponent', () => {
     component.form.controls.customUnitName.setValue('packet');
     expect(component.validate()).toBeNull();
   });
+
+  it('defers displaying validation error until interaction or showValidation', () => {
+    const fixture = TestBed.createComponent(MeasurementEditorComponent);
+    const component = fixture.componentInstance;
+    component.form.controls.enabled.setValue(true);
+    fixture.detectChanges();
+
+    expect(component.validate()).toEqual({ measurement: true });
+    expect(fixture.nativeElement.querySelector('.measurement-error')).toBeNull();
+
+    component.form.controls.quantity.markAsTouched();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.measurement-error')).not.toBeNull();
+  });
 });

@@ -1,3 +1,7 @@
+:host {
+  display: block;
+}
+
 .dialog-title-content {
   display: inline-flex;
   align-items: center;
@@ -11,25 +15,22 @@
 .dialog-form {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding-top: 8px;
+  gap: 14px;
+  padding: 8px 0 4px;
   width: 100%;
-  max-width: 520px;
-
-  @media (min-width: 480px) {
-    min-width: 360px;
-  }
+  min-width: 0;
+  overflow-x: hidden;
 }
 
 .quick-ingredients {
-  margin-bottom: 8px;
+  margin-bottom: 4px;
 
   .quick-label {
     font-size: 12px;
     font-weight: 500;
     color: var(--mat-sys-on-surface-variant);
     display: block;
-    margin-bottom: 4px;
+    margin-bottom: 6px;
   }
 
   .quick-chips {
@@ -76,12 +77,14 @@
 }
 
 .form-row {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(125px, 100%), 1fr));
   gap: 12px;
+  align-items: start;
 
   .flex-1 {
-    flex: 1 1 140px;
+    min-width: 0;
+    width: 100%;
   }
 }
 

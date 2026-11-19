@@ -2,7 +2,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { MatDialog } from '@angular/material/dialog';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { provideRouter } from '@angular/router';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 import { FoodItemDto } from '../../../core/models/food-catalog.models';
 import {
   RecipeAutocompleteItemDto,
@@ -481,6 +481,157 @@ describe('RecipeEditorComponent', () => {
           }),
         ],
       }),
+    );
+  });
+
+  it('filters food catalog autocomplete by name and alias and clears stale links on edit', () => {
+    component['foodItems'].set([
+      {
+        id: 'f-1',
+        name: 'All-Purpose Flour',
+        aliases: ['AP Flour', 'plain flour'],
+        category: 'Baking',
+        isPantryStaple: true,
+        referencedRecipeCount: 5,
+        createdAt: '2026-01-01T00:00:00Z',
+        modifiedAt: '2026-01-01T00:00:00Z',
+      },
+      {
+        id: 'f-2',
+        name: 'Yellow Onion',
+        aliases: ['brown onion'],
+        category: 'Produce',
+        isPantryStaple: false,
+        referencedRecipeCount: 3,
+        createdAt: '2026-01-01T00:00:00Z',
+        modifiedAt: '2026-01-01T00:00:00Z',
+      },
+    ]);
+
+    component.ingredientsArray.at(0).patchValue({ displayName: 'plain' });
+    expect(component['getFilteredFoodItemsForIngredient'](0).map((f) => f.id)).toEqual(['f-1']);
+
+    component.onFoodItemSelected(0, 'f-1');
+    expect(component.ingredientsArray.at(0).get('foodItemId')?.value).toBe('f-1');
+    expect(component.ingredientsArray.at(0).get('displayName')?.value).toBe('All-Purpose Flour');
+
+    component.ingredientsArray.at(0).patchValue({ displayName: 'Whole Wheat Flour' });
+    component['onIngredientDisplayNameInput'](0);
+    expect(component.ingredientsArray.at(0).get('foodItemId')?.value).toBeNull();
+  });
+
+  it('preserves alternative measurement and range disclosure across ingredient reordering', () => {
+    component.addIngredient();
+    const first = component.ingredientsArray.at(0);
+    const second = component.ingredientsArray.at(1);
+    first.patchValue({
+      displayName: 'Flour',
+      quantity: 2,
+      unit: 'Cup',
+      alternativeMeasurement: { quantity: 240, unit: 'G' },
+      preferAlternativeMeasurement: true,
+    });
+    second.patchValue({ displayName: 'Sugar', quantity: 1, unit: 'Cup' });
+    component['toggleRange'](second);
+
+    expect(component['isAltMeasurementExpanded'](first)).toBe(true);
+    expect(component['isAltMeasurementExpanded'](second)).toBe(false);
+    expect(component['isRangeExpanded'](second)).toBe(true);
+
+    component.moveIngredientUp(1);
+    fixture.detectChanges();
+
+    expect(component.ingredientsArray.at(0)).toBe(second);
+    expect(component.ingredientsArray.at(1)).toBe(first);
+    expect(component['isAltMeasurementExpanded'](component.ingredientsArray.at(0))).toBe(false);
+    expect(component['isAltMeasurementExpanded'](component.ingredientsArray.at(1))).toBe(true);
+    expect(component['isRangeExpanded'](component.ingredientsArray.at(0))).toBe(true);
+  });
+
+  it('bulk pastes multi-line ingredients with sections and replaces untouched starter row', () => {
+    component['foodItems'].set([
+      {
+        id: 'f-salt',
+        name: 'Kosher Salt',
+        aliases: [],
+        category: 'SpicesAndSeasonings',
+        isPantryStaple: true,
+        referencedRecipeCount: 1,
+        createdAt: '2026-01-01T00:00:00Z',
+        modifiedAt: '2026-01-01T00:00:00Z',
+      },
+    ]);
+
+    component['pasteIngredientsText'].set(
+      'Crust:\n2 cups all-purpose flour, sifted\n1 tsp kosher salt',
+    );
+    component['applyPastedIngredients']();
+
+    expect(component.ingredientsArray.length).toBe(2);
+    expect(component.ingredientsArray.at(0).get('sectionName')?.value).toBe('Crust');
+    expect(component.ingredientsArray.at(0).get('displayName')?.value).toBe('all-purpose flour');
+    expect(component.ingredientsArray.at(0).get('preparationNote')?.value).toBe('sifted');
+    expect(component.ingredientsArray.at(1).get('foodItemId')?.value).toBe('f-salt');
+  });
+
+  it('renders dedicated load error state when loading an existing recipe fails', () => {
+    mockRecipeService.getRecipeById.mockReturnValue(
+      throwError(() => ({ status: 404, error: { detail: 'Recipe not found' } })),
+    );
+
+    component.loadRecipe('missing-id');
+    fixture.detectChanges();
+
+    expect(component['isLoading']()).toBe(false);
+    expect(component['loadError']()).toContain('could not be found');
+    expect(fixture.nativeElement.querySelector('.load-error-card')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.editor-form')).toBeNull();
+  });
+
+  it('filters tags by search query and hides destructive manage buttons by default', () => {
+    component['tags'].set([
+      {
+        id: 't-1',
+        name: 'Vegetarian',
+        slug: 'vegetarian',
+        category: 'Dietary',
+        sortOrder: 1,
+        isSystemSeeded: true,
+        recipeCount: 0,
+      },
+      {
+        id: 't-2',
+        name: 'Italian',
+        slug: 'italian',
+        category: 'Cuisine',
+        sortOrder: 2,
+        isSystemSeeded: true,
+        recipeCount: 0,
+      },
+    ]);
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelectorAll('.chip-manage-btn').length).toBe(0);
+
+    component['toggleManageTaxonomy']();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelectorAll('.chip-manage-btn').length).toBe(4);
+
+    component['tagSearchQuery'].set('veg');
+    expect(component['filteredTagsByCategory']().length).toBe(1);
+    expect(component['filteredTagsByCategory']()[0].tags.map((t) => t.name)).toEqual([
+      'Vegetarian',
+    ]);
+  });
+
+  it('collects actionable validation issues when saving an invalid form', () => {
+    component.onSave();
+    fixture.detectChanges();
+
+    expect(component['validationIssues']().length).toBeGreaterThanOrEqual(3);
+    expect(component['validationIssues']().map((i) => i.targetId)).toContain('field-recipe-title');
+    expect(fixture.nativeElement.querySelectorAll('.validation-jump-chip').length).toBeGreaterThan(
+      0,
     );
   });
 });

@@ -1,80 +1,87 @@
-<div class="step-instruction-editor">
-  <div class="step-token-toolbar">
-    <button
-      mat-stroked-button
-      type="button"
-      class="token-btn add-ingredient-btn"
-      [disabled]="disabled()"
-      (mousedown)="captureCaretOffset()"
-      (click)="openInsertTokenDialog('ingredient')"
-    >
-      <mat-icon>nutrition</mat-icon>
-      <span>+ Ingredient</span>
-    </button>
-    <button
-      mat-stroked-button
-      type="button"
-      class="token-btn add-timer-btn"
-      [disabled]="disabled()"
-      (mousedown)="captureCaretOffset()"
-      (click)="openInsertTokenDialog('timer')"
-    >
-      <mat-icon>timer</mat-icon>
-      <span>+ Timer</span>
-    </button>
-    <button
-      mat-stroked-button
-      type="button"
-      class="token-btn add-temp-btn"
-      [disabled]="disabled()"
-      (mousedown)="captureCaretOffset()"
-      (click)="openInsertTokenDialog('temperature')"
-    >
-      <mat-icon>device_thermostat</mat-icon>
-      <span>+ Temp</span>
-    </button>
-    <button
-      mat-stroked-button
-      type="button"
-      class="token-btn add-mixture-btn"
-      [disabled]="disabled()"
-      (mousedown)="captureCaretOffset()"
-      (click)="openInsertTokenDialog('mixture')"
-    >
-      <mat-icon>blender</mat-icon>
-      <span>+ Mixture</span>
-    </button>
-    <button
-      mat-stroked-button
-      type="button"
-      class="token-btn add-dimension-btn"
-      [disabled]="disabled()"
-      (mousedown)="captureCaretOffset()"
-      (click)="openInsertTokenDialog('dimension')"
-    >
-      <mat-icon>straighten</mat-icon>
-      <span>+ Size</span>
-    </button>
-    <button
-      mat-stroked-button
-      type="button"
-      class="token-btn add-fixed-btn"
-      [disabled]="disabled()"
-      (mousedown)="captureCaretOffset()"
-      (click)="openInsertTokenDialog('fixed')"
-    >
-      <mat-icon>inventory_2</mat-icon>
-      <span>+ Fixed</span>
-    </button>
+<div
+  class="step-instruction-editor"
+  [class.focused]="isFocused()"
+  [class.disabled]="disabled()"
+  [class.invalid]="invalid()"
+>
+  <div class="step-token-toolbar" role="toolbar" aria-label="Insert smart step tokens">
+    <span class="toolbar-prefix" aria-hidden="true">Insert</span>
+    <div class="toolbar-group">
+      <button
+        type="button"
+        class="token-btn add-ingredient-btn"
+        [disabled]="disabled()"
+        matTooltip="Insert a scalable ingredient amount"
+        (mousedown)="captureCaretOffset()"
+        (click)="openInsertTokenDialog('ingredient')"
+      >
+        <mat-icon aria-hidden="true">nutrition</mat-icon>
+        <span>Ingredient</span>
+      </button>
+      <button
+        type="button"
+        class="token-btn add-timer-btn"
+        [disabled]="disabled()"
+        matTooltip="Insert an interactive countdown timer"
+        (mousedown)="captureCaretOffset()"
+        (click)="openInsertTokenDialog('timer')"
+      >
+        <mat-icon aria-hidden="true">timer</mat-icon>
+        <span>Timer</span>
+      </button>
+      <button
+        type="button"
+        class="token-btn add-temp-btn"
+        [disabled]="disabled()"
+        matTooltip="Insert an auto-converting temperature (°F / °C)"
+        (mousedown)="captureCaretOffset()"
+        (click)="openInsertTokenDialog('temperature')"
+      >
+        <mat-icon aria-hidden="true">device_thermostat</mat-icon>
+        <span>Temp</span>
+      </button>
+    </div>
+
+    <span class="toolbar-divider" aria-hidden="true"></span>
+
+    <div class="toolbar-group">
+      <button
+        type="button"
+        class="token-btn add-mixture-btn"
+        [disabled]="disabled()"
+        matTooltip="Insert a scalable combined mixture portion"
+        (mousedown)="captureCaretOffset()"
+        (click)="openInsertTokenDialog('mixture')"
+      >
+        <mat-icon aria-hidden="true">blender</mat-icon>
+        <span>Mixture</span>
+      </button>
+      <button
+        type="button"
+        class="token-btn add-dimension-btn"
+        [disabled]="disabled()"
+        matTooltip="Insert a pan or cut dimension (in / cm)"
+        (mousedown)="captureCaretOffset()"
+        (click)="openInsertTokenDialog('dimension')"
+      >
+        <mat-icon aria-hidden="true">straighten</mat-icon>
+        <span>Size</span>
+      </button>
+      <button
+        type="button"
+        class="token-btn add-fixed-btn"
+        [disabled]="disabled()"
+        matTooltip="Insert a non-scaling measurement (e.g. 12-cup pan)"
+        (mousedown)="captureCaretOffset()"
+        (click)="openInsertTokenDialog('fixed')"
+      >
+        <mat-icon aria-hidden="true">inventory_2</mat-icon>
+        <span>Fixed</span>
+      </button>
+    </div>
   </div>
 
-  <div class="editor-outline" [class.focused]="isFocused()" [class.disabled]="disabled()">
-    <span class="editor-floating-label">
-      {{ label() }}
-      @if (required()) {
-        <span aria-hidden="true"> *</span>
-      }
-    </span>
+  <div class="editor-surface-wrap">
     <div
       #editableSurface
       class="step-instruction-editable"
@@ -84,6 +91,7 @@
       [attr.tabindex]="disabled() ? -1 : 0"
       [attr.aria-label]="label()"
       [attr.aria-required]="required() ? 'true' : null"
+      [attr.aria-invalid]="invalid() ? 'true' : null"
       [attr.data-step-index]="stepIndex()"
       [attr.data-placeholder]="placeholder()"
       [attr.data-empty]="isEmpty() ? 'true' : 'false'"
@@ -96,4 +104,15 @@
       (click)="onEditableClick($event)"
     ></div>
   </div>
+
+  @if (invalid()) {
+    <div class="editor-error-footer" role="alert">
+      <mat-icon aria-hidden="true">error_outline</mat-icon>
+      <span>Step instruction is required</span>
+    </div>
+  } @else if (showHelperHint()) {
+    <div class="editor-helper-footer">
+      <span>Use the toolbar above to insert scalable amounts, timers, and temperatures.</span>
+    </div>
+  }
 </div>
