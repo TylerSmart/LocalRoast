@@ -205,6 +205,7 @@ export interface RecipeDetailDto {
   ratingCount?: number;
   cookLogs?: CookLogDto[];
   extractedModel?: string | null;
+  refinedModel?: string | null;
   ingestionJobId?: string | null;
 }
 
@@ -299,6 +300,7 @@ export interface UpsertRecipeRequest {
   collectionIds?: string[] | null;
   tagIds?: string[] | null;
   extractedModel?: string | null;
+  refinedModel?: string | null;
 }
 
 export interface UpdateRecipeOrganizationRequest {
@@ -405,6 +407,7 @@ export interface RecipePreviewData {
   sourceBookPage?: number | null;
   coverImagePath?: string | null;
   extractedModel?: string | null;
+  refinedModel?: string | null;
   collections: { id?: string; name: string }[];
   tags: { id?: string; name: string; category?: string }[];
   ingredients: RecipePreviewIngredient[];

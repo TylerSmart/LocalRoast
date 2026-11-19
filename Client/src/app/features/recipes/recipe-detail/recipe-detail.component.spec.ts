@@ -404,10 +404,35 @@ describe('RecipeDetailComponent', () => {
     expect(component['previewPhotoUrl']()).toBeNull();
   });
   it('displays extracted model pill in stats strip when recipe was ingested and links to ingestion review', () => {
-    const modelPill = fixture.nativeElement.querySelector('.stat-pill.model-stat');
+    const modelPill = fixture.nativeElement.querySelector(
+      '[data-testid="recipe-extracted-model-pill"]',
+    );
     expect(modelPill).toBeTruthy();
+    expect(modelPill.textContent).toContain('Ingested Model');
     expect(modelPill.textContent).toContain('llama3.2-vision');
     expect(modelPill.getAttribute('href')).toContain('/ingest/review/job-100');
+    expect(
+      fixture.nativeElement.querySelector('[data-testid="recipe-refined-model-pill"]'),
+    ).toBeNull();
+  });
+
+  it('displays refined model pill in stats strip when recipe was refined', () => {
+    mockRecipeService.getRecipeById.mockReturnValueOnce(
+      of({
+        ...sampleRecipe,
+        refinedModel: 'gemma4:26b-a4b',
+      }),
+    );
+    component.loadRecipe('r-1');
+    fixture.detectChanges();
+
+    const refinedPill = fixture.nativeElement.querySelector(
+      '[data-testid="recipe-refined-model-pill"]',
+    );
+    expect(refinedPill).toBeTruthy();
+    expect(refinedPill.textContent).toContain('Refined Model');
+    expect(refinedPill.textContent).toContain('gemma4:26b-a4b');
+    expect(refinedPill.getAttribute('href')).toContain('/ingest/review/job-100');
   });
 
   it('reruns ingestion and navigates to /ingest when rerun button is clicked', () => {

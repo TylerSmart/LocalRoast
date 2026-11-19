@@ -178,7 +178,8 @@ public record IngestionExtractedDraftDto(
     IReadOnlyList<string>? ProposedTagNames = null,
     IReadOnlyList<string>? MeasurementWarnings = null,
     IReadOnlyList<string>? QualityWarnings = null,
-    IReadOnlyList<string>? ValidationIssues = null
+    IReadOnlyList<string>? ValidationIssues = null,
+    [MaxLength(200)] string? RefinedModel = null
 );
 
 public record EnqueueWebUrlIngestionRequest([Required] IReadOnlyList<string> Urls);
@@ -277,7 +278,9 @@ public record IngestionJobSummaryDto(
     DateTimeOffset CreatedAt,
     DateTimeOffset ModifiedAt,
     int SourceFileCount = 0,
-    string? ExtractedModel = null
+    string? ExtractedModel = null,
+    string? RefinedModel = null,
+    DateTimeOffset? RefinedAt = null
 );
 
 public record IngestionJobDetailDto(
@@ -306,7 +309,9 @@ public record IngestionJobDetailDto(
     PdfInspectionSummaryDto? PdfInspection = null,
     string? SourceBookTitle = null,
     int? SourceBookPage = null,
-    string? ExtractedModel = null
+    string? ExtractedModel = null,
+    string? RefinedModel = null,
+    DateTimeOffset? RefinedAt = null
 )
 {
     public IReadOnlyList<IngestionSourceFileDto> SourceFiles { get; init; } = SourceFiles ?? [];

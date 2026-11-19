@@ -713,4 +713,35 @@ describe('IngestionReviewComponent', () => {
     component.removeIngredientReplacement(0, 0);
     expect(component.getReplacementsArray(0).length).toBe(0);
   });
+
+  it('displays ingested and refined model badges and carries refinedModel through draft and preview', () => {
+    mockIngestionService.getJobById.mockReturnValueOnce(
+      of({
+        ...sampleJob,
+        refinedModel: 'gemma4:26b-a4b',
+        refinedAt: '2026-10-26T12:15:00Z',
+        extractedDraft: {
+          ...sampleJob.extractedDraft!,
+          refinedModel: 'gemma4:26b-a4b',
+        },
+      }),
+    );
+
+    component['loadJob']();
+    fixture.detectChanges();
+
+    const el = fixture.nativeElement as HTMLElement;
+    expect(el.querySelector('[data-testid="review-extracted-model-badge"]')?.textContent).toContain(
+      'Ingested: gpt-4o',
+    );
+    expect(el.querySelector('[data-testid="review-refined-model-badge"]')?.textContent).toContain(
+      'Refined: gemma4:26b-a4b',
+    );
+
+    const payload = component.buildDraftPayload();
+    expect(payload.refinedModel).toBe('gemma4:26b-a4b');
+
+    component['refreshPreviewData']();
+    expect(component.previewData()?.refinedModel).toBe('gemma4:26b-a4b');
+  });
 });

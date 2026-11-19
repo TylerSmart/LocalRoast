@@ -219,4 +219,20 @@ describe('RecipeDetailPreviewComponent', () => {
     component.onPublish();
     expect(emitted).toBe(true);
   });
+
+  it('renders both ingested and refined model pills when present', () => {
+    fixture.componentRef.setInput('recipe', {
+      ...mockRecipeData,
+      refinedModel: 'gemma4:26b-a4b',
+    });
+    fixture.detectChanges();
+
+    const el = fixture.nativeElement as HTMLElement;
+    expect(el.querySelector('[data-testid="preview-extracted-model-pill"]')?.textContent).toContain(
+      'gemini-1.5-pro',
+    );
+    expect(el.querySelector('[data-testid="preview-refined-model-pill"]')?.textContent).toContain(
+      'gemma4:26b-a4b',
+    );
+  });
 });

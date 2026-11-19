@@ -42,6 +42,8 @@ public sealed class Recipe : IAuditable
 
     public string? ExtractedModel { get; set; }
 
+    public string? RefinedModel { get; set; }
+
     public int TimesCooked { get; set; }
 
     public DateTimeOffset? LastCookedAt { get; set; }

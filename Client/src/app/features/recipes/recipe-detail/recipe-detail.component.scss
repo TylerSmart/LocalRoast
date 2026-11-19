@@ -140,6 +140,19 @@
       }
     }
 
+    &.refined-model-stat {
+      background-color: var(--mat-sys-secondary-container, #e8def8);
+
+      .stat-label {
+        color: var(--mat-sys-on-secondary-container, #1d192b);
+        opacity: 0.8;
+      }
+
+      .stat-value {
+        color: var(--mat-sys-on-secondary-container, #1d192b);
+      }
+    }
+
     &.link-pill {
       text-decoration: none;
       cursor: pointer;

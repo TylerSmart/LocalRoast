@@ -52,10 +52,21 @@
             @if (job()?.extractedModel) {
               <div
                 class="model-badge"
-                [matTooltip]="'Extracted with LLM model: ' + job()!.extractedModel"
+                [matTooltip]="'Ingested with LLM model: ' + job()!.extractedModel"
+                data-testid="review-extracted-model-badge"
               >
                 <mat-icon class="model-icon">smart_toy</mat-icon>
-                <span>{{ job()!.extractedModel }}</span>
+                <span>Ingested: {{ job()!.extractedModel }}</span>
+              </div>
+            }
+            @if (job()?.refinedModel) {
+              <div
+                class="model-badge refined-model-badge"
+                [matTooltip]="'Refined with LLM model: ' + job()!.refinedModel"
+                data-testid="review-refined-model-badge"
+              >
+                <mat-icon class="model-icon">auto_awesome</mat-icon>
+                <span>Refined: {{ job()!.refinedModel }}</span>
               </div>
             }
           </div>

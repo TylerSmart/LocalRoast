@@ -44,6 +44,14 @@ public sealed class IngestionJob : IAuditable
 
     public string? ExtractedModel { get; set; }
 
+    public string? RefinedModel { get; set; }
+
+    public DateTimeOffset? RefinedAt { get; set; }
+
+    public int RefinementAttemptCount { get; set; }
+
+    public DateTimeOffset? RefinementNextRetryAt { get; set; }
+
     public decimal? ConfidenceScore { get; set; }
 
     public string? StatusDetail { get; set; }

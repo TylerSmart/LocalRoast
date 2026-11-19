@@ -8,6 +8,7 @@ using App.Core.FoodCatalog;
 using App.Core.Ingestion;
 using App.Core.Recipes;
 using App.Data;
+using App.Data.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -456,13 +457,13 @@ public sealed class MultiStageIngestionAndReplacementsIntegrationTests
     }
 
     [TestMethod]
-    public async Task ModelQuotaExhausted_OnRefinementModel_SkipsStage5WithoutPausingTextIngestion()
+    public async Task ModelQuotaExhausted_OnRefinementModel_SkipsStage6RefinementWithoutPausingTextIngestion()
     {
         var mockLlm = new FallbackExercisingLlmClient
         {
             ForceSimpleBatch = true,
             ThrowOnStage = (cfg, stage) =>
-                stage == "stage5b_polish_targeted"
+                stage == "stage6_refine_recipe"
                     ? new LlmHostUnavailableException(
                         "Daily request limit reached for model 'gemini-2.5-pro' (50 / 50 requests today).",
                         isQuotaExhausted: true
@@ -535,7 +536,8 @@ public sealed class MultiStageIngestionAndReplacementsIntegrationTests
                 TextModelProfileId: textCfg.DefaultProfileId,
                 RefineModelProfileId: refineCfg.DefaultProfileId,
                 EnableIngestion: true,
-                AutoResumeQueue: true
+                AutoResumeQueue: true,
+                RefineDuringIngestion: true
             )
         );
         Assert.AreEqual(HttpStatusCode.OK, wfRes.StatusCode);
@@ -559,6 +561,19 @@ public sealed class MultiStageIngestionAndReplacementsIntegrationTests
         }
 
         Assert.IsTrue(mockLlm.StageCalls.Contains("stage5b_polish_targeted"));
+        Assert.IsTrue(mockLlm.StageCalls.Contains("stage6_refine_recipe"));
+        Assert.IsTrue(
+            mockLlm.StageModels.Any(x =>
+                x.Stage == "stage5b_polish_targeted" && x.Model == "gemini-2.5-flash"
+            ),
+            "Stage 5 Targeted Polish must run on the primary Text model."
+        );
+        Assert.IsTrue(
+            mockLlm.StageModels.Any(x =>
+                x.Stage == "stage6_refine_recipe" && x.Model == "gemini-2.5-pro"
+            ),
+            "Stage 6 Refinement must run on the Refinement model."
+        );
 
         var settings = await client.GetFromJsonAsync<LlmSettingsDto>("/api/llm-settings");
         Assert.IsNotNull(settings);
@@ -572,6 +587,630 @@ public sealed class MultiStageIngestionAndReplacementsIntegrationTests
         );
         Assert.IsNotNull(detail);
         Assert.AreEqual(IngestionJobStatus.ReadyForReview, detail.Status);
+        Assert.AreEqual("gemini-2.5-flash", detail.ExtractedModel);
+        Assert.IsNull(detail.RefinedModel);
+        Assert.IsNull(detail.RefinedAt);
+    }
+
+    [TestMethod]
+    public async Task RefineDuringIngestion_RunsBeforeAutoPublishAndCleansFoodCatalogNames()
+    {
+        var mockLlm = new FallbackExercisingLlmClient
+        {
+            ForceSimpleBatch = true,
+            Stage1JsonOverride = """
+                {
+                    "title": "Garlicky Roasted Squash",
+                    "description": "Sweet roasted squash.",
+                    "servings": 4,
+                    "yield": "4 servings",
+                    "sections": [
+                        {
+                            "name": null,
+                            "ingredients": [
+                                {
+                                    "name": "1/2-inch cubed peeled butternut squash",
+                                    "quantity": 2,
+                                    "maxQuantity": null,
+                                    "unit": "pound",
+                                    "prepNote": null,
+                                    "isOptional": false,
+                                    "replacements": [],
+                                    "alternateMeasurements": []
+                                }
+                            ],
+                            "instructions": ["Roast 2 pounds butternut squash until tender."]
+                        }
+                    ],
+                    "timing": { "prep": 10, "cook": 30, "total": 40 },
+                    "tags": ["Side Dish"]
+                }
+                """,
+            Stage4BatchJsonOverride = """
+                {
+                    "steps": [
+                        {
+                            "stepNumber": 1,
+                            "tokens": [
+                                "Roast ",
+                                {
+                                    "type": "ingredient",
+                                    "ingredientIndex": 0,
+                                    "name": "butternut squash",
+                                    "quantity": 2,
+                                    "maxQuantity": null,
+                                    "unit": "pound"
+                                },
+                                " until tender."
+                            ]
+                        }
+                    ]
+                }
+                """,
+            Stage6JsonOverride = """
+                {
+                    "title": null,
+                    "description": null,
+                    "servings": null,
+                    "yield": null,
+                    "timing": null,
+                    "tags": null,
+                    "ingredientPatches": [
+                        {
+                            "index": 0,
+                            "displayName": "butternut squash",
+                            "canonicalFoodName": "butternut squash",
+                            "category": "Produce",
+                            "isPantryStaple": false,
+                            "quantity": null,
+                            "maxQuantity": null,
+                            "unit": null,
+                            "prepNote": "peeled and cut into 1/2-inch cubes",
+                            "isOptional": null,
+                            "isRecipeReference": null,
+                            "referencedRecipeTitle": null,
+                            "alternateMeasurements": null,
+                            "replacementPatches": null
+                        }
+                    ],
+                    "stepPatches": [],
+                    "refinementNotes": ["Cleaned butternut squash food catalog name before publish."]
+                }
+                """,
+        };
+
+        await using var customFactory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ILlmExtractionClient>();
+                services.AddSingleton<ILlmExtractionClient>(mockLlm);
+            });
+        });
+
+        using var client = customFactory.CreateClient();
+        await AuthenticateAsync(client);
+
+        var conn = await (
+            await client.PostAsJsonAsync(
+                "/api/llm-settings/connections",
+                new UpsertLlmConnectionRequest(
+                    Name: "Local Ollama",
+                    Provider: LlmProvider.Ollama,
+                    BaseUrl: "http://localhost:11434"
+                )
+            )
+        ).Content.ReadFromJsonAsync<LlmConnectionDto>();
+        Assert.IsNotNull(conn);
+
+        var textCfg = await (
+            await client.PostAsJsonAsync(
+                "/api/llm-settings/model-configurations",
+                new UpsertLlmModelConfigurationRequest("Fast Text", conn.Id, "gemma4:e4b")
+            )
+        ).Content.ReadFromJsonAsync<LlmModelConfigurationDto>();
+        var refineCfg = await (
+            await client.PostAsJsonAsync(
+                "/api/llm-settings/model-configurations",
+                new UpsertLlmModelConfigurationRequest("Deep Refine", conn.Id, "gemma4:12b")
+            )
+        ).Content.ReadFromJsonAsync<LlmModelConfigurationDto>();
+        Assert.IsNotNull(textCfg);
+        Assert.IsNotNull(refineCfg);
+
+        var wfRes = await client.PutAsJsonAsync(
+            "/api/llm-settings/workflows",
+            new UpdateLlmWorkflowsRequest(
+                TextModelProfileId: textCfg.DefaultProfileId,
+                RefineModelProfileId: refineCfg.DefaultProfileId,
+                AutoPublishHighConfidenceText: true,
+                EnableIngestion: true,
+                RefineDuringIngestion: true,
+                RefineDuringIdle: false
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.OK, wfRes.StatusCode);
+
+        var enqueueRes = await client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest(
+                "Garlicky Roasted Squash\nIngredients:\n- 2 lb butternut squash, peeled and cut into 1/2-inch cubes\nInstructions:\n1. Roast 2 pounds butternut squash until tender."
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Accepted, enqueueRes.StatusCode);
+        var queuedJob = await enqueueRes.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
+        Assert.IsNotNull(queuedJob);
+
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            var processed = await scope
+                .ServiceProvider.GetRequiredService<IIngestionProcessor>()
+                .ProcessNextQueuedJobAsync();
+            Assert.IsTrue(processed);
+        }
+
+        Assert.IsTrue(mockLlm.StageCalls.Contains("stage6_refine_recipe"));
+
+        var jobDetail = await client.GetFromJsonAsync<IngestionJobDetailDto>(
+            $"/api/ingestion/jobs/{queuedJob.Id}"
+        );
+        Assert.IsNotNull(jobDetail);
+        Assert.AreEqual(IngestionJobStatus.Published, jobDetail.Status);
+        Assert.AreEqual("gemma4:e4b", jobDetail.ExtractedModel);
+        Assert.AreEqual("gemma4:12b", jobDetail.RefinedModel);
+        Assert.IsNotNull(jobDetail.RefinedAt);
+        Assert.IsNotNull(jobDetail.ResultingRecipeId);
+
+        var recipe = await client.GetFromJsonAsync<RecipeDetailDto>(
+            $"/api/recipes/{jobDetail.ResultingRecipeId}"
+        );
+        Assert.IsNotNull(recipe);
+        Assert.AreEqual("gemma4:e4b", recipe.ExtractedModel);
+        Assert.AreEqual("gemma4:12b", recipe.RefinedModel);
+
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            Assert.IsFalse(
+                await db.FoodItems.AnyAsync(f =>
+                    f.NormalizedName.Contains("1/2-inch") || f.NormalizedName.Contains("cubed")
+                ),
+                "Polluted food name must never be created in FoodItems when RefineDuringIngestion cleans it before publish."
+            );
+            Assert.IsTrue(
+                await db.FoodItems.AnyAsync(f => f.NormalizedName == "butternut squash"),
+                "Clean refined food name must be materialized in FoodItems."
+            );
+        }
+    }
+
+    [TestMethod]
+    public async Task RefineDuringIdle_PrioritizesReviewThenPublished_UpdatesLiveRecipeAndCleansOrphans()
+    {
+        var mockLlm = new FallbackExercisingLlmClient
+        {
+            ForceSimpleBatch = true,
+            Stage6JsonFactory = (_, userContent) =>
+            {
+                if (userContent.Contains("Polluted Published Stew", StringComparison.Ordinal))
+                {
+                    return """
+                        {
+                            "title": null,
+                            "description": null,
+                            "servings": null,
+                            "yield": null,
+                            "timing": null,
+                            "tags": null,
+                            "ingredientPatches": [
+                                {
+                                    "index": 0,
+                                    "displayName": "yukon gold potatoes",
+                                    "canonicalFoodName": "yukon gold potato",
+                                    "category": "Produce",
+                                    "isPantryStaple": false,
+                                    "quantity": null,
+                                    "maxQuantity": null,
+                                    "unit": null,
+                                    "prepNote": "peeled and diced",
+                                    "isOptional": null,
+                                    "isRecipeReference": null,
+                                    "referencedRecipeTitle": null,
+                                    "alternateMeasurements": null,
+                                    "replacementPatches": null
+                                }
+                            ],
+                            "stepPatches": [],
+                            "refinementNotes": ["Fixed polluted potato catalog item name."]
+                        }
+                        """;
+                }
+
+                return """
+                    {
+                        "title": "Refined Review Soup",
+                        "description": null,
+                        "servings": null,
+                        "yield": null,
+                        "timing": null,
+                        "tags": null,
+                        "ingredientPatches": [],
+                        "stepPatches": [],
+                        "refinementNotes": ["Polished title."]
+                    }
+                    """;
+            },
+        };
+
+        await using var customFactory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ILlmExtractionClient>();
+                services.AddSingleton<ILlmExtractionClient>(mockLlm);
+            });
+        });
+
+        using var client = customFactory.CreateClient();
+        await AuthenticateAsync(client);
+
+        var conn = await (
+            await client.PostAsJsonAsync(
+                "/api/llm-settings/connections",
+                new UpsertLlmConnectionRequest(
+                    Name: "Local Ollama",
+                    Provider: LlmProvider.Ollama,
+                    BaseUrl: "http://localhost:11434"
+                )
+            )
+        ).Content.ReadFromJsonAsync<LlmConnectionDto>();
+        Assert.IsNotNull(conn);
+
+        var textCfg = await (
+            await client.PostAsJsonAsync(
+                "/api/llm-settings/model-configurations",
+                new UpsertLlmModelConfigurationRequest("Fast Text", conn.Id, "gemma4:e4b")
+            )
+        ).Content.ReadFromJsonAsync<LlmModelConfigurationDto>();
+        var refineCfg = await (
+            await client.PostAsJsonAsync(
+                "/api/llm-settings/model-configurations",
+                new UpsertLlmModelConfigurationRequest("Idle Refine", conn.Id, "gemma4:26b-a4b")
+            )
+        ).Content.ReadFromJsonAsync<LlmModelConfigurationDto>();
+        Assert.IsNotNull(textCfg);
+        Assert.IsNotNull(refineCfg);
+
+        var wfRes = await client.PutAsJsonAsync(
+            "/api/llm-settings/workflows",
+            new UpdateLlmWorkflowsRequest(
+                TextModelProfileId: textCfg.DefaultProfileId,
+                RefineModelProfileId: refineCfg.DefaultProfileId,
+                AutoPublishHighConfidenceText: false,
+                EnableIngestion: true,
+                RefineDuringIngestion: false,
+                RefineDuringIdle: true
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.OK, wfRes.StatusCode);
+
+        // Seed: (1) an already-published job with a bad orphaned FoodItem + user collection,
+        //       (2) a ReadyForReview job (should be refined FIRST even though Published is newer).
+        Guid reviewJobId;
+        Guid publishedJobId;
+        Guid publishedRecipeId;
+        Guid badFoodId;
+        Guid sharedFoodId;
+        Guid userCollectionId;
+
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+            var badFood = new FoodItem
+            {
+                Id = Guid.NewGuid(),
+                Name = "peeled diced yukon gold potatoes",
+                NormalizedName = "peeled diced yukon gold potatoes",
+                Category = FoodCategory.Other,
+                IsPantryStaple = false,
+                CreatedBy = "Test",
+                ModifiedBy = "Test",
+            };
+            var sharedFood = new FoodItem
+            {
+                Id = Guid.NewGuid(),
+                Name = "Kosher Salt",
+                NormalizedName = "kosher salt",
+                Category = FoodCategory.SpicesAndSeasonings,
+                IsPantryStaple = true,
+                CreatedBy = "Test",
+                ModifiedBy = "Test",
+            };
+            var userCollection = new Collection
+            {
+                Id = Guid.NewGuid(),
+                Name = "Winter Favorites",
+                Slug = "winter-favorites",
+                CreatedBy = "Test",
+                ModifiedBy = "Test",
+            };
+            db.FoodItems.AddRange(badFood, sharedFood);
+            db.Collections.Add(userCollection);
+
+            var publishedRecipe = new Recipe
+            {
+                Id = Guid.NewGuid(),
+                Title = "Polluted Published Stew",
+                Slug = "polluted-published-stew",
+                Status = RecipeStatus.Published,
+                BaseServings = 4m,
+                ExtractedModel = "gemma4:e4b",
+                CoverImagePath = "/api/uploads/recipes/user-cover.webp",
+                ThumbnailImagePath = "/api/uploads/recipes/user-thumb.webp",
+                CreatedBy = "Test",
+                ModifiedBy = "Test",
+            };
+            publishedRecipe.RecipeCollections.Add(
+                new RecipeCollection
+                {
+                    RecipeId = publishedRecipe.Id,
+                    CollectionId = userCollection.Id,
+                }
+            );
+            publishedRecipe.Ingredients.Add(
+                new RecipeIngredient
+                {
+                    Id = Guid.NewGuid(),
+                    SortOrder = 0,
+                    DisplayName = "peeled diced yukon gold potatoes",
+                    Quantity = 2m,
+                    Unit = MeasurementUnit.Lb,
+                    FoodItemId = badFood.Id,
+                }
+            );
+            publishedRecipe.Ingredients.Add(
+                new RecipeIngredient
+                {
+                    Id = Guid.NewGuid(),
+                    SortOrder = 1,
+                    DisplayName = "kosher salt",
+                    Quantity = 1m,
+                    Unit = MeasurementUnit.Tsp,
+                    FoodItemId = sharedFood.Id,
+                }
+            );
+            publishedRecipe.Steps.Add(
+                new RecipeStep
+                {
+                    Id = Guid.NewGuid(),
+                    StepNumber = 1,
+                    Instruction = "Simmer potatoes and kosher salt until tender.",
+                }
+            );
+            db.Recipes.Add(publishedRecipe);
+
+            // Second recipe using sharedFood so we prove shared FoodItems are never deleted
+            var otherRecipe = new Recipe
+            {
+                Id = Guid.NewGuid(),
+                Title = "Salted Broth",
+                Slug = "salted-broth",
+                Status = RecipeStatus.Published,
+                BaseServings = 2m,
+                CreatedBy = "Test",
+                ModifiedBy = "Test",
+            };
+            otherRecipe.Ingredients.Add(
+                new RecipeIngredient
+                {
+                    Id = Guid.NewGuid(),
+                    SortOrder = 0,
+                    DisplayName = "kosher salt",
+                    FoodItemId = sharedFood.Id,
+                }
+            );
+            otherRecipe.Steps.Add(
+                new RecipeStep
+                {
+                    Id = Guid.NewGuid(),
+                    StepNumber = 1,
+                    Instruction = "Dissolve salt in hot water.",
+                }
+            );
+            db.Recipes.Add(otherRecipe);
+
+            var pubDraft = new IngestionExtractedDraftDto(
+                Title: "Polluted Published Stew",
+                BaseServings: 4m,
+                ExtractedModel: "gemma4:e4b",
+                Ingredients:
+                [
+                    new IngestionDraftIngredientDto(
+                        Quantity: 2m,
+                        Unit: MeasurementUnit.Lb,
+                        MatchedFoodItemId: badFood.Id,
+                        MatchedFoodItemName: badFood.Name,
+                        IsNewFoodItem: false,
+                        DisplayName: "peeled diced yukon gold potatoes"
+                    ),
+                    new IngestionDraftIngredientDto(
+                        Quantity: 1m,
+                        Unit: MeasurementUnit.Tsp,
+                        MatchedFoodItemId: sharedFood.Id,
+                        MatchedFoodItemName: sharedFood.Name,
+                        IsNewFoodItem: false,
+                        DisplayName: "kosher salt"
+                    ),
+                ],
+                Steps:
+                [
+                    new IngestionDraftStepDto(
+                        Instruction: "Simmer potatoes and kosher salt until tender."
+                    ),
+                ]
+            );
+
+            var reviewDraft = new IngestionExtractedDraftDto(
+                Title: "Initial Review Soup",
+                BaseServings: 4m,
+                ExtractedModel: "gemma4:e4b",
+                Ingredients:
+                [
+                    new IngestionDraftIngredientDto(
+                        Quantity: 1m,
+                        Unit: MeasurementUnit.Tsp,
+                        MatchedFoodItemId: sharedFood.Id,
+                        MatchedFoodItemName: sharedFood.Name,
+                        IsNewFoodItem: false,
+                        DisplayName: "kosher salt"
+                    ),
+                ],
+                Steps: [new IngestionDraftStepDto(Instruction: "Heat broth with salt.")]
+            );
+
+            var reviewJob = new IngestionJob
+            {
+                Id = Guid.NewGuid(),
+                Channel = IngestionChannel.RawText,
+                Status = IngestionJobStatus.ReadyForReview,
+                DisplayTitle = "Initial Review Soup",
+                RawText =
+                    "Initial Review Soup\nIngredients:\n- 1 tsp kosher salt\nInstructions:\n1. Heat broth with salt.",
+                NormalizedSourceText =
+                    "Initial Review Soup\nIngredients:\n- 1 tsp kosher salt\nInstructions:\n1. Heat broth with salt.",
+                ExtractedDraftJson = JsonSerializer.Serialize(reviewDraft),
+                ExtractedModel = "gemma4:e4b",
+                CreatedAt = DateTimeOffset.UtcNow.AddHours(-2),
+                CreatedBy = "Test",
+                ModifiedBy = "Test",
+            };
+
+            var publishedJob = new IngestionJob
+            {
+                Id = Guid.NewGuid(),
+                Channel = IngestionChannel.RawText,
+                Status = IngestionJobStatus.Published,
+                DisplayTitle = "Polluted Published Stew",
+                RawText =
+                    "Polluted Published Stew\nIngredients:\n- 2 lb yukon gold potatoes, peeled and diced\n- 1 tsp kosher salt\nInstructions:\n1. Simmer potatoes and kosher salt until tender.",
+                NormalizedSourceText =
+                    "Polluted Published Stew\nIngredients:\n- 2 lb yukon gold potatoes, peeled and diced\n- 1 tsp kosher salt\nInstructions:\n1. Simmer potatoes and kosher salt until tender.",
+                ExtractedDraftJson = JsonSerializer.Serialize(pubDraft),
+                ExtractedModel = "gemma4:e4b",
+                ResultingRecipeId = publishedRecipe.Id,
+                CreatedAt = DateTimeOffset.UtcNow.AddHours(-1),
+                CreatedBy = "Test",
+                ModifiedBy = "Test",
+            };
+
+            db.IngestionJobs.AddRange(reviewJob, publishedJob);
+            await db.SaveChangesAsync();
+
+            reviewJobId = reviewJob.Id;
+            publishedJobId = publishedJob.Id;
+            publishedRecipeId = publishedRecipe.Id;
+            badFoodId = badFood.Id;
+            sharedFoodId = sharedFood.Id;
+            userCollectionId = userCollection.Id;
+        }
+
+        // First idle refinement tick MUST prioritize ReadyForReview before Published
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            var processed = await scope
+                .ServiceProvider.GetRequiredService<IIngestionProcessor>()
+                .ProcessNextIdleRefinementAsync();
+            Assert.IsTrue(processed);
+        }
+
+        var reviewAfterFirst = await client.GetFromJsonAsync<IngestionJobDetailDto>(
+            $"/api/ingestion/jobs/{reviewJobId}"
+        );
+        var pubAfterFirst = await client.GetFromJsonAsync<IngestionJobDetailDto>(
+            $"/api/ingestion/jobs/{publishedJobId}"
+        );
+        Assert.AreEqual("Refined Review Soup", reviewAfterFirst!.DisplayTitle);
+        Assert.AreEqual("gemma4:e4b", reviewAfterFirst.ExtractedModel);
+        Assert.AreEqual("gemma4:26b-a4b", reviewAfterFirst.RefinedModel);
+        Assert.IsNotNull(reviewAfterFirst.RefinedAt);
+        Assert.IsNull(
+            pubAfterFirst!.RefinedAt,
+            "Published job must wait until ReadyForReview jobs finish."
+        );
+
+        // Second idle refinement tick refines the Published job in-place & cleans up orphaned FoodItem
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            var processed = await scope
+                .ServiceProvider.GetRequiredService<IIngestionProcessor>()
+                .ProcessNextIdleRefinementAsync();
+            Assert.IsTrue(processed);
+        }
+
+        var pubAfterSecond = await client.GetFromJsonAsync<IngestionJobDetailDto>(
+            $"/api/ingestion/jobs/{publishedJobId}"
+        );
+        Assert.AreEqual(IngestionJobStatus.Published, pubAfterSecond!.Status);
+        Assert.AreEqual("gemma4:e4b", pubAfterSecond.ExtractedModel);
+        Assert.AreEqual("gemma4:26b-a4b", pubAfterSecond.RefinedModel);
+        Assert.IsNotNull(pubAfterSecond.RefinedAt);
+
+        var updatedLiveRecipe = await client.GetFromJsonAsync<RecipeDetailDto>(
+            $"/api/recipes/{publishedRecipeId}"
+        );
+        Assert.IsNotNull(updatedLiveRecipe);
+        Assert.AreEqual("gemma4:e4b", updatedLiveRecipe.ExtractedModel);
+        Assert.AreEqual("gemma4:26b-a4b", updatedLiveRecipe.RefinedModel);
+        Assert.AreEqual("/api/uploads/recipes/user-cover.webp", updatedLiveRecipe.CoverImagePath);
+        Assert.IsTrue(
+            updatedLiveRecipe.Collections.Any(c => c.Id == userCollectionId),
+            "In-place idle refinement must preserve user-assigned recipe collections."
+        );
+
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            Assert.IsFalse(
+                await db.FoodItems.AnyAsync(f => f.Id == badFoodId),
+                "Orphaned bad FoodItem created solely for the published recipe must be removed."
+            );
+            Assert.IsTrue(
+                await db.FoodItems.AnyAsync(f => f.NormalizedName == "yukon gold potato"),
+                "Clean refined FoodItem must be created and linked."
+            );
+            Assert.IsTrue(
+                await db.FoodItems.AnyAsync(f => f.Id == sharedFoodId),
+                "Shared FoodItems must never be deleted."
+            );
+        }
+
+        // Third tick returns false (all jobs refined)
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            var processed = await scope
+                .ServiceProvider.GetRequiredService<IIngestionProcessor>()
+                .ProcessNextIdleRefinementAsync();
+            Assert.IsFalse(processed);
+        }
+
+        // Retrying a refined job resets RefinedModel and RefinedAt so it can be refined again
+        var retryRes = await client.PostAsync($"/api/ingestion/jobs/{reviewJobId}/retry", null);
+        Assert.AreEqual(HttpStatusCode.Accepted, retryRes.StatusCode);
+        var retriedDetail = await client.GetFromJsonAsync<IngestionJobDetailDto>(
+            $"/api/ingestion/jobs/{reviewJobId}"
+        );
+        Assert.IsNull(retriedDetail!.RefinedModel);
+        Assert.IsNull(retriedDetail.RefinedAt);
+
+        // Idle refinement must NOT run while a queued ingestion job exists
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            var processed = await scope
+                .ServiceProvider.GetRequiredService<IIngestionProcessor>()
+                .ProcessNextIdleRefinementAsync();
+            Assert.IsFalse(processed);
+        }
     }
 
     [TestMethod]
@@ -695,9 +1334,12 @@ public sealed class MultiStageIngestionAndReplacementsIntegrationTests
         public bool ForceSimpleBatch { get; set; }
         public string? Stage1JsonOverride { get; set; }
         public string? Stage4BatchJsonOverride { get; set; }
+        public string? Stage6JsonOverride { get; set; }
+        public Func<EffectiveLlmConnectionConfig, string, string?>? Stage6JsonFactory { get; set; }
         public Func<EffectiveLlmConnectionConfig, string, Exception?>? ThrowOnStage { get; set; }
         public int EmbeddingCallCount { get; private set; }
         public List<string> StageCalls { get; } = [];
+        public List<(string Stage, string? Model)> StageModels { get; } = [];
 
         public Task<LlmConnectionTestResultDto> ProbeAndListModelsAsync(
             EffectiveLlmConnectionConfig config,
@@ -743,6 +1385,7 @@ public sealed class MultiStageIngestionAndReplacementsIntegrationTests
         )
         {
             StageCalls.Add(stageName);
+            StageModels.Add((stageName, config.TextModel));
             var thrown = ThrowOnStage?.Invoke(config, stageName);
             if (thrown is not null)
             {
@@ -839,6 +1482,21 @@ public sealed class MultiStageIngestionAndReplacementsIntegrationTests
                         "polishNotes": ["Populated missing timing."]
                     }
                     """,
+                "stage6_refine_recipe" => Stage6JsonFactory?.Invoke(config, userContent)
+                    ?? Stage6JsonOverride
+                    ?? """
+                        {
+                            "title": null,
+                            "description": null,
+                            "servings": null,
+                            "yield": null,
+                            "timing": null,
+                            "tags": null,
+                            "ingredientPatches": [],
+                            "stepPatches": [],
+                            "refinementNotes": ["No changes needed"]
+                        }
+                        """,
                 _ => throw new NotSupportedException(stageName),
             };
 

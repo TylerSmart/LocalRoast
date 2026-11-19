@@ -869,7 +869,8 @@ public static partial class IngestionCatalogMaterializer
             ThumbnailImagePath: draft.ThumbnailImagePath,
             CollectionIds: draft.SuggestedCollectionIds,
             TagIds: resolvedTagIds,
-            ExtractedModel: job.ExtractedModel
+            ExtractedModel: job.ExtractedModel,
+            RefinedModel: job.RefinedModel ?? draft.RefinedModel ?? string.Empty
         );
 
         RecipeDetailDto createdRecipe;
@@ -916,6 +917,96 @@ public static partial class IngestionCatalogMaterializer
         );
 
         return createdRecipe;
+    }
+
+    /// <summary>
+    /// Removes food items that were detached from a published recipe during refinement when they
+    /// are no longer referenced by any recipe ingredient, replacement, shopping list item, or
+    /// pending review draft.
+    /// </summary>
+    public static async Task<int> CleanupOrphanedFoodItemsAsync(
+        AppDbContext dbContext,
+        IReadOnlyCollection<Guid> candidateFoodItemIds,
+        Guid excludeJobId,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var distinctIds = candidateFoodItemIds.Where(id => id != Guid.Empty).Distinct().ToList();
+        if (distinctIds.Count == 0)
+        {
+            return 0;
+        }
+
+        var usedInIngredients = await dbContext
+            .RecipeIngredients.AsNoTracking()
+            .Where(ri => ri.FoodItemId.HasValue && distinctIds.Contains(ri.FoodItemId.Value))
+            .Select(ri => ri.FoodItemId!.Value)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        var usedInReplacements = await dbContext
+            .RecipeIngredientReplacements.AsNoTracking()
+            .Where(r => r.FoodItemId.HasValue && distinctIds.Contains(r.FoodItemId.Value))
+            .Select(r => r.FoodItemId!.Value)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        var usedInShopping = await dbContext
+            .ShoppingListItems.AsNoTracking()
+            .Where(s => s.FoodItemId.HasValue && distinctIds.Contains(s.FoodItemId.Value))
+            .Select(s => s.FoodItemId!.Value)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        var stillReferenced = new HashSet<Guid>(
+            usedInIngredients.Concat(usedInReplacements).Concat(usedInShopping)
+        );
+        var remaining = distinctIds.Where(id => !stillReferenced.Contains(id)).ToList();
+        if (remaining.Count == 0)
+        {
+            return 0;
+        }
+
+        // Also check pending ReadyForReview drafts so we never delete a FoodItem a draft links to.
+        var reviewDrafts = await dbContext
+            .IngestionJobs.AsNoTracking()
+            .Where(j =>
+                j.Id != excludeJobId
+                && j.Status == IngestionJobStatus.ReadyForReview
+                && j.ExtractedDraftJson != null
+            )
+            .Select(j => j.ExtractedDraftJson!)
+            .ToListAsync(cancellationToken);
+
+        foreach (var draftJson in reviewDrafts)
+        {
+            foreach (var candidateId in remaining.ToList())
+            {
+                if (draftJson.Contains(candidateId.ToString(), StringComparison.OrdinalIgnoreCase))
+                {
+                    remaining.Remove(candidateId);
+                }
+            }
+            if (remaining.Count == 0)
+            {
+                return 0;
+            }
+        }
+
+        var orphans = await dbContext
+            .FoodItems.Include(f => f.Aliases)
+            .Where(f => remaining.Contains(f.Id))
+            .ToListAsync(cancellationToken);
+
+        if (orphans.Count == 0)
+        {
+            return 0;
+        }
+
+        dbContext.FoodItemAliases.RemoveRange(orphans.SelectMany(f => f.Aliases));
+        dbContext.FoodItems.RemoveRange(orphans);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return orphans.Count;
     }
 
     public static async Task<int> PromoteWaitingRecipeReferenceJobsAsync(

@@ -124,6 +124,52 @@ public sealed record Stage5TargetedPolishResponseDto(
     IReadOnlyList<string> PolishNotes
 );
 
+// Stage 6 Refinement DTOs
+public sealed record Stage6ReplacementPatchDto(
+    [property: JsonConverter(typeof(FlexibleIntJsonConverter))] int ReplacementIndex,
+    string? DisplayName = null,
+    string? CanonicalFoodName = null,
+    string? Category = null,
+    bool? IsPantryStaple = null,
+    [property: JsonConverter(typeof(FlexibleNullableDecimalJsonConverter))]
+        decimal? Quantity = null,
+    [property: JsonConverter(typeof(FlexibleNullableDecimalJsonConverter))]
+        decimal? MaxQuantity = null,
+    string? Unit = null,
+    string? PrepNote = null
+);
+
+public sealed record Stage6IngredientPatchDto(
+    [property: JsonConverter(typeof(FlexibleIntJsonConverter))] int Index,
+    string? DisplayName = null,
+    string? CanonicalFoodName = null,
+    string? Category = null,
+    bool? IsPantryStaple = null,
+    [property: JsonConverter(typeof(FlexibleNullableDecimalJsonConverter))]
+        decimal? Quantity = null,
+    [property: JsonConverter(typeof(FlexibleNullableDecimalJsonConverter))]
+        decimal? MaxQuantity = null,
+    string? Unit = null,
+    string? PrepNote = null,
+    bool? IsOptional = null,
+    bool? IsRecipeReference = null,
+    string? ReferencedRecipeTitle = null,
+    IReadOnlyList<Stage1AlternateMeasurementDto>? AlternateMeasurements = null,
+    IReadOnlyList<Stage6ReplacementPatchDto>? ReplacementPatches = null
+);
+
+public sealed record Stage6RefineRecipeResponseDto(
+    string? Title,
+    string? Description,
+    [property: JsonConverter(typeof(FlexibleNullableDecimalJsonConverter))] decimal? Servings,
+    string? Yield,
+    Stage1TimingDto? Timing,
+    IReadOnlyList<string>? Tags,
+    IReadOnlyList<Stage6IngredientPatchDto> IngredientPatches,
+    IReadOnlyList<Stage5StepPatchDto> StepPatches,
+    IReadOnlyList<string> RefinementNotes
+);
+
 // Parsed intermediate representation of Stage 4 token JSON nodes before compilation into ||{...}|| strings
 public abstract record Stage4ParsedToken(string Type);
 
@@ -689,6 +735,193 @@ public static class MultiStageSchemas
                     "ingredientPatches",
                     "stepPatches",
                     "polishNotes",
+                },
+            }
+        );
+
+    private static object NullableCategorySchema() =>
+        new
+        {
+            type = new object[] { "string", "null" },
+            @enum = new object?[]
+            {
+                "Produce",
+                "MeatAndSeafood",
+                "DairyAndEggs",
+                "Refrigerated",
+                "Bakery",
+                "PantryDryGoods",
+                "CannedAndJarred",
+                "CondimentsAndSauces",
+                "SpicesAndSeasonings",
+                "Baking",
+                "Snacks",
+                "Beverages",
+                "Frozen",
+                "Other",
+                null,
+            },
+        };
+
+    public static JsonNode Stage6RefineRecipeSchema { get; } =
+        ToNode(
+            new
+            {
+                type = "object",
+                additionalProperties = false,
+                properties = new
+                {
+                    title = new { type = new[] { "string", "null" } },
+                    description = new { type = new[] { "string", "null" } },
+                    servings = new { type = new[] { "number", "null" } },
+                    yield = new { type = new[] { "string", "null" } },
+                    timing = new { anyOf = new object[] { TimingSchema(), new { type = "null" } } },
+                    tags = new
+                    {
+                        anyOf = new object[]
+                        {
+                            new { type = "array", items = new { type = "string" } },
+                            new { type = "null" },
+                        },
+                    },
+                    ingredientPatches = new
+                    {
+                        type = "array",
+                        items = new
+                        {
+                            type = "object",
+                            additionalProperties = false,
+                            properties = new
+                            {
+                                index = new { type = "integer" },
+                                displayName = new { type = new[] { "string", "null" } },
+                                canonicalFoodName = new { type = new[] { "string", "null" } },
+                                category = NullableCategorySchema(),
+                                isPantryStaple = new { type = new[] { "boolean", "null" } },
+                                quantity = new { type = new[] { "number", "null" } },
+                                maxQuantity = new { type = new[] { "number", "null" } },
+                                unit = new { type = new[] { "string", "null" } },
+                                prepNote = new { type = new[] { "string", "null" } },
+                                isOptional = new { type = new[] { "boolean", "null" } },
+                                isRecipeReference = new { type = new[] { "boolean", "null" } },
+                                referencedRecipeTitle = new { type = new[] { "string", "null" } },
+                                alternateMeasurements = new
+                                {
+                                    anyOf = new object[]
+                                    {
+                                        AlternateMeasurementsArraySchema(),
+                                        new { type = "null" },
+                                    },
+                                },
+                                replacementPatches = new
+                                {
+                                    anyOf = new object[]
+                                    {
+                                        new
+                                        {
+                                            type = "array",
+                                            items = new
+                                            {
+                                                type = "object",
+                                                additionalProperties = false,
+                                                properties = new
+                                                {
+                                                    replacementIndex = new { type = "integer" },
+                                                    displayName = new
+                                                    {
+                                                        type = new[] { "string", "null" },
+                                                    },
+                                                    canonicalFoodName = new
+                                                    {
+                                                        type = new[] { "string", "null" },
+                                                    },
+                                                    category = NullableCategorySchema(),
+                                                    isPantryStaple = new
+                                                    {
+                                                        type = new[] { "boolean", "null" },
+                                                    },
+                                                    quantity = new
+                                                    {
+                                                        type = new[] { "number", "null" },
+                                                    },
+                                                    maxQuantity = new
+                                                    {
+                                                        type = new[] { "number", "null" },
+                                                    },
+                                                    unit = new
+                                                    {
+                                                        type = new[] { "string", "null" },
+                                                    },
+                                                    prepNote = new
+                                                    {
+                                                        type = new[] { "string", "null" },
+                                                    },
+                                                },
+                                                required = new[]
+                                                {
+                                                    "replacementIndex",
+                                                    "displayName",
+                                                    "canonicalFoodName",
+                                                    "category",
+                                                    "isPantryStaple",
+                                                    "quantity",
+                                                    "maxQuantity",
+                                                    "unit",
+                                                    "prepNote",
+                                                },
+                                            },
+                                        },
+                                        new { type = "null" },
+                                    },
+                                },
+                            },
+                            required = new[]
+                            {
+                                "index",
+                                "displayName",
+                                "canonicalFoodName",
+                                "category",
+                                "isPantryStaple",
+                                "quantity",
+                                "maxQuantity",
+                                "unit",
+                                "prepNote",
+                                "isOptional",
+                                "isRecipeReference",
+                                "referencedRecipeTitle",
+                                "alternateMeasurements",
+                                "replacementPatches",
+                            },
+                        },
+                    },
+                    stepPatches = new
+                    {
+                        type = "array",
+                        items = new
+                        {
+                            type = "object",
+                            additionalProperties = false,
+                            properties = new
+                            {
+                                stepNumber = new { type = "integer" },
+                                tokens = StepTokenArraySchema(),
+                            },
+                            required = new[] { "stepNumber", "tokens" },
+                        },
+                    },
+                    refinementNotes = new { type = "array", items = new { type = "string" } },
+                },
+                required = new[]
+                {
+                    "title",
+                    "description",
+                    "servings",
+                    "yield",
+                    "timing",
+                    "tags",
+                    "ingredientPatches",
+                    "stepPatches",
+                    "refinementNotes",
                 },
             }
         );

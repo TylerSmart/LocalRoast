@@ -598,7 +598,7 @@ public abstract class E2ETestBase : PageTest
     /// LLM settings are household-wide and the E2E server is shared by every test, so clear the
     /// saved connections, model configurations and workflow choices left by earlier tests.
     /// </summary>
-    private async Task ResetLlmSettingsViaApiAsync()
+    protected async Task ResetLlmSettingsViaApiAsync()
     {
         var failures = await Page.EvaluateAsync<string>(
             """
@@ -620,6 +620,8 @@ public abstract class E2ETestBase : PageTest
                     textModelProfileId: null,
                     visionModelProfileId: null,
                     refineModelProfileId: null,
+                    refineDuringIngestion: false,
+                    refineDuringIdle: false,
                     embeddingModelProfileId: null,
                     autoPublishHighConfidenceText: false,
                     maxIngestionRetries: 3,

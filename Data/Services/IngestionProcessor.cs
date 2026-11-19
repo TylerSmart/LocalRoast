@@ -15,6 +15,7 @@ public sealed class IngestionProcessor(
     ILlmSettingsService llmSettingsService,
     ILlmExtractionClient llmClient,
     IIngestionRecipePipeline recipePipeline,
+    IIngestionRecipeRefiner recipeRefiner,
     IWebRecipeScraper scraper,
     IRecipeService recipeService,
     IMediaStorageService mediaStorageService,
@@ -32,18 +33,30 @@ public sealed class IngestionProcessor(
         CancellationToken cancellationToken = default
     )
     {
-        var activeId = queueSignal.ActiveJobId;
+        var activeIds = queueSignal.ActiveJobIds;
 
         var interrupted = await dbContext
             .IngestionJobs.Where(j =>
                 (
                     j.Status == IngestionJobStatus.Preprocessing
                     || j.Status == IngestionJobStatus.Extracting
-                ) && (activeId == null || j.Id != activeId)
+                ) && !activeIds.Contains(j.Id)
             )
             .ToListAsync(cancellationToken);
 
-        if (interrupted.Count == 0)
+        var interruptedRefining = await dbContext
+            .IngestionJobs.Where(j =>
+                (
+                    j.Status == IngestionJobStatus.ReadyForReview
+                    || j.Status == IngestionJobStatus.Published
+                )
+                && j.StatusDetail != null
+                && j.StatusDetail.StartsWith("Refining ")
+                && !activeIds.Contains(j.Id)
+            )
+            .ToListAsync(cancellationToken);
+
+        if (interrupted.Count == 0 && interruptedRefining.Count == 0)
         {
             return 0;
         }
@@ -57,14 +70,25 @@ public sealed class IngestionProcessor(
             job.StatusDetail = "Recovered from interrupted processing.";
         }
 
+        foreach (var job in interruptedRefining)
+        {
+            job.StatusDetail =
+                job.Status == IngestionJobStatus.Published
+                    ? $"Published ({job.ExtractedModel ?? "ingested"})."
+                    : $"Ready for side-by-side review ({job.ExtractedModel ?? "ingested"}).";
+        }
+
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        logger.LogInformation(
-            "Recovered {Count} interrupted ingestion job(s) back to Queued state.",
-            interrupted.Count
-        );
+        if (interrupted.Count > 0)
+        {
+            logger.LogInformation(
+                "Recovered {Count} interrupted ingestion job(s) back to Queued state.",
+                interrupted.Count
+            );
+        }
 
-        return interrupted.Count;
+        return interrupted.Count + interruptedRefining.Count;
     }
 
     public async Task<bool> ProcessNextQueuedJobAsync(CancellationToken cancellationToken = default)
@@ -566,6 +590,80 @@ public sealed class IngestionProcessor(
                 };
             }
 
+            job.ExtractedModel = modelUsed;
+            job.RefinedModel = null;
+            job.RefinedAt = null;
+            job.RefinementAttemptCount = 0;
+            job.RefinementNextRetryAt = null;
+
+            // Stage 6 (optional): Post-polish Refinement pass before Auto-Publish / Food Catalog creation
+            if (config.HasRefinementModelConfigured && config.RefineDuringIngestion)
+            {
+                var refineConfig = config.ForRefinement();
+                var refineModelLabel =
+                    refineConfig.TextModel?.Trim()
+                    ?? config.RefineModel?.Trim()
+                    ?? "refinement model";
+                job.StatusDetail =
+                    $"Stage 6: Refining recipe & catalog names via {refineModelLabel}...";
+                await dbContext.SaveChangesAsync(jobCt);
+
+                try
+                {
+                    var refineResult = await recipeRefiner.RefineDraftAsync(
+                        new IngestionRefineDraftRequest(
+                            SourceText: sourceText,
+                            Draft: draft,
+                            Config: config,
+                            ExcludeRecipeId: job.ResultingRecipeId
+                        ),
+                        jobCt
+                    );
+
+                    if (await IsJobDiscardedInDbAsync(job.Id, jobCt))
+                    {
+                        return false;
+                    }
+
+                    draft = refineResult.Draft with
+                    {
+                        ExtractedModel = IngestionMetadataAndTagHelper.CleanOptionalText(
+                            modelUsed,
+                            200
+                        ),
+                        RefinedModel = refineResult.RefinedModel,
+                    };
+                    allValidationIssues = new List<string>(draft.ValidationIssues ?? []);
+                    job.RefinedModel = refineResult.RefinedModel;
+                    job.RefinedAt = DateTimeOffset.UtcNow;
+                }
+                catch (LlmHostUnavailableException ex)
+                    when (ex.IsQuotaExhausted
+                        && !IngestionRecipePipeline.QuotaExhaustionAffectsPrimaryTextWorkflow(
+                            ex,
+                            config
+                        )
+                    )
+                {
+                    logger.LogWarning(
+                        ex,
+                        "Refinement model quota exhausted on '{Model}' during ingestion of job {JobId}; continuing without refinement.",
+                        refineModelLabel,
+                        job.Id
+                    );
+                }
+                catch (Exception ex)
+                    when (ex is not OperationCanceledException and not LlmHostUnavailableException)
+                {
+                    logger.LogWarning(
+                        ex,
+                        "Refinement pass failed during ingestion of job {JobId} on '{Model}'; keeping initial extracted draft so refinement can retry later.",
+                        job.Id,
+                        refineModelLabel
+                    );
+                }
+            }
+
             if (allValidationIssues.Count > 0)
             {
                 logger.LogWarning(
@@ -574,8 +672,6 @@ public sealed class IngestionProcessor(
                     string.Join(" ", allValidationIssues)
                 );
             }
-
-            job.ExtractedModel = modelUsed;
 
             if (
                 string.IsNullOrWhiteSpace(job.SourceBookTitle)
@@ -590,7 +686,7 @@ public sealed class IngestionProcessor(
                 job.SourceBookPage = draft.SourceBookPage;
             }
 
-            // Stage 5: Auto-Publish vs ReadyForReview
+            // Stage 5/6 -> Auto-Publish vs ReadyForReview
 
             var hasUnresolvedRecipeReferences =
                 draft.Ingredients?.Any(i => i.IsRecipeReference && !i.MatchedRecipeId.HasValue)
@@ -637,7 +733,9 @@ public sealed class IngestionProcessor(
 
                     job.ProcessedAt = DateTimeOffset.UtcNow;
 
-                    job.StatusDetail = $"Auto-published high-confidence extraction ({modelUsed}).";
+                    job.StatusDetail = !string.IsNullOrWhiteSpace(job.RefinedModel)
+                        ? $"Auto-published high-confidence extraction ({modelUsed}, refined by {job.RefinedModel})."
+                        : $"Auto-published high-confidence extraction ({modelUsed}).";
                     publishedSuccessfully = true;
                 }
                 catch (DomainValidationException ex)
@@ -661,6 +759,8 @@ public sealed class IngestionProcessor(
 
                     var preservedBookTitle = job.SourceBookTitle;
                     var preservedBookPage = job.SourceBookPage;
+                    var preservedRefinedModel = job.RefinedModel;
+                    var preservedRefinedAt = job.RefinedAt;
                     dbContext.ChangeTracker.Clear();
                     job =
                         await dbContext.IngestionJobs.FirstOrDefaultAsync(
@@ -668,6 +768,8 @@ public sealed class IngestionProcessor(
                             jobCt
                         ) ?? job;
                     job.ExtractedModel = modelUsed;
+                    job.RefinedModel = preservedRefinedModel;
+                    job.RefinedAt = preservedRefinedAt;
                     if (!string.IsNullOrWhiteSpace(preservedBookTitle))
                     {
                         job.SourceBookTitle = preservedBookTitle;
@@ -693,7 +795,9 @@ public sealed class IngestionProcessor(
 
                 job.ProcessedAt = DateTimeOffset.UtcNow;
 
-                job.StatusDetail = $"Ready for side-by-side review ({modelUsed}).";
+                job.StatusDetail = !string.IsNullOrWhiteSpace(job.RefinedModel)
+                    ? $"Ready for side-by-side review ({modelUsed}, refined by {job.RefinedModel})."
+                    : $"Ready for side-by-side review ({modelUsed}).";
                 if (allValidationIssues.Count > 0)
                 {
                     var detail =
@@ -1053,6 +1157,651 @@ public sealed class IngestionProcessor(
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return 0;
+    }
+
+    public async Task<bool> ProcessNextIdleRefinementAsync(
+        CancellationToken cancellationToken = default
+    )
+    {
+        var config = await llmSettingsService.GetEffectiveConfigAsync(cancellationToken);
+        if (
+            !config.EnableIngestion
+            || !config.HasRefinementModelConfigured
+            || !config.RefineDuringIdle
+        )
+        {
+            return false;
+        }
+
+        if (await HasActiveOrRunnableIngestionJobsAsync(cancellationToken))
+        {
+            return false;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var activeIds = queueSignal.ActiveJobIds;
+        var maxRetries = Math.Max(0, config.MaxIngestionRetries);
+
+        var candidateId = await dbContext
+            .IngestionJobs.AsNoTracking()
+            .Where(j =>
+                (
+                    j.Status == IngestionJobStatus.ReadyForReview
+                    || j.Status == IngestionJobStatus.Published
+                )
+                && j.RefinedAt == null
+                && j.ExtractedDraftJson != null
+                && !activeIds.Contains(j.Id)
+                && j.RefinementAttemptCount <= maxRetries
+                && (j.RefinementNextRetryAt == null || j.RefinementNextRetryAt <= now)
+            )
+            .OrderBy(j => j.Status == IngestionJobStatus.ReadyForReview ? 0 : 1)
+            .ThenByDescending(j => j.CreatedAt)
+            .ThenBy(j => j.Id)
+            .Select(j => j.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (candidateId == Guid.Empty)
+        {
+            return false;
+        }
+
+        var refineConfig = config.ForRefinement();
+        using var executionLock = await queueSignal.AcquireJobExecutionAsync(
+            refineConfig.EffectiveMaxConcurrentRequests,
+            cancellationToken
+        );
+
+        // Re-verify config and queue state after acquiring execution lock
+        config = await llmSettingsService.GetEffectiveConfigAsync(cancellationToken);
+        if (
+            !config.EnableIngestion
+            || !config.HasRefinementModelConfigured
+            || !config.RefineDuringIdle
+            || await HasActiveOrRunnableIngestionJobsAsync(cancellationToken)
+        )
+        {
+            return false;
+        }
+
+        var job = await dbContext.IngestionJobs.FirstOrDefaultAsync(
+            j => j.Id == candidateId,
+            cancellationToken
+        );
+
+        if (
+            job is null
+            || (
+                job.Status != IngestionJobStatus.ReadyForReview
+                && job.Status != IngestionJobStatus.Published
+            )
+            || job.RefinedAt != null
+            || string.IsNullOrWhiteSpace(job.ExtractedDraftJson)
+        )
+        {
+            return false;
+        }
+
+        IngestionExtractedDraftDto? draft;
+        try
+        {
+            draft = JsonSerializer.Deserialize<IngestionExtractedDraftDto>(
+                job.ExtractedDraftJson,
+                JsonOptions
+            );
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                ex,
+                "Could not deserialize ExtractedDraftJson for idle refinement of job {JobId}; skipping.",
+                job.Id
+            );
+            job.RefinementAttemptCount = maxRetries + 1;
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return false;
+        }
+
+        if (draft is null)
+        {
+            job.RefinementAttemptCount = maxRetries + 1;
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return false;
+        }
+
+        using var activeCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        using var activeRegistration = queueSignal.RegisterPreemptibleExecution(job.Id, activeCts);
+        var jobCt = activeCts.Token;
+
+        var originalDraftJson = job.ExtractedDraftJson;
+        var previousStatusDetail = job.StatusDetail;
+        var refineModelLabel =
+            refineConfig.TextModel?.Trim() ?? config.RefineModel?.Trim() ?? "refinement model";
+
+        try
+        {
+            job.StatusDetail = $"Refining recipe via {refineModelLabel}...";
+            await dbContext.SaveChangesAsync(jobCt);
+
+            var sourceText = ResolveSourceTextForIdleRefinement(job, draft);
+
+            var refineResult = await recipeRefiner.RefineDraftAsync(
+                new IngestionRefineDraftRequest(
+                    SourceText: sourceText,
+                    Draft: draft,
+                    Config: config,
+                    ExcludeRecipeId: job.ResultingRecipeId
+                ),
+                jobCt
+            );
+
+            // Reload fresh job to detect concurrent edits or discard while LLM call was in flight
+            dbContext.ChangeTracker.Clear();
+            job = await dbContext.IngestionJobs.FirstOrDefaultAsync(
+                j => j.Id == candidateId,
+                jobCt
+            );
+
+            if (
+                job is null
+                || (
+                    job.Status != IngestionJobStatus.ReadyForReview
+                    && job.Status != IngestionJobStatus.Published
+                )
+                || job.RefinedAt != null
+                || !string.Equals(
+                    job.ExtractedDraftJson,
+                    originalDraftJson,
+                    StringComparison.Ordinal
+                )
+            )
+            {
+                return false;
+            }
+
+            var refinedDraft = refineResult.Draft with
+            {
+                ExtractedModel = job.ExtractedModel ?? refineResult.Draft.ExtractedModel,
+                RefinedModel = refineResult.RefinedModel,
+            };
+
+            job.RefinedModel = refineResult.RefinedModel;
+            job.RefinedAt = DateTimeOffset.UtcNow;
+            job.RefinementAttemptCount = 0;
+            job.RefinementNextRetryAt = null;
+
+            if (job.Status == IngestionJobStatus.Published)
+            {
+                var previousFoodItemIds = new HashSet<Guid>();
+                Recipe? liveRecipe = null;
+                if (job.ResultingRecipeId.HasValue)
+                {
+                    liveRecipe = await dbContext
+                        .Recipes.AsNoTracking()
+                        .Include(r => r.Ingredients)
+                            .ThenInclude(i => i.Replacements)
+                        .Include(r => r.RecipeCollections)
+                        .FirstOrDefaultAsync(r => r.Id == job.ResultingRecipeId.Value, jobCt);
+                }
+
+                RecipeDetailDto? updatedRecipe = null;
+                if (liveRecipe is not null)
+                {
+                    foreach (var ing in liveRecipe.Ingredients)
+                    {
+                        if (ing.FoodItemId.HasValue)
+                        {
+                            previousFoodItemIds.Add(ing.FoodItemId.Value);
+                        }
+                        foreach (var rep in ing.Replacements)
+                        {
+                            if (rep.FoodItemId.HasValue)
+                            {
+                                previousFoodItemIds.Add(rep.FoodItemId.Value);
+                            }
+                        }
+                    }
+
+                    var preservedCollections = liveRecipe
+                        .RecipeCollections.Select(c => c.CollectionId)
+                        .Distinct()
+                        .ToList();
+                    refinedDraft = refinedDraft with
+                    {
+                        SuggestedCollectionIds = preservedCollections,
+                        CoverImagePath = liveRecipe.CoverImagePath ?? refinedDraft.CoverImagePath,
+                        ThumbnailImagePath =
+                            liveRecipe.ThumbnailImagePath ?? refinedDraft.ThumbnailImagePath,
+                    };
+
+                    updatedRecipe = await PublishDraftInternalAsync(job, refinedDraft, jobCt);
+
+                    await IngestionCatalogMaterializer.BacklinkUnresolvedRecipeReferencesAsync(
+                        dbContext,
+                        updatedRecipe.Id,
+                        updatedRecipe.Title,
+                        jobCt
+                    );
+
+                    // Clean up any FoodItems that were detached from this recipe and are now completely orphaned
+                    if (previousFoodItemIds.Count > 0)
+                    {
+                        var currentFoodItemIds = updatedRecipe
+                            .Ingredients.Where(i => i.FoodItemId.HasValue)
+                            .Select(i => i.FoodItemId!.Value)
+                            .Concat(
+                                updatedRecipe
+                                    .Ingredients.SelectMany(i => i.Replacements ?? [])
+                                    .Where(r => r.FoodItemId.HasValue)
+                                    .Select(r => r.FoodItemId!.Value)
+                            )
+                            .ToHashSet();
+
+                        var detachedFoodItemIds = previousFoodItemIds
+                            .Where(id => !currentFoodItemIds.Contains(id))
+                            .ToList();
+
+                        if (detachedFoodItemIds.Count > 0)
+                        {
+                            var deletedOrphans =
+                                await IngestionCatalogMaterializer.CleanupOrphanedFoodItemsAsync(
+                                    dbContext,
+                                    detachedFoodItemIds,
+                                    job.Id,
+                                    jobCt
+                                );
+                            if (deletedOrphans > 0)
+                            {
+                                logger.LogInformation(
+                                    "Idle refinement of published job {JobId} removed {Count} orphaned food item(s).",
+                                    job.Id,
+                                    deletedOrphans
+                                );
+                            }
+                        }
+                    }
+
+                    // Refresh job entity after recipe update & cleanup saves
+                    job =
+                        await dbContext.IngestionJobs.FirstOrDefaultAsync(
+                            j => j.Id == candidateId,
+                            jobCt
+                        ) ?? job;
+                    job.ResultingRecipeId = updatedRecipe.Id;
+                }
+
+                job.RefinedModel = refineResult.RefinedModel;
+                job.RefinedAt = DateTimeOffset.UtcNow;
+                job.RefinementAttemptCount = 0;
+                job.RefinementNextRetryAt = null;
+                job.ExtractedDraftJson = JsonSerializer.Serialize(refinedDraft, JsonOptions);
+                job.ConfidenceScore = refinedDraft.ConfidenceScore;
+                job.DisplayTitle = refinedDraft.Title;
+                job.StatusDetail = !string.IsNullOrWhiteSpace(job.ExtractedModel)
+                    ? $"Published ({job.ExtractedModel}, refined by {refineResult.RefinedModel})."
+                    : $"Published (refined by {refineResult.RefinedModel}).";
+
+                await dbContext.SaveChangesAsync(jobCt);
+
+                if (updatedRecipe is not null)
+                {
+                    await IngestionCatalogMaterializer.PromoteWaitingRecipeReferenceJobsAsync(
+                        dbContext,
+                        recipeService,
+                        mediaStorageService,
+                        globalAutoPublish: config.AutoPublishHighConfidenceText,
+                        jobCt
+                    );
+                }
+
+                return true;
+            }
+
+            // ReadyForReview job: update draft in-place, and auto-publish if now clean and enabled
+            var hasUnresolvedRecipeReferences =
+                refinedDraft.Ingredients?.Any(i =>
+                    i.IsRecipeReference && !i.MatchedRecipeId.HasValue
+                ) == true;
+            var isPlausible =
+                !string.IsNullOrWhiteSpace(refinedDraft.Title)
+                && !refinedDraft.Title.Equals("Untitled Recipe", StringComparison.Ordinal)
+                && (refinedDraft.Ingredients?.Count ?? 0) >= 1
+                && (refinedDraft.Steps?.Count ?? 0) >= 1;
+
+            var canAutoPublish =
+                isPlausible
+                && (refinedDraft.ValidationIssues?.Count ?? 0) == 0
+                && (refinedDraft.QualityWarnings?.Count ?? 0) == 0
+                && !hasUnresolvedRecipeReferences
+                && (config.AutoPublishHighConfidenceText || job.AutoPublish)
+                && (
+                    job.Channel == IngestionChannel.WebUrl
+                    || job.Channel == IngestionChannel.RawText
+                )
+                && refinedDraft.ConfidenceScore >= (job.AutoPublish ? 0.60m : 0.85m);
+
+            var publishedSuccessfully = false;
+            var remainingIssues = new List<string>(refinedDraft.ValidationIssues ?? []);
+
+            if (canAutoPublish)
+            {
+                try
+                {
+                    var createdRecipe = await PublishDraftInternalAsync(job, refinedDraft, jobCt);
+
+                    await IngestionCatalogMaterializer.BacklinkUnresolvedRecipeReferencesAsync(
+                        dbContext,
+                        createdRecipe.Id,
+                        createdRecipe.Title,
+                        jobCt
+                    );
+
+                    job.Status = IngestionJobStatus.Published;
+                    job.ResultingRecipeId = createdRecipe.Id;
+                    job.ExtractedDraftJson = JsonSerializer.Serialize(refinedDraft, JsonOptions);
+                    job.ConfidenceScore = refinedDraft.ConfidenceScore;
+                    job.DisplayTitle = refinedDraft.Title;
+                    job.ProcessedAt = DateTimeOffset.UtcNow;
+                    job.StatusDetail = !string.IsNullOrWhiteSpace(job.ExtractedModel)
+                        ? $"Auto-published after idle refinement ({job.ExtractedModel}, refined by {refineResult.RefinedModel})."
+                        : $"Auto-published after idle refinement ({refineResult.RefinedModel}).";
+                    publishedSuccessfully = true;
+                }
+                catch (DomainValidationException ex)
+                {
+                    logger.LogWarning(
+                        ex,
+                        "Auto-publish after idle refinement failed validation for job {JobId}; keeping ReadyForReview.",
+                        job.Id
+                    );
+                    var combinedIssues = (refinedDraft.ValidationIssues ?? [])
+                        .Append(ex.Message)
+                        .Where(s => !string.IsNullOrWhiteSpace(s))
+                        .Distinct(StringComparer.Ordinal)
+                        .ToList();
+                    refinedDraft = refinedDraft with
+                    {
+                        ValidationIssues = combinedIssues,
+                        ConfidenceScore = Math.Min(refinedDraft.ConfidenceScore, 0.70m),
+                    };
+                    remainingIssues = combinedIssues;
+
+                    var preservedModel = job.ExtractedModel;
+                    var preservedRefinedModel = job.RefinedModel;
+                    var preservedRefinedAt = job.RefinedAt;
+                    dbContext.ChangeTracker.Clear();
+                    job =
+                        await dbContext.IngestionJobs.FirstOrDefaultAsync(
+                            j => j.Id == candidateId,
+                            jobCt
+                        ) ?? job;
+                    job.ExtractedModel = preservedModel;
+                    job.RefinedModel = preservedRefinedModel;
+                    job.RefinedAt = preservedRefinedAt;
+                    job.RefinementAttemptCount = 0;
+                    job.RefinementNextRetryAt = null;
+                }
+            }
+
+            if (!publishedSuccessfully)
+            {
+                job.ExtractedDraftJson = JsonSerializer.Serialize(refinedDraft, JsonOptions);
+                job.ConfidenceScore = refinedDraft.ConfidenceScore;
+                job.DisplayTitle = refinedDraft.Title;
+                job.StatusDetail = !string.IsNullOrWhiteSpace(job.ExtractedModel)
+                    ? $"Ready for side-by-side review ({job.ExtractedModel}, refined by {refineResult.RefinedModel})."
+                    : $"Ready for side-by-side review (refined by {refineResult.RefinedModel}).";
+                if (remainingIssues.Count > 0)
+                {
+                    var detail =
+                        $"{job.StatusDetail} Validation: {string.Join(" ", remainingIssues.Distinct(StringComparer.Ordinal))}";
+                    job.StatusDetail = detail[..Math.Min(detail.Length, 2000)];
+                }
+            }
+
+            await dbContext.SaveChangesAsync(jobCt);
+
+            if (publishedSuccessfully)
+            {
+                await IngestionCatalogMaterializer.PromoteWaitingRecipeReferenceJobsAsync(
+                    dbContext,
+                    recipeService,
+                    mediaStorageService,
+                    globalAutoPublish: config.AutoPublishHighConfidenceText,
+                    jobCt
+                );
+            }
+
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            // Preempted by a newly queued import, AI kitchen helper, settings change, or shutdown.
+            // Do not fail or increment retry count; restore StatusDetail cleanly.
+            try
+            {
+                dbContext.ChangeTracker.Clear();
+                var trackedJob = await dbContext.IngestionJobs.FirstOrDefaultAsync(
+                    j => j.Id == candidateId,
+                    CancellationToken.None
+                );
+                if (
+                    trackedJob is not null
+                    && trackedJob.StatusDetail?.StartsWith("Refining ", StringComparison.Ordinal)
+                        == true
+                )
+                {
+                    trackedJob.StatusDetail = previousStatusDetail;
+                    await dbContext.SaveChangesAsync(CancellationToken.None);
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogDebug(
+                    ex,
+                    "Failed to restore StatusDetail after preempted idle refinement for job {JobId}.",
+                    candidateId
+                );
+            }
+
+            return false;
+        }
+        catch (LlmHostUnavailableException ex)
+        {
+            logger.LogWarning(
+                ex,
+                "Refinement host unavailable or rate-limited during idle refinement of job {JobId}.",
+                candidateId
+            );
+
+            try
+            {
+                dbContext.ChangeTracker.Clear();
+                var trackedJob = await dbContext.IngestionJobs.FirstOrDefaultAsync(
+                    j => j.Id == candidateId,
+                    CancellationToken.None
+                );
+                if (trackedJob is not null)
+                {
+                    var safeguardsEnabled = ex.ExhaustedQuotaScope.HasValue
+                        ? ex.SafeguardsEnabled
+                        : refineConfig.EnableRateLimitSafeguards;
+
+                    if (ex.IsQuotaExhausted && safeguardsEnabled)
+                    {
+                        var resetTimezone = !string.IsNullOrWhiteSpace(ex.QuotaResetTimezone)
+                            ? ex.QuotaResetTimezone
+                            : refineConfig.EffectiveQuotaResetTimezone;
+                        var resetTime = !string.IsNullOrWhiteSpace(ex.QuotaResetTime)
+                            ? ex.QuotaResetTime
+                            : refineConfig.EffectiveQuotaResetTime;
+                        var nextReset = LlmQuotaSchedule.GetNextResetUtc(
+                            DateTimeOffset.UtcNow,
+                            resetTimezone,
+                            resetTime
+                        );
+                        trackedJob.RefinementNextRetryAt = nextReset;
+                    }
+                    else
+                    {
+                        trackedJob.RefinementAttemptCount++;
+                        var delaySeconds = Math.Min(
+                            300,
+                            15 * (1 << Math.Min(trackedJob.RefinementAttemptCount - 1, 5))
+                        );
+                        trackedJob.RefinementNextRetryAt = DateTimeOffset.UtcNow.AddSeconds(
+                            delaySeconds
+                        );
+                    }
+
+                    if (
+                        trackedJob.StatusDetail?.StartsWith("Refining ", StringComparison.Ordinal)
+                        == true
+                    )
+                    {
+                        trackedJob.StatusDetail = previousStatusDetail;
+                    }
+                    await dbContext.SaveChangesAsync(CancellationToken.None);
+                }
+            }
+            catch (Exception saveEx)
+            {
+                logger.LogError(
+                    saveEx,
+                    "Failed to persist idle refinement backoff for job {JobId}.",
+                    candidateId
+                );
+            }
+
+            return false;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(
+                ex,
+                "Idle refinement failed for job {JobId}; scheduling backoff without changing job status.",
+                candidateId
+            );
+
+            try
+            {
+                dbContext.ChangeTracker.Clear();
+                var trackedJob = await dbContext.IngestionJobs.FirstOrDefaultAsync(
+                    j => j.Id == candidateId,
+                    CancellationToken.None
+                );
+                if (trackedJob is not null)
+                {
+                    trackedJob.RefinementAttemptCount++;
+                    var delaySeconds = Math.Min(
+                        300,
+                        15 * (1 << Math.Min(trackedJob.RefinementAttemptCount - 1, 5))
+                    );
+                    trackedJob.RefinementNextRetryAt = DateTimeOffset.UtcNow.AddSeconds(
+                        delaySeconds
+                    );
+                    if (
+                        trackedJob.StatusDetail?.StartsWith("Refining ", StringComparison.Ordinal)
+                        == true
+                    )
+                    {
+                        trackedJob.StatusDetail = previousStatusDetail;
+                    }
+                    await dbContext.SaveChangesAsync(CancellationToken.None);
+                }
+            }
+            catch (Exception saveEx)
+            {
+                logger.LogError(
+                    saveEx,
+                    "Failed to persist idle refinement error backoff for job {JobId}.",
+                    candidateId
+                );
+            }
+
+            return false;
+        }
+    }
+
+    private Task<bool> HasActiveOrRunnableIngestionJobsAsync(CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow;
+        return dbContext
+            .IngestionJobs.AsNoTracking()
+            .AnyAsync(
+                j =>
+                    j.Status == IngestionJobStatus.Preprocessing
+                    || j.Status == IngestionJobStatus.Extracting
+                    || (
+                        j.Status == IngestionJobStatus.Queued
+                        && (j.RunNowRequested || j.NextRetryAt == null || j.NextRetryAt <= now)
+                    ),
+                cancellationToken
+            );
+    }
+
+    private static string ResolveSourceTextForIdleRefinement(
+        IngestionJob job,
+        IngestionExtractedDraftDto draft
+    )
+    {
+        if (!string.IsNullOrWhiteSpace(job.NormalizedSourceText))
+        {
+            return job.NormalizedSourceText;
+        }
+
+        if (!string.IsNullOrWhiteSpace(job.RawText))
+        {
+            return job.RawText;
+        }
+
+        if (!string.IsNullOrWhiteSpace(job.ScrapedPageJson))
+        {
+            try
+            {
+                var payload = JsonSerializer.Deserialize<ScrapedWebRecipePayload>(
+                    job.ScrapedPageJson,
+                    JsonOptions
+                );
+                if (payload is not null)
+                {
+                    var text = BuildNormalizedWebText(payload);
+                    if (!string.IsNullOrWhiteSpace(text))
+                    {
+                        return text;
+                    }
+                }
+            }
+            catch
+            {
+                // Fall back to reconstructed draft text
+            }
+        }
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine(draft.Title);
+        if (!string.IsNullOrWhiteSpace(draft.Description))
+        {
+            sb.AppendLine(draft.Description);
+        }
+        sb.AppendLine();
+        sb.AppendLine("Ingredients:");
+        foreach (var ing in draft.Ingredients ?? [])
+        {
+            sb.AppendLine(
+                !string.IsNullOrWhiteSpace(ing.OriginalRawText)
+                    ? $"- {ing.OriginalRawText}"
+                    : $"- {ing.DisplayName}"
+            );
+        }
+        sb.AppendLine();
+        sb.AppendLine("Instructions:");
+        var stepNum = 1;
+        foreach (var step in draft.Steps ?? [])
+        {
+            sb.AppendLine($"{stepNum++}. {StepInstructionParser.ToPlainText(step.Instruction)}");
+        }
+        return sb.ToString();
     }
 
     private Task<RecipeDetailDto> PublishDraftInternalAsync(

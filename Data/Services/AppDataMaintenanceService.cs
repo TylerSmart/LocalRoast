@@ -277,6 +277,10 @@ public sealed class AppDataMaintenanceService(
             job.ResultingRecipeId = null;
             job.ExtractedDraftJson = null;
             job.ExtractedModel = null;
+            job.RefinedModel = null;
+            job.RefinedAt = null;
+            job.RefinementAttemptCount = 0;
+            job.RefinementNextRetryAt = null;
             job.ConfidenceScore = null;
             job.AttemptCount = 0;
             job.NextRetryAt = null;

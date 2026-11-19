@@ -241,16 +241,17 @@ Temperature 0 does not make extraction repeatable on the test server. Two identi
 
 ---
 
-## Refine Model (background second pass)
+## Refine Model (post-polish refinement & idle backfill)
 
-The optional **Refinement** workflow in LLM Settings uses a second, usually larger and slower model configuration — for example `gemma4:12b` with thinking, or a derived `gemma4:26b-a4b`, possibly on another machine — that re-checks drafts which still have problems after the Text Model's extraction. Create the configuration on the **Models** tab (the **Recommended settings** picker fills its thinking, sampling, context window and timeout), then select it for **Refinement** on the **Workflows** tab. Leave Refinement unassigned to turn the feature off.
+The optional **Refinement** workflow in LLM Settings uses a second, usually larger and stronger model profile — for example `gemma4:12b`, `gemma4:26b-a4b`, or a hosted Gemini Pro/Flash model — to run a full post-polish QA pass across metadata, ingredient quantities, **canonical food catalog names**, and tokenized steps. Create the profile on the **Models** / **Profiles** tabs, then select it for **Refinement** on the **Workflows** tab and choose when it runs with two independent toggles (both off by default):
 
-- **When it runs automatically:** after a text job (web, pasted text or digital PDF) reaches review, LocalRoast queues a refinement if a Refine Model is set, it differs from the Text Model, and the normalized draft still has validation issues or quality warnings. Photo and scanned-PDF jobs are not queued automatically.
-- **Manual request:** the review screen offers **Refine with _model_** for any draft ready for review, including photo jobs (their original images are sent to the Refine Model, so it must support images).
-- **Never blocks imports or other AI features:** refinement runs only while no imports are queued. A newly queued import, a "Re-extract with AI" preview, or a kitchen-helper request (substitutions, questions, meal plans) pauses the running refinement. It goes back to waiting and starts again from the beginning later. Interrupted refinements also resume after a server restart. Changing LLM Settings can pause it the same way.
-- **What it sends:** one repair request using the Refinement configuration's model, thinking, sampling, context window and timeout. It runs the same tagged extraction with the current ingredient rows as context.
-- **What counts as an improvement:** the proposal is kept only when it has fewer validation issues, or the same number and fewer quality warnings. Otherwise the review screen reports that the refine model found nothing to improve.
-- **Reviewing it:** the review screen shows the status and the before → after count of issues plus warnings. **Compare refined draft** opens the same comparison as **Re-extract with AI**; applying it replaces the editor contents (your food links, collections and tags are kept) and does not save. If the saved draft changed after the refinement started, a warning asks you to compare carefully. **Dismiss** (or **Cancel refinement** while it waits or runs) removes it. Re-running a job's import discards any refinement.
+- **Refine during ingestion:** runs the Refinement profile immediately after Stage 5 Targeted Polish, **before** auto-publishing or creating any new `FoodItem`s in the Food Catalog. Cleaned canonical food names are re-matched against existing `FoodItems` so malformed names never pollute the catalog.
+- **Refine during idle:** when background ingestion is enabled and no ingestion jobs are active or queued, the background worker works through unrefined `ReadyForReview` jobs first (newest first) and then unrefined `Published` jobs (newest first).
+  - Never blocks imports or AI kitchen helpers: idle refinement registers as preemptible background work and cancels immediately (without failing or incrementing retries) whenever a new recipe is queued or an AI helper is invoked.
+  - For `ReadyForReview` jobs, the draft is updated in-place (and auto-published if clean and Auto-Publish is enabled).
+  - For `Published` jobs, the live recipe is updated in-place (preserving collections and cover images), re-linked to clean `FoodItems`, and any orphaned bad `FoodItem` created solely for that recipe is automatically removed from the catalog.
+- **Dual model attribution:** LocalRoast records both the initial **Ingested Model** (`ExtractedModel`) and the **Refined Model** (`RefinedModel` + `RefinedAt`) on each job and published recipe, displaying both badges in the Ingestion Hub, Ingestion Review, and Recipe Detail views.
+- **Quota isolation:** if the Refinement workflow uses a different connection or per-model quota than the primary Text workflow, exhausting Refinement quota skips/defers refinement without pausing primary Text ingestion.
 - **Memory:** with `OLLAMA_MAX_LOADED_MODELS=1`, switching between the Text Model and the Refine Model reloads each model. Expect the load time (about 10–60 seconds, longer for partly offloaded models) on top of the refinement itself.
 
 ---

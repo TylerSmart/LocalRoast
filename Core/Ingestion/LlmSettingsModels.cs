@@ -39,8 +39,12 @@ public sealed class LlmDefaultsOptions
     /// <summary>Null omits top_k so the model's own default applies.</summary>
     public int? TopK { get; set; }
 
-    /// <summary>Optional larger model that refines drafts still flagged after the Text Model's extraction.</summary>
+    /// <summary>Optional larger model that refines recipes after ingestion or while idle.</summary>
     public string? RefineModel { get; set; }
+
+    public bool RefineDuringIngestion { get; set; }
+
+    public bool RefineDuringIdle { get; set; }
 
     public bool RefineEnableThinking { get; set; } = true;
 
@@ -119,7 +123,9 @@ public record LlmSettingsDto(
     Guid? TextModelProfileId = null,
     Guid? VisionModelProfileId = null,
     Guid? RefineModelProfileId = null,
-    Guid? EmbeddingModelProfileId = null
+    Guid? EmbeddingModelProfileId = null,
+    bool RefineDuringIngestion = false,
+    bool RefineDuringIdle = false
 );
 
 public record EffectiveLlmConnectionConfig(
@@ -165,7 +171,9 @@ public record EffectiveLlmConnectionConfig(
     int? ModelRequestsPerMinute = null,
     int? ModelDailyRequestQuota = null,
     string? ModelDailyQuotaResetTimezone = null,
-    string? ModelDailyQuotaResetTime = null
+    string? ModelDailyQuotaResetTime = null,
+    bool RefineDuringIngestion = false,
+    bool RefineDuringIdle = false
 )
 {
     public int EffectiveMaxConcurrentRequests =>
@@ -218,6 +226,9 @@ public record EffectiveLlmConnectionConfig(
             TopK = RefineTopK,
             RequestTimeoutSeconds = RefineRequestTimeoutSeconds,
         };
+
+    /// <summary>True when a refinement model is configured on the Refinement workflow.</summary>
+    public bool HasRefinementModelConfigured => !string.IsNullOrWhiteSpace(RefineModel?.Trim());
 
     /// <summary>
     /// True when a refine model is configured with a different host, model, or tuning profile
@@ -275,7 +286,9 @@ public record UpdateLlmSettingsRequest(
     [MaxLength(64)] string DailyQuotaResetTimezone = "UTC",
     [MaxLength(10)] string DailyQuotaResetTime = "00:00",
     bool AutoResumeQueue = true,
-    [MaxLength(200)] string? EmbeddingModel = null
+    [MaxLength(200)] string? EmbeddingModel = null,
+    bool RefineDuringIngestion = false,
+    bool RefineDuringIdle = false
 );
 
 public record TestLlmConnectionRequest(

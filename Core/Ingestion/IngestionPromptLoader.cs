@@ -16,6 +16,7 @@ public static class IngestionPromptLoader
     public const string Stage4TokenizeStep = "04-tokenize-step.md";
     public const string Stage4TokenizeStepsBatch = "04b-tokenize-steps-batch.md";
     public const string Stage5PolishTargeted = "05b-polish-targeted.md";
+    public const string Stage6RefineRecipe = "06-refine-recipe.md";
 
     private static readonly ConcurrentDictionary<string, string> Cache = new(
         StringComparer.OrdinalIgnoreCase

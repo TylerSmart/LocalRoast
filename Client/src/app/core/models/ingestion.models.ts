@@ -105,6 +105,8 @@ export interface LlmSettingsDto {
   topP?: number | null;
   topK?: number | null;
   refineModel?: string | null;
+  refineDuringIngestion?: boolean;
+  refineDuringIdle?: boolean;
   refineEnableThinking?: boolean;
   refineTemperature?: number | null;
   refineTopP?: number | null;
@@ -205,6 +207,8 @@ export interface UpdateLlmWorkflowsRequest {
   maxIngestionRetries: number;
   enableIngestion: boolean;
   autoResumeQueue: boolean;
+  refineDuringIngestion?: boolean;
+  refineDuringIdle?: boolean;
 }
 
 export interface UpdateLlmSettingsRequest {
@@ -226,6 +230,8 @@ export interface UpdateLlmSettingsRequest {
   topP?: number | null;
   topK?: number | null;
   refineModel?: string | null;
+  refineDuringIngestion?: boolean;
+  refineDuringIdle?: boolean;
   refineEnableThinking?: boolean;
   refineTemperature?: number | null;
   refineTopP?: number | null;
@@ -351,6 +357,7 @@ export interface IngestionExtractedDraftDto {
   sourceBookPage?: number | null;
   retainSourceAttachments?: boolean;
   extractedModel?: string | null;
+  refinedModel?: string | null;
   proposedTagNames?: string[] | null;
   measurementWarnings?: string[] | null;
   qualityWarnings?: string[] | null;
@@ -419,6 +426,8 @@ export interface IngestionJobSummaryDto {
   modifiedAt: string;
   sourceFileCount?: number;
   extractedModel?: string | null;
+  refinedModel?: string | null;
+  refinedAt?: string | null;
 }
 
 export interface IngestionJobDetailDto {
@@ -448,6 +457,8 @@ export interface IngestionJobDetailDto {
   sourceBookTitle?: string | null;
   sourceBookPage?: number | null;
   extractedModel?: string | null;
+  refinedModel?: string | null;
+  refinedAt?: string | null;
 }
 
 export interface RetryWaitingJobsResultDto {

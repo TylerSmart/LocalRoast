@@ -9,4 +9,6 @@ public interface IIngestionProcessor
     Task<bool> ProcessJobByIdAsync(Guid jobId, CancellationToken cancellationToken = default);
 
     Task<int> ProbeAndPromoteWaitingJobsAsync(CancellationToken cancellationToken = default);
+
+    Task<bool> ProcessNextIdleRefinementAsync(CancellationToken cancellationToken = default);
 }

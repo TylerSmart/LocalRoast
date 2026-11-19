@@ -139,6 +139,8 @@ describe('LlmSettingsDialogComponent', () => {
     textModelProfileId: 'prof-text-def',
     visionModelProfileId: 'prof-vision-def',
     refineModelProfileId: null,
+    refineDuringIngestion: false,
+    refineDuringIdle: false,
     embeddingModelProfileId: null,
   } as unknown as LlmSettingsDto;
 
@@ -242,6 +244,8 @@ describe('LlmSettingsDialogComponent', () => {
       textModelProfileId: 'prof-text-def',
       visionModelProfileId: null,
       refineModelProfileId: 'prof-text-thinking',
+      refineDuringIngestion: false,
+      refineDuringIdle: false,
       embeddingModelProfileId: null,
       autoPublishHighConfidenceText: true,
       maxIngestionRetries: 5,
@@ -250,6 +254,38 @@ describe('LlmSettingsDialogComponent', () => {
     });
     expect(mockIngestionService.refreshSummary).toHaveBeenCalled();
     expect(mockDialogRef.close).toHaveBeenCalledWith(true);
+  });
+
+  it('disables refinement toggles until a refinement profile is selected and persists them when enabled', async () => {
+    await create();
+
+    expect(component.workflowForm.controls.refineDuringIngestion.disabled).toBe(true);
+    expect(component.workflowForm.controls.refineDuringIdle.disabled).toBe(true);
+    expect(component.workflowForm.getRawValue().refineDuringIngestion).toBe(false);
+    expect(component.workflowForm.getRawValue().refineDuringIdle).toBe(false);
+
+    component.workflowForm.controls.refineModelProfileId.setValue('prof-refine-def');
+    fixture.detectChanges();
+
+    expect(component.workflowForm.controls.refineDuringIngestion.enabled).toBe(true);
+    expect(component.workflowForm.controls.refineDuringIdle.enabled).toBe(true);
+
+    component.workflowForm.controls.refineDuringIngestion.setValue(true);
+    component.workflowForm.controls.refineDuringIdle.setValue(true);
+    component.onSave();
+
+    expect(service['updateWorkflows']).toHaveBeenCalledWith(
+      expect.objectContaining({
+        refineModelProfileId: 'prof-refine-def',
+        refineDuringIngestion: true,
+        refineDuringIdle: true,
+      }),
+    );
+
+    component.workflowForm.controls.refineModelProfileId.setValue('');
+    fixture.detectChanges();
+    expect(component.workflowForm.controls.refineDuringIngestion.disabled).toBe(true);
+    expect(component.workflowForm.controls.refineDuringIdle.disabled).toBe(true);
   });
 
   it('persists selected embeddingModelProfileId when assigned', async () => {

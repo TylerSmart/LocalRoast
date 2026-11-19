@@ -110,6 +110,7 @@ public sealed class IngestionService(
                 || (j.SourceUrl != null && j.SourceUrl.Contains(term))
                 || (j.StatusDetail != null && j.StatusDetail.Contains(term))
                 || (j.ExtractedModel != null && j.ExtractedModel.Contains(term))
+                || (j.RefinedModel != null && j.RefinedModel.Contains(term))
                 || (j.ResultingRecipe != null && j.ResultingRecipe.Title.Contains(term))
             );
         }
@@ -203,7 +204,9 @@ public sealed class IngestionService(
                     CreatedAt: j.CreatedAt,
                     ModifiedAt: j.ModifiedAt,
                     SourceFileCount: fileCount,
-                    ExtractedModel: j.ExtractedModel
+                    ExtractedModel: j.ExtractedModel,
+                    RefinedModel: j.RefinedModel,
+                    RefinedAt: j.RefinedAt
                 );
             })
             .ToList();
@@ -286,7 +289,9 @@ public sealed class IngestionService(
                     CreatedAt: j.CreatedAt,
                     ModifiedAt: j.ModifiedAt,
                     SourceFileCount: fileCount,
-                    ExtractedModel: j.ExtractedModel
+                    ExtractedModel: j.ExtractedModel,
+                    RefinedModel: j.RefinedModel,
+                    RefinedAt: j.RefinedAt
                 );
             })
             .ToList();
@@ -457,7 +462,9 @@ public sealed class IngestionService(
             PdfInspection: pdfInspection,
             SourceBookTitle: job.SourceBookTitle,
             SourceBookPage: job.SourceBookPage,
-            ExtractedModel: job.ExtractedModel
+            ExtractedModel: job.ExtractedModel,
+            RefinedModel: job.RefinedModel,
+            RefinedAt: job.RefinedAt
         );
     }
 
@@ -1448,7 +1455,8 @@ public sealed class IngestionService(
             ThumbnailImagePath: draft.ThumbnailImagePath,
             CollectionIds: draft.SuggestedCollectionIds,
             TagIds: resolvedTagIds,
-            ExtractedModel: job.ExtractedModel
+            ExtractedModel: job.ExtractedModel,
+            RefinedModel: job.RefinedModel ?? draft.RefinedModel ?? string.Empty
         );
 
         RecipeDetailDto createdRecipe;
@@ -1560,6 +1568,14 @@ public sealed class IngestionService(
 
         job.RunNowRequested = true;
 
+        job.RefinedModel = null;
+
+        job.RefinedAt = null;
+
+        job.RefinementAttemptCount = 0;
+
+        job.RefinementNextRetryAt = null;
+
         job.StatusDetail = "Queued for retry.";
 
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -1612,6 +1628,10 @@ public sealed class IngestionService(
         {
             job.Status = IngestionJobStatus.Queued;
             job.AttemptCount = 0;
+            job.RefinedModel = null;
+            job.RefinedAt = null;
+            job.RefinementAttemptCount = 0;
+            job.RefinementNextRetryAt = null;
         }
 
         job.NextRetryAt = null;
@@ -1641,7 +1661,10 @@ public sealed class IngestionService(
             ResultingRecipeSlug: null,
             SubmittedByUsername: null,
             CreatedAt: job.CreatedAt,
-            ModifiedAt: job.ModifiedAt
+            ModifiedAt: job.ModifiedAt,
+            ExtractedModel: job.ExtractedModel,
+            RefinedModel: job.RefinedModel,
+            RefinedAt: job.RefinedAt
         );
 
     public async Task<RetryWaitingJobsResultDto> RetryAllWaitingJobsAsync(
@@ -1729,6 +1752,7 @@ public sealed class IngestionService(
                 || (j.SourceUrl != null && j.SourceUrl.Contains(term))
                 || (j.StatusDetail != null && j.StatusDetail.Contains(term))
                 || (j.ExtractedModel != null && j.ExtractedModel.Contains(term))
+                || (j.RefinedModel != null && j.RefinedModel.Contains(term))
                 || (j.ResultingRecipe != null && j.ResultingRecipe.Title.Contains(term))
             );
         }
@@ -1747,6 +1771,14 @@ public sealed class IngestionService(
             job.NextRetryAt = null;
 
             job.AttemptCount = 0;
+
+            job.RefinedModel = null;
+
+            job.RefinedAt = null;
+
+            job.RefinementAttemptCount = 0;
+
+            job.RefinementNextRetryAt = null;
 
             job.StatusDetail = "Queued for retry.";
         }
@@ -1770,9 +1802,9 @@ public sealed class IngestionService(
             return false;
         }
 
-        if (queueSignal.ActiveJobId == job.Id)
+        if (queueSignal.IsJobActive(job.Id))
         {
-            queueSignal.CancelActiveExecution();
+            queueSignal.CancelActiveExecution(job.Id);
         }
 
         job.Status = IngestionJobStatus.Discarded;

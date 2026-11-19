@@ -548,6 +548,7 @@ public sealed partial class RecipeService(
 
         var latestJob = recipe.IngestionJobs.OrderByDescending(j => j.CreatedAt).FirstOrDefault();
         var extractedModel = recipe.ExtractedModel ?? latestJob?.ExtractedModel;
+        var refinedModel = recipe.RefinedModel ?? latestJob?.RefinedModel;
         var ingestionJobId = latestJob?.Id;
 
         return new RecipeDetailDto(
@@ -602,7 +603,8 @@ public sealed partial class RecipeService(
                 ))
                 .ToList(),
             ExtractedModel: extractedModel,
-            IngestionJobId: ingestionJobId
+            IngestionJobId: ingestionJobId,
+            RefinedModel: refinedModel
         );
     }
 
@@ -704,6 +706,9 @@ public sealed partial class RecipeService(
             CoverImagePath = ValidateAndNormalizeMediaPath(request.CoverImagePath),
             ThumbnailImagePath = ValidateAndNormalizeMediaPath(request.ThumbnailImagePath),
             ExtractedModel = request.ExtractedModel,
+            RefinedModel = string.IsNullOrWhiteSpace(request.RefinedModel)
+                ? null
+                : request.RefinedModel.Trim(),
         };
 
         await ValidateAndBuildGraphAsync(recipe, request, cancellationToken);
@@ -803,6 +808,12 @@ public sealed partial class RecipeService(
         if (request.ExtractedModel != null)
         {
             recipe.ExtractedModel = request.ExtractedModel;
+        }
+        if (request.RefinedModel != null)
+        {
+            recipe.RefinedModel = string.IsNullOrWhiteSpace(request.RefinedModel)
+                ? null
+                : request.RefinedModel.Trim();
         }
 
         await ValidateAndBuildGraphAsync(recipe, request, cancellationToken);

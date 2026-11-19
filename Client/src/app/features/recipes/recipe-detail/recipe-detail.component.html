@@ -185,8 +185,9 @@
             class="stat-pill model-stat link-pill"
             matTooltip="View original ingestion item and extraction review"
             aria-label="View ingestion item"
+            data-testid="recipe-extracted-model-pill"
           >
-            <span class="stat-label">Model</span>
+            <span class="stat-label">Ingested Model</span>
             <span class="stat-value">
               <mat-icon class="stat-icon">smart_toy</mat-icon>
               <span>{{ recipe()!.extractedModel || 'Ingested' }}</span>
@@ -194,13 +195,42 @@
             </span>
           </a>
         } @else if (recipe()!.extractedModel) {
-          <div class="stat-pill model-stat">
-            <span class="stat-label">Model</span>
+          <div class="stat-pill model-stat" data-testid="recipe-extracted-model-pill">
+            <span class="stat-label">Ingested Model</span>
             <span class="stat-value">
               <mat-icon class="stat-icon">smart_toy</mat-icon>
               <span>{{ recipe()!.extractedModel }}</span>
             </span>
           </div>
+        }
+        @if (recipe()!.refinedModel) {
+          @if (recipe()!.ingestionJobId) {
+            <a
+              [routerLink]="['/ingest/review', recipe()!.ingestionJobId]"
+              class="stat-pill model-stat refined-model-stat link-pill"
+              matTooltip="View refinement details in ingestion review"
+              aria-label="View refined ingestion item"
+              data-testid="recipe-refined-model-pill"
+            >
+              <span class="stat-label">Refined Model</span>
+              <span class="stat-value">
+                <mat-icon class="stat-icon">auto_awesome</mat-icon>
+                <span>{{ recipe()!.refinedModel }}</span>
+                <mat-icon class="external-link-icon">open_in_new</mat-icon>
+              </span>
+            </a>
+          } @else {
+            <div
+              class="stat-pill model-stat refined-model-stat"
+              data-testid="recipe-refined-model-pill"
+            >
+              <span class="stat-label">Refined Model</span>
+              <span class="stat-value">
+                <mat-icon class="stat-icon">auto_awesome</mat-icon>
+                <span>{{ recipe()!.refinedModel }}</span>
+              </span>
+            </div>
+          }
         }
         @if (recipe()!.prepTimeMinutes) {
           <div class="stat-pill">

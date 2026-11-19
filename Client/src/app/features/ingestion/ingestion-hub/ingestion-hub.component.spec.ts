@@ -84,6 +84,8 @@ describe('IngestionHubComponent', () => {
       resultingRecipeId: 'recipe-123',
       resultingRecipeSlug: 'published-herb-pasta',
       extractedModel: 'llama3:8b',
+      refinedModel: 'gemma4:26b-a4b',
+      refinedAt: '2026-10-26T12:12:00Z',
       submittedByUsername: 'alice',
       createdAt: '2026-10-26T12:10:00Z',
       modifiedAt: '2026-10-26T12:10:00Z',
@@ -561,5 +563,14 @@ describe('IngestionHubComponent', () => {
       'Name',
       'Asc',
     );
+  });
+
+  it('displays both ingested and refined model chips when a job was refined', () => {
+    const el = fixture.nativeElement as HTMLElement;
+    const extractedChip = el.querySelector('[data-testid="job-extracted-model-chip"]');
+    const refinedChip = el.querySelector('[data-testid="job-refined-model-chip"]');
+
+    expect(extractedChip?.textContent).toContain('llama3:8b');
+    expect(refinedChip?.textContent).toContain('Refined: gemma4:26b-a4b');
   });
 });

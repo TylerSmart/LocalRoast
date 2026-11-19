@@ -91,6 +91,8 @@ export class LlmSettingsDialogComponent implements OnInit {
     textModelProfileId: this.fb.nonNullable.control(''),
     visionModelProfileId: this.fb.nonNullable.control(''),
     refineModelProfileId: this.fb.nonNullable.control(''),
+    refineDuringIngestion: this.fb.nonNullable.control(false),
+    refineDuringIdle: this.fb.nonNullable.control(false),
     embeddingModelProfileId: this.fb.nonNullable.control(''),
     enableIngestion: this.fb.nonNullable.control(true),
     autoPublishHighConfidenceText: this.fb.nonNullable.control(false),
@@ -157,6 +159,10 @@ export class LlmSettingsDialogComponent implements OnInit {
   });
 
   ngOnInit(): void {
+    this.workflowForm.controls.refineModelProfileId.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => this.syncRefinementToggleState());
+    this.syncRefinementToggleState();
     this.loadAll();
   }
 
@@ -181,12 +187,15 @@ export class LlmSettingsDialogComponent implements OnInit {
             textModelProfileId: settings.textModelProfileId ?? '',
             visionModelProfileId: settings.visionModelProfileId ?? '',
             refineModelProfileId: settings.refineModelProfileId ?? '',
+            refineDuringIngestion: settings.refineDuringIngestion ?? false,
+            refineDuringIdle: settings.refineDuringIdle ?? false,
             embeddingModelProfileId: settings.embeddingModelProfileId ?? '',
             enableIngestion: settings.enableIngestion ?? true,
             autoPublishHighConfidenceText: settings.autoPublishHighConfidenceText,
             autoResumeQueue: settings.autoResumeQueue ?? true,
             maxIngestionRetries: settings.maxIngestionRetries ?? 3,
           });
+          this.syncRefinementToggleState();
           if (connections.length === 0) {
             this.selectedTabIndex.set(LLM_SETTINGS_TABS.connections);
           }
@@ -234,6 +243,8 @@ export class LlmSettingsDialogComponent implements OnInit {
         textModelProfileId: values.textModelProfileId || null,
         visionModelProfileId: values.visionModelProfileId || null,
         refineModelProfileId: values.refineModelProfileId || null,
+        refineDuringIngestion: values.refineDuringIngestion,
+        refineDuringIdle: values.refineDuringIdle,
         embeddingModelProfileId: values.embeddingModelProfileId || null,
         autoPublishHighConfidenceText: values.autoPublishHighConfidenceText,
         maxIngestionRetries: values.maxIngestionRetries,
@@ -367,6 +378,21 @@ export class LlmSettingsDialogComponent implements OnInit {
     }
   }
 
+  private syncRefinementToggleState(): void {
+    const hasRefineProfile = !!this.workflowForm.controls.refineModelProfileId.value;
+    const controls = [
+      this.workflowForm.controls.refineDuringIngestion,
+      this.workflowForm.controls.refineDuringIdle,
+    ];
+    for (const ctrl of controls) {
+      if (hasRefineProfile && ctrl.disabled) {
+        ctrl.enable({ emitEvent: false });
+      } else if (!hasRefineProfile && ctrl.enabled) {
+        ctrl.disable({ emitEvent: false });
+      }
+    }
+  }
+
   private dropMissingProfiles(profiles: LlmModelProfile[]): void {
     const ids = new Set(profiles.map((p) => p.id));
     const controls = this.workflowForm.controls;
@@ -380,5 +406,6 @@ export class LlmSettingsDialogComponent implements OnInit {
         control.setValue('');
       }
     }
+    this.syncRefinementToggleState();
   }
 }

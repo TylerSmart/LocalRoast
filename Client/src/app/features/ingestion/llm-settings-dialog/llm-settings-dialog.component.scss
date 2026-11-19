@@ -12,6 +12,19 @@
     font-size: 0.8rem;
     overflow-wrap: anywhere;
   }
+
+  .refinement-toggles {
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+    margin-top: 0.25rem;
+    padding: 0.65rem 0.75rem;
+    border-radius: 10px;
+    background-color: var(--mat-sys-surface-container-low, #f9f6f0);
+    border: 1px solid var(--mat-sys-outline-variant, #dad4c8);
+    box-sizing: border-box;
+    max-width: 100%;
+  }
 }
 
 .profile-model-group {

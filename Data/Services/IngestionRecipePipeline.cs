@@ -164,9 +164,10 @@ public sealed partial class IngestionRecipePipeline(
 
         if (incompatibleAlts.Count > 0 || remainingStepWarnings.Count > 0 || missingMetadata)
         {
-            var polishConfig = request.Config.HasDistinctRefinement()
-                ? request.Config.ForRefinement()
-                : request.Config;
+            // Stage 5 Targeted Polish runs on the primary Text workflow profile; the optional
+            // Refinement workflow runs as its own dedicated post-polish pass controlled by the
+            // RefineDuringIngestion / RefineDuringIdle settings.
+            var polishConfig = request.Config;
 
             await ReportProgressAsync(
                 request.OnStageProgress,
@@ -174,36 +175,22 @@ public sealed partial class IngestionRecipePipeline(
             );
 
             Stage5TargetedPolishResponseDto? polishRes = null;
-            try
-            {
-                polishRes = await RunStage5PolishAsync(
-                    polishConfig,
-                    request.SourceText,
-                    title,
-                    description,
-                    servings,
-                    yieldDisplay,
-                    timing,
-                    rawTags,
-                    workIngredients,
-                    validatedSteps,
-                    incompatibleAlts,
-                    remainingStepWarnings,
-                    missingMetadata,
-                    cancellationToken
-                );
-            }
-            catch (LlmHostUnavailableException ex)
-                when (ex.IsQuotaExhausted
-                    && !QuotaExhaustionAffectsPrimaryTextWorkflow(ex, request.Config)
-                )
-            {
-                logger?.LogWarning(
-                    ex,
-                    "Refinement model quota exhausted on '{Model}'; skipping Stage 5 polish so primary Text ingestion can continue.",
-                    polishConfig.TextModel
-                );
-            }
+            polishRes = await RunStage5PolishAsync(
+                polishConfig,
+                request.SourceText,
+                title,
+                description,
+                servings,
+                yieldDisplay,
+                timing,
+                rawTags,
+                workIngredients,
+                validatedSteps,
+                incompatibleAlts,
+                remainingStepWarnings,
+                missingMetadata,
+                cancellationToken
+            );
 
             if (polishRes is not null)
             {
@@ -323,11 +310,75 @@ public sealed partial class IngestionRecipePipeline(
                         proposedAlt = target.AlternateMeasurements;
                     }
 
+                    var nameChanged = !string.Equals(
+                        target.Name,
+                        proposedName,
+                        StringComparison.OrdinalIgnoreCase
+                    );
+
                     target.Name = proposedName;
                     target.Quantity = proposedQty;
                     target.MaxQuantity = proposedMax;
                     target.Unit = proposedUnit;
                     target.AlternateMeasurements = proposedAlt;
+
+                    if (
+                        nameChanged
+                        && reconciledPrimary.TryGetValue(patch.Index, out var existingMatch)
+                        && !existingMatch.IsRecipeReference
+                        && existingMatch.IsNewFoodItem
+                    )
+                    {
+                        var updatedCanonical = FoodNameSanitizer.NormalizeCanonicalFoodName(
+                            proposedName
+                        );
+                        if (!string.IsNullOrWhiteSpace(updatedCanonical))
+                        {
+                            var exactExisting = catalogFoods.FirstOrDefault(f =>
+                                string.Equals(
+                                    f.NormalizedName,
+                                    updatedCanonical,
+                                    StringComparison.OrdinalIgnoreCase
+                                )
+                                || f.NormalizedAliases.Any(a =>
+                                    string.Equals(
+                                        a,
+                                        updatedCanonical,
+                                        StringComparison.OrdinalIgnoreCase
+                                    )
+                                )
+                            );
+                            if (exactExisting is not null)
+                            {
+                                reconciledPrimary[patch.Index] = existingMatch with
+                                {
+                                    MatchedFoodItemId = exactExisting.Id,
+                                    MatchedFoodItemName = exactExisting.Name,
+                                    IsNewFoodItem = false,
+                                    CreateNewFoodItem = false,
+                                    ProposedFoodItemName = null,
+                                    SuggestedCategory = exactExisting.Category,
+                                    SuggestedIsPantryStaple = exactExisting.IsPantryStaple,
+                                };
+                            }
+                            else
+                            {
+                                var updatedCategory = FoodCategoryClassifier.Classify(
+                                    updatedCanonical
+                                );
+                                reconciledPrimary[patch.Index] = existingMatch with
+                                {
+                                    ProposedFoodItemName = updatedCanonical,
+                                    SuggestedCategory = updatedCategory,
+                                    SuggestedIsPantryStaple =
+                                        FoodCategoryClassifier.IsLikelyPantryStaple(
+                                            updatedCanonical,
+                                            updatedCategory
+                                        ),
+                                };
+                            }
+                        }
+                    }
 
                     if (patch.PrepNote is not null)
                     {
@@ -1137,7 +1188,7 @@ public sealed partial class IngestionRecipePipeline(
         return res.Parsed;
     }
 
-    private static bool QuotaExhaustionAffectsPrimaryTextWorkflow(
+    internal static bool QuotaExhaustionAffectsPrimaryTextWorkflow(
         LlmHostUnavailableException ex,
         EffectiveLlmConnectionConfig primaryTextConfig
     )

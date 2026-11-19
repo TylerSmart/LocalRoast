@@ -29,6 +29,8 @@ public sealed class IngestionJobConfiguration : IEntityTypeConfiguration<Ingesti
         builder.Property(j => j.InitialCollectionIdsJson).HasMaxLength(4000);
         builder.Property(j => j.ExtractedDraftJson).HasMaxLength(200000);
         builder.Property(j => j.ExtractedModel).HasMaxLength(200);
+        builder.Property(j => j.RefinedModel).HasMaxLength(200);
+        builder.Property(j => j.RefinementAttemptCount).HasDefaultValue(0);
         builder.Property(j => j.ConfidenceScore).HasPrecision(4, 3);
         builder.Property(j => j.StatusDetail).HasMaxLength(2000);
 
@@ -37,6 +39,12 @@ public sealed class IngestionJobConfiguration : IEntityTypeConfiguration<Ingesti
 
         builder.HasIndex(j => j.Status);
         builder.HasIndex(j => new { j.Status, j.NextRetryAt });
+        builder.HasIndex(j => new
+        {
+            j.Status,
+            j.RefinedAt,
+            j.CreatedAt,
+        });
         builder.HasIndex(j => j.CreatedAt);
         builder.HasIndex(j => j.ResultingRecipeId);
 

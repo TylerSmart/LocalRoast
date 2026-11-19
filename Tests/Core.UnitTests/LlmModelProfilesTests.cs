@@ -161,4 +161,37 @@ public sealed class LlmModelProfilesTests
         };
         Assert.IsTrue(sameModelThinkingProfile.HasDistinctRefinement());
     }
+
+    [TestMethod]
+    public void RefinementToggles_DefaultFalseAndHasRefinementModelConfiguredDetectsAssignedModel()
+    {
+        var defaults = new LlmDefaultsOptions();
+        Assert.IsFalse(defaults.RefineDuringIngestion);
+        Assert.IsFalse(defaults.RefineDuringIdle);
+
+        var config = new EffectiveLlmConnectionConfig(
+            Provider: LlmProvider.Ollama,
+            BaseUrl: "http://localhost:11434",
+            ApiKey: null,
+            TextModel: "gemma4:e4b",
+            VisionModel: null,
+            OllamaKeepAlive: "5m",
+            RequestTimeoutSeconds: 120,
+            AutoPublishHighConfidenceText: false
+        );
+
+        Assert.IsFalse(config.HasRefinementModelConfigured);
+        Assert.IsFalse(config.RefineDuringIngestion);
+        Assert.IsFalse(config.RefineDuringIdle);
+
+        var configured = config with
+        {
+            RefineModel = "gemma4:12b",
+            RefineDuringIngestion = true,
+            RefineDuringIdle = true,
+        };
+        Assert.IsTrue(configured.HasRefinementModelConfigured);
+        Assert.IsTrue(configured.RefineDuringIngestion);
+        Assert.IsTrue(configured.RefineDuringIdle);
+    }
 }

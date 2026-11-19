@@ -573,6 +573,12 @@
         text-overflow: ellipsis;
         white-space: nowrap;
       }
+
+      &.refined-model-chip {
+        background-color: var(--mat-sys-secondary-container, #e8def8);
+        color: var(--mat-sys-on-secondary-container, #1d192b);
+        border-color: transparent;
+      }
     }
 
     .confidence-chip {

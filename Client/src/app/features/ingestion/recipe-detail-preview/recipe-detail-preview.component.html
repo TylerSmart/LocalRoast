@@ -80,11 +80,23 @@
     <!-- Metadata Summary Row -->
     <div class="recipe-stats-strip">
       @if (recipe().extractedModel) {
-        <div class="stat-pill model-stat">
-          <span class="stat-label">Model</span>
+        <div class="stat-pill model-stat" data-testid="preview-extracted-model-pill">
+          <span class="stat-label">Ingested Model</span>
           <span class="stat-value">
             <mat-icon class="stat-icon">smart_toy</mat-icon>
             <span>{{ recipe().extractedModel }}</span>
+          </span>
+        </div>
+      }
+      @if (recipe().refinedModel) {
+        <div
+          class="stat-pill model-stat refined-model-stat"
+          data-testid="preview-refined-model-pill"
+        >
+          <span class="stat-label">Refined Model</span>
+          <span class="stat-value">
+            <mat-icon class="stat-icon">auto_awesome</mat-icon>
+            <span>{{ recipe().refinedModel }}</span>
           </span>
         </div>
       }

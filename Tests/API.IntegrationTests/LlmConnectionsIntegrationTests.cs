@@ -230,7 +230,9 @@ public sealed class LlmConnectionsIntegrationTests
             new UpdateLlmWorkflowsRequest(
                 TextModelProfileId: text.DefaultProfileId,
                 VisionModelProfileId: visionThinking.Id,
-                RefineModelProfileId: refineDeep.Id
+                RefineModelProfileId: refineDeep.Id,
+                RefineDuringIngestion: true,
+                RefineDuringIdle: true
             )
         );
         Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
@@ -238,11 +240,16 @@ public sealed class LlmConnectionsIntegrationTests
         Assert.AreEqual(text.DefaultProfileId, settings!.TextModelProfileId);
         Assert.AreEqual(visionThinking.Id, settings.VisionModelProfileId);
         Assert.AreEqual(refineDeep.Id, settings.RefineModelProfileId);
+        Assert.IsTrue(settings.RefineDuringIngestion);
+        Assert.IsTrue(settings.RefineDuringIdle);
         Assert.AreEqual("gemma4:12b", settings.TextModel);
         Assert.AreEqual("qwen3-vl:8b", settings.VisionModel);
         Assert.AreEqual("gemma4:26b", settings.RefineModel);
 
         var effective = await GetEffectiveConfigAsync();
+        Assert.IsTrue(effective.RefineDuringIngestion);
+        Assert.IsTrue(effective.RefineDuringIdle);
+        Assert.IsTrue(effective.HasRefinementModelConfigured);
         Assert.AreEqual("http://desktop:11434", effective.BaseUrl);
         Assert.AreEqual(8192, effective.ContextWindowTokens);
         Assert.IsNull(effective.Temperature);

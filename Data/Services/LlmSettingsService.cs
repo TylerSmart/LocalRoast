@@ -68,7 +68,9 @@ public sealed class LlmSettingsService(
                 TextModelProfileId: entity.TextModelProfileId,
                 VisionModelProfileId: entity.VisionModelProfileId,
                 RefineModelProfileId: entity.RefineModelProfileId,
-                EmbeddingModelProfileId: entity.EmbeddingModelProfileId
+                EmbeddingModelProfileId: entity.EmbeddingModelProfileId,
+                RefineDuringIngestion: entity.RefineDuringIngestion,
+                RefineDuringIdle: entity.RefineDuringIdle
             );
         }
 
@@ -107,7 +109,9 @@ public sealed class LlmSettingsService(
             AutoResumeQueue: opt.AutoResumeQueue,
             PausedUntilUtc: opt.PausedUntilUtc,
             PauseReason: opt.PauseReason,
-            EmbeddingModel: opt.EmbeddingModel
+            EmbeddingModel: opt.EmbeddingModel,
+            RefineDuringIngestion: opt.RefineDuringIngestion,
+            RefineDuringIdle: opt.RefineDuringIdle
         );
     }
 
@@ -160,7 +164,9 @@ public sealed class LlmSettingsService(
             AutoResumeQueue: opt.AutoResumeQueue,
             PausedUntilUtc: opt.PausedUntilUtc,
             PauseReason: opt.PauseReason,
-            EmbeddingModel: opt.EmbeddingModel
+            EmbeddingModel: opt.EmbeddingModel,
+            RefineDuringIngestion: opt.RefineDuringIngestion,
+            RefineDuringIdle: opt.RefineDuringIdle
         );
     }
 
@@ -220,9 +226,13 @@ public sealed class LlmSettingsService(
         entity.Temperature = request.Temperature;
         entity.TopP = request.TopP;
         entity.TopK = request.TopK;
+        var wasRefineDuringIdle = entity.RefineDuringIdle;
+        var previousRefineModel = entity.RefineModel;
         entity.RefineModel = string.IsNullOrWhiteSpace(request.RefineModel)
             ? null
             : request.RefineModel.Trim();
+        entity.RefineDuringIngestion = request.RefineDuringIngestion;
+        entity.RefineDuringIdle = request.RefineDuringIdle;
         entity.RefineEnableThinking = request.RefineEnableThinking;
         entity.RefineTemperature = request.RefineTemperature;
         entity.RefineTopP = request.RefineTopP;
@@ -247,11 +257,30 @@ public sealed class LlmSettingsService(
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
+        var hasRefineModel =
+            !string.IsNullOrWhiteSpace(entity.RefineModel)
+            || entity.RefineModelProfileId is not null;
+        if (wasRefineDuringIdle && (!entity.RefineDuringIdle || !hasRefineModel))
+        {
+            queueSignal.PreemptBackgroundWork();
+        }
+
         await ApplyQueueSideEffectsAsync(
             wasIngestionEnabled,
             request.EnableIngestion,
             wakeWaitingJobs: !string.IsNullOrWhiteSpace(entity.TextModel)
                 || entity.TextModelProfileId is not null,
+            wakeIdleRefinement: entity.EnableIngestion
+                && entity.RefineDuringIdle
+                && hasRefineModel
+                && (
+                    !wasRefineDuringIdle
+                    || !string.Equals(
+                        previousRefineModel,
+                        entity.RefineModel,
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                ),
             cancellationToken
         );
 
@@ -293,6 +322,9 @@ public sealed class LlmSettingsService(
             dbContext.HouseholdLlmSettings.Add(entity);
         }
 
+        var wasRefineDuringIdle = entity.RefineDuringIdle;
+        var previousRefineProfileId = entity.RefineModelProfileId;
+
         entity.TextModelProfileId = request.TextModelProfileId;
         entity.VisionModelProfileId = request.VisionModelProfileId;
         entity.RefineModelProfileId = request.RefineModelProfileId;
@@ -321,6 +353,8 @@ public sealed class LlmSettingsService(
         entity.MaxIngestionRetries = request.MaxIngestionRetries;
         entity.EnableIngestion = request.EnableIngestion;
         entity.AutoResumeQueue = request.AutoResumeQueue;
+        entity.RefineDuringIngestion = request.RefineDuringIngestion;
+        entity.RefineDuringIdle = request.RefineDuringIdle;
         if (request.EnableIngestion)
         {
             entity.PausedUntilUtc = null;
@@ -329,10 +363,21 @@ public sealed class LlmSettingsService(
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
+        if (
+            wasRefineDuringIdle && (!entity.RefineDuringIdle || entity.RefineModelProfileId is null)
+        )
+        {
+            queueSignal.PreemptBackgroundWork();
+        }
+
         await ApplyQueueSideEffectsAsync(
             wasIngestionEnabled,
             request.EnableIngestion,
             wakeWaitingJobs: request.TextModelProfileId is not null,
+            wakeIdleRefinement: entity.EnableIngestion
+                && entity.RefineDuringIdle
+                && entity.RefineModelProfileId is not null
+                && (!wasRefineDuringIdle || previousRefineProfileId != entity.RefineModelProfileId),
             cancellationToken
         );
 
@@ -343,6 +388,7 @@ public sealed class LlmSettingsService(
         bool wasIngestionEnabled,
         bool enableIngestion,
         bool wakeWaitingJobs,
+        bool wakeIdleRefinement,
         CancellationToken cancellationToken
     )
     {
@@ -379,6 +425,43 @@ public sealed class LlmSettingsService(
         {
             await WakeWaitingJobsAsync(dbContext, queueSignal, cancellationToken);
         }
+
+        if (wakeIdleRefinement)
+        {
+            await WakeIdleRefinementJobsAsync(dbContext, queueSignal, cancellationToken);
+        }
+    }
+
+    /// <summary>Resets backoff on unrefined jobs and wakes the idle worker when refinement settings change.</summary>
+    internal static async Task WakeIdleRefinementJobsAsync(
+        AppDbContext dbContext,
+        IIngestionQueueSignal queueSignal,
+        CancellationToken cancellationToken
+    )
+    {
+        var backedOffJobs = await dbContext
+            .IngestionJobs.Where(j =>
+                (
+                    j.Status == IngestionJobStatus.ReadyForReview
+                    || j.Status == IngestionJobStatus.Published
+                )
+                && j.RefinedAt == null
+                && (j.RefinementNextRetryAt != null || j.RefinementAttemptCount > 0)
+            )
+            .ToListAsync(cancellationToken);
+
+        if (backedOffJobs.Count > 0)
+        {
+            foreach (var job in backedOffJobs)
+            {
+                job.RefinementNextRetryAt = null;
+                job.RefinementAttemptCount = 0;
+            }
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        queueSignal.NotifyBackgroundWorkAvailable();
     }
 
     /// <summary>Retries jobs parked while the LLM host was offline after the LLM setup changes.</summary>
@@ -452,7 +535,9 @@ public sealed class LlmSettingsService(
             AutoResumeQueue: entity.AutoResumeQueue,
             PausedUntilUtc: entity.PausedUntilUtc,
             PauseReason: entity.PauseReason,
-            EmbeddingModel: entity.EmbeddingModel
+            EmbeddingModel: entity.EmbeddingModel,
+            RefineDuringIngestion: entity.RefineDuringIngestion,
+            RefineDuringIdle: entity.RefineDuringIdle
         );
 
     /// <summary>
@@ -708,6 +793,8 @@ public sealed class LlmSettingsService(
             TopP = opt.TopP,
             TopK = opt.TopK,
             RefineModel = opt.RefineModel,
+            RefineDuringIngestion = opt.RefineDuringIngestion,
+            RefineDuringIdle = opt.RefineDuringIdle,
             RefineEnableThinking = opt.RefineEnableThinking,
             RefineTemperature = opt.RefineTemperature,
             RefineTopP = opt.RefineTopP,

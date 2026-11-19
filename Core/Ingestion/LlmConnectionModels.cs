@@ -129,5 +129,7 @@ public sealed record UpdateLlmWorkflowsRequest(
     [Range(0, 10)] int MaxIngestionRetries = 3,
     bool EnableIngestion = true,
     bool AutoResumeQueue = true,
-    Guid? EmbeddingModelProfileId = null
+    Guid? EmbeddingModelProfileId = null,
+    bool RefineDuringIngestion = false,
+    bool RefineDuringIdle = false
 );

@@ -162,7 +162,8 @@
                   }
                 </mat-select>
                 <mat-hint>
-                  Optional Stage 5 Targeted Polish profile override when warnings are detected.
+                  Optional post-polish model profile that audits recipes, step tokens, and food
+                  catalog names.
                 </mat-hint>
               </mat-form-field>
               @if (refineProfile(); as profile) {
@@ -173,10 +174,36 @@
               }
               @if (refineMatchesText()) {
                 <p class="assignment-detail" role="status">
-                  Stage 5 Targeted Polish already uses the Text profile when needed. Pick a
-                  different model or profile here to override it.
+                  Refinement is using the same profile as Text. Pick a stronger model or thinking
+                  profile for the best second-pass results.
                 </p>
               }
+              <div class="refinement-toggles" data-testid="refinement-toggles-group">
+                <div class="toggle-section">
+                  <mat-slide-toggle
+                    formControlName="refineDuringIngestion"
+                    data-testid="refine-during-ingestion-toggle"
+                  >
+                    Refine during ingestion
+                  </mat-slide-toggle>
+                  <span class="toggle-hint">
+                    Runs the refinement model after the polish step, before publishing or creating
+                    new food catalog items.
+                  </span>
+                </div>
+                <div class="toggle-section">
+                  <mat-slide-toggle
+                    formControlName="refineDuringIdle"
+                    data-testid="refine-during-idle-toggle"
+                  >
+                    Refine during idle
+                  </mat-slide-toggle>
+                  <span class="toggle-hint">
+                    When no ingestion jobs are active, refines in-review and published jobs that
+                    haven't been refined yet.
+                  </span>
+                </div>
+              </div>
             </div>
 
             <!-- Embedding Workflow -->

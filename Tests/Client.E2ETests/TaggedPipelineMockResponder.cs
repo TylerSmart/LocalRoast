@@ -14,7 +14,11 @@ namespace App.Client.E2ETests;
 /// </summary>
 public static partial class TaggedPipelineMockResponder
 {
-    public static string Respond(JsonElement request, string recipeJson)
+    public static string Respond(
+        JsonElement request,
+        string recipeJson,
+        string? stage6RefinementJson = null
+    )
     {
         var messages = request.GetProperty("messages");
         var system = ReadText(messages[0]);
@@ -33,6 +37,12 @@ public static partial class TaggedPipelineMockResponder
             if (props.TryGetProperty("sections", out _))
             {
                 return BuildStage1Json(recipeJson);
+            }
+
+            if (props.TryGetProperty("refinementNotes", out _))
+            {
+                return stage6RefinementJson
+                    ?? """{"title":null,"description":null,"servings":null,"yield":null,"timing":null,"tags":null,"ingredientPatches":[],"stepPatches":[],"refinementNotes":[]}""";
             }
 
             if (props.TryGetProperty("ingredientPatches", out _))

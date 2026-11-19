@@ -393,6 +393,16 @@ namespace App.Data.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("nvarchar(32)");
 
+                    b.Property<bool>("RefineDuringIdle")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("RefineDuringIngestion")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
+
                     b.Property<bool>("RefineEnableThinking")
                         .HasColumnType("bit");
 
@@ -545,6 +555,21 @@ namespace App.Data.Migrations
                         .HasMaxLength(100000)
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<DateTimeOffset?>("RefinedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("RefinedModel")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int>("RefinementAttemptCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0);
+
+                    b.Property<DateTimeOffset?>("RefinementNextRetryAt")
+                        .HasColumnType("datetimeoffset");
+
                     b.Property<Guid?>("ResultingRecipeId")
                         .HasColumnType("uniqueidentifier");
 
@@ -596,6 +621,8 @@ namespace App.Data.Migrations
                     b.HasIndex("Status");
 
                     b.HasIndex("Status", "NextRetryAt");
+
+                    b.HasIndex("Status", "RefinedAt", "CreatedAt");
 
                     b.ToTable("IngestionJobs", (string)null);
                 });
@@ -1135,6 +1162,10 @@ namespace App.Data.Migrations
 
                     b.Property<int>("RatingCount")
                         .HasColumnType("int");
+
+                    b.Property<string>("RefinedModel")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
 
                     b.Property<string>("Slug")
                         .IsRequired()

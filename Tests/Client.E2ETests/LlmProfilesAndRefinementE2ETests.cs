@@ -32,7 +32,26 @@ public sealed class LlmProfilesAndRefinementE2ETests : E2ETestBase
 
         // Assign the exact same saved model to Text (Defaults) and Refinement (Thinking) using the grouped profile selects
         await AssignLlmWorkflowAsync(dialog, "text", "gemma4:12b", profileName: "Defaults");
+
+        // Before assigning a refinement profile, both refinement toggles are disabled and off
+        var refineIngestionToggle = dialog.GetByTestId("refine-during-ingestion-toggle");
+        var refineIdleToggle = dialog.GetByTestId("refine-during-idle-toggle");
+        await Expect(refineIngestionToggle.Locator("button[role='switch']")).ToBeDisabledAsync();
+        await Expect(refineIdleToggle.Locator("button[role='switch']")).ToBeDisabledAsync();
+        await Expect(refineIngestionToggle)
+            .Not.ToHaveClassAsync(new Regex("mat-mdc-slide-toggle-checked"));
+        await Expect(refineIdleToggle)
+            .Not.ToHaveClassAsync(new Regex("mat-mdc-slide-toggle-checked"));
+
         await AssignLlmWorkflowAsync(dialog, "refine", "gemma4:12b", profileName: "Thinking");
+
+        await Expect(refineIngestionToggle.Locator("button[role='switch']")).ToBeEnabledAsync();
+        await Expect(refineIdleToggle.Locator("button[role='switch']")).ToBeEnabledAsync();
+        await refineIngestionToggle.Locator("button[role='switch']").ClickAsync();
+        await refineIdleToggle.Locator("button[role='switch']").ClickAsync();
+        await Expect(refineIngestionToggle)
+            .ToHaveClassAsync(new Regex("mat-mdc-slide-toggle-checked"));
+        await Expect(refineIdleToggle).ToHaveClassAsync(new Regex("mat-mdc-slide-toggle-checked"));
 
         var refineDetail = dialog.GetByTestId("workflow-refine-detail");
         await Expect(refineDetail).ToContainTextAsync($"gemma4:12b on {E2ELlmConnectionName}");
@@ -48,7 +67,7 @@ public sealed class LlmProfilesAndRefinementE2ETests : E2ETestBase
                 section => {
                   const bounds = section.getBoundingClientRect();
                   return section.scrollWidth <= section.clientWidth
-                    && [...section.querySelectorAll('mat-form-field, p')]
+                    && [...section.querySelectorAll('mat-form-field, p, .refinement-toggles, mat-slide-toggle')]
                       .map(el => el.getBoundingClientRect())
                       .every(r => r.left >= bounds.left - 1 && r.right <= bounds.right + 1);
                 }
@@ -71,6 +90,10 @@ public sealed class LlmProfilesAndRefinementE2ETests : E2ETestBase
         await Expect(dialog.GetByTestId("workflow-refine-select"))
             .ToContainTextAsync(LlmConfigName("gemma4:12b"));
         await Expect(dialog.GetByTestId("workflow-refine-select")).ToContainTextAsync("Thinking");
+        await Expect(dialog.GetByTestId("refine-during-ingestion-toggle"))
+            .ToHaveClassAsync(new Regex("mat-mdc-slide-toggle-checked"));
+        await Expect(dialog.GetByTestId("refine-during-idle-toggle"))
+            .ToHaveClassAsync(new Regex("mat-mdc-slide-toggle-checked"));
 
         await OpenLlmSettingsTabAsync(dialog, "Models");
         var modelCard = dialog.Locator(
@@ -90,6 +113,7 @@ public sealed class LlmProfilesAndRefinementE2ETests : E2ETestBase
             .GetByRole(AriaRole.Button, new() { Name = "Close", Exact = true })
             .ClickAsync();
         await Expect(dialog).Not.ToBeVisibleAsync();
+        await ResetLlmSettingsViaApiAsync();
     }
 
     [TestMethod]
@@ -423,5 +447,313 @@ public sealed class LlmProfilesAndRefinementE2ETests : E2ETestBase
         await OpenLlmSettingsTabAsync(dialog, "Workflows");
         await Expect(dialog.GetByTestId("workflow-embedding-select"))
             .ToContainTextAsync(LlmConfigName("embeddinggemma"));
+    }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task RefineDuringIngestion_CleansFoodCatalogBeforePublishAndShowsDualModelAttribution()
+    {
+        var suffix = Guid.NewGuid().ToString("N")[..6];
+        var recipeTitle = $"Ingest Refined Tofu {suffix}";
+        var pollutedBrand = $"BrandXIngest{suffix}";
+
+        await using var mockServer = await MockLanLlmAndBlogServer.StartAsync();
+        mockServer.ExtraModels.Add("gemma4:26b-a4b");
+        mockServer.ResponsePayload = $$"""
+            {
+              "title": "{{recipeTitle}}",
+              "description": "Golden crisp tofu tossed in fragrant sesame sauce.",
+              "baseServings": 4,
+              "yieldDisplay": "4 bowls",
+              "prepTimeMinutes": 15,
+              "cookTimeMinutes": 10,
+              "totalTimeMinutes": 25,
+              "difficulty": "Easy",
+              "sourceName": "Food Blog",
+              "sourceAuthor": "Chef Alex",
+              "ingredients": [
+                {
+                  "sortOrder": 0,
+                  "displayName": "Garlic",
+                  "quantity": 2,
+                  "unit": "Clove",
+                  "matchedFoodName": "Garlic",
+                  "isPantryStaple": true,
+                  "originalRawText": "2 cloves garlic, minced"
+                },
+                {
+                  "sortOrder": 1,
+                  "displayName": "{{pollutedBrand}} Sesame Oil",
+                  "quantity": 2,
+                  "unit": "Tbsp",
+                  "isPantryStaple": false,
+                  "originalRawText": "2 tbsp {{pollutedBrand}} Sesame Oil"
+                }
+              ],
+              "steps": [
+                {
+                  "stepNumber": 1,
+                  "instruction": "Heat oil and sauté minced garlic for 2 minutes.",
+                  "ingredientIndices": [0, 1],
+                  "timers": [
+                    {
+                      "durationSeconds": 120,
+                      "label": "Sauté garlic"
+                    }
+                  ]
+                }
+              ],
+              "suggestedTagNames": ["Quick & Easy"],
+              "confidenceScore": 0.94
+            }
+            """;
+        mockServer.Stage6RefinementPayload = """
+            {
+              "title": null,
+              "description": null,
+              "servings": null,
+              "yield": null,
+              "timing": null,
+              "tags": null,
+              "ingredientPatches": [
+                {
+                  "index": 1,
+                  "displayName": "toasted sesame oil",
+                  "quantity": null,
+                  "maxQuantity": null,
+                  "unit": null,
+                  "prepNote": null,
+                  "isOptional": null,
+                  "canonicalFoodName": "Sesame Oil",
+                  "replacementPatches": null
+                }
+              ],
+              "stepPatches": [],
+              "refinementNotes": ["Cleaned branded sesame oil catalog name before publishing."]
+            }
+            """;
+
+        await RegisterAndLoginAsync();
+        await Page.GotoAsync($"{ServerUrl}/ingest");
+        await Page.Locator(".llm-settings-btn").ClickAsync();
+        var dialog = Page.Locator("app-llm-settings-dialog");
+
+        await AddLlmConnectionInDialogAsync(dialog, mockServer.BaseUrl);
+        await AddLlmModelInDialogAsync(dialog, "qwen2.5:14b");
+        await AddLlmModelInDialogAsync(dialog, "gemma4:26b-a4b");
+
+        await AssignLlmWorkflowAsync(dialog, "text", "qwen2.5:14b");
+        await AssignLlmWorkflowAsync(dialog, "refine", "gemma4:26b-a4b");
+        await dialog
+            .GetByTestId("refine-during-ingestion-toggle")
+            .Locator("button[role='switch']")
+            .ClickAsync();
+        var autoPublishToggle = dialog.Locator(
+            "mat-slide-toggle[formcontrolname='autoPublishHighConfidenceText'] button[role='switch']"
+        );
+        if (await autoPublishToggle.GetAttributeAsync("aria-checked") != "true")
+        {
+            await autoPublishToggle.ClickAsync();
+        }
+        await SaveLlmWorkflowsAsync(dialog);
+
+        await Page.Locator("textarea[formcontrolname='urlsText']")
+            .FillAsync($"{mockServer.BaseUrl}/blog/crispy-sesame-tofu");
+        await Page.Locator("button[aria-label='Queue recipe URLs']").ClickAsync();
+
+        await Page.Locator("button.filter-pill", new() { HasText = "Published" }).ClickAsync();
+        var jobCard = Page.Locator(".job-card", new() { HasText = recipeTitle }).First;
+        await WaitForLocatorWithRefreshAsync(jobCard);
+
+        await Expect(jobCard.GetByTestId("job-extracted-model-chip"))
+            .ToContainTextAsync("qwen2.5:14b");
+        await Expect(jobCard.GetByTestId("job-refined-model-chip"))
+            .ToContainTextAsync("Refined: gemma4:26b-a4b");
+
+        // Open published recipe and verify both model pills + mobile fit
+        await jobCard.Locator("a.open-recipe-btn").ClickAsync();
+        await Expect(Page).ToHaveURLAsync(new Regex(".*/recipes/.*"));
+        await Expect(Page.GetByTestId("recipe-extracted-model-pill"))
+            .ToContainTextAsync("qwen2.5:14b");
+        await Expect(Page.GetByTestId("recipe-refined-model-pill"))
+            .ToContainTextAsync("gemma4:26b-a4b");
+
+        await Page.SetViewportSizeAsync(360, 740);
+        Assert.IsTrue(
+            await Page.EvaluateAsync<bool>(
+                "document.documentElement.scrollWidth <= window.innerWidth"
+            ),
+            "Recipe detail with both Ingested and Refined model pills must fit a 360px viewport."
+        );
+
+        // Follow refined model pill into Ingestion Review and verify both badges
+        await Page.GetByTestId("recipe-refined-model-pill").ClickAsync();
+        await Expect(Page).ToHaveURLAsync(new Regex(".*/ingest/review/.*"));
+        await Expect(Page.GetByTestId("review-extracted-model-badge"))
+            .ToContainTextAsync("Ingested: qwen2.5:14b");
+        await Expect(Page.GetByTestId("review-refined-model-badge"))
+            .ToContainTextAsync("Refined: gemma4:26b-a4b");
+
+        // Verify Food Catalog has clean "Sesame Oil" and NEVER created the polluted brand item
+        await Page.GotoAsync($"{ServerUrl}/catalog");
+        var searchInput = Page.Locator("input[placeholder='e.g. olive oil, garlic']");
+        await searchInput.FillAsync("Sesame Oil");
+        await Expect(Page.Locator(".catalog-page")).ToContainTextAsync("Sesame Oil");
+
+        await searchInput.FillAsync(pollutedBrand);
+        await Expect(Page.Locator(".catalog-page .empty-state")).ToBeVisibleAsync();
+    }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task RefineDuringIdle_BackfillsExistingPublishedJobAndDisplaysRefinedModel()
+    {
+        var suffix = Guid.NewGuid().ToString("N")[..6];
+        var initialTitle = $"Idle Unrefined Tofu {suffix}";
+        var refinedTitle = $"Idle Refined Tofu {suffix}";
+        var pollutedBrand = $"BrandXIdle{suffix}";
+
+        await using var mockServer = await MockLanLlmAndBlogServer.StartAsync();
+        mockServer.ExtraModels.Add("gemma4:26b-a4b");
+        mockServer.ResponsePayload = $$"""
+            {
+              "title": "{{initialTitle}}",
+              "description": "Golden crisp tofu tossed in fragrant sesame sauce.",
+              "baseServings": 4,
+              "yieldDisplay": "4 bowls",
+              "prepTimeMinutes": 15,
+              "cookTimeMinutes": 10,
+              "totalTimeMinutes": 25,
+              "difficulty": "Easy",
+              "sourceName": "Food Blog",
+              "sourceAuthor": "Chef Alex",
+              "ingredients": [
+                {
+                  "sortOrder": 0,
+                  "displayName": "Garlic",
+                  "quantity": 2,
+                  "unit": "Clove",
+                  "matchedFoodName": "Garlic",
+                  "isPantryStaple": true,
+                  "originalRawText": "2 cloves garlic, minced"
+                },
+                {
+                  "sortOrder": 1,
+                  "displayName": "{{pollutedBrand}} Sesame Oil",
+                  "quantity": 2,
+                  "unit": "Tbsp",
+                  "isPantryStaple": false,
+                  "originalRawText": "2 tbsp {{pollutedBrand}} Sesame Oil"
+                }
+              ],
+              "steps": [
+                {
+                  "stepNumber": 1,
+                  "instruction": "Heat oil and sauté minced garlic for 2 minutes.",
+                  "ingredientIndices": [0, 1],
+                  "timers": [
+                    {
+                      "durationSeconds": 120,
+                      "label": "Sauté garlic"
+                    }
+                  ]
+                }
+              ],
+              "suggestedTagNames": ["Quick & Easy"],
+              "confidenceScore": 0.94
+            }
+            """;
+        mockServer.Stage6RefinementPayload = $$"""
+            {
+              "title": "{{refinedTitle}}",
+              "description": null,
+              "servings": null,
+              "yield": null,
+              "timing": null,
+              "tags": null,
+              "ingredientPatches": [
+                {
+                  "index": 1,
+                  "displayName": "toasted sesame oil",
+                  "quantity": null,
+                  "maxQuantity": null,
+                  "unit": null,
+                  "prepNote": null,
+                  "isOptional": null,
+                  "canonicalFoodName": "Sesame Oil",
+                  "replacementPatches": null
+                }
+              ],
+              "stepPatches": [],
+              "refinementNotes": ["Idle refinement cleaned title and sesame oil catalog name."]
+            }
+            """;
+
+        await RegisterAndLoginAsync();
+        await Page.GotoAsync($"{ServerUrl}/ingest");
+        await Page.Locator(".llm-settings-btn").ClickAsync();
+        var dialog = Page.Locator("app-llm-settings-dialog");
+
+        await AddLlmConnectionInDialogAsync(dialog, mockServer.BaseUrl);
+        await AddLlmModelInDialogAsync(dialog, "qwen2.5:14b");
+        await AddLlmModelInDialogAsync(dialog, "gemma4:26b-a4b");
+
+        // Assign Refinement profile but leave BOTH refinement toggles OFF initially
+        await AssignLlmWorkflowAsync(dialog, "text", "qwen2.5:14b");
+        await AssignLlmWorkflowAsync(dialog, "refine", "gemma4:26b-a4b");
+        var autoPublishToggle = dialog.Locator(
+            "mat-slide-toggle[formcontrolname='autoPublishHighConfidenceText'] button[role='switch']"
+        );
+        if (await autoPublishToggle.GetAttributeAsync("aria-checked") != "true")
+        {
+            await autoPublishToggle.ClickAsync();
+        }
+        await SaveLlmWorkflowsAsync(dialog);
+
+        await Page.Locator("textarea[formcontrolname='urlsText']")
+            .FillAsync($"{mockServer.BaseUrl}/blog/crispy-sesame-tofu");
+        await Page.Locator("button[aria-label='Queue recipe URLs']").ClickAsync();
+
+        await Page.Locator("button.filter-pill", new() { HasText = "Published" }).ClickAsync();
+        var jobCard = Page.Locator(".job-card", new() { HasText = initialTitle }).First;
+        await WaitForLocatorWithRefreshAsync(jobCard);
+
+        // Initially ingested only — no refined badge yet
+        await Expect(jobCard.GetByTestId("job-extracted-model-chip"))
+            .ToContainTextAsync("qwen2.5:14b");
+        await Expect(jobCard.GetByTestId("job-refined-model-chip")).ToHaveCountAsync(0);
+
+        // Enable Refine during idle and verify background worker refines the published job automatically
+        await Page.Locator(".llm-settings-btn").ClickAsync();
+        await dialog
+            .GetByTestId("refine-during-idle-toggle")
+            .Locator("button[role='switch']")
+            .ClickAsync();
+        await SaveLlmWorkflowsAsync(dialog);
+
+        var refinedCard = Page.Locator(".job-card", new() { HasText = refinedTitle }).First;
+        var refinedChip = refinedCard.GetByTestId("job-refined-model-chip");
+        await WaitForLocatorWithRefreshAsync(refinedChip);
+        await Expect(refinedChip).ToContainTextAsync("Refined: gemma4:26b-a4b");
+
+        // Open the live recipe and verify title update + dual model pills
+        await refinedCard.Locator("a.open-recipe-btn").ClickAsync();
+        await Expect(Page).ToHaveURLAsync(new Regex(".*/recipes/.*"));
+        await Expect(Page.Locator(".recipe-title")).ToContainTextAsync(refinedTitle);
+        await Expect(Page.GetByTestId("recipe-extracted-model-pill"))
+            .ToContainTextAsync("qwen2.5:14b");
+        await Expect(Page.GetByTestId("recipe-refined-model-pill"))
+            .ToContainTextAsync("gemma4:26b-a4b");
+
+        // Verify orphaned polluted food item was cleaned up from Food Catalog
+        await Page.GotoAsync($"{ServerUrl}/catalog");
+        var searchInput = Page.Locator("input[placeholder='e.g. olive oil, garlic']");
+        await searchInput.FillAsync(pollutedBrand);
+        await Expect(Page.Locator(".catalog-page .empty-state")).ToBeVisibleAsync();
+
+        await searchInput.FillAsync("Sesame Oil");
+        await Expect(Page.Locator(".catalog-page")).ToContainTextAsync("Sesame Oil");
+
+        await ResetLlmSettingsViaApiAsync();
     }
 }

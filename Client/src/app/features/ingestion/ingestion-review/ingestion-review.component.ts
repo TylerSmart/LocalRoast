@@ -818,6 +818,7 @@ export class IngestionReviewComponent implements OnInit {
       sourceBookPage: draft.sourceBookPage,
       coverImagePath: draft.coverImagePath,
       extractedModel: draft.extractedModel,
+      refinedModel: draft.refinedModel ?? this.job()?.refinedModel ?? null,
       collections: selectedCollections,
       tags: selectedTags,
       ingredients: (draft.ingredients || []).map((ing, i) => ({
@@ -1057,6 +1058,7 @@ export class IngestionReviewComponent implements OnInit {
       steps,
       confidenceScore: this.job()?.confidenceScore ?? 0.8,
       extractedModel: this.job()?.extractedModel ?? null,
+      refinedModel: this.job()?.refinedModel ?? null,
     };
   }
 

@@ -353,6 +353,10 @@ public sealed class AppDataMaintenanceServiceTests
             ResultingRecipeId = recipe.Id,
             ExtractedDraftJson = "{\"Title\":\"Test Chili\"}",
             ExtractedModel = "gemma4:e4b",
+            RefinedModel = "gemma4:12b",
+            RefinedAt = DateTimeOffset.UtcNow,
+            RefinementAttemptCount = 2,
+            RefinementNextRetryAt = DateTimeOffset.UtcNow.AddMinutes(10),
             ConfidenceScore = 0.96m,
             AttemptCount = 1,
             NextRetryAt = DateTimeOffset.UtcNow.AddMinutes(5),
@@ -430,6 +434,10 @@ public sealed class AppDataMaintenanceServiceTests
         Assert.IsNull(resetRaw.ResultingRecipeId);
         Assert.IsNull(resetRaw.ExtractedDraftJson);
         Assert.IsNull(resetRaw.ExtractedModel);
+        Assert.IsNull(resetRaw.RefinedModel);
+        Assert.IsNull(resetRaw.RefinedAt);
+        Assert.AreEqual(0, resetRaw.RefinementAttemptCount);
+        Assert.IsNull(resetRaw.RefinementNextRetryAt);
         Assert.IsNull(resetRaw.ConfidenceScore);
         Assert.AreEqual(0, resetRaw.AttemptCount);
         Assert.IsFalse(resetRaw.RunNowRequested);

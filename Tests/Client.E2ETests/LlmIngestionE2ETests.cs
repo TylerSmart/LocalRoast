@@ -16,6 +16,7 @@ public sealed class MockLanLlmAndBlogServer : IAsyncDisposable
     public string BaseUrl { get; }
     public bool SimulateOffline { get; set; }
     public string? ResponsePayload { get; set; }
+    public string? Stage6RefinementPayload { get; set; }
     public Dictionary<string, string> ResponsesByModel { get; } =
         new(StringComparer.OrdinalIgnoreCase);
     public List<string> RequestedModels { get; } = [];
@@ -211,13 +212,16 @@ public sealed class MockLanLlmAndBlogServer : IAsyncDisposable
                 return Results.Ok(
                     new
                     {
-                        model = "qwen2.5:14b",
+                        model = string.IsNullOrWhiteSpace(requestedModel)
+                            ? "qwen2.5:14b"
+                            : requestedModel,
                         message = new
                         {
                             role = "assistant",
                             content = TaggedPipelineMockResponder.Respond(
                                 body.RootElement,
-                                payloadJson
+                                payloadJson,
+                                server.Stage6RefinementPayload
                             ),
                         },
                     }

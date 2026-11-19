@@ -42,6 +42,10 @@ public sealed class HouseholdLlmSettings : IAuditable
 
     public string? RefineModel { get; set; }
 
+    public bool RefineDuringIngestion { get; set; }
+
+    public bool RefineDuringIdle { get; set; }
+
     public bool RefineEnableThinking { get; set; } = true;
 
     public double? RefineTemperature { get; set; }

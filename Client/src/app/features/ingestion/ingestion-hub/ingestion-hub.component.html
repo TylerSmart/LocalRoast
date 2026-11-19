@@ -803,10 +803,21 @@
                 @if (job.extractedModel) {
                   <span
                     class="model-chip"
-                    [matTooltip]="'Extracted with LLM model: ' + job.extractedModel"
+                    [matTooltip]="'Ingested with LLM model: ' + job.extractedModel"
+                    data-testid="job-extracted-model-chip"
                   >
                     <mat-icon class="chip-icon">smart_toy</mat-icon>
                     <span class="model-name">{{ job.extractedModel }}</span>
+                  </span>
+                }
+                @if (job.refinedModel) {
+                  <span
+                    class="model-chip refined-model-chip"
+                    [matTooltip]="'Refined with LLM model: ' + job.refinedModel"
+                    data-testid="job-refined-model-chip"
+                  >
+                    <mat-icon class="chip-icon">auto_awesome</mat-icon>
+                    <span class="model-name">Refined: {{ job.refinedModel }}</span>
                   </span>
                 }
                 @if (job.confidenceScore !== null) {

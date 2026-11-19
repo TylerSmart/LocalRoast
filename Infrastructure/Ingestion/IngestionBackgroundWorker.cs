@@ -137,15 +137,37 @@ public sealed class IngestionBackgroundWorker(
                 }
 
                 // 3. Probe offline waiting jobs (only when ingestion is enabled)
+                var promotedWaiting = 0;
                 if (ingestionEnabled)
                 {
                     using var probeScope = scopeFactory.CreateScope();
                     var processor =
                         probeScope.ServiceProvider.GetRequiredService<IIngestionProcessor>();
-                    await processor.ProbeAndPromoteWaitingJobsAsync(stoppingToken);
+                    promotedWaiting = await processor.ProbeAndPromoteWaitingJobsAsync(
+                        stoppingToken
+                    );
                 }
 
-                // 4. Await signal or poll interval
+                // 4. Idle refinement pass when queue is empty and RefineDuringIdle is enabled
+                if (
+                    ingestionEnabled
+                    && promotedWaiting == 0
+                    && config.HasRefinementModelConfigured
+                    && config.RefineDuringIdle
+                    && !stoppingToken.IsCancellationRequested
+                )
+                {
+                    bool refinedAny;
+                    do
+                    {
+                        using var refineScope = scopeFactory.CreateScope();
+                        var processor =
+                            refineScope.ServiceProvider.GetRequiredService<IIngestionProcessor>();
+                        refinedAny = await processor.ProcessNextIdleRefinementAsync(stoppingToken);
+                    } while (refinedAny && !stoppingToken.IsCancellationRequested);
+                }
+
+                // 5. Await signal or poll interval
                 pollInterval = TimeSpan.FromSeconds(
                     Math.Max(1, options.Value.WorkerPollIntervalSeconds)
                 );
