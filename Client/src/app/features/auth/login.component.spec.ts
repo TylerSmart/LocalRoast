@@ -285,4 +285,37 @@ describe('LoginComponent', () => {
       component['getProviderSvg']({ id: 'custom', name: 'Custom OIDC', isExternal: true }),
     ).toBeNull();
   });
+
+  it('should surface confirm password mismatch through custom error state matcher', () => {
+    component['registerForm'].patchValue({
+      username: 'tester',
+      email: 'test@example.com',
+      password: 'password123',
+      confirmPassword: 'differentpassword',
+    });
+    const confirmControl = component['registerForm'].controls.confirmPassword;
+    confirmControl.markAsTouched();
+
+    expect(component['confirmPasswordErrorMatcher'].isErrorState(confirmControl, null)).toBe(true);
+
+    confirmControl.setValue('password123');
+    expect(component['confirmPasswordErrorMatcher'].isErrorState(confirmControl, null)).toBe(false);
+  });
+
+  it('should update card subtitle when switching between Sign In and Create Account tabs', () => {
+    const signInSubtitle = component['cardSubtitle']();
+    component.onTabChange(1);
+    const registerSubtitle = component['cardSubtitle']();
+
+    expect(registerSubtitle).not.toBe(signInSubtitle);
+    expect(registerSubtitle).toContain('Create an account');
+  });
+
+  it('should mark controls touched instead of submitting when login form is invalid', () => {
+    component.onLoginSubmit();
+
+    expect(mockAuthService.login).not.toHaveBeenCalled();
+    expect(component['loginForm'].controls.email.touched).toBe(true);
+    expect(component['loginForm'].controls.password.touched).toBe(true);
+  });
 });

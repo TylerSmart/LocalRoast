@@ -1,12 +1,15 @@
 <div class="auth-page">
   <header class="auth-header">
     <div class="brand">
-      <mat-icon aria-hidden="true">{{ brandIcon }}</mat-icon>
-      <span>{{ appName }}</span>
+      <span class="brand-badge" aria-hidden="true">
+        <mat-icon>{{ brandIcon }}</mat-icon>
+      </span>
+      <span class="brand-name">{{ appName }}</span>
     </div>
     <div class="header-actions">
       <button
         mat-icon-button
+        class="theme-toggle-btn"
         [matMenuTriggerFor]="themeMenu"
         [attr.aria-label]="'Current theme: ' + themeLabel() + '. Switch theme'"
         [matTooltip]="'Theme: ' + themeLabel()"
@@ -14,17 +17,38 @@
         <mat-icon>{{ themeIcon() }}</mat-icon>
       </button>
       <mat-menu #themeMenu="matMenu">
-        <button mat-menu-item (click)="themeService.setMode('light')">
+        <button
+          mat-menu-item
+          [class.active-theme-item]="themeService.mode() === 'light'"
+          (click)="themeService.setMode('light')"
+        >
           <mat-icon>light_mode</mat-icon>
           <span>Light</span>
+          @if (themeService.mode() === 'light') {
+            <mat-icon class="menu-check-icon" aria-hidden="true">check</mat-icon>
+          }
         </button>
-        <button mat-menu-item (click)="themeService.setMode('dark')">
+        <button
+          mat-menu-item
+          [class.active-theme-item]="themeService.mode() === 'dark'"
+          (click)="themeService.setMode('dark')"
+        >
           <mat-icon>dark_mode</mat-icon>
           <span>Dark</span>
+          @if (themeService.mode() === 'dark') {
+            <mat-icon class="menu-check-icon" aria-hidden="true">check</mat-icon>
+          }
         </button>
-        <button mat-menu-item (click)="themeService.setMode('system')">
+        <button
+          mat-menu-item
+          [class.active-theme-item]="themeService.mode() === 'system'"
+          (click)="themeService.setMode('system')"
+        >
           <mat-icon>brightness_auto</mat-icon>
           <span>System</span>
+          @if (themeService.mode() === 'system') {
+            <mat-icon class="menu-check-icon" aria-hidden="true">check</mat-icon>
+          }
         </button>
         <mat-divider></mat-divider>
         <button mat-menu-item (click)="themeService.openThemeSettingsDialog()">
@@ -38,29 +62,33 @@
   <main class="auth-content">
     <mat-card class="auth-card">
       <div class="auth-card-header">
+        <div class="auth-brand-emblem" aria-hidden="true">
+          <mat-icon>{{ brandIcon }}</mat-icon>
+        </div>
         <h1>Welcome to {{ appName }}</h1>
-        <p>{{ loginSubtitle }}</p>
+        <p>{{ cardSubtitle() }}</p>
       </div>
 
       @if (errorMessage()) {
         <div class="error-banner" role="alert">
-          <mat-icon aria-hidden="true">error</mat-icon>
+          <mat-icon aria-hidden="true">error_outline</mat-icon>
           <span>{{ errorMessage() }}</span>
         </div>
       }
 
       @if (isProcessingOAuth()) {
         <div class="oauth-loading" role="status">
-          <mat-spinner diameter="32"></mat-spinner>
+          <mat-spinner diameter="28"></mat-spinner>
           <span>Completing external sign in...</span>
         </div>
       }
 
       <mat-tab-group
+        class="auth-tabs"
         [selectedIndex]="selectedTabIndex()"
         (selectedIndexChange)="onTabChange($event)"
-        mat-stretch-tabs="false"
-        mat-align-tabs="center"
+        mat-stretch-tabs="true"
+        [disablePagination]="true"
         [dynamicHeight]="true"
       >
         <!-- Sign In Tab -->
@@ -70,9 +98,11 @@
             (ngSubmit)="onLoginSubmit()"
             class="tab-form"
             aria-label="Sign in form"
+            novalidate
           >
             <mat-form-field appearance="outline" class="full-width">
               <mat-label>Email Address</mat-label>
+              <mat-icon matPrefix class="field-prefix-icon" aria-hidden="true">mail</mat-icon>
               <input
                 matInput
                 type="email"
@@ -93,6 +123,7 @@
 
             <mat-form-field appearance="outline" class="full-width">
               <mat-label>Password</mat-label>
+              <mat-icon matPrefix class="field-prefix-icon" aria-hidden="true">lock</mat-icon>
               <input
                 matInput
                 [type]="hideLoginPassword() ? 'password' : 'text'"
@@ -124,9 +155,10 @@
                 color="primary"
                 type="submit"
                 class="submit-btn"
-                [disabled]="authService.isLoading() || loginForm.invalid"
+                [disabled]="authService.isLoading() || isProcessingOAuth()"
               >
                 @if (authService.isLoading()) {
+                  <mat-spinner diameter="18" class="btn-spinner"></mat-spinner>
                   <span>Signing in...</span>
                 } @else {
                   <span>Sign In</span>
@@ -143,9 +175,11 @@
             (ngSubmit)="onRegisterSubmit()"
             class="tab-form"
             aria-label="Create account form"
+            novalidate
           >
             <mat-form-field appearance="outline" class="full-width">
               <mat-label>Username</mat-label>
+              <mat-icon matPrefix class="field-prefix-icon" aria-hidden="true">person</mat-icon>
               <input
                 matInput
                 type="text"
@@ -170,6 +204,7 @@
 
             <mat-form-field appearance="outline" class="full-width">
               <mat-label>Email Address</mat-label>
+              <mat-icon matPrefix class="field-prefix-icon" aria-hidden="true">mail</mat-icon>
               <input
                 matInput
                 type="email"
@@ -193,6 +228,7 @@
 
             <mat-form-field appearance="outline" class="full-width">
               <mat-label>Password</mat-label>
+              <mat-icon matPrefix class="field-prefix-icon" aria-hidden="true">lock</mat-icon>
               <input
                 matInput
                 [type]="hideRegisterPassword() ? 'password' : 'text'"
@@ -226,10 +262,14 @@
 
             <mat-form-field appearance="outline" class="full-width">
               <mat-label>Confirm Password</mat-label>
+              <mat-icon matPrefix class="field-prefix-icon" aria-hidden="true">
+                verified_user
+              </mat-icon>
               <input
                 matInput
                 [type]="hideConfirmPassword() ? 'password' : 'text'"
                 formControlName="confirmPassword"
+                [errorStateMatcher]="confirmPasswordErrorMatcher"
                 autocomplete="new-password"
                 required
               />
@@ -250,10 +290,10 @@
                 registerForm.controls.confirmPassword.touched
               ) {
                 <mat-error>Confirm your password</mat-error>
-              }
-              @if (
+              } @else if (
                 registerForm.hasError('passwordMismatch') &&
-                registerForm.controls.confirmPassword.touched
+                (registerForm.controls.confirmPassword.touched ||
+                  registerForm.controls.confirmPassword.dirty)
               ) {
                 <mat-error>Passwords do not match</mat-error>
               }
@@ -265,9 +305,10 @@
                 color="primary"
                 type="submit"
                 class="submit-btn"
-                [disabled]="authService.isLoading() || registerForm.invalid"
+                [disabled]="authService.isLoading() || isProcessingOAuth()"
               >
                 @if (authService.isLoading()) {
+                  <mat-spinner diameter="18" class="btn-spinner"></mat-spinner>
                   <span>Creating Account...</span>
                 } @else {
                   <span>Create Account</span>
@@ -299,6 +340,20 @@
           }
         </div>
       }
+
+      <div class="auth-card-footer">
+        @if (selectedTabIndex() === 0) {
+          <span>New to {{ appName }}?</span>
+          <button mat-button type="button" class="switch-tab-btn" (click)="onTabChange(1)">
+            Create an account
+          </button>
+        } @else {
+          <span>Already have an account?</span>
+          <button mat-button type="button" class="switch-tab-btn" (click)="onTabChange(0)">
+            Sign in
+          </button>
+        }
+      </div>
     </mat-card>
   </main>
 </div>

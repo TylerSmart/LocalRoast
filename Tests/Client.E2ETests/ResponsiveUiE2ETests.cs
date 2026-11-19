@@ -71,22 +71,35 @@ public sealed class ResponsiveUiE2ETests : E2ETestBase
     }
 
     [TestMethod]
-    [DataRow(360, 640)]
-    [DataRow(768, 1024)]
-    [DataRow(1440, 900)]
+    [DataRow(360, 640, "light")]
+    [DataRow(360, 740, "dark")]
+    [DataRow(768, 1024, "light")]
+    [DataRow(1440, 900, "dark")]
     [Timeout(DefaultTestTimeoutMs)]
-    public async Task Authentication_FormsAndValidationFit(int width, int height)
+    public async Task Authentication_FormsAndValidationFit(int width, int height, string theme)
     {
-        await SetViewportAsync(width, height, "light");
+        await SetViewportAsync(width, height, theme);
         await Page.GotoAsync($"{ServerUrl}/login");
         await Expect(Page.Locator(".auth-card")).ToBeVisibleAsync();
-        await AssertLayoutAsync(Page.Locator(".auth-page"), "login");
+        await Page.Locator("button.theme-toggle-btn").ClickAsync();
+        await Page.GetByRole(
+                AriaRole.Menuitem,
+                new() { Name = theme == "dark" ? "Dark" : "Light", Exact = true }
+            )
+            .ClickAsync();
+        await Expect(Page.Locator("html")).ToHaveAttributeAsync("data-theme", theme);
+        await AssertLayoutAsync(Page.Locator(".auth-page"), $"login-{theme}");
         await Page.GetByRole(AriaRole.Tab, new() { Name = "Create Account" }).ClickAsync();
         var form = Page.Locator("form[aria-label='Create account form']");
         await form.Locator("input[formcontrolname='email']").FillAsync("invalid-email");
-        await form.Locator("input[formcontrolname='password']").ClickAsync();
-        await Expect(form.Locator("mat-error")).ToBeVisibleAsync();
-        await AssertLayoutAsync(Page.Locator(".auth-page"), "registration-validation");
+        await form.Locator("input[formcontrolname='password']").FillAsync("Password123!");
+        await form.Locator("input[formcontrolname='confirmPassword']").FillAsync("Mismatch456!");
+        await form.Locator("input[formcontrolname='username']").ClickAsync();
+        await Expect(form.Locator("mat-error", new() { HasText = "Enter a valid email address" }))
+            .ToBeVisibleAsync();
+        await Expect(form.Locator("mat-error", new() { HasText = "Passwords do not match" }))
+            .ToBeVisibleAsync();
+        await AssertLayoutAsync(Page.Locator(".auth-page"), $"registration-validation-{theme}");
     }
 
     [TestMethod]

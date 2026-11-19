@@ -4,6 +4,8 @@ import {
   AbstractControl,
   FormControl,
   FormGroup,
+  FormGroupDirective,
+  NgForm,
   ReactiveFormsModule,
   ValidationErrors,
   ValidatorFn,
@@ -11,6 +13,7 @@ import {
 } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
+import { ErrorStateMatcher } from '@angular/material/core';
 import { MatDialogModule } from '@angular/material/dialog';
 import { MatDividerModule } from '@angular/material/divider';
 import { MatFormFieldModule } from '@angular/material/form-field';
@@ -54,6 +57,17 @@ const passwordMatchValidator: ValidatorFn = (control: AbstractControl): Validati
     : null;
 };
 
+class ConfirmPasswordErrorStateMatcher implements ErrorStateMatcher {
+  isErrorState(control: FormControl | null, form: FormGroupDirective | NgForm | null): boolean {
+    if (!control) {
+      return false;
+    }
+    const isInteracted = Boolean(control.touched || control.dirty || form?.submitted);
+    const hasMismatch = Boolean(control.parent?.hasError('passwordMismatch'));
+    return isInteracted && (control.invalid || hasMismatch);
+  }
+}
+
 @Component({
   imports: [
     ReactiveFormsModule,
@@ -77,6 +91,7 @@ export class LoginComponent implements OnInit {
   protected readonly appName = APP_NAME;
   protected readonly brandIcon = APP_BRAND_ICON;
   protected readonly loginSubtitle = APP_LOGIN_SUBTITLE;
+  protected readonly confirmPasswordErrorMatcher = new ConfirmPasswordErrorStateMatcher();
   protected readonly authService = inject(AuthService);
   protected readonly themeService = inject(ThemeService);
   private readonly router = inject(Router);
@@ -84,6 +99,11 @@ export class LoginComponent implements OnInit {
   private readonly snackBar = inject(MatSnackBar);
 
   protected readonly selectedTabIndex = signal<number>(0);
+  protected readonly cardSubtitle = computed(() =>
+    this.selectedTabIndex() === 0
+      ? this.loginSubtitle
+      : 'Create an account to join your household cookbook, meal plans, and shopping lists',
+  );
   protected readonly hideLoginPassword = signal<boolean>(true);
   protected readonly hideRegisterPassword = signal<boolean>(true);
   protected readonly hideConfirmPassword = signal<boolean>(true);
@@ -165,17 +185,22 @@ export class LoginComponent implements OnInit {
     this.errorMessage.set(null);
     const formVal = this.loginForm.getRawValue();
 
-    this.authService.login(formVal).subscribe({
-      next: () => {
-        this.snackBar.open('Signed in successfully', 'Close', {
-          duration: 3000,
-        });
-        this.navigateToTarget();
-      },
-      error: (err: unknown) => {
-        this.errorMessage.set(this.extractErrorMessage(err, 'Invalid email or password.'));
-      },
-    });
+    this.authService
+      .login({
+        email: formVal.email.trim(),
+        password: formVal.password,
+      })
+      .subscribe({
+        next: () => {
+          this.snackBar.open('Signed in successfully', 'Close', {
+            duration: 3000,
+          });
+          this.navigateToTarget();
+        },
+        error: (err: unknown) => {
+          this.errorMessage.set(this.extractErrorMessage(err, 'Invalid email or password.'));
+        },
+      });
   }
 
   onRegisterSubmit(): void {
@@ -189,8 +214,8 @@ export class LoginComponent implements OnInit {
 
     this.authService
       .register({
-        email: formVal.email,
-        username: formVal.username,
+        email: formVal.email.trim(),
+        username: formVal.username.trim(),
         password: formVal.password,
       })
       .subscribe({
