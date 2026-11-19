@@ -44,7 +44,11 @@ export class LlmSettingsService {
   }
 
   deleteModelProfile(id: string): Observable<void> {
-    return this.http.delete<void>(apiUrl(`/llm-settings/model-profiles/${id}`));
+    return this.http.delete<void>(apiUrl(`/llm-settings/model-profiles/${id}`)).pipe(
+      tap(() => {
+        this.aiHelper?.checkStatus(true).subscribe();
+      }),
+    );
   }
 
   updateSettings(request: UpdateLlmSettingsRequest): Observable<LlmSettingsDto> {
@@ -76,7 +80,11 @@ export class LlmSettingsService {
   }
 
   deleteConnection(id: string): Observable<void> {
-    return this.http.delete<void>(apiUrl(`/llm-settings/connections/${id}`));
+    return this.http.delete<void>(apiUrl(`/llm-settings/connections/${id}`)).pipe(
+      tap(() => {
+        this.aiHelper?.checkStatus(true).subscribe();
+      }),
+    );
   }
 
   /** Probes a saved connection and lists the models it serves. */
@@ -111,7 +119,11 @@ export class LlmSettingsService {
   }
 
   deleteModelConfiguration(id: string): Observable<void> {
-    return this.http.delete<void>(apiUrl(`/llm-settings/model-configurations/${id}`));
+    return this.http.delete<void>(apiUrl(`/llm-settings/model-configurations/${id}`)).pipe(
+      tap(() => {
+        this.aiHelper?.checkStatus(true).subscribe();
+      }),
+    );
   }
 
   testConnection(request: TestLlmConnectionRequest): Observable<LlmConnectionTestResultDto> {

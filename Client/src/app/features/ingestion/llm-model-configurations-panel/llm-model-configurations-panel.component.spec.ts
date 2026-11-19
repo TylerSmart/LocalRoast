@@ -6,6 +6,7 @@ import type {
   LlmModelConfigurationDto,
 } from '../../../core/models/ingestion.models';
 import { LlmSettingsService } from '../../../core/services/llm-settings/llm-settings.service';
+import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialog/confirm-dialog.component';
 import { LlmModelConfigurationDialogComponent } from '../llm-model-configuration-dialog/llm-model-configuration-dialog.component';
 import { LlmModelConfigurationsPanelComponent } from './llm-model-configurations-panel.component';
 
@@ -124,21 +125,56 @@ describe('LlmModelConfigurationsPanelComponent', () => {
     expect(changed).not.toHaveBeenCalled();
   });
 
-  it('deletes a model configuration and emits changed', () => {
+  it('deletes an unassigned model with only its Defaults profile without confirmation', () => {
+    const unusedConfig: LlmModelConfigurationDto = {
+      ...savedConfiguration,
+      id: 'cfg-unused',
+      profileCount: 1,
+      assignedWorkflows: [],
+    };
+
+    component.delete(unusedConfig);
+
+    expect(dialog.open).not.toHaveBeenCalled();
+    expect(service['deleteModelConfiguration']).toHaveBeenCalledWith('cfg-unused');
+    expect(changed).toHaveBeenCalled();
+  });
+
+  it('confirms before deleting a model with custom profiles or assigned workflows', () => {
+    dialog.open.mockReturnValueOnce({ afterClosed: () => of(false) });
+    component.delete(savedConfiguration);
+
+    expect(dialog.open).toHaveBeenCalledWith(
+      ConfirmDialogComponent,
+      expect.objectContaining({
+        data: expect.objectContaining({
+          title: 'Delete Model',
+          confirmText: 'Delete Model',
+          isDestructive: true,
+          message:
+            'Deleting "Desk text" will also delete its 1 custom profile and deselect it from the Text workflow. Continue?',
+        }),
+      }),
+    );
+    expect(service['deleteModelConfiguration']).not.toHaveBeenCalled();
+    expect(changed).not.toHaveBeenCalled();
+
+    dialog.open.mockReturnValueOnce({ afterClosed: () => of(true) });
     component.delete(savedConfiguration);
 
     expect(service['deleteModelConfiguration']).toHaveBeenCalledWith('cfg-1');
     expect(changed).toHaveBeenCalled();
   });
 
-  it('displays API error when deleting fails', () => {
+  it('displays API error when deleting fails after confirmation', () => {
+    dialog.open.mockReturnValue({ afterClosed: () => of(true) });
     service['deleteModelConfiguration'].mockReturnValue(
-      throwError(() => ({ error: { detail: 'In use by workflow' } })),
+      throwError(() => ({ error: { detail: 'Failed to delete model' } })),
     );
 
     component.delete(savedConfiguration);
 
-    expect(component.errorMessage()).toBe('In use by workflow');
+    expect(component.errorMessage()).toBe('Failed to delete model');
     expect(changed).not.toHaveBeenCalled();
   });
 });

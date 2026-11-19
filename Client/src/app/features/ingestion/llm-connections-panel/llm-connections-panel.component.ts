@@ -15,13 +15,22 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import type {
   LlmConnectionDto,
   LlmConnectionTestResultDto,
+  LlmModelConfigurationDto,
 } from '../../../core/models/ingestion.models';
 import { LlmSettingsService } from '../../../core/services/llm-settings/llm-settings.service';
+import {
+  ConfirmDialogComponent,
+  type ConfirmDialogData,
+} from '../../../shared/components/confirm-dialog/confirm-dialog.component';
 import {
   LlmConnectionDialogComponent,
   type LlmConnectionDialogData,
 } from '../llm-connection-dialog/llm-connection-dialog.component';
-import { failedTestResult, providerLabel } from '../llm-settings-dialog/llm-settings.utils';
+import {
+  buildDeleteConnectionConfirmMessage,
+  failedTestResult,
+  providerLabel,
+} from '../llm-settings-dialog/llm-settings.utils';
 
 /** Manages saved LLM machines/providers: endpoint, authentication and request limits. */
 @Component({
@@ -37,6 +46,7 @@ export class LlmConnectionsPanelComponent {
   private readonly llmSettingsService = inject(LlmSettingsService);
 
   readonly connections = input.required<LlmConnectionDto[]>();
+  readonly configurations = input<LlmModelConfigurationDto[]>([]);
   /** Emits after a connection is created, updated or deleted. */
   readonly changed = output<void>();
 
@@ -79,6 +89,35 @@ export class LlmConnectionsPanelComponent {
     if (this.isSaving()) {
       return;
     }
+    const confirmMessage = buildDeleteConnectionConfirmMessage(connection, this.configurations());
+    if (confirmMessage) {
+      this.dialog
+        .open<ConfirmDialogComponent, ConfirmDialogData, boolean | undefined>(
+          ConfirmDialogComponent,
+          {
+            width: '440px',
+            maxWidth: '95vw',
+            data: {
+              title: 'Delete Connection',
+              message: confirmMessage,
+              confirmText: 'Delete Connection',
+              isDestructive: true,
+            },
+          },
+        )
+        .afterClosed()
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe((confirmed) => {
+          if (confirmed) {
+            this.executeDelete(connection);
+          }
+        });
+      return;
+    }
+    this.executeDelete(connection);
+  }
+
+  private executeDelete(connection: LlmConnectionDto): void {
     this.isSaving.set(true);
     this.errorMessage.set(null);
     this.llmSettingsService

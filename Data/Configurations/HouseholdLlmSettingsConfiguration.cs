@@ -35,7 +35,7 @@ public sealed class HouseholdLlmSettingsConfiguration
         builder.Property(s => s.PauseReason).HasMaxLength(500);
 
         // Restrict: SQL Server rejects multiple SET NULL paths to one table; the service
-        // refuses to delete assigned profiles/models instead.
+        // clears matching workflow assignments before deleting profiles, models, or connections.
         builder
             .HasOne(s => s.TextModelProfile)
             .WithMany()

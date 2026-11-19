@@ -76,23 +76,34 @@ public sealed class LlmConnectionService(
     public async Task DeleteConnectionAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity =
-            await dbContext.LlmConnections.FirstOrDefaultAsync(c => c.Id == id, cancellationToken)
+            await dbContext
+                .LlmConnections.Include(c => c.ModelConfigurations)
+                    .ThenInclude(m => m.Profiles)
+                .FirstOrDefaultAsync(c => c.Id == id, cancellationToken)
             ?? throw new NotFoundException($"LLM connection '{id}' not found.");
 
-        var configurationNames = await dbContext
-            .LlmModelConfigurations.Where(c => c.ConnectionId == id)
-            .Select(c => c.Name)
-            .ToListAsync(cancellationToken);
-        if (configurationNames.Count > 0)
-        {
-            throw new ConflictException(
-                $"Delete the model configurations that use '{entity.Name}' first: {string.Join(", ", configurationNames)}.",
-                "Connection in use"
-            );
-        }
+        var profiles = entity.ModelConfigurations.SelectMany(m => m.Profiles).ToList();
+        var preemptBackground = await LlmSettingsService.UnassignWorkflowsForProfilesAsync(
+            dbContext,
+            profiles.Select(p => p.Id).ToList(),
+            cancellationToken
+        );
 
+        if (profiles.Count > 0)
+        {
+            dbContext.LlmModelProfiles.RemoveRange(profiles);
+        }
+        if (entity.ModelConfigurations.Count > 0)
+        {
+            dbContext.LlmModelConfigurations.RemoveRange(entity.ModelConfigurations);
+        }
         dbContext.LlmConnections.Remove(entity);
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        if (preemptBackground)
+        {
+            queueSignal.PreemptBackgroundWork();
+        }
     }
 
     public async Task<LlmConnectionTestResultDto> TestConnectionAsync(
@@ -229,17 +240,11 @@ public sealed class LlmConnectionService(
                 .FirstOrDefaultAsync(c => c.Id == id, cancellationToken)
             ?? throw new NotFoundException($"Model configuration '{id}' not found.");
 
-        var workflows = GetAssignedWorkflows(
-            entity.Profiles.Select(p => p.Id),
-            await GetSettingsAssignmentsAsync(cancellationToken)
+        var preemptBackground = await LlmSettingsService.UnassignWorkflowsForProfilesAsync(
+            dbContext,
+            entity.Profiles.Select(p => p.Id).ToList(),
+            cancellationToken
         );
-        if (workflows.Count > 0)
-        {
-            throw new ConflictException(
-                $"'{entity.Name}' is selected for the {string.Join(", ", workflows)} workflow(s). Choose another profile there first.",
-                "Configuration in use"
-            );
-        }
 
         if (entity.Profiles.Count > 0)
         {
@@ -247,6 +252,11 @@ public sealed class LlmConnectionService(
         }
         dbContext.LlmModelConfigurations.Remove(entity);
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        if (preemptBackground)
+        {
+            queueSignal.PreemptBackgroundWork();
+        }
     }
 
     private static void ValidateConnectionRequest(UpsertLlmConnectionRequest request)

@@ -26,12 +26,17 @@ import type {
 } from '../../../core/models/ingestion.models';
 import { IngestionService } from '../../../core/services/ingestion/ingestion.service';
 import { LlmSettingsService } from '../../../core/services/llm-settings/llm-settings.service';
+import {
+  ConfirmDialogComponent,
+  type ConfirmDialogData,
+} from '../../../shared/components/confirm-dialog/confirm-dialog.component';
 import { LlmConnectionsPanelComponent } from '../llm-connections-panel/llm-connections-panel.component';
 import { LlmModelConfigurationsPanelComponent } from '../llm-model-configurations-panel/llm-model-configurations-panel.component';
 import {
   LlmModelProfileDialogComponent,
   type LlmModelProfileDialogData,
 } from '../llm-model-profile-dialog/llm-model-profile-dialog.component';
+import { buildDeleteProfileConfirmMessage } from './llm-settings.utils';
 
 export { filterModels } from './llm-settings.utils';
 
@@ -210,6 +215,7 @@ export class LlmSettingsDialogComponent implements OnInit {
 
   /** Reloads connections, models, and profiles after a panel saves or deletes an item. */
   reloadCatalog(): void {
+    const previousConfigCount = this.configurations().length;
     forkJoin({
       connections: this.llmSettingsService.getConnections(),
       configurations: this.llmSettingsService.getModelConfigurations(),
@@ -223,7 +229,8 @@ export class LlmSettingsDialogComponent implements OnInit {
           this.connections.set(connections);
           this.configurations.set(configurations);
           this.profiles.set(profiles);
-          this.syncWorkflowAssignments(configurations, profiles);
+          this.syncWorkflowAssignments(configurations, profiles, previousConfigCount);
+          this.ingestionService.refreshSummary();
         },
         error: (err) =>
           this.errorMessage.set(err?.error?.detail || 'Failed to reload LLM connections.'),
@@ -305,6 +312,35 @@ export class LlmSettingsDialogComponent implements OnInit {
     if (this.isSavingProfile() || profile.isDefault) {
       return;
     }
+    const confirmMessage = buildDeleteProfileConfirmMessage(profile);
+    if (confirmMessage) {
+      this.dialog
+        .open<ConfirmDialogComponent, ConfirmDialogData, boolean | undefined>(
+          ConfirmDialogComponent,
+          {
+            width: '440px',
+            maxWidth: '95vw',
+            data: {
+              title: 'Delete Profile',
+              message: confirmMessage,
+              confirmText: 'Delete Profile',
+              isDestructive: true,
+            },
+          },
+        )
+        .afterClosed()
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe((confirmed) => {
+          if (confirmed) {
+            this.executeDeleteProfile(profile);
+          }
+        });
+      return;
+    }
+    this.executeDeleteProfile(profile);
+  }
+
+  private executeDeleteProfile(profile: LlmModelProfile): void {
     this.isSavingProfile.set(true);
     this.profileCrudError.set(null);
 
@@ -315,6 +351,7 @@ export class LlmSettingsDialogComponent implements OnInit {
         next: () => {
           this.isSavingProfile.set(false);
           this.loadProfiles();
+          this.ingestionService.refreshSummary();
         },
         error: (err) => {
           this.profileCrudError.set(
@@ -364,10 +401,15 @@ export class LlmSettingsDialogComponent implements OnInit {
   private syncWorkflowAssignments(
     configurations: LlmModelConfigurationDto[],
     profiles: LlmModelProfile[],
+    previousConfigCount: number,
   ): void {
     this.dropMissingProfiles(profiles);
     const controls = this.workflowForm.controls;
-    if (!controls.textModelProfileId.value && configurations.length === 1) {
+    if (
+      previousConfigCount === 0 &&
+      !controls.textModelProfileId.value &&
+      configurations.length === 1
+    ) {
       const defaultProfileId =
         configurations[0].defaultProfileId ||
         profiles.find((p) => p.modelConfigurationId === configurations[0].id && p.isDefault)?.id;

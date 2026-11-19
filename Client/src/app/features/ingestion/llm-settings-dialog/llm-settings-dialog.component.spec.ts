@@ -11,12 +11,19 @@ import type {
 } from '../../../core/models/ingestion.models';
 import { IngestionService } from '../../../core/services/ingestion/ingestion.service';
 import { LlmSettingsService } from '../../../core/services/llm-settings/llm-settings.service';
+import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialog/confirm-dialog.component';
 import { LlmModelProfileDialogComponent } from '../llm-model-profile-dialog/llm-model-profile-dialog.component';
 import {
   LLM_SETTINGS_TABS,
   LlmSettingsDialogComponent,
   filterModels,
 } from './llm-settings-dialog.component';
+import {
+  buildDeleteConnectionConfirmMessage,
+  buildDeleteModelConfirmMessage,
+  buildDeleteProfileConfirmMessage,
+  formatWorkflowList,
+} from './llm-settings.utils';
 
 const connection = (id: string, name: string): LlmConnectionDto => ({
   id,
@@ -351,15 +358,72 @@ describe('LlmSettingsDialogComponent', () => {
     expect(component.refineMatchesText()).toBe(false);
   });
 
-  it('clears assignments whose profile was deleted during reloadCatalog', async () => {
+  it('clears assignments whose profile was deleted during reloadCatalog without auto-selecting a remaining model', async () => {
     await create();
-    service['getModelConfigurations'].mockReturnValue(of([cfgText]));
-    service['getModelProfiles'].mockReturnValue(of([profTextDefault, profTextThinking]));
+    // Simulate deleting the connection that owned cfgText (assigned to Text) while leaving only cfgVision (assigned to Vision)
+    service['getConnections'].mockReturnValue(of([connections[1]]));
+    service['getModelConfigurations'].mockReturnValue(of([cfgVision]));
+    service['getModelProfiles'].mockReturnValue(of([profVisionDefault]));
 
     component.reloadCatalog();
 
-    expect(component.workflowForm.controls.textModelProfileId.value).toBe('prof-text-def');
-    expect(component.workflowForm.controls.visionModelProfileId.value).toBe('');
+    expect(component.workflowForm.controls.textModelProfileId.value).toBe('');
+    expect(component.workflowForm.controls.visionModelProfileId.value).toBe('prof-vision-def');
+    expect(mockIngestionService.refreshSummary).toHaveBeenCalled();
+  });
+
+  it('confirms before deleting an assigned custom profile and deselects it on confirm', async () => {
+    await create();
+    const assignedProfile = profile('prof-assigned', cfgText, 'Thinking', false, {
+      assignedWorkflows: ['Refinement'],
+    });
+
+    mockDialog.open.mockReturnValueOnce({ afterClosed: () => of(false) });
+    component.deleteProfile(assignedProfile);
+
+    expect(mockDialog.open).toHaveBeenCalledWith(
+      ConfirmDialogComponent,
+      expect.objectContaining({
+        data: expect.objectContaining({
+          title: 'Delete Profile',
+          confirmText: 'Delete Profile',
+          isDestructive: true,
+          message: 'Deleting "Thinking" will deselect it from the Refinement workflow. Continue?',
+        }),
+      }),
+    );
+    expect(service['deleteModelProfile']).not.toHaveBeenCalled();
+
+    mockDialog.open.mockReturnValueOnce({ afterClosed: () => of(true) });
+    component.deleteProfile(assignedProfile);
+
+    expect(service['deleteModelProfile']).toHaveBeenCalledWith('prof-assigned');
+    expect(mockIngestionService.refreshSummary).toHaveBeenCalled();
+  });
+
+  it('formats workflow lists and cascade delete confirmation messages', () => {
+    expect(formatWorkflowList([])).toBe('');
+    expect(formatWorkflowList(['Text'])).toBe('Text workflow');
+    expect(formatWorkflowList(['Refinement', 'Text'])).toBe('Text and Refinement workflows');
+    expect(formatWorkflowList(['Embedding', 'Vision', 'Text', 'Text'])).toBe(
+      'Text, Vision, and Embedding workflows',
+    );
+
+    expect(
+      buildDeleteConnectionConfirmMessage({ ...connections[0], modelConfigurationCount: 0 }, []),
+    ).toBeNull();
+    expect(
+      buildDeleteConnectionConfirmMessage({ ...connections[0], modelConfigurationCount: 1 }, [
+        { ...cfgText, assignedWorkflows: [] },
+      ]),
+    ).toBe('Deleting "Desk GPU" will also delete 1 saved model and its profiles. Continue?');
+    expect(
+      buildDeleteModelConfirmMessage({ ...cfgText, profileCount: 1, assignedWorkflows: [] }),
+    ).toBeNull();
+    expect(
+      buildDeleteModelConfirmMessage({ ...cfgText, profileCount: 3, assignedWorkflows: [] }),
+    ).toBe('Deleting "gemma4:12b @ Desk GPU" will also delete its 2 custom profiles. Continue?');
+    expect(buildDeleteProfileConfirmMessage(profTextThinking)).toBeNull();
   });
 
   it('assigns the first saved model Defaults profile to the text workflow', async () => {

@@ -1,8 +1,12 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { MatDialog } from '@angular/material/dialog';
 import { of, throwError } from 'rxjs';
-import type { LlmConnectionDto } from '../../../core/models/ingestion.models';
+import type {
+  LlmConnectionDto,
+  LlmModelConfigurationDto,
+} from '../../../core/models/ingestion.models';
 import { LlmSettingsService } from '../../../core/services/llm-settings/llm-settings.service';
+import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialog/confirm-dialog.component';
 import { LlmConnectionDialogComponent } from '../llm-connection-dialog/llm-connection-dialog.component';
 import { LlmConnectionsPanelComponent } from './llm-connections-panel.component';
 
@@ -122,14 +126,98 @@ describe('LlmConnectionsPanelComponent', () => {
     expect(component.testingIds().has('desk')).toBe(false);
   });
 
-  it('shows the conflict message when a connection is still in use', () => {
+  it('deletes a connection without dependencies immediately without confirmation', () => {
+    const unusedConnection: LlmConnectionDto = {
+      ...savedConnection,
+      id: 'unused',
+      name: 'Unused Host',
+      modelConfigurationCount: 0,
+    };
+
+    component.delete(unusedConnection);
+
+    expect(dialog.open).not.toHaveBeenCalled();
+    expect(service['deleteConnection']).toHaveBeenCalledWith('unused');
+    expect(changed).toHaveBeenCalled();
+  });
+
+  it('confirms before deleting a connection with saved models and assigned workflows', () => {
+    const configs: LlmModelConfigurationDto[] = [
+      {
+        id: 'cfg-1',
+        name: 'models/gemini-3.8-flash @ Desk GPU',
+        connectionId: 'desk',
+        connectionName: 'Desk GPU',
+        provider: 'OpenAiCompatible',
+        model: 'models/gemini-3.8-flash',
+        ollamaGpuLayers: null,
+        maxConcurrentRequests: null,
+        requestsPerMinute: null,
+        dailyRequestQuota: null,
+        dailyQuotaResetTimezone: null,
+        dailyQuotaResetTime: null,
+        defaultProfileId: 'p1',
+        profileCount: 1,
+        assignedWorkflows: ['Text'],
+        modifiedAt: '2026-11-13T00:00:00Z',
+      },
+      {
+        id: 'cfg-2',
+        name: 'models/gemini-4-argon @ Desk GPU',
+        connectionId: 'desk',
+        connectionName: 'Desk GPU',
+        provider: 'OpenAiCompatible',
+        model: 'models/gemini-4-argon',
+        ollamaGpuLayers: null,
+        maxConcurrentRequests: null,
+        requestsPerMinute: null,
+        dailyRequestQuota: null,
+        dailyQuotaResetTimezone: null,
+        dailyQuotaResetTime: null,
+        defaultProfileId: 'p2',
+        profileCount: 2,
+        assignedWorkflows: ['Refinement'],
+        modifiedAt: '2026-11-13T00:00:00Z',
+      },
+    ];
+    fixture.componentRef.setInput('configurations', configs);
+
+    // Dismissing confirmation leaves the connection untouched
+    dialog.open.mockReturnValueOnce({ afterClosed: () => of(false) });
+    component.delete(savedConnection);
+
+    expect(dialog.open).toHaveBeenCalledWith(
+      ConfirmDialogComponent,
+      expect.objectContaining({
+        data: expect.objectContaining({
+          title: 'Delete Connection',
+          confirmText: 'Delete Connection',
+          isDestructive: true,
+          message:
+            'Deleting "Desk GPU" will also delete 2 saved models and their profiles, and deselect them from the Text and Refinement workflows. Continue?',
+        }),
+      }),
+    );
+    expect(service['deleteConnection']).not.toHaveBeenCalled();
+    expect(changed).not.toHaveBeenCalled();
+
+    // Confirming deletes the connection and emits changed
+    dialog.open.mockReturnValueOnce({ afterClosed: () => of(true) });
+    component.delete(savedConnection);
+
+    expect(service['deleteConnection']).toHaveBeenCalledWith('desk');
+    expect(changed).toHaveBeenCalled();
+  });
+
+  it('shows the API error when deleting a connection fails after confirmation', () => {
+    dialog.open.mockReturnValue({ afterClosed: () => of(true) });
     service['deleteConnection'].mockReturnValue(
-      throwError(() => ({ error: { detail: 'Connection is used by 2 saved models.' } })),
+      throwError(() => ({ error: { detail: 'Unexpected server error.' } })),
     );
 
     component.delete(savedConnection);
 
-    expect(component.errorMessage()).toBe('Connection is used by 2 saved models.');
+    expect(component.errorMessage()).toBe('Unexpected server error.');
     expect(changed).not.toHaveBeenCalled();
   });
 });
