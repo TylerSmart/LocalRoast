@@ -38,6 +38,7 @@ public static class DataServiceCollectionExtensions
         services.AddScoped<ILlmSettingsService, LlmSettingsService>();
         services.AddScoped<ILlmConnectionService, LlmConnectionService>();
         services.AddScoped<ICatalogVectorSearchService, CatalogVectorSearchService>();
+        services.AddScoped<IRecipeEmbeddingService, RecipeEmbeddingService>();
         services.AddScoped<IIngestionRecipePipeline, IngestionRecipePipeline>();
         services.AddScoped<IIngestionProcessor, IngestionProcessor>();
         services.AddScoped<IIngestionService, IngestionService>();

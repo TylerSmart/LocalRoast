@@ -923,7 +923,8 @@ public static partial class IngestionCatalogMaterializer
         IRecipeService recipeService,
         IMediaStorageService mediaStorageService,
         bool globalAutoPublish,
-        CancellationToken cancellationToken = default
+        CancellationToken cancellationToken = default,
+        ICollection<Guid>? promotedRecipeIds = null
     )
     {
         var totalPromoted = 0;
@@ -1073,6 +1074,7 @@ public static partial class IngestionCatalogMaterializer
                         cancellationToken
                     );
 
+                    promotedRecipeIds?.Add(createdRecipe.Id);
                     promotedInPass++;
                     totalPromoted++;
                 }

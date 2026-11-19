@@ -74,4 +74,6 @@ export interface DraftMealPlanResponseDto {
   modelUsed: string;
   consideredCookbookRecipeCount: number;
   candidates: DraftMealPlanCandidateDto[];
+  unmetCravingNotes?: string[] | null;
+  usedEmbeddings?: boolean;
 }

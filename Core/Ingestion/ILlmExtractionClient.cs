@@ -57,6 +57,27 @@ public record LlmCookbookRecipeCandidate(
     int? DaysSinceLastCooked
 );
 
+public record LlmMealPlanQueryAnalysisContext(
+    string UserPrompt,
+    int RequestedMealCount,
+    string DefaultSlotName
+);
+
+public record LlmMealPlanSearchBucketItem(
+    string? BucketName,
+    string? SemanticQuery,
+    IReadOnlyList<string>? SuggestedTags,
+    int? MaxTotalTimeMinutes,
+    int? DesiredCount
+);
+
+public record LlmMealPlanQueryAnalysisPayload(
+    IReadOnlyList<string>? ExcludedTerms,
+    IReadOnlyList<string>? PrioritizeIngredients,
+    int? MaxTotalTimeMinutes,
+    IReadOnlyList<LlmMealPlanSearchBucketItem>? SearchBuckets
+);
+
 public record LlmDraftMealPlanContext(
     DateOnly WeekStartDate,
     string UserPrompt,
@@ -64,7 +85,10 @@ public record LlmDraftMealPlanContext(
     string DefaultSlotName,
     bool PlaceOnDeck,
     IReadOnlyList<string> ExistingWeekScheduleLines,
-    IReadOnlyList<LlmCookbookRecipeCandidate> CookbookCatalog
+    IReadOnlyList<LlmCookbookRecipeCandidate> CookbookCatalog,
+    IReadOnlyList<string>? BucketSummaries = null,
+    IReadOnlyList<string>? PrioritizeIngredients = null,
+    IReadOnlyList<string>? UnmatchedBuckets = null
 );
 
 public record LlmDraftMealProposalItem(
@@ -77,7 +101,10 @@ public record LlmDraftMealProposalItem(
     string? Rationale
 );
 
-public record LlmDraftMealPlanPayload(IReadOnlyList<LlmDraftMealProposalItem>? Proposals);
+public record LlmDraftMealPlanPayload(
+    IReadOnlyList<LlmDraftMealProposalItem>? Proposals,
+    IReadOnlyList<string>? UnmetCravingNotes = null
+);
 
 public interface ILlmExtractionClient
 {
@@ -133,6 +160,29 @@ public interface ILlmExtractionClient
         LlmKitchenQuestionContext context,
         CancellationToken cancellationToken = default
     );
+
+    Task<LlmMealPlanQueryAnalysisPayload> DecomposeMealPlanPromptAsync(
+        EffectiveLlmConnectionConfig config,
+        LlmMealPlanQueryAnalysisContext context,
+        CancellationToken cancellationToken = default
+    ) =>
+        Task.FromResult(
+            new LlmMealPlanQueryAnalysisPayload(
+                ExcludedTerms: [],
+                PrioritizeIngredients: [],
+                MaxTotalTimeMinutes: null,
+                SearchBuckets:
+                [
+                    new LlmMealPlanSearchBucketItem(
+                        BucketName: "Requested meals",
+                        SemanticQuery: context.UserPrompt,
+                        SuggestedTags: [],
+                        MaxTotalTimeMinutes: null,
+                        DesiredCount: context.RequestedMealCount
+                    ),
+                ]
+            )
+        );
 
     Task<LlmDraftMealPlanPayload> DraftWeeklyMealPlanAsync(
         EffectiveLlmConnectionConfig config,

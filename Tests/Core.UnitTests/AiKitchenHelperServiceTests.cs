@@ -84,9 +84,12 @@ public sealed class AiKitchenHelperServiceTests
     {
         public bool ProbeReachable { get; set; } = true;
         public LlmSubstitutionPayload SubstitutionResult { get; set; } = new([]);
+        public LlmMealPlanQueryAnalysisPayload? QueryAnalysisResult { get; set; }
         public LlmDraftMealPlanPayload DraftResult { get; set; } = new([]);
+        public Func<IReadOnlyList<string>, float[][]>? EmbeddingFactory { get; set; }
         public string KitchenAnswer { get; set; } = "Cut the vegetable into thin matchsticks.";
         public LlmSubstitutionContext? LastSubstitutionContext { get; private set; }
+        public LlmMealPlanQueryAnalysisContext? LastQueryAnalysisContext { get; private set; }
         public LlmDraftMealPlanContext? LastDraftContext { get; private set; }
         public LlmKitchenQuestionContext? LastKitchenQuestionContext { get; private set; }
         public CancellationToken LastKitchenQuestionCancellationToken { get; private set; }
@@ -123,7 +126,41 @@ public sealed class AiKitchenHelperServiceTests
             EffectiveLlmConnectionConfig config,
             IReadOnlyList<string> inputs,
             CancellationToken cancellationToken = default
-        ) => Task.FromResult(Array.Empty<float[]>());
+        ) =>
+            Task.FromResult(
+                EmbeddingFactory is not null ? EmbeddingFactory(inputs) : Array.Empty<float[]>()
+            );
+
+        public Task<LlmMealPlanQueryAnalysisPayload> DecomposeMealPlanPromptAsync(
+            EffectiveLlmConnectionConfig config,
+            LlmMealPlanQueryAnalysisContext context,
+            CancellationToken cancellationToken = default
+        )
+        {
+            LastQueryAnalysisContext = context;
+            if (QueryAnalysisResult is not null)
+            {
+                return Task.FromResult(QueryAnalysisResult);
+            }
+
+            return Task.FromResult(
+                new LlmMealPlanQueryAnalysisPayload(
+                    ExcludedTerms: [],
+                    PrioritizeIngredients: [],
+                    MaxTotalTimeMinutes: null,
+                    SearchBuckets:
+                    [
+                        new LlmMealPlanSearchBucketItem(
+                            BucketName: "Requested meals",
+                            SemanticQuery: context.UserPrompt,
+                            SuggestedTags: [],
+                            MaxTotalTimeMinutes: null,
+                            DesiredCount: context.RequestedMealCount
+                        ),
+                    ]
+                )
+            );
+        }
 
         public Task<string?> TranscribeRecipeImagesAsync(
             EffectiveLlmConnectionConfig config,
@@ -721,6 +758,119 @@ public sealed class AiKitchenHelperServiceTests
             new(Prompt: "Dinner", MealCount: 1, TodayDate: new DateOnly(2026, 11, 4))
         );
         Assert.AreEqual(new DateOnly(2026, 11, 4), response.WeekStartDate);
+    }
+
+    [TestMethod]
+    public async Task DraftWeeklyMealPlanAsync_ThreeStageRag_AppliesExclusionsUsesEmbeddingsAndSurfacesUnmetNotes()
+    {
+        var shrimpRecipe = new Recipe
+        {
+            Id = Guid.NewGuid(),
+            Title = "Garlic Butter Shrimp",
+            Slug = "garlic-butter-shrimp",
+            Status = RecipeStatus.Published,
+            Ingredients = [new RecipeIngredient { DisplayName = "shrimp" }],
+        };
+        var pastaRecipe = new Recipe
+        {
+            Id = Guid.NewGuid(),
+            Title = "Roasted Garlic Tomato Pasta",
+            Slug = "roasted-garlic-tomato-pasta",
+            Status = RecipeStatus.Published,
+            TotalTimeMinutes = 25,
+            Ingredients = [new RecipeIngredient { DisplayName = "tomato" }],
+        };
+        _dbContext.Recipes.AddRange(shrimpRecipe, pastaRecipe);
+        await _dbContext.SaveChangesAsync();
+
+        _settingsService.Config = _settingsService.Config with { EmbeddingModel = "nomic-embed" };
+        _llmClient.EmbeddingFactory = inputs =>
+            inputs
+                .Select(text =>
+                    text.Contains("pasta", StringComparison.OrdinalIgnoreCase)
+                        ? new[] { 1f, 0f }
+                        : new[] { 0f, 1f }
+                )
+                .ToArray();
+        _llmClient.QueryAnalysisResult = new LlmMealPlanQueryAnalysisPayload(
+            ExcludedTerms: ["seafood"],
+            PrioritizeIngredients: [],
+            MaxTotalTimeMinutes: 30,
+            SearchBuckets:
+            [
+                new LlmMealPlanSearchBucketItem(
+                    "Italian pasta",
+                    "italian tomato pasta",
+                    ["Italian"],
+                    30,
+                    1
+                ),
+            ]
+        );
+        _llmClient.DraftResult = new LlmDraftMealPlanPayload(
+            Proposals:
+            [
+                new LlmDraftMealProposalItem(
+                    CatalogIndex: 1,
+                    RecipeTitle: "Roasted Garlic Tomato Pasta",
+                    DayOffset: 0,
+                    Slot: "Dinner",
+                    IsOnDeck: false,
+                    TargetServings: 4,
+                    Rationale: "Quick 25-minute pasta with no seafood."
+                ),
+            ],
+            UnmetCravingNotes: ["No Thai curry recipes found in your cookbook."]
+        );
+
+        var response = await _service.DraftWeeklyMealPlanAsync(
+            new DraftWeeklyMealPlanRequest(
+                Prompt: "Quick pasta dinner, no seafood, and maybe Thai curry",
+                MealCount: 1,
+                ServingsPerMeal: 2
+            )
+        );
+
+        Assert.IsTrue(response.UsedEmbeddings);
+        Assert.AreEqual(2, response.ConsideredCookbookRecipeCount);
+        Assert.AreEqual(1, _llmClient.LastDraftContext!.CookbookCatalog.Count);
+        Assert.AreEqual(pastaRecipe.Id, _llmClient.LastDraftContext.CookbookCatalog[0].RecipeId);
+        Assert.AreEqual(pastaRecipe.Id, response.Candidates[0].RecipeId);
+        Assert.IsNotNull(response.UnmetCravingNotes);
+        Assert.IsTrue(
+            response.UnmetCravingNotes!.Any(n =>
+                n.Contains("Thai curry", StringComparison.OrdinalIgnoreCase)
+            )
+        );
+        Assert.AreEqual(1, await _dbContext.RecipeEmbeddings.CountAsync());
+    }
+
+    [TestMethod]
+    public async Task DraftWeeklyMealPlanAsync_AllRecipesExcludedByPrompt_ThrowsDomainValidationException()
+    {
+        var shrimpRecipe = new Recipe
+        {
+            Id = Guid.NewGuid(),
+            Title = "Garlic Shrimp",
+            Slug = "garlic-shrimp",
+            Status = RecipeStatus.Published,
+            Ingredients = [new RecipeIngredient { DisplayName = "shrimp" }],
+        };
+        _dbContext.Recipes.Add(shrimpRecipe);
+        await _dbContext.SaveChangesAsync();
+
+        _llmClient.QueryAnalysisResult = new LlmMealPlanQueryAnalysisPayload(
+            ExcludedTerms: ["seafood"],
+            PrioritizeIngredients: [],
+            MaxTotalTimeMinutes: null,
+            SearchBuckets: [new LlmMealPlanSearchBucketItem("Dinner", "dinner", [], null, 1)]
+        );
+
+        await Assert.ThrowsAsync<DomainValidationException>(() =>
+            _service.DraftWeeklyMealPlanAsync(
+                new DraftWeeklyMealPlanRequest(Prompt: "Dinner with no seafood", MealCount: 1)
+            )
+        );
     }
 
     private async Task<Recipe[]> SeedDraftRecipesAsync()

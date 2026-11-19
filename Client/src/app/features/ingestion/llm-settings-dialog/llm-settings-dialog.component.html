@@ -204,8 +204,9 @@
                   }
                 </mat-select>
                 <mat-hint>
-                  Enables hybrid vector + lexical catalog matching (with automatic search-term
-                  fallback when unassigned or quota-limited).
+                  Enables hybrid vector + lexical catalog matching during ingestion and semantic
+                  recipe retrieval for AI meal planning (with automatic lexical fallback when
+                  unassigned or quota-limited).
                 </mat-hint>
               </mat-form-field>
               @if (embeddingProfile(); as profile) {

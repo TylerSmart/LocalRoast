@@ -14,7 +14,8 @@ namespace App.Data.Services;
 public sealed partial class RecipeService(
     AppDbContext dbContext,
     IMediaStorageService mediaStorageService,
-    TimeProvider? timeProvider = null
+    TimeProvider? timeProvider = null,
+    IIngestionQueueSignal? queueSignal = null
 ) : IRecipeService
 {
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
@@ -730,6 +731,11 @@ public sealed partial class RecipeService(
             cancellationToken
         );
 
+        if (recipe.Status == RecipeStatus.Published)
+        {
+            queueSignal?.NotifyBackgroundWorkAvailable();
+        }
+
         return (await GetRecipeByIdAsync(recipe.Id, cancellationToken))!;
     }
 
@@ -827,6 +833,22 @@ public sealed partial class RecipeService(
             recipe.Title,
             cancellationToken
         );
+
+        if (recipe.Status == RecipeStatus.Published)
+        {
+            queueSignal?.NotifyBackgroundWorkAvailable();
+        }
+        else
+        {
+            var staleEmbeddings = await dbContext
+                .RecipeEmbeddings.Where(e => e.RecipeId == recipe.Id)
+                .ToListAsync(cancellationToken);
+            if (staleEmbeddings.Count > 0)
+            {
+                dbContext.RecipeEmbeddings.RemoveRange(staleEmbeddings);
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
+        }
 
         // Clean up media files removed
         if (!string.IsNullOrEmpty(oldCover) && oldCover != recipe.CoverImagePath)
@@ -996,6 +1018,12 @@ public sealed partial class RecipeService(
         await SyncTaxonomyAsync(recipe, request.CollectionIds, request.TagIds, cancellationToken);
 
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        if (recipe.Status == RecipeStatus.Published)
+        {
+            queueSignal?.NotifyBackgroundWorkAvailable();
+        }
+
         return await GetRecipeByIdAsync(id, cancellationToken);
     }
 

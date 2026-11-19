@@ -75,5 +75,7 @@ public record DraftMealPlanResponseDto(
     DateOnly WeekEndDate,
     string ModelUsed,
     int ConsideredCookbookRecipeCount,
-    IReadOnlyList<DraftMealPlanCandidateDto> Candidates
+    IReadOnlyList<DraftMealPlanCandidateDto> Candidates,
+    IReadOnlyList<string>? UnmetCravingNotes = null,
+    bool UsedEmbeddings = false
 );

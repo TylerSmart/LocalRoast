@@ -20,7 +20,8 @@ public sealed class IngestionProcessor(
     IMediaStorageService mediaStorageService,
     IPdfIngestionInspector pdfInspector,
     IIngestionQueueSignal queueSignal,
-    ILogger<IngestionProcessor> logger
+    ILogger<IngestionProcessor> logger,
+    IRecipeEmbeddingService? recipeEmbeddingService = null
 ) : IIngestionProcessor
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -706,13 +707,22 @@ public sealed class IngestionProcessor(
 
             if (publishedSuccessfully)
             {
+                var publishedRecipeIds = new List<Guid>();
+                if (job.ResultingRecipeId.HasValue)
+                {
+                    publishedRecipeIds.Add(job.ResultingRecipeId.Value);
+                }
+
                 await IngestionCatalogMaterializer.PromoteWaitingRecipeReferenceJobsAsync(
                     dbContext,
                     recipeService,
                     mediaStorageService,
                     globalAutoPublish: config.AutoPublishHighConfidenceText,
-                    jobCt
+                    jobCt,
+                    promotedRecipeIds: publishedRecipeIds
                 );
+
+                await TryEmbedPublishedRecipesAsync(config, publishedRecipeIds, jobCt);
             }
 
             return true;
@@ -1053,6 +1063,65 @@ public sealed class IngestionProcessor(
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return 0;
+    }
+
+    public async Task<int> SyncPendingRecipeEmbeddingsAsync(
+        CancellationToken cancellationToken = default
+    )
+    {
+        if (recipeEmbeddingService is null)
+        {
+            return 0;
+        }
+
+        var config = await llmSettingsService.GetEffectiveConfigAsync(cancellationToken);
+        if (!config.EnableIngestion || config.ForEmbedding() is null)
+        {
+            return 0;
+        }
+
+        return await recipeEmbeddingService.SyncPendingEmbeddingsAsync(
+            config,
+            maxBatchCount: 64,
+            cancellationToken
+        );
+    }
+
+    private async Task TryEmbedPublishedRecipesAsync(
+        EffectiveLlmConnectionConfig config,
+        IReadOnlyCollection<Guid> recipeIds,
+        CancellationToken cancellationToken
+    )
+    {
+        if (recipeEmbeddingService is null || recipeIds.Count == 0)
+        {
+            return;
+        }
+
+        var embConfig = config.ForEmbedding();
+        if (embConfig is null || string.IsNullOrWhiteSpace(embConfig.TextModel))
+        {
+            return;
+        }
+
+        try
+        {
+            await recipeEmbeddingService.UpsertRecipeEmbeddingsAsync(
+                embConfig,
+                recipeIds,
+                cancellationToken
+            );
+        }
+        catch (Exception ex)
+            when (!(ex is OperationCanceledException && cancellationToken.IsCancellationRequested))
+        {
+            logger.LogWarning(
+                ex,
+                "Post-publish recipe embedding failed for {Count} recipe(s) on model '{Model}'; background sync will retry later.",
+                recipeIds.Count,
+                embConfig.TextModel
+            );
+        }
     }
 
     private Task<RecipeDetailDto> PublishDraftInternalAsync(

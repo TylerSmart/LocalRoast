@@ -1848,4 +1848,165 @@ public sealed class LlmExtractionClientTests
             Assert.AreEqual(1.0, norm, 1e-5);
         }
     }
+
+    [TestMethod]
+    public async Task DecomposeMealPlanPromptAsync_ParsesStructuredBuckets_AndFallsBackOnInvalidJson()
+    {
+        var responses = new Queue<string>([
+            """
+            {
+              "excludedTerms": ["seafood", "shrimp"],
+              "prioritizeIngredients": ["spinach"],
+              "maxTotalTimeMinutes": 35,
+              "searchBuckets": [
+                {
+                  "bucketName": "Italian pasta",
+                  "semanticQuery": "creamy italian pasta dinner",
+                  "suggestedTags": ["Italian", "Quick"],
+                  "maxTotalTimeMinutes": 30,
+                  "desiredCount": 2
+                }
+              ]
+            }
+            """,
+            "{not valid json",
+        ]);
+
+        var handler = new MockHttpMessageHandler(req =>
+        {
+            using var body = JsonDocument.Parse(req.Content!.ReadAsStringAsync().Result);
+            var props = body.RootElement.GetProperty("format").GetProperty("properties");
+            Assert.IsTrue(props.TryGetProperty("searchBuckets", out _));
+            Assert.IsTrue(props.TryGetProperty("excludedTerms", out _));
+            Assert.IsTrue(props.TryGetProperty("prioritizeIngredients", out _));
+            return OllamaReply(responses.Dequeue());
+        });
+
+        var client = new LlmExtractionClient(new HttpClient(handler));
+        var config = new EffectiveLlmConnectionConfig(
+            LlmProvider.Ollama,
+            "http://localhost:11434",
+            null,
+            "qwen2.5:14b",
+            null,
+            "5m",
+            30,
+            false
+        );
+
+        var parsed = await client.DecomposeMealPlanPromptAsync(
+            config,
+            new LlmMealPlanQueryAnalysisContext(
+                "Italian pasta, no seafood, use spinach",
+                2,
+                "Dinner"
+            )
+        );
+
+        Assert.AreEqual(2, parsed.ExcludedTerms!.Count);
+        Assert.AreEqual("spinach", parsed.PrioritizeIngredients![0]);
+        Assert.AreEqual(35, parsed.MaxTotalTimeMinutes);
+        Assert.AreEqual(1, parsed.SearchBuckets!.Count);
+        Assert.AreEqual("Italian pasta", parsed.SearchBuckets[0].BucketName);
+
+        var fallback = await client.DecomposeMealPlanPromptAsync(
+            config,
+            new LlmMealPlanQueryAnalysisContext("Cozy fall soups", 3, "Dinner")
+        );
+        Assert.AreEqual(1, fallback.SearchBuckets!.Count);
+        Assert.AreEqual("Cozy fall soups", fallback.SearchBuckets[0].SemanticQuery);
+        Assert.AreEqual(3, fallback.SearchBuckets[0].DesiredCount);
+    }
+
+    [TestMethod]
+    public async Task DraftWeeklyMealPlanAsync_IncludesBucketContextAndParsesUnmetCravingNotes()
+    {
+        string? capturedUserPrompt = null;
+        var handler = new MockHttpMessageHandler(req =>
+        {
+            using var body = JsonDocument.Parse(req.Content!.ReadAsStringAsync().Result);
+            capturedUserPrompt = body
+                .RootElement.GetProperty("messages")
+                .EnumerateArray()
+                .Last(m => m.GetProperty("role").GetString() == "user")
+                .GetProperty("content")
+                .GetString();
+
+            var props = body.RootElement.GetProperty("format").GetProperty("properties");
+            Assert.IsTrue(props.TryGetProperty("unmetCravingNotes", out _));
+
+            return OllamaReply(
+                """
+                {
+                  "proposals": [
+                    {
+                      "catalogIndex": 1,
+                      "recipeTitle": "Tuscan Chicken",
+                      "dayOffset": 0,
+                      "slot": "Dinner",
+                      "isOnDeck": false,
+                      "targetServings": 4,
+                      "rationale": "Uses up spinach."
+                    }
+                  ],
+                  "unmetCravingNotes": ["No authentic Moroccan recipes matched in your cookbook."]
+                }
+                """
+            );
+        });
+
+        var client = new LlmExtractionClient(new HttpClient(handler));
+        var config = new EffectiveLlmConnectionConfig(
+            LlmProvider.Ollama,
+            "http://localhost:11434",
+            null,
+            "qwen2.5:14b",
+            null,
+            "5m",
+            30,
+            false
+        );
+
+        var payload = await client.DraftWeeklyMealPlanAsync(
+            config,
+            new LlmDraftMealPlanContext(
+                WeekStartDate: new DateOnly(2026, 11, 5),
+                UserPrompt: "Use up spinach and one Moroccan night",
+                RequestedMealCount: 1,
+                DefaultSlotName: "Dinner",
+                PlaceOnDeck: false,
+                ExistingWeekScheduleLines: [],
+                CookbookCatalog:
+                [
+                    new LlmCookbookRecipeCandidate(
+                        1,
+                        Guid.NewGuid(),
+                        "Tuscan Chicken",
+                        4m,
+                        30,
+                        "Easy",
+                        ["Italian"],
+                        ["Spinach", "Chicken Breast"],
+                        4.8m,
+                        3,
+                        18
+                    ),
+                ],
+                BucketSummaries: ["Moroccan dinner (target ~1)"],
+                PrioritizeIngredients: ["spinach"],
+                UnmatchedBuckets: ["Moroccan dinner"]
+            )
+        );
+
+        Assert.IsNotNull(capturedUserPrompt);
+        StringAssert.Contains(capturedUserPrompt, "On-Hand Ingredients to Prioritize: spinach");
+        StringAssert.Contains(capturedUserPrompt, "Requested Meal Buckets:");
+        StringAssert.Contains(
+            capturedUserPrompt,
+            "Weakly Matched Buckets in Cookbook: Moroccan dinner"
+        );
+        Assert.AreEqual(1, payload.Proposals!.Count);
+        Assert.AreEqual(1, payload.UnmetCravingNotes!.Count);
+        StringAssert.Contains(payload.UnmetCravingNotes[0], "Moroccan");
+    }
 }

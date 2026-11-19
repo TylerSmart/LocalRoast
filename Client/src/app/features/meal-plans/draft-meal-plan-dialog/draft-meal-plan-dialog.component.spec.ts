@@ -345,4 +345,23 @@ describe('DraftMealPlanDialogComponent', () => {
     });
     expect(mockDialogRef.close).toHaveBeenCalled();
   });
+
+  it('displays unmet craving notes banner when returned by the backend', () => {
+    mockAiHelperService.draftWeeklyMealPlan.mockReturnValue(
+      of({
+        ...mockDraftResponse,
+        unmetCravingNotes: ['No authentic Thai curry recipes matched in your cookbook.'],
+      }),
+    );
+
+    component.prompt.set('Thai curry and cozy chili');
+    component.submitDraft();
+    fixture.detectChanges();
+
+    const banner = (fixture.nativeElement as HTMLElement).querySelector(
+      '[data-testid="unmet-cravings-banner"]',
+    );
+    expect(banner).not.toBeNull();
+    expect(banner?.textContent).toContain('Thai curry');
+  });
 });

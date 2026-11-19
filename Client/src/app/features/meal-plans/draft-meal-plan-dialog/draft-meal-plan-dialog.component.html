@@ -132,6 +132,17 @@
           </span>
         </div>
 
+        @if (resp.unmetCravingNotes && resp.unmetCravingNotes.length > 0) {
+          <div class="unmet-cravings-banner" role="status" data-testid="unmet-cravings-banner">
+            <mat-icon>info_outline</mat-icon>
+            <div class="unmet-cravings-content">
+              @for (note of resp.unmetCravingNotes; track note) {
+                <p class="unmet-craving-note">{{ note }}</p>
+              }
+            </div>
+          </div>
+        }
+
         <div class="candidates-list">
           @for (item of candidateItems(); track item.id) {
             <div class="candidate-card" [class.is-deselected]="!item.selected">

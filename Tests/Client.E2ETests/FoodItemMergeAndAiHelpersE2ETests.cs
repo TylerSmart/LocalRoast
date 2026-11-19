@@ -16,6 +16,7 @@ public sealed class MockKitchenAiOllamaServer : IAsyncDisposable
     public string BaseUrl { get; }
     public bool SimulateOffline { get; set; }
     public string? LastKitchenPrompt { get; private set; }
+    public string[]? UnmetCravingNotes { get; set; }
 
     private MockKitchenAiOllamaServer(WebApplication app, string baseUrl)
     {
@@ -54,6 +55,27 @@ public sealed class MockKitchenAiOllamaServer : IAsyncDisposable
         );
 
         app.MapPost(
+            "/v1/embeddings",
+            async (HttpRequest request) =>
+            {
+                if (server.SimulateOffline)
+                {
+                    return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+                }
+
+                using var reader = new StreamReader(request.Body);
+                var bodyText = await reader.ReadToEndAsync();
+                using var body = JsonDocument.Parse(bodyText);
+                var inputs = body.RootElement.GetProperty("input").EnumerateArray().ToArray();
+                var data = Enumerable
+                    .Range(0, inputs.Length)
+                    .Select(i => new { index = i, embedding = new[] { 1.0f, 0.0f, 0.0f, 0.0f } })
+                    .ToArray();
+                return Results.Ok(new { data });
+            }
+        );
+
+        app.MapPost(
             "/api/chat",
             async (HttpRequest request) =>
             {
@@ -79,6 +101,39 @@ public sealed class MockKitchenAiOllamaServer : IAsyncDisposable
                     payloadJson = """
                         { "answer": "Julienne means slicing food into thin matchsticks." }
                         """;
+                }
+                else if (formatProperties.TryGetProperty("searchBuckets", out _))
+                {
+                    var userMsg = body
+                        .RootElement.GetProperty("messages")
+                        .EnumerateArray()
+                        .Last(m => m.GetProperty("role").GetString() == "user")
+                        .GetProperty("content")
+                        .GetString()!;
+                    var reqMatch = Regex.Match(
+                        userMsg,
+                        @"Requested Number of Cooking Occasions: (\d+)"
+                    );
+                    var desiredCount = reqMatch.Success ? int.Parse(reqMatch.Groups[1].Value) : 2;
+                    payloadJson = JsonSerializer.Serialize(
+                        new
+                        {
+                            excludedTerms = Array.Empty<string>(),
+                            prioritizeIngredients = Array.Empty<string>(),
+                            maxTotalTimeMinutes = (int?)null,
+                            searchBuckets = new[]
+                            {
+                                new
+                                {
+                                    bucketName = "Weeknight dinners",
+                                    semanticQuery = "quick weeknight dinner",
+                                    suggestedTags = Array.Empty<string>(),
+                                    maxTotalTimeMinutes = (int?)null,
+                                    desiredCount,
+                                },
+                            },
+                        }
+                    );
                 }
                 else if (
                     bodyText.Contains("draft_meal_plan")
@@ -134,6 +189,7 @@ public sealed class MockKitchenAiOllamaServer : IAsyncDisposable
                                     targetServings = 4,
                                     rationale = "High-protein family favorite from cookbook.",
                                 }),
+                            unmetCravingNotes = server.UnmetCravingNotes ?? Array.Empty<string>(),
                         }
                     );
                 }
@@ -689,7 +745,11 @@ public sealed class FoodItemMergeAndAiHelpersE2ETests : E2ETestBase
             $"Expected no horizontal overflow on mobile calendar view, but scrollWidth ({pageScrollWidth}) > clientWidth ({pageClientWidth})"
         );
 
-        // Re-open Draft dialog in 360px viewport and verify zero overflow
+        // Re-open Draft dialog in 360px viewport and verify zero overflow (including unmet craving notes)
+        mockServer.UnmetCravingNotes =
+        [
+            "No authentic Thai curry recipes matched in your cookbook.",
+        ];
         await Page.Locator(".draft-week-ai-btn").ClickAsync();
         await Expect(draftDialog).ToBeVisibleAsync();
         await draftDialog.Locator(".preset-chip").First.ClickAsync();
@@ -697,6 +757,9 @@ public sealed class FoodItemMergeAndAiHelpersE2ETests : E2ETestBase
         await Page.GetByRole(AriaRole.Option, new() { Name = "1", Exact = true }).ClickAsync();
         await draftDialog.Locator(".draft-submit-btn").ClickAsync();
         await Expect(draftDialog.Locator(".candidate-card")).ToHaveCountAsync(1);
+        await Expect(draftDialog.Locator("[data-testid='unmet-cravings-banner']"))
+            .ToContainTextAsync("Thai curry");
+        mockServer.UnmetCravingNotes = null;
         await draftDialog.Locator(".retry-candidate-btn").ClickAsync();
         await Expect(draftDialog.Locator(".candidate-title")).ToContainTextAsync("Veggie Stir Fry");
         await Expect(draftDialog.Locator(".error-banner")).Not.ToBeVisibleAsync();

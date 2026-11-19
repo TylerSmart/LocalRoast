@@ -1292,6 +1292,63 @@ namespace App.Data.Migrations
                     b.ToTable("RecipeCollections", (string)null);
                 });
 
+            modelBuilder.Entity("App.Data.Entities.RecipeEmbedding", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ContentHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<int>("Dimensions")
+                        .HasColumnType("int");
+
+                    b.Property<string>("EmbeddingText")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<string>("ModelTag")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTimeOffset>("ModifiedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("ModifiedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<Guid>("RecipeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<byte[]>("VectorBytes")
+                        .IsRequired()
+                        .HasColumnType("varbinary(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ModelTag");
+
+                    b.HasIndex("RecipeId", "ModelTag")
+                        .IsUnique();
+
+                    b.ToTable("RecipeEmbeddings", (string)null);
+                });
+
             modelBuilder.Entity("App.Data.Entities.RecipeIngredient", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2138,6 +2195,17 @@ namespace App.Data.Migrations
                     b.Navigation("Recipe");
                 });
 
+            modelBuilder.Entity("App.Data.Entities.RecipeEmbedding", b =>
+                {
+                    b.HasOne("App.Data.Entities.Recipe", "Recipe")
+                        .WithMany("Embeddings")
+                        .HasForeignKey("RecipeId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Recipe");
+                });
+
             modelBuilder.Entity("App.Data.Entities.RecipeIngredient", b =>
                 {
                     b.HasOne("App.Data.Entities.FoodItem", "FoodItem")
@@ -2301,6 +2369,8 @@ namespace App.Data.Migrations
                     b.Navigation("Attachments");
 
                     b.Navigation("CookLogs");
+
+                    b.Navigation("Embeddings");
 
                     b.Navigation("IngestionJobs");
 
