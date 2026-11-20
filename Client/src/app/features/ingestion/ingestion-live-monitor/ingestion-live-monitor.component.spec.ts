@@ -129,4 +129,75 @@ describe('IngestionLiveMonitorComponent', () => {
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('.live-monitor-card')).toBeNull();
   });
+
+  it('trims leading blank lines in thinking prose without losing internal formatting', () => {
+    const workload = sampleWorkload({
+      calls: [
+        {
+          callId: 'c-done',
+          stageKey: 'stage1',
+          stageLabel: 'Stage 1 · Extract',
+          model: 'gemma4:e4b',
+          thinkingEnabled: true,
+          phase: 'Completed',
+          thinkingText: '\n\nFirst line.\nSecond line.\n\n',
+          outputText: '\n{"title":"Focaccia"}\n',
+          startedAtUtc: new Date().toISOString(),
+          completedAtUtc: new Date().toISOString(),
+        },
+        {
+          callId: 'c-live',
+          stageKey: 'stage2',
+          stageLabel: 'Stage 2 · Condense',
+          model: 'gemma4:e4b',
+          thinkingEnabled: true,
+          phase: 'Thinking',
+          thinkingText: '\n\nLive thought line ',
+          outputText: '',
+          startedAtUtc: new Date().toISOString(),
+        },
+      ],
+    });
+
+    realtime.applySnapshot({ activeWorkloads: [workload], recentWorkloads: [] });
+    component.toggleShowJsonOutput();
+    fixture.detectChanges();
+
+    const proseEls = fixture.nativeElement.querySelectorAll('.thinking-prose-text');
+    expect(proseEls.length).toBe(2);
+    expect(proseEls[0].textContent).toBe('First line.\nSecond line.');
+    expect(proseEls[1].textContent).toBe('Live thought line ');
+
+    const jsonEl = fixture.nativeElement.querySelector('.output-json-code');
+    expect(jsonEl?.textContent).toBe('{"title":"Focaccia"}');
+  });
+
+  it('pauses auto-scroll when user scrolls up and resumes on jump to live', () => {
+    realtime.applySnapshot({ activeWorkloads: [sampleWorkload()], recentWorkloads: [] });
+    fixture.detectChanges();
+
+    const viewport = fixture.nativeElement.querySelector('.stream-viewport') as HTMLDivElement;
+    expect(viewport).toBeTruthy();
+
+    Object.defineProperty(viewport, 'scrollHeight', { value: 900, configurable: true });
+    Object.defineProperty(viewport, 'clientHeight', { value: 300, configurable: true });
+
+    // Start scrolled to bottom, then simulate user scrolling upward
+    viewport.scrollTop = 600;
+    component.onViewportScroll();
+    expect(component.isAutoScrollPaused()).toBe(false);
+
+    viewport.scrollTop = 120;
+    component.onViewportScroll();
+    fixture.detectChanges();
+    expect(component.isAutoScrollPaused()).toBe(true);
+    expect(fixture.nativeElement.querySelector('.jump-to-live-btn')).toBeTruthy();
+
+    // Clicking Jump to live resumes live following and scrolls back to bottom
+    component.jumpToLive();
+    fixture.detectChanges();
+    expect(component.isAutoScrollPaused()).toBe(false);
+    expect(viewport.scrollTop).toBe(900);
+    expect(fixture.nativeElement.querySelector('.jump-to-live-btn')).toBeNull();
+  });
 });

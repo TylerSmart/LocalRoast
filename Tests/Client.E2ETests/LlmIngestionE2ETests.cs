@@ -2364,8 +2364,10 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         var holdGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         mockServer.StreamThinkingChunks =
         [
-            "Analyzing recipe structure for Crispy Sesame Tofu. ",
-            "Checking garlic cloves and toasted sesame oil measurements.",
+            "\n\nAnalyzing recipe structure for Crispy Sesame Tofu.\n",
+            "Checking garlic cloves, toasted sesame oil measurements, and cooking method.\n",
+            "Verifying ingredient quantities, canonical food names, and unit conversions for accuracy.\n",
+            "Inspecting every instruction step to preserve verbatim prose while tokenizing measurements.",
         ];
         mockServer.StreamHoldGate = holdGate;
 
@@ -2432,5 +2434,63 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         // 7. Job card MUST transition to Ready for Review automatically via SignalR without clicking Refresh!
         var reviewButton = Page.Locator($"a.review-action-btn[href$='{jobId}']");
         await Expect(reviewButton).ToBeVisibleAsync(new() { Timeout = 20000 });
+
+        // 8. Verify multiple call trace cards never squish inside the scrollable stream viewport
+        var streamMetrics = await monitor
+            .Locator(".stream-viewport")
+            .EvaluateAsync<JsonElement>(
+                """
+                viewport => {
+                  const cards = [...viewport.querySelectorAll('.call-trace-card')];
+                  const cardHeights = cards.map(c => c.getBoundingClientRect().height);
+                  const flexShrinks = cards.map(c => getComputedStyle(c).flexShrink);
+                  const firstProse = viewport.querySelector('.thinking-prose-text')?.textContent ?? '';
+                  const initialScrollHeight = viewport.scrollHeight;
+                  const clientHeight = viewport.clientHeight;
+                  const canScroll = initialScrollHeight > clientHeight;
+                  viewport.scrollTop = 0;
+                  const topAfterScrollUp = viewport.scrollTop;
+                  viewport.scrollTop = initialScrollHeight;
+                  const topAfterScrollDown = viewport.scrollTop;
+                  return {
+                    cardCount: cards.length,
+                    minCardHeight: cardHeights.length > 0 ? Math.min(...cardHeights) : 0,
+                    allFlexShrinkZero: flexShrinks.every(v => v === '0'),
+                    hasLeadingNewline: firstProse.startsWith('\n'),
+                    canScroll,
+                    topAfterScrollUp,
+                    topAfterScrollDown,
+                  };
+                }
+                """
+            );
+        Assert.IsGreaterThanOrEqualTo(
+            2,
+            streamMetrics.GetProperty("cardCount").GetInt32(),
+            "Expected multiple LLM call trace cards across pipeline stages."
+        );
+        Assert.IsGreaterThanOrEqualTo(
+            32.0,
+            streamMetrics.GetProperty("minCardHeight").GetDouble(),
+            "Call trace cards must retain full non-squished height inside the stream viewport."
+        );
+        Assert.IsTrue(
+            streamMetrics.GetProperty("allFlexShrinkZero").GetBoolean(),
+            "Call trace cards must set flex-shrink: 0 so Flexbox does not flatten earlier calls."
+        );
+        Assert.IsFalse(
+            streamMetrics.GetProperty("hasLeadingNewline").GetBoolean(),
+            "Thinking prose must trim leading blank newlines."
+        );
+        Assert.IsTrue(
+            streamMetrics.GetProperty("canScroll").GetBoolean(),
+            "Stream viewport must overflow vertically when multiple calls exceed max-height."
+        );
+        Assert.AreEqual(0, streamMetrics.GetProperty("topAfterScrollUp").GetInt32());
+        Assert.IsGreaterThan(
+            0,
+            streamMetrics.GetProperty("topAfterScrollDown").GetInt32(),
+            "Stream viewport must actually scroll vertically to inspect call history."
+        );
     }
 }

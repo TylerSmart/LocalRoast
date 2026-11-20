@@ -550,6 +550,9 @@
 .stream-viewport {
   max-height: 300px;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--mat-sys-outline-variant) transparent;
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
@@ -564,6 +567,7 @@
 }
 
 .stream-empty-state {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -580,6 +584,7 @@
 
 /* Individual Chat-App Thought Block */
 .call-trace-card {
+  flex: 0 0 auto;
   border-radius: 10px;
   border: 1px solid var(--mat-sys-outline-variant);
   background-color: var(--mat-sys-surface-container-lowest);
@@ -701,12 +706,16 @@
 }
 
 .thinking-prose-content {
-  white-space: pre-wrap;
+  white-space: normal;
   word-break: break-word;
   font-size: 0.84rem;
   line-height: 1.55;
   color: var(--mat-sys-on-surface-variant);
   margin: 0;
+}
+
+.thinking-prose-text {
+  white-space: pre-wrap;
 }
 
 .stream-cursor {
@@ -760,10 +769,16 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.76rem;
   line-height: 1.45;
-  white-space: pre-wrap;
+  white-space: normal;
   word-break: break-word;
   max-height: 220px;
   overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.output-json-code {
+  font-family: inherit;
+  white-space: pre-wrap;
 }
 
 .call-error-notice {
@@ -788,7 +803,8 @@
 .jump-to-live-btn {
   position: absolute;
   bottom: 0.75rem;
-  right: 1rem;
+  right: 1.25rem;
+  z-index: 2;
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;

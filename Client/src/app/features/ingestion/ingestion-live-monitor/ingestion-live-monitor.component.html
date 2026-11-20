@@ -312,7 +312,10 @@
                           @if (call.thinkingText) {
                             <div class="thinking-prose-block">
                               <div class="thinking-prose-content">
-                                {{ call.thinkingText }}
+                                <span
+                                  class="thinking-prose-text"
+                                  [textContent]="formatThinkingText(call.thinkingText, call.phase)"
+                                ></span>
                                 @if (call.phase === 'Thinking') {
                                   <span class="stream-cursor" aria-hidden="true"></span>
                                 }
@@ -320,24 +323,32 @@
                             </div>
                           } @else if (call.phase === 'WaitingForModel') {
                             <p class="call-hint-text">Loading model / waiting for first token…</p>
-                          } @else if (
-                            !call.thinkingEnabled && !showJsonOutput() && call.phase !== 'Failed'
-                          ) {
+                          } @else if (!showJsonOutput() && call.phase !== 'Failed') {
                             <p class="call-hint-text">
-                              Thinking is disabled for this stage. Turn on
-                              <strong>Show JSON</strong>
-                              above to inspect the structured output stream.
+                              @if (!call.thinkingEnabled) {
+                                Thinking is disabled for this stage. Turn on
+                                <strong>Show JSON</strong>
+                                above to inspect the structured output stream.
+                              } @else {
+                                No thinking prose was emitted for this call. Turn on
+                                <strong>Show JSON</strong>
+                                above to inspect the structured output stream.
+                              }
                             </p>
                           }
 
                           @if (showJsonOutput() && call.outputText) {
                             <div class="output-json-block">
                               <div class="output-json-label">Structured Output</div>
-                              <pre
-                                class="output-json-pre">{{ call.outputText }}@if (call.phase === 'GeneratingOutput') {<span
-                                class="stream-cursor"
-                                aria-hidden="true"
-                              ></span>}</pre>
+                              <pre class="output-json-pre">
+                                <code
+                                  class="output-json-code"
+                                  [textContent]="formatOutputText(call.outputText, call.phase)"
+                                ></code>
+                                @if (call.phase === 'GeneratingOutput') {
+                                  <span class="stream-cursor" aria-hidden="true"></span>
+                                }
+                              </pre>
                             </div>
                           }
 

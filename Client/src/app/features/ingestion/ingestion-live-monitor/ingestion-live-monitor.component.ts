@@ -3,9 +3,8 @@ import {
   Component,
   DestroyRef,
   ElementRef,
-  afterNextRender,
+  afterRenderEffect,
   computed,
-  effect,
   inject,
   signal,
   viewChild,
@@ -161,8 +160,16 @@ export class IngestionLiveMonitorComponent {
       return '';
     }
     const last = w.calls[w.calls.length - 1];
-    return `${w.workloadId}:${w.calls.length}:${last?.callId ?? ''}:${last?.thinkingText.length ?? 0}:${last?.outputText.length ?? 0}:${last?.phase ?? ''}`;
+    const totalChars = w.calls.reduce(
+      (sum, call) => sum + call.thinkingText.length + call.outputText.length,
+      0,
+    );
+    return `${w.workloadId}:${w.calls.length}:${last?.callId ?? ''}:${totalChars}:${last?.phase ?? ''}`;
   });
+
+  private pendingProgrammaticScroll = false;
+  private lastKnownScrollTop = 0;
+  private scrollGuardFrameId: number | null = null;
 
   constructor() {
     interval(1000)
@@ -173,28 +180,31 @@ export class IngestionLiveMonitorComponent {
         }
       });
 
-    // Follow newly arrived stream tokens unless the user scrolled up to read earlier thoughts
-    effect(() => {
+    this.destroyRef.onDestroy(() => {
+      if (this.scrollGuardFrameId !== null && typeof cancelAnimationFrame === 'function') {
+        cancelAnimationFrame(this.scrollGuardFrameId);
+        this.scrollGuardFrameId = null;
+      }
+    });
+
+    // Follow newly arrived stream tokens after Angular commits DOM layout,
+    // unless the user scrolled up to read earlier thoughts.
+    afterRenderEffect(() => {
       const fingerprint = this.streamFingerprint();
       const open = this.isThoughtsOpen();
       const paused = this.isAutoScrollPaused();
+      this.showJsonOutput();
+      this.isTallViewport();
       if (!fingerprint || !open || paused) {
         return;
       }
-      queueMicrotask(() => this.scrollViewportToBottom());
-    });
-
-    afterNextRender(() => {
-      if (this.isThoughtsOpen() && !this.isAutoScrollPaused()) {
-        this.scrollViewportToBottom();
-      }
+      this.scrollViewportToBottom();
     });
   }
 
   selectWorkload(workloadId: string): void {
     this.userSelectedWorkloadId.set(workloadId);
     this.isAutoScrollPaused.set(false);
-    queueMicrotask(() => this.scrollViewportToBottom());
   }
 
   dismissWorkload(workloadId: string): void {
@@ -210,7 +220,6 @@ export class IngestionLiveMonitorComponent {
     this.writeBoolStorage(this.thoughtsOpenStorageKey, next);
     if (next) {
       this.isAutoScrollPaused.set(false);
-      queueMicrotask(() => this.scrollViewportToBottom());
     }
   }
 
@@ -263,13 +272,32 @@ export class IngestionLiveMonitorComponent {
     if (!el) {
       return;
     }
-    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const currentTop = el.scrollTop;
+    const distanceFromBottom = el.scrollHeight - currentTop - el.clientHeight;
+
+    if (this.pendingProgrammaticScroll) {
+      if (currentTop >= this.lastKnownScrollTop - 2) {
+        this.lastKnownScrollTop = currentTop;
+        return;
+      }
+      this.pendingProgrammaticScroll = false;
+    }
+
+    this.lastKnownScrollTop = currentTop;
     this.isAutoScrollPaused.set(distanceFromBottom > 48);
   }
 
   jumpToLive(): void {
     this.isAutoScrollPaused.set(false);
-    this.scrollViewportToBottom(true);
+    this.scrollViewportToBottom();
+  }
+
+  formatThinkingText(text: string, phase: LlmCallTraceDto['phase']): string {
+    return phase === 'Thinking' ? text.trimStart() : text.trim();
+  }
+
+  formatOutputText(text: string, phase: LlmCallTraceDto['phase']): string {
+    return phase === 'GeneratingOutput' ? text.trimStart() : text.trim();
   }
 
   onThumbError(workloadId: string): void {
@@ -375,15 +403,25 @@ export class IngestionLiveMonitorComponent {
     }
   }
 
-  private scrollViewportToBottom(smooth = false): void {
+  private scrollViewportToBottom(): void {
     const el = this.streamViewport()?.nativeElement;
     if (!el) {
       return;
     }
-    if (smooth && typeof el.scrollTo === 'function') {
-      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+    this.pendingProgrammaticScroll = true;
+    el.scrollTop = el.scrollHeight;
+    this.lastKnownScrollTop = el.scrollTop;
+
+    if (typeof requestAnimationFrame === 'function') {
+      if (this.scrollGuardFrameId !== null && typeof cancelAnimationFrame === 'function') {
+        cancelAnimationFrame(this.scrollGuardFrameId);
+      }
+      this.scrollGuardFrameId = requestAnimationFrame(() => {
+        this.scrollGuardFrameId = null;
+        this.pendingProgrammaticScroll = false;
+      });
     } else {
-      el.scrollTop = el.scrollHeight;
+      this.pendingProgrammaticScroll = false;
     }
   }
 
