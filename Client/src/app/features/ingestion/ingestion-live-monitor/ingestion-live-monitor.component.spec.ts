@@ -200,4 +200,28 @@ describe('IngestionLiveMonitorComponent', () => {
     expect(viewport.scrollTop).toBe(900);
     expect(fixture.nativeElement.querySelector('.jump-to-live-btn')).toBeNull();
   });
+
+  it('toggles fixed tall class on stream viewport via height toggle button', () => {
+    realtime.applySnapshot({ activeWorkloads: [sampleWorkload()], recentWorkloads: [] });
+    fixture.detectChanges();
+
+    const viewport = fixture.nativeElement.querySelector('.stream-viewport') as HTMLDivElement;
+    const toggleBtn = fixture.nativeElement.querySelector(
+      '.height-toggle-btn',
+    ) as HTMLButtonElement;
+
+    expect(viewport.classList.contains('tall')).toBe(false);
+    expect(toggleBtn.getAttribute('aria-label')).toBe('Expand stream height');
+
+    toggleBtn.click();
+    fixture.detectChanges();
+
+    expect(viewport.classList.contains('tall')).toBe(true);
+    expect(toggleBtn.getAttribute('aria-label')).toBe('Compact stream height');
+
+    toggleBtn.click();
+    fixture.detectChanges();
+
+    expect(viewport.classList.contains('tall')).toBe(false);
+  });
 });

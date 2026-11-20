@@ -548,7 +548,7 @@
 }
 
 .stream-viewport {
-  max-height: 300px;
+  height: 300px;
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: thin;
@@ -562,17 +562,19 @@
   background-color: var(--mat-sys-surface);
 
   &.tall {
-    max-height: 540px;
+    height: 540px;
   }
 }
 
 .stream-empty-state {
-  flex: 0 0 auto;
+  flex: 1 0 auto;
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 0.5rem;
   color: var(--mat-sys-on-surface-variant);
   font-size: 0.84rem;
+  text-align: center;
   padding: 0.4rem 0.2rem;
 
   mat-icon {

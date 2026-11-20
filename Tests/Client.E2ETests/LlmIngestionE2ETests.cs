@@ -2409,6 +2409,39 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
                 new() { Timeout = 15000 }
             );
 
+        // 3b. Verify stream viewport uses a fixed height from the start (compact 300px, expanded 540px)
+        //     so content below the monitor does not shift downward as tokens and sections stream in.
+        var streamViewport = monitor.Locator(".stream-viewport");
+        var heightToggleBtn = monitor.Locator("button.height-toggle-btn");
+        var midFlightCompactHeight = await streamViewport.EvaluateAsync<double>(
+            "el => Math.round(el.getBoundingClientRect().height)"
+        );
+        Assert.AreEqual(
+            300.0,
+            midFlightCompactHeight,
+            "Stream viewport should render at a fixed 300px compact height even with short content."
+        );
+
+        await heightToggleBtn.ClickAsync();
+        var midFlightExpandedHeight = await streamViewport.EvaluateAsync<double>(
+            "el => Math.round(el.getBoundingClientRect().height)"
+        );
+        Assert.AreEqual(
+            540.0,
+            midFlightExpandedHeight,
+            "Stream viewport should render at a fixed 540px expanded height when toggled tall."
+        );
+
+        await heightToggleBtn.ClickAsync();
+        var restoredCompactHeight = await streamViewport.EvaluateAsync<double>(
+            "el => Math.round(el.getBoundingClientRect().height)"
+        );
+        Assert.AreEqual(
+            300.0,
+            restoredCompactHeight,
+            "Stream viewport should return to a fixed 300px compact height when toggled back."
+        );
+
         // 4. Verify responsive rendering on 360px mobile viewport while active
         await Page.SetViewportSizeAsync(360, 800);
         await Expect(monitor).ToBeVisibleAsync();
@@ -2453,6 +2486,7 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
                   viewport.scrollTop = initialScrollHeight;
                   const topAfterScrollDown = viewport.scrollTop;
                   return {
+                    viewportHeight: Math.round(viewport.getBoundingClientRect().height),
                     cardCount: cards.length,
                     minCardHeight: cardHeights.length > 0 ? Math.min(...cardHeights) : 0,
                     allFlexShrinkZero: flexShrinks.every(v => v === '0'),
@@ -2464,6 +2498,11 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
                 }
                 """
             );
+        Assert.AreEqual(
+            300.0,
+            streamMetrics.GetProperty("viewportHeight").GetDouble(),
+            "Stream viewport must remain at a fixed 300px compact height after multiple calls complete."
+        );
         Assert.IsGreaterThanOrEqualTo(
             2,
             streamMetrics.GetProperty("cardCount").GetInt32(),
