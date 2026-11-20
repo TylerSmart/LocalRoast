@@ -7,6 +7,7 @@ import {
 } from '@angular/core';
 import { CDK_DRAG_CONFIG, DragDropConfig } from '@angular/cdk/drag-drop';
 import { MatIconRegistry } from '@angular/material/icon';
+import { MAT_TOOLTIP_DEFAULT_OPTIONS, MatTooltipDefaultOptions } from '@angular/material/tooltip';
 import { provideRouter, withInMemoryScrolling } from '@angular/router';
 import { routes } from './app.routes';
 import { authInterceptor } from './core/interceptors/auth.interceptor';
@@ -20,6 +21,13 @@ export const appDragDropConfig: DragDropConfig = {
   },
 };
 
+export const appTooltipConfig: MatTooltipDefaultOptions = {
+  showDelay: 0,
+  hideDelay: 0,
+  touchendHideDelay: 1500,
+  touchGestures: 'off',
+};
+
 export const appConfig: ApplicationConfig = {
   providers: [
     provideBrowserGlobalErrorListeners(),
@@ -29,6 +37,7 @@ export const appConfig: ApplicationConfig = {
     ),
     provideHttpClient(withInterceptors([authInterceptor])),
     { provide: CDK_DRAG_CONFIG, useValue: appDragDropConfig },
+    { provide: MAT_TOOLTIP_DEFAULT_OPTIONS, useValue: appTooltipConfig },
     provideAppInitializer(() => {
       inject(MatIconRegistry).setDefaultFontSetClass(
         'material-symbols-outlined',

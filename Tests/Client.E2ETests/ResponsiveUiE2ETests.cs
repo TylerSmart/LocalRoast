@@ -662,6 +662,79 @@ public sealed class ResponsiveUiE2ETests : E2ETestBase
         await AssertLayoutAsync(Page.Locator("app-shell"), "matcher-results");
     }
 
+    [TestMethod]
+    [DataRow(
+        "Android Chrome",
+        "Mozilla/5.0 (Linux; Android 15; Pixel 9 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Mobile Safari/537.36"
+    )]
+    [DataRow(
+        "iPad Safari",
+        "Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
+    )]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task MobileTouchDevices_TooltipButtonsDoNotBlockTouchScrolling(
+        string platformLabel,
+        string userAgent
+    )
+    {
+        await RegisterAndLoginAsync();
+        var recipeId = await SeedRecipeAsync();
+        var storageState = await Context.StorageStateAsync();
+
+        await using var mobileContext = await Browser.NewContextAsync(
+            new BrowserNewContextOptions
+            {
+                StorageState = storageState,
+                UserAgent = userAgent,
+                HasTouch = true,
+                IsMobile = true,
+                ViewportSize = new ViewportSize { Width = 360, Height = 740 },
+            }
+        );
+        mobileContext.SetDefaultTimeout(IsInteractiveDebugSession ? 0 : DefaultActionTimeoutMs);
+        mobileContext.SetDefaultNavigationTimeout(
+            IsInteractiveDebugSession ? 0 : DefaultNavigationTimeoutMs
+        );
+
+        var mobilePage = await mobileContext.NewPageAsync();
+        foreach (
+            var (route, readySelector) in new[]
+            {
+                ("recipes", ".recipe-card .edit-action"),
+                ($"recipes/{recipeId}", ".recipe-body-grid"),
+            }
+        )
+        {
+            await mobilePage.GotoAsync($"{ServerUrl}/{route}");
+            await Expect(mobilePage.Locator(readySelector).First).ToBeVisibleAsync();
+
+            var tooltipTriggerCount = await mobilePage
+                .Locator(".mat-mdc-tooltip-trigger")
+                .CountAsync();
+            Assert.IsGreaterThan(
+                0,
+                tooltipTriggerCount,
+                $"{platformLabel} ({route}): expected at least one matTooltip trigger to verify."
+            );
+
+            var blockedTriggers = await mobilePage.EvaluateAsync<string[]>(
+                """
+                () => Array.from(document.querySelectorAll('.mat-mdc-tooltip-trigger'))
+                    .filter(el => {
+                        const styleTouchAction = el.style.touchAction;
+                        const computedTouchAction = getComputedStyle(el).touchAction;
+                        return styleTouchAction === 'none' || computedTouchAction === 'none';
+                    })
+                    .map(el => `${el.tagName}.${el.className} (inline=${el.style.touchAction}, computed=${getComputedStyle(el).touchAction})`)
+                """
+            );
+            Assert.IsEmpty(
+                blockedTriggers,
+                $"{platformLabel} ({route}): matTooltip triggers must not set touch-action: none:\n{string.Join("\n", blockedTriggers)}"
+            );
+        }
+    }
+
     private async Task<string> CreateResponsiveShoppingListAsync()
     {
         responsiveShoppingListId = await Page.EvaluateAsync<string>(
