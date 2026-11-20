@@ -2098,4 +2098,348 @@ public sealed class LlmExtractionClientTests
         );
         Assert.AreEqual(1, payload.Proposals!.Count);
     }
+
+    [TestMethod]
+    public async Task ExecuteStructuredStage_OllamaNdjsonStreaming_StreamsThinkingAndContentWithThroughput()
+    {
+        using var tracker = new IngestionLiveTracker();
+        var ndjson = string.Join(
+            "\n",
+            [
+                JsonSerializer.Serialize(
+                    new
+                    {
+                        model = "gemma4:e4b",
+                        message = new
+                        {
+                            role = "assistant",
+                            content = "",
+                            thinking = "Step 1: ",
+                        },
+                        done = false,
+                    }
+                ),
+                JsonSerializer.Serialize(
+                    new
+                    {
+                        model = "gemma4:e4b",
+                        message = new
+                        {
+                            role = "assistant",
+                            content = "",
+                            thinking = "parse butter ingredient.",
+                        },
+                        done = false,
+                    }
+                ),
+                JsonSerializer.Serialize(
+                    new
+                    {
+                        model = "gemma4:e4b",
+                        message = new { role = "assistant", content = Stage1ButterJson[..25] },
+                        done = false,
+                    }
+                ),
+                JsonSerializer.Serialize(
+                    new
+                    {
+                        model = "gemma4:e4b",
+                        message = new { role = "assistant", content = Stage1ButterJson[25..] },
+                        done = false,
+                    }
+                ),
+                JsonSerializer.Serialize(
+                    new
+                    {
+                        model = "gemma4:e4b",
+                        message = new { role = "assistant", content = "" },
+                        done = true,
+                        done_reason = "stop",
+                        eval_count = 120,
+                        eval_duration = 2_000_000_000L,
+                    }
+                ),
+            ]
+        );
+
+        var handler = new MockHttpMessageHandler(request =>
+        {
+            using var body = JsonDocument.Parse(
+                request.Content!.ReadAsStringAsync().GetAwaiter().GetResult()
+            );
+            Assert.IsTrue(body.RootElement.GetProperty("stream").GetBoolean());
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(ndjson, Encoding.UTF8, "application/x-ndjson"),
+            };
+        });
+
+        var client = new LlmExtractionClient(new HttpClient(handler), liveTracker: tracker);
+        var config = new EffectiveLlmConnectionConfig(
+            LlmProvider.Ollama,
+            "http://localhost:11434",
+            null,
+            "gemma4:e4b",
+            null,
+            "5m",
+            30,
+            false,
+            EnableThinking: true
+        );
+
+        using (
+            var workload = tracker.BeginWorkload(
+                LlmWorkloadKind.RecipeIngestion,
+                "Butter Toast",
+                [new LlmWorkflowSegmentDto("stage1", "1. Extract", LlmWorkflowSegmentState.Active)]
+            )
+        )
+        {
+            var result = await client.ExecuteStructuredStageAsync<Stage1RecipeDto>(
+                config,
+                "stage1_extract_recipe",
+                [new("system", "Extract recipe."), new("user", TaggedSource)],
+                MultiStageSchemas.Stage1ExtractRecipeSchema
+            );
+
+            Assert.IsNotNull(result.Parsed);
+            Assert.IsNull(result.Error);
+            workload.CompleteWorkload();
+        }
+
+        var snapshot = tracker.GetSnapshot();
+        Assert.HasCount(1, snapshot.RecentWorkloads);
+        var call = snapshot.RecentWorkloads[0].Calls[0];
+        Assert.AreEqual("Step 1: parse butter ingredient.", call.ThinkingText);
+        Assert.AreEqual(Stage1ButterJson, call.OutputText);
+        Assert.AreEqual(120, call.EvalCount);
+        Assert.AreEqual(60.0, call.TokensPerSecond);
+    }
+
+    [TestMethod]
+    public async Task ExecuteStructuredStage_OllamaStreamingTruncatedWhileThinking_RetriesWithoutThinking()
+    {
+        var seenThinkFlags = new List<bool>();
+        var handler = new MockHttpMessageHandler(request =>
+        {
+            using var body = JsonDocument.Parse(
+                request.Content!.ReadAsStringAsync().GetAwaiter().GetResult()
+            );
+            var think = body.RootElement.GetProperty("think").GetBoolean();
+            seenThinkFlags.Add(think);
+
+            if (think)
+            {
+                var truncatedStream = string.Join(
+                    "\n",
+                    [
+                        JsonSerializer.Serialize(
+                            new
+                            {
+                                message = new
+                                {
+                                    role = "assistant",
+                                    content = "",
+                                    thinking = "Long loop...",
+                                },
+                                done = false,
+                            }
+                        ),
+                        JsonSerializer.Serialize(
+                            new
+                            {
+                                message = new { role = "assistant", content = "" },
+                                done = true,
+                                done_reason = "length",
+                            }
+                        ),
+                    ]
+                );
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(
+                        truncatedStream,
+                        Encoding.UTF8,
+                        "application/x-ndjson"
+                    ),
+                };
+            }
+
+            return OllamaReply(Stage1ButterJson);
+        });
+
+        var client = new LlmExtractionClient(new HttpClient(handler));
+        var config = new EffectiveLlmConnectionConfig(
+            LlmProvider.Ollama,
+            "http://localhost:11434",
+            null,
+            "gemma4:e4b",
+            null,
+            "5m",
+            30,
+            false,
+            EnableThinking: true
+        );
+
+        var result = await client.ExecuteStructuredStageAsync<Stage1RecipeDto>(
+            config,
+            "stage1_extract_recipe",
+            [new("system", "Extract recipe."), new("user", TaggedSource)],
+            MultiStageSchemas.Stage1ExtractRecipeSchema
+        );
+
+        Assert.IsNotNull(result.Parsed);
+        CollectionAssert.AreEqual(new[] { true, false }, seenThinkFlags);
+    }
+
+    [TestMethod]
+    public async Task ExecuteStructuredStage_OpenAiSseStreaming_StreamsReasoningAndContent()
+    {
+        using var tracker = new IngestionLiveTracker();
+        var sse = string.Join(
+            "\n\n",
+            [
+                "data: "
+                    + JsonSerializer.Serialize(
+                        new
+                        {
+                            choices = new[]
+                            {
+                                new
+                                {
+                                    delta = new { content = "", reasoning = "Checking steps. " },
+                                    finish_reason = (string?)null,
+                                },
+                            },
+                        }
+                    ),
+                "data: "
+                    + JsonSerializer.Serialize(
+                        new
+                        {
+                            choices = new[]
+                            {
+                                new
+                                {
+                                    delta = new
+                                    {
+                                        content = "",
+                                        reasoning_content = "All units valid.",
+                                    },
+                                    finish_reason = (string?)null,
+                                },
+                            },
+                        }
+                    ),
+                "data: "
+                    + JsonSerializer.Serialize(
+                        new
+                        {
+                            choices = new[]
+                            {
+                                new
+                                {
+                                    delta = new { content = Stage1ButterJson },
+                                    finish_reason = "stop",
+                                },
+                            },
+                        }
+                    ),
+                "data: [DONE]",
+            ]
+        );
+
+        var handler = new MockHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(sse, Encoding.UTF8, "text/event-stream"),
+        });
+
+        var client = new LlmExtractionClient(new HttpClient(handler), liveTracker: tracker);
+        var config = new EffectiveLlmConnectionConfig(
+            LlmProvider.OpenAiCompatible,
+            "http://localhost:1234/v1",
+            null,
+            "gemma4:e4b",
+            null,
+            "5m",
+            30,
+            false,
+            EnableThinking: true
+        );
+
+        var result = await client.ExecuteStructuredStageAsync<Stage1RecipeDto>(
+            config,
+            "stage1_extract_recipe",
+            [new("system", "Extract recipe."), new("user", TaggedSource)],
+            MultiStageSchemas.Stage1ExtractRecipeSchema
+        );
+
+        Assert.IsNotNull(result.Parsed);
+        var snapshot = tracker.GetSnapshot();
+        Assert.HasCount(1, snapshot.RecentWorkloads);
+        Assert.AreEqual(
+            "Checking steps. All units valid.",
+            snapshot.RecentWorkloads[0].Calls[0].ThinkingText
+        );
+        Assert.AreEqual(Stage1ButterJson, snapshot.RecentWorkloads[0].Calls[0].OutputText);
+    }
+
+    [TestMethod]
+    public async Task ExecuteStructuredStage_InlineThinkTagsSplitAcrossChunks_SplitsThinkingAndOutput()
+    {
+        using var tracker = new IngestionLiveTracker();
+        var ndjson = string.Join(
+            "\n",
+            [
+                JsonSerializer.Serialize(
+                    new { message = new { role = "assistant", content = "<thi" }, done = false }
+                ),
+                JsonSerializer.Serialize(
+                    new
+                    {
+                        message = new { role = "assistant", content = "nk>Reasoning text</thi" },
+                        done = false,
+                    }
+                ),
+                JsonSerializer.Serialize(
+                    new
+                    {
+                        message = new { role = "assistant", content = $"nk>{Stage1ButterJson}" },
+                        done = true,
+                        done_reason = "stop",
+                    }
+                ),
+            ]
+        );
+
+        var handler = new MockHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(ndjson, Encoding.UTF8, "application/x-ndjson"),
+        });
+
+        var client = new LlmExtractionClient(new HttpClient(handler), liveTracker: tracker);
+        var config = new EffectiveLlmConnectionConfig(
+            LlmProvider.Ollama,
+            "http://localhost:11434",
+            null,
+            "deepseek-r1:8b",
+            null,
+            "5m",
+            30,
+            false,
+            EnableThinking: true
+        );
+
+        var result = await client.ExecuteStructuredStageAsync<Stage1RecipeDto>(
+            config,
+            "stage1_extract_recipe",
+            [new("system", "Extract recipe."), new("user", TaggedSource)],
+            MultiStageSchemas.Stage1ExtractRecipeSchema
+        );
+
+        Assert.IsNotNull(result.Parsed);
+        var call = tracker.GetSnapshot().RecentWorkloads[0].Calls[0];
+        Assert.AreEqual("Reasoning text", call.ThinkingText);
+        Assert.AreEqual(Stage1ButterJson, call.OutputText);
+    }
 }

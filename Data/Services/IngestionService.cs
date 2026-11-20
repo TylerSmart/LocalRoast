@@ -16,7 +16,8 @@ public sealed class IngestionService(
     IRecipeService recipeService,
     IMediaStorageService mediaStorageService,
     IIngestionQueueSignal queueSignal,
-    ILlmSettingsService? llmSettingsService = null
+    ILlmSettingsService? llmSettingsService = null,
+    IIngestionRealtimeNotifier? realtimeNotifier = null
 ) : IIngestionService
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -538,6 +539,7 @@ public sealed class IngestionService(
         await dbContext.SaveChangesAsync(cancellationToken);
 
         queueSignal.NotifyWorkAvailable();
+        await NotifyQueueChangedSafeAsync("enqueued", cancellationToken: cancellationToken);
 
         return newJobs
             .Select(j => new IngestionJobSummaryDto(
@@ -659,6 +661,7 @@ public sealed class IngestionService(
         await dbContext.SaveChangesAsync(cancellationToken);
 
         queueSignal.NotifyWorkAvailable();
+        await NotifyQueueChangedSafeAsync("enqueued", job.Id, cancellationToken);
 
         return new IngestionJobSummaryDto(
             Id: job.Id,
@@ -754,6 +757,7 @@ public sealed class IngestionService(
         await dbContext.SaveChangesAsync(cancellationToken);
 
         queueSignal.NotifyWorkAvailable();
+        await NotifyQueueChangedSafeAsync("enqueued", job.Id, cancellationToken);
 
         return new IngestionJobSummaryDto(
             Id: job.Id,
@@ -899,6 +903,7 @@ public sealed class IngestionService(
         await dbContext.SaveChangesAsync(cancellationToken);
 
         queueSignal.NotifyWorkAvailable();
+        await NotifyQueueChangedSafeAsync("enqueued", cancellationToken: cancellationToken);
 
         return newJobs
             .Select(job => new IngestionJobSummaryDto(
@@ -1073,6 +1078,7 @@ public sealed class IngestionService(
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
+        await NotifyQueueChangedSafeAsync("draft-saved", job.Id, cancellationToken);
 
         return await GetJobByIdAsync(id, cancellationToken);
     }
@@ -1212,6 +1218,7 @@ public sealed class IngestionService(
         await dbContext.SaveChangesAsync(cancellationToken);
 
         queueSignal.NotifyWorkAvailable();
+        await NotifyQueueChangedSafeAsync("enqueued", job.Id, cancellationToken);
 
         return new IngestionJobSummaryDto(
             Id: job.Id,
@@ -1276,6 +1283,7 @@ public sealed class IngestionService(
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
+        await NotifyQueueChangedSafeAsync("draft-saved", job.Id, cancellationToken);
 
         return await GetJobByIdAsync(id, cancellationToken);
     }
@@ -1532,6 +1540,8 @@ public sealed class IngestionService(
             cancellationToken
         );
 
+        await NotifyQueueChangedSafeAsync("approved", job.Id, cancellationToken);
+
         return (await recipeService.GetRecipeByIdAsync(createdRecipe.Id, cancellationToken))
             ?? createdRecipe;
     }
@@ -1587,6 +1597,7 @@ public sealed class IngestionService(
         await dbContext.SaveChangesAsync(cancellationToken);
 
         queueSignal.NotifyWorkAvailable();
+        await NotifyQueueChangedSafeAsync("retried", job.Id, cancellationToken);
 
         return ToSummary(job);
     }
@@ -1648,6 +1659,7 @@ public sealed class IngestionService(
         await dbContext.SaveChangesAsync(cancellationToken);
 
         queueSignal.NotifyWorkAvailable();
+        await NotifyQueueChangedSafeAsync("run-now", job.Id, cancellationToken);
 
         return ToSummary(job);
     }
@@ -1713,6 +1725,7 @@ public sealed class IngestionService(
         await dbContext.SaveChangesAsync(cancellationToken);
 
         queueSignal.NotifyWorkAvailable();
+        await NotifyQueueChangedSafeAsync("refine-now", job.Id, cancellationToken);
 
         return ToSummary(job);
     }
@@ -1765,6 +1778,7 @@ public sealed class IngestionService(
         await dbContext.SaveChangesAsync(cancellationToken);
 
         queueSignal.NotifyWorkAvailable();
+        await NotifyQueueChangedSafeAsync("retried-waiting", cancellationToken: cancellationToken);
 
         return new RetryWaitingJobsResultDto(waitingJobs.Count);
     }
@@ -1861,6 +1875,7 @@ public sealed class IngestionService(
         await dbContext.SaveChangesAsync(cancellationToken);
 
         queueSignal.NotifyWorkAvailable();
+        await NotifyQueueChangedSafeAsync("retried-batch", cancellationToken: cancellationToken);
 
         return new RetryBatchJobsResultDto(jobs.Count);
     }
@@ -1967,6 +1982,7 @@ public sealed class IngestionService(
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
+        await NotifyQueueChangedSafeAsync("discarded", job.Id, cancellationToken);
 
         return true;
     }
@@ -2195,5 +2211,30 @@ public sealed class IngestionService(
         }
 
         return new IngestionReviewDiagnosticsDto(validationIssues, qualityWarnings, targeted);
+    }
+
+    private async Task NotifyQueueChangedSafeAsync(
+        string reason,
+        Guid? jobId = null,
+        CancellationToken cancellationToken = default
+    )
+    {
+        if (realtimeNotifier is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var summary = await GetSummaryAsync(cancellationToken);
+            await realtimeNotifier.NotifyQueueChangedAsync(
+                new IngestionQueueChangedEventDto(Reason: reason, JobId: jobId, Summary: summary),
+                cancellationToken
+            );
+        }
+        catch
+        {
+            // Non-fatal realtime notification error
+        }
     }
 }

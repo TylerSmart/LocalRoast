@@ -1,0 +1,374 @@
+@if (hasAnyWorkload()) {
+  @let workload = selectedWorkload();
+  @if (workload) {
+    <section class="live-monitor-section" role="region" aria-label="Live LLM activity monitor">
+      <mat-card
+        class="live-monitor-card"
+        [class.is-running]="workload.status === 'Running'"
+        [class.is-completed]="workload.status === 'Completed'"
+        [class.is-failed]="workload.status === 'Failed'"
+      >
+        <!-- Parallel / Recent Workload Switcher Strip -->
+        @if (showWorkloadSelector()) {
+          <div
+            class="workload-selector-strip"
+            role="tablist"
+            aria-label="Active and recent LLM tasks"
+          >
+            @for (item of allWorkloads(); track item.workloadId) {
+              <button
+                type="button"
+                class="workload-tab-pill"
+                [class.selected]="item.workloadId === workload.workloadId"
+                [class.running]="item.status === 'Running'"
+                [class.completed]="item.status === 'Completed'"
+                [class.failed]="item.status === 'Failed'"
+                role="tab"
+                [attr.aria-selected]="item.workloadId === workload.workloadId"
+                (click)="selectWorkload(item.workloadId)"
+              >
+                @if (item.status === 'Running') {
+                  <span class="pill-pulse-dot" aria-hidden="true"></span>
+                } @else if (item.status === 'Completed') {
+                  <mat-icon class="pill-state-icon">check_circle</mat-icon>
+                } @else if (item.status === 'Failed') {
+                  <mat-icon class="pill-state-icon">error</mat-icon>
+                } @else {
+                  <mat-icon class="pill-state-icon">pause_circle</mat-icon>
+                }
+                <span class="pill-kind">{{ getKindLabel(item.kind) }}:</span>
+                <span class="pill-title">{{ item.title }}</span>
+              </button>
+            }
+          </div>
+        }
+
+        <!-- Workload Header -->
+        <div class="monitor-header">
+          <div class="monitor-identity">
+            <div class="monitor-avatar" aria-hidden="true">
+              @if (workload.thumbnailUrl && !failedThumbIds().has(workload.workloadId)) {
+                <img
+                  [src]="workload.thumbnailUrl"
+                  [alt]="workload.title"
+                  (error)="onThumbError(workload.workloadId)"
+                />
+              } @else {
+                <mat-icon>{{ getWorkloadIcon(workload.kind, workload.channel) }}</mat-icon>
+              }
+            </div>
+
+            <div class="monitor-title-block">
+              <div class="monitor-badges-row">
+                @if (workload.status === 'Running') {
+                  <span class="state-chip running">
+                    <span class="live-dot" aria-hidden="true"></span>
+                    <span>Working</span>
+                  </span>
+                } @else if (workload.status === 'Completed') {
+                  <span class="state-chip completed">
+                    <mat-icon>check_circle</mat-icon>
+                    <span>Recent · Completed</span>
+                  </span>
+                } @else if (workload.status === 'Failed') {
+                  <span class="state-chip failed">
+                    <mat-icon>error_outline</mat-icon>
+                    <span>Recent · Failed</span>
+                  </span>
+                } @else {
+                  <span class="state-chip canceled">
+                    <mat-icon>pause_circle</mat-icon>
+                    <span>Paused / Canceled</span>
+                  </span>
+                }
+
+                <span class="kind-chip">{{ getKindLabel(workload.kind) }}</span>
+
+                @if (workload.activeModel) {
+                  <span class="model-chip" [matTooltip]="'Active model: ' + workload.activeModel">
+                    <mat-icon>smart_toy</mat-icon>
+                    <span>{{ workload.activeModel }}</span>
+                  </span>
+                }
+              </div>
+
+              <h2 class="monitor-title">{{ workload.title }}</h2>
+
+              @if (workload.subtitle || workload.statusDetail) {
+                <p class="monitor-subtitle">
+                  {{ workload.statusDetail || workload.subtitle }}
+                </p>
+              }
+            </div>
+          </div>
+
+          <div class="monitor-metrics">
+            @if (activeThroughput(); as tps) {
+              <span class="metric-pill throughput-pill" matTooltip="Model generation throughput">
+                <mat-icon>speed</mat-icon>
+                <span>{{ tps.toFixed(1) }} tok/s</span>
+              </span>
+            }
+
+            @if (elapsedDisplay(); as elapsed) {
+              <span class="metric-pill elapsed-pill" matTooltip="Elapsed duration">
+                <mat-icon>schedule</mat-icon>
+                <span>{{ elapsed }}</span>
+              </span>
+            }
+
+            @if (workload.status !== 'Running') {
+              <button
+                mat-icon-button
+                type="button"
+                class="dismiss-recent-btn"
+                (click)="dismissWorkload(workload.workloadId)"
+                matTooltip="Dismiss completed activity"
+                aria-label="Dismiss completed activity"
+              >
+                <mat-icon>close</mat-icon>
+              </button>
+            }
+          </div>
+        </div>
+
+        <!-- Segmented Workflow Progress Bar -->
+        @if (workload.segments.length > 0) {
+          <div class="workflow-progress-section">
+            <div
+              class="segments-track"
+              role="progressbar"
+              [attr.aria-label]="'Workflow progress for ' + workload.title"
+              [attr.aria-valuemin]="0"
+              [attr.aria-valuemax]="100"
+              [attr.aria-valuenow]="progressPercent()"
+            >
+              @for (segment of workload.segments; track segment.key) {
+                <div
+                  class="workflow-segment"
+                  [class.seg-pending]="segment.state === 'Pending'"
+                  [class.seg-active]="segment.state === 'Active'"
+                  [class.seg-completed]="segment.state === 'Completed'"
+                  [class.seg-skipped]="segment.state === 'Skipped'"
+                  [class.seg-failed]="segment.state === 'Failed'"
+                  [matTooltip]="getSegmentTooltip(segment)"
+                >
+                  <div class="segment-bar">
+                    @if (segment.state === 'Active') {
+                      <div class="segment-active-shimmer"></div>
+                    }
+                  </div>
+                  <div class="segment-caption">
+                    @if (segment.state === 'Completed') {
+                      <mat-icon class="segment-state-icon">check</mat-icon>
+                    } @else if (segment.state === 'Skipped') {
+                      <mat-icon class="segment-state-icon">remove</mat-icon>
+                    } @else if (segment.state === 'Failed') {
+                      <mat-icon class="segment-state-icon">close</mat-icon>
+                    }
+                    <span class="segment-label">{{ segment.label }}</span>
+                  </div>
+                </div>
+              }
+            </div>
+
+            <div class="active-stage-summary">
+              @if (activeSegment(); as currentSeg) {
+                <div class="active-stage-left">
+                  <span class="stage-step-pill">
+                    Step {{ activeSegmentIndex() + 1 }} of {{ workload.segments.length }}
+                  </span>
+                  <strong class="stage-current-name">{{ currentSeg.label }}</strong>
+                  @if (currentSeg.subStatus) {
+                    <span class="stage-substatus-chip">{{ currentSeg.subStatus }}</span>
+                  }
+                </div>
+              }
+              <span class="stage-progress-pct">{{ progressPercent() }}%</span>
+            </div>
+          </div>
+        }
+
+        <!-- Chat-App Style Thought History & Stream Drawer -->
+        <div class="stream-drawer">
+          <div class="stream-toolbar">
+            <button
+              type="button"
+              class="thoughts-toggle-btn"
+              (click)="toggleThoughtsOpen()"
+              [attr.aria-expanded]="isThoughtsOpen()"
+              aria-label="Toggle model thinking and live stream history"
+            >
+              <mat-icon class="thoughts-icon">psychology</mat-icon>
+              <span>Model Thinking &amp; Stream</span>
+              @if (workload.calls.length > 0) {
+                <span class="call-count-badge">
+                  {{ workload.calls.length }}
+                  {{ workload.calls.length === 1 ? 'call' : 'calls' }}
+                </span>
+              }
+              <mat-icon class="chevron-icon">
+                {{ isThoughtsOpen() ? 'expand_less' : 'expand_more' }}
+              </mat-icon>
+            </button>
+
+            @if (isThoughtsOpen()) {
+              <div class="stream-toolbar-actions">
+                <button
+                  type="button"
+                  class="json-toggle-pill"
+                  [class.active]="showJsonOutput()"
+                  [attr.aria-pressed]="showJsonOutput()"
+                  (click)="toggleShowJsonOutput()"
+                  matTooltip="Toggle raw structured JSON output alongside model thoughts"
+                >
+                  <mat-icon>code</mat-icon>
+                  <span>Show JSON</span>
+                </button>
+
+                <button
+                  mat-icon-button
+                  type="button"
+                  class="height-toggle-btn"
+                  (click)="toggleViewportHeight()"
+                  [matTooltip]="isTallViewport() ? 'Compact stream height' : 'Expand stream height'"
+                  [attr.aria-label]="
+                    isTallViewport() ? 'Compact stream height' : 'Expand stream height'
+                  "
+                >
+                  <mat-icon>{{ isTallViewport() ? 'close_fullscreen' : 'open_in_full' }}</mat-icon>
+                </button>
+              </div>
+            }
+          </div>
+
+          @if (isThoughtsOpen()) {
+            <div class="stream-viewport-shell">
+              <div
+                #streamViewport
+                class="stream-viewport"
+                [class.tall]="isTallViewport()"
+                (scroll)="onViewportScroll()"
+                role="log"
+                aria-live="polite"
+                aria-label="Model thinking and activity history"
+              >
+                @if (workload.calls.length === 0) {
+                  <div class="stream-empty-state">
+                    <mat-icon>hourglass_top</mat-icon>
+                    <span>
+                      {{
+                        workload.status === 'Running'
+                          ? 'Preparing workflow step… waiting for the first LLM call.'
+                          : 'No LLM calls were recorded for this task.'
+                      }}
+                    </span>
+                  </div>
+                } @else {
+                  @for (call of workload.calls; track call.callId; let isLast = $last) {
+                    @let expanded = isCallExpanded(call, isLast);
+                    <div
+                      class="call-trace-card"
+                      [class.phase-thinking]="call.phase === 'Thinking'"
+                      [class.phase-generating]="call.phase === 'GeneratingOutput'"
+                      [class.phase-completed]="call.phase === 'Completed'"
+                      [class.phase-failed]="call.phase === 'Failed'"
+                    >
+                      <button
+                        type="button"
+                        class="call-trace-header"
+                        (click)="toggleCallExpanded(call, isLast)"
+                        [attr.aria-expanded]="expanded"
+                      >
+                        <div class="call-trace-title-row">
+                          @if (call.phase === 'Thinking') {
+                            <mat-icon class="call-phase-icon thinking-pulse">psychology</mat-icon>
+                          } @else if (call.phase === 'WaitingForModel') {
+                            <mat-icon class="call-phase-icon spinning">sync</mat-icon>
+                          } @else if (call.phase === 'GeneratingOutput') {
+                            <mat-icon class="call-phase-icon generating-pulse"
+                              >data_object</mat-icon
+                            >
+                          } @else if (call.phase === 'Completed') {
+                            <mat-icon class="call-phase-icon completed-icon">check_circle</mat-icon>
+                          } @else {
+                            <mat-icon class="call-phase-icon failed-icon">error_outline</mat-icon>
+                          }
+
+                          <span class="call-stage-label">{{ call.stageLabel }}</span>
+                          <span class="call-model-tag">{{ call.model }}</span>
+                        </div>
+
+                        <div class="call-trace-meta-row">
+                          <span class="call-phase-summary">{{ getCallPhaseSummary(call) }}</span>
+                          <mat-icon class="call-chevron">
+                            {{ expanded ? 'expand_less' : 'expand_more' }}
+                          </mat-icon>
+                        </div>
+                      </button>
+
+                      @if (expanded) {
+                        <div class="call-trace-body">
+                          @if (call.thinkingText) {
+                            <div class="thinking-prose-block">
+                              <div class="thinking-prose-content">
+                                {{ call.thinkingText }}
+                                @if (call.phase === 'Thinking') {
+                                  <span class="stream-cursor" aria-hidden="true"></span>
+                                }
+                              </div>
+                            </div>
+                          } @else if (call.phase === 'WaitingForModel') {
+                            <p class="call-hint-text">Loading model / waiting for first token…</p>
+                          } @else if (
+                            !call.thinkingEnabled && !showJsonOutput() && call.phase !== 'Failed'
+                          ) {
+                            <p class="call-hint-text">
+                              Thinking is disabled for this stage. Turn on
+                              <strong>Show JSON</strong>
+                              above to inspect the structured output stream.
+                            </p>
+                          }
+
+                          @if (showJsonOutput() && call.outputText) {
+                            <div class="output-json-block">
+                              <div class="output-json-label">Structured Output</div>
+                              <pre
+                                class="output-json-pre">{{ call.outputText }}@if (call.phase === 'GeneratingOutput') {<span
+                                class="stream-cursor"
+                                aria-hidden="true"
+                              ></span>}</pre>
+                            </div>
+                          }
+
+                          @if (call.errorMessage) {
+                            <div class="call-error-notice" role="alert">
+                              <mat-icon>warning</mat-icon>
+                              <span>{{ call.errorMessage }}</span>
+                            </div>
+                          }
+                        </div>
+                      }
+                    </div>
+                  }
+                }
+              </div>
+
+              @if (isAutoScrollPaused() && workload.status === 'Running') {
+                <button
+                  type="button"
+                  class="jump-to-live-btn"
+                  (click)="jumpToLive()"
+                  aria-label="Jump to latest live output"
+                >
+                  <mat-icon>arrow_downward</mat-icon>
+                  <span>Jump to live</span>
+                </button>
+              }
+            </div>
+          }
+        </div>
+      </mat-card>
+    </section>
+  }
+}

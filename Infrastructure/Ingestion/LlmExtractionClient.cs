@@ -18,7 +18,8 @@ namespace App.Infrastructure.Ingestion;
 public sealed class LlmExtractionClient(
     HttpClient httpClient,
     ILlmRequestGate? requestGate = null,
-    ILogger<LlmExtractionClient>? logger = null
+    ILogger<LlmExtractionClient>? logger = null,
+    IIngestionLiveTracker? liveTracker = null
 ) : ILlmExtractionClient
 {
     // OpenAI-compatible servers may reject max_tokens larger than the remaining context, so
@@ -335,113 +336,141 @@ public sealed class LlmExtractionClient(
         var results = new List<float[]>(inputs.Count);
         const int batchSize = 64;
 
-        for (var offset = 0; offset < inputs.Count; offset += batchSize)
+        using var callScope = liveTracker?.BeginLlmCall(
+            stageKey: "embeddings",
+            stageLabel: $"Generate Embeddings ({inputs.Count} text{(inputs.Count == 1 ? "" : "s")})",
+            model: model,
+            thinkingEnabled: false,
+            fallbackWorkloadTitle: $"Generating {inputs.Count} embedding(s)",
+            fallbackKind: LlmWorkloadKind.EmbeddingSync
+        );
+
+        try
         {
-            var chunkCount = Math.Min(batchSize, inputs.Count - offset);
-            var chunk = new string[chunkCount];
-            for (var i = 0; i < chunkCount; i++)
+            for (var offset = 0; offset < inputs.Count; offset += batchSize)
             {
-                chunk[i] = inputs[offset + i];
-            }
-
-            using var cts = new CancellationTokenSource(timeout);
-            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
-                cancellationToken,
-                cts.Token
-            );
-
-            var payloadJson = JsonSerializer.Serialize(new { model, input = chunk });
-            using var response = await SendWithRateLimitRetryAsync(
-                () =>
+                var chunkCount = Math.Min(batchSize, inputs.Count - offset);
+                var chunk = new string[chunkCount];
+                for (var i = 0; i < chunkCount; i++)
                 {
-                    var req = new HttpRequestMessage(HttpMethod.Post, embeddingsUrl)
-                    {
-                        Content = new StringContent(payloadJson, Encoding.UTF8, "application/json"),
-                    };
-                    if (!string.IsNullOrWhiteSpace(config.ApiKey))
-                    {
-                        req.Headers.Authorization = new AuthenticationHeaderValue(
-                            "Bearer",
-                            config.ApiKey.Trim()
-                        );
-                    }
-                    return req;
-                },
-                config,
-                linkedCts.Token
-            );
+                    chunk[i] = inputs[offset + i];
+                }
 
-            await EnsureSuccessfulLlmResponseAsync(response, linkedCts.Token, config);
-            var body = await response.Content.ReadAsStringAsync(linkedCts.Token);
-            using var doc = JsonDocument.Parse(body);
-            if (
-                !doc.RootElement.TryGetProperty("data", out var dataProp)
-                || dataProp.ValueKind != JsonValueKind.Array
-            )
-            {
-                throw new InvalidOperationException(
-                    "Embeddings endpoint response did not include a 'data' array."
+                using var cts = new CancellationTokenSource(timeout);
+                using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
+                    cancellationToken,
+                    cts.Token
                 );
-            }
 
-            var indexedVectors = new SortedDictionary<int, float[]>();
-            var fallbackIndex = 0;
-            foreach (var item in dataProp.EnumerateArray())
-            {
-                var idx =
-                    item.TryGetProperty("index", out var indexProp)
-                    && indexProp.TryGetInt32(out var parsedIdx)
-                        ? parsedIdx
-                        : fallbackIndex;
-                fallbackIndex++;
+                var payloadJson = JsonSerializer.Serialize(new { model, input = chunk });
+                using var response = await SendWithRateLimitRetryAsync(
+                    () =>
+                    {
+                        var req = new HttpRequestMessage(HttpMethod.Post, embeddingsUrl)
+                        {
+                            Content = new StringContent(
+                                payloadJson,
+                                Encoding.UTF8,
+                                "application/json"
+                            ),
+                        };
+                        if (!string.IsNullOrWhiteSpace(config.ApiKey))
+                        {
+                            req.Headers.Authorization = new AuthenticationHeaderValue(
+                                "Bearer",
+                                config.ApiKey.Trim()
+                            );
+                        }
+                        return req;
+                    },
+                    config,
+                    linkedCts.Token
+                );
 
+                await EnsureSuccessfulLlmResponseAsync(response, linkedCts.Token, config);
+                var body = await response.Content.ReadAsStringAsync(linkedCts.Token);
+                using var doc = JsonDocument.Parse(body);
                 if (
-                    !item.TryGetProperty("embedding", out var embProp)
-                    || embProp.ValueKind != JsonValueKind.Array
+                    !doc.RootElement.TryGetProperty("data", out var dataProp)
+                    || dataProp.ValueKind != JsonValueKind.Array
                 )
                 {
                     throw new InvalidOperationException(
-                        "Embedding item in response did not include an 'embedding' array."
+                        "Embeddings endpoint response did not include a 'data' array."
                     );
                 }
 
-                var vec = new float[embProp.GetArrayLength()];
-                var pos = 0;
-                double sumSq = 0;
-                foreach (var val in embProp.EnumerateArray())
+                var indexedVectors = new SortedDictionary<int, float[]>();
+                var fallbackIndex = 0;
+                foreach (var item in dataProp.EnumerateArray())
                 {
-                    var f = val.GetSingle();
-                    vec[pos++] = f;
-                    sumSq += f * (double)f;
-                }
+                    var idx =
+                        item.TryGetProperty("index", out var indexProp)
+                        && indexProp.TryGetInt32(out var parsedIdx)
+                            ? parsedIdx
+                            : fallbackIndex;
+                    fallbackIndex++;
 
-                var norm = Math.Sqrt(sumSq);
-                if (norm > 1e-8)
-                {
-                    var inv = (float)(1.0 / norm);
-                    for (var j = 0; j < vec.Length; j++)
+                    if (
+                        !item.TryGetProperty("embedding", out var embProp)
+                        || embProp.ValueKind != JsonValueKind.Array
+                    )
                     {
-                        vec[j] *= inv;
+                        throw new InvalidOperationException(
+                            "Embedding item in response did not include an 'embedding' array."
+                        );
                     }
+
+                    var vec = new float[embProp.GetArrayLength()];
+                    var pos = 0;
+                    double sumSq = 0;
+                    foreach (var val in embProp.EnumerateArray())
+                    {
+                        var f = val.GetSingle();
+                        vec[pos++] = f;
+                        sumSq += f * (double)f;
+                    }
+
+                    var norm = Math.Sqrt(sumSq);
+                    if (norm > 1e-8)
+                    {
+                        var inv = (float)(1.0 / norm);
+                        for (var j = 0; j < vec.Length; j++)
+                        {
+                            vec[j] *= inv;
+                        }
+                    }
+
+                    indexedVectors[idx] = vec;
                 }
 
-                indexedVectors[idx] = vec;
+                if (indexedVectors.Count != chunkCount)
+                {
+                    throw new InvalidOperationException(
+                        $"Embeddings endpoint returned {indexedVectors.Count} vectors for {chunkCount} inputs."
+                    );
+                }
+
+                foreach (var kvp in indexedVectors)
+                {
+                    results.Add(kvp.Value);
+                }
+
+                callScope?.UpdateProgress(evalCount: results.Count);
             }
 
-            if (indexedVectors.Count != chunkCount)
-            {
-                throw new InvalidOperationException(
-                    $"Embeddings endpoint returned {indexedVectors.Count} vectors for {chunkCount} inputs."
-                );
-            }
-
-            foreach (var kvp in indexedVectors)
-            {
-                results.Add(kvp.Value);
-            }
+            var dims = results.Count > 0 ? results[0].Length : 0;
+            callScope?.AppendOutput(
+                $"Generated {results.Count} L2-normalized {dims}-dim embedding vector(s)."
+            );
+            callScope?.Complete(evalCount: results.Count);
+            return [.. results];
         }
-
-        return [.. results];
+        catch (Exception ex)
+        {
+            callScope?.Fail(ex.Message);
+            throw;
+        }
     }
 
     public async Task<LlmSubstitutionPayload> SuggestIngredientSubstitutionsAsync(
@@ -783,7 +812,20 @@ public sealed class LlmExtractionClient(
             cts.Token
         );
 
-        string responseContent;
+        var (stageKey, stageLabel) = MapStageDisplay(schemaName);
+        var modelName = config.TextModel!.Trim();
+        using var callScope = liveTracker?.BeginLlmCall(
+            stageKey: stageKey,
+            stageLabel: stageLabel,
+            model: modelName,
+            thinkingEnabled: enableThinking,
+            fallbackWorkloadTitle: stageLabel,
+            fallbackKind: schemaName.Contains("meal_plan", StringComparison.OrdinalIgnoreCase)
+                ? LlmWorkloadKind.MealPlanDraft
+                : LlmWorkloadKind.KitchenHelper
+        );
+
+        StreamedLlmResult streamed;
 
         try
         {
@@ -802,8 +844,8 @@ public sealed class LlmExtractionClient(
 
                 var payload = new
                 {
-                    model = config.TextModel!.Trim(),
-                    stream = false,
+                    model = modelName,
+                    stream = true,
                     think = enableThinking,
                     keep_alive = string.IsNullOrWhiteSpace(config.OllamaKeepAlive)
                         ? "5m"
@@ -830,12 +872,16 @@ public sealed class LlmExtractionClient(
                             ),
                         },
                     config,
-                    linkedCts.Token
+                    linkedCts.Token,
+                    HttpCompletionOption.ResponseHeadersRead
                 );
                 await EnsureSuccessfulLlmResponseAsync(response, linkedCts.Token, config);
 
-                var rawResponse = await response.Content.ReadAsStringAsync(linkedCts.Token);
-                responseContent = ExtractOllamaMessageContent(rawResponse);
+                streamed = await ReadOllamaStreamingChatResponseAsync(
+                    response,
+                    callScope,
+                    linkedCts.Token
+                );
             }
             else // OpenAiCompatible
             {
@@ -853,8 +899,8 @@ public sealed class LlmExtractionClient(
 
                 var payload = new
                 {
-                    model = config.TextModel!.Trim(),
-                    stream = false,
+                    model = modelName,
+                    stream = true,
                     temperature = config.Temperature ?? temperature,
                     top_p = config.TopP,
                     top_k = config.TopK,
@@ -897,29 +943,41 @@ public sealed class LlmExtractionClient(
                         return req;
                     },
                     config,
-                    linkedCts.Token
+                    linkedCts.Token,
+                    HttpCompletionOption.ResponseHeadersRead
                 );
                 await EnsureSuccessfulLlmResponseAsync(response, linkedCts.Token, config);
 
-                var rawResponse = await response.Content.ReadAsStringAsync(linkedCts.Token);
-                responseContent = ExtractOpenAiMessageContent(rawResponse);
+                streamed = await ReadOpenAiStreamingChatResponseAsync(
+                    response,
+                    callScope,
+                    linkedCts.Token
+                );
             }
         }
         catch (HttpRequestException ex)
         {
-            throw new LlmHostUnavailableException($"LLM host connection failed: {ex.Message}", ex);
+            var err = $"LLM host connection failed: {ex.Message}";
+            callScope?.Fail(err);
+            throw new LlmHostUnavailableException(err, ex);
         }
         catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
             sw.Stop();
             var elapsed = Math.Max(1, (int)sw.Elapsed.TotalSeconds);
-            throw new LlmHostUnavailableException(
-                $"LLM extraction request timed out after {elapsed}s (configured timeout: {config.RequestTimeoutSeconds}s).",
-                ex
-            );
+            var err =
+                $"LLM extraction request timed out after {elapsed}s (configured timeout: {config.RequestTimeoutSeconds}s).";
+            callScope?.Fail(err);
+            throw new LlmHostUnavailableException(err, ex);
+        }
+        catch (Exception ex)
+        {
+            callScope?.Fail(ex.Message);
+            throw;
         }
 
-        return responseContent;
+        callScope?.Complete(streamed.EvalCount, streamed.TokensPerSecond);
+        return streamed.Content;
     }
 
     private const string TranscriptionSchemaName = "recipe_transcription";
@@ -1075,7 +1133,18 @@ Transcribe the recipe printed in these page images. Copy text verbatim: never re
             cts.Token
         );
 
-        string responseContent;
+        var (stageKey, stageLabel) = MapStageDisplay(schemaName);
+        var modelName = config.VisionModel.Trim();
+        using var callScope = liveTracker?.BeginLlmCall(
+            stageKey: stageKey,
+            stageLabel: stageLabel,
+            model: modelName,
+            thinkingEnabled: config.EnableThinking,
+            fallbackWorkloadTitle: stageLabel,
+            fallbackKind: LlmWorkloadKind.RecipeIngestion
+        );
+
+        StreamedLlmResult streamed;
 
         try
         {
@@ -1083,8 +1152,8 @@ Transcribe the recipe printed in these page images. Copy text verbatim: never re
             {
                 var payload = new
                 {
-                    model = config.VisionModel.Trim(),
-                    stream = false,
+                    model = modelName,
+                    stream = true,
                     think = config.EnableThinking,
                     keep_alive = string.IsNullOrWhiteSpace(config.OllamaKeepAlive)
                         ? "5m"
@@ -1124,12 +1193,16 @@ Transcribe the recipe printed in these page images. Copy text verbatim: never re
                             ),
                         },
                     config,
-                    linkedCts.Token
+                    linkedCts.Token,
+                    HttpCompletionOption.ResponseHeadersRead
                 );
                 await EnsureSuccessfulLlmResponseAsync(response, linkedCts.Token, config);
 
-                var rawResponse = await response.Content.ReadAsStringAsync(linkedCts.Token);
-                responseContent = ExtractOllamaMessageContent(rawResponse);
+                streamed = await ReadOllamaStreamingChatResponseAsync(
+                    response,
+                    callScope,
+                    linkedCts.Token
+                );
             }
             else // OpenAiCompatible
             {
@@ -1155,8 +1228,8 @@ Transcribe the recipe printed in these page images. Copy text verbatim: never re
 
                 var payload = new
                 {
-                    model = config.VisionModel.Trim(),
-                    stream = false,
+                    model = modelName,
+                    stream = true,
                     temperature = config.Temperature ?? 0,
                     top_p = config.TopP,
                     top_k = config.TopK,
@@ -1203,29 +1276,41 @@ Transcribe the recipe printed in these page images. Copy text verbatim: never re
                         return req;
                     },
                     config,
-                    linkedCts.Token
+                    linkedCts.Token,
+                    HttpCompletionOption.ResponseHeadersRead
                 );
                 await EnsureSuccessfulLlmResponseAsync(response, linkedCts.Token, config);
 
-                var rawResponse = await response.Content.ReadAsStringAsync(linkedCts.Token);
-                responseContent = ExtractOpenAiMessageContent(rawResponse);
+                streamed = await ReadOpenAiStreamingChatResponseAsync(
+                    response,
+                    callScope,
+                    linkedCts.Token
+                );
             }
         }
         catch (HttpRequestException ex)
         {
-            throw new LlmHostUnavailableException($"LLM host connection failed: {ex.Message}", ex);
+            var err = $"LLM host connection failed: {ex.Message}";
+            callScope?.Fail(err);
+            throw new LlmHostUnavailableException(err, ex);
         }
         catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
             sw.Stop();
             var elapsed = Math.Max(1, (int)sw.Elapsed.TotalSeconds);
-            throw new LlmHostUnavailableException(
-                $"LLM vision extraction request timed out after {elapsed}s (configured timeout: {config.RequestTimeoutSeconds}s).",
-                ex
-            );
+            var err =
+                $"LLM vision extraction request timed out after {elapsed}s (configured timeout: {config.RequestTimeoutSeconds}s).";
+            callScope?.Fail(err);
+            throw new LlmHostUnavailableException(err, ex);
+        }
+        catch (Exception ex)
+        {
+            callScope?.Fail(ex.Message);
+            throw;
         }
 
-        return responseContent;
+        callScope?.Complete(streamed.EvalCount, streamed.TokensPerSecond);
+        return streamed.Content;
     }
 
     private static int GetOllamaOutputTokenLimit(EffectiveLlmConnectionConfig config) =>
@@ -1267,7 +1352,8 @@ Transcribe the recipe printed in these page images. Copy text verbatim: never re
     private async Task<HttpResponseMessage> SendWithRateLimitRetryAsync(
         Func<HttpRequestMessage> requestFactory,
         EffectiveLlmConnectionConfig config,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        HttpCompletionOption completionOption = HttpCompletionOption.ResponseContentRead
     )
     {
         var attempt = 0;
@@ -1278,7 +1364,7 @@ Transcribe the recipe printed in these page images. Copy text verbatim: never re
                 ? null
                 : await requestGate.AcquireAsync(config, cancellationToken);
 
-            var response = await httpClient.SendAsync(request, cancellationToken);
+            var response = await httpClient.SendAsync(request, completionOption, cancellationToken);
 
             if (
                 config.EnableRateLimitSafeguards
@@ -1588,7 +1674,212 @@ Transcribe the recipe printed in these page images. Copy text verbatim: never re
         return trimmed;
     }
 
-    private static string ExtractOllamaMessageContent(string rawResponse)
+    private readonly record struct StreamedLlmResult(
+        string Content,
+        int? EvalCount,
+        double? TokensPerSecond
+    );
+
+    private static (string StageKey, string StageLabel) MapStageDisplay(string schemaName) =>
+        schemaName.ToLowerInvariant() switch
+        {
+            "stage1_extract_recipe" => ("stage1", "Stage 1 · Extract Recipe Structure"),
+            "stage2_shorten_description" => ("stage2", "Stage 2 · Condense Description"),
+            "stage3a_search_terms" => ("stage3", "Stage 3 · Generate Catalog Search Terms"),
+            "stage3c_match_batch" => ("stage3", "Stage 3 · Match Ingredients Batch"),
+            "stage3b_match_ingredient" => ("stage3", "Stage 3 · Match Single Ingredient"),
+            "stage4b_tokenize_batch" => ("stage4", "Stage 4 · Tokenize Steps Batch"),
+            "stage4_tokenize_step" => ("stage4", "Stage 4 · Tokenize Single Step"),
+            "stage5b_polish_targeted" => ("stage5", "Stage 5 · Targeted Recipe Polish"),
+            "stage6_refine_recipe" => ("stage6", "Stage 6 · Refine Recipe & Catalog"),
+            "recipe_transcription" => ("vision", "Vision OCR · Transcribe Recipe Images"),
+            "ingredient_substitutions" => (
+                "kitchen_helper",
+                "Kitchen AI · Ingredient Substitutions"
+            ),
+            "kitchen_answer" => ("kitchen_helper", "Kitchen AI · Cooking Question"),
+            "meal_plan_query_analysis" => ("analyze_prompt", "Meal Planner · Analyze Cravings"),
+            "draft_meal_plan" => ("draft_schedule", "Meal Planner · Assemble Weekly Schedule"),
+            _ => (schemaName, schemaName),
+        };
+
+    private static async Task<StreamedLlmResult> ReadOllamaStreamingChatResponseAsync(
+        HttpResponseMessage response,
+        ILlmCallScope? callScope,
+        CancellationToken cancellationToken
+    )
+    {
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var reader = new StreamReader(stream, Encoding.UTF8);
+
+        var contentBuilder = new StringBuilder();
+        var sawNativeThinking = false;
+        var sawAnyThinking = false;
+        var inlineSplitter = callScope is not null
+            ? new InlineThinkStreamSplitter(callScope)
+            : null;
+        string? doneReason = null;
+        int? evalCount = null;
+        double? tokensPerSecond = null;
+        var parsedChunkCount = 0;
+
+        while (true)
+        {
+            var line = await reader.ReadLineAsync(cancellationToken);
+            if (line is null)
+            {
+                break;
+            }
+
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                continue;
+            }
+
+            JsonDocument? doc = null;
+            try
+            {
+                doc = JsonDocument.Parse(line);
+            }
+            catch (JsonException) when (parsedChunkCount == 0)
+            {
+                // Fallback for non-streaming mock servers returning pretty-printed multi-line JSON
+                var remainder = await reader.ReadToEndAsync(cancellationToken);
+                var fullBody = string.IsNullOrEmpty(remainder) ? line : $"{line}\n{remainder}";
+                return ExtractOllamaSingleResponse(fullBody, callScope);
+            }
+
+            using (doc)
+            {
+                parsedChunkCount++;
+                var root = doc.RootElement;
+                if (root.ValueKind != JsonValueKind.Object)
+                {
+                    throw new DomainValidationException("LLM returned an invalid Ollama response.");
+                }
+
+                if (
+                    root.TryGetProperty("error", out var errorProp)
+                    && errorProp.ValueKind == JsonValueKind.String
+                )
+                {
+                    var errText = errorProp.GetString();
+                    if (!string.IsNullOrWhiteSpace(errText))
+                    {
+                        throw new DomainValidationException($"Ollama stream error: {errText}");
+                    }
+                }
+
+                if (
+                    root.TryGetProperty("message", out var msgProp)
+                    && msgProp.ValueKind == JsonValueKind.Object
+                )
+                {
+                    if (
+                        msgProp.TryGetProperty("thinking", out var thinkingProp)
+                        && thinkingProp.ValueKind == JsonValueKind.String
+                    )
+                    {
+                        var thinkingChunk = thinkingProp.GetString();
+                        if (!string.IsNullOrEmpty(thinkingChunk))
+                        {
+                            sawNativeThinking = true;
+                            sawAnyThinking = true;
+                            callScope?.AppendThinking(thinkingChunk);
+                        }
+                    }
+
+                    if (
+                        msgProp.TryGetProperty("content", out var contentProp)
+                        && contentProp.ValueKind == JsonValueKind.String
+                    )
+                    {
+                        var contentChunk = contentProp.GetString();
+                        if (!string.IsNullOrEmpty(contentChunk))
+                        {
+                            contentBuilder.Append(contentChunk);
+                            if (sawNativeThinking || inlineSplitter is null)
+                            {
+                                callScope?.AppendOutput(contentChunk);
+                            }
+                            else
+                            {
+                                inlineSplitter.Process(contentChunk);
+                                if (inlineSplitter.SawInlineThinking)
+                                {
+                                    sawAnyThinking = true;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (
+                    root.TryGetProperty("done_reason", out var doneReasonProp)
+                    && doneReasonProp.ValueKind == JsonValueKind.String
+                )
+                {
+                    doneReason = doneReasonProp.GetString();
+                }
+
+                if (
+                    root.TryGetProperty("eval_count", out var evalProp)
+                    && evalProp.TryGetInt32(out var parsedEval)
+                    && parsedEval > 0
+                )
+                {
+                    evalCount = parsedEval;
+                }
+
+                if (
+                    evalCount.HasValue
+                    && root.TryGetProperty("eval_duration", out var durProp)
+                    && durProp.TryGetInt64(out var durNs)
+                    && durNs > 0
+                )
+                {
+                    tokensPerSecond = evalCount.Value / (durNs / 1_000_000_000.0);
+                }
+
+                if (
+                    root.TryGetProperty("done", out var doneProp)
+                    && doneProp.ValueKind == JsonValueKind.True
+                )
+                {
+                    break;
+                }
+            }
+        }
+
+        inlineSplitter?.Flush();
+
+        if (string.Equals(doneReason, "length", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new LlmOutputTruncatedException(
+                "LLM output reached the maximum token limit before completing the structured JSON response (done_reason: length). Increase context/output limits or use an instruct/non-thinking model."
+            );
+        }
+
+        var content = contentBuilder.ToString();
+        if (!string.IsNullOrWhiteSpace(content))
+        {
+            return new StreamedLlmResult(content, evalCount, tokensPerSecond);
+        }
+
+        if (sawAnyThinking)
+        {
+            throw new DomainValidationException(
+                "LLM returned internal reasoning tokens without a final structured JSON response."
+            );
+        }
+
+        return new StreamedLlmResult(content, evalCount, tokensPerSecond);
+    }
+
+    private static StreamedLlmResult ExtractOllamaSingleResponse(
+        string rawResponse,
+        ILlmCallScope? callScope
+    )
     {
         using var doc = JsonDocument.Parse(rawResponse);
         var root = doc.RootElement;
@@ -1622,6 +1913,39 @@ Transcribe the recipe printed in these page images. Copy text verbatim: never re
             }
         }
 
+        if (!string.IsNullOrEmpty(thinking))
+        {
+            callScope?.AppendThinking(thinking);
+        }
+
+        if (!string.IsNullOrEmpty(content))
+        {
+            if (string.IsNullOrEmpty(thinking) && callScope is not null)
+            {
+                var splitter = new InlineThinkStreamSplitter(callScope);
+                splitter.Process(content);
+                splitter.Flush();
+            }
+            else
+            {
+                callScope?.AppendOutput(content);
+            }
+        }
+
+        int? evalCount =
+            root.TryGetProperty("eval_count", out var evalProp)
+            && evalProp.TryGetInt32(out var parsedEval)
+            && parsedEval > 0
+                ? parsedEval
+                : null;
+        double? tokensPerSecond =
+            evalCount.HasValue
+            && root.TryGetProperty("eval_duration", out var durProp)
+            && durProp.TryGetInt64(out var durNs)
+            && durNs > 0
+                ? evalCount.Value / (durNs / 1_000_000_000.0)
+                : null;
+
         var doneReason =
             root.TryGetProperty("done_reason", out var doneReasonProp)
             && doneReasonProp.ValueKind == JsonValueKind.String
@@ -1637,7 +1961,7 @@ Transcribe the recipe printed in these page images. Copy text verbatim: never re
 
         if (!string.IsNullOrWhiteSpace(content))
         {
-            return content;
+            return new StreamedLlmResult(content, evalCount, tokensPerSecond);
         }
 
         if (!string.IsNullOrWhiteSpace(thinking))
@@ -1647,10 +1971,158 @@ Transcribe the recipe printed in these page images. Copy text verbatim: never re
             );
         }
 
-        return content ?? "";
+        return new StreamedLlmResult(content ?? "", evalCount, tokensPerSecond);
     }
 
-    private static string ExtractOpenAiMessageContent(string rawResponse)
+    private static async Task<StreamedLlmResult> ReadOpenAiStreamingChatResponseAsync(
+        HttpResponseMessage response,
+        ILlmCallScope? callScope,
+        CancellationToken cancellationToken
+    )
+    {
+        var mediaType = response.Content.Headers.ContentType?.MediaType;
+        if (string.Equals(mediaType, "application/json", StringComparison.OrdinalIgnoreCase))
+        {
+            var rawJson = await response.Content.ReadAsStringAsync(cancellationToken);
+            return ExtractOpenAiSingleResponse(rawJson, callScope);
+        }
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var reader = new StreamReader(stream, Encoding.UTF8);
+
+        var contentBuilder = new StringBuilder();
+        var sawNativeReasoning = false;
+        var inlineSplitter = callScope is not null
+            ? new InlineThinkStreamSplitter(callScope)
+            : null;
+        string? finishReason = null;
+        var sawSseData = false;
+
+        while (true)
+        {
+            var line = await reader.ReadLineAsync(cancellationToken);
+            if (line is null)
+            {
+                break;
+            }
+
+            var trimmed = line.Trim();
+            if (trimmed.Length == 0 || trimmed.StartsWith(':'))
+            {
+                continue;
+            }
+
+            if (!sawSseData && trimmed.StartsWith('{'))
+            {
+                // Fallback for non-streaming servers omitting application/json content-type
+                var remainder = await reader.ReadToEndAsync(cancellationToken);
+                var fullBody = string.IsNullOrEmpty(remainder) ? line : $"{line}\n{remainder}";
+                return ExtractOpenAiSingleResponse(fullBody, callScope);
+            }
+
+            if (!trimmed.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            sawSseData = true;
+            var payload = trimmed[5..].Trim();
+            if (payload.Length == 0)
+            {
+                continue;
+            }
+
+            if (string.Equals(payload, "[DONE]", StringComparison.Ordinal))
+            {
+                break;
+            }
+
+            using var doc = JsonDocument.Parse(payload);
+            if (
+                doc.RootElement.ValueKind != JsonValueKind.Object
+                || !doc.RootElement.TryGetProperty("choices", out var choices)
+                || choices.ValueKind != JsonValueKind.Array
+                || choices.GetArrayLength() == 0
+                || choices[0].ValueKind != JsonValueKind.Object
+            )
+            {
+                continue;
+            }
+
+            var choice = choices[0];
+            if (
+                choice.TryGetProperty("delta", out var delta)
+                && delta.ValueKind == JsonValueKind.Object
+            )
+            {
+                string? reasoningChunk = null;
+                if (
+                    delta.TryGetProperty("reasoning_content", out var rcProp)
+                    && rcProp.ValueKind == JsonValueKind.String
+                )
+                {
+                    reasoningChunk = rcProp.GetString();
+                }
+                else if (
+                    delta.TryGetProperty("reasoning", out var rProp)
+                    && rProp.ValueKind == JsonValueKind.String
+                )
+                {
+                    reasoningChunk = rProp.GetString();
+                }
+
+                if (!string.IsNullOrEmpty(reasoningChunk))
+                {
+                    sawNativeReasoning = true;
+                    callScope?.AppendThinking(reasoningChunk);
+                }
+
+                if (
+                    delta.TryGetProperty("content", out var contentProp)
+                    && contentProp.ValueKind == JsonValueKind.String
+                )
+                {
+                    var contentChunk = contentProp.GetString();
+                    if (!string.IsNullOrEmpty(contentChunk))
+                    {
+                        contentBuilder.Append(contentChunk);
+                        if (sawNativeReasoning || inlineSplitter is null)
+                        {
+                            callScope?.AppendOutput(contentChunk);
+                        }
+                        else
+                        {
+                            inlineSplitter.Process(contentChunk);
+                        }
+                    }
+                }
+            }
+
+            if (
+                choice.TryGetProperty("finish_reason", out var finishProp)
+                && finishProp.ValueKind == JsonValueKind.String
+            )
+            {
+                finishReason = finishProp.GetString();
+            }
+        }
+
+        inlineSplitter?.Flush();
+
+        if (string.Equals(finishReason, "length", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new LlmOutputTruncatedException(
+                "LLM output reached the maximum token limit before completing the structured JSON response (finish_reason: length)."
+            );
+        }
+
+        return new StreamedLlmResult(contentBuilder.ToString(), null, null);
+    }
+
+    private static StreamedLlmResult ExtractOpenAiSingleResponse(
+        string rawResponse,
+        ILlmCallScope? callScope
+    )
     {
         using var doc = JsonDocument.Parse(rawResponse);
         if (
@@ -1667,13 +2139,56 @@ Transcribe the recipe printed in these page images. Copy text verbatim: never re
         }
 
         var choice = choices[0];
-        var content =
+        string? content = null;
+        string? reasoning = null;
+
+        if (
             choice.TryGetProperty("message", out var msgProp)
             && msgProp.ValueKind == JsonValueKind.Object
-            && msgProp.TryGetProperty("content", out var contentProp)
-            && contentProp.ValueKind == JsonValueKind.String
-                ? contentProp.GetString()
-                : null;
+        )
+        {
+            if (
+                msgProp.TryGetProperty("content", out var contentProp)
+                && contentProp.ValueKind == JsonValueKind.String
+            )
+            {
+                content = contentProp.GetString();
+            }
+
+            if (
+                msgProp.TryGetProperty("reasoning_content", out var rcProp)
+                && rcProp.ValueKind == JsonValueKind.String
+            )
+            {
+                reasoning = rcProp.GetString();
+            }
+            else if (
+                msgProp.TryGetProperty("reasoning", out var rProp)
+                && rProp.ValueKind == JsonValueKind.String
+            )
+            {
+                reasoning = rProp.GetString();
+            }
+        }
+
+        if (!string.IsNullOrEmpty(reasoning))
+        {
+            callScope?.AppendThinking(reasoning);
+        }
+
+        if (!string.IsNullOrEmpty(content))
+        {
+            if (string.IsNullOrEmpty(reasoning) && callScope is not null)
+            {
+                var splitter = new InlineThinkStreamSplitter(callScope);
+                splitter.Process(content);
+                splitter.Flush();
+            }
+            else
+            {
+                callScope?.AppendOutput(content);
+            }
+        }
 
         var finishReason =
             choice.TryGetProperty("finish_reason", out var finishProp)
@@ -1688,12 +2203,134 @@ Transcribe the recipe printed in these page images. Copy text verbatim: never re
             );
         }
 
-        if (!string.IsNullOrWhiteSpace(content))
+        return new StreamedLlmResult(content ?? "", null, null);
+    }
+
+    private sealed class InlineThinkStreamSplitter(ILlmCallScope callScope)
+    {
+        private const string OpenTag = "<think>";
+        private const string CloseTag = "</think>";
+
+        private enum Mode
         {
-            return content;
+            DetectOpening,
+            InsideThink,
+            PassthroughOutput,
         }
 
-        return content ?? "";
+        private readonly StringBuilder _buffer = new();
+        private Mode _mode = Mode.DetectOpening;
+
+        public bool SawInlineThinking { get; private set; }
+
+        public void Process(string chunk)
+        {
+            if (string.IsNullOrEmpty(chunk))
+            {
+                return;
+            }
+
+            if (_mode == Mode.PassthroughOutput)
+            {
+                callScope.AppendOutput(chunk);
+                return;
+            }
+
+            _buffer.Append(chunk);
+
+            while (_buffer.Length > 0)
+            {
+                if (_mode == Mode.DetectOpening)
+                {
+                    var text = _buffer.ToString();
+                    var trimmedStart = text.TrimStart();
+                    if (trimmedStart.Length == 0)
+                    {
+                        return;
+                    }
+
+                    if (trimmedStart.Length < OpenTag.Length)
+                    {
+                        if (OpenTag.StartsWith(trimmedStart, StringComparison.OrdinalIgnoreCase))
+                        {
+                            return;
+                        }
+
+                        _mode = Mode.PassthroughOutput;
+                        callScope.AppendOutput(text);
+                        _buffer.Clear();
+                        return;
+                    }
+
+                    if (trimmedStart.StartsWith(OpenTag, StringComparison.OrdinalIgnoreCase))
+                    {
+                        SawInlineThinking = true;
+                        _mode = Mode.InsideThink;
+                        var afterOpen = trimmedStart[OpenTag.Length..];
+                        _buffer.Clear();
+                        if (afterOpen.Length > 0)
+                        {
+                            _buffer.Append(afterOpen);
+                        }
+                        continue;
+                    }
+
+                    _mode = Mode.PassthroughOutput;
+                    callScope.AppendOutput(text);
+                    _buffer.Clear();
+                    return;
+                }
+
+                if (_mode == Mode.InsideThink)
+                {
+                    var text = _buffer.ToString();
+                    var closeIdx = text.IndexOf(CloseTag, StringComparison.OrdinalIgnoreCase);
+                    if (closeIdx >= 0)
+                    {
+                        if (closeIdx > 0)
+                        {
+                            callScope.AppendThinking(text[..closeIdx]);
+                        }
+
+                        var afterClose = text[(closeIdx + CloseTag.Length)..];
+                        _buffer.Clear();
+                        _mode = Mode.PassthroughOutput;
+                        if (afterClose.Length > 0)
+                        {
+                            callScope.AppendOutput(afterClose);
+                        }
+                        return;
+                    }
+
+                    var safeFlushLen = text.Length - (CloseTag.Length - 1);
+                    if (safeFlushLen > 0)
+                    {
+                        callScope.AppendThinking(text[..safeFlushLen]);
+                        _buffer.Remove(0, safeFlushLen);
+                    }
+                    return;
+                }
+            }
+        }
+
+        public void Flush()
+        {
+            if (_buffer.Length == 0)
+            {
+                return;
+            }
+
+            var remaining = _buffer.ToString();
+            _buffer.Clear();
+            if (_mode == Mode.InsideThink)
+            {
+                callScope.AppendThinking(remaining);
+            }
+            else
+            {
+                callScope.AppendOutput(remaining);
+            }
+        }
     }
 
     private static string CleanMarkdownJsonFences(string content)

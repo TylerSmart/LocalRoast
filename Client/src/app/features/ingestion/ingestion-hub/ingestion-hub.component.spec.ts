@@ -2,13 +2,17 @@ import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { of } from 'rxjs';
-import { signal, Signal } from '@angular/core';
+import { Subject, of } from 'rxjs';
+import { signal, Signal, WritableSignal } from '@angular/core';
 import type {
   IngestionJobSummaryDto,
   IngestionJobStatus,
+  IngestionQueueChangedEventDto,
   IngestionQueueSummaryDto,
+  IngestionRealtimeSyncState,
+  LlmActiveWorkloadDto,
 } from '../../../core/models/ingestion.models';
+import { IngestionRealtimeService } from '../../../core/services/ingestion/ingestion-realtime.service';
 import { IngestionService } from '../../../core/services/ingestion/ingestion.service';
 import { LlmSettingsService } from '../../../core/services/llm-settings/llm-settings.service';
 import { IngestionHubComponent } from './ingestion-hub.component';
@@ -34,6 +38,16 @@ describe('IngestionHubComponent', () => {
     openLlmSettingsDialog: ReturnType<typeof vi.fn>;
     getSettings: ReturnType<typeof vi.fn>;
     setIngestionEnabled: ReturnType<typeof vi.fn>;
+  };
+  let mockIngestionRealtimeService: {
+    syncState: WritableSignal<IngestionRealtimeSyncState>;
+    activeWorkloads: WritableSignal<LlmActiveWorkloadDto[]>;
+    recentWorkloads: WritableSignal<LlmActiveWorkloadDto[]>;
+    queueChanged$: Subject<IngestionQueueChangedEventDto>;
+    reconnected$: Subject<void>;
+    connect: ReturnType<typeof vi.fn>;
+    disconnect: ReturnType<typeof vi.fn>;
+    dismissRecentWorkload: ReturnType<typeof vi.fn>;
   };
 
   const sampleJobs: IngestionJobSummaryDto[] = [
@@ -197,6 +211,17 @@ describe('IngestionHubComponent', () => {
       ),
     };
 
+    mockIngestionRealtimeService = {
+      syncState: signal<IngestionRealtimeSyncState>('disconnected'),
+      activeWorkloads: signal<LlmActiveWorkloadDto[]>([]),
+      recentWorkloads: signal<LlmActiveWorkloadDto[]>([]),
+      queueChanged$: new Subject<IngestionQueueChangedEventDto>(),
+      reconnected$: new Subject<void>(),
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      dismissRecentWorkload: vi.fn(),
+    };
+
     await TestBed.configureTestingModule({
       imports: [IngestionHubComponent],
       providers: [
@@ -204,6 +229,7 @@ describe('IngestionHubComponent', () => {
         provideHttpClientTesting(),
         provideRouter([]),
         { provide: IngestionService, useValue: mockIngestionService },
+        { provide: IngestionRealtimeService, useValue: mockIngestionRealtimeService },
         { provide: LlmSettingsService, useValue: mockLlmSettingsService },
       ],
     }).compileComponents();
@@ -596,5 +622,29 @@ describe('IngestionHubComponent', () => {
 
     expect(mockIngestionService.refineJobNow).toHaveBeenCalledWith('job-1');
     expect(component.feedbackMessage()).toContain('while the rest of the queue stays paused');
+  });
+
+  it('displays Live Sync pill when SignalR is connected and hides countdown polling spinner', () => {
+    mockIngestionRealtimeService.syncState.set('live');
+    fixture.detectChanges();
+
+    const el = fixture.nativeElement as HTMLElement;
+    const livePill = el.querySelector('.sync-status-pill.live');
+    expect(livePill?.textContent).toContain('Live Sync');
+    expect(el.querySelector('.unified-refresh-group .countdown-spinner')).toBeNull();
+  });
+
+  it('updates pause banner immediately when SignalR broadcasts a paused-changed event', () => {
+    mockIngestionRealtimeService.queueChanged$.next({
+      reason: 'paused-changed',
+      enableIngestion: false,
+      pausedUntilUtc: '2026-11-20T07:00:00Z',
+      pauseReason: 'Provider quota exhausted',
+    });
+    fixture.detectChanges();
+
+    expect(component.isIngestionEnabled()).toBe(false);
+    expect(component.pauseReason()).toBe('Provider quota exhausted');
+    expect(fixture.nativeElement.querySelector('.paused-ingestion-banner')).toBeTruthy();
   });
 });

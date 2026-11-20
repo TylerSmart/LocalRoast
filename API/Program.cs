@@ -6,6 +6,7 @@ using App.API.Hubs;
 using App.API.Mcp;
 using App.Core;
 using App.Core.Authentication;
+using App.Core.Ingestion;
 using App.Core.Shopping;
 using App.Data;
 using App.Data.Services;
@@ -191,6 +192,10 @@ builder
     });
 
 builder.Services.AddScoped<IShoppingRealtimeNotifier, SignalRShoppingRealtimeNotifier>();
+builder.Services.AddSingleton<SignalRIngestionRealtimeNotifier>();
+builder.Services.AddSingleton<IIngestionRealtimeNotifier>(sp =>
+    sp.GetRequiredService<SignalRIngestionRealtimeNotifier>()
+);
 
 // Every other Angular asset is content-hashed and safe to cache forever, but index.html keeps its
 
@@ -372,6 +377,7 @@ app.MapGet("/version", () => Results.Ok(ApiBuildVersion.Info))
     .ExcludeFromDescription();
 
 app.MapHub<ShoppingHub>("/api/hubs/shopping").RequireAuthorization().ExcludeFromDescription();
+app.MapHub<IngestionHub>("/api/hubs/ingestion").RequireAuthorization().ExcludeFromDescription();
 
 app.MapMcp("/api/mcp")
     .RequireAuthorization(

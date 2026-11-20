@@ -20,7 +20,8 @@ public sealed partial class RecipeEmbeddingService(
     ILlmExtractionClient llmClient,
     IIngestionQueueSignal? queueSignal = null,
     ILogger<RecipeEmbeddingService>? logger = null,
-    Random? random = null
+    Random? random = null,
+    IIngestionLiveTracker? liveTracker = null
 ) : IRecipeEmbeddingService
 {
     private readonly Random _random = random ?? Random.Shared;
@@ -491,12 +492,58 @@ public sealed partial class RecipeEmbeddingService(
             return 0;
         }
 
-        return await PersistComputedEmbeddingsAsync(
-            embConfig,
-            modelTag,
-            pendingRecipes,
-            cancellationToken
-        );
+        using var workload = liveTracker?.CurrentWorkload is null
+            ? liveTracker?.BeginWorkload(
+                kind: LlmWorkloadKind.EmbeddingSync,
+                title: $"Syncing {pendingRecipes.Count} recipe embedding{(pendingRecipes.Count == 1 ? "" : "s")}",
+                segments:
+                [
+                    new LlmWorkflowSegmentDto(
+                        "prepare",
+                        "Scan Pending",
+                        LlmWorkflowSegmentState.Completed
+                    ),
+                    new LlmWorkflowSegmentDto(
+                        "embeddings",
+                        "Embed Batch",
+                        LlmWorkflowSegmentState.Active,
+                        SubStatus: $"{pendingRecipes.Count} recipe{(pendingRecipes.Count == 1 ? "" : "s")}"
+                    ),
+                    new LlmWorkflowSegmentDto(
+                        "finalize",
+                        "Save Vectors",
+                        LlmWorkflowSegmentState.Pending
+                    ),
+                ],
+                subtitle: "Background semantic search index",
+                activeModel: modelTag,
+                statusDetail: $"Generating semantic embeddings for {pendingRecipes.Count} recipe(s)..."
+            )
+            : null;
+
+        try
+        {
+            var count = await PersistComputedEmbeddingsAsync(
+                embConfig,
+                modelTag,
+                pendingRecipes,
+                cancellationToken
+            );
+            workload?.CompleteSegment("embeddings");
+            workload?.CompleteSegment("finalize");
+            workload?.CompleteWorkload($"Indexed {count} recipe embedding(s).");
+            return count;
+        }
+        catch (OperationCanceledException)
+        {
+            workload?.CancelWorkload("Embedding sync preempted.");
+            throw;
+        }
+        catch (Exception ex)
+        {
+            workload?.FailWorkload(ex.Message);
+            throw;
+        }
     }
 
     public async Task<MealPlanRetrievalResult> RetrieveMealPlanCandidatesAsync(

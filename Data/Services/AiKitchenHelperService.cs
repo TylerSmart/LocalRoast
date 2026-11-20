@@ -14,7 +14,8 @@ public sealed class AiKitchenHelperService(
     ILlmExtractionClient llmClient,
     TimeProvider? timeProvider = null,
     IIngestionQueueSignal? queueSignal = null,
-    IRecipeEmbeddingService? recipeEmbeddingService = null
+    IRecipeEmbeddingService? recipeEmbeddingService = null,
+    IIngestionLiveTracker? liveTracker = null
 ) : IAiKitchenHelperService
 {
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
@@ -167,11 +168,45 @@ public sealed class AiKitchenHelperService(
 
         queueSignal?.PreemptBackgroundWork();
 
-        var payload = await llmClient.SuggestIngredientSubstitutionsAsync(
-            config,
-            context,
-            cancellationToken
+        using var workload = liveTracker?.BeginWorkload(
+            kind: LlmWorkloadKind.KitchenHelper,
+            title: $"Substitutions: {ingredient.DisplayName}",
+            segments:
+            [
+                new LlmWorkflowSegmentDto(
+                    "kitchen_helper",
+                    "Suggest Substitutions",
+                    LlmWorkflowSegmentState.Active,
+                    SubStatus: recipe.Title
+                ),
+            ],
+            recipeId: recipe.Id,
+            subtitle: recipe.Title,
+            thumbnailUrl: recipe.ThumbnailImagePath,
+            activeModel: config.TextModel,
+            statusDetail: $"Finding substitutions for {ingredient.DisplayName}..."
         );
+
+        LlmSubstitutionPayload payload;
+        try
+        {
+            payload = await llmClient.SuggestIngredientSubstitutionsAsync(
+                config,
+                context,
+                cancellationToken
+            );
+            workload?.CompleteWorkload("Substitutions generated.");
+        }
+        catch (OperationCanceledException)
+        {
+            workload?.CancelWorkload("Substitution request canceled.");
+            throw;
+        }
+        catch (Exception ex)
+        {
+            workload?.FailWorkload(ex.Message);
+            throw;
+        }
 
         var options = (payload.Substitutions ?? [])
             .Where(s =>
@@ -294,7 +329,42 @@ public sealed class AiKitchenHelperService(
 
         queueSignal?.PreemptBackgroundWork();
 
-        var answer = await llmClient.AnswerKitchenQuestionAsync(config, context, cancellationToken);
+        var questionPreview =
+            context.Question.Length > 72 ? context.Question[..72] + "…" : context.Question;
+        using var workload = liveTracker?.BeginWorkload(
+            kind: LlmWorkloadKind.KitchenHelper,
+            title: recipe is not null ? $"Kitchen Q&A: {recipe.Title}" : "Kitchen AI Question",
+            segments:
+            [
+                new LlmWorkflowSegmentDto(
+                    "kitchen_helper",
+                    "Answer Question",
+                    LlmWorkflowSegmentState.Active
+                ),
+            ],
+            recipeId: recipe?.Id,
+            subtitle: questionPreview,
+            thumbnailUrl: recipe?.ThumbnailImagePath,
+            activeModel: config.TextModel,
+            statusDetail: "Answering cooking question..."
+        );
+
+        string answer;
+        try
+        {
+            answer = await llmClient.AnswerKitchenQuestionAsync(config, context, cancellationToken);
+            workload?.CompleteWorkload("Answer ready.");
+        }
+        catch (OperationCanceledException)
+        {
+            workload?.CancelWorkload("Question canceled.");
+            throw;
+        }
+        catch (Exception ex)
+        {
+            workload?.FailWorkload(ex.Message);
+            throw;
+        }
         if (string.IsNullOrWhiteSpace(answer))
         {
             throw new DomainValidationException("The AI returned an empty answer. Please retry.");
@@ -408,311 +478,380 @@ public sealed class AiKitchenHelperService(
 
         queueSignal?.PreemptBackgroundWork();
 
-        List<string> excludedTerms = [];
-        List<string> prioritizeIngredients = [];
-        int? globalMaxTime = null;
-        List<MealPlanSearchBucketInput> searchBuckets = [];
+        using var workload = liveTracker?.BeginWorkload(
+            kind: LlmWorkloadKind.MealPlanDraft,
+            title: isSurpriseDraft
+                ? $"Draft {requestedMealCount} Surprise {request.DefaultSlot} Meals"
+                : $"Draft {requestedMealCount} {request.DefaultSlot} Meals",
+            segments:
+            [
+                new LlmWorkflowSegmentDto(
+                    "analyze_prompt",
+                    "1. Analyze Cravings",
+                    isSurpriseDraft
+                        ? LlmWorkflowSegmentState.Skipped
+                        : LlmWorkflowSegmentState.Pending
+                ),
+                new LlmWorkflowSegmentDto(
+                    "retrieve",
+                    "2. Search Cookbook",
+                    LlmWorkflowSegmentState.Pending
+                ),
+                new LlmWorkflowSegmentDto(
+                    "draft_schedule",
+                    "3. Assemble Plan",
+                    LlmWorkflowSegmentState.Pending
+                ),
+            ],
+            subtitle: isSurpriseDraft
+                ? $"Week of {rangeStart:MMM d}"
+                : (prompt.Length > 80 ? prompt[..80] + "…" : prompt),
+            activeModel: config.TextModel,
+            statusDetail: "Drafting weekly meal plan..."
+        );
 
-        if (!isSurpriseDraft)
+        try
         {
-            // Stage 1: Decompose natural-language mood prompt into exclusions, priorities, and search buckets
-            var analysis = await llmClient.DecomposeMealPlanPromptAsync(
+            List<string> excludedTerms = [];
+            List<string> prioritizeIngredients = [];
+            int? globalMaxTime = null;
+            List<MealPlanSearchBucketInput> searchBuckets = [];
+
+            if (!isSurpriseDraft)
+            {
+                workload?.ActivateSegment(
+                    "analyze_prompt",
+                    "Decomposing prompt",
+                    "Stage 1/3: Analyzing meal-plan prompt..."
+                );
+                // Stage 1: Decompose natural-language mood prompt into exclusions, priorities, and search buckets
+                var analysis = await llmClient.DecomposeMealPlanPromptAsync(
+                    config,
+                    new LlmMealPlanQueryAnalysisContext(
+                        UserPrompt: prompt,
+                        RequestedMealCount: requestedMealCount,
+                        DefaultSlotName: request.DefaultSlot.ToString()
+                    ),
+                    cancellationToken
+                );
+
+                excludedTerms = (analysis.ExcludedTerms ?? [])
+                    .Where(t => !string.IsNullOrWhiteSpace(t))
+                    .Select(t => t.Trim())
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Take(20)
+                    .ToList();
+
+                prioritizeIngredients = (analysis.PrioritizeIngredients ?? [])
+                    .Where(t => !string.IsNullOrWhiteSpace(t))
+                    .Select(t => t.Trim())
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Take(12)
+                    .ToList();
+
+                globalMaxTime = analysis.MaxTotalTimeMinutes is int gMax and > 0 and <= 1440
+                    ? gMax
+                    : null;
+
+                searchBuckets = (analysis.SearchBuckets ?? [])
+                    .Where(b =>
+                        b is not null
+                        && (
+                            !string.IsNullOrWhiteSpace(b.SemanticQuery)
+                            || !string.IsNullOrWhiteSpace(b.BucketName)
+                            || (b.SuggestedTags?.Count ?? 0) > 0
+                        )
+                    )
+                    .Take(4)
+                    .Select(b => new MealPlanSearchBucketInput(
+                        BucketName: !string.IsNullOrWhiteSpace(b.BucketName)
+                            ? b.BucketName.Trim()
+                            : (b.SemanticQuery?.Trim() ?? "Requested meals"),
+                        SemanticQuery: !string.IsNullOrWhiteSpace(b.SemanticQuery)
+                            ? b.SemanticQuery.Trim()
+                            : (b.BucketName?.Trim() ?? prompt),
+                        SuggestedTags: (b.SuggestedTags ?? [])
+                            .Where(t => !string.IsNullOrWhiteSpace(t))
+                            .Select(t => t.Trim())
+                            .Distinct(StringComparer.OrdinalIgnoreCase)
+                            .Take(6)
+                            .ToList(),
+                        MaxTotalTimeMinutes: b.MaxTotalTimeMinutes is int bMax and > 0 and <= 1440
+                            ? bMax
+                            : null,
+                        DesiredCount: Math.Clamp(b.DesiredCount ?? 1, 1, requestedMealCount)
+                    ))
+                    .ToList();
+
+                if (searchBuckets.Count == 0)
+                {
+                    searchBuckets.Add(
+                        new MealPlanSearchBucketInput(
+                            BucketName: "Requested meals",
+                            SemanticQuery: prompt,
+                            SuggestedTags: [],
+                            MaxTotalTimeMinutes: globalMaxTime,
+                            DesiredCount: requestedMealCount
+                        )
+                    );
+                }
+                workload?.CompleteSegment("analyze_prompt");
+            }
+
+            workload?.ActivateSegment(
+                "retrieve",
+                "Searching recipes",
+                "Stage 2/3: Retrieving cookbook candidates..."
+            );
+            // Stage 2: Deterministic exclusions + hybrid RecipeEmbedding search (or slot-aware randomized sample when prompt is blank) + perishable synergy
+            var retrieval = await _recipeEmbeddingService.RetrieveMealPlanCandidatesAsync(
                 config,
-                new LlmMealPlanQueryAnalysisContext(
-                    UserPrompt: prompt,
+                new MealPlanRetrievalRequest(
+                    RawUserPrompt: prompt,
                     RequestedMealCount: requestedMealCount,
-                    DefaultSlotName: request.DefaultSlot.ToString()
+                    ExcludedRecipeIds: excludedIds.ToList(),
+                    RecentlyScheduledRecipeIds: recentlyScheduledRecipeIds,
+                    ExcludedTerms: excludedTerms,
+                    PrioritizeIngredients: prioritizeIngredients,
+                    GlobalMaxTotalTimeMinutes: globalMaxTime,
+                    SearchBuckets: searchBuckets,
+                    UtcNow: now,
+                    DefaultSlot: request.DefaultSlot,
+                    RandomizeSelection: isSurpriseDraft
                 ),
                 cancellationToken
             );
 
-            excludedTerms = (analysis.ExcludedTerms ?? [])
-                .Where(t => !string.IsNullOrWhiteSpace(t))
-                .Select(t => t.Trim())
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .Take(20)
-                .ToList();
-
-            prioritizeIngredients = (analysis.PrioritizeIngredients ?? [])
-                .Where(t => !string.IsNullOrWhiteSpace(t))
-                .Select(t => t.Trim())
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .Take(12)
-                .ToList();
-
-            globalMaxTime = analysis.MaxTotalTimeMinutes is int gMax and > 0 and <= 1440
-                ? gMax
-                : null;
-
-            searchBuckets = (analysis.SearchBuckets ?? [])
-                .Where(b =>
-                    b is not null
-                    && (
-                        !string.IsNullOrWhiteSpace(b.SemanticQuery)
-                        || !string.IsNullOrWhiteSpace(b.BucketName)
-                        || (b.SuggestedTags?.Count ?? 0) > 0
-                    )
-                )
-                .Take(4)
-                .Select(b => new MealPlanSearchBucketInput(
-                    BucketName: !string.IsNullOrWhiteSpace(b.BucketName)
-                        ? b.BucketName.Trim()
-                        : (b.SemanticQuery?.Trim() ?? "Requested meals"),
-                    SemanticQuery: !string.IsNullOrWhiteSpace(b.SemanticQuery)
-                        ? b.SemanticQuery.Trim()
-                        : (b.BucketName?.Trim() ?? prompt),
-                    SuggestedTags: (b.SuggestedTags ?? [])
-                        .Where(t => !string.IsNullOrWhiteSpace(t))
-                        .Select(t => t.Trim())
-                        .Distinct(StringComparer.OrdinalIgnoreCase)
-                        .Take(6)
-                        .ToList(),
-                    MaxTotalTimeMinutes: b.MaxTotalTimeMinutes is int bMax and > 0 and <= 1440
-                        ? bMax
-                        : null,
-                    DesiredCount: Math.Clamp(b.DesiredCount ?? 1, 1, requestedMealCount)
-                ))
-                .ToList();
-
-            if (searchBuckets.Count == 0)
-            {
-                searchBuckets.Add(
-                    new MealPlanSearchBucketInput(
-                        BucketName: "Requested meals",
-                        SemanticQuery: prompt,
-                        SuggestedTags: [],
-                        MaxTotalTimeMinutes: globalMaxTime,
-                        DesiredCount: requestedMealCount
-                    )
-                );
-            }
-        }
-
-        // Stage 2: Deterministic exclusions + hybrid RecipeEmbedding search (or slot-aware randomized sample when prompt is blank) + perishable synergy
-        var retrieval = await _recipeEmbeddingService.RetrieveMealPlanCandidatesAsync(
-            config,
-            new MealPlanRetrievalRequest(
-                RawUserPrompt: prompt,
-                RequestedMealCount: requestedMealCount,
-                ExcludedRecipeIds: excludedIds.ToList(),
-                RecentlyScheduledRecipeIds: recentlyScheduledRecipeIds,
-                ExcludedTerms: excludedTerms,
-                PrioritizeIngredients: prioritizeIngredients,
-                GlobalMaxTotalTimeMinutes: globalMaxTime,
-                SearchBuckets: searchBuckets,
-                UtcNow: now,
-                DefaultSlot: request.DefaultSlot,
-                RandomizeSelection: isSurpriseDraft
-            ),
-            cancellationToken
-        );
-
-        if (retrieval.Candidates.Count == 0)
-        {
-            throw new DomainValidationException(
-                excludedTerms.Count > 0
-                    ? "No eligible published recipes matched your prompt's exclusions. Relax your exclusions or add matching recipes before drafting."
-                    : "No eligible published recipes remain in your household cookbook. Add recipes or remove exclusions before drafting."
-            );
-        }
-
-        var catalogList = retrieval.Candidates;
-        var bucketSummaries = searchBuckets
-            .Select(b =>
-            {
-                var details = new List<string> { $"target ~{b.DesiredCount}" };
-                if (b.MaxTotalTimeMinutes.HasValue)
-                {
-                    details.Add($"<= {b.MaxTotalTimeMinutes.Value}m");
-                }
-                if (b.SuggestedTags.Count > 0)
-                {
-                    details.Add($"tags: {string.Join(", ", b.SuggestedTags)}");
-                }
-                return $"{b.BucketName} ({string.Join("; ", details)})";
-            })
-            .ToList();
-
-        // Stage 3: Constrained schedule assembly from compact candidate cards
-        var llmContext = new LlmDraftMealPlanContext(
-            WeekStartDate: rangeStart,
-            UserPrompt: prompt,
-            RequestedMealCount: requestedMealCount,
-            DefaultSlotName: request.DefaultSlot.ToString(),
-            PlaceOnDeck: request.PlaceOnDeck,
-            ExistingWeekScheduleLines: existingLines,
-            CookbookCatalog: catalogList,
-            BucketSummaries: bucketSummaries.Count > 0 ? bucketSummaries : null,
-            PrioritizeIngredients: prioritizeIngredients.Count > 0 ? prioritizeIngredients : null,
-            UnmatchedBuckets: retrieval.UnmatchedBuckets.Count > 0
-                ? retrieval.UnmatchedBuckets
-                : null
-        );
-
-        var payload = await llmClient.DraftWeeklyMealPlanAsync(
-            config,
-            llmContext,
-            cancellationToken
-        );
-
-        var candidateRecipeIds = catalogList.Select(c => c.RecipeId).Distinct().ToList();
-        var candidateRecipes = await dbContext
-            .Recipes.AsNoTracking()
-            .Where(r => candidateRecipeIds.Contains(r.Id))
-            .Select(r => new MealPlanRecipeBadgeDto(
-                r.Id,
-                r.Title,
-                r.Slug,
-                r.BaseServings,
-                r.TotalTimeMinutes,
-                r.Difficulty,
-                r.ThumbnailImagePath
-            ))
-            .ToListAsync(cancellationToken);
-
-        var candidateMapByIndex = catalogList.ToDictionary(c => c.CatalogIndex);
-        var badgeByIdMap = candidateRecipes.ToDictionary(r => r.Id);
-        var badgeByTitleMap = catalogList
-            .Where(candidate => badgeByIdMap.ContainsKey(candidate.RecipeId))
-            .Select(candidate => badgeByIdMap[candidate.RecipeId])
-            .GroupBy(r => r.Title, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
-
-        var proposals = payload.Proposals ?? [];
-        var resultCandidates = new List<DraftMealPlanCandidateDto>();
-        var seenRecipeIds = new HashSet<Guid>();
-
-        var nextOpenDay = 0;
-
-        foreach (var p in proposals)
-        {
-            MealPlanRecipeBadgeDto? matchedRecipe = null;
-
-            if (candidateMapByIndex.TryGetValue(p.CatalogIndex, out var cand))
-            {
-                matchedRecipe = badgeByIdMap.GetValueOrDefault(cand.RecipeId);
-            }
-            else if (
-                !string.IsNullOrWhiteSpace(p.RecipeTitle)
-                && badgeByTitleMap.TryGetValue(p.RecipeTitle.Trim(), out var byTitle)
-            )
-            {
-                matchedRecipe = byTitle;
-            }
-
-            if (matchedRecipe is null)
-            {
-                // Discard hallucinated / non-existent recipes
-                continue;
-            }
-
-            if (seenRecipeIds.Contains(matchedRecipe.Id) && catalogList.Count >= requestedMealCount)
-            {
-                // Skip duplicate recipe in draft if we have enough distinct recipes
-                continue;
-            }
-
-            seenRecipeIds.Add(matchedRecipe.Id);
-
-            var isOnDeck = request.PlaceOnDeck;
-            int? dayOffset = null;
-            DateOnly? scheduledDate = null;
-            MealSlot? slot = null;
-
-            var leftoverDates = new List<DateOnly>();
-            if (!isOnDeck)
-            {
-                // Meal count is cooking occasions; each batch covers its share of open dates.
-                var coverage =
-                    openDates.Count / requestedMealCount
-                    + (resultCandidates.Count < openDates.Count % requestedMealCount ? 1 : 0);
-                scheduledDate = openDates[nextOpenDay++];
-                dayOffset = scheduledDate.Value.DayNumber - rangeStart.DayNumber;
-                slot = request.DefaultSlot;
-                for (var i = 1; i < coverage; i++)
-                {
-                    leftoverDates.Add(openDates[nextOpenDay++]);
-                }
-            }
-
-            var targetServings = request.ServingsPerMeal * (1 + leftoverDates.Count);
-            if (targetServings > 999m)
+            if (retrieval.Candidates.Count == 0)
             {
                 throw new DomainValidationException(
-                    "Cooking servings including leftovers cannot exceed 999. Reduce servings per meal."
+                    excludedTerms.Count > 0
+                        ? "No eligible published recipes matched your prompt's exclusions. Relax your exclusions or add matching recipes before drafting."
+                        : "No eligible published recipes remain in your household cookbook. Add recipes or remove exclusions before drafting."
                 );
             }
+            workload?.CompleteSegment("retrieve");
 
-            var rationale = !string.IsNullOrWhiteSpace(p.Rationale)
-                ? p.Rationale.Trim()
-                : (
-                    isSurpriseDraft
-                        ? $"Selected as a varied {request.DefaultSlot} pick from your cookbook."
-                        : $"Selected based on your request: {prompt}"
-                );
-
-            resultCandidates.Add(
-                new DraftMealPlanCandidateDto(
-                    RecipeId: matchedRecipe.Id,
-                    Recipe: matchedRecipe,
-                    IsOnDeck: isOnDeck,
-                    DayOffset: dayOffset,
-                    ScheduledDate: scheduledDate,
-                    Slot: slot,
-                    TargetServings: targetServings,
-                    Rationale: rationale,
-                    LeftoverDates: leftoverDates
-                )
-            );
-
-            if (resultCandidates.Count >= requestedMealCount)
-            {
-                break;
-            }
-        }
-
-        if (resultCandidates.Count != requestedMealCount)
-        {
-            throw new DomainValidationException(
-                $"The AI model returned {resultCandidates.Count} valid cookbook suggestions instead of {requestedMealCount}. Try again or reduce the cooking count."
-            );
-        }
-
-        var unmetCravingNotes = isSurpriseDraft
-            ? []
-            : (payload.UnmetCravingNotes ?? [])
-                .Where(n => !string.IsNullOrWhiteSpace(n))
-                .Select(n => n.Trim())
-                .Distinct(StringComparer.OrdinalIgnoreCase)
+            var catalogList = retrieval.Candidates;
+            var bucketSummaries = searchBuckets
+                .Select(b =>
+                {
+                    var details = new List<string> { $"target ~{b.DesiredCount}" };
+                    if (b.MaxTotalTimeMinutes.HasValue)
+                    {
+                        details.Add($"<= {b.MaxTotalTimeMinutes.Value}m");
+                    }
+                    if (b.SuggestedTags.Count > 0)
+                    {
+                        details.Add($"tags: {string.Join(", ", b.SuggestedTags)}");
+                    }
+                    return $"{b.BucketName} ({string.Join("; ", details)})";
+                })
                 .ToList();
 
-        if (!isSurpriseDraft)
-        {
-            foreach (var bucket in retrieval.UnmatchedBuckets)
+            workload?.ActivateSegment(
+                "draft_schedule",
+                $"{catalogList.Count} candidates",
+                "Stage 3/3: Selecting & scheduling meals..."
+            );
+            // Stage 3: Constrained schedule assembly from compact candidate cards
+            var llmContext = new LlmDraftMealPlanContext(
+                WeekStartDate: rangeStart,
+                UserPrompt: prompt,
+                RequestedMealCount: requestedMealCount,
+                DefaultSlotName: request.DefaultSlot.ToString(),
+                PlaceOnDeck: request.PlaceOnDeck,
+                ExistingWeekScheduleLines: existingLines,
+                CookbookCatalog: catalogList,
+                BucketSummaries: bucketSummaries.Count > 0 ? bucketSummaries : null,
+                PrioritizeIngredients: prioritizeIngredients.Count > 0
+                    ? prioritizeIngredients
+                    : null,
+                UnmatchedBuckets: retrieval.UnmatchedBuckets.Count > 0
+                    ? retrieval.UnmatchedBuckets
+                    : null
+            );
+
+            var payload = await llmClient.DraftWeeklyMealPlanAsync(
+                config,
+                llmContext,
+                cancellationToken
+            );
+            workload?.CompleteSegment("draft_schedule");
+            workload?.CompleteWorkload($"Drafted {requestedMealCount} meal suggestion(s).");
+
+            var candidateRecipeIds = catalogList.Select(c => c.RecipeId).Distinct().ToList();
+            var candidateRecipes = await dbContext
+                .Recipes.AsNoTracking()
+                .Where(r => candidateRecipeIds.Contains(r.Id))
+                .Select(r => new MealPlanRecipeBadgeDto(
+                    r.Id,
+                    r.Title,
+                    r.Slug,
+                    r.BaseServings,
+                    r.TotalTimeMinutes,
+                    r.Difficulty,
+                    r.ThumbnailImagePath
+                ))
+                .ToListAsync(cancellationToken);
+
+            var candidateMapByIndex = catalogList.ToDictionary(c => c.CatalogIndex);
+            var badgeByIdMap = candidateRecipes.ToDictionary(r => r.Id);
+            var badgeByTitleMap = catalogList
+                .Where(candidate => badgeByIdMap.ContainsKey(candidate.RecipeId))
+                .Select(candidate => badgeByIdMap[candidate.RecipeId])
+                .GroupBy(r => r.Title, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+            var proposals = payload.Proposals ?? [];
+            var resultCandidates = new List<DraftMealPlanCandidateDto>();
+            var seenRecipeIds = new HashSet<Guid>();
+
+            var nextOpenDay = 0;
+
+            foreach (var p in proposals)
             {
-                if (
-                    !string.IsNullOrWhiteSpace(bucket)
-                    && !unmetCravingNotes.Any(n =>
-                        n.Contains(bucket, StringComparison.OrdinalIgnoreCase)
-                    )
+                MealPlanRecipeBadgeDto? matchedRecipe = null;
+
+                if (candidateMapByIndex.TryGetValue(p.CatalogIndex, out var cand))
+                {
+                    matchedRecipe = badgeByIdMap.GetValueOrDefault(cand.RecipeId);
+                }
+                else if (
+                    !string.IsNullOrWhiteSpace(p.RecipeTitle)
+                    && badgeByTitleMap.TryGetValue(p.RecipeTitle.Trim(), out var byTitle)
                 )
                 {
-                    unmetCravingNotes.Add(
-                        $"Limited cookbook matches found for \"{bucket}\"; substituted the closest available recipes."
+                    matchedRecipe = byTitle;
+                }
+
+                if (matchedRecipe is null)
+                {
+                    // Discard hallucinated / non-existent recipes
+                    continue;
+                }
+
+                if (
+                    seenRecipeIds.Contains(matchedRecipe.Id)
+                    && catalogList.Count >= requestedMealCount
+                )
+                {
+                    // Skip duplicate recipe in draft if we have enough distinct recipes
+                    continue;
+                }
+
+                seenRecipeIds.Add(matchedRecipe.Id);
+
+                var isOnDeck = request.PlaceOnDeck;
+                int? dayOffset = null;
+                DateOnly? scheduledDate = null;
+                MealSlot? slot = null;
+
+                var leftoverDates = new List<DateOnly>();
+                if (!isOnDeck)
+                {
+                    // Meal count is cooking occasions; each batch covers its share of open dates.
+                    var coverage =
+                        openDates.Count / requestedMealCount
+                        + (resultCandidates.Count < openDates.Count % requestedMealCount ? 1 : 0);
+                    scheduledDate = openDates[nextOpenDay++];
+                    dayOffset = scheduledDate.Value.DayNumber - rangeStart.DayNumber;
+                    slot = request.DefaultSlot;
+                    for (var i = 1; i < coverage; i++)
+                    {
+                        leftoverDates.Add(openDates[nextOpenDay++]);
+                    }
+                }
+
+                var targetServings = request.ServingsPerMeal * (1 + leftoverDates.Count);
+                if (targetServings > 999m)
+                {
+                    throw new DomainValidationException(
+                        "Cooking servings including leftovers cannot exceed 999. Reduce servings per meal."
                     );
                 }
-            }
-        }
 
-        return new DraftMealPlanResponseDto(
-            WeekStartDate: rangeStart,
-            WeekEndDate: rangeEnd,
-            ModelUsed: config.TextModel,
-            ConsideredCookbookRecipeCount: retrieval.TotalEligiblePublishedCount,
-            Candidates: resultCandidates,
-            UnmetCravingNotes: unmetCravingNotes.Count > 0 ? unmetCravingNotes : null,
-            UsedEmbeddings: retrieval.UsedEmbeddings
-        );
+                var rationale = !string.IsNullOrWhiteSpace(p.Rationale)
+                    ? p.Rationale.Trim()
+                    : (
+                        isSurpriseDraft
+                            ? $"Selected as a varied {request.DefaultSlot} pick from your cookbook."
+                            : $"Selected based on your request: {prompt}"
+                    );
+
+                resultCandidates.Add(
+                    new DraftMealPlanCandidateDto(
+                        RecipeId: matchedRecipe.Id,
+                        Recipe: matchedRecipe,
+                        IsOnDeck: isOnDeck,
+                        DayOffset: dayOffset,
+                        ScheduledDate: scheduledDate,
+                        Slot: slot,
+                        TargetServings: targetServings,
+                        Rationale: rationale,
+                        LeftoverDates: leftoverDates
+                    )
+                );
+
+                if (resultCandidates.Count >= requestedMealCount)
+                {
+                    break;
+                }
+            }
+
+            if (resultCandidates.Count != requestedMealCount)
+            {
+                throw new DomainValidationException(
+                    $"The AI model returned {resultCandidates.Count} valid cookbook suggestions instead of {requestedMealCount}. Try again or reduce the cooking count."
+                );
+            }
+
+            var unmetCravingNotes = isSurpriseDraft
+                ? []
+                : (payload.UnmetCravingNotes ?? [])
+                    .Where(n => !string.IsNullOrWhiteSpace(n))
+                    .Select(n => n.Trim())
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+            if (!isSurpriseDraft)
+            {
+                foreach (var bucket in retrieval.UnmatchedBuckets)
+                {
+                    if (
+                        !string.IsNullOrWhiteSpace(bucket)
+                        && !unmetCravingNotes.Any(n =>
+                            n.Contains(bucket, StringComparison.OrdinalIgnoreCase)
+                        )
+                    )
+                    {
+                        unmetCravingNotes.Add(
+                            $"Limited cookbook matches found for \"{bucket}\"; substituted the closest available recipes."
+                        );
+                    }
+                }
+            }
+
+            return new DraftMealPlanResponseDto(
+                WeekStartDate: rangeStart,
+                WeekEndDate: rangeEnd,
+                ModelUsed: config.TextModel,
+                ConsideredCookbookRecipeCount: retrieval.TotalEligiblePublishedCount,
+                Candidates: resultCandidates,
+                UnmetCravingNotes: unmetCravingNotes.Count > 0 ? unmetCravingNotes : null,
+                UsedEmbeddings: retrieval.UsedEmbeddings
+            );
+        }
+        catch (OperationCanceledException)
+        {
+            workload?.CancelWorkload("Meal plan draft canceled.");
+            throw;
+        }
+        catch (Exception ex)
+        {
+            workload?.FailWorkload(ex.Message);
+            throw;
+        }
     }
 
     private static bool StepMentionsIngredient(string? instruction, RecipeIngredient ingredient)

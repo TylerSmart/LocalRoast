@@ -11,7 +11,8 @@ public sealed class LlmSettingsService(
     AppDbContext dbContext,
     IOptions<LlmDefaultsOptions> defaultOptions,
     ILlmExtractionClient llmClient,
-    IIngestionQueueSignal queueSignal
+    IIngestionQueueSignal queueSignal,
+    IIngestionRealtimeNotifier? realtimeNotifier = null
 ) : ILlmSettingsService
 {
     public async Task<LlmSettingsDto> GetSettingsAsync(
@@ -861,6 +862,26 @@ public sealed class LlmSettingsService(
         else if (!wasEnabled)
         {
             queueSignal.NotifyWorkAvailable();
+        }
+
+        if (realtimeNotifier is not null)
+        {
+            try
+            {
+                await realtimeNotifier.NotifyQueueChangedAsync(
+                    new IngestionQueueChangedEventDto(
+                        Reason: "paused-changed",
+                        EnableIngestion: entity.EnableIngestion,
+                        PausedUntilUtc: entity.PausedUntilUtc,
+                        PauseReason: entity.PauseReason
+                    ),
+                    cancellationToken
+                );
+            }
+            catch
+            {
+                // Non-fatal realtime notification error
+            }
         }
 
         return await GetSettingsAsync(cancellationToken);

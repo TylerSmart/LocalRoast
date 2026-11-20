@@ -3,6 +3,7 @@ import {
   ChangeDetectionStrategy,
   Component,
   DestroyRef,
+  OnDestroy,
   OnInit,
   computed,
   inject,
@@ -25,7 +26,7 @@ import { MatPaginatorModule, PageEvent } from '@angular/material/paginator';
 import { MatSelectModule } from '@angular/material/select';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { RouterLink } from '@angular/router';
-import { interval } from 'rxjs';
+import { Subject, debounceTime, interval } from 'rxjs';
 import { APP_STORAGE_PREFIX } from '../../../app.branding';
 import type {
   IngestionChannel,
@@ -34,8 +35,10 @@ import type {
   IngestionJobStatus,
   IngestionJobSummaryDto,
 } from '../../../core/models/ingestion.models';
+import { IngestionRealtimeService } from '../../../core/services/ingestion/ingestion-realtime.service';
 import { IngestionService } from '../../../core/services/ingestion/ingestion.service';
 import { LlmSettingsService } from '../../../core/services/llm-settings/llm-settings.service';
+import { IngestionLiveMonitorComponent } from '../ingestion-live-monitor/ingestion-live-monitor.component';
 
 export type IngestionFilter = 'All' | 'ReadyForReview' | 'ActiveWaiting' | 'Published' | 'Failed';
 
@@ -84,16 +87,23 @@ export const REFRESH_OPTIONS: RefreshOption[] = [
     MatProgressSpinnerModule,
     MatSelectModule,
     MatTooltipModule,
+    IngestionLiveMonitorComponent,
   ],
   templateUrl: './ingestion-hub.component.html',
   styleUrl: './ingestion-hub.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class IngestionHubComponent implements OnInit {
+export class IngestionHubComponent implements OnInit, OnDestroy {
   private readonly fb = inject(FormBuilder);
   private readonly destroyRef = inject(DestroyRef);
   private readonly ingestionService = inject(IngestionService);
+  private readonly ingestionRealtime = inject(IngestionRealtimeService);
   private readonly llmSettingsService = inject(LlmSettingsService);
+
+  private readonly liveRefreshTrigger$ = new Subject<void>();
+
+  readonly syncState = this.ingestionRealtime.syncState;
+  readonly isLiveSynced = computed(() => this.syncState() === 'live');
 
   readonly refreshOptions = REFRESH_OPTIONS;
   readonly sortOptions = SORT_OPTIONS;
@@ -265,6 +275,45 @@ export class IngestionHubComponent implements OnInit {
     this.loadJobs();
     this.loadLlmSettings();
     this.setupPolling();
+    this.setupRealtime();
+  }
+
+  ngOnDestroy(): void {
+    if (this.searchTimer) {
+      clearTimeout(this.searchTimer);
+      this.searchTimer = null;
+    }
+    void this.ingestionRealtime.disconnect();
+  }
+
+  reconnectRealtime(): void {
+    void this.ingestionRealtime.connect();
+  }
+
+  private setupRealtime(): void {
+    this.liveRefreshTrigger$
+      .pipe(debounceTime(250), takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
+        this.executeRefresh(true);
+      });
+
+    this.ingestionRealtime.queueChanged$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((event) => {
+        if (event.enableIngestion !== undefined && event.enableIngestion !== null) {
+          this.isIngestionEnabled.set(event.enableIngestion);
+          this.pausedUntilUtc.set(event.pausedUntilUtc ?? null);
+          this.pauseReason.set(event.pauseReason ?? null);
+        }
+        this.liveRefreshTrigger$.next();
+      });
+
+    this.ingestionRealtime.reconnected$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
+      this.loadLlmSettings();
+      this.executeRefresh(true);
+    });
+
+    void this.ingestionRealtime.connect();
   }
 
   private getInitialRefreshInterval(): number {
@@ -325,8 +374,10 @@ export class IngestionHubComponent implements OnInit {
     }
   }
 
-  private executeRefresh(): void {
-    this.isRefreshing.set(true);
+  private executeRefresh(silent = false): void {
+    if (!silent) {
+      this.isRefreshing.set(true);
+    }
     let status: IngestionJobStatus | null = null;
     let activeWaiting = false;
 
@@ -363,13 +414,17 @@ export class IngestionHubComponent implements OnInit {
           this.jobs.set(res.items);
           this.totalCount.set(res.totalCount);
           this.isLoading.set(false);
-          this.isRefreshing.set(false);
+          if (!silent) {
+            this.isRefreshing.set(false);
+          }
           this.ingestionService.refreshSummary();
         },
         error: (err) => {
-          this.errorMessage.set(err?.error?.detail || 'Failed to load ingestion jobs.');
+          if (!silent) {
+            this.errorMessage.set(err?.error?.detail || 'Failed to load ingestion jobs.');
+            this.isRefreshing.set(false);
+          }
           this.isLoading.set(false);
-          this.isRefreshing.set(false);
         },
       });
   }
@@ -378,6 +433,11 @@ export class IngestionHubComponent implements OnInit {
     interval(100)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(() => {
+        if (this.isLiveSynced()) {
+          // SignalR live sync handles updates; polling acts as an automatic offline fallback
+          return;
+        }
+
         const intervalVal = this.refreshInterval();
         if (intervalVal <= 0) {
           // Manual mode: do not count down or auto-refresh

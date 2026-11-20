@@ -22,7 +22,9 @@ public sealed class IngestionProcessor(
     IPdfIngestionInspector pdfInspector,
     IIngestionQueueSignal queueSignal,
     ILogger<IngestionProcessor> logger,
-    IRecipeEmbeddingService? recipeEmbeddingService = null
+    IRecipeEmbeddingService? recipeEmbeddingService = null,
+    IIngestionLiveTracker? liveTracker = null,
+    IIngestionRealtimeNotifier? realtimeNotifier = null
 ) : IIngestionProcessor
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -106,6 +108,8 @@ public sealed class IngestionProcessor(
             );
         }
 
+        await NotifyQueueChangedSafeAsync("recovered", cancellationToken: cancellationToken);
+
         return interrupted.Count + interruptedRefining.Count + interruptedRecipeRefinements.Count;
     }
 
@@ -168,6 +172,26 @@ public sealed class IngestionProcessor(
 
         var jobCt = activeCts.Token;
 
+        var includeVisionInitially = job.Channel == IngestionChannel.Images;
+        var includeStage6Initially =
+            initialConfig.HasRefinementModelConfigured && initialConfig.RefineDuringIngestion;
+
+        using var workload = liveTracker?.BeginWorkload(
+            kind: LlmWorkloadKind.RecipeIngestion,
+            title: job.DisplayTitle,
+            segments: BuildIngestionSegments(
+                includeVisionInitially,
+                includeStage6Initially,
+                preprocessCompleted: false
+            ),
+            jobId: job.Id,
+            channel: job.Channel,
+            subtitle: job.SourceUrl ?? job.SourceBookTitle,
+            thumbnailUrl: job.DownloadedThumbnailImagePath,
+            activeModel: initialConfig.TextModel,
+            statusDetail: "Preprocessing source content..."
+        );
+
         try
         {
             // Step 1: Preprocessing
@@ -180,6 +204,18 @@ public sealed class IngestionProcessor(
             job.RunNowRequested = false;
 
             await dbContext.SaveChangesAsync(jobCt);
+            workload?.ActivateSegment(
+                "preprocess",
+                subStatus: job.Channel switch
+                {
+                    IngestionChannel.WebUrl => "Scraping web page",
+                    IngestionChannel.Pdf => "Inspecting PDF pages",
+                    IngestionChannel.Images => "Preparing images",
+                    _ => "Preparing source text",
+                },
+                statusDetail: job.StatusDetail
+            );
+            await NotifyQueueChangedSafeAsync("status-changed", job.Id, cancellationToken: jobCt);
 
             if (job.Channel == IngestionChannel.WebUrl)
             {
@@ -225,6 +261,10 @@ public sealed class IngestionProcessor(
                     }
 
                     await dbContext.SaveChangesAsync(jobCt);
+                    workload?.UpdateMetadata(
+                        title: job.DisplayTitle,
+                        thumbnailUrl: job.DownloadedThumbnailImagePath
+                    );
                 }
                 else
                 {
@@ -318,8 +358,11 @@ public sealed class IngestionProcessor(
 
             if (await IsJobDiscardedInDbAsync(job.Id, jobCt))
             {
+                workload?.CancelWorkload("Job discarded.");
                 return false;
             }
+
+            workload?.CompleteSegment("preprocess");
 
             // Step 2: Extracting
 
@@ -328,6 +371,7 @@ public sealed class IngestionProcessor(
             job.StatusDetail = "Extracting structured recipe via local LLM...";
 
             await dbContext.SaveChangesAsync(jobCt);
+            await NotifyQueueChangedSafeAsync("status-changed", job.Id, cancellationToken: jobCt);
 
             var config = await llmSettingsService.GetEffectiveConfigAsync(jobCt);
 
@@ -356,6 +400,22 @@ public sealed class IngestionProcessor(
                 {
                     // ignore
                 }
+            }
+
+            var includeStage6Now =
+                config.HasRefinementModelConfigured && config.RefineDuringIngestion;
+            if (
+                requiresVision != includeVisionInitially
+                || includeStage6Now != includeStage6Initially
+            )
+            {
+                workload?.SetSegments(
+                    BuildIngestionSegments(
+                        requiresVision,
+                        includeStage6Now,
+                        preprocessCompleted: true
+                    )
+                );
             }
 
             string modelUsed;
@@ -460,11 +520,18 @@ public sealed class IngestionProcessor(
 
                 job.StatusDetail = "Reading recipe text from images via local LLM...";
                 await dbContext.SaveChangesAsync(jobCt);
+                workload?.ActivateSegment(
+                    "vision",
+                    subStatus: $"{imageInputs.Count} page{(imageInputs.Count == 1 ? "" : "s")}",
+                    statusDetail: job.StatusDetail,
+                    activeModel: config.ForVision().VisionModel ?? config.VisionModel
+                );
                 sourceText =
                     await llmClient.TranscribeRecipeImagesAsync(config, visionContext, jobCt)
                     ?? throw new DomainValidationException(
                         "No recipe text could be read from the images."
                     );
+                workload?.CompleteSegment("vision");
                 job.NormalizedSourceText = sourceText;
                 job.StatusDetail = "Extracting structured recipe via local LLM...";
                 await dbContext.SaveChangesAsync(jobCt);
@@ -563,6 +630,7 @@ public sealed class IngestionProcessor(
 
             if (await IsJobDiscardedInDbAsync(job.Id, jobCt))
             {
+                workload?.CancelWorkload("Job discarded.");
                 return false;
             }
 
@@ -625,6 +693,12 @@ public sealed class IngestionProcessor(
                 job.StatusDetail =
                     $"Stage 6: Refining recipe & catalog names via {refineModelLabel}...";
                 await dbContext.SaveChangesAsync(jobCt);
+                workload?.ActivateSegment(
+                    "stage6",
+                    subStatus: refineModelLabel,
+                    statusDetail: job.StatusDetail,
+                    activeModel: refineModelLabel
+                );
 
                 try
                 {
@@ -640,6 +714,7 @@ public sealed class IngestionProcessor(
 
                     if (await IsJobDiscardedInDbAsync(job.Id, jobCt))
                     {
+                        workload?.CancelWorkload("Job discarded.");
                         return false;
                     }
 
@@ -654,6 +729,7 @@ public sealed class IngestionProcessor(
                     allValidationIssues = new List<string>(draft.ValidationIssues ?? []);
                     job.RefinedModel = refineResult.RefinedModel;
                     job.RefinedAt = DateTimeOffset.UtcNow;
+                    workload?.CompleteSegment("stage6");
                 }
                 catch (LlmHostUnavailableException ex)
                     when (ex.IsQuotaExhausted
@@ -663,6 +739,7 @@ public sealed class IngestionProcessor(
                         )
                     )
                 {
+                    workload?.SkipSegment("stage6");
                     logger.LogWarning(
                         ex,
                         "Refinement model quota exhausted on '{Model}' during ingestion of job {JobId}; continuing without refinement.",
@@ -673,6 +750,7 @@ public sealed class IngestionProcessor(
                 catch (Exception ex)
                     when (ex is not OperationCanceledException and not LlmHostUnavailableException)
                 {
+                    workload?.SkipSegment("stage6");
                     logger.LogWarning(
                         ex,
                         "Refinement pass failed during ingestion of job {JobId} on '{Model}'; keeping initial extracted draft so refinement can retry later.",
@@ -726,6 +804,13 @@ public sealed class IngestionProcessor(
                 && draft.ConfidenceScore >= (job.AutoPublish ? 0.60m : 0.85m);
 
             var publishedSuccessfully = false;
+            workload?.ActivateSegment(
+                "finalize",
+                subStatus: canAutoPublish ? "Auto-publishing recipe" : "Saving draft for review",
+                statusDetail: canAutoPublish
+                    ? "Auto-publishing high-confidence recipe..."
+                    : "Saving extracted draft for review..."
+            );
             if (canAutoPublish)
             {
                 try
@@ -846,12 +931,21 @@ public sealed class IngestionProcessor(
                 await TryEmbedPublishedRecipesAsync(config, publishedRecipeIds, jobCt);
             }
 
+            workload?.UpdateMetadata(
+                title: job.DisplayTitle,
+                thumbnailUrl: job.DownloadedThumbnailImagePath
+            );
+            workload?.CompleteSegment("finalize");
+            workload?.CompleteWorkload(job.StatusDetail);
+            await NotifyQueueChangedSafeAsync("completed", job.Id, cancellationToken: jobCt);
+
             return true;
         }
         catch (OperationCanceledException)
         {
             if (await IsJobDiscardedInDbAsync(job.Id, CancellationToken.None))
             {
+                workload?.CancelWorkload("Job discarded.");
                 return false;
             }
 
@@ -881,12 +975,16 @@ public sealed class IngestionProcessor(
                 logger.LogError(ex, "Failed to revert canceled job {JobId} to Queued.", job.Id);
             }
 
+            workload?.CancelWorkload("Paused. Queued to resume when ingestion is enabled.");
+            await NotifyQueueChangedSafeAsync("status-changed", job.Id);
+
             return false;
         }
         catch (LlmHostUnavailableException ex)
         {
             if (await IsJobDiscardedInDbAsync(job.Id, CancellationToken.None))
             {
+                workload?.CancelWorkload("Job discarded.");
                 return false;
             }
 
@@ -945,6 +1043,14 @@ public sealed class IngestionProcessor(
                             "Auto-paused ingestion for job {JobId} because provider quota is exhausted.",
                             job.Id
                         );
+                        workload?.CancelWorkload(trackedJob.StatusDetail);
+                        await NotifyQueueChangedSafeAsync(
+                            "paused-changed",
+                            job.Id,
+                            enableIngestion: false,
+                            pausedUntilUtc: nextReset,
+                            pauseReason: reason
+                        );
                         return false;
                     }
 
@@ -968,12 +1074,16 @@ public sealed class IngestionProcessor(
                 );
             }
 
+            workload?.FailWorkload(ex.Message);
+            await NotifyQueueChangedSafeAsync("status-changed", job.Id);
+
             return false;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             if (await IsJobDiscardedInDbAsync(job.Id, CancellationToken.None))
             {
+                workload?.CancelWorkload("Job discarded.");
                 return false;
             }
 
@@ -1023,6 +1133,8 @@ public sealed class IngestionProcessor(
                         );
 
                         await dbContext.SaveChangesAsync(CancellationToken.None);
+                        workload?.FailWorkload(trackedJob.StatusDetail);
+                        await NotifyQueueChangedSafeAsync("status-changed", job.Id);
                         return false;
                     }
 
@@ -1038,6 +1150,8 @@ public sealed class IngestionProcessor(
                     trackedJob.StatusDetail = ex.Message;
 
                     await dbContext.SaveChangesAsync(CancellationToken.None);
+                    workload?.FailWorkload(ex.Message);
+                    await NotifyQueueChangedSafeAsync("status-changed", job.Id);
                     return false;
                 }
             }
@@ -1050,6 +1164,9 @@ public sealed class IngestionProcessor(
                     ex.Message
                 );
             }
+
+            workload?.FailWorkload(ex.Message);
+            await NotifyQueueChangedSafeAsync("status-changed", job.Id);
 
             return false;
         }
@@ -1164,6 +1281,10 @@ public sealed class IngestionProcessor(
                 await dbContext.SaveChangesAsync(cancellationToken);
 
                 queueSignal.NotifyWorkAvailable();
+                await NotifyQueueChangedSafeAsync(
+                    "promoted-waiting",
+                    cancellationToken: cancellationToken
+                );
 
                 logger.LogInformation(
                     "LLM host is back online; promoted {Count} waiting job(s) to Queued.",
@@ -1345,8 +1466,20 @@ public sealed class IngestionProcessor(
         using var activeRegistration = queueSignal.RegisterActiveJobExecution(recipeId, activeCts);
         var runCt = activeCts.Token;
 
+        using var workload = liveTracker?.BeginWorkload(
+            kind: LlmWorkloadKind.RecipeRefinement,
+            title: trackedRecipe.Title,
+            segments: BuildRefinementSegments("Load Recipe", "Apply & Re-embed"),
+            recipeId: recipeId,
+            subtitle: "On-demand recipe refinement",
+            thumbnailUrl: trackedRecipe.ThumbnailImagePath,
+            activeModel: refineModelLabel,
+            statusDetail: $"Refining recipe via {refineModelLabel}..."
+        );
+
         try
         {
+            workload?.ActivateSegment("prepare", "Loading recipe & catalog");
             trackedRecipe.RefinementStatus = RecipeRefinementStatus.Running;
             trackedRecipe.RefinementStatusDetail = $"Refining recipe via {refineModelLabel}...";
             await dbContext.SaveChangesAsync(runCt);
@@ -1400,6 +1533,14 @@ public sealed class IngestionProcessor(
             var draft = BuildDraftFromRecipe(fullRecipe);
             var sourceText = ResolveSourceTextForRecipeRefinement(linkedJob, draft);
 
+            workload?.CompleteSegment("prepare");
+            workload?.ActivateSegment(
+                "stage6",
+                subStatus: refineModelLabel,
+                statusDetail: $"Refining recipe via {refineModelLabel}...",
+                activeModel: refineModelLabel
+            );
+
             var refineResult = await recipeRefiner.RefineDraftAsync(
                 new IngestionRefineDraftRequest(
                     SourceText: sourceText,
@@ -1409,6 +1550,9 @@ public sealed class IngestionProcessor(
                 ),
                 runCt
             );
+
+            workload?.CompleteSegment("stage6");
+            workload?.ActivateSegment("finalize", "Applying refined recipe");
 
             dbContext.ChangeTracker.Clear();
             var freshState = await dbContext
@@ -1576,6 +1720,11 @@ public sealed class IngestionProcessor(
                 await TryEmbedPublishedRecipesAsync(config, publishedRecipeIds, runCt);
             }
 
+            workload?.UpdateMetadata(title: updatedRecipe.Title);
+            workload?.CompleteSegment("finalize");
+            workload?.CompleteWorkload($"Refined via {refineResult.RefinedModel}.");
+            await NotifyQueueChangedSafeAsync("refined", linkedJob?.Id, cancellationToken: runCt);
+
             return true;
         }
         catch (OperationCanceledException)
@@ -1600,6 +1749,7 @@ public sealed class IngestionProcessor(
                 );
             }
 
+            workload?.CancelWorkload("Recipe refinement canceled.");
             return false;
         }
         catch (LlmHostUnavailableException ex)
@@ -1616,6 +1766,7 @@ public sealed class IngestionProcessor(
                 msg,
                 CancellationToken.None
             );
+            workload?.FailWorkload(msg);
             return false;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -1629,6 +1780,7 @@ public sealed class IngestionProcessor(
                 msg,
                 CancellationToken.None
             );
+            workload?.FailWorkload(msg);
             return false;
         }
     }
@@ -1775,13 +1927,36 @@ public sealed class IngestionProcessor(
         var refineModelLabel =
             refineConfig.TextModel?.Trim() ?? config.RefineModel?.Trim() ?? "refinement model";
 
+        using var workload = liveTracker?.BeginWorkload(
+            kind: LlmWorkloadKind.JobRefinement,
+            title: job.DisplayTitle,
+            segments: BuildRefinementSegments("Load Draft", "Save & Materialize"),
+            jobId: job.Id,
+            recipeId: job.ResultingRecipeId,
+            channel: job.Channel,
+            subtitle: isManualRunNow ? "Manual refinement" : "Idle refinement",
+            thumbnailUrl: job.DownloadedThumbnailImagePath,
+            activeModel: refineModelLabel,
+            statusDetail: $"Refining recipe via {refineModelLabel}..."
+        );
+
         try
         {
+            workload?.ActivateSegment("prepare", "Preparing draft");
             job.RefinementRunNowRequested = false;
             job.StatusDetail = $"Refining recipe via {refineModelLabel}...";
             await dbContext.SaveChangesAsync(jobCt);
+            await NotifyQueueChangedSafeAsync("status-changed", job.Id, cancellationToken: jobCt);
 
             var sourceText = ResolveSourceTextForIdleRefinement(job, draft);
+
+            workload?.CompleteSegment("prepare");
+            workload?.ActivateSegment(
+                "stage6",
+                subStatus: refineModelLabel,
+                statusDetail: job.StatusDetail,
+                activeModel: refineModelLabel
+            );
 
             var refineResult = await recipeRefiner.RefineDraftAsync(
                 new IngestionRefineDraftRequest(
@@ -1792,6 +1967,9 @@ public sealed class IngestionProcessor(
                 ),
                 jobCt
             );
+
+            workload?.CompleteSegment("stage6");
+            workload?.ActivateSegment("finalize", "Saving refined recipe");
 
             // Reload fresh job to detect concurrent edits or discard while LLM call was in flight
             dbContext.ChangeTracker.Clear();
@@ -1956,6 +2134,11 @@ public sealed class IngestionProcessor(
                     await TryEmbedPublishedRecipesAsync(config, publishedRecipeIds, jobCt);
                 }
 
+                workload?.UpdateMetadata(title: job.DisplayTitle);
+                workload?.CompleteSegment("finalize");
+                workload?.CompleteWorkload(job.StatusDetail);
+                await NotifyQueueChangedSafeAsync("refined", job.Id, cancellationToken: jobCt);
+
                 return true;
             }
 
@@ -2081,6 +2264,11 @@ public sealed class IngestionProcessor(
                 await TryEmbedPublishedRecipesAsync(config, publishedRecipeIds, jobCt);
             }
 
+            workload?.UpdateMetadata(title: job.DisplayTitle);
+            workload?.CompleteSegment("finalize");
+            workload?.CompleteWorkload(job.StatusDetail);
+            await NotifyQueueChangedSafeAsync("refined", job.Id, cancellationToken: jobCt);
+
             return true;
         }
         catch (OperationCanceledException)
@@ -2119,6 +2307,8 @@ public sealed class IngestionProcessor(
                 );
             }
 
+            workload?.CancelWorkload("Refinement preempted or canceled.");
+            await NotifyQueueChangedSafeAsync("status-changed", candidateId);
             return false;
         }
         catch (LlmHostUnavailableException ex)
@@ -2201,6 +2391,8 @@ public sealed class IngestionProcessor(
                 );
             }
 
+            workload?.FailWorkload(ex.Message);
+            await NotifyQueueChangedSafeAsync("status-changed", candidateId);
             return false;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -2256,6 +2448,8 @@ public sealed class IngestionProcessor(
                 );
             }
 
+            workload?.FailWorkload(ex.Message);
+            await NotifyQueueChangedSafeAsync("status-changed", candidateId);
             return false;
         }
     }
@@ -2829,5 +3023,134 @@ public sealed class IngestionProcessor(
                 )
             )
             .ToList();
+    }
+
+    private static IReadOnlyList<LlmWorkflowSegmentDto> BuildIngestionSegments(
+        bool includeVision,
+        bool includeStage6,
+        bool preprocessCompleted
+    )
+    {
+        var segments = new List<LlmWorkflowSegmentDto>
+        {
+            new(
+                "preprocess",
+                "Preprocess",
+                preprocessCompleted
+                    ? LlmWorkflowSegmentState.Completed
+                    : LlmWorkflowSegmentState.Pending
+            ),
+        };
+
+        if (includeVision)
+        {
+            segments.Add(new("vision", "Vision OCR", LlmWorkflowSegmentState.Pending));
+        }
+
+        segments.Add(new("stage1", "1. Extract", LlmWorkflowSegmentState.Pending));
+        segments.Add(new("stage2", "2. Condense", LlmWorkflowSegmentState.Pending));
+        segments.Add(new("stage3", "3. Match", LlmWorkflowSegmentState.Pending));
+        segments.Add(new("stage4", "4. Tokenize", LlmWorkflowSegmentState.Pending));
+        segments.Add(new("stage5", "5. Polish", LlmWorkflowSegmentState.Pending));
+
+        if (includeStage6)
+        {
+            segments.Add(new("stage6", "6. Refine", LlmWorkflowSegmentState.Pending));
+        }
+
+        segments.Add(new("finalize", "Save", LlmWorkflowSegmentState.Pending));
+        return segments;
+    }
+
+    private static IReadOnlyList<LlmWorkflowSegmentDto> BuildRefinementSegments(
+        string prepareLabel,
+        string finalizeLabel
+    ) =>
+        [
+            new("prepare", prepareLabel, LlmWorkflowSegmentState.Pending),
+            new("stage6", "Refine Recipe", LlmWorkflowSegmentState.Pending),
+            new("finalize", finalizeLabel, LlmWorkflowSegmentState.Pending),
+        ];
+
+    private async Task NotifyQueueChangedSafeAsync(
+        string reason,
+        Guid? jobId = null,
+        bool? enableIngestion = null,
+        DateTimeOffset? pausedUntilUtc = null,
+        string? pauseReason = null,
+        CancellationToken cancellationToken = default
+    )
+    {
+        if (realtimeNotifier is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var counts = await dbContext
+                .IngestionJobs.AsNoTracking()
+                .Where(j => j.Status != IngestionJobStatus.Discarded)
+                .GroupBy(j => j.Status)
+                .Select(g => new { Status = g.Key, Count = g.Count() })
+                .ToListAsync(cancellationToken);
+
+            var ready = 0;
+            var active = 0;
+            var waiting = 0;
+            var failed = 0;
+            var published = 0;
+            var all = 0;
+
+            foreach (var row in counts)
+            {
+                all += row.Count;
+                switch (row.Status)
+                {
+                    case IngestionJobStatus.ReadyForReview:
+                        ready += row.Count;
+                        break;
+                    case IngestionJobStatus.Queued:
+                    case IngestionJobStatus.Preprocessing:
+                    case IngestionJobStatus.Extracting:
+                        active += row.Count;
+                        break;
+                    case IngestionJobStatus.WaitingForLlmHost:
+                        waiting += row.Count;
+                        break;
+                    case IngestionJobStatus.Failed:
+                        failed += row.Count;
+                        break;
+                    case IngestionJobStatus.Published:
+                        published += row.Count;
+                        break;
+                }
+            }
+
+            var summary = new IngestionQueueSummaryDto(
+                ReadyForReviewCount: ready,
+                ActiveProcessingCount: active,
+                WaitingForLlmHostCount: waiting,
+                FailedCount: failed,
+                AllCount: all,
+                PublishedCount: published
+            );
+
+            await realtimeNotifier.NotifyQueueChangedAsync(
+                new IngestionQueueChangedEventDto(
+                    Reason: reason,
+                    JobId: jobId,
+                    Summary: summary,
+                    EnableIngestion: enableIngestion,
+                    PausedUntilUtc: pausedUntilUtc,
+                    PauseReason: pauseReason
+                ),
+                cancellationToken
+            );
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "Non-fatal error broadcasting ingestion queue update.");
+        }
     }
 }

@@ -2,7 +2,38 @@
   <!-- Header Bar -->
   <div class="page-header">
     <div class="header-titles">
-      <h1 class="page-title">Recipe Ingestion & Review Inbox</h1>
+      <div class="title-with-sync">
+        <h1 class="page-title">Recipe Ingestion & Review Inbox</h1>
+        @if (syncState() === 'live') {
+          <span
+            class="sync-status-pill live"
+            role="status"
+            aria-live="polite"
+            matTooltip="Connected to real-time LLM and queue updates"
+          >
+            <span class="sync-dot" aria-hidden="true"></span>
+            <span>Live Sync</span>
+          </span>
+        } @else if (syncState() === 'connecting' || syncState() === 'reconnecting') {
+          <span class="sync-status-pill reconnecting" role="status" aria-live="polite">
+            <mat-icon class="spinning">sync</mat-icon>
+            <span>Syncing…</span>
+          </span>
+        } @else {
+          <button
+            type="button"
+            class="sync-status-pill offline"
+            (click)="reconnectRealtime()"
+            role="status"
+            aria-live="polite"
+            aria-label="Reconnect live sync"
+            matTooltip="Live sync disconnected — using auto-refresh fallback. Click to reconnect."
+          >
+            <mat-icon>cloud_off</mat-icon>
+            <span>Reconnect</span>
+          </button>
+        }
+      </div>
       <p class="page-subtitle">
         Import recipes from web URLs, pasted text, photos, or PDFs using local LLM extraction.
       </p>
@@ -510,6 +541,9 @@
     </div>
   }
 
+  <!-- Real-Time Active LLM Activity & Thinking Monitor -->
+  <app-ingestion-live-monitor />
+
   <!-- Queue & Inbox Toolbar -->
   <div class="queue-toolbar">
     <div class="filter-strip" role="tablist" aria-label="Ingestion Queue Filters">
@@ -586,16 +620,18 @@
           (click)="manualRefresh()"
           [disabled]="isRefreshing()"
           [matTooltip]="
-            refreshInterval() > 0
-              ? 'Refresh now (Next auto-refresh in ' + remainingTimeDisplay() + ')'
-              : 'Refresh queue now (Auto-refresh off)'
+            isLiveSynced()
+              ? 'Refresh now (Live Sync active — auto-refresh on standby)'
+              : refreshInterval() > 0
+                ? 'Refresh now (Next auto-refresh in ' + remainingTimeDisplay() + ')'
+                : 'Refresh queue now (Auto-refresh off)'
           "
           aria-label="Refresh ingestion jobs"
         >
           <span class="refresh-indicator" matButtonIcon>
             @if (isRefreshing()) {
               <mat-spinner diameter="16" class="inline-spinner"></mat-spinner>
-            } @else if (refreshInterval() > 0) {
+            } @else if (!isLiveSynced() && refreshInterval() > 0) {
               <mat-progress-spinner
                 mode="determinate"
                 [value]="countdownProgress()"

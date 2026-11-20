@@ -18,6 +18,73 @@
   gap: 0.2rem;
 }
 
+.title-with-sync {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.sync-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.32rem;
+  padding: 0.2rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  line-height: 1.25;
+  border: 1px solid transparent;
+
+  mat-icon {
+    font-size: 14px;
+    width: 14px;
+    height: 14px;
+  }
+
+  &.live {
+    background-color: var(--app-success-container);
+    color: var(--app-on-success-container);
+
+    .sync-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background-color: var(--app-success);
+      animation: syncPulse 2s ease-in-out infinite;
+    }
+  }
+
+  &.reconnecting {
+    background-color: var(--app-warning-container);
+    color: var(--app-on-warning-container);
+  }
+
+  &.offline {
+    background-color: var(--mat-sys-surface-container-highest);
+    color: var(--mat-sys-on-surface-variant);
+    border-color: var(--mat-sys-outline-variant);
+    cursor: pointer;
+
+    &:hover {
+      background-color: var(--mat-sys-surface-container-high);
+      color: var(--mat-sys-on-surface);
+    }
+  }
+}
+
+@keyframes syncPulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.82);
+  }
+}
+
 .page-title {
   margin: 0;
   font-size: 1.7rem;

@@ -19,7 +19,8 @@ public sealed partial class IngestionRecipePipeline(
     AppDbContext dbContext,
     ILlmExtractionClient llmClient,
     ICatalogVectorSearchService catalogSearch,
-    ILogger<IngestionRecipePipeline>? logger = null
+    ILogger<IngestionRecipePipeline>? logger = null,
+    IIngestionLiveTracker? liveTracker = null
 ) : IIngestionRecipePipeline
 {
     private const int DescriptionMaxLength = 250;
@@ -41,9 +42,17 @@ public sealed partial class IngestionRecipePipeline(
             );
         }
 
+        var workload = liveTracker?.CurrentWorkload;
+
         // ============================================================
         // STAGE 1: Structured Extraction
         // ============================================================
+        workload?.ActivateSegment(
+            "stage1",
+            subStatus: "Attempt 1/3",
+            statusDetail: "Stage 1/5: Extracting recipe structure...",
+            activeModel: request.Config.TextModel
+        );
         await ReportProgressAsync(
             request.OnStageProgress,
             "Stage 1/5: Extracting recipe structure..."
@@ -69,11 +78,22 @@ public sealed partial class IngestionRecipePipeline(
         var timing = stage1.Timing;
         var rawTags = stage1.Tags?.ToList() ?? [];
 
+        if (!string.Equals(title, "Untitled Recipe", StringComparison.Ordinal))
+        {
+            workload?.UpdateMetadata(title: title);
+        }
+        workload?.CompleteSegment("stage1");
+
         // ============================================================
         // STAGE 2: Conditional Description Condensing
         // ============================================================
         if (!string.IsNullOrWhiteSpace(description) && ShouldCondenseDescription(description))
         {
+            workload?.ActivateSegment(
+                "stage2",
+                subStatus: "Condensing summary",
+                statusDetail: "Stage 2/5: Condensing recipe summary..."
+            );
             await ReportProgressAsync(
                 request.OnStageProgress,
                 "Stage 2/5: Condensing recipe summary..."
@@ -85,11 +105,21 @@ public sealed partial class IngestionRecipePipeline(
                 description,
                 cancellationToken
             );
+            workload?.CompleteSegment("stage2");
+        }
+        else
+        {
+            workload?.SkipSegment("stage2");
         }
 
         // ============================================================
         // STAGE 3: Hybrid Catalog Search & Batch Matching
         // ============================================================
+        workload?.ActivateSegment(
+            "stage3",
+            subStatus: "Searching catalog",
+            statusDetail: "Stage 3/5: Matching ingredients to food catalog..."
+        );
         await ReportProgressAsync(
             request.OnStageProgress,
             "Stage 3/5: Matching ingredients to food catalog..."
@@ -137,10 +167,16 @@ public sealed partial class IngestionRecipePipeline(
             catalogRecipes,
             cancellationToken
         );
+        workload?.CompleteSegment("stage3");
 
         // ============================================================
         // STAGE 4: Batch Step Tokenization + Multi-Turn Repair
         // ============================================================
+        workload?.ActivateSegment(
+            "stage4",
+            subStatus: "Tokenizing steps",
+            statusDetail: "Stage 4/5: Tokenizing step instructions..."
+        );
         await ReportProgressAsync(
             request.OnStageProgress,
             "Stage 4/5: Tokenizing step instructions..."
@@ -152,6 +188,7 @@ public sealed partial class IngestionRecipePipeline(
             workSteps,
             cancellationToken
         );
+        workload?.CompleteSegment("stage4");
 
         // ============================================================
         // STAGE 5: Conditional Targeted Polish
@@ -169,6 +206,11 @@ public sealed partial class IngestionRecipePipeline(
             // RefineDuringIngestion / RefineDuringIdle settings.
             var polishConfig = request.Config;
 
+            workload?.ActivateSegment(
+                "stage5",
+                subStatus: "Polishing flagged details",
+                statusDetail: "Stage 5/5: Polishing flagged recipe details..."
+            );
             await ReportProgressAsync(
                 request.OnStageProgress,
                 "Stage 5/5: Polishing flagged recipe details..."
@@ -420,6 +462,12 @@ public sealed partial class IngestionRecipePipeline(
 
                 incompatibleAlts = FindAllIncompatibleAlts(workIngredients);
             }
+
+            workload?.CompleteSegment("stage5");
+        }
+        else
+        {
+            workload?.SkipSegment("stage5");
         }
 
         // ============================================================
@@ -470,6 +518,14 @@ public sealed partial class IngestionRecipePipeline(
         string? lastError = null;
         for (var attempt = 1; attempt <= 3; attempt++)
         {
+            liveTracker?.CurrentWorkload?.UpdateSegmentSubStatus(
+                "stage1",
+                attempt == 1 ? "Attempt 1/3" : $"Retry attempt {attempt}/3",
+                attempt == 1
+                    ? "Stage 1/5: Extracting recipe structure..."
+                    : $"Stage 1/5: Retrying extraction (attempt {attempt}/3)..."
+            );
+
             var res = await llmClient.ExecuteStructuredStageAsync<Stage1RecipeDto>(
                 config,
                 stageName: "stage1_extract_recipe",
@@ -723,8 +779,17 @@ public sealed partial class IngestionRecipePipeline(
         var rawDecisions = new Dictionary<int, Stage3MatchDecisionDto>();
         var batchPrompt = IngestionPromptLoader.LoadPrompt(IngestionPromptLoader.Stage3MatchBatch);
 
-        foreach (var chunk in queryItems.Chunk(Stage3BatchSize))
+        var stage3Chunks = queryItems.Chunk(Stage3BatchSize).ToList();
+        for (var chunkIdx = 0; chunkIdx < stage3Chunks.Count; chunkIdx++)
         {
+            var chunk = stage3Chunks[chunkIdx];
+            liveTracker?.CurrentWorkload?.UpdateSegmentSubStatus(
+                "stage3",
+                stage3Chunks.Count > 1
+                    ? $"Batch {chunkIdx + 1}/{stage3Chunks.Count}"
+                    : "Matching ingredients"
+            );
+
             var batchPayload = JsonSerializer.Serialize(
                 new
                 {
@@ -793,6 +858,11 @@ public sealed partial class IngestionRecipePipeline(
             {
                 continue;
             }
+
+            liveTracker?.CurrentWorkload?.UpdateSegmentSubStatus(
+                "stage3",
+                $"Retrying ingredient: {q.Name}"
+            );
 
             searchResult.CandidatesByKey.TryGetValue(q.Key, out var cand);
             var singlePayload = JsonSerializer.Serialize(
@@ -908,8 +978,17 @@ public sealed partial class IngestionRecipePipeline(
             IngestionPromptLoader.Stage4TokenizeStepsBatch
         );
 
-        foreach (var chunk in steps.Chunk(Stage4BatchSize))
+        var stage4Chunks = steps.Chunk(Stage4BatchSize).ToList();
+        for (var chunkIdx = 0; chunkIdx < stage4Chunks.Count; chunkIdx++)
         {
+            var chunk = stage4Chunks[chunkIdx];
+            liveTracker?.CurrentWorkload?.UpdateSegmentSubStatus(
+                "stage4",
+                stage4Chunks.Count > 1
+                    ? $"Batch {chunkIdx + 1}/{stage4Chunks.Count}"
+                    : "Tokenizing steps"
+            );
+
             var payloadJson = JsonSerializer.Serialize(
                 new
                 {
@@ -994,6 +1073,11 @@ public sealed partial class IngestionRecipePipeline(
 
                 for (var attempt = 0; attempt <= MaxStage4SingleStepRepairTurns; attempt++)
                 {
+                    liveTracker?.CurrentWorkload?.UpdateSegmentSubStatus(
+                        "stage4",
+                        $"Repairing step {step.StepNumber} (attempt {attempt + 1}/{MaxStage4SingleStepRepairTurns + 1})"
+                    );
+
                     var singleRes = await llmClient.ExecuteStructuredStageAsync<JsonObject>(
                         config,
                         stageName: "stage4_tokenize_step",

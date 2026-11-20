@@ -476,3 +476,117 @@ export interface RetryBatchJobsRequest {
 export interface RetryBatchJobsResultDto {
   requeuedCount: number;
 }
+
+export type IngestionRealtimeSyncState = 'disconnected' | 'connecting' | 'live' | 'reconnecting';
+
+export type LlmWorkloadKind =
+  | 'RecipeIngestion'
+  | 'JobRefinement'
+  | 'RecipeRefinement'
+  | 'EmbeddingSync'
+  | 'MealPlanDraft'
+  | 'KitchenHelper';
+
+export type LlmWorkloadStatus = 'Running' | 'Completed' | 'Failed' | 'Canceled';
+
+export type LlmWorkflowSegmentState = 'Pending' | 'Active' | 'Completed' | 'Skipped' | 'Failed';
+
+export type LlmCallPhase =
+  'WaitingForModel' | 'Thinking' | 'GeneratingOutput' | 'Completed' | 'Failed';
+
+export interface LlmWorkflowSegmentDto {
+  key: string;
+  label: string;
+  state: LlmWorkflowSegmentState;
+  subStatus?: string | null;
+  startedAtUtc?: string | null;
+  completedAtUtc?: string | null;
+}
+
+export interface LlmCallTraceDto {
+  callId: string;
+  stageKey: string;
+  stageLabel: string;
+  model: string;
+  thinkingEnabled: boolean;
+  phase: LlmCallPhase;
+  thinkingText: string;
+  outputText: string;
+  startedAtUtc: string;
+  thinkingCompletedAtUtc?: string | null;
+  completedAtUtc?: string | null;
+  evalCount?: number | null;
+  tokensPerSecond?: number | null;
+  errorMessage?: string | null;
+}
+
+export interface LlmActiveWorkloadDto {
+  workloadId: string;
+  kind: LlmWorkloadKind;
+  status: LlmWorkloadStatus;
+  title: string;
+  startedAtUtc: string;
+  jobId?: string | null;
+  recipeId?: string | null;
+  channel?: IngestionChannel | null;
+  subtitle?: string | null;
+  thumbnailUrl?: string | null;
+  activeModel?: string | null;
+  statusDetail?: string | null;
+  completedAtUtc?: string | null;
+  segments: LlmWorkflowSegmentDto[];
+  calls: LlmCallTraceDto[];
+}
+
+export interface IngestionLiveSnapshotDto {
+  activeWorkloads: LlmActiveWorkloadDto[];
+  recentWorkloads: LlmActiveWorkloadDto[];
+}
+
+export interface LlmWorkloadMetaUpdatedDto {
+  workloadId: string;
+  status: LlmWorkloadStatus;
+  title: string;
+  subtitle?: string | null;
+  thumbnailUrl?: string | null;
+  activeModel?: string | null;
+  statusDetail?: string | null;
+  completedAtUtc?: string | null;
+  segments: LlmWorkflowSegmentDto[];
+}
+
+export interface LlmCallStartedDto {
+  workloadId: string;
+  call: LlmCallTraceDto;
+}
+
+export interface LlmCallStreamDeltaDto {
+  workloadId: string;
+  callId: string;
+  phase: LlmCallPhase;
+  thinkingDelta?: string | null;
+  outputDelta?: string | null;
+  thinkingCompletedAtUtc?: string | null;
+  evalCount?: number | null;
+  tokensPerSecond?: number | null;
+}
+
+export interface LlmCallCompletedDto {
+  workloadId: string;
+  callId: string;
+  phase: LlmCallPhase;
+  thinkingCompletedAtUtc?: string | null;
+  completedAtUtc: string;
+  evalCount?: number | null;
+  tokensPerSecond?: number | null;
+  errorMessage?: string | null;
+}
+
+export interface IngestionQueueChangedEventDto {
+  reason: string;
+  jobId?: string | null;
+  summary?: IngestionQueueSummaryDto | null;
+  enableIngestion?: boolean | null;
+  pausedUntilUtc?: string | null;
+  pauseReason?: string | null;
+}

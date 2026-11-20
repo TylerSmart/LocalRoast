@@ -19,7 +19,8 @@ namespace App.Data.Services;
 public sealed partial class IngestionRecipeRefiner(
     AppDbContext dbContext,
     ILlmExtractionClient llmClient,
-    ILogger<IngestionRecipeRefiner>? logger = null
+    ILogger<IngestionRecipeRefiner>? logger = null,
+    IIngestionLiveTracker? liveTracker = null
 ) : IIngestionRecipeRefiner
 {
     private const int DescriptionMaxLength = 250;
@@ -238,6 +239,12 @@ public sealed partial class IngestionRecipeRefiner(
             }
         );
 
+        liveTracker?.CurrentWorkload?.UpdateSegmentSubStatus(
+            "stage6",
+            $"Auditing via {refineModelName}",
+            $"Stage 6: Auditing recipe & catalog names via {refineModelName}..."
+        );
+
         var stageResult =
             await llmClient.ExecuteStructuredStageAsync<Stage6RefineRecipeResponseDto>(
                 refineConfig,
@@ -248,6 +255,12 @@ public sealed partial class IngestionRecipeRefiner(
                 maxTokens: 16384,
                 cancellationToken: cancellationToken
             );
+
+        liveTracker?.CurrentWorkload?.UpdateSegmentSubStatus(
+            "stage6",
+            "Applying patches",
+            $"Stage 6: Applying validated refinement patches..."
+        );
 
         var response =
             stageResult.Parsed

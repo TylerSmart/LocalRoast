@@ -27,6 +27,8 @@ public sealed class MockLanLlmAndBlogServer : IAsyncDisposable
     public double? LastTopP { get; private set; }
     public int? LastTopK { get; private set; }
     public string? LastUserPrompt { get; private set; }
+    public IReadOnlyList<string>? StreamThinkingChunks { get; set; }
+    public TaskCompletionSource? StreamHoldGate { get; set; }
 
     private MockLanLlmAndBlogServer(WebApplication app, string baseUrl)
     {
@@ -113,8 +115,9 @@ public sealed class MockLanLlmAndBlogServer : IAsyncDisposable
 
         app.MapPost(
             "/api/chat",
-            async (HttpRequest request) =>
+            async (HttpContext httpContext) =>
             {
+                var request = httpContext.Request;
                 using var body = await JsonDocument.ParseAsync(request.Body);
                 var userContent = body
                     .RootElement.GetProperty("messages")[1]
@@ -209,21 +212,76 @@ public sealed class MockLanLlmAndBlogServer : IAsyncDisposable
                         }
                         """;
 
+                var responseModel = string.IsNullOrWhiteSpace(requestedModel)
+                    ? "qwen2.5:14b"
+                    : requestedModel;
+                var responseContent = TaggedPipelineMockResponder.Respond(
+                    body.RootElement,
+                    payloadJson,
+                    server.Stage6RefinementPayload
+                );
+
+                if (server.StreamThinkingChunks is { Count: > 0 } thinkingChunks)
+                {
+                    httpContext.Response.StatusCode = StatusCodes.Status200OK;
+                    httpContext.Response.ContentType = "application/x-ndjson";
+                    var ct = httpContext.RequestAborted;
+
+                    foreach (var chunk in thinkingChunks)
+                    {
+                        var line = JsonSerializer.Serialize(
+                            new
+                            {
+                                model = responseModel,
+                                message = new
+                                {
+                                    role = "assistant",
+                                    content = "",
+                                    thinking = chunk,
+                                },
+                                done = false,
+                            }
+                        );
+                        await httpContext.Response.WriteAsync(line + "\n", ct);
+                        await httpContext.Response.Body.FlushAsync(ct);
+                    }
+
+                    if (server.StreamHoldGate is { } gate)
+                    {
+                        await gate.Task.WaitAsync(TimeSpan.FromSeconds(20), ct);
+                    }
+
+                    var contentLine = JsonSerializer.Serialize(
+                        new
+                        {
+                            model = responseModel,
+                            message = new { role = "assistant", content = responseContent },
+                            done = false,
+                        }
+                    );
+                    await httpContext.Response.WriteAsync(contentLine + "\n", ct);
+
+                    var doneLine = JsonSerializer.Serialize(
+                        new
+                        {
+                            model = responseModel,
+                            message = new { role = "assistant", content = "" },
+                            done = true,
+                            done_reason = "stop",
+                            eval_count = 96,
+                            eval_duration = 1_500_000_000L,
+                        }
+                    );
+                    await httpContext.Response.WriteAsync(doneLine + "\n", ct);
+                    await httpContext.Response.Body.FlushAsync(ct);
+                    return Results.Empty;
+                }
+
                 return Results.Ok(
                     new
                     {
-                        model = string.IsNullOrWhiteSpace(requestedModel)
-                            ? "qwen2.5:14b"
-                            : requestedModel,
-                        message = new
-                        {
-                            role = "assistant",
-                            content = TaggedPipelineMockResponder.Respond(
-                                body.RootElement,
-                                payloadJson,
-                                server.Stage6RefinementPayload
-                            ),
-                        },
+                        model = responseModel,
+                        message = new { role = "assistant", content = responseContent },
                     }
                 );
             }
@@ -870,11 +928,10 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
     {
         await RegisterAndLoginAsync();
 
-        // 1. Navigate to /ingest
+        // 1. Navigate to /ingest with SignalR Live Sync connected
         await Page.GotoAsync($"{ServerUrl}/ingest");
         await Expect(Page).ToHaveURLAsync(new Regex(".*/ingest$"));
 
-        // 2. Verify unified refresh controls in queue toolbar
         var refreshGroup = Page.Locator(".queue-toolbar-actions .unified-refresh-group");
         await Expect(refreshGroup).ToBeVisibleAsync();
 
@@ -882,12 +939,21 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await Expect(refreshBtn).ToBeVisibleAsync();
         await Expect(refreshBtn).ToContainTextAsync("Refresh");
 
-        // Circular countdown spinner should be visible
         var countdownSpinner = refreshGroup.Locator(".countdown-spinner");
-        await Expect(countdownSpinner).ToBeVisibleAsync();
-
         var configBtn = refreshGroup.Locator(".refresh-config-btn");
         await Expect(configBtn).ToBeVisibleAsync();
+
+        // When Live Sync is connected, countdown polling stays on standby
+        await Expect(Page.Locator(".sync-status-pill.live")).ToBeVisibleAsync();
+        await Expect(countdownSpinner).Not.ToBeVisibleAsync();
+
+        // 2. Simulate SignalR transport unavailable so the countdown polling fallback activates
+        await Page.RouteAsync(new Regex("/api/hubs/ingestion"), route => route.AbortAsync());
+        await Page.ReloadAsync();
+        await Expect(Page.Locator(".sync-status-pill.offline")).ToBeVisibleAsync();
+
+        // Circular countdown spinner should now be visible in fallback polling mode
+        await Expect(countdownSpinner).ToBeVisibleAsync();
 
         // 3. Open menu and switch to Manual (Off)
         await configBtn.ClickAsync();
@@ -2288,5 +2354,83 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await Expect(Page).ToHaveURLAsync(new Regex(".*/recipes/[a-f0-9-]+$"));
         await Expect(Page.Locator(".sub-recipe-inline-panel"))
             .ToContainTextAsync(existingSubRecipeTitle);
+    }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task IngestionHub_LiveMonitor_StreamsThinkingAndAutoUpdatesQueueWithoutRefreshAsync()
+    {
+        await using var mockServer = await MockLanLlmAndBlogServer.StartAsync();
+        var holdGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        mockServer.StreamThinkingChunks =
+        [
+            "Analyzing recipe structure for Crispy Sesame Tofu. ",
+            "Checking garlic cloves and toasted sesame oil measurements.",
+        ];
+        mockServer.StreamHoldGate = holdGate;
+
+        await RegisterAndLoginAsync();
+        await Page.GotoAsync($"{ServerUrl}/ingest");
+
+        // 1. Live Sync pill should connect automatically on the Ingestion Hub
+        await Expect(Page.Locator(".sync-status-pill.live")).ToContainTextAsync("Live Sync");
+
+        // Configure LLM settings pointing to our streaming mock server
+        await Page.Locator(".llm-settings-btn").ClickAsync();
+        var dialog = Page.Locator("app-llm-settings-dialog");
+        await AddLlmConnectionInDialogAsync(dialog, mockServer.BaseUrl);
+        await AddLlmModelInDialogAsync(dialog, "qwen2.5:14b");
+        await AssignLlmWorkflowAsync(dialog, "text", "qwen2.5:14b");
+        await SaveLlmWorkflowsAsync(dialog);
+
+        // 2. Submit a raw text recipe and watch the live monitor appear automatically
+        await Page.Locator("button.tab-pill", new() { HasText = "Paste Raw Text" }).ClickAsync();
+        await Page.Locator("textarea[formcontrolname='rawText']")
+            .FillAsync(
+                "Crispy Sesame Tofu\nIngredients:\n- 2 cloves garlic, minced\n- 2 tbsp toasted sesame oil\nSteps:\n1. Heat oil and sauté garlic for 2 minutes."
+            );
+
+        var queuedRes = await Page.RunAndWaitForResponseAsync(
+            () => Page.Locator("button[aria-label='Queue raw text recipe']").ClickAsync(),
+            r => r.Url.EndsWith("/api/ingestion/jobs/text", StringComparison.Ordinal) && r.Ok
+        );
+        using var queuedDoc = JsonDocument.Parse(await queuedRes.TextAsync());
+        var jobId = queuedDoc.RootElement.GetProperty("id").GetGuid();
+
+        // 3. Assert live monitor card, segmented workflow bar, and streamed thinking prose appear mid-flight
+        var monitor = Page.Locator("app-ingestion-live-monitor .live-monitor-card");
+        await Expect(monitor).ToBeVisibleAsync(new() { Timeout = 15000 });
+        await Expect(monitor.Locator(".workflow-segment").First).ToBeVisibleAsync();
+        await Expect(monitor.Locator(".thinking-prose-content").First)
+            .ToContainTextAsync(
+                "Analyzing recipe structure for Crispy Sesame Tofu.",
+                new() { Timeout = 15000 }
+            );
+
+        // 4. Verify responsive rendering on 360px mobile viewport while active
+        await Page.SetViewportSizeAsync(360, 800);
+        await Expect(monitor).ToBeVisibleAsync();
+        var hasHorizontalOverflow = await Page.EvaluateAsync<bool>(
+            "() => document.documentElement.scrollWidth > window.innerWidth + 2"
+        );
+        Assert.IsFalse(
+            hasHorizontalOverflow,
+            "Live monitor should fit cleanly within a 360px mobile viewport without horizontal overflow."
+        );
+        await Page.SetViewportSizeAsync(1280, 900);
+
+        // 5. Release mock stream gate so extraction completes
+        mockServer.StreamHoldGate = null;
+        holdGate.TrySetResult();
+
+        // 6. Toggle Show JSON Output and verify the structured output appears in the history
+        var showJsonBtn = monitor.Locator("button.json-toggle-pill");
+        await showJsonBtn.ClickAsync();
+        await Expect(monitor.Locator(".output-json-pre").First)
+            .ToBeVisibleAsync(new() { Timeout = 15000 });
+
+        // 7. Job card MUST transition to Ready for Review automatically via SignalR without clicking Refresh!
+        var reviewButton = Page.Locator($"a.review-action-btn[href$='{jobId}']");
+        await Expect(reviewButton).ToBeVisibleAsync(new() { Timeout = 20000 });
     }
 }
