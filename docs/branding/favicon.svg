@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="512" height="512" viewBox="0 0 512 512">
+  <title>favicon-512</title>
+  <g id="_01_-_Logomarks" data-name="01 - Logomarks">
+  </g>
+  <g id="_02_-_App_Icons___Favicon" data-name="02 - App Icons &amp; Favicon">
+    <path id="Favicon_Rounded_Tile_BG" data-name="Favicon Rounded Tile BG" d="M112 0 L400 0 C461.856 0 512 50.144 512 112 L512 400 C512 461.856 461.856 512 400 512 L112 512 C50.144 512 0 461.856 0 400 L0 112 C0 50.144 50.144 0 112 0 Z" fill="#1a1715"/>
+    <g>
+      <path id="Favicon_Bold_Grab_Tab" data-name="Favicon Bold Grab Tab" d="M319.846 336 C357.499 306.465 403.93 292.5 456 292.5 C463.456 292.5 469.5 298.544 469.5 306 C469.5 313.456 463.456 319.5 456 319.5 C408.158 319.5 366.216 332.393 332.642 360.371 C331.535 361.294 330.323 362.01 329.054 362.522 L325 378 C318 401 299 414 270 414 L144 414 C115 414 96 401 89 378 L85.071 363 L56 363 C48 363 43 358 43 349.5 C43 341 48 336 56 336 L78 336 L88 336 Z" fill="#faf6f0"/>
+      <path id="Favicon_Bold_Sparkle_Hero" data-name="Favicon Bold Sparkle Hero" d="M210 138 C222 190 239 207 288 219 C239 231 222 248 210 300 C198 248 181 231 132 219 C181 207 198 190 210 138 Z" fill="#d9531e"/>
+      <path id="Favicon_Bold_Sparkle_Secondary" data-name="Favicon Bold Sparkle Secondary" d="M122 102 C128 127 137 136 161 142 C137 148 128 157 122 182 C116 157 107 148 83 142 C107 136 116 127 122 102 Z" fill="#d9531e"/>
+      <path id="Favicon_Bold_Sparkle_Tertiary" data-name="Favicon Bold Sparkle Tertiary" d="M294 120 C299 139 305 145 323 150 C305 155 299 161 294 180 C289 161 283 155 265 150 C283 145 289 139 294 120 Z" fill="#d9531e"/>
+    </g>
+  </g>
+  <g id="_03_-_Wordmark_Lockups" data-name="03 - Wordmark Lockups">
+  </g>
+  <g id="_04_-_Social_Banner" data-name="04 - Social Banner">
+  </g>
+  <g id="_05_-_Brand_Palette_Guide" data-name="05 - Brand Palette Guide">
+  </g>
+</svg>

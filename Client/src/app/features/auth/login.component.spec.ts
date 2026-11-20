@@ -3,6 +3,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { ActivatedRoute, Router } from '@angular/router';
 import { of, throwError } from 'rxjs';
+import { APP_BRAND_MARK_SRC } from '../../app.branding';
 import { AuthService } from '../../core/services/auth/auth.service';
 import { ThemeService } from '../../core/services/theme/theme.service';
 import { LoginComponent } from './login.component';
@@ -88,8 +89,17 @@ describe('LoginComponent', () => {
     fixture.detectChanges();
   });
 
-  it('should create the component', () => {
+  it('should create the component and render SVG brand marks', () => {
     expect(component).toBeTruthy();
+
+    const headerLogo = fixture.nativeElement.querySelector(
+      '.brand-badge img.brand-icon',
+    ) as HTMLImageElement | null;
+    const emblemLogo = fixture.nativeElement.querySelector(
+      '.auth-brand-emblem img.brand-emblem-icon',
+    ) as HTMLImageElement | null;
+    expect(headerLogo?.getAttribute('src')).toBe(APP_BRAND_MARK_SRC);
+    expect(emblemLogo?.getAttribute('src')).toBe(APP_BRAND_MARK_SRC);
   });
 
   it('should have invalid login form when empty', () => {

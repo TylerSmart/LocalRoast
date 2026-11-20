@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>app-icon-mono-1024</title>
+  <g id="_01_-_Logomarks" data-name="01 - Logomarks">
+  </g>
+  <g id="_02_-_App_Icons___Favicon" data-name="02 - App Icons &amp; Favicon">
+    <g>
+      <path id="Mono_Icon_Grab_Tab" data-name="Mono Icon Grab Tab" d="M603.273 620.64 C654.22 583.433 717.981 565.76 788.08 565.76 C796.121 565.76 802.64 572.279 802.64 580.32 C802.64 588.361 796.121 594.88 788.08 594.88 C721.862 594.88 662.273 611.731 615.543 647.841 C615.14 648.152 614.726 648.439 614.302 648.702 L608.88 667.68 C601.04 695.68 575.28 712.48 539.44 712.48 L349.04 712.48 C313.2 712.48 287.44 695.68 279.6 667.68 L274.48 649.76 L235.92 649.76 C226.96 649.76 221.36 644.16 221.36 635.2 C221.36 626.24 226.96 620.64 235.92 620.64 L266.16 620.64 L279.6 620.64 Z" fill="#111111"/>
+      <path id="Mono_Icon_Sparkle_Hero" data-name="Mono Icon Sparkle Hero" d="M444.24 358.56 C457.68 423.52 477.84 445.92 538.32 460.48 C477.84 475.04 457.68 497.44 444.24 562.4 C430.8 497.44 410.64 475.04 350.16 460.48 C410.64 445.92 430.8 423.52 444.24 358.56 Z" fill="#111111"/>
+      <path id="Mono_Icon_Sparkle_Secondary" data-name="Mono Icon Sparkle Secondary" d="M331.12 311.52 C336.72 340.64 346.8 350.72 373.68 357.44 C346.8 364.16 336.72 374.24 331.12 403.36 C325.52 374.24 315.44 364.16 288.56 357.44 C315.44 350.72 325.52 340.64 331.12 311.52 Z" fill="#111111"/>
+      <path id="Mono_Icon_Sparkle_Tertiary" data-name="Mono Icon Sparkle Tertiary" d="M552.88 336.16 C557.36 356.32 564.08 363.04 582 367.52 C564.08 372 557.36 378.72 552.88 398.88 C548.4 378.72 541.68 372 523.76 367.52 C541.68 363.04 548.4 356.32 552.88 336.16 Z" fill="#111111"/>
+    </g>
+  </g>
+  <g id="_03_-_Wordmark_Lockups" data-name="03 - Wordmark Lockups">
+  </g>
+  <g id="_04_-_Social_Banner" data-name="04 - Social Banner">
+  </g>
+  <g id="_05_-_Brand_Palette_Guide" data-name="05 - Brand Palette Guide">
+  </g>
+</svg>

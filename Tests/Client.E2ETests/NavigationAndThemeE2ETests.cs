@@ -382,6 +382,50 @@ public sealed class NavigationAndThemeE2ETests : E2ETestBase
         await Expect(jobCard.Locator(".status-badge")).ToContainTextAsync("Queued");
     }
 
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task Branding_SvgLogoAndFavicon_LoadCleanlyAcrossLoginAndAppShell()
+    {
+        await Page.GotoAsync($"{ServerUrl}/login");
+
+        // Verify SVG favicon and web manifest links are wired and served cleanly
+        var svgIconHref = await Page.Locator("link[rel='icon'][type='image/svg+xml']")
+            .GetAttributeAsync("href");
+        Assert.AreEqual("favicon.svg", svgIconHref);
+
+        var faviconResponse = await Page.APIRequest.GetAsync($"{ServerUrl}/favicon.svg");
+        Assert.AreEqual(200, faviconResponse.Status);
+        var manifestResponse = await Page.APIRequest.GetAsync($"{ServerUrl}/site.webmanifest");
+        Assert.AreEqual(200, manifestResponse.Status);
+
+        // Verify Login header and hero emblem SVG marks render and load
+        var loginHeaderImg = Page.Locator(".brand-badge img.brand-icon");
+        var loginEmblemImg = Page.Locator(".auth-brand-emblem img.brand-emblem-icon");
+        await Expect(loginHeaderImg).ToBeVisibleAsync();
+        await Expect(loginEmblemImg).ToBeVisibleAsync();
+        Assert.IsTrue(
+            await loginHeaderImg.EvaluateAsync<bool>("img => img.complete && img.naturalWidth > 0")
+        );
+        Assert.IsTrue(
+            await loginEmblemImg.EvaluateAsync<bool>("img => img.complete && img.naturalWidth > 0")
+        );
+
+        // Authenticate and verify AppShell SVG brand mark on desktop & 360px mobile viewports
+        await RegisterAndLoginAsync();
+
+        var shellBrandImg = Page.Locator(".top-bar .brand-badge img.brand-icon");
+        await Expect(shellBrandImg).ToBeVisibleAsync();
+        Assert.IsTrue(
+            await shellBrandImg.EvaluateAsync<bool>("img => img.complete && img.naturalWidth > 0")
+        );
+
+        await Page.SetViewportSizeAsync(360, 640);
+        await Expect(shellBrandImg).ToBeVisibleAsync();
+        Assert.IsTrue(
+            await shellBrandImg.EvaluateAsync<bool>("img => img.complete && img.naturalWidth > 0")
+        );
+    }
+
     private sealed class NavMetrics
     {
         public double NavClientWidth { get; set; }

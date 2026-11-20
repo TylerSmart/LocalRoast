@@ -2,7 +2,7 @@
   <header class="auth-header">
     <div class="brand">
       <span class="brand-badge" aria-hidden="true">
-        <mat-icon>{{ brandIcon }}</mat-icon>
+        <img [src]="brandMarkSrc" alt="" class="brand-icon" />
       </span>
       <span class="brand-name">{{ appName }}</span>
     </div>
@@ -63,7 +63,7 @@
     <mat-card class="auth-card">
       <div class="auth-card-header">
         <div class="auth-brand-emblem" aria-hidden="true">
-          <mat-icon>{{ brandIcon }}</mat-icon>
+          <img [src]="brandMarkSrc" alt="" class="brand-emblem-icon" />
         </div>
         <h1>Welcome to {{ appName }}</h1>
         <p>{{ cardSubtitle() }}</p>

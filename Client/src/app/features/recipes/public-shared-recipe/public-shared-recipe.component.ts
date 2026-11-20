@@ -11,7 +11,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { ActivatedRoute } from '@angular/router';
-import { APP_BRAND_ICON, APP_NAME } from '../../../app.branding';
+import { APP_BRAND_MARK_SRC, APP_NAME } from '../../../app.branding';
 import { RecipeStepDto, UnitSystem } from '../../../core/models/recipe.models';
 import {
   PublicRecipeIngredientDto,
@@ -77,7 +77,7 @@ export interface PublicStepSectionGroup {
 })
 export class PublicSharedRecipeComponent implements OnInit {
   protected readonly appName = APP_NAME;
-  protected readonly brandIcon = APP_BRAND_ICON;
+  protected readonly brandMarkSrc = APP_BRAND_MARK_SRC;
 
   private readonly route = inject(ActivatedRoute);
   private readonly shareLinkService = inject(ShareLinkService);

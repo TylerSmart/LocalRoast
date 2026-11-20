@@ -3,6 +3,7 @@ import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap } from '@angular/router';
 import { of, throwError } from 'rxjs';
+import { APP_BRAND_MARK_SRC } from '../../../app.branding';
 import { PublicSharedRecipeDto } from '../../../core/models/share-link.models';
 import { ShareLinkService } from '../../../core/services/share-link/share-link.service';
 import { PublicSharedRecipeComponent } from './public-shared-recipe.component';
@@ -297,5 +298,13 @@ describe('PublicSharedRecipeComponent', () => {
     fixture.detectChanges();
     expect(component['previewPhotoUrl']()).toBeNull();
     expect(fixture.nativeElement.querySelector('.photo-lightbox-backdrop')).toBeNull();
+  });
+
+  it('renders the LocalRoast SVG brand mark in the public header', () => {
+    const brandImg = fixture.nativeElement.querySelector(
+      '.brand-badge img.brand-icon',
+    ) as HTMLImageElement | null;
+    expect(brandImg).toBeTruthy();
+    expect(brandImg?.getAttribute('src')).toBe(APP_BRAND_MARK_SRC);
   });
 });

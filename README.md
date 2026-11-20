@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/branding/social-banner-1280x640.svg" alt="LocalRoast — Self-hosted household cookbook, local-AI ingestion &amp; meal planning" width="100%" />
+</p>
+
 # LocalRoast
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -105,6 +109,7 @@ Open `http://localhost:62781` (or your reverse-proxied HTTPS domain) in your bro
 - 🚀 **[TrueNAS Scale Deployment Guide (`docs/deployment/truenas-scale.md`)](docs/deployment/truenas-scale.md)**
 - 🔐 **[OIDC & SSO Authentication Guide (`docs/deployment/oidc-authentication.md`)](docs/deployment/oidc-authentication.md)**
 - 🤖 **[Recommended Local LLM Model Settings (`docs/llm-model-settings.md`)](docs/llm-model-settings.md)**
+- 🎨 **[Brand Suite & VectorCraft Master Assets (`docs/branding/`)](docs/branding/)**
 - 🛠️ **[Contributing & Development Guide (`docs/contributing.md`)](docs/contributing.md)**
 
 ---

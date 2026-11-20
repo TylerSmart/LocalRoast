@@ -36,15 +36,15 @@
       width: 34px;
       height: 34px;
       border-radius: 10px;
-      background-color: var(--mat-sys-primary-container);
-      color: var(--mat-sys-on-primary-container);
+      background-color: #1a1715;
+      border: 1px solid color-mix(in srgb, #faf6f0 14%, transparent);
       flex-shrink: 0;
     }
 
     .brand-icon {
-      font-size: 20px;
-      width: 20px;
-      height: 20px;
+      display: block;
+      width: 28px;
+      height: 28px;
     }
 
     .brand-title {

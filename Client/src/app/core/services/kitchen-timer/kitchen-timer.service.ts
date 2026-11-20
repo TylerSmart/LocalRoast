@@ -52,7 +52,7 @@ function showNotification(timer: ActiveKitchenTimer): void {
     if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
       new Notification(`Timer Finished: ${timer.label}`, {
         body: `${timer.recipeTitle} — your timer has completed!`,
-        icon: '/favicon.ico',
+        icon: '/icons/icon-192.png',
       });
     }
   } catch {

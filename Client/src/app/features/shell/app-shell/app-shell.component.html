@@ -4,7 +4,7 @@
   <header class="top-bar">
     <a class="brand-section" routerLink="/recipes" [attr.aria-label]="appName + ' home'">
       <span class="brand-badge" aria-hidden="true">
-        <mat-icon class="brand-icon">{{ brandIcon }}</mat-icon>
+        <img [src]="brandMarkSrc" alt="" class="brand-icon" />
       </span>
       <span class="brand-title">{{ appName }}</span>
     </a>

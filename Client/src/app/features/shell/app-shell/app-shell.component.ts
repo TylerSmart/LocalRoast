@@ -15,7 +15,7 @@ import {
   RouterOutlet,
 } from '@angular/router';
 import { filter, map, startWith } from 'rxjs';
-import { APP_BRAND_ICON, APP_NAME } from '../../../app.branding';
+import { APP_BRAND_MARK_SRC, APP_NAME } from '../../../app.branding';
 import { AccountService } from '../../../core/services/account/account.service';
 import { AuthService } from '../../../core/services/auth/auth.service';
 import { IngestionService } from '../../../core/services/ingestion/ingestion.service';
@@ -68,7 +68,7 @@ function hasFullWidthData(route: ActivatedRouteSnapshot): boolean {
 })
 export class AppShellComponent implements OnInit {
   protected readonly appName = APP_NAME;
-  protected readonly brandIcon = APP_BRAND_ICON;
+  protected readonly brandMarkSrc = APP_BRAND_MARK_SRC;
   protected readonly accountService = inject(AccountService);
   protected readonly authService = inject(AuthService);
   protected readonly themeService = inject(ThemeService);

@@ -33,13 +33,13 @@
     border-radius: 0.65rem;
     display: grid;
     place-items: center;
-    background-color: var(--mat-sys-primary-container);
-    color: var(--mat-sys-on-primary-container);
+    background-color: #1a1715;
+    border: 1px solid color-mix(in srgb, #faf6f0 14%, transparent);
 
-    mat-icon {
-      font-size: 20px;
-      width: 20px;
-      height: 20px;
+    .brand-icon {
+      display: block;
+      width: 28px;
+      height: 28px;
     }
   }
 }
@@ -91,20 +91,19 @@
   margin-bottom: 1.25rem;
 
   .auth-brand-emblem {
-    width: 52px;
-    height: 52px;
+    width: 56px;
+    height: 56px;
     border-radius: 0.9rem;
     display: grid;
     place-items: center;
-    background-color: var(--mat-sys-primary-container);
-    color: var(--mat-sys-on-primary-container);
+    background-color: #1a1715;
     margin-bottom: 0.85rem;
-    border: 1px solid color-mix(in srgb, var(--mat-sys-primary) 18%, transparent);
+    border: 1px solid color-mix(in srgb, #faf6f0 14%, transparent);
 
-    mat-icon {
-      font-size: 28px;
-      width: 28px;
-      height: 28px;
+    .brand-emblem-icon {
+      display: block;
+      width: 44px;
+      height: 44px;
     }
   }
 
@@ -317,14 +316,13 @@
     margin-bottom: 1rem;
 
     .auth-brand-emblem {
-      width: 44px;
-      height: 44px;
+      width: 48px;
+      height: 48px;
       margin-bottom: 0.65rem;
 
-      mat-icon {
-        font-size: 24px;
-        width: 24px;
-        height: 24px;
+      .brand-emblem-icon {
+        width: 38px;
+        height: 38px;
       }
     }
 

@@ -26,7 +26,7 @@ import { MatTabsModule } from '@angular/material/tabs';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { DomSanitizer } from '@angular/platform-browser';
 import { ActivatedRoute, Router } from '@angular/router';
-import { APP_BRAND_ICON, APP_LOGIN_SUBTITLE, APP_NAME } from '../../app.branding';
+import { APP_BRAND_MARK_SRC, APP_LOGIN_SUBTITLE, APP_NAME } from '../../app.branding';
 import { AuthProviderDto } from '../../core/models/auth.models';
 import { AuthService } from '../../core/services/auth/auth.service';
 import { ThemeMode, ThemeService } from '../../core/services/theme/theme.service';
@@ -89,7 +89,7 @@ class ConfirmPasswordErrorStateMatcher implements ErrorStateMatcher {
 })
 export class LoginComponent implements OnInit {
   protected readonly appName = APP_NAME;
-  protected readonly brandIcon = APP_BRAND_ICON;
+  protected readonly brandMarkSrc = APP_BRAND_MARK_SRC;
   protected readonly loginSubtitle = APP_LOGIN_SUBTITLE;
   protected readonly confirmPasswordErrorMatcher = new ConfirmPasswordErrorStateMatcher();
   protected readonly authService = inject(AuthService);

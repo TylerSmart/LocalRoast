@@ -3,7 +3,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { MatDialog } from '@angular/material/dialog';
 import { provideRouter } from '@angular/router';
 import { Subject } from 'rxjs';
-import { APP_NAME } from '../../../app.branding';
+import { APP_BRAND_MARK_SRC, APP_NAME } from '../../../app.branding';
 import { AccountService } from '../../../core/services/account/account.service';
 import { AuthService } from '../../../core/services/auth/auth.service';
 import { IngestionService } from '../../../core/services/ingestion/ingestion.service';
@@ -93,6 +93,11 @@ describe('AppShellComponent', () => {
 
     const text = fixture.nativeElement.textContent;
     expect(text).toContain(APP_NAME);
+    const brandImg = fixture.nativeElement.querySelector(
+      '.brand-badge img.brand-icon',
+    ) as HTMLImageElement | null;
+    expect(brandImg).toBeTruthy();
+    expect(brandImg?.getAttribute('src')).toBe(APP_BRAND_MARK_SRC);
     expect(text).toContain('Cookbook');
     expect(text).toContain('Meal Plan');
     expect(text).toContain('Shop');

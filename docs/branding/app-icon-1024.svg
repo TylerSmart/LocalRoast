@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>app-icon-1024</title>
+  <g id="_01_-_Logomarks" data-name="01 - Logomarks">
+  </g>
+  <g id="_02_-_App_Icons___Favicon" data-name="02 - App Icons &amp; Favicon">
+    <rect id="App_Icon_Full-Bleed_BG" data-name="App Icon Full-Bleed BG" x="0" y="0" width="1024" height="1024" fill="#1a1715"/>
+    <g>
+      <path id="App_Icon_Grab_Tab" data-name="App Icon Grab Tab" d="M624.461 645.86 C687.26 599.993 765.754 578.24 852.17 578.24 C862.078 578.24 870.11 586.272 870.11 596.18 C870.11 606.088 862.078 614.12 852.17 614.12 C770.628 614.12 697.121 634.911 639.579 679.376 C639.083 679.759 638.573 680.113 638.051 680.437 L631.37 703.82 C621.71 738.32 589.97 759.02 545.81 759.02 L311.21 759.02 C267.05 759.02 235.31 738.32 225.65 703.82 L219.341 681.74 L171.83 681.74 C160.79 681.74 153.89 674.84 153.89 663.8 C153.89 652.76 160.79 645.86 171.83 645.86 L209.09 645.86 L225.65 645.86 Z" fill="#faf6f0"/>
+      <path id="App_Icon_Sparkle_Hero" data-name="App Icon Sparkle Hero" d="M428.51 322.94 C445.07 402.98 469.91 430.58 544.43 448.52 C469.91 466.46 445.07 494.06 428.51 574.1 C411.95 494.06 387.11 466.46 312.59 448.52 C387.11 430.58 411.95 402.98 428.51 322.94 Z" fill="#d9531e"/>
+      <path id="App_Icon_Sparkle_Secondary" data-name="App Icon Sparkle Secondary" d="M289.13 264.98 C296.03 300.86 308.45 313.28 341.57 321.56 C308.45 329.84 296.03 342.26 289.13 378.14 C282.23 342.26 269.81 329.84 236.69 321.56 C269.81 313.28 282.23 300.86 289.13 264.98 Z" fill="#d9531e"/>
+      <path id="App_Icon_Sparkle_Tertiary" data-name="App Icon Sparkle Tertiary" d="M562.37 295.34 C567.89 320.18 576.17 328.46 598.25 333.98 C576.17 339.5 567.89 347.78 562.37 372.62 C556.85 347.78 548.57 339.5 526.49 333.98 C548.57 328.46 556.85 320.18 562.37 295.34 Z" fill="#d9531e"/>
+    </g>
+  </g>
+  <g id="_03_-_Wordmark_Lockups" data-name="03 - Wordmark Lockups">
+  </g>
+  <g id="_04_-_Social_Banner" data-name="04 - Social Banner">
+  </g>
+  <g id="_05_-_Brand_Palette_Guide" data-name="05 - Brand Palette Guide">
+  </g>
+</svg>

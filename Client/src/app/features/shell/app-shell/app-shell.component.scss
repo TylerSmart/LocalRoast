@@ -62,15 +62,15 @@
   border-radius: 0.6rem;
   display: grid;
   place-items: center;
-  background: var(--mat-sys-primary-container);
-  color: var(--mat-sys-on-primary-container);
+  background: #1a1715;
+  border: 1px solid color-mix(in srgb, #faf6f0 14%, transparent);
   flex-shrink: 0;
 }
 
 .brand-icon {
-  font-size: 1.25rem;
-  width: 1.25rem;
-  height: 1.25rem;
+  display: block;
+  width: 28px;
+  height: 28px;
 }
 
 .brand-title {
@@ -367,9 +367,8 @@
   }
 
   .brand-icon {
-    font-size: 1.1rem;
-    width: 1.1rem;
-    height: 1.1rem;
+    width: 24px;
+    height: 24px;
   }
 
   .brand-title {
