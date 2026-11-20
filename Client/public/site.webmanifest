@@ -1,27 +1,120 @@
 {
+  "id": "/",
   "name": "LocalRoast",
   "short_name": "LocalRoast",
   "description": "Self-hosted household cookbook, local-AI recipe ingestion, meal planning calendar, and live shopping lists.",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#1a1715",
   "theme_color": "#1a1715",
+  "categories": ["food", "lifestyle", "productivity"],
   "icons": [
     {
       "src": "favicon.svg",
       "sizes": "any",
-      "type": "image/svg+xml"
+      "type": "image/svg+xml",
+      "purpose": "any"
     },
     {
       "src": "icons/icon-192.png",
       "sizes": "192x192",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any"
     },
     {
       "src": "icons/icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-maskable-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "icons/icon-monochrome-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "monochrome"
+    },
+    {
+      "src": "icons/icon-monochrome-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "monochrome"
     }
-  ]
+  ],
+  "shortcuts": [
+    {
+      "name": "Cookbook",
+      "short_name": "Cookbook",
+      "description": "Browse and search household recipes",
+      "url": "/recipes",
+      "icons": [
+        {
+          "src": "icons/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Meal Plan",
+      "short_name": "Meal Plan",
+      "description": "Open the weekly meal planning calendar",
+      "url": "/meal-plan",
+      "icons": [
+        {
+          "src": "icons/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Shopping List",
+      "short_name": "Shop",
+      "description": "Check off live household grocery lists",
+      "url": "/shopping",
+      "icons": [
+        {
+          "src": "icons/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Ingest Recipe",
+      "short_name": "Ingest",
+      "description": "Import a recipe URL, photo scan, PDF, or text",
+      "url": "/ingest",
+      "icons": [
+        {
+          "src": "icons/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    }
+  ],
+  "share_target": {
+    "action": "/ingest",
+    "method": "GET",
+    "enctype": "application/x-www-form-urlencoded",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url"
+    }
+  }
 }

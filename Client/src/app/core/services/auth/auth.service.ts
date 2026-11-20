@@ -12,6 +12,7 @@ import {
   LoginRequest,
   RegisterRequest,
 } from '../../models/auth.models';
+import { clearPwaRuntimeDataCaches } from '../pwa/pwa.service';
 
 const TOKEN_KEY = `${APP_STORAGE_PREFIX}-token`;
 const USER_KEY = `${APP_STORAGE_PREFIX}-user`;
@@ -291,6 +292,7 @@ export class AuthService {
       localStorage.removeItem(TOKEN_KEY);
       localStorage.removeItem(USER_KEY);
     }
+    void clearPwaRuntimeDataCaches();
   }
 
   private applyLoadedUser(user: CurrentUserDto): void {

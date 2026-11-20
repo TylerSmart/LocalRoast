@@ -21,6 +21,7 @@ import { AuthService } from '../../../core/services/auth/auth.service';
 import { IngestionService } from '../../../core/services/ingestion/ingestion.service';
 import { KitchenTimerService } from '../../../core/services/kitchen-timer/kitchen-timer.service';
 import { LlmSettingsService } from '../../../core/services/llm-settings/llm-settings.service';
+import { PwaService } from '../../../core/services/pwa/pwa.service';
 import { ThemeMode, ThemeService } from '../../../core/services/theme/theme.service';
 import { formatCountdown } from '../../../core/utils/culinary-math';
 import { GlobalSearchDialogComponent } from '../global-search-dialog/global-search-dialog.component';
@@ -74,6 +75,7 @@ export class AppShellComponent implements OnInit {
   protected readonly themeService = inject(ThemeService);
   protected readonly ingestionService = inject(IngestionService);
   protected readonly llmSettingsService = inject(LlmSettingsService);
+  protected readonly pwaService = inject(PwaService);
   protected readonly kitchenTimerService = inject(KitchenTimerService);
   private readonly dialog = inject(MatDialog);
   private readonly router = inject(Router);

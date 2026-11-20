@@ -1,0 +1,49 @@
+<div class="pwa-install-dialog-container">
+  <div class="dialog-header" mat-dialog-title>
+    <div class="header-title-group">
+      <span class="header-icon-badge" aria-hidden="true">
+        <img [src]="brandMarkSrc" alt="" class="brand-icon" />
+      </span>
+      <div class="header-titles">
+        <h2 class="dialog-title">Install {{ appName }}</h2>
+        <p class="dialog-subtitle">
+          Add to your Home Screen for full-screen cooking &amp; shopping
+        </p>
+      </div>
+    </div>
+    <button type="button" mat-icon-button (click)="close()" aria-label="Close install instructions">
+      <mat-icon>close</mat-icon>
+    </button>
+  </div>
+
+  <mat-dialog-content class="install-steps-content">
+    <ol class="install-steps">
+      <li class="install-step">
+        <span class="step-badge" aria-hidden="true">1</span>
+        <div class="step-body">
+          <strong>Tap the Share button in Safari</strong>
+          <p>
+            Look for the
+            <mat-icon class="inline-icon" aria-hidden="true">ios_share</mat-icon>
+            Share icon in Safari's toolbar.
+          </p>
+        </div>
+      </li>
+      <li class="install-step">
+        <span class="step-badge" aria-hidden="true">2</span>
+        <div class="step-body">
+          <strong>Choose "Add to Home Screen"</strong>
+          <p>
+            Scroll down in the share sheet, tap
+            <mat-icon class="inline-icon" aria-hidden="true">add_box</mat-icon>
+            <strong>Add to Home Screen</strong>, then tap <strong>Add</strong>.
+          </p>
+        </div>
+      </li>
+    </ol>
+  </mat-dialog-content>
+
+  <mat-dialog-actions align="end">
+    <button type="button" mat-flat-button (click)="close()">Got it</button>
+  </mat-dialog-actions>
+</div>

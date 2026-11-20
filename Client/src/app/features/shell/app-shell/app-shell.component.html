@@ -166,6 +166,27 @@
           <mat-icon>manage_accounts</mat-icon>
           <span>Account Settings</span>
         </button>
+        @if (pwaService.canShowInstallOption()) {
+          <button
+            mat-menu-item
+            data-testid="pwa-install-menu-item"
+            (click)="pwaService.promptInstall()"
+          >
+            <mat-icon>install_mobile</mat-icon>
+            <span>Install {{ appName }}</span>
+          </button>
+        }
+        @if (pwaService.updateAvailable()) {
+          <button
+            mat-menu-item
+            data-testid="pwa-update-menu-item"
+            [disabled]="pwaService.isApplyingUpdate()"
+            (click)="pwaService.applyUpdate()"
+          >
+            <mat-icon>system_update_alt</mat-icon>
+            <span>{{ pwaService.isApplyingUpdate() ? 'Updating...' : 'Update App' }}</span>
+          </button>
+        }
         <mat-divider></mat-divider>
         <button mat-menu-item class="logout-menu-item" (click)="onLogout()">
           <mat-icon>logout</mat-icon>

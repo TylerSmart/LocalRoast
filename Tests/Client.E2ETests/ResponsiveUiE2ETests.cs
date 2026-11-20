@@ -14,6 +14,15 @@ public sealed class ResponsiveUiE2ETests : E2ETestBase
         "ExtraVirginOliveOilWithAnIntentionallyLongUnbrokenCatalogName";
     private string? responsiveShoppingListId;
 
+    public override BrowserNewContextOptions ContextOptions()
+    {
+        var options = base.ContextOptions();
+        // Block service workers in this layout suite so Playwright RouteAsync synthetic mocks
+        // for /api/recipes/** and /api/uploads/** always intercept requests deterministically.
+        options.ServiceWorkers = ServiceWorkerPolicy.Block;
+        return options;
+    }
+
     [TestMethod]
     [DataRow(360, 740, "light")]
     [DataRow(768, 1024, "dark")]
@@ -403,7 +412,7 @@ public sealed class ResponsiveUiE2ETests : E2ETestBase
                 },
             },
         };
-        await Page.RouteAsync(
+        await Context.RouteAsync(
             $"**/api/ingestion/jobs/{jobId}",
             route =>
                 route.FulfillAsync(
@@ -581,7 +590,7 @@ public sealed class ResponsiveUiE2ETests : E2ETestBase
         var recipeId = await SeedRecipeAsync();
         await SetViewportAsync(width, height, "light");
         await MockMediaAsync();
-        await Page.RouteAsync(
+        await Context.RouteAsync(
             $"**/api/recipes/{recipeId}",
             async route =>
             {
@@ -783,7 +792,7 @@ public sealed class ResponsiveUiE2ETests : E2ETestBase
     }
 
     private Task MockJsonAsync(string pattern, object body) =>
-        Page.RouteAsync(
+        Context.RouteAsync(
             pattern,
             route =>
                 route.FulfillAsync(
@@ -805,11 +814,11 @@ public sealed class ResponsiveUiE2ETests : E2ETestBase
         using var imageStream = new MemoryStream();
         await image.SaveAsync(imageStream, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
         var png = imageStream.ToArray();
-        await Page.RouteAsync(
+        await Context.RouteAsync(
             $"**{SampleImagePath}",
             route => route.FulfillAsync(new() { ContentType = "image/png", BodyBytes = png })
         );
-        await Page.RouteAsync(
+        await Context.RouteAsync(
             "**/api/uploads/responsive/source.txt",
             route =>
                 route.FulfillAsync(
@@ -835,7 +844,7 @@ public sealed class ResponsiveUiE2ETests : E2ETestBase
             font
         );
         var pdf = builder.Build();
-        await Page.RouteAsync(
+        await Context.RouteAsync(
             "**/api/uploads/responsive/source.pdf",
             route => route.FulfillAsync(new() { ContentType = "application/pdf", BodyBytes = pdf })
         );

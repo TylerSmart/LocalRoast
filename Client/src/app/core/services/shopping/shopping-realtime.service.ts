@@ -52,6 +52,7 @@ export class ShoppingRealtimeService {
     const builder = new HubConnectionBuilder()
       .withUrl(apiUrl('/hubs/shopping'), {
         accessTokenFactory: () => this.authService.token() ?? '',
+        headers: { 'ngsw-bypass': 'true' },
       })
       .withAutomaticReconnect({
         nextRetryDelayInMilliseconds: (retryContext) => {

@@ -948,7 +948,7 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await Expect(countdownSpinner).Not.ToBeVisibleAsync();
 
         // 2. Simulate SignalR transport unavailable so the countdown polling fallback activates
-        await Page.RouteAsync(new Regex("/api/hubs/ingestion"), route => route.AbortAsync());
+        await Context.RouteAsync(new Regex("/api/hubs/ingestion"), route => route.AbortAsync());
         await Page.ReloadAsync();
         await Expect(Page.Locator(".sync-status-pill.offline")).ToBeVisibleAsync();
 
@@ -1099,7 +1099,7 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
             + string.Join(" ", Enumerable.Repeat("Additional diagnostic context.", 8))
             + " END-OF-DETAIL";
 
-        await Page.RouteAsync(
+        await Context.RouteAsync(
             new Regex(@"/api/ingestion/jobs\?"),
             async route =>
             {

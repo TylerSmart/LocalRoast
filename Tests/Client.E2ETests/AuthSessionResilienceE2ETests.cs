@@ -70,7 +70,7 @@ public sealed class AuthSessionResilienceE2ETests : E2ETestBase
 
         // 2. Simulate an API restart/outage (proxy returns 502 without X-Api-Version) during a full reload
         var apiOffline = true;
-        await Page.RouteAsync(
+        await Context.RouteAsync(
             "**/api/**",
             async route =>
             {

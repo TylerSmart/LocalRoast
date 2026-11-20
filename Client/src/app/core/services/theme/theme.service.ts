@@ -348,6 +348,12 @@ export class ThemeService {
       rootStyle.setProperty('--mat-sys-on-tertiary-fixed-variant', tertiaryTones[30]);
     }
 
+    // Sync PWA title bar / mobile status bar theme color
+    const themeColorMeta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
+    if (themeColorMeta) {
+      themeColorMeta.content = theme === 'dark' ? '#1a1715' : '#f0edf1';
+    }
+
     // Typography & Font
     rootStyle.setProperty('--app-font-family', font.fontFamily);
     rootStyle.setProperty('--mat-sys-body-large-font', font.fontFamily);

@@ -95,4 +95,48 @@ describe('KitchenTimerService', () => {
     service.cancelTimer(id);
     expect(service.timers().length).toBe(0);
   });
+
+  it('uses ServiceWorkerRegistration.showNotification when a service worker is registered', async () => {
+    const showNotificationSpy = vi.fn().mockResolvedValue(undefined);
+    const originalNotification = globalThis.Notification;
+    const originalSw = navigator.serviceWorker;
+
+    Object.defineProperty(globalThis, 'Notification', {
+      value: { permission: 'granted' },
+      configurable: true,
+    });
+    Object.defineProperty(navigator, 'serviceWorker', {
+      value: {
+        getRegistration: vi.fn().mockResolvedValue({
+          showNotification: showNotificationSpy,
+        }),
+      },
+      configurable: true,
+    });
+
+    try {
+      const id = service.startTimer('rec-1', 'Chili', 'Simmer', 5);
+      vi.advanceTimersByTime(6000);
+      await Promise.resolve();
+
+      expect(showNotificationSpy).toHaveBeenCalledWith(
+        'Timer Finished: Simmer',
+        expect.objectContaining({
+          body: 'Chili — your timer has completed!',
+          icon: '/icons/icon-192.png',
+          badge: '/icons/icon-monochrome-192.png',
+          tag: id,
+        }),
+      );
+    } finally {
+      Object.defineProperty(globalThis, 'Notification', {
+        value: originalNotification,
+        configurable: true,
+      });
+      Object.defineProperty(navigator, 'serviceWorker', {
+        value: originalSw,
+        configurable: true,
+      });
+    }
+  });
 });

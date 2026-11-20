@@ -1,8 +1,8 @@
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { provideRouter } from '@angular/router';
-import { Subject, of } from 'rxjs';
+import { ActivatedRoute, convertToParamMap, provideRouter, Router } from '@angular/router';
+import { BehaviorSubject, Subject, of } from 'rxjs';
 import { signal, Signal, WritableSignal } from '@angular/core';
 import type {
   IngestionJobSummaryDto,
@@ -646,5 +646,112 @@ describe('IngestionHubComponent', () => {
     expect(component.isIngestionEnabled()).toBe(false);
     expect(component.pauseReason()).toBe('Provider quota exhausted');
     expect(fixture.nativeElement.querySelector('.paused-ingestion-banner')).toBeTruthy();
+  });
+
+  it('pre-populates Web URLs tab from PWA Web Share Target url query param', async () => {
+    const queryParamMap$ = new BehaviorSubject(
+      convertToParamMap({
+        url: 'https://example.com/roast-chicken',
+        title: 'Sunday Roast Chicken',
+      }),
+    );
+
+    TestBed.resetTestingModule();
+    await TestBed.configureTestingModule({
+      imports: [IngestionHubComponent],
+      providers: [
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        provideRouter([]),
+        { provide: ActivatedRoute, useValue: { queryParamMap: queryParamMap$.asObservable() } },
+        { provide: IngestionService, useValue: mockIngestionService },
+        { provide: IngestionRealtimeService, useValue: mockIngestionRealtimeService },
+        { provide: LlmSettingsService, useValue: mockLlmSettingsService },
+      ],
+    }).compileComponents();
+
+    const router = TestBed.inject(Router);
+    const navigateSpy = vi.spyOn(router, 'navigate').mockResolvedValue(true);
+
+    const shareFixture = TestBed.createComponent(IngestionHubComponent);
+    const shareComponent = shareFixture.componentInstance;
+    shareFixture.detectChanges();
+
+    expect(shareComponent.activeTab()).toBe('urls');
+    expect(shareComponent.urlForm.controls.urlsText.value).toBe(
+      'https://example.com/roast-chicken',
+    );
+    expect(shareComponent.feedbackMessage()).toContain('Shared recipe link loaded');
+    expect(navigateSpy).toHaveBeenCalledWith(
+      [],
+      expect.objectContaining({
+        queryParams: { url: null, text: null, title: null },
+        replaceUrl: true,
+      }),
+    );
+  });
+
+  it('extracts URL from Android-style shared text without recipe body into URLs tab', async () => {
+    const queryParamMap$ = new BehaviorSubject(
+      convertToParamMap({
+        text: 'Try this pasta https://example.com/pasta-alla-vodka',
+      }),
+    );
+
+    TestBed.resetTestingModule();
+    await TestBed.configureTestingModule({
+      imports: [IngestionHubComponent],
+      providers: [
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        provideRouter([]),
+        { provide: ActivatedRoute, useValue: { queryParamMap: queryParamMap$.asObservable() } },
+        { provide: IngestionService, useValue: mockIngestionService },
+        { provide: IngestionRealtimeService, useValue: mockIngestionRealtimeService },
+        { provide: LlmSettingsService, useValue: mockLlmSettingsService },
+      ],
+    }).compileComponents();
+
+    const shareFixture = TestBed.createComponent(IngestionHubComponent);
+    const shareComponent = shareFixture.componentInstance;
+    shareFixture.detectChanges();
+
+    expect(shareComponent.activeTab()).toBe('urls');
+    expect(shareComponent.urlForm.controls.urlsText.value).toBe(
+      'https://example.com/pasta-alla-vodka',
+    );
+  });
+
+  it('pre-populates Raw Text tab when shared text contains multi-line recipe content', async () => {
+    const recipeBody = 'Ingredients:\n- 2 cups flour\n- 1 cup sugar\nInstructions:\nMix and bake.';
+    const queryParamMap$ = new BehaviorSubject(
+      convertToParamMap({
+        title: 'Grandma Cake',
+        text: recipeBody,
+      }),
+    );
+
+    TestBed.resetTestingModule();
+    await TestBed.configureTestingModule({
+      imports: [IngestionHubComponent],
+      providers: [
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        provideRouter([]),
+        { provide: ActivatedRoute, useValue: { queryParamMap: queryParamMap$.asObservable() } },
+        { provide: IngestionService, useValue: mockIngestionService },
+        { provide: IngestionRealtimeService, useValue: mockIngestionRealtimeService },
+        { provide: LlmSettingsService, useValue: mockLlmSettingsService },
+      ],
+    }).compileComponents();
+
+    const shareFixture = TestBed.createComponent(IngestionHubComponent);
+    const shareComponent = shareFixture.componentInstance;
+    shareFixture.detectChanges();
+
+    expect(shareComponent.activeTab()).toBe('text');
+    expect(shareComponent.textForm.controls.titleHint.value).toBe('Grandma Cake');
+    expect(shareComponent.textForm.controls.rawText.value).toBe(recipeBody);
+    expect(shareComponent.feedbackMessage()).toContain('Shared recipe text loaded');
   });
 });

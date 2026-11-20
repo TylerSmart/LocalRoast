@@ -25,7 +25,7 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatPaginatorModule, PageEvent } from '@angular/material/paginator';
 import { MatSelectModule } from '@angular/material/select';
 import { MatTooltipModule } from '@angular/material/tooltip';
-import { RouterLink } from '@angular/router';
+import { ActivatedRoute, ParamMap, Router, RouterLink } from '@angular/router';
 import { Subject, debounceTime, interval } from 'rxjs';
 import { APP_STORAGE_PREFIX } from '../../../app.branding';
 import type {
@@ -96,6 +96,8 @@ export const REFRESH_OPTIONS: RefreshOption[] = [
 export class IngestionHubComponent implements OnInit, OnDestroy {
   private readonly fb = inject(FormBuilder);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
   private readonly ingestionService = inject(IngestionService);
   private readonly ingestionRealtime = inject(IngestionRealtimeService);
   private readonly llmSettingsService = inject(LlmSettingsService);
@@ -272,10 +274,61 @@ export class IngestionHubComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
+    this.setupShareTargetParams();
     this.loadJobs();
     this.loadLlmSettings();
     this.setupPolling();
     this.setupRealtime();
+  }
+
+  private setupShareTargetParams(): void {
+    this.route.queryParamMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
+      this.applyShareTargetParams(params);
+    });
+  }
+
+  private applyShareTargetParams(params: ParamMap): void {
+    const sharedUrl = params.get('url')?.trim() ?? '';
+    const sharedText = params.get('text')?.trim() ?? '';
+    const sharedTitle = params.get('title')?.trim() ?? '';
+
+    if (!sharedUrl && !sharedText && !sharedTitle) {
+      return;
+    }
+
+    const combinedForUrls = [sharedUrl, sharedText].filter(Boolean).join('\n');
+    const urlMatches = combinedForUrls.match(/https?:\/\/[^\s<>"{}|\\^`[\]]+/gi) ?? [];
+    const extractedUrls = Array.from(
+      new Set(urlMatches.map((match) => match.replace(/[.,;!?)]+$/, ''))),
+    );
+
+    const remainingTextWithoutUrls = sharedText
+      .replace(/https?:\/\/[^\s<>"{}|\\^`[\]]+/gi, '')
+      .trim();
+    const hasSubstantialRecipeBody =
+      remainingTextWithoutUrls.length >= 80 || remainingTextWithoutUrls.includes('\n');
+
+    if (extractedUrls.length > 0 && (!sharedText || !hasSubstantialRecipeBody)) {
+      this.activeTab.set('urls');
+      this.urlForm.controls.urlsText.setValue(extractedUrls.join('\n'));
+      this.feedbackMessage.set('Shared recipe link loaded — tap Queue URL(s) to import.');
+    } else if (sharedText || sharedTitle) {
+      this.activeTab.set('text');
+      if (sharedTitle) {
+        this.textForm.controls.titleHint.setValue(sharedTitle);
+      }
+      this.textForm.controls.rawText.setValue(sharedText || sharedUrl);
+      this.feedbackMessage.set(
+        'Shared recipe text loaded — review and tap Extract Recipe to import.',
+      );
+    }
+
+    void this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { url: null, text: null, title: null },
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+    });
   }
 
   ngOnDestroy(): void {

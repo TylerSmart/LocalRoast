@@ -197,17 +197,17 @@ builder.Services.AddSingleton<IIngestionRealtimeNotifier>(sp =>
     sp.GetRequiredService<SignalRIngestionRealtimeNotifier>()
 );
 
-// Every other Angular asset is content-hashed and safe to cache forever, but index.html keeps its
-
-// name across deploys. Without this it can be served from cache and reference a previous deploy's
-
-// bundle. Applies to UseStaticFiles and MapFallbackToFile, which both read these options.
+// Every other Angular asset is content-hashed and safe to cache forever, while index.html,
+// the web manifest, and Angular Service Worker control files keep their names across deploys.
+// Without no-cache headers, clients or reverse proxies can serve stale manifests/SW scripts.
+// Applies to UseStaticFiles and MapFallbackToFile, which both read these options.
 
 builder.Services.Configure<StaticFileOptions>(options =>
 {
+    options.ContentTypeProvider = SpaHosting.CreateContentTypeProvider();
     options.OnPrepareResponse = context =>
     {
-        if (string.Equals(context.File.Name, "index.html", StringComparison.OrdinalIgnoreCase))
+        if (SpaHosting.ShouldDisableCache(context.File.Name))
         {
             context.Context.Response.Headers.CacheControl = "no-cache, must-revalidate";
         }

@@ -12,6 +12,7 @@ import {
   KitchenTimerService,
 } from '../../../core/services/kitchen-timer/kitchen-timer.service';
 import { LlmSettingsService } from '../../../core/services/llm-settings/llm-settings.service';
+import { PwaService } from '../../../core/services/pwa/pwa.service';
 import { ThemeService } from '../../../core/services/theme/theme.service';
 import { AppShellComponent } from './app-shell.component';
 
@@ -52,6 +53,17 @@ describe('AppShellComponent', () => {
     openLlmSettingsDialog: vi.fn(),
   };
 
+  const mockCanShowInstallOption = signal<boolean>(false);
+  const mockUpdateAvailable = signal<boolean>(false);
+  const mockIsApplyingUpdate = signal<boolean>(false);
+  const mockPwaService = {
+    canShowInstallOption: mockCanShowInstallOption.asReadonly(),
+    updateAvailable: mockUpdateAvailable.asReadonly(),
+    isApplyingUpdate: mockIsApplyingUpdate.asReadonly(),
+    promptInstall: vi.fn(),
+    applyUpdate: vi.fn(),
+  };
+
   const mockTimers = signal<ActiveKitchenTimer[]>([]);
   const mockKitchenTimerService = {
     timers: mockTimers,
@@ -61,8 +73,13 @@ describe('AppShellComponent', () => {
     mockTimers.set([]);
     mockIsBackendUnreachable.set(false);
     mockIsRetryingConnection.set(false);
+    mockCanShowInstallOption.set(false);
+    mockUpdateAvailable.set(false);
+    mockIsApplyingUpdate.set(false);
     mockAuthService.retryConnectionNow.mockClear();
     mockIngestionService.refreshSummary.mockClear();
+    mockPwaService.promptInstall.mockClear();
+    mockPwaService.applyUpdate.mockClear();
     mockDialog = {
       open: vi.fn(),
       openDialogs: [],
@@ -77,6 +94,7 @@ describe('AppShellComponent', () => {
         { provide: ThemeService, useValue: mockThemeService },
         { provide: IngestionService, useValue: mockIngestionService },
         { provide: LlmSettingsService, useValue: mockLlmSettingsService },
+        { provide: PwaService, useValue: mockPwaService },
         { provide: KitchenTimerService, useValue: mockKitchenTimerService },
         { provide: MatDialog, useValue: mockDialog },
       ],
@@ -190,5 +208,38 @@ describe('AppShellComponent', () => {
     mockBackendRecovered$.next(false);
 
     expect(mockIngestionService.refreshSummary).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows Install and Update actions in user menu when PWA service exposes them', () => {
+    mockCanShowInstallOption.set(true);
+    mockUpdateAvailable.set(true);
+    fixture.detectChanges();
+
+    const userMenuBtn = fixture.nativeElement.querySelector(
+      'button.user-profile-btn',
+    ) as HTMLButtonElement;
+    userMenuBtn.click();
+    fixture.detectChanges();
+
+    const installBtn = document.querySelector(
+      '[data-testid="pwa-install-menu-item"]',
+    ) as HTMLButtonElement | null;
+    const updateBtn = document.querySelector(
+      '[data-testid="pwa-update-menu-item"]',
+    ) as HTMLButtonElement | null;
+
+    expect(installBtn?.textContent).toContain(`Install ${APP_NAME}`);
+    expect(updateBtn?.textContent).toContain('Update App');
+
+    installBtn?.click();
+    expect(mockPwaService.promptInstall).toHaveBeenCalledTimes(1);
+
+    userMenuBtn.click();
+    fixture.detectChanges();
+    const updateBtnAgain = document.querySelector(
+      '[data-testid="pwa-update-menu-item"]',
+    ) as HTMLButtonElement | null;
+    updateBtnAgain?.click();
+    expect(mockPwaService.applyUpdate).toHaveBeenCalledTimes(1);
   });
 });

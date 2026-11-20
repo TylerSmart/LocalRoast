@@ -278,4 +278,21 @@ describe('ThemeService', () => {
     httpMock.expectNone('/api/account/theme');
     httpMock.verify();
   });
+
+  it('syncs meta[name="theme-color"] when toggling between light and dark themes', () => {
+    const meta = document.createElement('meta');
+    meta.name = 'theme-color';
+    meta.content = '#1a1715';
+    document.head.appendChild(meta);
+
+    try {
+      service.setMode('light');
+      expect(meta.content).toBe('#f0edf1');
+
+      service.setMode('dark');
+      expect(meta.content).toBe('#1a1715');
+    } finally {
+      meta.remove();
+    }
+  });
 });

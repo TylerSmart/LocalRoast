@@ -49,12 +49,43 @@ function playChime(): void {
 
 function showNotification(timer: ActiveKitchenTimer): void {
   try {
-    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-      new Notification(`Timer Finished: ${timer.label}`, {
-        body: `${timer.recipeTitle} — your timer has completed!`,
-        icon: '/icons/icon-192.png',
-      });
+    if (typeof Notification === 'undefined' || Notification.permission !== 'granted') {
+      return;
     }
+
+    const title = `Timer Finished: ${timer.label}`;
+    const options: NotificationOptions = {
+      body: `${timer.recipeTitle} — your timer has completed!`,
+      icon: '/icons/icon-192.png',
+      badge: '/icons/icon-monochrome-192.png',
+      tag: timer.id,
+    };
+
+    if (
+      typeof navigator !== 'undefined' &&
+      'serviceWorker' in navigator &&
+      typeof navigator.serviceWorker?.getRegistration === 'function'
+    ) {
+      void navigator.serviceWorker
+        .getRegistration()
+        .then((registration) => {
+          if (registration && typeof registration.showNotification === 'function') {
+            return registration.showNotification(title, options);
+          }
+          new Notification(title, options);
+          return undefined;
+        })
+        .catch(() => {
+          try {
+            new Notification(title, options);
+          } catch {
+            // Non-blocking fallback when Notification constructor is disallowed
+          }
+        });
+      return;
+    }
+
+    new Notification(title, options);
   } catch {
     // Non-blocking
   }

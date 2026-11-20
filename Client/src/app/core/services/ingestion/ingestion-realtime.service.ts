@@ -58,6 +58,7 @@ export class IngestionRealtimeService {
     const hub = new HubConnectionBuilder()
       .withUrl(apiUrl('/hubs/ingestion'), {
         accessTokenFactory: () => this.authService.token() ?? '',
+        headers: { 'ngsw-bypass': 'true' },
       })
       .withAutomaticReconnect({
         nextRetryDelayInMilliseconds: (retryContext) => {

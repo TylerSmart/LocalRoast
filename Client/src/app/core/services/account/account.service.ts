@@ -1,7 +1,7 @@
 import { HttpClient } from '@angular/common/http';
 import { Service, inject } from '@angular/core';
 import { MatDialog, MatDialogRef } from '@angular/material/dialog';
-import { Observable } from 'rxjs';
+import { Observable, tap } from 'rxjs';
 import type { AccountSettingsDialogComponent } from '../../../features/account-settings-dialog/account-settings-dialog.component';
 import { apiUrl } from '../../api/api-url';
 import {
@@ -12,6 +12,7 @@ import {
   UpdateProfileRequest,
 } from '../../models/account.models';
 import { AuthResponse } from '../../models/auth.models';
+import { clearPwaRuntimeDataCaches } from '../pwa/pwa.service';
 
 export type AccountSettingsTab = 'profile' | 'password' | 'tokens' | 'data';
 
@@ -33,7 +34,9 @@ export class AccountService {
   }
 
   resetAppData(request: ResetAppDataRequest = {}): Observable<ResetAppDataResultDto> {
-    return this.http.post<ResetAppDataResultDto>(apiUrl('/account/reset-data'), request);
+    return this.http
+      .post<ResetAppDataResultDto>(apiUrl('/account/reset-data'), request)
+      .pipe(tap(() => void clearPwaRuntimeDataCaches()));
   }
 
   async openAccountSettingsDialog(

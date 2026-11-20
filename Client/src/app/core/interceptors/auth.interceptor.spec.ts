@@ -127,8 +127,54 @@ describe('authInterceptor', () => {
     httpClient.get('/api/recipes').subscribe();
 
     const req = httpMock.expectOne('/api/recipes');
+    expect(req.request.headers.has('ngsw-bypass')).toBe(false);
     req.flush([], { headers: { 'X-Api-Version': '1.0.0' } });
 
     expect(mockAuthService.reportBackendReachable).toHaveBeenCalled();
+  });
+
+  it('should attach ngsw-bypass header to auth, ingestion, and mutation requests', () => {
+    mockAuthService.token.mockReturnValue('valid-token');
+
+    httpClient.get('/api/auth/me').subscribe();
+    const authReq = httpMock.expectOne('/api/auth/me');
+    expect(authReq.request.headers.get('ngsw-bypass')).toBe('true');
+    authReq.flush({});
+
+    httpClient.get('/api/ingestion/jobs').subscribe();
+    const ingestReq = httpMock.expectOne('/api/ingestion/jobs');
+    expect(ingestReq.request.headers.get('ngsw-bypass')).toBe('true');
+    ingestReq.flush([]);
+
+    httpClient.post('/api/recipes', { title: 'Chili' }).subscribe();
+    const postReq = httpMock.expectOne('/api/recipes');
+    expect(postReq.request.headers.get('ngsw-bypass')).toBe('true');
+    postReq.flush({});
+  });
+
+  it('should not report backend reachable from cached SW GET response when controlled by service worker', () => {
+    mockAuthService.token.mockReturnValue('valid-token');
+    const originalSw = navigator.serviceWorker;
+    Object.defineProperty(navigator, 'serviceWorker', {
+      value: { controller: {} },
+      configurable: true,
+    });
+
+    try {
+      httpClient.get('/api/recipes').subscribe();
+      const recipeReq = httpMock.expectOne('/api/recipes');
+      recipeReq.flush([], { headers: { 'X-Api-Version': '1.0.0' } });
+      expect(mockAuthService.reportBackendReachable).not.toHaveBeenCalled();
+
+      httpClient.get('/api/auth/me').subscribe();
+      const authReq = httpMock.expectOne('/api/auth/me');
+      authReq.flush({}, { headers: { 'X-Api-Version': '1.0.0' } });
+      expect(mockAuthService.reportBackendReachable).toHaveBeenCalledTimes(1);
+    } finally {
+      Object.defineProperty(navigator, 'serviceWorker', {
+        value: originalSw,
+        configurable: true,
+      });
+    }
   });
 });

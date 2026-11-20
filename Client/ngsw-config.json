@@ -1,0 +1,68 @@
+{
+  "$schema": "./node_modules/@angular/service-worker/config/schema.json",
+  "index": "/index.html",
+  "navigationUrls": ["/**", "!/**/*.*", "!/**/*__*", "!/**/*__*/**", "!/api/**", "!/version"],
+  "assetGroups": [
+    {
+      "name": "app",
+      "installMode": "prefetch",
+      "updateMode": "prefetch",
+      "resources": {
+        "files": [
+          "/favicon.ico",
+          "/favicon.svg",
+          "/site.webmanifest",
+          "/index.html",
+          "/*.css",
+          "/*.js"
+        ]
+      }
+    },
+    {
+      "name": "assets",
+      "installMode": "lazy",
+      "updateMode": "prefetch",
+      "resources": {
+        "files": ["/branding/**", "/icons/**"],
+        "urls": ["https://fonts.googleapis.com/**", "https://fonts.gstatic.com/**"]
+      }
+    }
+  ],
+  "dataGroups": [
+    {
+      "name": "household-read-models",
+      "urls": [
+        "/api/recipes",
+        "/api/recipes/**",
+        "/api/collections",
+        "/api/collections/**",
+        "/api/tags",
+        "/api/tags/**",
+        "/api/food-items",
+        "/api/food-items/**",
+        "/api/meal-plans",
+        "/api/meal-plans/**",
+        "/api/meal-plan-templates",
+        "/api/meal-plan-templates/**",
+        "/api/shopping-lists",
+        "/api/shopping-lists/**",
+        "/api/public/shares/**"
+      ],
+      "cacheConfig": {
+        "strategy": "freshness",
+        "maxSize": 250,
+        "maxAge": "7d",
+        "timeout": "3s"
+      }
+    },
+    {
+      "name": "recipe-media",
+      "urls": ["/api/uploads/**"],
+      "cacheConfig": {
+        "strategy": "performance",
+        "maxSize": 300,
+        "maxAge": "30d"
+      }
+    }
+  ]
+}

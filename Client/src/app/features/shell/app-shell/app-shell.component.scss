@@ -32,7 +32,9 @@
   display: flex;
   align-items: center;
   gap: 1rem;
-  padding: 0.65rem var(--app-page-gutter);
+  padding: calc(0.65rem + env(safe-area-inset-top))
+    max(var(--app-page-gutter), env(safe-area-inset-right)) 0.65rem
+    max(var(--app-page-gutter), env(safe-area-inset-left));
   background: var(--mat-sys-surface-container);
   border-bottom: 1px solid var(--mat-sys-outline-variant);
   position: sticky;
@@ -357,7 +359,9 @@
   .top-bar {
     justify-content: space-between;
     gap: 0.25rem;
-    padding: 0.45rem var(--app-page-gutter);
+    padding: calc(0.45rem + env(safe-area-inset-top))
+      max(var(--app-page-gutter), env(safe-area-inset-right)) 0.45rem
+      max(var(--app-page-gutter), env(safe-area-inset-left));
   }
 
   .brand-badge {
