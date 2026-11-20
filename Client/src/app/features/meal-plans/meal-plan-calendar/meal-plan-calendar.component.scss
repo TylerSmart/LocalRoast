@@ -71,23 +71,6 @@
   flex-wrap: wrap;
 }
 
-.draft-week-ai-btn {
-  border-color: var(--mat-sys-primary);
-  color: var(--mat-sys-primary);
-
-  mat-icon {
-    color: var(--mat-sys-primary);
-  }
-
-  &:hover {
-    background-color: var(--mat-sys-primary-container);
-  }
-}
-
-.clear-week-btn {
-  color: var(--mat-sys-error);
-}
-
 .loading-state {
   display: flex;
   flex-direction: column;
@@ -808,15 +791,16 @@
   .calendar-top-actions {
     display: flex;
     flex-wrap: wrap;
+    align-items: center;
     gap: 0.5rem;
 
-    > button {
-      flex: 1 1 calc(50% - 0.25rem);
+    > button:not([mat-icon-button]) {
+      flex: 1 1 auto;
       min-width: 0;
     }
 
-    .add-meal-primary-btn {
-      flex: 1 0 100%;
+    .calendar-actions-menu-btn {
+      flex: 0 0 auto;
     }
   }
 

@@ -726,7 +726,14 @@ describe('IngestionReviewComponent', () => {
     expect(publishBtn).toBeTruthy();
     expect(publishBtn.textContent).toContain('Update Published Recipe');
 
-    const openRecipeLink = publishedFixture.nativeElement.querySelector('.open-recipe-btn');
+    const menuBtn = publishedFixture.nativeElement.querySelector(
+      '.review-actions-menu-btn',
+    ) as HTMLButtonElement;
+    expect(menuBtn).toBeTruthy();
+    menuBtn.click();
+    publishedFixture.detectChanges();
+
+    const openRecipeLink = document.querySelector('.open-recipe-btn');
     expect(openRecipeLink).toBeTruthy();
 
     pubComp.approveAndPublish();
@@ -811,9 +818,16 @@ describe('IngestionReviewComponent', () => {
     expect(component.previewData()?.refinedModel).toBe('gemma4:26b-a4b');
   });
 
-  it('queues immediate refinement from review header and navigates to /ingest', () => {
+  it('queues immediate refinement from review header menu and navigates to /ingest', () => {
     const el = fixture.nativeElement as HTMLElement;
-    const refineBtn = el.querySelector<HTMLButtonElement>('[data-testid="review-refine-now-btn"]');
+    const menuBtn = el.querySelector<HTMLButtonElement>('.review-actions-menu-btn');
+    expect(menuBtn).toBeTruthy();
+    menuBtn?.click();
+    fixture.detectChanges();
+
+    const refineBtn = document.querySelector<HTMLButtonElement>(
+      '[data-testid="review-refine-now-btn"]',
+    );
     expect(refineBtn).toBeTruthy();
     expect(refineBtn?.textContent).toContain('Refine Now');
 

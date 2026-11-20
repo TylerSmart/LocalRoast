@@ -96,6 +96,21 @@ public sealed class FoodCatalogE2ETests : E2ETestBase
         await searchInput.FillAsync(uniqueAlias);
         await Expect(card).ToBeVisibleAsync();
 
+        // Verify Merge, Edit, and Delete are grouped inside the card overflow menu
+        await Expect(card.Locator("button[aria-label='Edit food item']")).ToHaveCountAsync(0);
+        await Expect(card.Locator("button[aria-label='Delete food item']")).ToHaveCountAsync(0);
+        await card.Locator(".food-item-menu-btn").ClickAsync();
+        await Expect(Page.Locator("button.merge-item-btn")).ToBeVisibleAsync();
+        await Expect(Page.Locator("button.edit-food-item-btn")).ToBeVisibleAsync();
+        await Expect(Page.Locator("button.delete-food-item-btn")).ToBeVisibleAsync();
+        await Page.Locator("button.edit-food-item-btn").ClickAsync();
+        var editDialog = Page.Locator("app-food-item-dialog");
+        await Expect(editDialog).ToBeVisibleAsync();
+        await editDialog
+            .Locator("button[aria-label='Close dialog'], button:has-text('Cancel')")
+            .First.ClickAsync();
+        await Expect(editDialog).Not.ToBeVisibleAsync();
+
         // Search for nonexistent term
         await searchInput.FillAsync("ZzzNonExistentFoodItem999");
         await Expect(Page.Locator(".empty-state h3")).ToContainTextAsync("No food items found");

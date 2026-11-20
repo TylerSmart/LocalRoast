@@ -185,8 +185,14 @@ describe('RecipeDetailComponent', () => {
 
   it('opens Kitchen AI with the selected ingredient, step, or recipe', () => {
     mockDialog.open.mockClear();
-    const ingredientButton: HTMLButtonElement =
-      fixture.nativeElement.querySelector('.explain-ing-btn');
+    const ingredientAiMenuBtn: HTMLButtonElement =
+      fixture.nativeElement.querySelector('.ingredient-ai-menu-btn');
+    expect(ingredientAiMenuBtn).toBeTruthy();
+    ingredientAiMenuBtn.click();
+    fixture.detectChanges();
+
+    const ingredientButton = document.querySelector('.explain-ing-btn') as HTMLButtonElement;
+    expect(ingredientButton).toBeTruthy();
     ingredientButton.click();
     expect(mockDialog.open).toHaveBeenLastCalledWith(
       KitchenQuestionDialogComponent,
@@ -215,6 +221,15 @@ describe('RecipeDetailComponent', () => {
         data: { recipeId: 'r-1', recipeTitle: sampleRecipe.title },
       }),
     );
+  });
+
+  it('renders recipe top actions menu trigger as an icon-only button without visible text', () => {
+    const actionsBtn = fixture.nativeElement.querySelector(
+      '.recipe-actions-menu-btn',
+    ) as HTMLButtonElement | null;
+    expect(actionsBtn).not.toBeNull();
+    expect(actionsBtn?.hasAttribute('mat-icon-button')).toBe(true);
+    expect(actionsBtn?.querySelector('span')?.textContent?.trim() ?? '').toBe('');
   });
 
   it('renders recipe title, collections, tags, ingredients, and step instructions', () => {

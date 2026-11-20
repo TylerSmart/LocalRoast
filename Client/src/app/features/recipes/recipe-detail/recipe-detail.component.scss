@@ -30,8 +30,8 @@
   gap: 0.5rem;
   flex-wrap: wrap;
 
-  button,
-  a {
+  button:not([mat-icon-button]),
+  a:not([mat-icon-button]) {
     padding: 0 1rem !important;
     white-space: nowrap;
   }
@@ -579,14 +579,9 @@
   }
 }
 
-.explain-ing-btn {
+.ingredient-ai-menu-btn {
   flex-shrink: 0;
-  color: var(--mat-sys-primary);
-}
-
-.substitute-ing-btn {
-  flex-shrink: 0;
-  opacity: 0.78;
+  opacity: 0.82;
   color: var(--mat-sys-primary);
 
   &:hover {
@@ -1039,8 +1034,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-.delete-attachment-btn,
-.delete-log-btn {
+.delete-attachment-btn {
   color: var(--mat-sys-error);
   flex-shrink: 0;
 }
@@ -1190,8 +1184,8 @@
     width: 100%;
     justify-content: flex-start;
 
-    button,
-    a {
+    button:not([mat-icon-button]),
+    a:not([mat-icon-button]) {
       font-size: 0.85rem;
       padding: 0 0.85rem !important;
     }

@@ -76,96 +76,9 @@
 
       <div class="header-actions">
         <button
-          mat-button
-          type="button"
-          (click)="discardJob()"
-          class="discard-btn"
-          aria-label="Discard ingestion job"
-        >
-          <mat-icon>delete_outline</mat-icon>
-          <span>Discard</span>
-        </button>
-
-        <button
           mat-stroked-button
           type="button"
-          (click)="rerunExtraction()"
-          [disabled]="isRerunning() || isSaving() || isPublishing()"
-          matTooltip="Rerun extraction using currently configured LLM model"
-          aria-label="Rerun extraction with current model"
-          class="rerun-btn"
-        >
-          @if (isRerunning()) {
-            <mat-spinner diameter="18" class="inline-spinner"></mat-spinner>
-          } @else {
-            <mat-icon>refresh</mat-icon>
-          }
-          <span>{{ isRerunning() ? 'Re-queueing...' : 'Rerun' }}</span>
-        </button>
-
-        @if (canRefineJob()) {
-          <button
-            mat-stroked-button
-            type="button"
-            (click)="refineJobNow()"
-            [disabled]="
-              isQueueingRefinement() ||
-              isRerunning() ||
-              isSaving() ||
-              isPublishing() ||
-              !!job()?.refinementRunNowRequested
-            "
-            [matTooltip]="
-              'Run refinement via ' +
-              (aiHelper?.refineModel?.() || 'refinement model') +
-              ' now (runs even when the queue is paused)'
-            "
-            aria-label="Run refinement now"
-            class="refine-btn"
-            data-testid="review-refine-now-btn"
-          >
-            @if (isQueueingRefinement()) {
-              <mat-spinner diameter="18" class="inline-spinner"></mat-spinner>
-            } @else {
-              <mat-icon>auto_fix_high</mat-icon>
-            }
-            <span>{{
-              isQueueingRefinement()
-                ? 'Queueing...'
-                : job()?.refinedModel
-                  ? 'Re-refine'
-                  : 'Refine Now'
-            }}</span>
-          </button>
-        }
-
-        @if (job()?.resultingRecipeId; as publishedRecipeId) {
-          <a
-            mat-stroked-button
-            [routerLink]="['/recipes', publishedRecipeId]"
-            class="open-recipe-btn"
-            aria-label="Open published recipe"
-          >
-            <mat-icon>open_in_new</mat-icon>
-            <span>Open Published Recipe</span>
-          </a>
-        }
-
-        <button
-          mat-stroked-button
-          type="button"
-          (click)="openPreviewDialog()"
-          matTooltip="Preview formatted recipe"
-          aria-label="Preview formatted recipe"
-          class="preview-btn"
-        >
-          <mat-icon>visibility</mat-icon>
-          <span>Preview</span>
-        </button>
-
-        <button
-          mat-stroked-button
-          type="button"
+          class="save-draft-btn"
           (click)="saveDraft()"
           [disabled]="isSaving() || isPublishing()"
           aria-label="Save review draft"
@@ -202,6 +115,100 @@
                 : 'Approve & Publish'
           }}</span>
         </button>
+
+        <button
+          mat-icon-button
+          type="button"
+          class="review-actions-menu-btn"
+          [matMenuTriggerFor]="reviewActionsMenu"
+          aria-label="More review actions"
+          matTooltip="More actions"
+        >
+          <mat-icon>more_vert</mat-icon>
+        </button>
+
+        <mat-menu #reviewActionsMenu="matMenu" xPosition="before">
+          <button
+            mat-menu-item
+            type="button"
+            (click)="openPreviewDialog()"
+            aria-label="Preview formatted recipe"
+            class="preview-btn"
+          >
+            <mat-icon>visibility</mat-icon>
+            <span>Preview Recipe</span>
+          </button>
+
+          @if (job()?.resultingRecipeId; as publishedRecipeId) {
+            <a
+              mat-menu-item
+              [routerLink]="['/recipes', publishedRecipeId]"
+              class="open-recipe-btn"
+              aria-label="Open published recipe"
+            >
+              <mat-icon>open_in_new</mat-icon>
+              <span>Open Published Recipe</span>
+            </a>
+          }
+
+          @if (canRefineJob()) {
+            <button
+              mat-menu-item
+              type="button"
+              (click)="refineJobNow()"
+              [disabled]="
+                isQueueingRefinement() ||
+                isRerunning() ||
+                isSaving() ||
+                isPublishing() ||
+                !!job()?.refinementRunNowRequested
+              "
+              [matTooltip]="
+                'Run refinement via ' +
+                (aiHelper?.refineModel?.() || 'refinement model') +
+                ' now (runs even when the queue is paused)'
+              "
+              aria-label="Run refinement now"
+              class="refine-btn"
+              data-testid="review-refine-now-btn"
+            >
+              <mat-icon>auto_fix_high</mat-icon>
+              <span>{{
+                isQueueingRefinement()
+                  ? 'Queueing...'
+                  : job()?.refinedModel
+                    ? 'Re-refine'
+                    : 'Refine Now'
+              }}</span>
+            </button>
+          }
+
+          <button
+            mat-menu-item
+            type="button"
+            (click)="rerunExtraction()"
+            [disabled]="isRerunning() || isSaving() || isPublishing()"
+            matTooltip="Rerun extraction using currently configured LLM model"
+            aria-label="Rerun extraction with current model"
+            class="rerun-btn"
+          >
+            <mat-icon>refresh</mat-icon>
+            <span>{{ isRerunning() ? 'Re-queueing...' : 'Rerun Extraction' }}</span>
+          </button>
+
+          <mat-divider></mat-divider>
+
+          <button
+            mat-menu-item
+            type="button"
+            (click)="discardJob()"
+            class="discard-btn destructive-menu-item"
+            aria-label="Discard ingestion job"
+          >
+            <mat-icon>delete_outline</mat-icon>
+            <span>Discard Job</span>
+          </button>
+        </mat-menu>
       </div>
     </header>
 

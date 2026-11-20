@@ -79,8 +79,10 @@ public sealed class PrintAndShareE2ETests : E2ETestBase
         await Expect(linkCard.Locator(".link-label")).ToContainTextAsync("Family Taco Night");
         await Expect(linkCard.Locator(".badge-active")).ToContainTextAsync("Active");
 
-        var openLink = linkCard.Locator("a[aria-label='Open public view in new tab']");
+        await linkCard.Locator(".link-actions-menu-btn").ClickAsync();
+        var openLink = Page.Locator("a[aria-label='Open public view in new tab']");
         var shareUrl = await openLink.GetAttributeAsync("href");
+        await Page.Keyboard.PressAsync("Escape");
         Assert.IsNotNull(shareUrl, "Expected share URL href to be populated.");
 
         // 4. Launch brand-new unauthenticated browser context
@@ -114,8 +116,9 @@ public sealed class PrintAndShareE2ETests : E2ETestBase
         var leakedLinks = guestPage.Locator("app-public-shared-recipe a[href*='/recipes/']");
         await Expect(leakedLinks).ToHaveCountAsync(0);
 
-        // 9. Back on authenticated page: Revoke the share link
-        await shareDialog.Locator("button[aria-label='Revoke share link']").First.ClickAsync();
+        // 9. Back on authenticated page: Revoke the share link via overflow menu
+        await shareDialog.Locator(".link-card .link-actions-menu-btn").First.ClickAsync();
+        await Page.Locator("button[aria-label='Revoke share link']").ClickAsync();
         await Expect(shareDialog.Locator(".badge-revoked")).ToBeVisibleAsync();
 
         // 10. Reload guest page and assert unavailable card
@@ -190,9 +193,9 @@ public sealed class PrintAndShareE2ETests : E2ETestBase
         var shareDialog = Page.Locator("app-recipe-share-dialog");
         await Expect(shareDialog).ToBeVisibleAsync();
         await shareDialog.Locator("button[aria-label='Create share link']").ClickAsync();
-        var shareUrl = await shareDialog
-            .Locator("a[aria-label='Open public view in new tab']")
-            .First.GetAttributeAsync("href");
+        await shareDialog.Locator(".link-card .link-actions-menu-btn").First.ClickAsync();
+        var shareUrl = await Page.Locator("a[aria-label='Open public view in new tab']")
+            .GetAttributeAsync("href");
         Assert.IsNotNull(shareUrl);
 
         // 5. Navigate to public share view and emulate print media
@@ -257,9 +260,9 @@ public sealed class PrintAndShareE2ETests : E2ETestBase
 
         await shareDialog.Locator("input[formcontrolname='label']").FillAsync("Mobile Potluck");
         await shareDialog.Locator("button[aria-label='Create share link']").ClickAsync();
-        var shareUrl = await shareDialog
-            .Locator("a[aria-label='Open public view in new tab']")
-            .First.GetAttributeAsync("href");
+        await shareDialog.Locator(".link-card .link-actions-menu-btn").First.ClickAsync();
+        var shareUrl = await Page.Locator("a[aria-label='Open public view in new tab']")
+            .GetAttributeAsync("href");
         Assert.IsNotNull(shareUrl);
 
         // 4. Navigate to public share view at 360px

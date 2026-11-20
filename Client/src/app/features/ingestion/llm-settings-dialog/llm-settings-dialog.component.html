@@ -377,15 +377,66 @@
                           <div class="profile-card-ident">
                             <h5 class="profile-card-title">{{ profile.displayName }}</h5>
                           </div>
-                          <div class="card-badges">
-                            @if (profile.isDefault) {
-                              <span class="profile-badge-default profile-badge-standard">
-                                Default
-                              </span>
-                            }
-                            @for (workflow of profile.assignedWorkflows; track workflow) {
-                              <span class="workflow-badge">{{ workflow }}</span>
-                            }
+                          <div class="profile-card-header-trailing">
+                            <div class="card-badges">
+                              @if (profile.isDefault) {
+                                <span class="profile-badge-default profile-badge-standard">
+                                  Default
+                                </span>
+                              }
+                              @for (workflow of profile.assignedWorkflows; track workflow) {
+                                <span class="workflow-badge">{{ workflow }}</span>
+                              }
+                            </div>
+                            <button
+                              mat-icon-button
+                              type="button"
+                              class="card-menu-btn"
+                              [matMenuTriggerFor]="profileMenu"
+                              [attr.aria-label]="'Options for profile ' + profile.displayName"
+                              matTooltip="Profile options"
+                              [attr.data-testid]="'profile-actions-menu-' + profile.id"
+                            >
+                              <mat-icon>more_vert</mat-icon>
+                            </button>
+                            <mat-menu #profileMenu="matMenu" xPosition="before">
+                              <button
+                                mat-menu-item
+                                type="button"
+                                class="duplicate-card-btn"
+                                (click)="duplicateProfile(profile)"
+                                [attr.aria-label]="'Duplicate profile ' + profile.displayName"
+                                [attr.data-testid]="'duplicate-profile-' + profile.id"
+                              >
+                                <mat-icon>content_copy</mat-icon>
+                                <span>Duplicate Profile</span>
+                              </button>
+                              <button
+                                mat-menu-item
+                                type="button"
+                                class="edit-card-btn"
+                                (click)="startEditProfile(profile)"
+                                [attr.aria-label]="'Edit profile ' + profile.displayName"
+                                [attr.data-testid]="'edit-profile-' + profile.id"
+                              >
+                                <mat-icon>edit</mat-icon>
+                                <span>Edit Profile</span>
+                              </button>
+                              @if (!profile.isDefault) {
+                                <mat-divider></mat-divider>
+                                <button
+                                  mat-menu-item
+                                  type="button"
+                                  class="delete-card-btn destructive-menu-item"
+                                  (click)="deleteProfile(profile)"
+                                  [attr.aria-label]="'Delete profile ' + profile.displayName"
+                                  [attr.data-testid]="'delete-profile-' + profile.id"
+                                >
+                                  <mat-icon>delete</mat-icon>
+                                  <span>Delete Profile</span>
+                                </button>
+                              }
+                            </mat-menu>
                           </div>
                         </div>
 
@@ -423,42 +474,6 @@
                             }
                           </ul>
                         }
-
-                        <div class="profile-card-actions">
-                          <button
-                            mat-button
-                            type="button"
-                            class="duplicate-card-btn"
-                            (click)="duplicateProfile(profile)"
-                            [attr.aria-label]="'Duplicate profile ' + profile.displayName"
-                            [attr.data-testid]="'duplicate-profile-' + profile.id"
-                          >
-                            <mat-icon>content_copy</mat-icon>
-                            <span>Duplicate</span>
-                          </button>
-                          <button
-                            mat-button
-                            type="button"
-                            class="edit-card-btn"
-                            (click)="startEditProfile(profile)"
-                            [attr.data-testid]="'edit-profile-' + profile.id"
-                          >
-                            <mat-icon>edit</mat-icon>
-                            <span>Edit</span>
-                          </button>
-                          @if (!profile.isDefault) {
-                            <button
-                              mat-button
-                              type="button"
-                              class="delete-card-btn"
-                              (click)="deleteProfile(profile)"
-                              [attr.data-testid]="'delete-profile-' + profile.id"
-                            >
-                              <mat-icon>delete</mat-icon>
-                              <span>Delete</span>
-                            </button>
-                          }
-                        </div>
                       </div>
                     }
                   </div>

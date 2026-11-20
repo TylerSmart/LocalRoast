@@ -253,6 +253,18 @@
       overflow-wrap: anywhere;
     }
 
+    .link-title-trailing {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      flex-shrink: 0;
+      margin-right: -0.5rem;
+    }
+
+    .link-actions-menu-btn {
+      color: var(--mat-sys-on-surface-variant);
+    }
+
     .badge {
       font-size: 0.72rem;
       font-weight: 700;
@@ -308,31 +320,6 @@
       }
     }
   }
-
-  .link-actions {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 0.45rem;
-    margin-top: 0.25rem;
-    flex-wrap: wrap;
-
-    .action-btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.25rem;
-      font-size: 0.8rem;
-      height: 32px;
-      line-height: 32px;
-      padding: 0 0.65rem;
-
-      mat-icon {
-        font-size: 1rem;
-        width: 1rem;
-        height: 1rem;
-      }
-    }
-  }
 }
 
 .share-dialog-actions {
@@ -361,15 +348,6 @@
 
   .link-card .link-title-row {
     flex-wrap: wrap;
-  }
-
-  .link-card .link-actions {
-    justify-content: stretch;
-
-    .action-btn {
-      flex: 1;
-      justify-content: center;
-    }
   }
 
   .share-dialog-actions {

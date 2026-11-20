@@ -239,9 +239,19 @@ public sealed class RecipeCookbookE2ETests : E2ETestBase
             $"Expected card hit target to resolve to recipe-card-link, got '{hitTargetClass}'."
         );
 
-        var editLink = pubCard.Locator("a[aria-label='Edit recipe']");
-        await Expect(editLink).ToBeVisibleAsync();
-        await editLink.ClickAsync();
+        // Recipe cards on Cookbook should not render inline edit/delete buttons
+        await Expect(pubCard.Locator("a[aria-label='Edit recipe']")).ToHaveCountAsync(0);
+        await Expect(pubCard.Locator("button[aria-label='Delete recipe']")).ToHaveCountAsync(0);
+
+        // Open recipe detail via card link and access Edit from the icon-only actions menu
+        await cardLink.ClickAsync();
+        await Expect(Page).ToHaveURLAsync(new Regex($".*{Regex.Escape(cardHref!)}$"));
+
+        var actionsMenuBtn = Page.Locator("button.recipe-actions-menu-btn");
+        await Expect(actionsMenuBtn).ToBeVisibleAsync();
+        await Expect(actionsMenuBtn).ToHaveAttributeAsync("mat-icon-button", "");
+        await actionsMenuBtn.ClickAsync();
+        await Page.Locator("a[aria-label='Edit recipe']").ClickAsync();
         await Expect(Page).ToHaveURLAsync(new Regex($".*{Regex.Escape(cardHref!)}/edit$"));
     }
 

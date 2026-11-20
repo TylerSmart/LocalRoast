@@ -393,11 +393,15 @@ public sealed class FoodItemMergeAndAiHelpersE2ETests : E2ETestBase
             "Buttermilk"
         );
 
-        // 1. Verify substitute button is visible when AI host is online
-        var subBtn = Page.Locator(".substitute-ing-btn").First;
+        // 1. Verify ingredient AI menu is visible when AI host is online and offers substitution
+        var aiMenuBtn = Page.Locator(".ingredient-ai-menu-btn").First;
+        await Expect(aiMenuBtn).ToBeVisibleAsync();
+        await aiMenuBtn.ClickAsync();
+
+        var subBtn = Page.Locator("button.substitute-ing-btn");
         await Expect(subBtn).ToBeVisibleAsync();
 
-        // Click substitute button
+        // Click substitute menu item
         await subBtn.ClickAsync();
         var subDialog = Page.Locator("app-ingredient-substitution-dialog");
         await Expect(subDialog).ToBeVisibleAsync();
@@ -439,9 +443,8 @@ public sealed class FoodItemMergeAndAiHelpersE2ETests : E2ETestBase
         // Invalidate status by reloading recipe detail page
         await Page.ReloadAsync();
 
-        // Verify substitute button cleanly hides when offline
-        await Expect(Page.Locator(".substitute-ing-btn")).Not.ToBeVisibleAsync();
-        await Expect(Page.Locator(".explain-ing-btn")).Not.ToBeVisibleAsync();
+        // Verify ingredient AI menu cleanly hides when offline
+        await Expect(Page.Locator(".ingredient-ai-menu-btn")).Not.ToBeVisibleAsync();
         await Expect(Page.Locator(".explain-step-btn")).Not.ToBeVisibleAsync();
     }
 
@@ -462,21 +465,16 @@ public sealed class FoodItemMergeAndAiHelpersE2ETests : E2ETestBase
         {
             await Page.SetViewportSizeAsync(width, 740);
             var row = Page.Locator(".ingredient-row").First;
-            var ask = row.Locator(".explain-ing-btn");
-            var substitute = row.Locator(".substitute-ing-btn");
-            await Expect(ask).ToBeVisibleAsync();
-            await Expect(substitute).ToBeVisibleAsync();
+            var aiMenu = row.Locator(".ingredient-ai-menu-btn");
+            await Expect(aiMenu).ToBeVisibleAsync();
             var checkboxBox = await row.Locator("mat-checkbox").BoundingBoxAsync();
-            var askBox = await ask.BoundingBoxAsync();
-            var substituteBox = await substitute.BoundingBoxAsync();
+            var aiMenuBox = await aiMenu.BoundingBoxAsync();
             Assert.IsNotNull(checkboxBox);
-            Assert.IsNotNull(askBox);
-            Assert.IsNotNull(substituteBox);
-            Assert.IsLessThanOrEqualTo(substituteBox.X + 1, checkboxBox.X + checkboxBox.Width);
-            Assert.IsLessThanOrEqualTo(askBox.X + 1, substituteBox.X + substituteBox.Width);
+            Assert.IsNotNull(aiMenuBox);
+            Assert.IsLessThanOrEqualTo(aiMenuBox.X + 1, checkboxBox.X + checkboxBox.Width);
             Assert.IsLessThanOrEqualTo(
                 checkboxBox.Y + checkboxBox.Height + 1,
-                askBox.Y + askBox.Height / 2,
+                aiMenuBox.Y + aiMenuBox.Height / 2,
                 $"Ingredient actions must not wrap below the checkbox at {width}px."
             );
             Assert.IsLessThanOrEqualTo(
@@ -508,7 +506,8 @@ public sealed class FoodItemMergeAndAiHelpersE2ETests : E2ETestBase
             await Expect(dialog).ToHaveCountAsync(0);
         }
 
-        await Page.Locator(".explain-ing-btn").First.ClickAsync();
+        await Page.Locator(".ingredient-ai-menu-btn").First.ClickAsync();
+        await Page.Locator("button.explain-ing-btn").ClickAsync();
         await Expect(dialog.Locator(".answer-text")).ToContainTextAsync("thin matchsticks");
         Assert.IsNotNull(mockServer.LastKitchenPrompt);
         StringAssert.Contains(mockServer.LastKitchenPrompt, "Kiwi");
@@ -541,7 +540,8 @@ public sealed class FoodItemMergeAndAiHelpersE2ETests : E2ETestBase
         await CloseKitchenDialogAsync();
 
         await Page.SetViewportSizeAsync(360, 740);
-        await Page.Locator(".explain-ing-btn").First.ClickAsync();
+        await Page.Locator(".ingredient-ai-menu-btn").First.ClickAsync();
+        await Page.Locator("button.explain-ing-btn").ClickAsync();
         await Expect(dialog.Locator(".answer-text")).ToBeVisibleAsync();
         Assert.IsLessThanOrEqualTo(
             await dialog.EvaluateAsync<int>("el => el.clientWidth"),
@@ -642,13 +642,19 @@ public sealed class FoodItemMergeAndAiHelpersE2ETests : E2ETestBase
         for (var week = 0; week < 2; week++)
         {
             await Expect(Page.Locator(".week-days-grid")).ToBeVisibleAsync();
-            if (await Page.Locator("button.clear-week-btn").IsVisibleAsync())
+            await Page.Locator("button.calendar-actions-menu-btn").ClickAsync();
+            var clearWeekBtn = Page.Locator("button.clear-week-btn");
+            if (await clearWeekBtn.IsVisibleAsync())
             {
-                await Page.Locator("button.clear-week-btn").ClickAsync();
+                await clearWeekBtn.ClickAsync();
                 await Page.Locator("mat-dialog-container button", new() { HasText = "Clear Week" })
                     .ClickAsync();
                 await Expect(Page.Locator("mat-dialog-container")).Not.ToBeVisibleAsync();
                 await Expect(Page.Locator(".week-days-grid")).ToBeVisibleAsync();
+            }
+            else
+            {
+                await Page.Keyboard.PressAsync("Escape");
             }
             if (week == 0)
             {
@@ -659,11 +665,12 @@ public sealed class FoodItemMergeAndAiHelpersE2ETests : E2ETestBase
         await Page.Locator("mat-button-toggle[value='next7'] button").ClickAsync();
         await Expect(Page.Locator(".meal-entry-card")).ToHaveCountAsync(0);
 
-        // Verify Draft Week AI button is visible
-        var draftWeekBtn = Page.Locator(".draft-week-ai-btn");
+        // Verify Draft Plan AI action is available inside the header overflow menu
+        await Page.Locator("button.calendar-actions-menu-btn").ClickAsync();
+        var draftWeekBtn = Page.Locator("button.draft-week-ai-btn");
         await Expect(draftWeekBtn).ToBeVisibleAsync();
 
-        // Click Draft Week
+        // Click Draft Plan
         await draftWeekBtn.ClickAsync();
         var draftDialog = Page.Locator("app-draft-meal-plan-dialog");
         await Expect(draftDialog).ToBeVisibleAsync();
@@ -758,7 +765,8 @@ public sealed class FoodItemMergeAndAiHelpersE2ETests : E2ETestBase
         [
             "No authentic Thai curry recipes matched in your cookbook.",
         ];
-        await Page.Locator(".draft-week-ai-btn").ClickAsync();
+        await Page.Locator("button.calendar-actions-menu-btn").ClickAsync();
+        await Page.Locator("button.draft-week-ai-btn").ClickAsync();
         await Expect(draftDialog).ToBeVisibleAsync();
         await draftDialog.Locator(".preset-chip").First.ClickAsync();
         await draftDialog.Locator(".meal-count-field mat-select").ClickAsync();

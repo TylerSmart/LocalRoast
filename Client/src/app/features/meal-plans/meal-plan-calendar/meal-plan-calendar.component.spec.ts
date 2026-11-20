@@ -265,9 +265,14 @@ describe('MealPlanCalendarComponent', () => {
     expect(mockDialog.open).toHaveBeenCalled();
   });
 
-  it('renders Draft Week button when aiHelper is available and opens dialog', () => {
+  it('renders Draft Plan action in header overflow menu when aiHelper is available and opens dialog', () => {
     const el = fixture.nativeElement as HTMLElement;
-    const draftBtn = el.querySelector('.draft-week-ai-btn') as HTMLButtonElement;
+    const menuBtn = el.querySelector('.calendar-actions-menu-btn') as HTMLButtonElement;
+    expect(menuBtn).toBeTruthy();
+    menuBtn.click();
+    fixture.detectChanges();
+
+    const draftBtn = document.querySelector('.draft-week-ai-btn') as HTMLButtonElement;
     expect(draftBtn).toBeTruthy();
 
     mockDialog.open.mockReturnValue({

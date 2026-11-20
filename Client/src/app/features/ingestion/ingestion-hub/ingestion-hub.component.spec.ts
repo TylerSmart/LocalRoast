@@ -337,9 +337,14 @@ describe('IngestionHubComponent', () => {
     expect(mockIngestionService.retryJob).toHaveBeenCalledWith('job-2');
   });
 
-  it('discards waiting, review, and published jobs and renders remove buttons for all statuses', () => {
-    const discardButtons = fixture.nativeElement.querySelectorAll('button.discard-btn');
-    expect(discardButtons.length).toBe(3);
+  it('discards waiting, review, and published jobs and renders overflow menu buttons for all statuses', () => {
+    const menuButtons = fixture.nativeElement.querySelectorAll('button.job-actions-menu-btn');
+    expect(menuButtons.length).toBe(3);
+
+    (menuButtons[0] as HTMLButtonElement).click();
+    fixture.detectChanges();
+    const discardBtn = document.querySelector<HTMLButtonElement>('button.discard-btn');
+    expect(discardBtn).toBeTruthy();
 
     component.discardJob(sampleJobs[1]);
     expect(mockIngestionService.discardJob).toHaveBeenCalledWith('job-2');
@@ -529,7 +534,7 @@ describe('IngestionHubComponent', () => {
     expect(mockIngestionService.runJobNow).toHaveBeenCalledWith('job-2');
     expect(component.feedbackMessage()).toContain('rest of the queue stays paused');
   });
-  it('renders Review Side-by-Side button for Published jobs alongside Open Recipe', () => {
+  it('renders Review Side-by-Side button for Published jobs and Open Recipe in actions menu', () => {
     component.setFilter('Published');
     fixture.detectChanges();
 
@@ -537,9 +542,16 @@ describe('IngestionHubComponent', () => {
     expect(reviewBtn).toBeTruthy();
     expect(reviewBtn.textContent).toContain('Review Side-by-Side');
 
-    const openRecipeBtn = fixture.nativeElement.querySelector('.open-recipe-btn');
+    const menuBtn = fixture.nativeElement.querySelector(
+      '.job-actions-menu-btn',
+    ) as HTMLButtonElement;
+    expect(menuBtn).toBeTruthy();
+    menuBtn.click();
+    fixture.detectChanges();
+
+    const openRecipeBtn = document.querySelector('.open-recipe-btn');
     expect(openRecipeBtn).toBeTruthy();
-    expect(openRecipeBtn.textContent).toContain('Open Recipe');
+    expect(openRecipeBtn?.textContent).toContain('Open Recipe');
   });
 
   it('renders sort selector and direction toggle next to search bar and reloads on change', () => {
@@ -604,24 +616,40 @@ describe('IngestionHubComponent', () => {
     expect(refinedChip?.textContent).toContain('Refined: gemma4:26b-a4b');
   });
 
-  it('shows Refine now button on review/published cards when a refinement model is configured and queues while paused', () => {
+  it('shows Refine now action in overflow menu on review/published cards when a refinement model is configured and queues while paused', () => {
     const el = fixture.nativeElement as HTMLElement;
-    expect(el.querySelectorAll('[data-testid="refine-now-btn"]').length).toBe(0);
+    const menuBtns = el.querySelectorAll<HTMLButtonElement>('.job-actions-menu-btn');
+    menuBtns[0].click();
+    fixture.detectChanges();
+    expect(document.querySelector('[data-testid="refine-now-btn"]')).toBeNull();
+    document.querySelector<HTMLElement>('.cdk-overlay-backdrop')?.click();
+    fixture.detectChanges();
 
     component.refineModel.set('gemma4:26b-a4b');
     component.isIngestionEnabled.set(false);
     fixture.detectChanges();
 
-    const refineBtns = el.querySelectorAll<HTMLButtonElement>('[data-testid="refine-now-btn"]');
-    expect(refineBtns.length).toBe(2);
-    expect(refineBtns[0].textContent).toContain('Refine now');
-    expect(refineBtns[1].textContent).toContain('Re-refine');
+    menuBtns[0].click();
+    fixture.detectChanges();
+    const firstRefineBtn = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('[data-testid="refine-now-btn"]'),
+    ).at(-1);
+    expect(firstRefineBtn).toBeTruthy();
+    expect(firstRefineBtn?.textContent).toContain('Refine now');
 
-    refineBtns[0].click();
+    firstRefineBtn?.click();
     fixture.detectChanges();
 
     expect(mockIngestionService.refineJobNow).toHaveBeenCalledWith('job-1');
     expect(component.feedbackMessage()).toContain('while the rest of the queue stays paused');
+
+    menuBtns[2].click();
+    fixture.detectChanges();
+    const publishedRefineBtn = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('[data-testid="refine-now-btn"]'),
+    ).at(-1);
+    expect(publishedRefineBtn).toBeTruthy();
+    expect(publishedRefineBtn?.textContent).toContain('Re-refine');
   });
 
   it('displays Live Sync pill when SignalR is connected and hides countdown polling spinner', () => {

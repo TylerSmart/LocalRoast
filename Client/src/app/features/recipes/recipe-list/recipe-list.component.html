@@ -16,24 +16,6 @@
     </div>
     <div class="header-actions">
       <a
-        mat-stroked-button
-        routerLink="/ingest"
-        class="import-btn"
-        aria-label="Import recipe from web or text"
-      >
-        <mat-icon>move_to_inbox</mat-icon>
-        <span>Import Recipe</span>
-      </a>
-      <a
-        mat-stroked-button
-        routerLink="/matcher"
-        class="matcher-btn"
-        aria-label="Use up ingredients"
-      >
-        <mat-icon>blender</mat-icon>
-        <span>Use Up Ingredients</span>
-      </a>
-      <a
         mat-flat-button
         color="primary"
         routerLink="/recipes/new"
@@ -69,22 +51,36 @@
         </button>
         <button
           type="button"
-          class="collection-pill-action edit-collection-btn"
-          (click)="openEditCollectionDialog(c, $event)"
-          [attr.aria-label]="'Edit collection ' + c.name"
-          matTooltip="Edit collection"
+          class="collection-pill-action collection-menu-btn"
+          [matMenuTriggerFor]="collectionMenu"
+          (click)="$event.stopPropagation()"
+          [attr.aria-label]="'Collection options for ' + c.name"
+          matTooltip="Collection options"
         >
-          <mat-icon>edit</mat-icon>
+          <mat-icon>more_vert</mat-icon>
         </button>
-        <button
-          type="button"
-          class="collection-pill-action delete-collection-btn"
-          (click)="deleteCollection(c, $event)"
-          [attr.aria-label]="'Delete collection ' + c.name"
-          matTooltip="Delete collection"
-        >
-          <mat-icon>delete_outline</mat-icon>
-        </button>
+        <mat-menu #collectionMenu="matMenu" xPosition="before">
+          <button
+            mat-menu-item
+            type="button"
+            class="edit-collection-btn"
+            (click)="openEditCollectionDialog(c, $event)"
+            [attr.aria-label]="'Edit collection ' + c.name"
+          >
+            <mat-icon>edit</mat-icon>
+            <span>Edit Collection</span>
+          </button>
+          <button
+            mat-menu-item
+            type="button"
+            class="delete-collection-btn destructive-menu-item"
+            (click)="deleteCollection(c, $event)"
+            [attr.aria-label]="'Delete collection ' + c.name"
+          >
+            <mat-icon>delete_outline</mat-icon>
+            <span>Delete Collection</span>
+          </button>
+        </mat-menu>
       </div>
     }
     <button
@@ -259,22 +255,36 @@
                         <span class="tag-pill-name">{{ t.name }}</span>
                         <button
                           type="button"
-                          class="tag-pill-action edit-tag-btn"
-                          (click)="openEditTagDialog(t, $event)"
-                          [attr.aria-label]="'Edit tag ' + t.name"
-                          matTooltip="Edit tag"
+                          class="tag-pill-action tag-menu-btn"
+                          [matMenuTriggerFor]="tagMenu"
+                          (click)="$event.stopPropagation()"
+                          [attr.aria-label]="'Tag options for ' + t.name"
+                          matTooltip="Tag options"
                         >
-                          <mat-icon>edit</mat-icon>
+                          <mat-icon>more_vert</mat-icon>
                         </button>
-                        <button
-                          type="button"
-                          class="tag-pill-action delete-tag-btn"
-                          (click)="deleteTag(t, $event)"
-                          [attr.aria-label]="'Delete tag ' + t.name"
-                          matTooltip="Delete tag"
-                        >
-                          <mat-icon>delete_outline</mat-icon>
-                        </button>
+                        <mat-menu #tagMenu="matMenu" xPosition="before">
+                          <button
+                            mat-menu-item
+                            type="button"
+                            class="edit-tag-btn"
+                            (click)="openEditTagDialog(t, $event)"
+                            [attr.aria-label]="'Edit tag ' + t.name"
+                          >
+                            <mat-icon>edit</mat-icon>
+                            <span>Edit Tag</span>
+                          </button>
+                          <button
+                            mat-menu-item
+                            type="button"
+                            class="delete-tag-btn destructive-menu-item"
+                            (click)="deleteTag(t, $event)"
+                            [attr.aria-label]="'Delete tag ' + t.name"
+                          >
+                            <mat-icon>delete_outline</mat-icon>
+                            <span>Delete Tag</span>
+                          </button>
+                        </mat-menu>
                       </div>
                     }
                   </div>
@@ -431,43 +441,22 @@
             }
 
             <div class="recipe-card-body">
-              <div class="card-top-row">
-                <div class="status-and-diff">
-                  @if (recipe.difficulty) {
-                    <span class="diff-badge" [attr.data-diff]="recipe.difficulty">
-                      {{ recipe.difficulty }}
-                    </span>
-                  }
-                  @if (recipe.status !== 'Published') {
-                    <span class="status-badge" [attr.data-status]="recipe.status">
-                      {{ recipe.status === 'DraftReview' ? 'Draft' : 'Archived' }}
-                    </span>
-                  }
+              @if (recipe.difficulty || recipe.status !== 'Published') {
+                <div class="card-top-row">
+                  <div class="status-and-diff">
+                    @if (recipe.difficulty) {
+                      <span class="diff-badge" [attr.data-diff]="recipe.difficulty">
+                        {{ recipe.difficulty }}
+                      </span>
+                    }
+                    @if (recipe.status !== 'Published') {
+                      <span class="status-badge" [attr.data-status]="recipe.status">
+                        {{ recipe.status === 'DraftReview' ? 'Draft' : 'Archived' }}
+                      </span>
+                    }
+                  </div>
                 </div>
-
-                <div class="card-actions-quick">
-                  <a
-                    mat-icon-button
-                    class="card-action-icon edit-action"
-                    [routerLink]="['/recipes', recipe.id, 'edit']"
-                    (click)="$event.stopPropagation()"
-                    aria-label="Edit recipe"
-                    matTooltip="Edit Recipe"
-                  >
-                    <mat-icon>edit</mat-icon>
-                  </a>
-                  <button
-                    mat-icon-button
-                    type="button"
-                    class="card-action-icon delete-action"
-                    (click)="deleteRecipe(recipe, $event)"
-                    aria-label="Delete recipe"
-                    matTooltip="Delete Recipe"
-                  >
-                    <mat-icon>delete_outline</mat-icon>
-                  </button>
-                </div>
-              </div>
+              }
 
               <h2 class="recipe-card-title">
                 <a class="recipe-card-link" [routerLink]="['/recipes', recipe.id]">

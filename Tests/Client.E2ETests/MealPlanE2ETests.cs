@@ -218,7 +218,8 @@ public sealed class MealPlanE2ETests : E2ETestBase
         await Expect(Page.Locator(".meal-entry-card", new() { HasText = "Monday Tacos" }))
             .ToBeVisibleAsync();
 
-        // 3. Open Templates dialog and save current week
+        // 3. Open Templates dialog from header overflow menu and save current week
+        await Page.Locator("button.calendar-actions-menu-btn").ClickAsync();
         await Page.Locator("button.template-action-btn").ClickAsync();
         var tplDialog = Page.Locator("mat-dialog-container");
         await Expect(tplDialog.Locator("h2")).ToContainTextAsync("Meal Plan Templates");
@@ -253,6 +254,7 @@ public sealed class MealPlanE2ETests : E2ETestBase
         await Expect(Page.Locator(".meal-entry-card")).ToHaveCountAsync(0);
 
         // 5. Open Templates dialog again and Apply in Merge mode
+        await Page.Locator("button.calendar-actions-menu-btn").ClickAsync();
         await Page.Locator("button.template-action-btn").ClickAsync();
         var applyDialog = Page.Locator("mat-dialog-container");
         var targetCard = applyDialog.Locator(".template-card", new() { HasText = tplName });
@@ -280,6 +282,7 @@ public sealed class MealPlanE2ETests : E2ETestBase
             .ToBeVisibleAsync();
 
         // 7. Re-apply template in Replace mode
+        await Page.Locator("button.calendar-actions-menu-btn").ClickAsync();
         await Page.Locator("button.template-action-btn").ClickAsync();
         var replaceDialog = Page.Locator("mat-dialog-container");
         var replaceCard = replaceDialog.Locator(".template-card", new() { HasText = tplName });
@@ -345,16 +348,24 @@ public sealed class MealPlanE2ETests : E2ETestBase
         await Expect(Page.Locator(".week-days-grid")).ToBeVisibleAsync();
 
         // Clear current week if any entries exist from prior tests
-        if (await Page.Locator("button.clear-week-btn").IsVisibleAsync())
+        await Page.Locator("button.calendar-actions-menu-btn").ClickAsync();
+        var clearWeekBtn = Page.Locator("button.clear-week-btn");
+        if (await clearWeekBtn.IsVisibleAsync())
         {
-            await Page.Locator("button.clear-week-btn").ClickAsync();
+            await clearWeekBtn.ClickAsync();
             var confirmBtn = Page.Locator(
                 "mat-dialog-container button",
                 new() { HasText = "Clear Week" }
             );
             await confirmBtn.ClickAsync();
             await Expect(Page.Locator("mat-dialog-container")).Not.ToBeVisibleAsync();
+            await Page.Locator("button.calendar-actions-menu-btn").ClickAsync();
             await Expect(Page.Locator("button.clear-week-btn")).Not.ToBeVisibleAsync();
+            await Page.Keyboard.PressAsync("Escape");
+        }
+        else
+        {
+            await Page.Keyboard.PressAsync("Escape");
         }
 
         // 1. Add a scheduled meal for today

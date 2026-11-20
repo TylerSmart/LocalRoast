@@ -127,8 +127,12 @@
               <mat-icon>{{ curList.isPinned ? 'push_pin' : 'keep' }}</mat-icon>
               <span>{{ curList.isPinned ? 'Unpin List' : 'Pin to Top' }}</span>
             </button>
-            <button mat-menu-item (click)="deleteActiveList()" class="delete-menu-item">
-              <mat-icon color="warn">delete</mat-icon>
+            <button
+              mat-menu-item
+              (click)="deleteActiveList()"
+              class="delete-menu-item destructive-menu-item"
+            >
+              <mat-icon>delete</mat-icon>
               <span>Delete List</span>
             </button>
           </mat-menu>
@@ -278,19 +282,35 @@
                       <button
                         type="button"
                         mat-icon-button
-                        (click)="openItemDialog(item)"
-                        [aria-label]="'Edit ' + item.displayName"
+                        class="shopping-item-menu-btn"
+                        [matMenuTriggerFor]="shoppingItemMenu"
+                        [attr.aria-label]="'Options for ' + item.displayName"
+                        matTooltip="Item options"
                       >
-                        <mat-icon>edit</mat-icon>
+                        <mat-icon>more_vert</mat-icon>
                       </button>
-                      <button
-                        type="button"
-                        mat-icon-button
-                        (click)="deleteItem(item)"
-                        [aria-label]="'Delete ' + item.displayName"
-                      >
-                        <mat-icon>delete</mat-icon>
-                      </button>
+                      <mat-menu #shoppingItemMenu="matMenu" xPosition="before">
+                        <button
+                          mat-menu-item
+                          type="button"
+                          class="edit-shopping-item-btn"
+                          (click)="openItemDialog(item)"
+                          [attr.aria-label]="'Edit ' + item.displayName"
+                        >
+                          <mat-icon>edit</mat-icon>
+                          <span>Edit Item</span>
+                        </button>
+                        <button
+                          mat-menu-item
+                          type="button"
+                          class="delete-shopping-item-btn destructive-menu-item"
+                          (click)="deleteItem(item)"
+                          [attr.aria-label]="'Delete ' + item.displayName"
+                        >
+                          <mat-icon>delete</mat-icon>
+                          <span>Delete Item</span>
+                        </button>
+                      </mat-menu>
                     </div>
                   </li>
                 }

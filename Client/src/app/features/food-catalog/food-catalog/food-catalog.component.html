@@ -203,31 +203,48 @@
 
                 <div class="item-actions">
                   <button
+                    type="button"
                     mat-icon-button
-                    class="merge-item-btn"
-                    (click)="openMergeDialog(item)"
-                    aria-label="Merge duplicate items into this"
-                    matTooltip="Merge duplicate items"
+                    class="food-item-menu-btn"
+                    [matMenuTriggerFor]="foodItemMenu"
+                    [attr.aria-label]="'Options for ' + item.name"
+                    matTooltip="Item options"
                   >
-                    <mat-icon>call_merge</mat-icon>
+                    <mat-icon>more_vert</mat-icon>
                   </button>
-                  <button
-                    mat-icon-button
-                    (click)="openEditDialog(item)"
-                    aria-label="Edit food item"
-                    matTooltip="Edit Item"
-                  >
-                    <mat-icon>edit</mat-icon>
-                  </button>
-                  <button
-                    mat-icon-button
-                    color="warn"
-                    (click)="deleteItem(item)"
-                    aria-label="Delete food item"
-                    matTooltip="Delete Item"
-                  >
-                    <mat-icon>delete</mat-icon>
-                  </button>
+                  <mat-menu #foodItemMenu="matMenu" xPosition="before">
+                    <button
+                      mat-menu-item
+                      type="button"
+                      class="merge-item-btn"
+                      (click)="openMergeDialog(item)"
+                      aria-label="Merge duplicate items into this"
+                    >
+                      <mat-icon>call_merge</mat-icon>
+                      <span>Merge Duplicates</span>
+                    </button>
+                    <button
+                      mat-menu-item
+                      type="button"
+                      class="edit-food-item-btn"
+                      (click)="openEditDialog(item)"
+                      aria-label="Edit food item"
+                    >
+                      <mat-icon>edit</mat-icon>
+                      <span>Edit Item</span>
+                    </button>
+                    <mat-divider></mat-divider>
+                    <button
+                      mat-menu-item
+                      type="button"
+                      class="delete-food-item-btn destructive-menu-item"
+                      (click)="deleteItem(item)"
+                      aria-label="Delete food item"
+                    >
+                      <mat-icon>delete</mat-icon>
+                      <span>Delete Item</span>
+                    </button>
+                  </mat-menu>
                 </div>
               </div>
             </div>

@@ -10,8 +10,11 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { MatButtonModule } from '@angular/material/button';
 import { MatDialog } from '@angular/material/dialog';
+import { MatDividerModule } from '@angular/material/divider';
 import { MatIconModule } from '@angular/material/icon';
+import { MatMenuModule } from '@angular/material/menu';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import type {
   LlmConnectionDto,
   LlmConnectionTestResultDto,
@@ -35,7 +38,14 @@ import {
 /** Manages saved LLM machines/providers: endpoint, authentication and request limits. */
 @Component({
   selector: 'app-llm-connections-panel',
-  imports: [MatButtonModule, MatIconModule, MatProgressSpinnerModule],
+  imports: [
+    MatButtonModule,
+    MatDividerModule,
+    MatIconModule,
+    MatMenuModule,
+    MatProgressSpinnerModule,
+    MatTooltipModule,
+  ],
   templateUrl: './llm-connections-panel.component.html',
   styleUrl: './llm-connections-panel.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,

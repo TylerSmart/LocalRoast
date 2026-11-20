@@ -17,6 +17,7 @@ import { MatDialog } from '@angular/material/dialog';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
+import { MatMenuModule } from '@angular/material/menu';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSelectModule } from '@angular/material/select';
 import { MatSnackBar } from '@angular/material/snack-bar';
@@ -59,6 +60,7 @@ import { TagDialogComponent, TagDialogData } from '../tag-dialog/tag-dialog.comp
     MatIconModule,
     MatFormFieldModule,
     MatInputModule,
+    MatMenuModule,
     MatSelectModule,
     MatChipsModule,
     MatTooltipModule,
@@ -572,39 +574,5 @@ export class RecipeListComponent implements OnInit {
   onMaxTimeChange(minutes: number | null): void {
     this.maxTimeMinutes.set(minutes);
     this.loadRecipes();
-  }
-
-  deleteRecipe(recipe: RecipeSummaryDto, event: Event): void {
-    event.stopPropagation();
-    event.preventDefault();
-
-    const confirmRef = this.dialog.open(ConfirmDialogComponent, {
-      data: {
-        title: 'Delete Recipe',
-        message: `Are you sure you want to delete "${recipe.title}"?`,
-        confirmText: 'Delete',
-        isDestructive: true,
-      },
-    });
-
-    confirmRef.afterClosed().subscribe((confirmed: boolean) => {
-      if (!confirmed) {
-        return;
-      }
-
-      this.recipeService.deleteRecipe(recipe.id).subscribe({
-        next: () => {
-          this.recipes.update((list) => list.filter((r) => r.id !== recipe.id));
-          this.snackBar.open(`Deleted "${recipe.title}"`, 'Close', { duration: 3000 });
-        },
-        error: (err: { error?: { detail?: string; title?: string } }) => {
-          this.snackBar.open(
-            err?.error?.detail || err?.error?.title || 'Cannot delete recipe.',
-            'Close',
-            { duration: 5000 },
-          );
-        },
-      });
-    });
   }
 }

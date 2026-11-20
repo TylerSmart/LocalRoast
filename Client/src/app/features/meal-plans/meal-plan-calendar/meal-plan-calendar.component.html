@@ -52,7 +52,7 @@
       </button>
     </div>
 
-    <!-- Actions (Templates, Clear, Add) -->
+    <!-- Actions (Shop, Add, Overflow Menu) -->
     <div class="calendar-top-actions">
       @if (viewMode() !== 'month') {
         <button
@@ -65,46 +65,6 @@
           <mat-icon>shopping_cart_checkout</mat-icon>
           <span class="btn-text">{{ viewMode() === 'next7' ? 'Shop 7 Days' : 'Shop Week' }}</span>
         </button>
-
-        @if (aiHelper.isAvailable()) {
-          <button
-            type="button"
-            mat-stroked-button
-            (click)="openDraftMealPlanDialog()"
-            class="draft-week-ai-btn"
-            aria-label="Draft a future seven-day meal plan with local AI"
-          >
-            <mat-icon>auto_awesome</mat-icon>
-            <span class="btn-text">Draft Plan</span>
-          </button>
-        }
-
-        @if (viewMode() === 'week') {
-          <button
-            type="button"
-            mat-stroked-button
-            (click)="openTemplatesDialog()"
-            class="template-action-btn"
-            aria-label="Manage reusable week templates"
-          >
-            <mat-icon>auto_awesome_motion</mat-icon>
-            <span class="btn-text">Templates</span>
-          </button>
-
-          @if (totalWeekMealsCount() > 0) {
-            <button
-              type="button"
-              mat-button
-              color="warn"
-              (click)="clearCurrentWeek()"
-              class="clear-week-btn"
-              aria-label="Clear all scheduled meals for this week"
-            >
-              <mat-icon>delete_sweep</mat-icon>
-              <span class="btn-text">Clear Week</span>
-            </button>
-          }
-        }
       }
 
       <button
@@ -118,6 +78,61 @@
         <mat-icon>add</mat-icon>
         <span>Add Meal</span>
       </button>
+
+      @if (viewMode() === 'week' || (viewMode() === 'next7' && aiHelper.isAvailable())) {
+        <button
+          type="button"
+          mat-icon-button
+          class="calendar-actions-menu-btn"
+          [matMenuTriggerFor]="calendarActionsMenu"
+          aria-label="More meal plan actions"
+          matTooltip="More actions"
+        >
+          <mat-icon>more_vert</mat-icon>
+        </button>
+
+        <mat-menu #calendarActionsMenu="matMenu" xPosition="before">
+          @if (viewMode() !== 'month' && aiHelper.isAvailable()) {
+            <button
+              mat-menu-item
+              type="button"
+              (click)="openDraftMealPlanDialog()"
+              class="draft-week-ai-btn"
+              aria-label="Draft a future seven-day meal plan with local AI"
+            >
+              <mat-icon>auto_awesome</mat-icon>
+              <span>Draft Plan with AI</span>
+            </button>
+          }
+
+          @if (viewMode() === 'week') {
+            <button
+              mat-menu-item
+              type="button"
+              (click)="openTemplatesDialog()"
+              class="template-action-btn"
+              aria-label="Manage reusable week templates"
+            >
+              <mat-icon>auto_awesome_motion</mat-icon>
+              <span>Templates</span>
+            </button>
+
+            @if (totalWeekMealsCount() > 0) {
+              <mat-divider></mat-divider>
+              <button
+                mat-menu-item
+                type="button"
+                (click)="clearCurrentWeek()"
+                class="clear-week-btn destructive-menu-item"
+                aria-label="Clear all scheduled meals for this week"
+              >
+                <mat-icon>delete_sweep</mat-icon>
+                <span>Clear Week</span>
+              </button>
+            }
+          }
+        </mat-menu>
+      }
     </div>
   </header>
 
@@ -208,7 +223,11 @@
                                 <mat-icon>edit</mat-icon>
                                 <span>Edit Meal</span>
                               </button>
-                              <button mat-menu-item (click)="deleteEntry(entry)">
+                              <button
+                                mat-menu-item
+                                class="destructive-menu-item"
+                                (click)="deleteEntry(entry)"
+                              >
                                 <mat-icon>delete</mat-icon>
                                 <span>Remove</span>
                               </button>
@@ -358,7 +377,11 @@
                                       <mat-icon>view_sidebar</mat-icon>
                                       <span>Move to On-Deck</span>
                                     </button>
-                                    <button mat-menu-item (click)="deleteEntry(entry)">
+                                    <button
+                                      mat-menu-item
+                                      class="destructive-menu-item"
+                                      (click)="deleteEntry(entry)"
+                                    >
                                       <mat-icon>delete</mat-icon>
                                       <span>Remove</span>
                                     </button>
@@ -495,7 +518,11 @@
                                 <mat-icon>edit</mat-icon>
                                 <span>Edit Meal</span>
                               </button>
-                              <button mat-menu-item (click)="deleteEntry(entry)">
+                              <button
+                                mat-menu-item
+                                class="destructive-menu-item"
+                                (click)="deleteEntry(entry)"
+                              >
                                 <mat-icon>delete</mat-icon>
                                 <span>Remove</span>
                               </button>

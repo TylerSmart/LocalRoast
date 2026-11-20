@@ -882,46 +882,6 @@
                 </a>
               }
 
-              @if (job.status === 'Published' && job.resultingRecipeId) {
-                <a
-                  mat-stroked-button
-                  [routerLink]="['/recipes', job.resultingRecipeId]"
-                  class="open-recipe-btn"
-                >
-                  <mat-icon>menu_book</mat-icon>
-                  <span>Open Recipe</span>
-                </a>
-              }
-
-              @if (
-                hasRefinementModel() &&
-                (job.status === 'ReadyForReview' || job.status === 'Published')
-              ) {
-                <button
-                  mat-stroked-button
-                  type="button"
-                  class="refine-now-btn"
-                  data-testid="refine-now-btn"
-                  (click)="refineJobNow(job)"
-                  [disabled]="isJobRefining(job)"
-                  [attr.aria-label]="
-                    (job.refinedModel ? 'Re-refine now: ' : 'Refine now: ') + job.displayTitle
-                  "
-                  [matTooltip]="
-                    'Run refinement via ' + refineModel() + ' now, even when ingestion is paused'
-                  "
-                >
-                  <mat-icon>auto_fix_high</mat-icon>
-                  <span>{{
-                    isJobRefining(job)
-                      ? 'Refining...'
-                      : job.refinedModel
-                        ? 'Re-refine'
-                        : 'Refine now'
-                  }}</span>
-                </button>
-              }
-
               @if (
                 job.status === 'Queued' ||
                 job.status === 'WaitingForLlmHost' ||
@@ -946,32 +906,87 @@
                 </button>
               }
 
-              @if (
-                job.status !== 'Queued' &&
-                job.status !== 'Preprocessing' &&
-                job.status !== 'Extracting'
-              ) {
-                <button
-                  mat-stroked-button
-                  type="button"
-                  (click)="retryJob(job)"
-                  aria-label="Retry extraction"
-                >
-                  <mat-icon>refresh</mat-icon>
-                  <span>Retry</span>
-                </button>
-              }
-
               <button
                 mat-icon-button
                 type="button"
-                (click)="discardJob(job)"
-                class="discard-btn"
-                [attr.aria-label]="'Discard ' + job.displayTitle"
-                [matTooltip]="job.status === 'Published' ? 'Remove from list' : 'Discard job'"
+                class="job-actions-menu-btn"
+                [matMenuTriggerFor]="jobActionsMenu"
+                [attr.aria-label]="'More actions for ' + job.displayTitle"
+                matTooltip="More actions"
               >
-                <mat-icon>delete_outline</mat-icon>
+                <mat-icon>more_vert</mat-icon>
               </button>
+
+              <mat-menu #jobActionsMenu="matMenu" xPosition="before">
+                @if (job.status === 'Published' && job.resultingRecipeId) {
+                  <a
+                    mat-menu-item
+                    [routerLink]="['/recipes', job.resultingRecipeId]"
+                    class="open-recipe-btn"
+                  >
+                    <mat-icon>menu_book</mat-icon>
+                    <span>Open Recipe</span>
+                  </a>
+                }
+
+                @if (
+                  hasRefinementModel() &&
+                  (job.status === 'ReadyForReview' || job.status === 'Published')
+                ) {
+                  <button
+                    mat-menu-item
+                    type="button"
+                    class="refine-now-btn"
+                    data-testid="refine-now-btn"
+                    (click)="refineJobNow(job)"
+                    [disabled]="isJobRefining(job)"
+                    [attr.aria-label]="
+                      (job.refinedModel ? 'Re-refine now: ' : 'Refine now: ') + job.displayTitle
+                    "
+                    [matTooltip]="
+                      'Run refinement via ' + refineModel() + ' now, even when ingestion is paused'
+                    "
+                  >
+                    <mat-icon>auto_fix_high</mat-icon>
+                    <span>{{
+                      isJobRefining(job)
+                        ? 'Refining...'
+                        : job.refinedModel
+                          ? 'Re-refine'
+                          : 'Refine now'
+                    }}</span>
+                  </button>
+                }
+
+                @if (
+                  job.status !== 'Queued' &&
+                  job.status !== 'Preprocessing' &&
+                  job.status !== 'Extracting'
+                ) {
+                  <button
+                    mat-menu-item
+                    type="button"
+                    class="retry-job-btn"
+                    (click)="retryJob(job)"
+                    aria-label="Retry extraction"
+                  >
+                    <mat-icon>refresh</mat-icon>
+                    <span>Retry Extraction</span>
+                  </button>
+                  <mat-divider></mat-divider>
+                }
+
+                <button
+                  mat-menu-item
+                  type="button"
+                  (click)="discardJob(job)"
+                  class="discard-btn destructive-menu-item"
+                  [attr.aria-label]="'Discard ' + job.displayTitle"
+                >
+                  <mat-icon>delete_outline</mat-icon>
+                  <span>{{ job.status === 'Published' ? 'Remove from List' : 'Discard Job' }}</span>
+                </button>
+              </mat-menu>
             </div>
           </div>
         </mat-card>

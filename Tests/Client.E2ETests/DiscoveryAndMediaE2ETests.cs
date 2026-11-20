@@ -31,12 +31,17 @@ public sealed class DiscoveryAndMediaE2ETests : E2ETestBase
         await collectionDialog.Locator("button[mat-flat-button]").ClickAsync();
         await Expect(collectionDialog).Not.ToBeVisibleAsync();
 
-        // Verify collection pill appears in strip
-        var createdCollectionPill = Page.Locator(
-            ".collection-pill",
+        // Verify collection pill appears in strip with single overflow menu trigger
+        var createdCollectionGroup = Page.Locator(
+            ".collection-pill-group",
             new() { HasText = collectionName }
         );
-        await Expect(createdCollectionPill).ToBeVisibleAsync();
+        await Expect(createdCollectionGroup).ToBeVisibleAsync();
+        await Expect(createdCollectionGroup.Locator(".collection-pill-action")).ToHaveCountAsync(1);
+        await createdCollectionGroup.Locator(".collection-menu-btn").ClickAsync();
+        await Expect(Page.Locator("button.edit-collection-btn")).ToBeVisibleAsync();
+        await Expect(Page.Locator("button.delete-collection-btn")).ToBeVisibleAsync();
+        await Page.Keyboard.PressAsync("Escape");
 
         // 2. Navigate to New Recipe and fill details
         await Page.Locator("a[routerlink='/recipes/new']").First.ClickAsync();
@@ -143,6 +148,16 @@ public sealed class DiscoveryAndMediaE2ETests : E2ETestBase
         await Page.Locator("mat-option", new() { HasText = "Vegetarian" }).ClickAsync();
         await Page.Keyboard.PressAsync("Escape");
         await Expect(recipeCard).ToBeVisibleAsync();
+
+        // Verify Manage Tags panel groups Edit and Delete into a single overflow menu per tag pill
+        await Page.Locator("button.manage-tags-toggle-btn").ClickAsync();
+        var vegetarianTagGroup = Page.Locator(".tag-pill-group", new() { HasText = "Vegetarian" });
+        await Expect(vegetarianTagGroup).ToBeVisibleAsync();
+        await Expect(vegetarianTagGroup.Locator(".tag-pill-action")).ToHaveCountAsync(1);
+        await vegetarianTagGroup.Locator(".tag-menu-btn").ClickAsync();
+        await Expect(Page.Locator("button.edit-tag-btn")).ToBeVisibleAsync();
+        await Expect(Page.Locator("button.delete-tag-btn")).ToBeVisibleAsync();
+        await Page.Keyboard.PressAsync("Escape");
     }
 
     [TestMethod]

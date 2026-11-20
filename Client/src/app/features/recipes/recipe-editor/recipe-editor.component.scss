@@ -246,7 +246,8 @@
 }
 
 .editor-section-card {
-  padding: 1.35rem 1.5rem;
+  --editor-card-gutter: 1.5rem;
+  padding: 1.35rem var(--editor-card-gutter);
   background-color: var(--mat-sys-surface);
   border: 1px solid var(--mat-sys-outline-variant);
   border-radius: 0.85rem;
@@ -666,8 +667,14 @@
   align-items: center;
   gap: 0.35rem;
   overflow-x: auto;
-  padding-bottom: 0.2rem;
-  scrollbar-width: thin;
+  margin-inline: calc(var(--editor-card-gutter) * -1);
+  padding: 0.1rem var(--editor-card-gutter) 0.25rem;
+  scroll-padding-inline: var(--editor-card-gutter);
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
 
   .category-tab-pill {
     flex-shrink: 0;
@@ -1547,7 +1554,8 @@ button[mat-stroked-button] {
 
 @media (max-width: 600px) {
   .editor-section-card {
-    padding: 1rem;
+    --editor-card-gutter: 1rem;
+    padding: 1rem var(--editor-card-gutter);
   }
 
   .provenance-panel .provenance-summary.is-muted {

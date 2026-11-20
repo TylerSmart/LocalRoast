@@ -169,7 +169,8 @@ public sealed class LlmProfilesAndRefinementE2ETests : E2ETestBase
         await Page.ReloadAsync();
         await Page.Locator(".llm-settings-btn").ClickAsync();
         await OpenLlmSettingsTabAsync(dialog, "Models");
-        await card.GetByTestId("edit-model-config-btn").ClickAsync();
+        await card.GetByTestId("model-config-actions-menu-btn").ClickAsync();
+        await Page.GetByTestId("edit-model-config-btn").ClickAsync();
         var editEditor = Page.GetByTestId("model-config-editor-form");
         await Expect(editEditor.GetByTestId("model-config-max-concurrent")).ToHaveValueAsync("2");
         await Expect(editEditor.GetByTestId("model-config-rpm")).ToHaveValueAsync("10");
@@ -237,7 +238,8 @@ public sealed class LlmProfilesAndRefinementE2ETests : E2ETestBase
         await Page.ReloadAsync();
         await Page.Locator(".llm-settings-btn").ClickAsync();
         await OpenLlmSettingsTabAsync(dialog, "Models");
-        await card.GetByTestId("edit-model-config-btn").ClickAsync();
+        await card.GetByTestId("model-config-actions-menu-btn").ClickAsync();
+        await Page.GetByTestId("edit-model-config-btn").ClickAsync();
         var modelEditor = Page.GetByTestId("model-config-editor-form");
         await Expect(modelEditor.GetByTestId("model-config-gpu-layers")).ToHaveValueAsync("24");
         await modelEditor.GetByTestId("model-config-gpu-layers").FillAsync("");
@@ -250,7 +252,8 @@ public sealed class LlmProfilesAndRefinementE2ETests : E2ETestBase
         );
         await Expect(modelEditor).Not.ToBeVisibleAsync();
         await Expect(card).Not.ToContainTextAsync("GPU layers:");
-        await card.GetByTestId("edit-model-config-btn").ClickAsync();
+        await card.GetByTestId("model-config-actions-menu-btn").ClickAsync();
+        await Page.GetByTestId("edit-model-config-btn").ClickAsync();
         await Expect(modelEditor.GetByTestId("model-config-gpu-layers")).ToHaveValueAsync("");
         Assert.IsTrue(
             await Page.EvaluateAsync<bool>(
@@ -389,7 +392,8 @@ public sealed class LlmProfilesAndRefinementE2ETests : E2ETestBase
             .ToContainTextAsync(LlmConfigName("gemini-2.5-flash-lite", connectionName));
         await Expect(dialog.GetByTestId("workflow-text-select")).ToContainTextAsync("Fast Lite");
         await OpenLlmSettingsTabAsync(dialog, "Connections");
-        await connectionCard.GetByTestId("edit-connection-btn").ClickAsync();
+        await connectionCard.GetByTestId("connection-actions-menu-btn").ClickAsync();
+        await Page.GetByTestId("edit-connection-btn").ClickAsync();
         var editor = Page.GetByTestId("connection-editor-form");
         await Expect(editor.Locator(".slider-field-value")).ToHaveTextAsync("3");
         await Expect(editor.GetByTestId("rpm-input")).ToHaveValueAsync("15");
@@ -570,8 +574,9 @@ public sealed class LlmProfilesAndRefinementE2ETests : E2ETestBase
         await Expect(jobCard.GetByTestId("job-refined-model-chip"))
             .ToContainTextAsync("Refined: gemma4:26b-a4b");
 
-        // Open published recipe and verify both model pills + mobile fit
-        await jobCard.Locator("a.open-recipe-btn").ClickAsync();
+        // Open published recipe via job overflow menu and verify both model pills + mobile fit
+        await jobCard.Locator(".job-actions-menu-btn").ClickAsync();
+        await Page.Locator("a.open-recipe-btn").ClickAsync();
         await Expect(Page).ToHaveURLAsync(new Regex(".*/recipes/.*"));
         await Expect(Page.GetByTestId("recipe-extracted-model-pill"))
             .ToContainTextAsync("qwen2.5:14b");
@@ -736,8 +741,9 @@ public sealed class LlmProfilesAndRefinementE2ETests : E2ETestBase
         await WaitForLocatorWithRefreshAsync(refinedChip);
         await Expect(refinedChip).ToContainTextAsync("Refined: gemma4:26b-a4b");
 
-        // Open the live recipe and verify title update + dual model pills
-        await refinedCard.Locator("a.open-recipe-btn").ClickAsync();
+        // Open the live recipe via job overflow menu and verify title update + dual model pills
+        await refinedCard.Locator(".job-actions-menu-btn").ClickAsync();
+        await Page.Locator("a.open-recipe-btn").ClickAsync();
         await Expect(Page).ToHaveURLAsync(new Regex(".*/recipes/.*"));
         await Expect(Page.Locator(".recipe-title")).ToContainTextAsync(refinedTitle);
         await Expect(Page.GetByTestId("recipe-extracted-model-pill"))
@@ -823,7 +829,8 @@ public sealed class LlmProfilesAndRefinementE2ETests : E2ETestBase
         await Expect(googleCard).ToBeVisibleAsync();
 
         // Cancel confirmation first -> nothing deleted
-        await googleCard.GetByTestId("delete-connection-btn").ClickAsync();
+        await googleCard.GetByTestId("connection-actions-menu-btn").ClickAsync();
+        await Page.GetByTestId("delete-connection-btn").ClickAsync();
         var confirmDialog = Page.Locator("app-confirm-dialog");
         await Expect(confirmDialog).ToBeVisibleAsync();
         await Expect(confirmDialog).ToContainTextAsync("3 saved models and their profiles");
@@ -841,7 +848,8 @@ public sealed class LlmProfilesAndRefinementE2ETests : E2ETestBase
         await Expect(googleCard).ToBeVisibleAsync();
 
         // Confirm delete -> cascades models & profiles and deselects Text & Refinement workflows
-        await googleCard.GetByTestId("delete-connection-btn").ClickAsync();
+        await googleCard.GetByTestId("connection-actions-menu-btn").ClickAsync();
+        await Page.GetByTestId("delete-connection-btn").ClickAsync();
         await Expect(confirmDialog).ToBeVisibleAsync();
         await Page.RunAndWaitForResponseAsync(
             () =>
@@ -899,7 +907,8 @@ public sealed class LlmProfilesAndRefinementE2ETests : E2ETestBase
         // 7. Deleting the remaining assigned model directly confirms and deselects Vision
         await OpenLlmSettingsTabAsync(dialog, "Models");
         var visionCard = dialog.Locator(".model-config-card", new() { HasText = "qwen2.5vl:7b" });
-        await visionCard.GetByTestId("delete-model-config-btn").ClickAsync();
+        await visionCard.GetByTestId("model-config-actions-menu-btn").ClickAsync();
+        await Page.GetByTestId("delete-model-config-btn").ClickAsync();
         await Expect(confirmDialog).ToBeVisibleAsync();
         await Expect(confirmDialog).ToContainTextAsync("deselect it from the Vision workflow");
         await Page.RunAndWaitForResponseAsync(
@@ -1157,16 +1166,18 @@ public sealed class LlmProfilesAndRefinementE2ETests : E2ETestBase
                 new() { HasText = chosenInitialTitle }
             ).First;
             var heldCard = Page.Locator(".job-card", new() { HasText = heldInitialTitle }).First;
-            var refineNowBtn = chosenCard.GetByTestId("refine-now-btn");
-            await Expect(refineNowBtn).ToBeVisibleAsync();
-            await Expect(refineNowBtn).ToContainTextAsync("Refine now");
 
             Assert.IsTrue(
                 await Page.EvaluateAsync<bool>(
                     "document.documentElement.scrollWidth <= window.innerWidth"
                 ),
-                "Ingestion Hub cards with Refine now button must fit a 360px mobile viewport."
+                "Ingestion Hub cards with overflow menu must fit a 360px mobile viewport."
             );
+
+            await chosenCard.Locator(".job-actions-menu-btn").ClickAsync();
+            var refineNowBtn = Page.GetByTestId("refine-now-btn");
+            await Expect(refineNowBtn).ToBeVisibleAsync();
+            await Expect(refineNowBtn).ToContainTextAsync("Refine now");
 
             await Page.RunAndWaitForResponseAsync(
                 () => refineNowBtn.ClickAsync(),

@@ -348,6 +348,12 @@ public sealed class CookModeAndCookLogsE2ETests : E2ETestBase
         await Expect(historySection).ToBeVisibleAsync();
         await Expect(historySection).ToContainTextAsync(username);
         await Expect(historySection.Locator("img.log-thumb-img")).ToBeVisibleAsync();
+
+        // Cook history card actions are grouped inside an overflow menu
+        await historySection.Locator(".cook-log-menu-btn").First.ClickAsync();
+        await Expect(Page.Locator("button.edit-log-btn")).ToBeVisibleAsync();
+        await Expect(Page.Locator("button.delete-log-btn")).ToBeVisibleAsync();
+        await Page.Keyboard.PressAsync("Escape");
     }
 
     [TestMethod]
@@ -538,9 +544,10 @@ public sealed class CookModeAndCookLogsE2ETests : E2ETestBase
 
         var linkNoLogs = shareDialog.Locator(".link-card", new() { HasText = "Public No Logs" });
         await Expect(linkNoLogs).ToBeVisibleAsync();
-        var urlNoLogs = await linkNoLogs
-            .Locator("a[aria-label='Open public view in new tab']")
+        await linkNoLogs.Locator(".link-actions-menu-btn").ClickAsync();
+        var urlNoLogs = await Page.Locator("a[aria-label='Open public view in new tab']")
             .GetAttributeAsync("href");
+        await Page.Keyboard.PressAsync("Escape");
         Assert.IsNotNull(urlNoLogs);
 
         // Create share link WITH cook logs
@@ -553,9 +560,10 @@ public sealed class CookModeAndCookLogsE2ETests : E2ETestBase
             new() { HasText = "Public With Logs" }
         );
         await Expect(linkWithLogs).ToBeVisibleAsync();
-        var urlWithLogs = await linkWithLogs
-            .Locator("a[aria-label='Open public view in new tab']")
+        await linkWithLogs.Locator(".link-actions-menu-btn").ClickAsync();
+        var urlWithLogs = await Page.Locator("a[aria-label='Open public view in new tab']")
             .GetAttributeAsync("href");
+        await Page.Keyboard.PressAsync("Escape");
         Assert.IsNotNull(urlWithLogs);
 
         // 7. Verify in isolated unauthenticated context

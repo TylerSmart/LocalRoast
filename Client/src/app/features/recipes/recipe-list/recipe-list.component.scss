@@ -150,11 +150,6 @@
     background-color: var(--mat-sys-surface-container-highest);
     color: var(--mat-sys-on-surface);
   }
-
-  &.delete-collection-btn:hover {
-    background-color: var(--mat-sys-error-container);
-    color: var(--mat-sys-error);
-  }
 }
 
 .collection-pill {
@@ -509,11 +504,6 @@
       background-color: var(--mat-sys-surface-container-highest);
       color: var(--mat-sys-on-surface);
     }
-
-    &.delete-tag-btn:hover {
-      background-color: var(--mat-sys-error-container);
-      color: var(--mat-sys-error);
-    }
   }
 }
 
@@ -653,7 +643,6 @@
   justify-content: space-between;
   align-items: center;
   gap: 0.5rem;
-  margin-top: -0.25rem;
 }
 
 .status-and-diff {
@@ -677,28 +666,6 @@
   border-radius: 9999px;
   background-color: var(--mat-sys-surface-container-highest);
   color: var(--mat-sys-on-surface-variant);
-}
-
-.card-actions-quick {
-  position: relative;
-  z-index: 2;
-  display: flex;
-  align-items: center;
-  margin-right: -0.4rem;
-
-  .card-action-icon {
-    color: var(--mat-sys-on-surface-variant);
-    transition: color 0.15s ease;
-
-    &.edit-action:hover {
-      color: var(--mat-sys-primary);
-    }
-
-    &.delete-action {
-      color: var(--mat-sys-error);
-      --mat-icon-button-icon-color: var(--mat-sys-error);
-    }
-  }
 }
 
 .recipe-card-title {
@@ -972,6 +939,15 @@
   }
 }
 
+@media (max-width: 1280px) {
+  .collections-strip {
+    margin-inline: calc(var(--app-page-gutter) * -1);
+    padding: 0.15rem var(--app-page-gutter);
+    scroll-padding-inline: var(--app-page-gutter);
+    max-width: none;
+  }
+}
+
 @media (max-width: 960px) {
   .filters-grid-primary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -988,14 +964,6 @@
     flex-wrap: wrap;
     width: 100%;
     gap: 0.5rem;
-
-    .import-btn,
-    .matcher-btn {
-      flex: 1 1 auto;
-      font-size: 0.82rem;
-      padding-inline: 0.65rem;
-      white-space: nowrap;
-    }
 
     .new-recipe-btn {
       flex: 1 1 100%;

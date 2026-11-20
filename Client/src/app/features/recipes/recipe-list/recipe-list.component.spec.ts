@@ -126,6 +126,19 @@ describe('RecipeListComponent', () => {
     ) as HTMLAnchorElement | null;
     expect(cardLink).not.toBeNull();
     expect(cardLink?.getAttribute('href')).toBe('/recipes/r-1');
+    expect(fixture.nativeElement.querySelector('.recipe-card .card-actions-quick')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.header-actions .import-btn')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.header-actions .matcher-btn')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.header-actions .new-recipe-btn')).not.toBeNull();
+
+    const collectionMenuBtn = fixture.nativeElement.querySelector(
+      '.collection-pill-group .collection-menu-btn',
+    ) as HTMLButtonElement | null;
+    expect(collectionMenuBtn).not.toBeNull();
+    collectionMenuBtn?.click();
+    fixture.detectChanges();
+    expect(document.querySelector('.edit-collection-btn')).not.toBeNull();
+    expect(document.querySelector('.delete-collection-btn')).not.toBeNull();
   });
 
   it('filters recipes by search query matching tags or collections', () => {

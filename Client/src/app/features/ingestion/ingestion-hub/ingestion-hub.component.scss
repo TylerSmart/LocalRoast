@@ -319,7 +319,9 @@
   display: flex;
   gap: 0.75rem;
   overflow-x: auto;
-  padding: 0.25rem 0;
+  margin-inline: -1.1rem;
+  padding: 0.25rem 1.1rem;
+  scroll-padding-inline: 1.1rem;
 }
 
 .preview-card {
@@ -1006,11 +1008,6 @@
   gap: 0.35rem;
 }
 
-.discard-btn {
-  color: var(--mat-sys-error);
-  --mat-icon-button-icon-color: var(--mat-sys-error);
-}
-
 .loading-state,
 .empty-state {
   display: flex;
@@ -1063,6 +1060,25 @@
   border: 1px solid var(--mat-sys-outline-variant);
 }
 
+@media (max-width: 960px) {
+  .queue-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.65rem;
+  }
+
+  .filter-strip {
+    flex: none;
+    margin-inline: calc(var(--app-page-gutter) * -1);
+    padding: 0.1rem var(--app-page-gutter) 0.25rem;
+    scroll-padding-inline: var(--app-page-gutter);
+  }
+
+  .queue-toolbar-actions {
+    justify-content: flex-end;
+  }
+}
+
 @media (max-width: 768px) {
   .page-header {
     flex-direction: column;
@@ -1093,12 +1109,6 @@
 
   .banner-resume-btn {
     align-self: flex-end;
-  }
-
-  .queue-toolbar {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 0.65rem;
   }
 
   .queue-toolbar-actions {
@@ -1153,11 +1163,12 @@
   .job-actions {
     width: 100%;
     justify-content: flex-end;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     gap: 0.45rem;
 
-    .review-action-btn {
-      flex: 1 1 100%;
+    .review-action-btn,
+    .run-now-btn {
+      flex: 1 1 auto;
       justify-content: center;
     }
   }

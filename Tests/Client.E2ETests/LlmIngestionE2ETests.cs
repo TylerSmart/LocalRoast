@@ -373,11 +373,12 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
 
     private async Task DiscardAllJobCardsAsync()
     {
-        var discardButtons = Page.Locator(".job-card button.discard-btn");
-        for (var remaining = await discardButtons.CountAsync(); remaining > 0; remaining--)
+        var jobCards = Page.Locator(".job-card");
+        for (var remaining = await jobCards.CountAsync(); remaining > 0; remaining--)
         {
-            await discardButtons.First.ClickAsync();
-            await Expect(discardButtons).ToHaveCountAsync(remaining - 1);
+            await jobCards.First.Locator(".job-actions-menu-btn").ClickAsync();
+            await Page.Locator("button.discard-btn").ClickAsync();
+            await Expect(jobCards).ToHaveCountAsync(remaining - 1);
         }
     }
 
@@ -512,7 +513,11 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await SaveLlmWorkflowsAsync(dialog);
         await Page.Locator(".llm-settings-btn").ClickAsync();
         await OpenLlmSettingsTabAsync(dialog, "Connections");
-        await dialog.GetByTestId("edit-connection-btn").ClickAsync();
+        await dialog
+            .Locator(".connection-card")
+            .First.GetByTestId("connection-actions-menu-btn")
+            .ClickAsync();
+        await Page.GetByTestId("edit-connection-btn").ClickAsync();
         var connectionEditor = Page.GetByTestId("connection-editor-form");
         await Expect(
                 connectionEditor.Locator("mat-checkbox[formcontrolname='ollamaCpuOnly'] input")
@@ -742,7 +747,8 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await Expect(publishedJobCard).ToBeVisibleAsync();
         await Expect(publishedJobCard.Locator(".status-badge")).ToContainTextAsync("Published");
 
-        await publishedJobCard.Locator("button.discard-btn").ClickAsync();
+        await publishedJobCard.Locator(".job-actions-menu-btn").ClickAsync();
+        await Page.Locator("button.discard-btn").ClickAsync();
         await Expect(publishedJobCard).Not.ToBeVisibleAsync();
 
         // 7. Navigate to /catalog and verify "Toasted Sesame Oil" was created in the food catalog
@@ -809,6 +815,7 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await reviewBtn.ClickAsync();
         await Expect(Page).ToHaveURLAsync(new Regex(".*/ingest/review/.*"));
 
+        await Page.Locator("button.review-actions-menu-btn").ClickAsync();
         await Page.Locator("button[aria-label='Discard ingestion job']").ClickAsync();
         var confirmDialog = Page.Locator("app-confirm-dialog");
         await Expect(confirmDialog).ToBeVisibleAsync();
@@ -1235,7 +1242,8 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         // Enable thinking on qwen2.5:14b's Defaults profile
         await OpenLlmSettingsTabAsync(dialog, "Profiles");
         var defaultsCard = GetLlmProfileCard(dialog, "qwen2.5:14b");
-        await defaultsCard.Locator(".edit-card-btn").ClickAsync();
+        await defaultsCard.Locator(".card-menu-btn").ClickAsync();
+        await Page.Locator("button.edit-card-btn").ClickAsync();
         var profileEditor = Page.GetByTestId("profile-editor-form");
         var thinkingToggle = profileEditor.Locator("[data-testid='profile-form-thinking'] button");
         if (await thinkingToggle.GetAttributeAsync("aria-checked") != "true")
@@ -1269,7 +1277,8 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
             .ToContainTextAsync(LlmConfigName("qwen2.5:14b"));
         await Expect(dialog.GetByTestId("workflow-text-select")).ToContainTextAsync("Defaults");
         await OpenLlmSettingsTabAsync(dialog, "Profiles");
-        await defaultsCard.Locator(".edit-card-btn").ClickAsync();
+        await defaultsCard.Locator(".card-menu-btn").ClickAsync();
+        await Page.Locator("button.edit-card-btn").ClickAsync();
         await Expect(profileEditor.Locator("[data-testid='profile-form-thinking'] button"))
             .ToHaveAttributeAsync("aria-checked", "true");
         await profileEditor.GetByTestId("cancel-profile-btn").ClickAsync();
@@ -1296,7 +1305,8 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
 
         await OpenLlmSettingsTabAsync(dialog, "Profiles");
         var defaultsCard = GetLlmProfileCard(dialog, "qwen2.5:14b");
-        await defaultsCard.Locator(".edit-card-btn").ClickAsync();
+        await defaultsCard.Locator(".card-menu-btn").ClickAsync();
+        await Page.Locator("button.edit-card-btn").ClickAsync();
         var profileEditor = Page.GetByTestId("profile-editor-form");
         await profileEditor.GetByTestId("profile-form-context").FillAsync("16384");
         await Page.RunAndWaitForResponseAsync(
@@ -1316,7 +1326,8 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await Page.Locator(".llm-settings-btn").ClickAsync();
         await Expect(dialog).ToBeVisibleAsync();
         await OpenLlmSettingsTabAsync(dialog, "Profiles");
-        await defaultsCard.Locator(".edit-card-btn").ClickAsync();
+        await defaultsCard.Locator(".card-menu-btn").ClickAsync();
+        await Page.Locator("button.edit-card-btn").ClickAsync();
         await Expect(profileEditor.GetByTestId("profile-form-context")).ToHaveValueAsync("16384");
         await Expect(profileEditor.Locator("#profileContextSlider")).ToHaveValueAsync("16384");
         await profileEditor.GetByTestId("cancel-profile-btn").ClickAsync();
@@ -1345,7 +1356,8 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
 
         await OpenLlmSettingsTabAsync(dialog, "Profiles");
         var defaultsCard = GetLlmProfileCard(dialog, "qwen2.5:14b");
-        await defaultsCard.Locator(".edit-card-btn").ClickAsync();
+        await defaultsCard.Locator(".card-menu-btn").ClickAsync();
+        await Page.Locator("button.edit-card-btn").ClickAsync();
         var profileEditor = Page.GetByTestId("profile-editor-form");
         var timeout = profileEditor.GetByTestId("profile-form-timeout");
         var save = profileEditor.GetByTestId("save-profile-btn");
@@ -1390,7 +1402,8 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
 
         await Page.Locator(".llm-settings-btn").ClickAsync();
         await OpenLlmSettingsTabAsync(dialog, "Profiles");
-        await defaultsCard.Locator(".edit-card-btn").ClickAsync();
+        await defaultsCard.Locator(".card-menu-btn").ClickAsync();
+        await Page.Locator("button.edit-card-btn").ClickAsync();
         await Expect(profileEditor.GetByTestId("profile-form-timeout")).ToHaveValueAsync("1800");
         await profileEditor.GetByTestId("cancel-profile-btn").ClickAsync();
         await Expect(profileEditor).Not.ToBeVisibleAsync();
@@ -1415,7 +1428,8 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
 
         await OpenLlmSettingsTabAsync(dialog, "Profiles");
         var defaultsCard = GetLlmProfileCard(dialog, "qwen2.5:14b");
-        await defaultsCard.Locator(".edit-card-btn").ClickAsync();
+        await defaultsCard.Locator(".card-menu-btn").ClickAsync();
+        await Page.Locator("button.edit-card-btn").ClickAsync();
         var profileEditor = Page.GetByTestId("profile-editor-form");
         var temperature = profileEditor.GetByTestId("profile-form-temperature");
         var topP = profileEditor.GetByTestId("profile-form-top-p");
@@ -1456,7 +1470,8 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
 
         await Page.Locator(".llm-settings-btn").ClickAsync();
         await OpenLlmSettingsTabAsync(dialog, "Profiles");
-        await defaultsCard.Locator(".edit-card-btn").ClickAsync();
+        await defaultsCard.Locator(".card-menu-btn").ClickAsync();
+        await Page.Locator("button.edit-card-btn").ClickAsync();
         await Expect(temperature).ToHaveValueAsync("1");
         await Expect(topP).ToHaveValueAsync("0.95");
         await Expect(topK).ToHaveValueAsync("64");
@@ -1477,7 +1492,8 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
 
         await Page.Locator(".llm-settings-btn").ClickAsync();
         await OpenLlmSettingsTabAsync(dialog, "Profiles");
-        await defaultsCard.Locator(".edit-card-btn").ClickAsync();
+        await defaultsCard.Locator(".card-menu-btn").ClickAsync();
+        await Page.Locator("button.edit-card-btn").ClickAsync();
         await Expect(temperature).ToHaveValueAsync("1");
         await temperature.FillAsync("");
         await topP.FillAsync("");
@@ -1499,7 +1515,8 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await OpenLlmSettingsTabAsync(dialog, "Connections");
         await Expect(dialog.Locator(".connection-card")).ToContainTextAsync(mockServer.BaseUrl);
         await OpenLlmSettingsTabAsync(dialog, "Profiles");
-        await defaultsCard.Locator(".edit-card-btn").ClickAsync();
+        await defaultsCard.Locator(".card-menu-btn").ClickAsync();
+        await Page.Locator("button.edit-card-btn").ClickAsync();
         await Expect(temperature).ToHaveValueAsync("");
         await Expect(topP).ToHaveValueAsync("");
         await Expect(topK).ToHaveValueAsync("");
@@ -1539,10 +1556,12 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
 
         await Expect(Page).ToHaveURLAsync(new Regex(".*/ingest/review/.*"));
 
-        // 3. Verify Preview button exists in header actions
-        var headerPreviewBtn = Page.Locator(".header-actions button.preview-btn");
+        // 3. Verify Preview action exists in review header overflow menu
+        await Page.Locator(".review-header button.review-actions-menu-btn").ClickAsync();
+        var headerPreviewBtn = Page.Locator("button.preview-btn");
         await Expect(headerPreviewBtn).ToBeVisibleAsync();
         await Expect(headerPreviewBtn).ToContainTextAsync("Preview");
+        await Page.Keyboard.PressAsync("Escape");
 
         // 4. Verify segmented view toggle in draft pane toolbar
         var paneToolbar = Page.Locator(".draft-pane-toolbar");
@@ -1581,7 +1600,8 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await Expect(Page.Locator(".draft-form")).ToBeVisibleAsync();
         await Expect(inlinePreview).Not.ToBeVisibleAsync();
 
-        // 7. Open full modal preview via header button
+        // 7. Open full modal preview via header overflow menu
+        await Page.Locator(".review-header button.review-actions-menu-btn").ClickAsync();
         await headerPreviewBtn.ClickAsync();
         var previewModal = Page.Locator("app-recipe-detail-preview-dialog");
         await Expect(previewModal).ToBeVisibleAsync();
@@ -1733,19 +1753,21 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         );
         await Expect(jobCard).ToBeVisibleAsync();
 
-        // Published job card has BOTH Open Recipe AND Review Side-by-Side
-        var openRecipeBtn = jobCard.Locator("a.open-recipe-btn");
+        // Published job card has Review Side-by-Side directly visible and Open Recipe inside overflow menu
         var reviewSideBySideBtn = jobCard.Locator("a.review-action-btn");
-        await Expect(openRecipeBtn).ToBeVisibleAsync();
         await Expect(reviewSideBySideBtn).ToBeVisibleAsync();
+        await jobCard.Locator(".job-actions-menu-btn").ClickAsync();
+        await Expect(Page.Locator("a.open-recipe-btn")).ToBeVisibleAsync();
+        await Page.Keyboard.PressAsync("Escape");
 
         // 5. Open Review Side-by-Side from the Published job card
         await reviewSideBySideBtn.ClickAsync();
         await Expect(Page).ToHaveURLAsync(new Regex($".*/ingest/review/{jobId}"));
 
-        // Verify "Open Published Recipe" link and "Update Published Recipe" button
-        var openPublishedHeaderLink = Page.Locator(".header-actions a.open-recipe-btn");
-        await Expect(openPublishedHeaderLink).ToBeVisibleAsync();
+        // Verify "Open Published Recipe" link in header overflow menu and "Update Published Recipe" button
+        await Page.Locator(".review-header button.review-actions-menu-btn").ClickAsync();
+        await Expect(Page.Locator("a.open-recipe-btn")).ToBeVisibleAsync();
+        await Page.Keyboard.PressAsync("Escape");
 
         var updateBtn = Page.Locator(".publish-btn");
         await Expect(updateBtn).ToContainTextAsync("Update Published Recipe");
@@ -1841,10 +1863,11 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         var defaultsCard = GetLlmProfileCard(dialog, "qwen2.5:14b", "Defaults");
         await Expect(defaultsCard).ToBeVisibleAsync();
         await Expect(defaultsCard).ToContainTextAsync("Default");
-        await Expect(defaultsCard.Locator(".delete-card-btn")).ToHaveCountAsync(0);
 
-        // Editing Defaults locks Model and Display Name
-        await defaultsCard.Locator(".edit-card-btn").ClickAsync();
+        // Editing Defaults locks Model and Display Name, and Defaults cannot be deleted
+        await defaultsCard.Locator(".card-menu-btn").ClickAsync();
+        await Expect(Page.Locator("button.delete-card-btn")).ToHaveCountAsync(0);
+        await Page.Locator("button.edit-card-btn").ClickAsync();
         var editorForm = Page.GetByTestId("profile-editor-form");
         await Expect(editorForm).ToBeVisibleAsync();
         await Expect(editorForm.GetByTestId("profile-form-name")).ToBeDisabledAsync();
@@ -1910,7 +1933,8 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         // 5. Switch back to Profiles tab, edit custom profile, then delete it
         await OpenLlmSettingsTabAsync(dialog, "Profiles");
         await Expect(customCard).ToBeVisibleAsync();
-        await customCard.Locator(".edit-card-btn").ClickAsync();
+        await customCard.Locator(".card-menu-btn").ClickAsync();
+        await Page.Locator("button.edit-card-btn").ClickAsync();
         await Expect(editorForm).ToBeVisibleAsync();
 
         await editorForm
@@ -1927,8 +1951,9 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await Expect(customCard.Locator(".profile-card-summary"))
             .ToContainTextAsync("Updated summary for testing.");
 
+        await customCard.Locator(".card-menu-btn").ClickAsync();
         await Page.RunAndWaitForResponseAsync(
-            () => customCard.Locator(".delete-card-btn").ClickAsync(),
+            () => Page.Locator("button.delete-card-btn").ClickAsync(),
             resp =>
                 resp.Url.Contains("/api/llm-settings/model-profiles")
                 && resp.Request.Method == "DELETE"
@@ -1942,8 +1967,9 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
             ".model-config-card",
             new() { HasText = LlmConfigName("qwen2.5:14b") }
         );
+        await modelCard.GetByTestId("model-config-actions-menu-btn").ClickAsync();
         await Page.RunAndWaitForResponseAsync(
-            () => modelCard.GetByTestId("delete-model-config-btn").ClickAsync(),
+            () => Page.GetByTestId("delete-model-config-btn").ClickAsync(),
             resp =>
                 resp.Url.Contains("/api/llm-settings/model-configurations/")
                 && resp.Request.Method == "DELETE"

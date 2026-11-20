@@ -200,6 +200,14 @@ mat-icon,
   }
 }
 
+.mat-mdc-menu-item.destructive-menu-item {
+  color: var(--mat-sys-error);
+
+  .mat-icon {
+    color: var(--mat-sys-error);
+  }
+}
+
 .mat-mdc-button.mat-mdc-button-base > .mat-icon,
 .mat-mdc-unelevated-button.mat-mdc-button-base > .mat-icon,
 .mat-mdc-raised-button.mat-mdc-button-base > .mat-icon,

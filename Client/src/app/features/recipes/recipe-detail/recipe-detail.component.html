@@ -29,13 +29,13 @@
         </button>
         <button
           type="button"
-          mat-stroked-button
+          mat-icon-button
           [matMenuTriggerFor]="recipeActionsMenu"
           class="recipe-actions-menu-btn"
           aria-label="More recipe actions"
+          matTooltip="More actions"
         >
-          <mat-icon>more_horiz</mat-icon>
-          <span>Actions</span>
+          <mat-icon>more_vert</mat-icon>
         </button>
 
         <mat-menu #recipeActionsMenu="matMenu" xPosition="before">
@@ -126,11 +126,11 @@
           </a>
           <button
             mat-menu-item
-            class="delete-recipe-menu-item"
+            class="delete-recipe-menu-item destructive-menu-item"
             (click)="deleteRecipe()"
             aria-label="Delete recipe"
           >
-            <mat-icon color="warn">delete</mat-icon>
+            <mat-icon>delete</mat-icon>
             <span>Delete Recipe</span>
           </button>
         </mat-menu>
@@ -554,35 +554,46 @@
                         <mat-icon>swap_horiz</mat-icon>
                       </button>
                     }
-                    @if (aiHelper.isAvailable() && !item.ingredient.linkedRecipeId) {
-                      <button
-                        type="button"
-                        mat-icon-button
-                        class="substitute-ing-btn no-print"
-                        matTooltip="Suggest ingredient substitution"
-                        aria-label="Suggest ingredient substitution"
-                        (click)="openIngredientSubstitution(item)"
-                      >
-                        <mat-icon>auto_awesome</mat-icon>
-                      </button>
-                    }
-
                     @if (aiHelper.isAvailable()) {
                       <button
                         type="button"
                         mat-icon-button
-                        class="explain-ing-btn no-print"
-                        matTooltip="Ask AI about this ingredient"
-                        [attr.aria-label]="'Ask AI about ' + item.ingredient.displayName"
-                        (click)="
-                          openKitchenQuestion({
-                            recipeIngredientId: item.ingredient.id,
-                            ingredientName: item.ingredient.displayName,
-                          })
-                        "
+                        class="ingredient-ai-menu-btn no-print"
+                        [matMenuTriggerFor]="ingredientAiMenu"
+                        matTooltip="Kitchen AI options"
+                        [attr.aria-label]="'Kitchen AI options for ' + item.ingredient.displayName"
                       >
-                        <mat-icon>help_outline</mat-icon>
+                        <mat-icon>auto_awesome</mat-icon>
                       </button>
+                      <mat-menu #ingredientAiMenu="matMenu" xPosition="before">
+                        @if (!item.ingredient.linkedRecipeId) {
+                          <button
+                            mat-menu-item
+                            type="button"
+                            class="substitute-ing-btn"
+                            aria-label="Suggest ingredient substitution"
+                            (click)="openIngredientSubstitution(item)"
+                          >
+                            <mat-icon>swap_horiz</mat-icon>
+                            <span>Suggest Substitution</span>
+                          </button>
+                        }
+                        <button
+                          mat-menu-item
+                          type="button"
+                          class="explain-ing-btn"
+                          [attr.aria-label]="'Ask AI about ' + item.ingredient.displayName"
+                          (click)="
+                            openKitchenQuestion({
+                              recipeIngredientId: item.ingredient.id,
+                              ingredientName: item.ingredient.displayName,
+                            })
+                          "
+                        >
+                          <mat-icon>help_outline</mat-icon>
+                          <span>Ask AI About Ingredient</span>
+                        </button>
+                      </mat-menu>
                     }
                   </div>
 
@@ -844,22 +855,37 @@
                         <span class="log-rating-stars">★ {{ log.rating }}</span>
                       }
                       <button
+                        type="button"
                         mat-icon-button
-                        (click)="openCookLogDialog(log)"
-                        aria-label="Edit cook log"
-                        matTooltip="Edit cook log"
+                        class="cook-log-menu-btn"
+                        [matMenuTriggerFor]="cookLogMenu"
+                        aria-label="Cook log options"
+                        matTooltip="Cook log options"
                       >
-                        <mat-icon>edit</mat-icon>
+                        <mat-icon>more_vert</mat-icon>
                       </button>
-                      <button
-                        mat-icon-button
-                        class="delete-log-btn"
-                        (click)="deleteCookLog(log.id)"
-                        aria-label="Delete cook log"
-                        matTooltip="Delete cook log"
-                      >
-                        <mat-icon>delete</mat-icon>
-                      </button>
+                      <mat-menu #cookLogMenu="matMenu" xPosition="before">
+                        <button
+                          mat-menu-item
+                          type="button"
+                          class="edit-log-btn"
+                          (click)="openCookLogDialog(log)"
+                          aria-label="Edit cook log"
+                        >
+                          <mat-icon>edit</mat-icon>
+                          <span>Edit Cook Log</span>
+                        </button>
+                        <button
+                          mat-menu-item
+                          type="button"
+                          class="delete-log-btn destructive-menu-item"
+                          (click)="deleteCookLog(log.id)"
+                          aria-label="Delete cook log"
+                        >
+                          <mat-icon>delete</mat-icon>
+                          <span>Delete Cook Log</span>
+                        </button>
+                      </mat-menu>
                     </div>
                   </div>
 

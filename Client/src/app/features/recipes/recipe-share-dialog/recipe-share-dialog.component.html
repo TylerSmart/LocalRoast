@@ -118,13 +118,74 @@
             <div class="link-main-info">
               <div class="link-title-row">
                 <span class="link-label">{{ link.label || 'Public Share Link' }}</span>
-                @if (link.revokedAt) {
-                  <span class="badge badge-revoked">Revoked</span>
-                } @else if (link.expiresAt && !link.isActive) {
-                  <span class="badge badge-expired">Expired</span>
-                } @else {
-                  <span class="badge badge-active">Active</span>
-                }
+                <div class="link-title-trailing">
+                  @if (link.revokedAt) {
+                    <span class="badge badge-revoked">Revoked</span>
+                  } @else if (link.expiresAt && !link.isActive) {
+                    <span class="badge badge-expired">Expired</span>
+                  } @else {
+                    <span class="badge badge-active">Active</span>
+                  }
+
+                  <button
+                    mat-icon-button
+                    type="button"
+                    class="link-actions-menu-btn"
+                    [matMenuTriggerFor]="shareLinkMenu"
+                    [attr.aria-label]="'Options for ' + (link.label || 'Public Share Link')"
+                    matTooltip="Link options"
+                  >
+                    <mat-icon>more_vert</mat-icon>
+                  </button>
+
+                  <mat-menu #shareLinkMenu="matMenu" xPosition="before">
+                    @if (link.isActive) {
+                      <button
+                        mat-menu-item
+                        type="button"
+                        class="copy-link-btn"
+                        (click)="copyLink(link.token)"
+                        aria-label="Copy share link to clipboard"
+                      >
+                        <mat-icon>content_copy</mat-icon>
+                        <span>Copy Link</span>
+                      </button>
+                      <a
+                        mat-menu-item
+                        class="open-link-btn"
+                        [href]="buildShareUrl(link.token)"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        aria-label="Open public view in new tab"
+                      >
+                        <mat-icon>open_in_new</mat-icon>
+                        <span>Open Public Page</span>
+                      </a>
+                      <mat-divider></mat-divider>
+                      <button
+                        mat-menu-item
+                        type="button"
+                        class="revoke-link-btn destructive-menu-item"
+                        (click)="onRevoke(link)"
+                        aria-label="Revoke share link"
+                      >
+                        <mat-icon>block</mat-icon>
+                        <span>Revoke Link</span>
+                      </button>
+                    } @else {
+                      <button
+                        mat-menu-item
+                        type="button"
+                        class="delete-link-btn destructive-menu-item"
+                        (click)="onDelete(link)"
+                        aria-label="Delete share link"
+                      >
+                        <mat-icon>delete</mat-icon>
+                        <span>Delete Link</span>
+                      </button>
+                    }
+                  </mat-menu>
+                </div>
               </div>
 
               <div class="link-url-row">
@@ -153,56 +214,6 @@
                   </span>
                 }
               </div>
-            </div>
-
-            <div class="link-actions">
-              @if (link.isActive) {
-                <button
-                  mat-stroked-button
-                  class="action-btn"
-                  (click)="copyLink(link.token)"
-                  aria-label="Copy share link to clipboard"
-                  matTooltip="Copy Link"
-                >
-                  <mat-icon>content_copy</mat-icon>
-                  <span class="btn-text">Copy</span>
-                </button>
-                <a
-                  mat-stroked-button
-                  class="action-btn"
-                  [href]="buildShareUrl(link.token)"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  aria-label="Open public view in new tab"
-                  matTooltip="Preview Public Page"
-                >
-                  <mat-icon>open_in_new</mat-icon>
-                  <span class="btn-text">Open</span>
-                </a>
-                <button
-                  mat-button
-                  color="warn"
-                  class="action-btn"
-                  (click)="onRevoke(link)"
-                  aria-label="Revoke share link"
-                  matTooltip="Revoke Link"
-                >
-                  <mat-icon>block</mat-icon>
-                  <span class="btn-text">Revoke</span>
-                </button>
-              } @else {
-                <button
-                  mat-button
-                  color="warn"
-                  class="action-btn"
-                  (click)="onDelete(link)"
-                  aria-label="Delete share link"
-                  matTooltip="Delete Link"
-                >
-                  <mat-icon>delete</mat-icon>
-                  <span class="btn-text">Delete</span>
-                </button>
-              }
             </div>
           </div>
         }

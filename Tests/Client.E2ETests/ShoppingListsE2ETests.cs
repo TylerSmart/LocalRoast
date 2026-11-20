@@ -329,12 +329,13 @@ public sealed class ShoppingListsE2ETests : E2ETestBase
             )
             .ToBeVisibleAsync();
 
-        // 3. Edit "Paper Towels" with quantity and notes
+        // 3. Edit "Paper Towels" with quantity and notes via item overflow menu
         var paperTowelsRow = activeCard.Locator(
             ".shopping-item-row",
             new() { HasText = "Paper Towels" }
         );
-        await paperTowelsRow.Locator("button[aria-label='Edit Paper Towels']").ClickAsync();
+        await paperTowelsRow.Locator(".shopping-item-menu-btn").ClickAsync();
+        await Page.Locator("button[aria-label='Edit Paper Towels']").ClickAsync();
 
         var itemDialog = Page.Locator("mat-dialog-container");
         await Expect(itemDialog.Locator("h2")).ToContainTextAsync("Edit Item");

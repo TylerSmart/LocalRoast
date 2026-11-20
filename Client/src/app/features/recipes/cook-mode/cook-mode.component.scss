@@ -852,13 +852,14 @@
 
 /* 4. Sticky Floating Multi-Timer Tray */
 .floating-timer-tray {
+  --timer-tray-gutter: 1.25rem;
   position: sticky;
   bottom: 0;
   z-index: 100;
   background-color: var(--mat-sys-surface-container);
   border-top: 1px solid var(--mat-sys-outline-variant);
   box-shadow: 0 -4px 16px color-mix(in srgb, var(--mat-sys-shadow) 10%, transparent);
-  padding: 0.65rem 1.25rem;
+  padding: 0.65rem var(--timer-tray-gutter);
 }
 
 .tray-header {
@@ -923,8 +924,14 @@
   display: flex;
   gap: 0.65rem;
   overflow-x: auto;
-  padding: 0.6rem 0.25rem 0.25rem;
-  margin: 0 -0.25rem;
+  margin-inline: calc(var(--timer-tray-gutter) * -1);
+  padding: 0.6rem var(--timer-tray-gutter) 0.25rem;
+  scroll-padding-inline: var(--timer-tray-gutter);
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 .timer-card {
@@ -1137,7 +1144,8 @@
   }
 
   .floating-timer-tray {
-    padding: 0.55rem 0.9rem calc(0.55rem + env(safe-area-inset-bottom));
+    --timer-tray-gutter: 0.9rem;
+    padding: 0.55rem var(--timer-tray-gutter) calc(0.55rem + env(safe-area-inset-bottom));
     position: static;
   }
 }

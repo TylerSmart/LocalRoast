@@ -100,6 +100,14 @@ describe('FoodCatalogComponent', () => {
       'mat-icon.staple-active.icon-filled',
     );
     expect(filledStars.length).toBe(1);
+
+    const menuButtons = fixture.nativeElement.querySelectorAll('.food-item-menu-btn');
+    expect(menuButtons.length).toBe(2);
+    (menuButtons[0] as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(document.querySelector('.merge-item-btn')).not.toBeNull();
+    expect(document.querySelector('.edit-food-item-btn')).not.toBeNull();
+    expect(document.querySelector('.delete-food-item-btn')).not.toBeNull();
   });
 
   it('filters items by search query', () => {

@@ -56,13 +56,51 @@
             <h4 class="profile-card-title">{{ config.name }}</h4>
             <span class="profile-card-tag">{{ config.model }}</span>
           </div>
-          @if (config.assignedWorkflows.length > 0) {
-            <div class="card-badges">
-              @for (workflow of config.assignedWorkflows; track workflow) {
-                <span class="workflow-badge">{{ workflow }}</span>
-              }
-            </div>
-          }
+          <div class="profile-card-header-trailing">
+            @if (config.assignedWorkflows.length > 0) {
+              <div class="card-badges">
+                @for (workflow of config.assignedWorkflows; track workflow) {
+                  <span class="workflow-badge">{{ workflow }}</span>
+                }
+              </div>
+            }
+            <button
+              mat-icon-button
+              type="button"
+              class="card-menu-btn"
+              [matMenuTriggerFor]="modelConfigMenu"
+              [attr.aria-label]="'Options for model ' + config.name"
+              matTooltip="Model options"
+              data-testid="model-config-actions-menu-btn"
+            >
+              <mat-icon>more_vert</mat-icon>
+            </button>
+            <mat-menu #modelConfigMenu="matMenu" xPosition="before">
+              <button
+                mat-menu-item
+                type="button"
+                (click)="startEdit(config)"
+                [attr.aria-label]="'Edit model configuration ' + config.name"
+                data-testid="edit-model-config-btn"
+              >
+                <mat-icon>edit</mat-icon>
+                <span>Edit Model</span>
+              </button>
+              <mat-divider></mat-divider>
+              <button
+                mat-menu-item
+                type="button"
+                class="delete-card-btn destructive-menu-item"
+                (click)="delete(config)"
+                [disabled]="isSaving()"
+                [attr.aria-label]="'Delete model configuration ' + config.name"
+                data-testid="delete-model-config-btn"
+              >
+                <mat-icon>delete</mat-icon>
+                <span>Delete Model</span>
+              </button>
+            </mat-menu>
+          </div>
         </div>
 
         <div class="profile-chips">
@@ -90,31 +128,6 @@
               }}
             </span>
           }
-        </div>
-
-        <div class="profile-card-actions">
-          <button
-            mat-button
-            type="button"
-            (click)="startEdit(config)"
-            [attr.aria-label]="'Edit model configuration ' + config.name"
-            data-testid="edit-model-config-btn"
-          >
-            <mat-icon>edit</mat-icon>
-            <span>Edit</span>
-          </button>
-          <button
-            mat-button
-            type="button"
-            class="delete-card-btn"
-            (click)="delete(config)"
-            [disabled]="isSaving()"
-            [attr.aria-label]="'Delete model configuration ' + config.name"
-            data-testid="delete-model-config-btn"
-          >
-            <mat-icon>delete</mat-icon>
-            <span>Delete</span>
-          </button>
         </div>
       </div>
     } @empty {

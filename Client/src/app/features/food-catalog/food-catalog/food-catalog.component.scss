@@ -279,10 +279,6 @@
 .item-actions {
   display: flex;
   align-items: center;
-
-  button[color='warn'] {
-    color: var(--mat-sys-error);
-  }
 }
 
 .catalog-paginator {

@@ -10,7 +10,10 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { MatButtonModule } from '@angular/material/button';
 import { MatDialog } from '@angular/material/dialog';
+import { MatDividerModule } from '@angular/material/divider';
 import { MatIconModule } from '@angular/material/icon';
+import { MatMenuModule } from '@angular/material/menu';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import type {
   LlmConnectionDto,
   LlmModelConfigurationDto,
@@ -29,7 +32,7 @@ import { buildDeleteModelConfirmMessage } from '../llm-settings-dialog/llm-setti
 /** Saves each unique (Connection, Model) pair together with optional hardware placement and rate limits. */
 @Component({
   selector: 'app-llm-model-configurations-panel',
-  imports: [MatButtonModule, MatIconModule],
+  imports: [MatButtonModule, MatDividerModule, MatIconModule, MatMenuModule, MatTooltipModule],
   templateUrl: './llm-model-configurations-panel.component.html',
   styleUrl: './llm-model-configurations-panel.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,

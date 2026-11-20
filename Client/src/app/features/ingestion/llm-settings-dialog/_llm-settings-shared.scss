@@ -411,6 +411,19 @@
       }
     }
 
+    .profile-card-header-trailing {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      flex-shrink: 0;
+      margin-top: -0.35rem;
+      margin-right: -0.45rem;
+    }
+
+    .card-menu-btn {
+      color: var(--mat-sys-on-surface-variant);
+    }
+
     .profile-badge-default {
       font-size: 0.7rem;
       font-weight: 700;
@@ -485,19 +498,6 @@
 
     span {
       overflow-wrap: anywhere;
-    }
-  }
-
-  .profile-card-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 0.35rem;
-    padding-top: 0.35rem;
-    border-top: 1px solid var(--mat-sys-outline-variant);
-    flex-wrap: wrap;
-
-    .delete-card-btn {
-      color: var(--mat-sys-error);
     }
   }
 }
@@ -677,10 +677,6 @@
     .profiles-header-actions {
       justify-content: flex-start;
     }
-  }
-
-  .profile-card-actions {
-    justify-content: flex-start;
   }
 
   .dialog-actions {

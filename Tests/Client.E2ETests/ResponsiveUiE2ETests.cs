@@ -271,7 +271,8 @@ public sealed class ResponsiveUiE2ETests : E2ETestBase
         await AssertLayoutAsync(Page.Locator("app-shell"), "populated-meal-plan");
 
         await Page.Locator("mat-button-toggle[value='week'] button").ClickAsync();
-        await Page.GetByRole(AriaRole.Button, new() { Name = "Manage reusable week templates" })
+        await Page.Locator("button.calendar-actions-menu-btn").ClickAsync();
+        await Page.GetByRole(AriaRole.Menuitem, new() { Name = "Manage reusable week templates" })
             .ClickAsync();
         await AssertDialogAsync("templates");
         await Page.GetByRole(AriaRole.Tab, new() { Name = "Save Current Week" }).ClickAsync();
@@ -461,7 +462,8 @@ public sealed class ResponsiveUiE2ETests : E2ETestBase
         }
         await Expect(Page.Locator("app-recipe-detail-preview")).ToBeVisibleAsync();
         await AssertLayoutAsync(Page.Locator("app-shell"), "review-inline-preview");
-        await Page.Locator(".review-header .preview-btn").ClickAsync();
+        await Page.Locator(".review-header .review-actions-menu-btn").ClickAsync();
+        await Page.Locator("button.preview-btn").ClickAsync();
         await AssertDialogAsync("recipe-preview");
     }
 
@@ -560,13 +562,15 @@ public sealed class ResponsiveUiE2ETests : E2ETestBase
         await AssertDialogAsync("kitchen-answer");
         await Page.Keyboard.PressAsync("Escape");
 
-        await Page.Locator(".substitute-ing-btn").First.ClickAsync();
+        await Page.Locator(".ingredient-ai-menu-btn").First.ClickAsync();
+        await Page.Locator("button.substitute-ing-btn").ClickAsync();
         await Expect(Page.Locator(".substitution-card")).ToBeVisibleAsync();
         await AssertDialogAsync("substitution-results");
         await Page.Keyboard.PressAsync("Escape");
 
         await Page.GotoAsync($"{ServerUrl}/meal-plan");
-        await Page.Locator(".draft-week-ai-btn").ClickAsync();
+        await Page.Locator("button.calendar-actions-menu-btn").ClickAsync();
+        await Page.Locator("button.draft-week-ai-btn").ClickAsync();
         await Page.Locator(".preset-chip").First.ClickAsync();
         await Page.Locator(".draft-submit-btn").ClickAsync();
         await Expect(Page.Locator(".candidate-card")).ToBeVisibleAsync();
@@ -654,9 +658,12 @@ public sealed class ResponsiveUiE2ETests : E2ETestBase
         await OpenRecipeActionAsync("Share recipe");
         await Page.Locator("input[formcontrolname='label']").FillAsync(RecipeTitle);
         await Page.GetByRole(AriaRole.Button, new() { Name = "Create share link" }).ClickAsync();
+        var linkCard = Page.Locator("app-recipe-share-dialog .link-card").First;
+        await Expect(linkCard).ToBeVisibleAsync();
+        await AssertDialogAsync("share-with-link");
+        await linkCard.Locator(".link-actions-menu-btn").ClickAsync();
         var link = Page.Locator("a[aria-label='Open public view in new tab']").First;
         await Expect(link).ToBeVisibleAsync();
-        await AssertDialogAsync("share-with-link");
         var shareUrl = await link.GetAttributeAsync("href");
         Assert.IsNotNull(shareUrl);
         await Page.GotoAsync(shareUrl);
@@ -709,7 +716,7 @@ public sealed class ResponsiveUiE2ETests : E2ETestBase
         foreach (
             var (route, readySelector) in new[]
             {
-                ("recipes", ".recipe-card .edit-action"),
+                ("recipes", ".recipe-card .recipe-card-link"),
                 ($"recipes/{recipeId}", ".recipe-body-grid"),
             }
         )
@@ -742,6 +749,241 @@ public sealed class ResponsiveUiE2ETests : E2ETestBase
                 $"{platformLabel} ({route}): matTooltip triggers must not set touch-action: none:\n{string.Join("\n", blockedTriggers)}"
             );
         }
+    }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task HorizontalStrips_ExtendFullBleedOnNarrowViewports()
+    {
+        await RegisterAndLoginAsync();
+        var recipeId = await SeedRecipeAsync();
+        await SetViewportAsync(360, 740, "light");
+
+        await MockJsonAsync(
+            "**/api/collections",
+            new[]
+            {
+                new
+                {
+                    id = Guid.NewGuid(),
+                    name = "America's Test Kitchen",
+                    slug = "americas-test-kitchen",
+                    description = (string?)null,
+                    sortOrder = 1,
+                    isSystemSeeded = false,
+                    recipeCount = 509,
+                },
+                new
+                {
+                    id = Guid.NewGuid(),
+                    name = "Weeknight Dinners",
+                    slug = "weeknight-dinners",
+                    description = (string?)null,
+                    sortOrder = 2,
+                    isSystemSeeded = false,
+                    recipeCount = 18,
+                },
+                new
+                {
+                    id = Guid.NewGuid(),
+                    name = "Holiday Baking",
+                    slug = "holiday-baking",
+                    description = (string?)null,
+                    sortOrder = 3,
+                    isSystemSeeded = false,
+                    recipeCount = 12,
+                },
+            }
+        );
+
+        await MockJsonAsync(
+            "**/api/tags",
+            new[]
+            {
+                new
+                {
+                    id = Guid.NewGuid(),
+                    name = "Weeknight",
+                    slug = "weeknight",
+                    category = "Course",
+                    sortOrder = 1,
+                    isSystemSeeded = false,
+                    recipeCount = 5,
+                },
+                new
+                {
+                    id = Guid.NewGuid(),
+                    name = "Italian",
+                    slug = "italian",
+                    category = "Cuisine",
+                    sortOrder = 2,
+                    isSystemSeeded = false,
+                    recipeCount = 8,
+                },
+                new
+                {
+                    id = Guid.NewGuid(),
+                    name = "Vegetarian",
+                    slug = "vegetarian",
+                    category = "Dietary",
+                    sortOrder = 3,
+                    isSystemSeeded = false,
+                    recipeCount = 4,
+                },
+                new
+                {
+                    id = Guid.NewGuid(),
+                    name = "Cast Iron",
+                    slug = "cast-iron",
+                    category = "Equipment",
+                    sortOrder = 4,
+                    isSystemSeeded = false,
+                    recipeCount = 3,
+                },
+                new
+                {
+                    id = Guid.NewGuid(),
+                    name = "Summer",
+                    slug = "summer",
+                    category = "Occasion",
+                    sortOrder = 5,
+                    isSystemSeeded = false,
+                    recipeCount = 6,
+                },
+            }
+        );
+
+        // 1. Cookbook collections strip: full viewport width (0..360) with gutter-aligned resting pills
+        await Page.GotoAsync($"{ServerUrl}/recipes");
+        await Expect(Page.Locator(".collections-strip .collection-pill-group").First)
+            .ToBeVisibleAsync();
+        await AssertFullBleedViewportStripAsync(
+            ".collections-strip",
+            ".collections-strip .collection-pill",
+            ".filter-card",
+            "cookbook-collections"
+        );
+        await AssertLayoutAsync(Page.Locator("app-shell"), "full-bleed-collections");
+
+        // 2. Ingestion Hub stage filters: full viewport width (0..360) with gutter-aligned resting pills
+        await Page.GotoAsync($"{ServerUrl}/ingest");
+        await Expect(Page.Locator(".filter-strip .filter-pill").First).ToBeVisibleAsync();
+        await AssertFullBleedViewportStripAsync(
+            ".filter-strip",
+            ".filter-strip .filter-pill",
+            ".capture-card",
+            "ingest-stage-filters"
+        );
+        await AssertLayoutAsync(Page.Locator("app-shell"), "full-bleed-ingest-filters");
+
+        // 3. Recipe editor tag category tabs: full-bleed to inner borders of taxonomy card
+        await Page.GotoAsync($"{ServerUrl}/recipes/{recipeId}/edit");
+        await Expect(Page.Locator(".tag-category-tabs .category-tab-pill").First)
+            .ToBeVisibleAsync();
+        var editorStripCheck = await Page.EvaluateAsync<string?>(
+            """
+            () => {
+                const card = document.querySelector('.taxonomy-card');
+                const strip = document.querySelector('.tag-category-tabs');
+                const firstPill = document.querySelector('.tag-category-tabs .category-tab-pill');
+                const searchBox = document.querySelector('.tag-search-box');
+                if (!card || !strip || !firstPill || !searchBox) return 'Missing editor elements';
+                const cardStyle = getComputedStyle(card);
+                const cardRect = card.getBoundingClientRect();
+                const stripRect = strip.getBoundingClientRect();
+                const pillRect = firstPill.getBoundingClientRect();
+                const searchRect = searchBox.getBoundingClientRect();
+                const expectedLeft = cardRect.left + parseFloat(cardStyle.borderLeftWidth);
+                const expectedRight = cardRect.right - parseFloat(cardStyle.borderRightWidth);
+                if (Math.abs(stripRect.left - expectedLeft) > 1.5)
+                    return `Editor tag tabs left ${stripRect.left} != card inner left ${expectedLeft}`;
+                if (Math.abs(stripRect.right - expectedRight) > 1.5)
+                    return `Editor tag tabs right ${stripRect.right} != card inner right ${expectedRight}`;
+                if (Math.abs(pillRect.left - searchRect.left) > 1.5)
+                    return `First category pill left ${pillRect.left} != search box left ${searchRect.left}`;
+                if (strip.scrollWidth <= strip.clientWidth)
+                    return `Expected editor tag tabs to overflow horizontally (scrollWidth=${strip.scrollWidth}, clientWidth=${strip.clientWidth})`;
+                return null;
+            }
+            """
+        );
+        Assert.IsNull(editorStripCheck, editorStripCheck);
+        await AssertLayoutAsync(Page.Locator("app-shell"), "full-bleed-editor-tag-tabs");
+
+        // 4. Cook mode timer cards row: full viewport width (0..360) with gutter-aligned cards
+        await Page.GotoAsync($"{ServerUrl}/recipes/{recipeId}/cook");
+        await Expect(Page.Locator(".cook-step-card")).ToBeVisibleAsync();
+        for (var i = 1; i <= 2; i++)
+        {
+            await Page.Locator(".custom-timer-toggle-btn").ClickAsync();
+            await Expect(Page.Locator(".custom-timer-input")).ToBeVisibleAsync();
+            await Page.Locator(".custom-timer-input").FillAsync($"Timer {i}");
+            await Page.Locator(".custom-timer-mins").FillAsync($"{i * 5}");
+            await Page.Locator(".custom-timer-form button").ClickAsync();
+            await Expect(Page.Locator(".timer-cards-row .timer-card")).ToHaveCountAsync(i);
+            await Expect(Page.Locator(".custom-timer-input")).Not.ToBeVisibleAsync();
+        }
+
+        await Expect(Page.Locator(".timer-cards-row .timer-card")).ToHaveCountAsync(2);
+        await AssertFullBleedViewportStripAsync(
+            ".timer-cards-row",
+            ".timer-cards-row .timer-card",
+            ".tray-header",
+            "cook-mode-timers"
+        );
+        await AssertLayoutAsync(Page.Locator(".cook-mode-container"), "full-bleed-cook-timers");
+    }
+
+    private async Task AssertFullBleedViewportStripAsync(
+        string stripSelector,
+        string itemSelector,
+        string alignedContentSelector,
+        string label
+    )
+    {
+        var viewportWidth = Page.ViewportSize!.Width;
+        var issue = await Page.EvaluateAsync<string?>(
+            """
+            ({ stripSelector, itemSelector, alignedContentSelector, viewportWidth }) => {
+                const strip = document.querySelector(stripSelector);
+                const items = Array.from(document.querySelectorAll(itemSelector));
+                const aligned = document.querySelector(alignedContentSelector);
+                if (!strip || !items.length || !aligned) return 'Missing strip or alignment target';
+
+                const stripRect = strip.getBoundingClientRect();
+                const firstRect = items[0].getBoundingClientRect();
+                const alignedRect = aligned.getBoundingClientRect();
+
+                if (Math.abs(stripRect.left) > 1)
+                    return `Strip left ${stripRect.left} is not flush with viewport left edge 0`;
+                if (Math.abs(stripRect.right - viewportWidth) > 1)
+                    return `Strip right ${stripRect.right} is not flush with viewport right edge ${viewportWidth}`;
+                if (Math.abs(firstRect.left - alignedRect.left) > 1.5)
+                    return `Resting first item left ${firstRect.left} does not align with content left ${alignedRect.left}`;
+                if (strip.scrollWidth <= strip.clientWidth)
+                    return `Expected strip to overflow horizontally (scrollWidth=${strip.scrollWidth}, clientWidth=${strip.clientWidth})`;
+
+                strip.scrollLeft = strip.scrollWidth;
+                const lastRect = items[items.length - 1].getBoundingClientRect();
+                const expectedRightEdge = viewportWidth - alignedRect.left;
+                if (lastRect.right > expectedRightEdge + 2)
+                    return `Scrolled last item right ${lastRect.right} exceeds trailing gutter edge ${expectedRightEdge}`;
+                if (document.documentElement.scrollWidth > viewportWidth + 1)
+                    return `Document overflowed horizontally after scrolling strip (${document.documentElement.scrollWidth} > ${viewportWidth})`;
+
+                strip.scrollLeft = 0;
+                return null;
+            }
+            """,
+            new
+            {
+                stripSelector,
+                itemSelector,
+                alignedContentSelector,
+                viewportWidth,
+            }
+        );
+        Assert.IsNull(issue, $"{label}: {issue}");
     }
 
     private async Task<string> CreateResponsiveShoppingListAsync()
