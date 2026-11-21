@@ -355,6 +355,64 @@ public static partial class StepTokenValidator
     )]
     private static partial Regex ExplicitCelsiusInSourceRegex();
 
+    [GeneratedRegex(
+        @"^\s+(?<actual>(?:(?:defatted|reserved|warm|hot|cold|remaining|melted|strained|pan|cooking|soaked|unsoaked)\s+)?(?:water|juices?|drippings|sauce|liquid|broth|stock|marinade|brine|glaze|syrup|dressing|gravy|fat))\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex TrailingSwapNounPrefixRegex();
+
+    [GeneratedRegex(@"[\p{L}]{3,}", RegexOptions.CultureInvariant)]
+    private static partial Regex TokenContentWordRegex();
+
+    private static readonly HashSet<string> TokenContentStopWords = new(
+        StringComparer.OrdinalIgnoreCase
+    )
+    {
+        "the",
+        "and",
+        "with",
+        "for",
+        "more",
+        "remaining",
+        "some",
+        "into",
+    };
+
+    private static bool HasAnyContentWordInOriginal(
+        string tokenName,
+        string originalInstruction,
+        out bool hasContentWords
+    )
+    {
+        var words = TokenContentWordRegex()
+            .Matches(tokenName)
+            .Select(m => m.Value.ToLowerInvariant())
+            .Where(w => !TokenContentStopWords.Contains(w))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        hasContentWords = words.Count > 0;
+        if (!hasContentWords)
+        {
+            return true;
+        }
+
+        var origLower = originalInstruction.ToLowerInvariant();
+        foreach (var word in words)
+        {
+            var sing = SimpleSingular(word);
+            if (
+                origLower.Contains(word, StringComparison.Ordinal)
+                || origLower.Contains(sing, StringComparison.Ordinal)
+            )
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public static bool HasPrintedNumericRangeInSource(
         string sourceText,
         decimal minQty,
@@ -605,6 +663,54 @@ public static partial class StepTokenValidator
             }
 
             var tokType = tokObj["type"]?.GetValue<string>()?.Trim().ToLowerInvariant();
+            if (
+                tokType == "ingredient"
+                && GetNullableDecimal(tokObj["quantity"]) is > 0m
+                && GetNullableString(tokObj["name"]) is string rawMixIngName
+                && rawMixIngName.Trim().EndsWith(" mixture", StringComparison.OrdinalIgnoreCase)
+            )
+            {
+                tokObj["type"] = "mixture";
+                tokObj.Remove("ingredientIndex");
+                tokType = "mixture";
+            }
+
+            if (
+                !string.IsNullOrWhiteSpace(originalInstruction)
+                && tokType == "ingredient"
+                && GetNullableDecimal(tokObj["quantity"]) is > 0m
+                && GetNullableString(tokObj["name"]) is string swapIngName
+                && !HasAnyContentWordInOriginal(
+                    swapIngName,
+                    originalInstruction,
+                    out var hasSwWords
+                )
+                && hasSwWords
+                && i + 1 < sanitized.Count
+                && sanitized[i + 1] is JsonValue nextSwapVal
+                && nextSwapVal.TryGetValue<string>(out var nextSwapStr)
+                && TrailingSwapNounPrefixRegex().Match(nextSwapStr) is { Success: true } swapMatch
+            )
+            {
+                var actualNoun = swapMatch.Groups["actual"].Value.Trim();
+                if (originalInstruction.Contains(actualNoun, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (actualNoun.EndsWith("water", StringComparison.OrdinalIgnoreCase))
+                    {
+                        tokObj["name"] = actualNoun;
+                        tokObj["ingredientIndex"] = null;
+                    }
+                    else
+                    {
+                        tokObj["type"] = "mixture";
+                        tokObj["name"] = actualNoun;
+                        tokObj.Remove("ingredientIndex");
+                        tokType = "mixture";
+                    }
+                    sanitized[i + 1] = JsonValue.Create(nextSwapStr[swapMatch.Length..]);
+                }
+            }
+
             if (
                 tokType == "ingredient"
                 && tokObj["ingredientIndex"] is null
@@ -1872,6 +1978,20 @@ public static partial class StepTokenValidator
                     {
                         warnings.Add(
                             $"Ingredient token '{ing.Name}' converted a unitless prose fraction into quantity={ing.Quantity.Value} with unit=null; leave prose fractions without a printed unit (like 'half of ...' or 'one-third of ...') as plain text."
+                        );
+                    }
+                    if (
+                        !string.IsNullOrWhiteSpace(originalInstruction)
+                        && !HasAnyContentWordInOriginal(
+                            ing.Name,
+                            originalInstruction,
+                            out var hasCw
+                        )
+                        && hasCw
+                    )
+                    {
+                        warnings.Add(
+                            $"Ingredient token '{ing.Name}' does not appear in original step text; use the exact noun from originalInstruction (or type='mixture' for prepared mixtures/sauces/juices)."
                         );
                     }
                     CheckBoundaryWordDuplication(

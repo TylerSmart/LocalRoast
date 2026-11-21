@@ -1524,4 +1524,90 @@ public sealed class StepTokenValidatorTests
         Assert.AreEqual("chives", compiledToken.Ingredient);
         Assert.AreEqual(2m, compiledToken.Amount);
     }
+
+    [TestMethod]
+    public void BuildAndValidateStep_ConvertsMixtureSuffixAndHealsHallucinatedNounSwaps()
+    {
+        // 1. "... mixture" with ingredientIndex converts cleanly to StepMixtureToken
+        var mixtureRes = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 1,
+            sectionName: null,
+            originalInstruction: "Rub 4 teaspoons salt-sugar mixture under skin.",
+            rawTokensJson: new JsonArray
+            {
+                "Rub ",
+                new JsonObject
+                {
+                    ["type"] = "ingredient",
+                    ["ingredientIndex"] = 0,
+                    ["name"] = "salt-sugar mixture",
+                    ["quantity"] = 4,
+                    ["unit"] = "teaspoon",
+                },
+                " under skin.",
+            },
+            ingredientCount: 2
+        );
+        Assert.IsEmpty(
+            mixtureRes.ValidationWarnings,
+            string.Join(" | ", mixtureRes.ValidationWarnings)
+        );
+        var mixTok = StepInstructionParser
+            .ExtractTokens(mixtureRes.CompiledInstruction)
+            .OfType<StepMixtureToken>()
+            .Single();
+        Assert.AreEqual("salt-sugar mixture", mixTok.Name);
+        Assert.AreEqual(4m, mixTok.Amount);
+
+        // 2. Hallucinated master ingredient name ("cider vinegar" + " water", "kosher salt" + " defatted juices", "ketchup" + " sauce") heals cleanly
+        var swapRes = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 2,
+            sectionName: null,
+            originalInstruction: "Fill pans with 3 cups water. Stir 1/3 cup defatted juices and 1/2 cup sauce into pork.",
+            rawTokensJson: new JsonArray
+            {
+                "Fill pans with ",
+                new JsonObject
+                {
+                    ["type"] = "ingredient",
+                    ["ingredientIndex"] = 8,
+                    ["name"] = "cider vinegar",
+                    ["quantity"] = 3,
+                    ["unit"] = "cup",
+                },
+                " water. Stir ",
+                new JsonObject
+                {
+                    ["type"] = "ingredient",
+                    ["ingredientIndex"] = 12,
+                    ["name"] = "kosher salt",
+                    ["quantity"] = 0.3333m,
+                    ["unit"] = "cup",
+                },
+                " defatted juices and ",
+                new JsonObject
+                {
+                    ["type"] = "ingredient",
+                    ["ingredientIndex"] = 9,
+                    ["name"] = "ketchup",
+                    ["quantity"] = 0.5m,
+                    ["unit"] = "cup",
+                },
+                " sauce into pork.",
+            },
+            ingredientCount: 13
+        );
+        Assert.IsEmpty(swapRes.ValidationWarnings, string.Join(" | ", swapRes.ValidationWarnings));
+
+        var compiledTokens = StepInstructionParser.ExtractTokens(swapRes.CompiledInstruction);
+        var waterTok = compiledTokens.OfType<StepIngredientToken>().Single();
+        Assert.AreEqual("water", waterTok.Ingredient);
+        Assert.IsNull(waterTok.IngredientIndex);
+        Assert.AreEqual(3m, waterTok.Amount);
+
+        var mixtures = compiledTokens.OfType<StepMixtureToken>().ToList();
+        Assert.HasCount(2, mixtures);
+        Assert.AreEqual("defatted juices", mixtures[0].Name);
+        Assert.AreEqual("sauce", mixtures[1].Name);
+    }
 }

@@ -1113,21 +1113,21 @@ public static partial class CulinaryMath
             }
         }
 
-        if (unit == MeasurementUnit.Whole)
-        {
-            return qty;
-        }
-
-        // Handle multi-serving dishes referenced purely by serving count (e.g., "4 Beef Topping" for "Serves 4").
+        // Handle multi-serving dishes referenced purely by serving count (e.g., "4 Beef Topping" or "4 Pan-Seared Brined Salmon" for "Serves 4").
         var isServesStyleYield = yieldEntries.Count > 0 && yieldEntries.All(e => e.IsServingYield);
         if (
-            unit is null
+            (unit is null || unit == MeasurementUnit.Whole)
             && isServesStyleYield
             && subRecipeBaseServings > 1m
             && qty == subRecipeBaseServings
         )
         {
             return 1m;
+        }
+
+        if (unit == MeasurementUnit.Whole)
+        {
+            return qty;
         }
 
         return qty;

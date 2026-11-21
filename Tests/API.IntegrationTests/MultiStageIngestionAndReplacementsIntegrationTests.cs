@@ -2078,6 +2078,134 @@ public sealed class MultiStageIngestionAndReplacementsIntegrationTests
         }
     }
 
+    [TestMethod]
+    public async Task Ingestion_RepairsOunceWeightCopiedIntoCanCount_ToOneCanWithOzAlternative()
+    {
+        var mockLlm = new FallbackExercisingLlmClient
+        {
+            ForceSimpleBatch = true,
+            Stage1JsonOverride = """
+                {
+                    "title": "Crushed Tomato Pizza Sauce",
+                    "description": "Quick pizza sauce.",
+                    "servings": 4,
+                    "yield": "4 servings",
+                    "sections": [
+                        {
+                            "name": null,
+                            "ingredients": [
+                                {
+                                    "name": "crushed tomatoes",
+                                    "quantity": 28,
+                                    "maxQuantity": null,
+                                    "unit": "can",
+                                    "prepNote": null,
+                                    "isOptional": false,
+                                    "replacements": [],
+                                    "alternateMeasurements": [
+                                        { "quantity": 28, "maxQuantity": null, "unit": "ounce" }
+                                    ]
+                                }
+                            ],
+                            "instructions": ["Place 28-ounce can of crushed tomatoes in strainer."]
+                        }
+                    ],
+                    "timing": { "prep": 5, "cook": 5, "total": 10 },
+                    "tags": ["Sauce"]
+                }
+                """,
+            Stage4BatchJsonOverride = """
+                {
+                    "steps": [
+                        {
+                            "stepNumber": 1,
+                            "tokens": [
+                                "Place ",
+                                {
+                                    "type": "ingredient",
+                                    "ingredientIndex": 0,
+                                    "name": "crushed tomatoes",
+                                    "quantity": 28,
+                                    "maxQuantity": null,
+                                    "unit": "ounce"
+                                },
+                                " in strainer."
+                            ]
+                        }
+                    ]
+                }
+                """,
+        };
+
+        await using var customFactory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ILlmExtractionClient>();
+                services.AddSingleton<ILlmExtractionClient>(mockLlm);
+            });
+        });
+
+        using var client = customFactory.CreateClient();
+        await AuthenticateAsync(client);
+
+        var conn = await (
+            await client.PostAsJsonAsync(
+                "/api/llm-settings/connections",
+                new UpsertLlmConnectionRequest(
+                    Name: "Can Repair Ollama",
+                    Provider: LlmProvider.Ollama,
+                    BaseUrl: "http://localhost:11434"
+                )
+            )
+        ).Content.ReadFromJsonAsync<LlmConnectionDto>();
+        var textCfg = await (
+            await client.PostAsJsonAsync(
+                "/api/llm-settings/model-configurations",
+                new UpsertLlmModelConfigurationRequest("Fast Text", conn!.Id, "gemma4:e4b")
+            )
+        ).Content.ReadFromJsonAsync<LlmModelConfigurationDto>();
+        await client.PutAsJsonAsync(
+            "/api/llm-settings/workflows",
+            new UpdateLlmWorkflowsRequest(
+                TextModelProfileId: textCfg!.DefaultProfileId,
+                AutoPublishHighConfidenceText: true,
+                EnableIngestion: true
+            )
+        );
+
+        var enqueueRes = await client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest(
+                "Crushed Tomato Pizza Sauce\nIngredients:\n- 1 (28-ounce) can crushed tomatoes\nInstructions:\n1. Place 28-ounce can of crushed tomatoes in strainer."
+            )
+        );
+        var queued = await enqueueRes.Content.ReadFromJsonAsync<IngestionJobSummaryDto>();
+
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            Assert.IsTrue(
+                await scope
+                    .ServiceProvider.GetRequiredService<IIngestionProcessor>()
+                    .ProcessNextQueuedJobAsync()
+            );
+        }
+
+        var jobDetail = await client.GetFromJsonAsync<IngestionJobDetailDto>(
+            $"/api/ingestion/jobs/{queued!.Id}"
+        );
+        Assert.AreEqual(IngestionJobStatus.Published, jobDetail!.Status);
+        var recipe = await client.GetFromJsonAsync<RecipeDetailDto>(
+            $"/api/recipes/{jobDetail.ResultingRecipeId}"
+        );
+        var tom = recipe!.Ingredients.Single();
+        Assert.AreEqual(1m, tom.Quantity);
+        Assert.AreEqual(MeasurementUnit.Can, tom.Unit);
+        Assert.IsNotNull(tom.AlternativeMeasurement);
+        Assert.AreEqual(28m, tom.AlternativeMeasurement.Quantity);
+        Assert.AreEqual(MeasurementUnit.Oz, tom.AlternativeMeasurement.Unit);
+    }
+
     private sealed class FallbackExercisingLlmClient : ILlmExtractionClient
     {
         public bool ForceSimpleBatch { get; set; }

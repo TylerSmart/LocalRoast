@@ -1971,6 +1971,26 @@ public sealed partial class IngestionRecipePipeline(
                 }
 
                 if (
+                    uKind == MeasurementUnit.Can
+                    && ingQty is > 4m
+                    && ingMaxQty is null
+                    && ing.AlternateMeasurements is { Count: > 0 }
+                    && ing.AlternateMeasurements.Any(a =>
+                        a.Quantity == ingQty
+                        && RecipeUnitAndSectionHelpers.NormalizeUnit(a.Unit).Unit
+                            == MeasurementUnit.Oz
+                    )
+                    && !Regex.IsMatch(
+                        sourceText,
+                        $@"\b{Regex.Escape(ingQty.Value.ToString("0.####", CultureInfo.InvariantCulture))}\s+cans?\b",
+                        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+                    )
+                )
+                {
+                    ingQty = 1m;
+                }
+
+                if (
                     ingQty.HasValue
                     && ingMaxQty.HasValue
                     && ingMaxQty.Value > ingQty.Value

@@ -476,6 +476,22 @@ describe('culinary-math', () => {
         ),
       ).toBe(1);
 
+      // "4 Pan-Seared Brined Salmon" (Whole count == baseServings on "Serves 4") -> 1x (not 4x)
+      expect(
+        computeSubRecipeBatchMultiplier(
+          { quantity: 4, unit: 'Whole', originalRawText: '4 Pan-Seared Brined Salmon' },
+          { baseServings: 4, yieldDisplay: 'Serves 4' },
+        ),
+      ).toBe(1);
+
+      // Explicit "2 recipes Herb Dressing" -> still 2x
+      expect(
+        computeSubRecipeBatchMultiplier(
+          { quantity: 2, unit: 'Whole', originalRawText: '2 recipes Herb Dressing' },
+          { baseServings: 4, yieldDisplay: 'Serves 4' },
+        ),
+      ).toBe(2);
+
       // "1 crust" fallback when sub-recipe has no yieldDisplay
       expect(
         computeSubRecipeBatchMultiplier(

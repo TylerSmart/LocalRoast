@@ -463,4 +463,139 @@ public sealed class StepIngredientEnricherTests
         Assert.HasCount(1, tokens);
         Assert.AreEqual(0, tokens[0].IngredientIndex);
     }
+
+    [TestMethod]
+    public void EnrichSteps_LinksAccentedAliases_AndMatchesPluralCountForms()
+    {
+        var ingredients = new List<IngestionDraftIngredientDto>
+        {
+            new(Quantity: 1m, Unit: null, DisplayName: "jalapeño chile"),
+            new(Quantity: 1m, Unit: MeasurementUnit.Tbsp, DisplayName: "fresh parsley"),
+            new(Quantity: 12m, Unit: null, DisplayName: "parsley leaves"),
+        };
+
+        var steps = new List<IngestionDraftStepDto>
+        {
+            new(
+                Instruction: "Mash avocado with jalapeño. Garnish with ||{\"ingredient\":\"parsley leaf\",\"amount\":1}||."
+            ),
+        };
+
+        var enriched = StepIngredientEnricher.EnrichSteps(ingredients, steps);
+        var tokens = StepInstructionParser
+            .ExtractTokens(enriched[0].Instruction)
+            .OfType<StepIngredientToken>()
+            .ToList();
+
+        Assert.HasCount(2, tokens);
+        Assert.AreEqual("jalapeño", tokens[0].Ingredient);
+        Assert.AreEqual(0, tokens[0].IngredientIndex);
+        Assert.AreEqual(1m, tokens[0].Amount);
+
+        Assert.AreEqual("parsley leaf", tokens[1].Ingredient);
+        Assert.AreEqual(2, tokens[1].IngredientIndex);
+    }
+
+    [TestMethod]
+    public void EnrichSteps_SectionScopedAliasesLinkSameSectionMentions_WithoutCrossLeaking()
+    {
+        var ingredients = new List<IngestionDraftIngredientDto>
+        {
+            new(
+                SectionName: "Pork",
+                Quantity: 5m,
+                Unit: MeasurementUnit.Tsp,
+                DisplayName: "kosher salt"
+            ),
+            new(
+                SectionName: "Pork",
+                Quantity: 2m,
+                Unit: MeasurementUnit.Tsp,
+                DisplayName: "light brown sugar"
+            ),
+            new(
+                SectionName: "Vinegar Sauce",
+                Quantity: 2m,
+                Unit: MeasurementUnit.Tbsp,
+                DisplayName: "light brown sugar"
+            ),
+            new(
+                SectionName: "Vinegar Sauce",
+                Quantity: 1m,
+                Unit: MeasurementUnit.Tsp,
+                DisplayName: "kosher salt"
+            ),
+        };
+
+        var steps = new List<IngestionDraftStepDto>
+        {
+            new(SectionName: "Pork", Instruction: "Combine salt and sugar in small bowl."),
+            new(
+                SectionName: "Vinegar Sauce",
+                Instruction: "Whisk brown sugar and salt until dissolved."
+            ),
+        };
+
+        var enriched = StepIngredientEnricher.EnrichSteps(ingredients, steps);
+
+        var porkToks = StepInstructionParser
+            .ExtractTokens(enriched[0].Instruction)
+            .OfType<StepIngredientToken>()
+            .ToList();
+        Assert.HasCount(2, porkToks);
+        Assert.AreEqual(0, porkToks[0].IngredientIndex);
+        Assert.AreEqual(5m, porkToks[0].Amount);
+        Assert.AreEqual(1, porkToks[1].IngredientIndex);
+        Assert.AreEqual(2m, porkToks[1].Amount);
+
+        var sauceToks = StepInstructionParser
+            .ExtractTokens(enriched[1].Instruction)
+            .OfType<StepIngredientToken>()
+            .ToList();
+        Assert.HasCount(2, sauceToks);
+        Assert.AreEqual(2, sauceToks[0].IngredientIndex);
+        Assert.AreEqual(2m, sauceToks[0].Amount);
+        Assert.AreEqual(3, sauceToks[1].IngredientIndex);
+        Assert.AreEqual(1m, sauceToks[1].Amount);
+    }
+
+    [TestMethod]
+    public void EnrichSteps_RebalancesDuplicateIngredientSiblingAllocations_EliminatingFalseWarnings()
+    {
+        var ingredients = new List<IngestionDraftIngredientDto>
+        {
+            new(Quantity: 5m, Unit: MeasurementUnit.Tbsp, DisplayName: "extra-virgin olive oil"),
+            new(Quantity: 1m, Unit: MeasurementUnit.Tbsp, DisplayName: "extra-virgin olive oil"),
+        };
+
+        var steps = new List<IngestionDraftStepDto>
+        {
+            new(
+                Instruction: "Mix ||{\"ingredient\":\"extra-virgin olive oil\",\"amount\":1,\"unit\":\"tbsp\",\"ingredientIndex\":1}|| with tomatoes."
+            ),
+            new(
+                // LLM matched both 1 tbsp uses onto index 1 instead of index 0
+                Instruction: "Coat bowl with ||{\"ingredient\":\"of the oil\",\"amount\":1,\"unit\":\"tbsp\",\"ingredientIndex\":1}|| and pour ||{\"ingredient\":\"more oil\",\"amount\":1,\"unit\":\"tbsp\",\"ingredientIndex\":1}|| over dough."
+            ),
+            new(
+                Instruction: "Coat sheet with ||{\"ingredient\":\"more oil\",\"amount\":2,\"unit\":\"tbsp\",\"ingredientIndex\":0}||."
+            ),
+            new(
+                Instruction: "Brush with ||{\"ingredient\":\"oil\",\"amount\":1,\"unit\":\"tbsp\",\"ingredientIndex\":1}||."
+            ),
+        };
+
+        var warnings = new List<string>();
+        var enriched = StepIngredientEnricher.EnrichSteps(ingredients, steps, warnings);
+
+        Assert.HasCount(0, warnings);
+
+        var allTokens = enriched
+            .SelectMany(s => StepInstructionParser.ExtractTokens(s.Instruction))
+            .OfType<StepIngredientToken>()
+            .ToList();
+        Assert.HasCount(5, allTokens);
+        Assert.AreEqual(1m, allTokens.Where(t => t.IngredientIndex == 1).Sum(t => t.Amount ?? 0m));
+        Assert.AreEqual(5m, allTokens.Where(t => t.IngredientIndex == 0).Sum(t => t.Amount ?? 0m));
+    }
 }

@@ -408,13 +408,21 @@ export function computeSubRecipeBatchMultiplier(
     }
   }
 
-  if (unit === 'Whole') {
-    return rawQty;
+  const isServesOnly = yieldEntries.length > 0 && yieldEntries.every((e) => e.isServingYield);
+  const hasExplicitBatchWord =
+    origText != null && /\b(?:recipe|recipes|batch|batches)\b/i.test(origText);
+  if (
+    (unit == null || unit === 'Whole') &&
+    !hasExplicitBatchWord &&
+    isServesOnly &&
+    baseServings > 1 &&
+    rawQty === baseServings
+  ) {
+    return 1;
   }
 
-  const isServesOnly = yieldEntries.length > 0 && yieldEntries.every((e) => e.isServingYield);
-  if (unit == null && isServesOnly && baseServings > 1 && rawQty === baseServings) {
-    return 1;
+  if (unit === 'Whole') {
+    return rawQty;
   }
 
   return rawQty;

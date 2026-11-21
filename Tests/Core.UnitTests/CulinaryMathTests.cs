@@ -504,5 +504,33 @@ public sealed class CulinaryMathTests
                 subRecipeYieldDisplay: "MAKES 6 eggs"
             )
         );
+
+        // "4 Pan-Seared Brined Salmon" (Whole count == baseServings on "Serves 4") -> 1x (not 4x)
+        Assert.AreEqual(
+            1m,
+            CulinaryMath.ComputeSubRecipeBatchMultiplier(
+                quantity: 4m,
+                unit: MeasurementUnit.Whole,
+                customUnitName: null,
+                originalRawText: "4 Pan-Seared Brined Salmon",
+                alternativeMeasurement: null,
+                subRecipeBaseServings: 4m,
+                subRecipeYieldDisplay: "Serves 4"
+            )
+        );
+
+        // Explicit "2 recipes Herb Dressing" -> still 2x
+        Assert.AreEqual(
+            2m,
+            CulinaryMath.ComputeSubRecipeBatchMultiplier(
+                quantity: 2m,
+                unit: MeasurementUnit.Whole,
+                customUnitName: null,
+                originalRawText: "2 recipes Herb Dressing",
+                alternativeMeasurement: null,
+                subRecipeBaseServings: 4m,
+                subRecipeYieldDisplay: "Serves 4"
+            )
+        );
     }
 }
