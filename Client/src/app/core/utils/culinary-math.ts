@@ -41,6 +41,24 @@ export function scaleIngredient(
   );
 }
 
+const EXACT_INTRA_SYSTEM_FACTORS: Readonly<
+  Partial<Record<MeasurementUnit, { system: string; factor: number }>>
+> = {
+  Tsp: { system: 'us-vol', factor: 1 },
+  Tbsp: { system: 'us-vol', factor: 3 },
+  FlOz: { system: 'us-vol', factor: 6 },
+  Cup: { system: 'us-vol', factor: 48 },
+  Pt: { system: 'us-vol', factor: 96 },
+  Qt: { system: 'us-vol', factor: 192 },
+  Gal: { system: 'us-vol', factor: 768 },
+  Ml: { system: 'metric-vol', factor: 1 },
+  L: { system: 'metric-vol', factor: 1000 },
+  Oz: { system: 'us-wt', factor: 1 },
+  Lb: { system: 'us-wt', factor: 16 },
+  G: { system: 'metric-wt', factor: 1 },
+  Kg: { system: 'metric-wt', factor: 1000 },
+};
+
 export function measurementUnitFactor(
   from: RecipeMeasurement,
   to: RecipeMeasurement,
@@ -52,12 +70,354 @@ export function measurementUnitFactor(
       from.customUnitName?.toLowerCase() === to.customUnitName?.toLowerCase())
   )
     return 1;
+  const fromExact = EXACT_INTRA_SYSTEM_FACTORS[from.unit];
+  const toExact = EXACT_INTRA_SYSTEM_FACTORS[to.unit];
+  if (fromExact && toExact && fromExact.system === toExact.system) {
+    return fromExact.factor / toExact.factor;
+  }
   const fromVolume = getVolumeMlFactor(from.unit);
   const toVolume = getVolumeMlFactor(to.unit);
-  if (fromVolume !== null && toVolume !== null) return fromVolume / toVolume;
+  if (fromVolume !== null && toVolume !== null) return roundTo(fromVolume / toVolume, 6);
   const fromWeight = getWeightGFactor(from.unit);
   const toWeight = getWeightGFactor(to.unit);
-  return fromWeight !== null && toWeight !== null ? fromWeight / toWeight : null;
+  if (fromWeight !== null && toWeight !== null) {
+    return roundTo(fromWeight / toWeight, 6);
+  }
+  return null;
+}
+
+export interface ParsedYieldMeasurement {
+  quantity: number;
+  unit: MeasurementUnit | null;
+  countNoun: string | null;
+  isServingYield: boolean;
+}
+
+const YIELD_UNICODE_FRACTIONS: Record<string, string> = {
+  '¼': ' 1/4',
+  '½': ' 1/2',
+  '¾': ' 3/4',
+  '⅓': ' 1/3',
+  '⅔': ' 2/3',
+  '⅕': ' 1/5',
+  '⅖': ' 2/5',
+  '⅗': ' 3/5',
+  '⅘': ' 4/5',
+  '⅙': ' 1/6',
+  '⅚': ' 5/6',
+  '⅛': ' 1/8',
+  '⅜': ' 3/8',
+  '⅝': ' 5/8',
+  '⅞': ' 7/8',
+};
+
+const YIELD_IGNORE_WORDS = new Set([
+  'to',
+  'or',
+  'about',
+  'season',
+  'makes',
+  'serves',
+  'recipe',
+  'recipes',
+  'batch',
+  'batches',
+]);
+
+function singularizeSimple(word: string): string {
+  const lower = word.toLowerCase();
+  if (lower.endsWith('ies') && lower.length > 4) {
+    return `${lower.slice(0, -3)}y`;
+  }
+  if (/(?:oes|ses|xes|ches|shes)$/.test(lower) && lower.length > 4) {
+    return lower.slice(0, -2);
+  }
+  if (lower.endsWith('s') && !lower.endsWith('ss') && lower.length > 3) {
+    return lower.slice(0, -1);
+  }
+  return lower;
+}
+
+function normalizeYieldUnitWord(word: string): MeasurementUnit | null {
+  switch (word.trim().toLowerCase()) {
+    case 'tsp':
+    case 'teaspoon':
+    case 'teaspoons':
+    case 't':
+      return 'Tsp';
+    case 'tbsp':
+    case 'tablespoon':
+    case 'tablespoons':
+    case 'tb':
+      return 'Tbsp';
+    case 'fl oz':
+    case 'fl_oz':
+    case 'floz':
+    case 'fluid ounce':
+    case 'fluid ounces':
+      return 'FlOz';
+    case 'cup':
+    case 'cups':
+    case 'c':
+      return 'Cup';
+    case 'pt':
+    case 'pint':
+    case 'pints':
+      return 'Pt';
+    case 'qt':
+    case 'quart':
+    case 'quarts':
+      return 'Qt';
+    case 'gal':
+    case 'gallon':
+    case 'gallons':
+      return 'Gal';
+    case 'ml':
+    case 'milliliter':
+    case 'milliliters':
+    case 'millilitre':
+    case 'millilitres':
+      return 'Ml';
+    case 'l':
+    case 'liter':
+    case 'liters':
+    case 'litre':
+    case 'litres':
+      return 'L';
+    case 'oz':
+    case 'ounce':
+    case 'ounces':
+      return 'Oz';
+    case 'lb':
+    case 'lbs':
+    case 'pound':
+    case 'pounds':
+      return 'Lb';
+    case 'g':
+    case 'gram':
+    case 'grams':
+      return 'G';
+    case 'kg':
+    case 'kilogram':
+    case 'kilograms':
+      return 'Kg';
+    case 'pinch':
+    case 'pinches':
+      return 'Pinch';
+    case 'dash':
+    case 'dashes':
+      return 'Dash';
+    case 'clove':
+    case 'cloves':
+      return 'Clove';
+    case 'can':
+    case 'cans':
+      return 'Can';
+    case 'bunch':
+    case 'bunches':
+      return 'Bunch';
+    case 'slice':
+    case 'slices':
+      return 'Slice';
+    default:
+      return null;
+  }
+}
+
+function parseYieldNumber(raw: string): number | null {
+  const parts = raw.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 2) {
+    const whole = Number(parts[0]);
+    const frac = parseSimpleFraction(parts[1]);
+    return !Number.isNaN(whole) && frac != null ? whole + frac : null;
+  }
+  if (parts.length === 1) {
+    if (parts[0].includes('/')) {
+      return parseSimpleFraction(parts[0]);
+    }
+    const n = Number(parts[0]);
+    return !Number.isNaN(n) && n > 0 ? n : null;
+  }
+  return null;
+}
+
+function parseSimpleFraction(tok: string): number | null {
+  const slash = tok.indexOf('/');
+  if (slash <= 0 || slash === tok.length - 1) return null;
+  const num = Number(tok.slice(0, slash));
+  const den = Number(tok.slice(slash + 1));
+  if (Number.isNaN(num) || Number.isNaN(den) || den === 0) return null;
+  const val = num / den;
+  return val > 0 ? val : null;
+}
+
+function isServingUnitWord(word: string | null | undefined): boolean {
+  if (!word) return false;
+  const w = word.trim().toLowerCase();
+  return w === 'serving' || w === 'servings' || w === 'portion' || w === 'portions';
+}
+
+export function parseYieldMeasurements(
+  yieldDisplay: string | null | undefined,
+): ParsedYieldMeasurement[] {
+  if (!yieldDisplay || !yieldDisplay.trim()) {
+    return [];
+  }
+
+  let expanded = '';
+  for (const ch of yieldDisplay) {
+    expanded += YIELD_UNICODE_FRACTIONS[ch] ?? ch;
+  }
+
+  const cleaned = expanded
+    .replace(/\b(?:season|episode|ep|page|chapter)\s+\d+\b/gi, ' ')
+    .replace(
+      /\b\d+(?:\s+\d+\/\d+|\.\d+)?\s*(?:to|–|-)\s*(?:\d+\s+)?\d+(?:\.\d+|\/\d+)?-(?:inch|inches|cm|mm|ounce|oz|pound|lb)\b|\b\d+(?:\.\d+|\/\d+)?-(?:inch|inches|cm|mm|ounce|oz|pound|lb)\b/gi,
+      ' ',
+    )
+    .replace(
+      /(\d+\s+\d+\s*\/\s*\d+|\d+\s*\/\s*\d+|\d+(?:\.\d+)?)\s*(?:to|–|-)\s*(?:\d+\s+\d+\s*\/\s*\d+|\d+\s*\/\s*\d+|\d+(?:\.\d+)?)/gi,
+      '$1',
+    );
+
+  const trimmedLower = cleaned.trim().toLowerCase();
+  const startsWithServes = trimmedLower.startsWith('serves') || trimmedLower.startsWith('serve ');
+
+  const results: ParsedYieldMeasurement[] = [];
+  const tokenRegex =
+    /(\d+\s+\d+\s*\/\s*\d+|\d+\s*\/\s*\d+|\d+(?:\.\d+)?)\s*([a-zA-Z]+(?:\s+ounces?)?)?/g;
+  for (const m of cleaned.matchAll(tokenRegex)) {
+    const qty = parseYieldNumber(m[1]);
+    if (qty == null || qty <= 0) continue;
+
+    const rawWord = (m[2] ?? '').trim();
+    const firstWord = rawWord.split(/\s+/).filter(Boolean)[0] ?? '';
+    const candidateWord = /^fluid ounces?$/i.test(rawWord) ? rawWord : firstWord;
+
+    let unit: MeasurementUnit | null = null;
+    let countNoun: string | null = null;
+    let isServing = false;
+
+    if (candidateWord) {
+      if (isServingUnitWord(candidateWord)) {
+        isServing = true;
+      } else {
+        unit = normalizeYieldUnitWord(candidateWord);
+        if (!unit) {
+          const lowerTok = candidateWord.toLowerCase();
+          if (!YIELD_IGNORE_WORDS.has(lowerTok)) {
+            countNoun = singularizeSimple(lowerTok);
+          }
+        }
+      }
+    }
+
+    if (!isServing && startsWithServes && unit == null && countNoun == null) {
+      isServing = true;
+    }
+
+    results.push({ quantity: qty, unit, countNoun, isServingYield: isServing });
+  }
+
+  return results;
+}
+
+export interface SubRecipeParentIngredientRef {
+  quantity: number | null;
+  maxQuantity?: number | null;
+  unit: MeasurementUnit | null;
+  customUnitName?: string | null;
+  originalRawText?: string | null;
+  alternativeMeasurement?: RecipeMeasurement | null;
+  preferAlternativeMeasurement?: boolean;
+}
+
+export interface SubRecipeYieldInfo {
+  baseServings: number;
+  yieldDisplay?: string | null;
+}
+
+export function computeSubRecipeBatchMultiplier(
+  parentIng: SubRecipeParentIngredientRef | null | undefined,
+  subRecipe: SubRecipeYieldInfo | null | undefined,
+): number {
+  const rawQty = parentIng ? preferredIngredientMeasurement(parentIng).quantity : null;
+  if (!parentIng || rawQty == null || rawQty <= 0) {
+    return 1;
+  }
+
+  const pref = preferredIngredientMeasurement(parentIng);
+  const unit = pref.unit ?? null;
+  const customUnitName = pref.customUnitName ?? null;
+  const origText = parentIng.originalRawText ?? null;
+  const baseServings = subRecipe?.baseServings ?? 1;
+
+  const leadingServingRegex =
+    /^\s*(?:\d+\s+\d+\/\d+|\d+\/\d+|\d+(?:\.\d+)?)(?:\s*(?:to|–|-)\s*(?:\d+\s+\d+\/\d+|\d+\/\d+|\d+(?:\.\d+)?))?\s*(?:servings?|portions?)\b/i;
+  if (
+    (unit === 'Custom' && isServingUnitWord(customUnitName)) ||
+    (origText != null && leadingServingRegex.test(origText))
+  ) {
+    return baseServings > 0 ? rawQty / baseServings : 1;
+  }
+
+  if (
+    unit === 'Whole' &&
+    origText != null &&
+    /\b(?:recipe|recipes|batch|batches)\b/i.test(origText)
+  ) {
+    return rawQty;
+  }
+
+  const yieldEntries = parseYieldMeasurements(subRecipe?.yieldDisplay);
+  const altMeasure = parentIng.preferAlternativeMeasurement
+    ? {
+        quantity: parentIng.quantity,
+        maxQuantity: parentIng.maxQuantity,
+        unit: parentIng.unit,
+        customUnitName: parentIng.customUnitName,
+      }
+    : parentIng.alternativeMeasurement;
+
+  for (const cand of [pref, altMeasure]) {
+    if (!cand || cand.quantity == null || cand.quantity <= 0 || !cand.unit) continue;
+    for (const entry of yieldEntries) {
+      if (entry.isServingYield || !entry.unit || entry.quantity <= 0) continue;
+      const factor = measurementUnitFactor(
+        { quantity: cand.quantity, unit: cand.unit },
+        { quantity: entry.quantity, unit: entry.unit },
+      );
+      if (factor !== null) {
+        return roundTo((cand.quantity * factor) / entry.quantity, 6);
+      }
+    }
+  }
+
+  if (unit == null || unit === 'Whole' || unit === 'Custom') {
+    const customNoun =
+      unit === 'Custom' && customUnitName?.trim() ? singularizeSimple(customUnitName.trim()) : null;
+    for (const entry of yieldEntries) {
+      if (entry.isServingYield || entry.unit != null || entry.quantity <= 0) continue;
+      if (customNoun !== null) {
+        if (entry.countNoun && entry.countNoun.toLowerCase() === customNoun.toLowerCase()) {
+          return rawQty / entry.quantity;
+        }
+      } else {
+        return rawQty / entry.quantity;
+      }
+    }
+  }
+
+  if (unit === 'Whole') {
+    return rawQty;
+  }
+
+  const isServesOnly = yieldEntries.length > 0 && yieldEntries.every((e) => e.isServingYield);
+  if (unit == null && isServesOnly && baseServings > 1 && rawQty === baseServings) {
+    return 1;
+  }
+
+  return rawQty;
 }
 
 export function scaleStepIngredient(

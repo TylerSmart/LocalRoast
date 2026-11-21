@@ -693,6 +693,13 @@
   flex-shrink: 0;
 }
 
+.sub-batch-pill {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--mat-sys-primary);
+  white-space: nowrap;
+}
+
 .view-sub-link {
   display: inline-flex;
   align-items: center;

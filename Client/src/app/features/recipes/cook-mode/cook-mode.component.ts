@@ -40,6 +40,7 @@ import {
 } from '../kitchen-question-dialog/kitchen-question-dialog.component';
 import {
   FormattedQuantityResult,
+  computeSubRecipeBatchMultiplier,
   formatCountdown,
   formatDuration,
   formatIngredientReplacement,
@@ -213,9 +214,13 @@ export class CookModeComponent implements OnInit, OnDestroy {
     }));
   }
   scaleSubRecipeIngredient(ingredient: RecipeIngredientDto, sub: SubRecipePreviewDto): string {
-    const quantity =
-      this.recipe()?.ingredients.find((i) => i.linkedRecipeId === sub.id)?.quantity ?? 1;
-    const scaled = scaleIngredient(ingredient, this.scaleFactor() * quantity, this.targetSystem());
+    const parentIng = this.recipe()?.ingredients.find((i) => i.linkedRecipeId === sub.id);
+    const batchMultiplier = computeSubRecipeBatchMultiplier(parentIng, sub);
+    const scaled = scaleIngredient(
+      ingredient,
+      this.scaleFactor() * batchMultiplier,
+      this.targetSystem(),
+    );
     return [scaled.formattedMeasurement, ingredient.displayName].filter(Boolean).join(' ');
   }
 

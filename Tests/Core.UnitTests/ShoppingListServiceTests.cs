@@ -356,4 +356,86 @@ public sealed class ShoppingListServiceTests
         Assert.AreEqual(2, detailAfterPromotion.ActiveItems.Count);
         Assert.AreEqual(0, detailAfterPromotion.ExcludedPantryItems.Count);
     }
+
+    [TestMethod]
+    public async Task AddRecipeToShoppingList_NormalizesSubRecipeByServingsAndVolumeYield()
+    {
+        var beefFood = new FoodItem
+        {
+            Id = Guid.NewGuid(),
+            Name = "Ground Beef",
+            NormalizedName = "ground beef",
+            IsPantryStaple = false,
+        };
+        _dbContext.FoodItems.Add(beefFood);
+
+        var beefSub = new Recipe
+        {
+            Id = Guid.NewGuid(),
+            Title = "Spiced Beef Topping",
+            Slug = "spiced-beef-topping",
+            BaseServings = 4m,
+            YieldDisplay = "Serves 4",
+            Status = RecipeStatus.Published,
+            Ingredients =
+            [
+                new RecipeIngredient
+                {
+                    Id = Guid.NewGuid(),
+                    FoodItemId = beefFood.Id,
+                    FoodItem = beefFood,
+                    DisplayName = "ground beef",
+                    Quantity = 1m,
+                    Unit = MeasurementUnit.Lb,
+                    SortOrder = 0,
+                },
+            ],
+        };
+
+        var loadedHummus = new Recipe
+        {
+            Id = Guid.NewGuid(),
+            Title = "Loaded Hummus",
+            Slug = "loaded-hummus",
+            BaseServings = 4m,
+            Status = RecipeStatus.Published,
+            Ingredients =
+            [
+                new RecipeIngredient
+                {
+                    Id = Guid.NewGuid(),
+                    LinkedRecipeId = beefSub.Id,
+                    LinkedRecipe = beefSub,
+                    DisplayName = "Spiced Beef Topping",
+                    Quantity = 4m,
+                    Unit = MeasurementUnit.Custom,
+                    CustomUnitName = "servings",
+                    OriginalRawText = "4 servings Spiced Beef Topping",
+                    SortOrder = 0,
+                },
+            ],
+        };
+
+        _dbContext.Recipes.AddRange(beefSub, loadedHummus);
+        await _dbContext.SaveChangesAsync();
+
+        var list = await _service.CreateShoppingListAsync(
+            new CreateShoppingListRequest("Sub-Recipe Scaling Test")
+        );
+
+        var res = await _service.AddRecipeIngredientsAsync(
+            list.Id,
+            new AddRecipeToShoppingListRequest(
+                RecipeId: loadedHummus.Id,
+                TargetServings: 4m,
+                IncludeSubRecipes: true
+            )
+        );
+
+        Assert.IsNotNull(res);
+        var beefItem = res.ShoppingList.ActiveItems.Single(i => i.FoodItemId == beefFood.Id);
+        // 4 servings of a 4-serving sub-recipe = 1x batch -> 1 lb ground beef (NOT 4 lb!)
+        Assert.AreEqual(1m, beefItem.Quantity);
+        Assert.AreEqual(MeasurementUnit.Lb, beefItem.Unit);
+    }
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  computeSubRecipeBatchMultiplier,
   convertDimension,
   formatAmount,
   formatCountdown,
@@ -9,6 +10,7 @@ import {
   formatMinutes,
   formatNumber,
   getUnitLabel,
+  parseYieldMeasurements,
   scaleAndConvert,
   scaleIngredient,
   scaleStepIngredient,
@@ -411,6 +413,68 @@ describe('culinary-math', () => {
         'Metric',
       );
       expect(metricText).toBe('113 g butter');
+    });
+  });
+
+  describe('sub-recipe servings and yield batch multiplier', () => {
+    it('parses yield counts, volumes, weights, and serving ranges', () => {
+      expect(parseYieldMeasurements('MAKES 24 puffs SEASON 26')).toEqual([
+        { quantity: 24, unit: null, countNoun: 'puff', isServingYield: false },
+      ]);
+      expect(parseYieldMeasurements('Makes about 9 cups (42 ounces)')).toEqual([
+        { quantity: 9, unit: 'Cup', countNoun: null, isServingYield: false },
+        { quantity: 42, unit: 'Oz', countNoun: null, isServingYield: false },
+      ]);
+      expect(parseYieldMeasurements('SERVES 4 to 6')).toEqual([
+        { quantity: 4, unit: null, countNoun: null, isServingYield: true },
+      ]);
+    });
+
+    it('normalizes servings, volume/weight yields, and item counts instead of blind multiplication', () => {
+      // "4 servings" against baseServings=4 -> 1x (not 4x)
+      expect(
+        computeSubRecipeBatchMultiplier(
+          {
+            quantity: 4,
+            unit: 'Custom',
+            customUnitName: 'servings',
+            originalRawText: '4 servings Spiced Beef',
+          },
+          { baseServings: 4, yieldDisplay: 'Serves 4' },
+        ),
+      ).toBe(1);
+
+      // "4 cups" against "MAKES 2 quarts" (8 cups) -> 0.5x
+      expect(
+        computeSubRecipeBatchMultiplier(
+          { quantity: 4, unit: 'Cup' },
+          { baseServings: 8, yieldDisplay: 'MAKES 2 quarts' },
+        ),
+      ).toBe(0.5);
+
+      // "3 eggs" against "MAKES 6 eggs" -> 0.5x
+      expect(
+        computeSubRecipeBatchMultiplier(
+          { quantity: 3, unit: null },
+          { baseServings: 6, yieldDisplay: 'MAKES 6 eggs' },
+        ),
+      ).toBe(0.5);
+
+      // "1 recipe" against "MAKES 6 eggs" -> 1x full batch
+      expect(
+        computeSubRecipeBatchMultiplier(
+          { quantity: 1, unit: 'Whole', originalRawText: '1 recipe Easy-Peel Hard-Cooked Eggs' },
+          { baseServings: 6, yieldDisplay: 'MAKES 6 eggs' },
+        ),
+      ).toBe(1);
+
+      // "1 crust" fallback when sub-recipe has no yieldDisplay
+      expect(
+        computeSubRecipeBatchMultiplier(
+          { quantity: 1, unit: 'Custom', customUnitName: 'crust' },
+          { baseServings: 1, yieldDisplay: null },
+        ),
+      ).toBe(1);
     });
   });
 });

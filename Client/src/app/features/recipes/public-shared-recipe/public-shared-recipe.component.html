@@ -346,7 +346,9 @@
                               <ul>
                                 @for (subIng of subRecipe.ingredients; track subIng.id) {
                                   <li>
-                                    {{ scaleSubRecipeIngredient(subIng, item.ingredient.quantity) }}
+                                    {{
+                                      scaleSubRecipeIngredient(subIng, item.ingredient, subRecipe)
+                                    }}
                                     @if (subIng.preparationNote) {
                                       ({{ subIng.preparationNote }})
                                     }
@@ -364,7 +366,7 @@
                                       <app-step-instruction
                                         [step]="subStep"
                                         [ingredients]="subRecipe.ingredients"
-                                        [factor]="scaleFactor() * (item.ingredient.quantity ?? 1)"
+                                        [factor]="subRecipeBatchFactor(item.ingredient, subRecipe)"
                                         [unitSystem]="targetSystem()"
                                       ></app-step-instruction>
                                     </li>

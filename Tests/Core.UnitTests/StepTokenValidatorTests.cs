@@ -1370,4 +1370,122 @@ public sealed class StepTokenValidatorTests
             string.Join(" | ", resAdjacentDim.ValidationWarnings)
         );
     }
+
+    [TestMethod]
+    public void BuildAndValidateStep_ConvertsIncrementalAtATimeTokensToFixedAndPreservesTotal()
+    {
+        const string original =
+            "(If too thick, loosen with water, adding 1 teaspoon at a time.) Add remaining 1/4 cup flour, 1 tablespoon at a time.";
+
+        var rawTokens = new JsonArray
+        {
+            "(If too thick, loosen with water, adding ",
+            new JsonObject
+            {
+                ["type"] = "ingredient",
+                ["ingredientIndex"] = null,
+                ["name"] = "water at a time",
+                ["quantity"] = 1,
+                ["unit"] = "teaspoon",
+            },
+            ".) Add remaining ",
+            new JsonObject
+            {
+                ["type"] = "ingredient",
+                ["ingredientIndex"] = 0,
+                ["name"] = "flour",
+                ["quantity"] = 0.25m,
+                ["unit"] = "cup",
+            },
+            ", ",
+            new JsonObject
+            {
+                ["type"] = "ingredient",
+                ["ingredientIndex"] = 1,
+                ["name"] = "ice water",
+                ["quantity"] = 1,
+                ["unit"] = "tablespoon",
+            },
+            " at a time.",
+        };
+
+        var result = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 1,
+            sectionName: null,
+            originalInstruction: original,
+            rawTokensJson: rawTokens,
+            ingredientCount: 2
+        );
+
+        var parsed = StepInstructionParser.ExtractTokens(result.CompiledInstruction);
+        var fixedTokens = parsed.OfType<StepFixedToken>().ToList();
+        var ingTokens = parsed.OfType<StepIngredientToken>().ToList();
+
+        Assert.HasCount(2, fixedTokens);
+        Assert.AreEqual(1m, fixedTokens[0].Amount);
+        Assert.AreEqual(MeasurementUnit.Tsp, fixedTokens[0].Unit);
+        Assert.AreEqual(1m, fixedTokens[1].Amount);
+        Assert.AreEqual(MeasurementUnit.Tbsp, fixedTokens[1].Unit);
+
+        Assert.HasCount(1, ingTokens);
+        Assert.AreEqual("flour", ingTokens[0].Ingredient);
+        Assert.AreEqual(0.25m, ingTokens[0].Amount);
+        Assert.Contains(
+            "1 teaspoon water at a time.)",
+            StepTokenValidator.RenderForValidation(result.ParsedTokens)
+        );
+    }
+
+    [TestMethod]
+    public void BuildAndValidateStep_HealsTransposedPreNounModifiersAcrossCommas()
+    {
+        const string original =
+            "Add reserved bacon fat, 1 tablespoon minced fresh chives, 2 teaspoons distilled white vinegar, and 1/8 teaspoon salt.";
+
+        var rawTokens = new JsonArray
+        {
+            "Add reserved bacon fat, ",
+            new JsonObject
+            {
+                ["type"] = "ingredient",
+                ["ingredientIndex"] = 0,
+                ["name"] = "chives",
+                ["quantity"] = 1,
+                ["unit"] = "tablespoon",
+            },
+            ", minced fresh ",
+            new JsonObject
+            {
+                ["type"] = "ingredient",
+                ["ingredientIndex"] = 1,
+                ["name"] = "vinegar",
+                ["quantity"] = 2,
+                ["unit"] = "teaspoon",
+            },
+            ", distilled white, and ",
+            new JsonObject
+            {
+                ["type"] = "ingredient",
+                ["ingredientIndex"] = 2,
+                ["name"] = "salt",
+                ["quantity"] = 0.125m,
+                ["unit"] = "teaspoon",
+            },
+            ".",
+        };
+
+        var result = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 1,
+            sectionName: null,
+            originalInstruction: original,
+            rawTokensJson: rawTokens,
+            ingredientCount: 3
+        );
+
+        var rendered = StepTokenValidator.RenderForValidation(result.ParsedTokens);
+        Assert.AreEqual(
+            "Add reserved bacon fat, 1 tablespoon minced fresh chives, 2 teaspoons distilled white vinegar, and 1/8 teaspoon salt.",
+            rendered
+        );
+    }
 }

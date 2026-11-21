@@ -326,6 +326,30 @@ public static partial class StepTokenValidator
     private static partial Regex ToolVesselSuffixRegex();
 
     [GeneratedRegex(
+        @"^(?:(?<before>.*?)\s+)?at\s+a\s+time\s*$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex AtATimeNameSuffixRegex();
+
+    [GeneratedRegex(
+        @"^\s*(?:at\s+a\s+time\b|increments?\b)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex AtATimeFollowingPrefixRegex();
+
+    [GeneratedRegex(
+        @"^\s+(?:[a-z][a-z\s-]{0,24}\s+)?at\s+a\s+time\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex UnnamedAtATimeFollowingRegex();
+
+    [GeneratedRegex(
+        @"^,\s+(?<mods>[a-zA-Z][\p{L}\s-]{1,35}?)(?<tail>(?:,\s*|\s+)and\s+|\s+)$",
+        RegexOptions.CultureInvariant
+    )]
+    private static partial Regex TrailingCommaModifierGapRegex();
+
+    [GeneratedRegex(
         @"(?:°\s*C\b|\bCelsius\b|\b\d+\s*C\b)",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
@@ -420,7 +444,10 @@ public static partial class StepTokenValidator
         return patterns;
     }
 
-    public static JsonArray SanitizeRawTokens(JsonArray tokensArray)
+    public static JsonArray SanitizeRawTokens(
+        JsonArray tokensArray,
+        string? originalInstruction = null
+    )
     {
         static JsonArray MergeAdjacentStrings(JsonArray source)
         {
@@ -587,24 +614,65 @@ public static partial class StepTokenValidator
                 && toolQty > 0m
             )
             {
-                tokObj["type"] = "fixed";
-                tokObj["amount"] = toolQty;
-                if (tokObj["maxQuantity"] is not null)
-                {
-                    tokObj["maxAmount"] = tokObj["maxQuantity"]?.DeepClone();
-                }
-                else
-                {
-                    tokObj.Remove("maxAmount");
-                }
-                tokObj.Remove("quantity");
-                tokObj.Remove("maxQuantity");
-                tokObj.Remove("ingredientIndex");
-                if (tokObj["hyphenated"] is null)
-                {
-                    tokObj["hyphenated"] = false;
-                }
+                ConvertIngredientOrMixtureToFixed(tokObj, toolQty);
                 tokType = "fixed";
+            }
+            else if (
+                tokType is "ingredient" or "mixture"
+                && GetNullableDecimal(tokObj["quantity"]) is decimal rateQty
+                && rateQty > 0m
+            )
+            {
+                var rawRateName = GetNullableString(tokObj["name"]);
+                var followingText =
+                    i + 1 < sanitized.Count
+                    && sanitized[i + 1] is JsonValue nextStrVal
+                    && nextStrVal.TryGetValue<string>(out var nt)
+                        ? nt
+                        : string.Empty;
+
+                var suffixMatch = !string.IsNullOrWhiteSpace(rawRateName)
+                    ? AtATimeNameSuffixRegex().Match(rawRateName.Trim())
+                    : Match.Empty;
+                var isIncrementalFollowing =
+                    AtATimeFollowingPrefixRegex().IsMatch(followingText)
+                    || (
+                        string.IsNullOrWhiteSpace(rawRateName)
+                        && UnnamedAtATimeFollowingRegex().IsMatch(followingText)
+                    );
+
+                if (suffixMatch.Success)
+                {
+                    var cleanName = suffixMatch.Groups["before"].Value.Trim();
+                    if (string.IsNullOrWhiteSpace(cleanName))
+                    {
+                        tokObj.Remove("name");
+                    }
+                    else
+                    {
+                        tokObj["name"] = cleanName;
+                    }
+
+                    if (!AtATimeFollowingPrefixRegex().IsMatch(followingText))
+                    {
+                        if (i + 1 < sanitized.Count && sanitized[i + 1] is JsonValue)
+                        {
+                            sanitized[i + 1] = JsonValue.Create(" at a time" + followingText);
+                        }
+                        else
+                        {
+                            sanitized.Insert(i + 1, JsonValue.Create(" at a time"));
+                        }
+                    }
+
+                    ConvertIngredientOrMixtureToFixed(tokObj, rateQty);
+                    tokType = "fixed";
+                }
+                else if (isIncrementalFollowing)
+                {
+                    ConvertIngredientOrMixtureToFixed(tokObj, rateQty);
+                    tokType = "fixed";
+                }
             }
 
             if (
@@ -758,6 +826,61 @@ public static partial class StepTokenValidator
             }
         }
 
+        if (!string.IsNullOrWhiteSpace(originalInstruction))
+        {
+            for (var i = 0; i + 2 < sanitized.Count; i++)
+            {
+                if (
+                    sanitized[i] is not JsonObject tokObj
+                    || sanitized[i + 1] is not JsonValue gapVal
+                    || !gapVal.TryGetValue<string>(out var gapStr)
+                    || sanitized[i + 2] is not JsonObject
+                )
+                {
+                    continue;
+                }
+
+                var tType = GetNullableString(tokObj["type"])?.Trim().ToLowerInvariant();
+                if (tType is not ("ingredient" or "mixture"))
+                {
+                    continue;
+                }
+
+                var tokName = GetNullableString(tokObj["name"])?.Trim();
+                if (string.IsNullOrWhiteSpace(tokName))
+                {
+                    continue;
+                }
+
+                var gapMatch = TrailingCommaModifierGapRegex().Match(gapStr);
+                if (!gapMatch.Success)
+                {
+                    continue;
+                }
+
+                var mods = gapMatch.Groups["mods"].Value.Trim();
+                var restoredPhrase = $"{mods} {tokName}";
+                var validCommaOrder = $"{tokName}, {mods}";
+                if (
+                    originalInstruction.Contains(restoredPhrase, StringComparison.OrdinalIgnoreCase)
+                    && !originalInstruction.Contains(
+                        validCommaOrder,
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                )
+                {
+                    tokObj["name"] = restoredPhrase;
+                    var tail = gapMatch.Groups["tail"].Value;
+                    var replacementGap =
+                        tail.StartsWith(',')
+                        || tail.TrimStart().StartsWith("and", StringComparison.OrdinalIgnoreCase)
+                            ? tail
+                            : "," + tail;
+                    sanitized[i + 1] = JsonValue.Create(replacementGap);
+                }
+            }
+        }
+
         return sanitized;
     }
 
@@ -770,7 +893,7 @@ public static partial class StepTokenValidator
         string? extraParseError = null
     )
     {
-        var sanitized = SanitizeRawTokens(rawTokensJson);
+        var sanitized = SanitizeRawTokens(rawTokensJson, originalInstruction);
         if (
             sanitized.Count > 0
             && sanitized[^1] is JsonValue lastTextVal
@@ -2981,6 +3104,27 @@ public static partial class StepTokenValidator
             "meter" => @"(?:meters?|metres?)\b",
             _ => Regex.Escape(unit.Trim()) + @"\b",
         };
+
+    private static void ConvertIngredientOrMixtureToFixed(JsonObject tokObj, decimal amount)
+    {
+        tokObj["type"] = "fixed";
+        tokObj["amount"] = amount;
+        if (tokObj["maxQuantity"] is not null)
+        {
+            tokObj["maxAmount"] = tokObj["maxQuantity"]?.DeepClone();
+        }
+        else
+        {
+            tokObj.Remove("maxAmount");
+        }
+        tokObj.Remove("quantity");
+        tokObj.Remove("maxQuantity");
+        tokObj.Remove("ingredientIndex");
+        if (tokObj["hyphenated"] is null)
+        {
+            tokObj["hyphenated"] = false;
+        }
+    }
 
     private static string? GetNullableString(JsonNode? node)
     {

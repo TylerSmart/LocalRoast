@@ -382,4 +382,113 @@ public sealed class CulinaryMathTests
         Assert.AreEqual(MeasurementUnit.Tsp, resultMismatch.Unit);
         Assert.AreEqual("4–6", resultMismatch.FormattedAmount);
     }
+
+    [TestMethod]
+    public void ParseYieldMeasurements_HandlesMakesServesRangesMetadataAndParentheticals()
+    {
+        var puffs = CulinaryMath.ParseYieldMeasurements("MAKES 24 puffs SEASON 26");
+        Assert.HasCount(1, puffs);
+        Assert.AreEqual(24m, puffs[0].Quantity);
+        Assert.IsNull(puffs[0].Unit);
+        Assert.AreEqual("puff", puffs[0].CountNoun);
+        Assert.IsFalse(puffs[0].IsServingYield);
+
+        var flourBlend = CulinaryMath.ParseYieldMeasurements("Makes about 9 cups (42 ounces)");
+        Assert.HasCount(2, flourBlend);
+        Assert.AreEqual(9m, flourBlend[0].Quantity);
+        Assert.AreEqual(MeasurementUnit.Cup, flourBlend[0].Unit);
+        Assert.AreEqual(42m, flourBlend[1].Quantity);
+        Assert.AreEqual(MeasurementUnit.Oz, flourBlend[1].Unit);
+
+        var serves = CulinaryMath.ParseYieldMeasurements("SERVES 4 to 6");
+        Assert.HasCount(1, serves);
+        Assert.AreEqual(4m, serves[0].Quantity);
+        Assert.IsTrue(serves[0].IsServingYield);
+    }
+
+    [TestMethod]
+    public void ComputeSubRecipeBatchMultiplier_HandlesServingsVolumeCountAndRecipeUnits()
+    {
+        // "4 servings" referencing a 4-serving sub-recipe -> 1x (NOT 4x)
+        Assert.AreEqual(
+            1m,
+            CulinaryMath.ComputeSubRecipeBatchMultiplier(
+                quantity: 4m,
+                unit: MeasurementUnit.Custom,
+                customUnitName: "servings",
+                originalRawText: "4 servings Baharat-Spiced Beef Topping",
+                alternativeMeasurement: null,
+                subRecipeBaseServings: 4m,
+                subRecipeYieldDisplay: "Serves 4"
+            )
+        );
+
+        // "2 servings" of a 4-serving sub-recipe -> 0.5x
+        Assert.AreEqual(
+            0.5m,
+            CulinaryMath.ComputeSubRecipeBatchMultiplier(
+                quantity: 2m,
+                unit: MeasurementUnit.Custom,
+                customUnitName: "servings",
+                originalRawText: "2 servings Spiced Beef",
+                alternativeMeasurement: null,
+                subRecipeBaseServings: 4m,
+                subRecipeYieldDisplay: "Serves 4"
+            )
+        );
+
+        // "4 Beef Topping" unitless equal to Serves 4 -> 1x
+        Assert.AreEqual(
+            1m,
+            CulinaryMath.ComputeSubRecipeBatchMultiplier(
+                quantity: 4m,
+                unit: null,
+                customUnitName: null,
+                originalRawText: "4 Baharat-Spiced Beef Topping",
+                alternativeMeasurement: null,
+                subRecipeBaseServings: 4m,
+                subRecipeYieldDisplay: "Serves 4"
+            )
+        );
+
+        // "4 cups Chicken Broth" referencing "Makes 2 quarts" (8 cups) -> 0.5x
+        Assert.AreEqual(
+            0.5m,
+            CulinaryMath.ComputeSubRecipeBatchMultiplier(
+                quantity: 4m,
+                unit: MeasurementUnit.Cup,
+                customUnitName: null,
+                originalRawText: "4 cups Chicken Broth",
+                alternativeMeasurement: null,
+                subRecipeBaseServings: 8m,
+                subRecipeYieldDisplay: "MAKES 2 quarts"
+            )
+        );
+
+        // "2 Easy-Peel Hard-Cooked Eggs" referencing "MAKES 6 eggs" -> 1/3 batch
+        var eggRatio = CulinaryMath.ComputeSubRecipeBatchMultiplier(
+            quantity: 2m,
+            unit: null,
+            customUnitName: null,
+            originalRawText: "2 Easy-Peel Hard-Cooked Eggs",
+            alternativeMeasurement: null,
+            subRecipeBaseServings: 6m,
+            subRecipeYieldDisplay: "MAKES 6 eggs"
+        );
+        Assert.IsTrue(Math.Abs(eggRatio - (2m / 6m)) < 0.0001m);
+
+        // "1 recipe" referencing "MAKES 6 eggs" -> still 1 full batch
+        Assert.AreEqual(
+            1m,
+            CulinaryMath.ComputeSubRecipeBatchMultiplier(
+                quantity: 1m,
+                unit: MeasurementUnit.Whole,
+                customUnitName: null,
+                originalRawText: "1 recipe Easy-Peel Hard-Cooked Eggs",
+                alternativeMeasurement: null,
+                subRecipeBaseServings: 6m,
+                subRecipeYieldDisplay: "MAKES 6 eggs"
+            )
+        );
+    }
 }

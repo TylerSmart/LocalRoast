@@ -70,6 +70,7 @@ public sealed partial class IngestionRecipePipeline(
         var description = string.IsNullOrWhiteSpace(stage1.Description)
             ? null
             : stage1.Description.Trim();
+        (workSteps, description) = RelocateLeadingStorageNoteStep(workSteps, description);
         var servings = stage1.Servings;
         var yieldDisplay = IngestionMetadataAndTagHelper.ResolveYieldDisplay(
             stage1.Yield,
@@ -1912,6 +1913,7 @@ public sealed partial class IngestionRecipePipeline(
         string sourceText
     )
     {
+        var (foundIngHeader, sourceIngLines) = ExtractSourceIngredientLines(sourceText);
         var list = new List<WorkIngredient>();
         var idx = 0;
         foreach (var section in stage1.Sections ?? [])
@@ -1927,6 +1929,36 @@ public sealed partial class IngestionRecipePipeline(
                 if (
                     uKind == MeasurementUnit.Custom
                     && RecipeUnitAndSectionHelpers.IsRedundantSelfCustomUnit(uCustom, ingName)
+                )
+                {
+                    ingUnit = null;
+                }
+                else if (
+                    uKind == MeasurementUnit.Clove
+                    && !ingName.Contains("garlic", StringComparison.OrdinalIgnoreCase)
+                    && !ingName.Contains("shallot", StringComparison.OrdinalIgnoreCase)
+                    && !HasSourceCloveUnitForIngredient(
+                        sourceIngLines,
+                        foundIngHeader,
+                        sourceText,
+                        ingName
+                    )
+                )
+                {
+                    ingUnit = null;
+                }
+                else if (
+                    uKind == MeasurementUnit.Custom
+                    && (
+                        string.Equals(uCustom, "piece", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(uCustom, "pieces", StringComparison.OrdinalIgnoreCase)
+                    )
+                    && !HasLeadingPieceUnitForIngredient(
+                        sourceIngLines,
+                        foundIngHeader,
+                        sourceText,
+                        ingName
+                    )
                 )
                 {
                     ingUnit = null;
@@ -2035,7 +2067,138 @@ public sealed partial class IngestionRecipePipeline(
                 );
             }
         }
+
+        MergeSplitAdditiveIngredients(list, sourceIngLines);
+        for (var k = 0; k < list.Count; k++)
+        {
+            list[k].Index = k;
+        }
         return list;
+    }
+
+    private static void MergeSplitAdditiveIngredients(
+        List<WorkIngredient> items,
+        IReadOnlyList<string> sourceIngLines
+    )
+    {
+        for (var i = items.Count - 2; i >= 0; i--)
+        {
+            var first = items[i];
+            var second = items[i + 1];
+            if (
+                !string.Equals(
+                    first.SectionName?.Trim(),
+                    second.SectionName?.Trim(),
+                    StringComparison.OrdinalIgnoreCase
+                )
+                || !string.Equals(
+                    first.Name.Trim(),
+                    second.Name.Trim(),
+                    StringComparison.OrdinalIgnoreCase
+                )
+                || first.IsOptional != second.IsOptional
+                || first.Quantity is not > 0m
+                || second.Quantity is not > 0m
+                || first.MaxQuantity.HasValue
+                || second.MaxQuantity.HasValue
+                || (first.Replacements is { Count: > 0 })
+                || (second.Replacements is { Count: > 0 })
+            )
+            {
+                continue;
+            }
+
+            if (
+                !string.IsNullOrWhiteSpace(first.PrepNote)
+                && !string.IsNullOrWhiteSpace(second.PrepNote)
+                && !string.Equals(
+                    first.PrepNote.Trim(),
+                    second.PrepNote.Trim(),
+                    StringComparison.OrdinalIgnoreCase
+                )
+            )
+            {
+                continue;
+            }
+
+            var (firstUnit, _) = RecipeUnitAndSectionHelpers.NormalizeUnit(first.Unit);
+            var (secondUnit, _) = RecipeUnitAndSectionHelpers.NormalizeUnit(second.Unit);
+            if (
+                !firstUnit.HasValue
+                || !secondUnit.HasValue
+                || firstUnit == MeasurementUnit.Custom
+                || secondUnit == MeasurementUnit.Custom
+                || firstUnit == MeasurementUnit.Whole
+                || secondUnit == MeasurementUnit.Whole
+                || !CulinaryMath.TryConvertQuantity(
+                    second.Quantity.Value,
+                    secondUnit.Value,
+                    firstUnit.Value,
+                    out var secondInFirstUnit
+                )
+            )
+            {
+                continue;
+            }
+
+            var nameWords = ExtractDistinctLongWords(first.Name);
+            var hasAdditivePlusLine = sourceIngLines.Any(line =>
+                AdditivePlusLineRegex().IsMatch(line)
+                && (
+                    nameWords.Count == 0
+                    || nameWords.Any(w => line.Contains(w, StringComparison.OrdinalIgnoreCase))
+                )
+            );
+            if (!hasAdditivePlusLine)
+            {
+                continue;
+            }
+
+            first.Quantity = decimal.Round(
+                first.Quantity.Value + secondInFirstUnit,
+                4,
+                MidpointRounding.AwayFromZero
+            );
+            first.PrepNote ??= second.PrepNote;
+            items.RemoveAt(i + 1);
+        }
+    }
+
+    private static (List<WorkStep> Steps, string? Description) RelocateLeadingStorageNoteStep(
+        List<WorkStep> steps,
+        string? description
+    )
+    {
+        if (steps.Count < 2)
+        {
+            return (steps, description);
+        }
+
+        var first = steps[0].Instruction.Trim();
+        if (
+            first.Length > 220
+            || SentenceEndRegex().Matches(first).Count > 1
+            || !StandaloneStorageStepRegex().IsMatch(first)
+        )
+        {
+            return (steps, description);
+        }
+
+        var updatedDesc = string.IsNullOrWhiteSpace(description)
+            ? first
+            : (
+                description.Contains(first, StringComparison.OrdinalIgnoreCase)
+                    ? description
+                    : $"{description.TrimEnd()} {first}"
+            );
+
+        var relocated = new List<WorkStep>(steps.Count - 1);
+        for (var i = 1; i < steps.Count; i++)
+        {
+            relocated.Add(steps[i] with { StepNumber = i });
+        }
+
+        return (relocated, updatedDesc);
     }
 
     private static List<WorkStep> FlattenSteps(Stage1RecipeDto stage1)
@@ -2248,7 +2411,7 @@ public sealed partial class IngestionRecipePipeline(
 
     private sealed class WorkIngredient
     {
-        public int Index { get; init; }
+        public int Index { get; set; }
         public string? SectionName { get; set; }
         public string Name { get; set; } = string.Empty;
         public decimal? Quantity { get; set; }
@@ -2558,7 +2721,9 @@ public sealed partial class IngestionRecipePipeline(
             : null;
     }
 
-    private static bool HasSourceRecipeCueForIngredient(string sourceText, string ingName)
+    private static (bool FoundIngredientsHeader, List<string> Lines) ExtractSourceIngredientLines(
+        string sourceText
+    )
     {
         var lines = sourceText.Replace("\r\n", "\n").Split('\n');
         var inIngredients = false;
@@ -2591,9 +2756,28 @@ public sealed partial class IngestionRecipePipeline(
             }
         }
 
+        return (foundIngredientsHeader, ingLines);
+    }
+
+    private static List<string> ExtractDistinctLongWords(string text) =>
+        StepWordNonAlnumRegex()
+            .Replace(text.ToLowerInvariant(), " ")
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Where(w => w.Length >= 4)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+    private static bool AnyMatchingLine(
+        IReadOnlyList<string> ingLines,
+        bool foundIngredientsHeader,
+        string sourceText,
+        string ingName,
+        Func<string, bool> predicate
+    )
+    {
         if (!foundIngredientsHeader)
         {
-            return RecipeCueRegex().IsMatch(sourceText);
+            return predicate(sourceText);
         }
 
         if (ingLines.Count == 0)
@@ -2601,25 +2785,59 @@ public sealed partial class IngestionRecipePipeline(
             return false;
         }
 
-        var ingWords = StepWordNonAlnumRegex()
-            .Replace(ingName.ToLowerInvariant(), " ")
-            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
-            .Where(w => w.Length >= 4)
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
-
-        if (ingWords.Count == 0)
-        {
-            return ingLines.Any(line =>
-                RecipeCueRegex().IsMatch(line) || PageReferenceCueRegex().IsMatch(line)
+        var ingWords = ExtractDistinctLongWords(ingName);
+        return ingWords.Count == 0
+            ? ingLines.Any(predicate)
+            : ingLines.Any(line =>
+                predicate(line)
+                && ingWords.Any(w => line.Contains(w, StringComparison.OrdinalIgnoreCase))
             );
+    }
+
+    private static bool HasSourceRecipeCueForIngredient(string sourceText, string ingName)
+    {
+        var (foundHeader, ingLines) = ExtractSourceIngredientLines(sourceText);
+        if (!foundHeader)
+        {
+            return RecipeCueRegex().IsMatch(sourceText);
         }
 
-        return ingLines.Any(line =>
-            (RecipeCueRegex().IsMatch(line) || PageReferenceCueRegex().IsMatch(line))
-            && ingWords.Any(w => line.Contains(w, StringComparison.OrdinalIgnoreCase))
+        return AnyMatchingLine(
+            ingLines,
+            foundHeader,
+            sourceText,
+            ingName,
+            line => RecipeCueRegex().IsMatch(line) || PageReferenceCueRegex().IsMatch(line)
         );
     }
+
+    private static bool HasSourceCloveUnitForIngredient(
+        IReadOnlyList<string> ingLines,
+        bool foundHeader,
+        string sourceText,
+        string ingName
+    ) =>
+        AnyMatchingLine(
+            ingLines,
+            foundHeader,
+            sourceText,
+            ingName,
+            line => ExplicitCloveWordRegex().IsMatch(line)
+        );
+
+    private static bool HasLeadingPieceUnitForIngredient(
+        IReadOnlyList<string> ingLines,
+        bool foundHeader,
+        string sourceText,
+        string ingName
+    ) =>
+        AnyMatchingLine(
+            ingLines,
+            foundHeader,
+            sourceText,
+            ingName,
+            line => LeadingPieceMeasurementRegex().IsMatch(line)
+        );
 
     private static readonly HashSet<string> DimensionOrTempUnits = new(
         StringComparer.OrdinalIgnoreCase
@@ -2733,4 +2951,25 @@ public sealed partial class IngestionRecipePipeline(
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex FreshPepperCueRegex();
+
+    [GeneratedRegex(@"\bcloves?\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex ExplicitCloveWordRegex();
+
+    [GeneratedRegex(
+        @"^[-•*\s]*(?:\d+\s+\d+/\d+|\d+/\d+|\d+(?:\.\d+)?)\s+(?:(?:\([^)]*\)|large|medium|small)\s+)*pieces?\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex LeadingPieceMeasurementRegex();
+
+    [GeneratedRegex(
+        @"(?:\d+\s+\d+/\d+|\d+/\d+|\d+(?:\.\d+)?)\s+[a-zA-Z.]+\s+plus\s+(?:\d+\s+\d+/\d+|\d+/\d+|\d+(?:\.\d+)?)\s+[a-zA-Z.]+",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex AdditivePlusLineRegex();
+
+    [GeneratedRegex(
+        @"^(?:The\s+)?[\p{L}\s'-]{2,40}\s+can\s+be\s+(?:refrigerated|stored|kept|frozen|made\s+(?:in\s+advance|ahead)|prepared\s+(?:in\s+advance|ahead))\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex StandaloneStorageStepRegex();
 }

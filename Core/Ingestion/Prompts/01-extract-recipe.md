@@ -49,7 +49,10 @@ For each ingredient line in the source:
 
 ### Sub-Recipe Ingredients
 
-- When an ingredient references another prepared recipe (e.g., `"1 recipe Easy-Peel Hard-Cooked Eggs"`, `"1 recipe Toasted Bread for Bruschetta"`, `"Garlic Mayonnaise (recipe follows)"`), keep it as an ingredient entry with its clean name (e.g., `name: "Easy-Peel Hard-Cooked Eggs"`, `quantity: 1`, `unit: "recipe"`, `prepNote: null` or `"recipe follows"` if stated).
+- When an ingredient references another prepared recipe (e.g., `"1 recipe Easy-Peel Hard-Cooked Eggs"`, `"1 recipe Toasted Bread for Bruschetta"`, `"Garlic Mayonnaise (recipe follows)"`, `"4 servings Pulled Pork"`, `"1 recipe (about 2 cups) Marinara Sauce"`), keep it as an ingredient entry with its clean recipe name:
+  - Preserve `"recipe"` (`quantity: 1, unit: "recipe"`) when written as `"1 recipe ..."`, putting parenthetical yields into `alternateMeasurements` (`"1 recipe (about 2 cups) Marinara"` -> `quantity: 1, unit: "recipe", alternateMeasurements: [{"quantity": 2, "unit": "cup"}]`).
+  - Preserve `"serving"` (`quantity: 4, unit: "serving"`) when written as `"4 servings ..."` — never drop `"serving"` and never invent a batch count!
+  - Preserve measured portions (`"2 cups Classic Marinara"`, `"2 Easy-Peel Hard-Cooked Eggs"`) faithfully with their stated `quantity` and `unit`.
 
 ### Replacements (`replacements`)
 

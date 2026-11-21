@@ -1,4 +1,6 @@
 using System.Globalization;
+using System.Text;
+using System.Text.RegularExpressions;
 
 namespace App.Core.Recipes;
 
@@ -10,7 +12,14 @@ public record FormattedQuantityResult(
     string FormattedAmount
 );
 
-public static class CulinaryMath
+public record ParsedYieldMeasurement(
+    decimal Quantity,
+    MeasurementUnit? Unit,
+    string? CountNoun,
+    bool IsServingYield
+);
+
+public static partial class CulinaryMath
 {
     public static RecipeMeasurement PreferredMeasurement(
         RecipeMeasurement primary,
@@ -765,5 +774,362 @@ public static class CulinaryMath
         var hrs = minutes.Value / 60;
         var remMins = minutes.Value % 60;
         return remMins > 0 ? $"{hrs} hr {remMins} min" : $"{hrs} hr";
+    }
+
+    private static readonly Dictionary<char, string> UnicodeFractionMap = new()
+    {
+        ['¼'] = " 1/4",
+        ['½'] = " 1/2",
+        ['¾'] = " 3/4",
+        ['⅐'] = " 1/7",
+        ['⅑'] = " 1/9",
+        ['⅒'] = " 1/10",
+        ['⅓'] = " 1/3",
+        ['⅔'] = " 2/3",
+        ['⅕'] = " 1/5",
+        ['⅖'] = " 2/5",
+        ['⅗'] = " 3/5",
+        ['⅘'] = " 4/5",
+        ['⅙'] = " 1/6",
+        ['⅚'] = " 5/6",
+        ['⅛'] = " 1/8",
+        ['⅜'] = " 3/8",
+        ['⅝'] = " 5/8",
+        ['⅞'] = " 7/8",
+    };
+
+    [GeneratedRegex(
+        @"\b\d+(?:\s+\d+/\d+|\.\d+)?\s*(?:to|–|-)\s*(?:\d+\s+)?\d+(?:\.\d+|/\d+)?-(?:inch|inches|cm|mm|ounce|oz|pound|lb)\b|\b\d+(?:\.\d+|/\d+)?-(?:inch|inches|cm|mm|ounce|oz|pound|lb)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex HyphenatedSizeModifierRegex();
+
+    [GeneratedRegex(
+        @"\b(?:season|episode|ep|page|chapter)\s+\d+\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex YieldMetadataTagRegex();
+
+    [GeneratedRegex(
+        @"(?<min>\d+\s+\d+\s*/\s*\d+|\d+\s*/\s*\d+|\d+(?:\.\d+)?)\s*(?:to|–|-)\s*(?:\d+\s+\d+\s*/\s*\d+|\d+\s*/\s*\d+|\d+(?:\.\d+)?)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex YieldNumericRangeRegex();
+
+    [GeneratedRegex(
+        @"(?<qty>\d+\s+\d+\s*/\s*\d+|\d+\s*/\s*\d+|\d+(?:\.\d+)?)\s*(?<word>[a-zA-Z]+(?:\s+ounces?)?)?",
+        RegexOptions.CultureInvariant
+    )]
+    private static partial Regex YieldQuantityTokenRegex();
+
+    [GeneratedRegex(
+        @"\b(?:recipe|recipes|batch|batches)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex ExplicitBatchWordRegex();
+
+    [GeneratedRegex(
+        @"^\s*(?:\d+\s+\d+/\d+|\d+/\d+|\d+(?:\.\d+)?)(?:\s*(?:to|–|-)\s*(?:\d+\s+\d+/\d+|\d+/\d+|\d+(?:\.\d+)?))?\s*(?<unit>servings?|portions?)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex LeadingServingUnitRegex();
+
+    private static bool IsServingUnitName(string? unitName) =>
+        !string.IsNullOrWhiteSpace(unitName)
+        && unitName.Trim().ToLowerInvariant() is "serving" or "servings" or "portion" or "portions";
+
+    private static bool TryParseYieldNumber(string raw, out decimal value)
+    {
+        value = 0m;
+        var s = raw.Trim();
+        if (string.IsNullOrEmpty(s))
+        {
+            return false;
+        }
+
+        var parts = s.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (
+            parts.Length == 2
+            && decimal.TryParse(
+                parts[0],
+                NumberStyles.Number,
+                CultureInfo.InvariantCulture,
+                out var whole
+            )
+            && TryParseSimpleFraction(parts[1], out var frac)
+        )
+        {
+            value = whole + frac;
+            return true;
+        }
+
+        return parts.Length == 1
+            && (
+                decimal.TryParse(
+                    parts[0],
+                    NumberStyles.Number,
+                    CultureInfo.InvariantCulture,
+                    out value
+                ) || TryParseSimpleFraction(parts[0], out value)
+            );
+    }
+
+    private static bool TryParseSimpleFraction(string token, out decimal value)
+    {
+        value = 0m;
+        var slash = token.IndexOf('/');
+        if (slash <= 0 || slash == token.Length - 1)
+        {
+            return false;
+        }
+
+        return decimal.TryParse(
+                token[..slash].Trim(),
+                NumberStyles.Number,
+                CultureInfo.InvariantCulture,
+                out var num
+            )
+            && decimal.TryParse(
+                token[(slash + 1)..].Trim(),
+                NumberStyles.Number,
+                CultureInfo.InvariantCulture,
+                out var den
+            )
+            && den != 0m
+            && (value = num / den) > 0m;
+    }
+
+    public static IReadOnlyList<ParsedYieldMeasurement> ParseYieldMeasurements(string? yieldDisplay)
+    {
+        if (string.IsNullOrWhiteSpace(yieldDisplay))
+        {
+            return [];
+        }
+
+        var sb = new StringBuilder(yieldDisplay.Length + 8);
+        foreach (var ch in yieldDisplay)
+        {
+            if (UnicodeFractionMap.TryGetValue(ch, out var expansion))
+            {
+                sb.Append(expansion);
+            }
+            else
+            {
+                sb.Append(ch);
+            }
+        }
+
+        var cleaned = YieldMetadataTagRegex().Replace(sb.ToString(), " ");
+        cleaned = HyphenatedSizeModifierRegex().Replace(cleaned, " ");
+        cleaned = YieldNumericRangeRegex().Replace(cleaned, "${min}");
+
+        var trimmedLower = cleaned.Trim().ToLowerInvariant();
+        var startsWithServes =
+            trimmedLower.StartsWith("serves", StringComparison.Ordinal)
+            || trimmedLower.StartsWith("serve ", StringComparison.Ordinal);
+
+        var results = new List<ParsedYieldMeasurement>();
+        foreach (Match m in YieldQuantityTokenRegex().Matches(cleaned))
+        {
+            if (!TryParseYieldNumber(m.Groups["qty"].Value, out var qty) || qty <= 0m)
+            {
+                continue;
+            }
+
+            var rawWord = m.Groups["word"].Value.Trim();
+            var firstWord = rawWord
+                .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                .FirstOrDefault();
+            var twoWord =
+                rawWord.Equals("fluid ounce", StringComparison.OrdinalIgnoreCase)
+                || rawWord.Equals("fluid ounces", StringComparison.OrdinalIgnoreCase)
+                    ? rawWord
+                    : firstWord;
+
+            MeasurementUnit? unit = null;
+            string? countNoun = null;
+            var isServing = false;
+
+            if (!string.IsNullOrWhiteSpace(twoWord))
+            {
+                if (IsServingUnitName(twoWord))
+                {
+                    isServing = true;
+                }
+                else
+                {
+                    var (normUnit, normCustom) = RecipeUnitAndSectionHelpers.NormalizeUnit(twoWord);
+                    if (
+                        normUnit.HasValue
+                        && normUnit != MeasurementUnit.Custom
+                        && normUnit != MeasurementUnit.Whole
+                    )
+                    {
+                        unit = normUnit;
+                    }
+                    else
+                    {
+                        var nounToken = (normCustom ?? twoWord).Trim().ToLowerInvariant();
+                        if (
+                            nounToken
+                            is not (
+                                "to"
+                                or "or"
+                                or "about"
+                                or "season"
+                                or "makes"
+                                or "serves"
+                                or "recipe"
+                                or "recipes"
+                                or "batch"
+                                or "batches"
+                            )
+                        )
+                        {
+                            countNoun = RecipeUnitAndSectionHelpers.Singularize(nounToken);
+                        }
+                    }
+                }
+            }
+
+            if (!isServing && startsWithServes && unit is null && countNoun is null)
+            {
+                isServing = true;
+            }
+
+            results.Add(new ParsedYieldMeasurement(qty, unit, countNoun, isServing));
+        }
+
+        return results;
+    }
+
+    public static decimal ComputeSubRecipeBatchMultiplier(
+        decimal? quantity,
+        MeasurementUnit? unit,
+        string? customUnitName,
+        string? originalRawText,
+        RecipeMeasurement? alternativeMeasurement,
+        decimal subRecipeBaseServings,
+        string? subRecipeYieldDisplay
+    )
+    {
+        if (quantity is null or <= 0m)
+        {
+            return 1m;
+        }
+
+        var qty = quantity.Value;
+        var hasServingUnit =
+            (unit == MeasurementUnit.Custom && IsServingUnitName(customUnitName))
+            || (
+                !string.IsNullOrWhiteSpace(originalRawText)
+                && LeadingServingUnitRegex().IsMatch(originalRawText)
+            );
+        if (hasServingUnit)
+        {
+            return subRecipeBaseServings > 0m ? qty / subRecipeBaseServings : 1m;
+        }
+
+        var hasExplicitBatchWord =
+            !string.IsNullOrWhiteSpace(originalRawText)
+            && ExplicitBatchWordRegex().IsMatch(originalRawText);
+        if (unit == MeasurementUnit.Whole && hasExplicitBatchWord)
+        {
+            return qty;
+        }
+
+        var yieldEntries = ParseYieldMeasurements(subRecipeYieldDisplay);
+
+        // Compare parent measurement (primary or alternative) against compatible volume/weight yield entries.
+        foreach (
+            var candidate in new[]
+            {
+                new RecipeMeasurement(qty, unit, null, customUnitName),
+                alternativeMeasurement,
+            }
+        )
+        {
+            if (candidate?.Quantity is not > 0m || candidate.Unit is null)
+            {
+                continue;
+            }
+
+            foreach (var entry in yieldEntries)
+            {
+                if (entry.IsServingYield || entry.Unit is null || entry.Quantity <= 0m)
+                {
+                    continue;
+                }
+
+                if (
+                    TryConvertQuantity(
+                        candidate.Quantity.Value,
+                        candidate.Unit.Value,
+                        entry.Unit.Value,
+                        out var convertedQty
+                    )
+                )
+                {
+                    return convertedQty / entry.Quantity;
+                }
+            }
+        }
+
+        // Count/unitless or non-batch Whole (e.g., "2 Easy-Peel Hard-Cooked Eggs" or "1 crust") against count yields.
+        if (unit is null or MeasurementUnit.Whole or MeasurementUnit.Custom)
+        {
+            var customNoun =
+                unit == MeasurementUnit.Custom && !string.IsNullOrWhiteSpace(customUnitName)
+                    ? RecipeUnitAndSectionHelpers.Singularize(
+                        customUnitName.Trim().ToLowerInvariant()
+                    )
+                    : null;
+
+            foreach (var entry in yieldEntries)
+            {
+                if (entry.IsServingYield || entry.Unit is not null || entry.Quantity <= 0m)
+                {
+                    continue;
+                }
+
+                if (customNoun is not null)
+                {
+                    if (
+                        entry.CountNoun is not null
+                        && string.Equals(
+                            entry.CountNoun,
+                            customNoun,
+                            StringComparison.OrdinalIgnoreCase
+                        )
+                    )
+                    {
+                        return qty / entry.Quantity;
+                    }
+                }
+                else
+                {
+                    return qty / entry.Quantity;
+                }
+            }
+        }
+
+        if (unit == MeasurementUnit.Whole)
+        {
+            return qty;
+        }
+
+        // Handle multi-serving dishes referenced purely by serving count (e.g., "4 Beef Topping" for "Serves 4").
+        var isServesStyleYield = yieldEntries.Count > 0 && yieldEntries.All(e => e.IsServingYield);
+        if (
+            unit is null
+            && isServesStyleYield
+            && subRecipeBaseServings > 1m
+            && qty == subRecipeBaseServings
+        )
+        {
+            return 1m;
+        }
+
+        return qty;
     }
 }

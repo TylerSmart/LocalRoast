@@ -608,6 +608,12 @@
                           <mat-panel-title>
                             <mat-icon class="sub-icon">restaurant_menu</mat-icon>
                             <span>Sub-Recipe: {{ subRecipe.title }}</span>
+                            @if (
+                              formatSubRecipeBatchLabel(item.ingredient, subRecipe);
+                              as batchLbl
+                            ) {
+                              <span class="sub-batch-pill">({{ batchLbl }})</span>
+                            }
                           </mat-panel-title>
                         </mat-expansion-panel-header>
 
@@ -622,7 +628,7 @@
                             <ul>
                               @for (subIng of subRecipe.ingredients; track subIng.id) {
                                 <li>
-                                  {{ scaleSubRecipeIngredient(subIng, item.ingredient.quantity) }}
+                                  {{ scaleSubRecipeIngredient(subIng, item.ingredient, subRecipe) }}
                                   @if (subIng.preparationNote) {
                                     ({{ subIng.preparationNote }})
                                   }

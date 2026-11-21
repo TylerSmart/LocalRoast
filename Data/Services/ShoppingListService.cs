@@ -1159,7 +1159,33 @@ public sealed class ShoppingListService(
 
                     if (subRecipe is not null)
                     {
-                        var subScale = scaleFactor * (ing.Quantity ?? 1m);
+                        var preferred = ing.GetPreferredMeasurement();
+                        RecipeMeasurement? altMeasure =
+                            ing.PreferAlternativeMeasurement
+                                ? new RecipeMeasurement(
+                                    ing.Quantity,
+                                    ing.Unit,
+                                    ing.MaxQuantity,
+                                    ing.CustomUnitName
+                                )
+                            : ing.AlternativeQuantity.HasValue && ing.AlternativeUnit.HasValue
+                                ? new RecipeMeasurement(
+                                    ing.AlternativeQuantity,
+                                    ing.AlternativeUnit,
+                                    ing.AlternativeMaxQuantity,
+                                    ing.AlternativeCustomUnitName
+                                )
+                            : null;
+                        var batchMultiplier = CulinaryMath.ComputeSubRecipeBatchMultiplier(
+                            preferred.Quantity,
+                            preferred.Unit,
+                            preferred.CustomUnitName,
+                            ing.OriginalRawText,
+                            altMeasure,
+                            subRecipe.BaseServings,
+                            subRecipe.YieldDisplay
+                        );
+                        var subScale = scaleFactor * batchMultiplier;
                         await CollectRecipeInputsAsync(
                             subRecipe,
                             subScale,

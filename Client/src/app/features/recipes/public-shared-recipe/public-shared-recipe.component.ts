@@ -22,6 +22,7 @@ import { ShareLinkService } from '../../../core/services/share-link/share-link.s
 import { ThemeService } from '../../../core/services/theme/theme.service';
 import {
   FormattedQuantityResult,
+  computeSubRecipeBatchMultiplier,
   formatDuration,
   formatIngredientReplacement,
   formatMinutes,
@@ -265,8 +266,22 @@ export class PublicSharedRecipeComponent implements OnInit {
     return this.recipe()?.linkedSubRecipes.find((s) => s.id === subRecipeId);
   }
 
-  scaleSubRecipeIngredient(ing: PublicRecipeIngredientDto, quantity: number | null = null): string {
-    const factor = this.scaleFactor() * (quantity ?? 1);
+  subRecipeBatchFactor(
+    parentIng: PublicRecipeIngredientDto,
+    subRecipe: PublicSubRecipeDto,
+  ): number {
+    return this.scaleFactor() * computeSubRecipeBatchMultiplier(parentIng, subRecipe);
+  }
+
+  scaleSubRecipeIngredient(
+    ing: PublicRecipeIngredientDto,
+    parentOrQty: PublicRecipeIngredientDto | number | null = null,
+    subRecipe?: PublicSubRecipeDto,
+  ): string {
+    const factor =
+      typeof parentOrQty === 'number' || parentOrQty === null
+        ? this.scaleFactor() * (parentOrQty ?? 1)
+        : this.subRecipeBatchFactor(parentOrQty, subRecipe!);
     const sys = this.targetSystem();
     const scaled = scaleIngredient(ing, factor, sys);
     const qtyAndUnit = scaled.formattedMeasurement;

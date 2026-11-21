@@ -33,6 +33,7 @@ import { IngestionService } from '../../../core/services/ingestion/ingestion.ser
 import { AiKitchenHelperService } from '../../../core/services/ai-helpers/ai-kitchen-helper.service';
 import {
   FormattedQuantityResult,
+  computeSubRecipeBatchMultiplier,
   formatDuration,
   formatIngredientReplacement,
   formatMinutes,
@@ -564,10 +565,38 @@ export class RecipeDetailComponent implements OnInit {
     return this.recipe()?.linkedSubRecipes.find((s) => s.id === subRecipeId);
   }
 
-  scaleSubRecipeIngredient(ingredient: RecipeIngredientDto, quantity: number | null): string {
+  subRecipeBatchMultiplier(
+    parentIngredient: RecipeIngredientDto,
+    subRecipe: SubRecipePreviewDto,
+  ): number {
+    return computeSubRecipeBatchMultiplier(parentIngredient, subRecipe);
+  }
+
+  formatSubRecipeBatchLabel(
+    parentIngredient: RecipeIngredientDto,
+    subRecipe: SubRecipePreviewDto,
+  ): string | null {
+    const effective =
+      this.scaleFactor() * computeSubRecipeBatchMultiplier(parentIngredient, subRecipe);
+    if (Math.abs(effective - 1) < 0.01) {
+      return null;
+    }
+    const rounded = Math.round(effective * 100) / 100;
+    return `${rounded}x batch`;
+  }
+
+  scaleSubRecipeIngredient(
+    ingredient: RecipeIngredientDto,
+    parentOrQty: RecipeIngredientDto | number | null = null,
+    subRecipe?: SubRecipePreviewDto,
+  ): string {
+    const batchMultiplier =
+      typeof parentOrQty === 'number' || parentOrQty === null
+        ? (parentOrQty ?? 1)
+        : computeSubRecipeBatchMultiplier(parentOrQty, subRecipe);
     const scaled = scaleIngredient(
       ingredient,
-      this.scaleFactor() * (quantity ?? 1),
+      this.scaleFactor() * batchMultiplier,
       this.targetSystem(),
     );
     return [scaled.formattedMeasurement, ingredient.displayName].filter(Boolean).join(' ');
