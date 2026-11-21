@@ -275,10 +275,16 @@ public static partial class StepIngredientEnricher
     private static partial Regex TrailingCulinaryModifierRegex();
 
     [GeneratedRegex(
-        @"\b(?:omit|without|exclude)\s+(?:the\s+)?$",
+        @"\b(?:omits?|omitting|without|excludes?|excluding)\b[^.?!,;]{0,50}$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex OmitPrecedingRegex();
+
+    [GeneratedRegex(
+        @"\b(?:boil|boiling|simmer|simmering|steam|steaming)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex BoilingContextRegex();
 
     [GeneratedRegex(
         @"^\s+(?:pan|pot|skillet|sheet|bowl|bath|knife|rack|towel|paper|plate|spoon|whisk|processor|blender|strainer|colander|thermometer|oven|burner|grate|press|shaker|peeler|grater|mill)\b",
@@ -317,7 +323,7 @@ public static partial class StepIngredientEnricher
 
         var stepSegments = steps.Select(step => ParseToMutable(step.Instruction)).ToList();
 
-        // Pass 1A: Link unindexed StepIngredientTokens to matching ingredient rows.
+        // Pass 1A: Link unindexed StepIngredientTokens and revalidate ambiguous/mismatched indices.
         for (var s = 0; s < steps.Count; s++)
         {
             var segs = stepSegments[s];
@@ -329,21 +335,24 @@ public static partial class StepIngredientEnricher
                     continue;
                 }
 
-                if (
-                    ingTok.IngredientIndex.HasValue
-                    && ingTok.IngredientIndex.Value >= 0
-                    && ingTok.IngredientIndex.Value < ingredients.Count
-                )
-                {
-                    continue;
-                }
+                var prevText = i > 0 && !segs[i - 1].IsToken ? segs[i - 1].Text : string.Empty;
+                var nextText =
+                    i + 1 < segs.Count && !segs[i + 1].IsToken ? segs[i + 1].Text : string.Empty;
 
-                var matchedIdx = MatchIngredientIndex(ingTok.Ingredient, section, ingredients);
-                if (matchedIdx.HasValue)
+                var resolvedIdx = RevalidateOrMatchIngredientIndex(
+                    ingTok,
+                    prevText,
+                    nextText,
+                    section,
+                    ingredients
+                );
+                if (resolvedIdx != ingTok.IngredientIndex)
                 {
-                    segs[i].Token = ingTok with { IngredientIndex = matchedIdx.Value };
+                    segs[i].Token = ingTok with { IngredientIndex = resolvedIdx };
                 }
             }
+
+            CollapseParentheticalEquivalentTokens(segs);
         }
 
         // Pass 1B: Link untokenized plain-text mentions for ingredients that have 0 token links.
@@ -413,52 +422,312 @@ public static partial class StepIngredientEnricher
         return sb.ToString();
     }
 
-    private static int? MatchIngredientIndex(
-        string tokenName,
+    private static int? RevalidateOrMatchIngredientIndex(
+        StepIngredientToken tok,
+        string prevText,
+        string nextText,
         string? stepSectionName,
         IReadOnlyList<IngestionDraftIngredientDto> ingredients
     )
     {
-        var cleanFull = NormalizePhrase(tokenName);
+        var cleanFull = NormalizePhrase(tok.Ingredient);
         var cleanStripped = StripPrepAdjectives(cleanFull);
         var tokenHead = ExtractHeadNoun(cleanStripped);
         if (string.IsNullOrWhiteSpace(cleanFull))
         {
-            return null;
+            return tok.IngredientIndex is >= 0 and var cur && cur < ingredients.Count ? cur : null;
         }
 
-        var normalizedSection = stepSectionName?.Trim() ?? string.Empty;
-        var bestIdx = -1;
-        var bestScore = 0;
-        var tieCount = 0;
+        var hasValidExisting =
+            tok.IngredientIndex.HasValue
+            && tok.IngredientIndex.Value >= 0
+            && tok.IngredientIndex.Value < ingredients.Count;
 
+        if (hasValidExisting)
+        {
+            var curIdx = tok.IngredientIndex!.Value;
+            var curIng = ingredients[curIdx];
+            var curLexical = ScoreIngredientMatch(
+                cleanFull,
+                cleanStripped,
+                tokenHead,
+                curIng,
+                stepSection: string.Empty
+            );
+
+            // Reject impossible qualifier mismatches (e.g. 4 qt boiling water bound to 0.5 cup ice water).
+            if (IsQualifierMismatchForExisting(cleanFull, tok, curIng, prevText, nextText))
+            {
+                return MatchBestDuplicateCandidate(
+                    tok,
+                    cleanFull,
+                    cleanStripped,
+                    tokenHead,
+                    stepSectionName,
+                    ingredients,
+                    preferredTieIndex: null,
+                    excludedIndex: curIdx
+                );
+            }
+
+            if (curLexical == 0 && !curIng.IsRecipeReference)
+            {
+                return MatchBestDuplicateCandidate(
+                    tok,
+                    cleanFull,
+                    cleanStripped,
+                    tokenHead,
+                    stepSectionName,
+                    ingredients,
+                    preferredTieIndex: null,
+                    excludedIndex: curIdx
+                );
+            }
+
+            return MatchBestDuplicateCandidate(
+                    tok,
+                    cleanFull,
+                    cleanStripped,
+                    tokenHead,
+                    stepSectionName,
+                    ingredients,
+                    preferredTieIndex: curIdx,
+                    excludedIndex: null
+                ) ?? curIdx;
+        }
+
+        return MatchBestDuplicateCandidate(
+            tok,
+            cleanFull,
+            cleanStripped,
+            tokenHead,
+            stepSectionName,
+            ingredients,
+            preferredTieIndex: null,
+            excludedIndex: null
+        );
+    }
+
+    private static bool IsQualifierMismatchForExisting(
+        string tokenCleanFull,
+        StepIngredientToken tok,
+        IngestionDraftIngredientDto ing,
+        string prevText,
+        string nextText
+    )
+    {
+        var ingNorm = NormalizePhrase(ing.DisplayName);
+        if (
+            !ingNorm.StartsWith("ice ", StringComparison.Ordinal)
+            || ContainsWholePhrase(tokenCleanFull, "ice")
+        )
+        {
+            return false;
+        }
+
+        var prevWin = prevText.Length > 45 ? prevText[^45..] : prevText;
+        var nextWin = nextText.Length > 45 ? nextText[..45] : nextText;
+        if (BoilingContextRegex().IsMatch(prevWin) || BoilingContextRegex().IsMatch(nextWin))
+        {
+            return true;
+        }
+
+        if (
+            tok.Amount.HasValue
+            && ing.Quantity.HasValue
+            && TrySumInTargetUnit([tok], ing.Unit, ing.CustomUnitName, out var convAmt)
+        )
+        {
+            var maxAllowed = ing.MaxQuantity ?? ing.Quantity.Value;
+            if (maxAllowed > 0m && convAmt > maxAllowed * 2m)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static int? MatchBestDuplicateCandidate(
+        StepIngredientToken tok,
+        string cleanFull,
+        string cleanStripped,
+        string tokenHead,
+        string? stepSectionName,
+        IReadOnlyList<IngestionDraftIngredientDto> ingredients,
+        int? preferredTieIndex,
+        int? excludedIndex
+    )
+    {
+        var normalizedSection = stepSectionName?.Trim() ?? string.Empty;
+        var hasStepSection = !string.IsNullOrEmpty(normalizedSection);
+
+        var candidates = new List<(int Index, int BaseScore, int TotalScore)>();
         for (var i = 0; i < ingredients.Count; i++)
         {
-            var score = ScoreIngredientMatch(
+            if (excludedIndex == i)
+            {
+                continue;
+            }
+
+            var baseScore = ScoreIngredientMatch(
                 cleanFull,
                 cleanStripped,
                 tokenHead,
                 ingredients[i],
-                normalizedSection
+                stepSection: string.Empty
             );
-            if (score > bestScore)
+            if (baseScore < 50)
             {
-                bestScore = score;
-                bestIdx = i;
-                tieCount = 1;
+                continue;
             }
-            else if (score > 0 && score == bestScore)
+
+            var total = baseScore;
+            var ingSection = ingredients[i].SectionName?.Trim() ?? string.Empty;
+
+            if (hasStepSection)
             {
-                tieCount++;
+                if (
+                    string.Equals(normalizedSection, ingSection, StringComparison.OrdinalIgnoreCase)
+                )
+                {
+                    total += 30;
+                }
+                else if (!string.IsNullOrEmpty(ingSection))
+                {
+                    total -= 25;
+                }
             }
+            else
+            {
+                total += string.IsNullOrEmpty(ingSection) ? 20 : -15;
+            }
+
+            if (tok.Amount.HasValue)
+            {
+                if (
+                    ingredients[i].Quantity.HasValue
+                    && TrySumInTargetUnit(
+                        [tok],
+                        ingredients[i].Unit,
+                        ingredients[i].CustomUnitName,
+                        out var convAmt
+                    )
+                )
+                {
+                    var listedMax = ingredients[i].MaxQuantity ?? ingredients[i].Quantity!.Value;
+                    if (Math.Abs(convAmt - ingredients[i].Quantity!.Value) <= 0.01m)
+                    {
+                        total += 25;
+                    }
+                    else if (listedMax > 0m && convAmt <= listedMax * 1.05m)
+                    {
+                        total += 12;
+                    }
+                    else if (listedMax > 0m && convAmt > listedMax * 2.0m)
+                    {
+                        total -= 35;
+                    }
+                }
+                else if (!ingredients[i].Quantity.HasValue)
+                {
+                    total += 8;
+                }
+            }
+
+            candidates.Add((i, baseScore, total));
         }
 
-        if (bestScore < 50 || tieCount > 1)
+        if (candidates.Count == 0)
         {
             return null;
         }
 
-        return bestIdx;
+        if (candidates.Count == 1)
+        {
+            return candidates[0].Index;
+        }
+
+        var maxTotal = candidates.Max(c => c.TotalScore);
+        var topMatches = candidates.Where(c => c.TotalScore == maxTotal).ToList();
+        if (topMatches.Count == 1)
+        {
+            return topMatches[0].Index;
+        }
+
+        if (preferredTieIndex.HasValue && topMatches.Any(c => c.Index == preferredTieIndex.Value))
+        {
+            return preferredTieIndex.Value;
+        }
+
+        // Only return ambiguous multi-match if resolving an existing index tie, not guessing unindexed ties.
+        return null;
+    }
+
+    private static void CollapseParentheticalEquivalentTokens(List<MutableSegment> segments)
+    {
+        for (var i = 0; i <= segments.Count - 4; i++)
+        {
+            if (
+                segments[i].Token is not StepIngredientToken tokA
+                || segments[i + 1].IsToken
+                || !string.Equals(segments[i + 1].Text.Trim(), "(", StringComparison.Ordinal)
+                || segments[i + 2].Token is not StepIngredientToken tokB
+                || segments[i + 3].IsToken
+            )
+            {
+                continue;
+            }
+
+            if (!tokA.Amount.HasValue || !tokB.Amount.HasValue)
+            {
+                continue;
+            }
+
+            var sameTarget =
+                (tokA.IngredientIndex.HasValue && tokA.IngredientIndex == tokB.IngredientIndex)
+                || string.Equals(
+                    NormalizePhrase(tokA.Ingredient),
+                    NormalizePhrase(tokB.Ingredient),
+                    StringComparison.Ordinal
+                );
+            if (!sameTarget)
+            {
+                continue;
+            }
+
+            var after = segments[i + 3].Text;
+            var closeMatch = Regex.Match(after, @"^\s*\)");
+            if (!closeMatch.Success)
+            {
+                continue;
+            }
+
+            var remainder = after[closeMatch.Length..];
+            foreach (
+                var dupName in new[] { tokA.Ingredient.Trim(), tokB.Ingredient.Trim() }
+                    .Where(n => !string.IsNullOrEmpty(n))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+            )
+            {
+                var dupRegex = $@"^\s*{Regex.Escape(dupName)}\b";
+                var dupMatch = Regex.Match(
+                    remainder,
+                    dupRegex,
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+                );
+                if (dupMatch.Success)
+                {
+                    remainder = remainder[dupMatch.Length..];
+                    break;
+                }
+            }
+
+            segments[i + 3].Text = remainder;
+            segments.RemoveAt(i + 2);
+            segments.RemoveAt(i + 1);
+            CoalesceTextSegments(segments);
+        }
     }
 
     private static int ScoreIngredientMatch(

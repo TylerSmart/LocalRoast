@@ -391,7 +391,7 @@ public static class RecipeUnitAndSectionHelpers
         );
         normalized = Regex.Replace(
             normalized,
-            @"\s*\((?:optional\s*;\s*)?(?:see\s+)?(?:recipes?\s+follows?|(?:this|facing)\s+page(?:\s+and\s+(?:this|facing)\s+page)?|pages?\s+\d+)\)",
+            @"\s*\((?:[^()]*;\s*)?(?:see\s+)?(?:recipes?\s+follows?|(?:this|facing)\s+page(?:\s+and\s+(?:this|facing)\s+page)?|pages?\s+\d+)\)",
             "",
             RegexOptions.IgnoreCase,
             RegexTimeout

@@ -172,4 +172,21 @@ public sealed class RecipeMeasurementTests
     {
         Assert.AreEqual(expected, RecipeUnitAndSectionHelpers.FormatSectionDisplayName(rawSection));
     }
+
+    [TestMethod]
+    public void NormalizeRecipeReferenceTitle_StripsSectionAnnotatedPageReferences()
+    {
+        Assert.AreEqual(
+            "Free-Form Summer Fruit Tart",
+            RecipeUnitAndSectionHelpers.NormalizeRecipeReferenceTitle(
+                "Free-Form Summer Fruit Tart (Rustic Tart Dough; this page)"
+            )
+        );
+        Assert.AreEqual(
+            "Classic Tart",
+            RecipeUnitAndSectionHelpers.NormalizeRecipeReferenceTitle(
+                "Classic Tart (Quick Crust; facing page)"
+            )
+        );
+    }
 }

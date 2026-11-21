@@ -324,4 +324,143 @@ public sealed class StepIngredientEnricherTests
         StringAssert.Contains(plain, "Avoid tomato paste");
         StringAssert.Contains(plain, "Omit parsley garnish.");
     }
+
+    [TestMethod]
+    public void EnrichSteps_RevalidatesDuplicateSectionAndQuantityBindings_EliminatesFalseWarnings()
+    {
+        var ingredients = new List<IngestionDraftIngredientDto>
+        {
+            new(
+                SectionName: "Topping Preparation",
+                Quantity: 1m,
+                Unit: MeasurementUnit.Tbsp,
+                DisplayName: "extra-virgin olive oil"
+            ),
+            new(
+                SectionName: null,
+                Quantity: 5m,
+                Unit: MeasurementUnit.Tbsp,
+                DisplayName: "extra-virgin olive oil"
+            ),
+            new(
+                Quantity: 0.25m,
+                Unit: MeasurementUnit.Cup,
+                DisplayName: "table salt",
+                PreparationNote: "for brining"
+            ),
+            new(
+                Quantity: 0.5m,
+                Unit: MeasurementUnit.Tsp,
+                DisplayName: "table salt",
+                PreparationNote: "divided"
+            ),
+        };
+
+        var steps = new List<IngestionDraftStepDto>
+        {
+            new(
+                SectionName: "Topping Preparation",
+                // Stage 4 wrongly pointed to index 1 (5 tbsp unnamed) instead of index 0 (1 tbsp Topping Preparation)
+                Instruction: "Combine ||{\"ingredient\":\"extra-virgin olive oil\",\"amount\":1,\"unit\":\"tbsp\",\"ingredientIndex\":1}||."
+            ),
+            new(
+                SectionName: null,
+                // Stage 4 wrongly pointed 0.25 cup brining salt to index 3 (0.5 tsp divided) instead of index 2
+                Instruction: "Dissolve ||{\"ingredient\":\"salt\",\"amount\":0.25,\"unit\":\"cup\",\"ingredientIndex\":3}|| in water. Coat pan with ||{\"ingredient\":\"oil\",\"amount\":1,\"unit\":\"tbsp\",\"ingredientIndex\":1}|| and season with ||{\"ingredient\":\"salt\",\"amount\":0.5,\"unit\":\"tsp\",\"ingredientIndex\":3}||."
+            ),
+        };
+
+        var warnings = new List<string>();
+        var enriched = StepIngredientEnricher.EnrichSteps(ingredients, steps, warnings);
+
+        Assert.HasCount(0, warnings);
+        var s1Tok = StepInstructionParser
+            .ExtractTokens(enriched[0].Instruction)
+            .OfType<StepIngredientToken>()
+            .Single();
+        Assert.AreEqual(0, s1Tok.IngredientIndex);
+
+        var s2Toks = StepInstructionParser
+            .ExtractTokens(enriched[1].Instruction)
+            .OfType<StepIngredientToken>()
+            .ToList();
+        Assert.AreEqual(2, s2Toks[0].IngredientIndex);
+        Assert.AreEqual(1, s2Toks[1].IngredientIndex);
+        Assert.AreEqual(3, s2Toks[2].IngredientIndex);
+    }
+
+    [TestMethod]
+    public void EnrichSteps_UnlinksDrippingsFatFromOilAndBoilingWaterFromIceWater()
+    {
+        var ingredients = new List<IngestionDraftIngredientDto>
+        {
+            new(Quantity: 2.5m, Unit: MeasurementUnit.Tbsp, DisplayName: "vegetable oil"),
+            new(
+                SectionName: "Crust",
+                Quantity: 0.5m,
+                Unit: MeasurementUnit.Cup,
+                DisplayName: "ice water"
+            ),
+        };
+
+        var steps = new List<IngestionDraftStepDto>
+        {
+            new(
+                SectionName: null,
+                Instruction: "Use ||{\"ingredient\":\"oil\",\"amount\":2.5,\"unit\":\"tbsp\",\"ingredientIndex\":0}||. Reserve ||{\"ingredient\":\"fat\",\"amount\":3,\"unit\":\"tbsp\",\"ingredientIndex\":0}||."
+            ),
+            new(
+                SectionName: "Filling",
+                Instruction: "Bring ||{\"ingredient\":\"water\",\"amount\":4,\"unit\":\"qt\",\"ingredientIndex\":1}|| to boil."
+            ),
+        };
+
+        var warnings = new List<string>();
+        var enriched = StepIngredientEnricher.EnrichSteps(ingredients, steps, warnings);
+
+        Assert.HasCount(0, warnings);
+        var s1Toks = StepInstructionParser
+            .ExtractTokens(enriched[0].Instruction)
+            .OfType<StepIngredientToken>()
+            .ToList();
+        Assert.AreEqual(0, s1Toks[0].IngredientIndex);
+        Assert.IsNull(s1Toks[1].IngredientIndex);
+
+        var s2Tok = StepInstructionParser
+            .ExtractTokens(enriched[1].Instruction)
+            .OfType<StepIngredientToken>()
+            .Single();
+        Assert.IsNull(s2Tok.IngredientIndex);
+    }
+
+    [TestMethod]
+    public void EnrichSteps_CollapsesParentheticalDualEquivalentAndOmittingVerb()
+    {
+        var ingredients = new List<IngestionDraftIngredientDto>
+        {
+            new(Quantity: 6m, Unit: MeasurementUnit.Oz, DisplayName: "shredded mozzarella"),
+            new(Quantity: 1m, Unit: MeasurementUnit.Tsp, DisplayName: "kosher salt"),
+        };
+
+        var steps = new List<IngestionDraftStepDto>
+        {
+            new(
+                Instruction: "Follow master recipe, omitting kosher salt. Sprinkle with ||{\"ingredient\":\"shredded mozzarella\",\"amount\":6,\"unit\":\"oz\",\"ingredientIndex\":0}||(||{\"ingredient\":\"shredded mozzarella\",\"amount\":1.5,\"unit\":\"cup\",\"ingredientIndex\":0}||) shredded mozzarella."
+            ),
+        };
+
+        var enriched = StepIngredientEnricher.EnrichSteps(ingredients, steps);
+        var plain = StepInstructionParser.ToPlainText(enriched[0].Instruction);
+        Assert.AreEqual(
+            "Follow master recipe, omitting kosher salt. Sprinkle with 6 oz shredded mozzarella.",
+            plain
+        );
+
+        var tokens = StepInstructionParser
+            .ExtractTokens(enriched[0].Instruction)
+            .OfType<StepIngredientToken>()
+            .ToList();
+        Assert.HasCount(1, tokens);
+        Assert.AreEqual(0, tokens[0].IngredientIndex);
+    }
 }
