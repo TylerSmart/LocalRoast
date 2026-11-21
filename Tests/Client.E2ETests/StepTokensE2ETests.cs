@@ -8,7 +8,31 @@ public sealed class StepTokensE2ETests : E2ETestBase
 {
     private static readonly Regex TwoX = new(@"^\s*2x\s*$");
 
-    private async Task<string> SeedPancakesRecipeAsync(string title)
+    private async Task<string> CreateRecipeViaApiAsync(object payload)
+    {
+        var result = await Page.EvaluateAsync<string>(
+            @"async (payload) => {
+                const tokenKey = Object.keys(localStorage).find(k => k.endsWith('-token'));
+                const token = tokenKey ? localStorage.getItem(tokenKey) : null;
+                const res = await fetch('/api/recipes', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify(payload)
+                });
+                const text = await res.text();
+                if (!res.ok) return 'ERROR ' + res.status + ': ' + text;
+                return JSON.parse(text).id;
+            }",
+            payload
+        );
+        Assert.IsFalse(result.StartsWith("ERROR", StringComparison.Ordinal), result);
+        return result;
+    }
+
+    private Task<string> SeedPancakesRecipeAsync(string title)
     {
         var payload = new
         {
@@ -32,26 +56,7 @@ public sealed class StepTokensE2ETests : E2ETestBase
             },
         };
 
-        var result = await Page.EvaluateAsync<string>(
-            @"async (payload) => {
-                const tokenKey = Object.keys(localStorage).find(k => k.endsWith('-token'));
-                const token = tokenKey ? localStorage.getItem(tokenKey) : null;
-                const res = await fetch('/api/recipes', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${token}`
-                    },
-                    body: JSON.stringify(payload)
-                });
-                const text = await res.text();
-                if (!res.ok) return 'ERROR ' + res.status + ': ' + text;
-                return JSON.parse(text).id;
-            }",
-            payload
-        );
-        Assert.IsFalse(result.StartsWith("ERROR", StringComparison.Ordinal), result);
-        return result;
+        return CreateRecipeViaApiAsync(payload);
     }
 
     [TestMethod]
@@ -203,5 +208,230 @@ public sealed class StepTokensE2ETests : E2ETestBase
         var box = await chip.BoundingBoxAsync();
         Assert.IsNotNull(box);
         Assert.IsGreaterThanOrEqualTo(box.Height, 24);
+    }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task RecipeDetail_ContiguousSections_FixedRate_SubRecipeBatch_AndIngredientSync_WorkEndToEnd()
+    {
+        await Page.SetViewportSizeAsync(1280, 800);
+        await RegisterAndLoginAsync();
+
+        var suffix = Guid.NewGuid().ToString("N")[..6];
+        var subRecipeAId = await CreateRecipeViaApiAsync(
+            new
+            {
+                title = $"Herb Dressing {suffix}",
+                baseServings = 4,
+                yieldDisplay = "Makes 1 cup",
+                ingredients = new object[]
+                {
+                    new
+                    {
+                        displayName = "olive oil",
+                        quantity = 2,
+                        unit = "Tsp",
+                    },
+                },
+                steps = new object[] { new { instruction = "Whisk oil." } },
+            }
+        );
+
+        var subRecipeBId = await CreateRecipeViaApiAsync(
+            new
+            {
+                title = $"Braised Beef {suffix}",
+                baseServings = 4,
+                yieldDisplay = "Serves 4",
+                ingredients = new object[]
+                {
+                    new
+                    {
+                        displayName = "kosher salt",
+                        quantity = 2,
+                        unit = "Tsp",
+                    },
+                },
+                steps = new object[] { new { instruction = "Season beef." } },
+            }
+        );
+
+        var parentId = await CreateRecipeViaApiAsync(
+            new
+            {
+                title = $"Plated Beef Bowl {suffix}",
+                baseServings = 4,
+                ingredients = new object[]
+                {
+                    new
+                    {
+                        sectionName = (string?)null,
+                        displayName = "unsalted butter",
+                        quantity = 1,
+                        unit = "Tsp",
+                    },
+                    new
+                    {
+                        sectionName = "Sauce",
+                        displayName = $"Herb Dressing {suffix}",
+                        quantity = 0.5m,
+                        unit = "Cup",
+                        linkedRecipeId = subRecipeAId,
+                    },
+                    new
+                    {
+                        sectionName = (string?)null,
+                        displayName = $"Braised Beef {suffix}",
+                        quantity = 4,
+                        unit = "Custom",
+                        customUnitName = "servings",
+                        linkedRecipeId = subRecipeBId,
+                    },
+                },
+                steps = new object[]
+                {
+                    new
+                    {
+                        sectionName = (string?)null,
+                        instruction = "Add ||{\"type\":\"ingredient\",\"ingredient\":\"unsalted butter\",\"amount\":1,\"unit\":\"tsp\",\"ingredientIndex\":0}||, whisking ||{\"type\":\"fixed\",\"amount\":1,\"unit\":\"tbsp\",\"hyphenated\":false}|| at a time.",
+                    },
+                    new
+                    {
+                        sectionName = "Sauce",
+                        instruction = "Drizzle ||{\"type\":\"ingredient\",\"ingredient\":\"dressing\",\"ingredientIndex\":1}|| over top.",
+                    },
+                    new
+                    {
+                        sectionName = (string?)null,
+                        instruction = "Serve over ||{\"type\":\"ingredient\",\"ingredient\":\"beef\",\"ingredientIndex\":2}||.",
+                    },
+                },
+            }
+        );
+
+        await Page.GotoAsync($"{ServerUrl}/recipes/{parentId}");
+
+        // 1. Mixed contiguous [null, "Sauce", null] sections & continuation divider
+        var ingGroups = Page.Locator(".ingredient-section-group");
+        await Expect(ingGroups).ToHaveCountAsync(3);
+        await Expect(ingGroups.Nth(0).Locator(".group-subtitle")).ToHaveCountAsync(0);
+        await Expect(ingGroups.Nth(1).Locator(".group-subtitle")).ToHaveTextAsync("Sauce");
+        await Expect(ingGroups.Nth(2)).ToHaveClassAsync(new Regex("section-continuation-divider"));
+        await Expect(ingGroups.Nth(2).Locator(".group-subtitle")).ToHaveCountAsync(0);
+
+        var stepGroups = Page.Locator(".step-section-group");
+        await Expect(stepGroups).ToHaveCountAsync(3);
+        await Expect(stepGroups.Nth(1).Locator(".group-subtitle")).ToHaveTextAsync("Sauce");
+        await Expect(stepGroups.Nth(2)).ToHaveClassAsync(new Regex("section-continuation-divider"));
+
+        // 2. ingredientIndex -> ingredientId binding & interactive hover sync
+        var butterRow = Page.Locator("li.ingredient-row").First;
+        var butterRowId = await butterRow.GetAttributeAsync("data-ingredient-id");
+        Assert.IsFalse(string.IsNullOrWhiteSpace(butterRowId));
+
+        var step1Linked = stepGroups
+            .Nth(0)
+            .Locator(".step-instruction-text .inline-amount.is-linked");
+        await Expect(step1Linked).ToHaveTextAsync("1 tsp unsalted butter");
+        await Expect(step1Linked).ToHaveAttributeAsync("data-ingredient-id", butterRowId);
+
+        await step1Linked.HoverAsync();
+        await Expect(Page.Locator($"li.ingredient-row[data-ingredient-id='{butterRowId}']"))
+            .ToHaveClassAsync(new Regex("is-highlighted"));
+
+        var dressingRowId = await Page.Locator("li.ingredient-row")
+            .Nth(1)
+            .GetAttributeAsync("data-ingredient-id");
+        Assert.IsFalse(string.IsNullOrWhiteSpace(dressingRowId));
+
+        var step2Linked = stepGroups
+            .Nth(1)
+            .Locator(
+                ".step-instruction-text .inline-amount.is-linked.is-subrecipe.is-unquantified"
+            );
+        await Expect(step2Linked).ToHaveTextAsync("dressing");
+        await Expect(step2Linked).ToHaveAttributeAsync("data-ingredient-id", dressingRowId);
+
+        // 3. Fixed "1 tbsp at a time" non-scaling vs ingredient scaling
+        var twoXChip = Page.Locator(".mult-chip", new() { HasTextRegex = TwoX });
+        await twoXChip.ClickAsync();
+        await Expect(twoXChip).ToHaveClassAsync(new Regex("active-mult"));
+
+        await Expect(step1Linked).ToHaveTextAsync("2 tsp unsalted butter");
+        await Expect(step1Linked).ToHaveClassAsync(new Regex("is-scaled"));
+        var fixedToken = stepGroups.Nth(0).Locator(".step-instruction-text .fixed-amount.is-fixed");
+        await Expect(fixedToken).ToHaveTextAsync("1 tbsp");
+
+        var oneXChip = Page.Locator(".mult-chip", new() { HasTextRegex = new(@"^\s*1x\s*$") });
+        await oneXChip.ClickAsync();
+        await Expect(oneXChip).ToHaveClassAsync(new Regex("active-mult"));
+
+        // 4. Sub-recipe yield batch multiplier scaling (0.5x cup vs 4 servings = 1x batch)
+        var subPanels = Page.Locator(".sub-recipe-inline-panel");
+        await Expect(subPanels).ToHaveCountAsync(2);
+
+        var herbPanel = subPanels.Nth(0);
+        await Expect(herbPanel.Locator(".sub-batch-pill")).ToHaveTextAsync("(0.5x batch)");
+        await herbPanel.Locator("mat-expansion-panel-header").ClickAsync();
+        await Expect(herbPanel.Locator(".sub-ingredients-list"))
+            .ToContainTextAsync("1 tsp olive oil");
+
+        var beefPanel = subPanels.Nth(1);
+        await Expect(beefPanel.Locator(".sub-batch-pill")).ToHaveCountAsync(0);
+        await beefPanel.Locator("mat-expansion-panel-header").ClickAsync();
+        await Expect(beefPanel.Locator(".sub-ingredients-list"))
+            .ToContainTextAsync("2 tsp kosher salt");
+    }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task CookMode_MobileViewport_360px_ClickingLinkedIngredientOpensDrawerAndHighlights()
+    {
+        await Page.SetViewportSizeAsync(360, 800);
+        await RegisterAndLoginAsync();
+
+        var suffix = Guid.NewGuid().ToString("N")[..6];
+        var recipeId = await CreateRecipeViaApiAsync(
+            new
+            {
+                title = $"Mobile Sync {suffix}",
+                baseServings = 4,
+                ingredients = new object[]
+                {
+                    new
+                    {
+                        displayName = "unsalted butter",
+                        quantity = 1,
+                        unit = "Tsp",
+                    },
+                },
+                steps = new object[]
+                {
+                    new
+                    {
+                        instruction = "Melt ||{\"type\":\"ingredient\",\"ingredient\":\"unsalted butter\",\"amount\":1,\"unit\":\"tsp\",\"ingredientIndex\":0}|| gently.",
+                    },
+                },
+            }
+        );
+
+        await Page.GotoAsync($"{ServerUrl}/recipes/{recipeId}/cook");
+        await Expect(Page.Locator(".mobile-ingredients-drawer")).ToHaveCountAsync(0);
+
+        var linkedChip = Page.Locator(".instruction-text .inline-amount.is-linked");
+        await Expect(linkedChip).ToBeVisibleAsync();
+        await linkedChip.ClickAsync();
+
+        var drawer = Page.Locator(".mobile-ingredients-drawer");
+        await Expect(drawer).ToBeVisibleAsync();
+
+        var highlighted = drawer.Locator(".drawer-body li.ingredient-item.is-highlighted");
+        await Expect(highlighted).ToHaveCountAsync(1);
+        await Expect(highlighted).ToContainTextAsync("unsalted butter");
+
+        var pageOverflow = await Page.EvaluateAsync<bool>(
+            "() => document.documentElement.scrollWidth > document.documentElement.clientWidth"
+        );
+        Assert.IsFalse(pageOverflow, "Cook Mode at 360px must not overflow horizontally.");
     }
 }

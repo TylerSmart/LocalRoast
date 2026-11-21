@@ -550,7 +550,7 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         await Expect(instructions.First)
             .ToHaveAttributeAsync(
                 "data-serialized-value",
-                "Combine ||{\"ingredient\":\"Starter Flour\",\"amount\":1,\"unit\":\"cup\",\"type\":\"Ingredient\"}|| with water."
+                "Combine ||{\"ingredient\":\"Starter Flour\",\"amount\":1,\"unit\":\"cup\",\"ingredientIndex\":0,\"type\":\"Ingredient\"}|| with water."
             );
         var taggedChips = Page.Locator(
             "app-step-instruction-editor .inline-step-chip.is-ingredient"

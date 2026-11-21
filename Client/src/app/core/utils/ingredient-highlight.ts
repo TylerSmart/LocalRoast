@@ -40,6 +40,10 @@ export function createIngredientHighlightController(
   return {
     highlightedIngredientId,
     highlight(id: string | null): void {
+      // Preserve an active click-scroll pulse against incidental mouseleave (e.g., mobile backdrop overlay).
+      if (id === null && pulseTimer !== null) {
+        return;
+      }
       if (pulseTimer !== null) {
         clearTimeout(pulseTimer);
         pulseTimer = null;
