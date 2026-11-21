@@ -1,4 +1,5 @@
 import { MeasurementUnit } from '../models/recipe.models';
+import { stripOuterParentheses } from './culinary-math';
 
 export interface ParsedIngredientLine {
   sectionName: string | null;
@@ -213,7 +214,7 @@ export function parseIngredientLines(rawBlock: string): ParsedIngredientLine[] {
     const commaIndex = work.indexOf(',');
     if (commaIndex > 0) {
       displayName = work.slice(0, commaIndex).trim();
-      preparationNote = work.slice(commaIndex + 1).trim() || null;
+      preparationNote = stripOuterParentheses(work.slice(commaIndex + 1));
     }
 
     if (!displayName) {

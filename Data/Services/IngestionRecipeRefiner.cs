@@ -586,21 +586,18 @@ public sealed partial class IngestionRecipeRefiner(
             refinedDraft.Ingredients
         );
 
-        var confidence = Math.Clamp(
-            0.96m
-                - (distinctValidationIssues.Count * 0.15m)
-                - (filteredQualityWarnings.Count * 0.10m)
-                - (measurementWarnings.Count * 0.05m),
-            0.10m,
-            0.99m
-        );
-
-        refinedDraft = refinedDraft with
+        var draftWithDiagnostics = refinedDraft with
         {
             QualityWarnings = filteredQualityWarnings.Count > 0 ? filteredQualityWarnings : null,
             ValidationIssues = distinctValidationIssues.Count > 0 ? distinctValidationIssues : null,
-            ConfidenceScore = confidence,
         };
+
+        var confidence = IngestionConfidenceScorer.Compute(
+            draftWithDiagnostics,
+            draftWithDiagnostics.PipelineRepairCount
+        );
+
+        refinedDraft = draftWithDiagnostics with { ConfidenceScore = confidence };
 
         var notes = (response.RefinementNotes ?? [])
             .Where(n => !string.IsNullOrWhiteSpace(n))
@@ -703,7 +700,7 @@ public sealed partial class IngestionRecipeRefiner(
         {
             updated = updated with
             {
-                PreparationNote = IngestionMetadataAndTagHelper.CleanOptionalText(
+                PreparationNote = RecipeUnitAndSectionHelpers.CleanPreparationNote(
                     patch.PrepNote,
                     200
                 ),
@@ -1020,7 +1017,7 @@ public sealed partial class IngestionRecipeRefiner(
         {
             updated = updated with
             {
-                PreparationNote = IngestionMetadataAndTagHelper.CleanOptionalText(
+                PreparationNote = RecipeUnitAndSectionHelpers.CleanPreparationNote(
                     patch.PrepNote,
                     300
                 ),
@@ -1205,17 +1202,20 @@ public sealed partial class IngestionRecipeRefiner(
                 case StepIngredientToken ing:
                 {
                     var matchedIdx = FindMatchingIngredientIndex(ing.Ingredient, ingredients);
-                    arr.Add(
-                        new JsonObject
-                        {
-                            ["type"] = "ingredient",
-                            ["ingredientIndex"] = matchedIdx,
-                            ["name"] = ing.Ingredient,
-                            ["quantity"] = ing.Amount,
-                            ["maxQuantity"] = ing.MaxAmount,
-                            ["unit"] = FormatMeasurementUnitString(ing.Unit, ing.CustomUnitName),
-                        }
-                    );
+                    var ingObj = new JsonObject
+                    {
+                        ["type"] = "ingredient",
+                        ["ingredientIndex"] = matchedIdx,
+                        ["name"] = ing.Ingredient,
+                        ["quantity"] = ing.Amount,
+                        ["maxQuantity"] = ing.MaxAmount,
+                        ["unit"] = FormatMeasurementUnitString(ing.Unit, ing.CustomUnitName),
+                    };
+                    if (ing.Fixed)
+                    {
+                        ingObj["fixed"] = true;
+                    }
+                    arr.Add(ingObj);
                     break;
                 }
                 case StepMixtureToken mix:

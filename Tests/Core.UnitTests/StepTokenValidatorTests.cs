@@ -1610,4 +1610,127 @@ public sealed class StepTokenValidatorTests
         Assert.AreEqual("defatted juices", mixtures[0].Name);
         Assert.AreEqual("sauce", mixtures[1].Name);
     }
+
+    [TestMethod]
+    public void BuildAndValidateStep_HealsFalsePositiveFixedWaterAndFat_WhilePreservingVesselsRatesAndCheckYields()
+    {
+        // False-positive fixed on brine water ("2 qt cold water") and pan drippings ("3 tbsp fat")
+        var stepRes = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 1,
+            sectionName: null,
+            originalInstruction: "Dissolve 1/4 cup salt in 2 quarts cold water. Reserve 3 tablespoons fat. Add 1 tablespoon at a time in 12-cup Bundt pan (you should have 5 to 6 cups).",
+            rawTokensJson: new JsonArray
+            {
+                "Dissolve ",
+                new JsonObject
+                {
+                    ["type"] = "ingredient",
+                    ["ingredientIndex"] = 0,
+                    ["name"] = "salt",
+                    ["quantity"] = 0.25m,
+                    ["unit"] = "cup",
+                },
+                " in ",
+                new JsonObject
+                {
+                    ["type"] = "fixed",
+                    ["amount"] = 2m,
+                    ["unit"] = "quart",
+                    ["hyphenated"] = false,
+                },
+                " cold water. Reserve ",
+                new JsonObject
+                {
+                    ["type"] = "fixed",
+                    ["amount"] = 3m,
+                    ["unit"] = "tablespoon",
+                    ["hyphenated"] = false,
+                },
+                " fat. Add ",
+                new JsonObject
+                {
+                    ["type"] = "fixed",
+                    ["amount"] = 1m,
+                    ["unit"] = "tablespoon",
+                    ["hyphenated"] = false,
+                },
+                " at a time in ",
+                new JsonObject
+                {
+                    ["type"] = "fixed",
+                    ["name"] = "Bundt pan",
+                    ["amount"] = 12m,
+                    ["unit"] = "cup",
+                    ["hyphenated"] = true,
+                },
+                " (you should have ",
+                new JsonObject
+                {
+                    ["type"] = "fixed",
+                    ["amount"] = 5m,
+                    ["maxAmount"] = 6m,
+                    ["unit"] = "cup",
+                    ["hyphenated"] = false,
+                },
+                ").",
+            },
+            ingredientCount: 1
+        );
+
+        Assert.IsEmpty(stepRes.ValidationWarnings, string.Join(" | ", stepRes.ValidationWarnings));
+
+        var tokens = StepInstructionParser.ExtractTokens(stepRes.CompiledInstruction);
+        var ingredients = tokens.OfType<StepIngredientToken>().ToList();
+        Assert.HasCount(2, ingredients);
+        Assert.AreEqual("salt", ingredients[0].Ingredient);
+        Assert.AreEqual("cold water", ingredients[1].Ingredient);
+        Assert.AreEqual(2m, ingredients[1].Amount);
+        Assert.AreEqual(MeasurementUnit.Qt, ingredients[1].Unit);
+        Assert.IsNull(ingredients[1].IngredientIndex);
+
+        var fatMix = tokens.OfType<StepMixtureToken>().Single();
+        Assert.AreEqual("fat", fatMix.Name);
+        Assert.AreEqual(3m, fatMix.Amount);
+        Assert.AreEqual(MeasurementUnit.Tbsp, fatMix.Unit);
+
+        var keptFixed = tokens.OfType<StepFixedToken>().ToList();
+        Assert.HasCount(3, keptFixed);
+        Assert.AreEqual(1m, keptFixed[0].Amount);
+        Assert.AreEqual("Bundt pan", keptFixed[1].Name);
+        Assert.AreEqual(5m, keptFixed[2].Amount);
+        Assert.AreEqual(6m, keptFixed[2].MaxAmount);
+    }
+
+    [TestMethod]
+    public void BuildAndValidateStep_PreservesFixedFlagOnStepIngredientToken()
+    {
+        var res = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 1,
+            sectionName: null,
+            originalInstruction: "Spread 1 tablespoon butter on each roll.",
+            rawTokensJson: new JsonArray
+            {
+                "Spread ",
+                new JsonObject
+                {
+                    ["type"] = "ingredient",
+                    ["ingredientIndex"] = 0,
+                    ["name"] = "butter",
+                    ["quantity"] = 1m,
+                    ["unit"] = "tablespoon",
+                    ["fixed"] = true,
+                },
+                " on each roll.",
+            },
+            ingredientCount: 1
+        );
+
+        Assert.IsEmpty(res.ValidationWarnings, string.Join(" | ", res.ValidationWarnings));
+        var tok = StepInstructionParser
+            .ExtractTokens(res.CompiledInstruction)
+            .OfType<StepIngredientToken>()
+            .Single();
+        Assert.IsTrue(tok.Fixed);
+        StringAssert.Contains(res.CompiledInstruction, "\"fixed\":true");
+    }
 }

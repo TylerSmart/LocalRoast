@@ -28,6 +28,7 @@ export interface InstructionSegment {
     scaled: boolean;
     linkedRecipeId?: string | null;
     isUnquantified?: boolean;
+    isFixed?: boolean;
   };
   mention?: {
     ingredientId: string;
@@ -144,16 +145,21 @@ export function buildInstructionSegments(
       const displayText = formatTokenDisplay(ing, factor, system, matched);
       const noteText = ing.notes ? `Note: ${ing.notes}` : null;
       const isUnquantified = ing.amount == null || Number.isNaN(ing.amount);
-      const isScaled = (factor !== 1 || system !== 'Original') && !isUnquantified;
+      const isFixed = Boolean(ing.fixed);
+      const isScaled = isFixed
+        ? system !== 'Original' && !isUnquantified
+        : (factor !== 1 || system !== 'Original') && !isUnquantified;
+      const tooltipBase = noteText ?? ing.ingredient;
       segments.push({
         text: displayText,
         amount: {
           kind: 'Ingredient',
           ingredientId: matchedId,
-          ingredientName: noteText ?? ing.ingredient,
+          ingredientName: isFixed ? `${tooltipBase} (fixed per item)` : tooltipBase,
           scaled: isScaled,
           linkedRecipeId,
           isUnquantified,
+          isFixed,
         },
       });
     }

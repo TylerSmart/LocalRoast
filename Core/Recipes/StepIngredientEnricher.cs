@@ -234,10 +234,16 @@ public static partial class StepIngredientEnricher
     private static partial Regex AdHocOrGarnishRegex();
 
     [GeneratedRegex(
-        @"\b(?:each|apiece|per\s+(?:serving|person|piece|slice|toast|portion|plate|dish|cake|muffin|cookie|taco|bowl))\b",
+        @"\b(?:each|apiece|per\s+(?:serving|person|piece|slice|toast|portion|plate|dish|cake|muffin|cookie|taco|bowl|roll|bun|burger|sandwich|wrap|tortilla|pita|skewer|cutlet|fillet|steak|chop|breast|thigh|half|halves|egg|tart|biscuit|cut))\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex DistributiveContextRegex();
+
+    [GeneratedRegex(
+        @"^\s*(?:at\s+a\s+time|in\s+\S+\s+increments?|increments?)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex IncrementalRateFollowingRegex();
 
     [GeneratedRegex(@"(?:^|[.!?]\s+)The\s+$", RegexOptions.CultureInvariant)]
     private static partial Regex SentenceInitialTheRegex();
@@ -350,9 +356,30 @@ public static partial class StepIngredientEnricher
                     section,
                     ingredients
                 );
-                if (resolvedIdx != ingTok.IngredientIndex)
+                var updatedTok =
+                    resolvedIdx != ingTok.IngredientIndex
+                        ? ingTok with
+                        {
+                            IngredientIndex = resolvedIdx,
+                        }
+                        : ingTok;
+
+                if (
+                    updatedTok.Amount.HasValue
+                    && !updatedTok.Fixed
+                    && !resolvedIdx.HasValue
+                    && (
+                        HasDistributiveInClause(prevText, nextText)
+                        || IncrementalRateFollowingRegex().IsMatch(nextText)
+                    )
+                )
                 {
-                    segs[i].Token = ingTok with { IngredientIndex = resolvedIdx };
+                    updatedTok = updatedTok with { Fixed = true };
+                }
+
+                if (!Equals(updatedTok, ingTok))
+                {
+                    segs[i].Token = updatedTok;
                 }
             }
 
@@ -372,6 +399,10 @@ public static partial class StepIngredientEnricher
 
         // Pass 2 & 3: Classify contexts, inject measurements, resolve remainders, check over-use.
         EnrichOccurrencesAndWarn(ingredients, stepSegments, measurementWarnings);
+
+        // Pass 4: Unwrap remaining unquantified non-sub-recipe ingredient tokens back to plain text.
+        // Sub-recipe references (IsRecipeReference == true) keep their link even without a printed unit.
+        UnwrapUnquantifiedNonSubRecipeTokens(ingredients, stepSegments);
 
         var result = new List<IngestionDraftStepDto>(steps.Count);
         for (var s = 0; s < steps.Count; s++)
@@ -781,12 +812,7 @@ public static partial class StepIngredientEnricher
                         i + 1 < segs.Count && !segs[i + 1].IsToken
                             ? segs[i + 1].Text
                             : string.Empty;
-                    var prevWin = prevText.Length > 45 ? prevText[^45..] : prevText;
-                    var nextWin = nextText.Length > 45 ? nextText[..45] : nextText;
-                    if (
-                        DistributiveContextRegex().IsMatch(prevWin)
-                        || DistributiveContextRegex().IsMatch(nextWin)
-                    )
+                    if (HasDistributiveInClause(prevText, nextText))
                     {
                         continue;
                     }
@@ -1465,9 +1491,35 @@ public static partial class StepIngredientEnricher
                     || AdHocOrGarnishRegex().IsMatch(nextWindow)
                     || OmitPrecedingRegex().IsMatch(prevText);
 
-                var isDistributive =
-                    DistributiveContextRegex().IsMatch(prevWindow)
-                    || DistributiveContextRegex().IsMatch(nextWindow);
+                var isDistributive = HasDistributiveInClause(prevText, nextText);
+                var isIncrementalRate = IncrementalRateFollowingRegex().IsMatch(nextText);
+
+                if (
+                    tok.Amount.HasValue
+                    && !tok.Fixed
+                    && (
+                        isIncrementalRate
+                        || (
+                            isDistributive
+                            && (
+                                !ingredients[idx].Quantity.HasValue
+                                || (
+                                    TrySumInTargetUnit(
+                                        [tok],
+                                        ingredients[idx].Unit,
+                                        ingredients[idx].CustomUnitName,
+                                        out var stepInIngUnit
+                                    )
+                                    && stepInIngUnit < ingredients[idx].Quantity!.Value * 0.95m
+                                )
+                            )
+                        )
+                    )
+                )
+                {
+                    tok = tok with { Fixed = true };
+                    segs[i].Token = tok;
+                }
 
                 var fracMatch = LeadingFractionPhraseRegex().Match(prevText);
                 var fracVal = 0m;
@@ -1498,7 +1550,7 @@ public static partial class StepIngredientEnricher
                         PrevText: prevText,
                         NextText: nextText,
                         IsAdHoc: isAdHoc,
-                        IsDistributive: isDistributive,
+                        IsDistributive: isDistributive || isIncrementalRate || tok.Fixed,
                         IsFractional: fracVal > 0m,
                         FractionValue: fracVal,
                         IsRemaining: !tok.Amount.HasValue && remMatch.Success
@@ -1732,6 +1784,167 @@ public static partial class StepIngredientEnricher
             }
         }
     }
+
+    private static bool HasDistributiveInClause(string prevText, string nextText)
+    {
+        var lastBoundary = prevText.LastIndexOfAny(['.', '!', '?', ';']);
+        var prevClause = lastBoundary >= 0 ? prevText[(lastBoundary + 1)..] : prevText;
+        if (prevClause.Length > 60)
+        {
+            prevClause = prevClause[^60..];
+        }
+
+        var nextBoundary = nextText.IndexOfAny(['.', '!', '?', ';']);
+        var nextClause = nextBoundary >= 0 ? nextText[..nextBoundary] : nextText;
+        if (nextClause.Length > 60)
+        {
+            nextClause = nextClause[..60];
+        }
+
+        return DistributiveContextRegex().IsMatch(prevClause)
+            || DistributiveContextRegex().IsMatch(nextClause);
+    }
+
+    private static void UnwrapUnquantifiedNonSubRecipeTokens(
+        IReadOnlyList<IngestionDraftIngredientDto> ingredients,
+        List<List<MutableSegment>> stepSegments
+    )
+    {
+        foreach (var segs in stepSegments)
+        {
+            var changed = false;
+            foreach (var seg in segs)
+            {
+                if (seg.Token is not StepIngredientToken { Amount: null } unqTok)
+                {
+                    continue;
+                }
+
+                var isSubRecipe =
+                    unqTok.IngredientIndex is int idx
+                    && idx >= 0
+                    && idx < ingredients.Count
+                    && ingredients[idx].IsRecipeReference;
+                if (isSubRecipe)
+                {
+                    continue;
+                }
+
+                seg.Text = !string.IsNullOrWhiteSpace(unqTok.DisplayText)
+                    ? unqTok.DisplayText
+                    : unqTok.Ingredient;
+                seg.Token = null;
+                changed = true;
+            }
+
+            if (changed)
+            {
+                CoalesceTextSegments(segs);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Returns true if the ingredient's normalized aliases or head noun appear in plain step prose.
+    /// </summary>
+    public static bool IsIngredientReferencedInText(
+        IngestionDraftIngredientDto ingredient,
+        string normalizedPlainStepCorpus
+    )
+    {
+        if (string.IsNullOrWhiteSpace(normalizedPlainStepCorpus))
+        {
+            return false;
+        }
+
+        foreach (var candidate in EnumerateCandidateLabels(ingredient))
+        {
+            var norm = NormalizePhrase(candidate);
+            if (norm.Length < 3)
+            {
+                continue;
+            }
+
+            var formStripped = StripFormSuffixes(norm);
+            var prepStripped = StripPrepAdjectives(formStripped);
+
+            foreach (var probe in new[] { norm, formStripped, prepStripped })
+            {
+                if (probe.Length < 3 || StopAliases.Contains(probe))
+                {
+                    continue;
+                }
+
+                if (
+                    ContainsWholePhrase(normalizedPlainStepCorpus, probe)
+                    || ContainsWholePhrase(normalizedPlainStepCorpus, SingularizePhrase(probe))
+                )
+                {
+                    return true;
+                }
+            }
+
+            var head = ExtractHeadNoun(prepStripped);
+            if (
+                head.Length >= 3
+                && !StopAliases.Contains(head)
+                && ContainsWholePhrase(normalizedPlainStepCorpus, head)
+            )
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Returns true when the quantified ingredient is reasonably accounted for by linked step tokens.
+    /// </summary>
+    public static bool IsQuantifiedIngredientReconciled(
+        IngestionDraftIngredientDto ingredient,
+        IReadOnlyList<StepIngredientToken> linkedTokens
+    )
+    {
+        if (!ingredient.Quantity.HasValue || ingredient.Quantity.Value <= 0m)
+        {
+            return true;
+        }
+
+        if (linkedTokens.Count == 0)
+        {
+            return false;
+        }
+
+        if (linkedTokens.Any(t => t.Fixed && t.Amount is > 0m))
+        {
+            return true;
+        }
+
+        var quantified = linkedTokens.Where(t => t.Amount is > 0m).ToList();
+        if (quantified.Count == 0)
+        {
+            return false;
+        }
+
+        if (
+            !TrySumInTargetUnit(
+                quantified,
+                ingredient.Unit,
+                ingredient.CustomUnitName,
+                out var totalStepSum
+            )
+        )
+        {
+            return true;
+        }
+
+        var minAllowed = ingredient.Quantity.Value * 0.85m;
+        var maxAllowed = (ingredient.MaxQuantity ?? ingredient.Quantity.Value) * 1.08m;
+        return totalStepSum >= minAllowed && totalStepSum <= maxAllowed;
+    }
+
+    internal static string NormalizeTextForReferenceScan(string raw) => NormalizePhrase(raw);
 
     private static bool ShouldSkipSubRecipeQuantityInjection(IngestionDraftIngredientDto ing)
     {

@@ -31,6 +31,7 @@ import {
   formatIngredientReplacement,
   formatMinutes,
   scaleIngredient,
+  stripOuterParentheses,
 } from '../../../core/utils/culinary-math';
 import {
   NumberedInstructionStep,
@@ -91,6 +92,7 @@ export class RecipeDetailPreviewComponent {
   readonly targetServings = linkedSignal(() => this.recipe().baseServings || 4);
   readonly targetSystem = signal<UnitSystem>('Original');
   readonly formatReplacement = formatIngredientReplacement;
+  readonly cleanPrepNote = stripOuterParentheses;
   private readonly elementRef = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly destroyRef = inject(DestroyRef);
   private readonly ingredientHighlight = createIngredientHighlightController();

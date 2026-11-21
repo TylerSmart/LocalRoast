@@ -179,7 +179,9 @@ public record IngestionExtractedDraftDto(
     IReadOnlyList<string>? MeasurementWarnings = null,
     IReadOnlyList<string>? QualityWarnings = null,
     IReadOnlyList<string>? ValidationIssues = null,
-    [MaxLength(200)] string? RefinedModel = null
+    [MaxLength(200)] string? RefinedModel = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        int PipelineRepairCount = 0
 );
 
 public record EnqueueWebUrlIngestionRequest([Required] IReadOnlyList<string> Urls);

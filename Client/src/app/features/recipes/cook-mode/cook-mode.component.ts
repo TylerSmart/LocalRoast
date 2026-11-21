@@ -54,6 +54,7 @@ import {
   formatDuration,
   formatIngredientReplacement,
   scaleIngredient,
+  stripOuterParentheses,
 } from '../../../core/utils/culinary-math';
 import { renderScaledInstruction } from '../../../core/utils/step-instruction';
 import {
@@ -165,6 +166,7 @@ export class CookModeComponent implements OnInit, OnDestroy {
   protected readonly formatCountdown = formatCountdown;
   protected readonly formatDuration = formatDuration;
   protected readonly formatReplacement = formatIngredientReplacement;
+  protected readonly cleanPrepNote = stripOuterParentheses;
   protected readonly shouldShowTimerLabel = shouldShowTimerLabel;
 
   protected readonly scaleFactor = computed(() => {

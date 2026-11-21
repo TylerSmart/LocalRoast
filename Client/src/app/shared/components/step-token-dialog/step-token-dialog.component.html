@@ -67,23 +67,23 @@
         </div>
       }
 
-      <mat-form-field appearance="outline" class="full-width">
+      <mat-form-field appearance="outline" class="full-width" subscriptSizing="dynamic">
         <mat-label>Ingredient Name</mat-label>
         <input matInput formControlName="ingredient" placeholder="e.g. eggs, butter, flour" />
+        @if (selectedOption(); as sel) {
+          @if (formatIngredientOptionLabel(sel); as totalHint) {
+            <mat-hint>Recipe total: {{ totalHint }}</mat-hint>
+          }
+        }
         @if (ingredientForm.get('ingredient')?.hasError('required')) {
           <mat-error>Ingredient name is required</mat-error>
         }
       </mat-form-field>
 
-      <div class="form-row">
-        <mat-form-field appearance="outline" class="flex-1">
+      <div class="form-row form-row--three">
+        <mat-form-field appearance="outline" class="flex-1" subscriptSizing="dynamic">
           <mat-label>Amount</mat-label>
           <input matInput type="number" step="any" formControlName="amount" placeholder="e.g. 4" />
-          @if (selectedOption(); as sel) {
-            @if (formatIngredientOptionLabel(sel); as totalHint) {
-              <mat-hint>Recipe total: {{ totalHint }}</mat-hint>
-            }
-          }
         </mat-form-field>
 
         <mat-form-field appearance="outline" class="flex-1" subscriptSizing="dynamic">
@@ -97,7 +97,7 @@
           />
         </mat-form-field>
 
-        <mat-form-field appearance="outline" class="flex-1">
+        <mat-form-field appearance="outline" class="flex-1" subscriptSizing="dynamic">
           <mat-label>Unit</mat-label>
           <input
             matInput
@@ -113,20 +113,24 @@
         </mat-form-field>
       </div>
 
-      <mat-form-field appearance="outline" class="full-width">
+      <mat-checkbox formControlName="fixed" class="token-option-checkbox">
+        Fixed measurement (converts units, doesn't multiply with servings)
+      </mat-checkbox>
+
+      <mat-form-field appearance="outline" class="full-width" subscriptSizing="dynamic">
         <mat-label>Notes (optional)</mat-label>
         <input matInput formControlName="notes" placeholder="e.g. room temperature, softened" />
       </mat-form-field>
     </form>
   } @else if (mode() === 'mixture') {
     <form [formGroup]="mixtureForm" class="dialog-form">
-      <mat-form-field appearance="outline" class="full-width">
+      <mat-form-field appearance="outline" class="full-width" subscriptSizing="dynamic">
         <mat-label>Mixture / Sub-portion Name</mat-label>
         <input matInput formControlName="name" placeholder="e.g. garlic-lemon mixture, batter" />
         <mat-hint>Scales with servings and converts US ↔ Metric</mat-hint>
       </mat-form-field>
-      <div class="form-row">
-        <mat-form-field appearance="outline" class="flex-1">
+      <div class="form-row form-row--three">
+        <mat-form-field appearance="outline" class="flex-1" subscriptSizing="dynamic">
           <mat-label>Amount</mat-label>
           <input matInput type="number" step="any" formControlName="amount" placeholder="e.g. 2" />
         </mat-form-field>
@@ -140,7 +144,7 @@
             placeholder="optional"
           />
         </mat-form-field>
-        <mat-form-field appearance="outline" class="flex-1">
+        <mat-form-field appearance="outline" class="flex-1" subscriptSizing="dynamic">
           <mat-label>Unit</mat-label>
           <input
             matInput
@@ -158,13 +162,13 @@
     </form>
   } @else if (mode() === 'fixed') {
     <form [formGroup]="fixedForm" class="dialog-form">
-      <mat-form-field appearance="outline" class="full-width">
+      <mat-form-field appearance="outline" class="full-width" subscriptSizing="dynamic">
         <mat-label>Vessel / Item Name (optional)</mat-label>
         <input matInput formControlName="name" placeholder="e.g. Bundt pan, water, brine" />
         <mat-hint>Converts US ↔ Metric without multiplying by servings</mat-hint>
       </mat-form-field>
-      <div class="form-row">
-        <mat-form-field appearance="outline" class="flex-1">
+      <div class="form-row form-row--three">
+        <mat-form-field appearance="outline" class="flex-1" subscriptSizing="dynamic">
           <mat-label>Amount</mat-label>
           <input matInput type="number" step="any" formControlName="amount" placeholder="e.g. 2" />
         </mat-form-field>
@@ -178,7 +182,7 @@
             placeholder="optional"
           />
         </mat-form-field>
-        <mat-form-field appearance="outline" class="flex-1">
+        <mat-form-field appearance="outline" class="flex-1" subscriptSizing="dynamic">
           <mat-label>Unit</mat-label>
           <input
             matInput
@@ -199,8 +203,8 @@
     </form>
   } @else if (mode() === 'dimension') {
     <form [formGroup]="dimensionForm" class="dialog-form">
-      <div class="form-row">
-        <mat-form-field appearance="outline" class="flex-1">
+      <div class="form-row form-row--three">
+        <mat-form-field appearance="outline" class="flex-1" subscriptSizing="dynamic">
           <mat-label>Size / Distance</mat-label>
           <input matInput type="number" step="any" formControlName="value" placeholder="e.g. 12" />
         </mat-form-field>
@@ -214,7 +218,7 @@
             placeholder="optional"
           />
         </mat-form-field>
-        <mat-form-field appearance="outline" class="flex-1">
+        <mat-form-field appearance="outline" class="flex-1" subscriptSizing="dynamic">
           <mat-label>Unit</mat-label>
           <mat-select formControlName="unit">
             @for (u of dimensionUnits; track u.value) {
@@ -230,12 +234,12 @@
   } @else if (mode() === 'timer') {
     <form [formGroup]="timerForm" class="dialog-form">
       <div class="form-row">
-        <mat-form-field appearance="outline" class="flex-1">
+        <mat-form-field appearance="outline" class="flex-1" subscriptSizing="dynamic">
           <mat-label>Minutes</mat-label>
           <input matInput type="number" min="0" formControlName="minutes" placeholder="0" />
         </mat-form-field>
 
-        <mat-form-field appearance="outline" class="flex-1">
+        <mat-form-field appearance="outline" class="flex-1" subscriptSizing="dynamic">
           <mat-label>Seconds</mat-label>
           <input
             matInput
@@ -273,7 +277,7 @@
         </mat-form-field>
       </div>
 
-      <mat-form-field appearance="outline" class="full-width">
+      <mat-form-field appearance="outline" class="full-width" subscriptSizing="dynamic">
         <mat-label>Timer Label (optional)</mat-label>
         <input matInput formControlName="label" placeholder="e.g. Simmer sauce, Bake crust" />
       </mat-form-field>
@@ -281,7 +285,7 @@
   } @else {
     <form [formGroup]="temperatureForm" class="dialog-form">
       <div class="form-row">
-        <mat-form-field appearance="outline" class="flex-1">
+        <mat-form-field appearance="outline" class="flex-1" subscriptSizing="dynamic">
           <mat-label>Fahrenheit (°F)</mat-label>
           <input
             matInput
@@ -294,7 +298,7 @@
           />
         </mat-form-field>
 
-        <mat-form-field appearance="outline" class="flex-1">
+        <mat-form-field appearance="outline" class="flex-1" subscriptSizing="dynamic">
           <mat-label>Celsius (°C)</mat-label>
           <input
             matInput
@@ -308,7 +312,7 @@
         </mat-form-field>
       </div>
       <div class="form-row">
-        <mat-form-field appearance="outline" class="flex-1">
+        <mat-form-field appearance="outline" class="flex-1" subscriptSizing="dynamic">
           <mat-label>Max °F (optional)</mat-label>
           <input
             matInput
@@ -321,7 +325,7 @@
           />
         </mat-form-field>
 
-        <mat-form-field appearance="outline" class="flex-1">
+        <mat-form-field appearance="outline" class="flex-1" subscriptSizing="dynamic">
           <mat-label>Max °C (optional)</mat-label>
           <input
             matInput

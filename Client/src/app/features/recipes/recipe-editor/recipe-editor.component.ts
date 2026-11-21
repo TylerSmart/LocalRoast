@@ -46,6 +46,7 @@ import { MediaService } from '../../../core/services/media/media.service';
 import { RecipeService } from '../../../core/services/recipe/recipe.service';
 import { TaxonomyService } from '../../../core/services/taxonomy/taxonomy.service';
 import { parseIngredientLines } from '../../../core/utils/ingredient-line-parser';
+import { stripOuterParentheses } from '../../../core/utils/culinary-math';
 import { ingredientMeasurementValidator } from '../../../core/utils/recipe-measurement-forms';
 import {
   StepTokenOriginFlags,
@@ -1533,7 +1534,7 @@ export class RecipeEditorComponent implements OnInit {
           ? ing.unresolvedRecipeTitle?.trim() || ing.displayName.trim()
           : null,
       displayName: ing.displayName.trim(),
-      preparationNote: ing.preparationNote?.trim() || null,
+      preparationNote: stripOuterParentheses(ing.preparationNote),
       isOptional: !!ing.isOptional,
       originalRawText: ing.originalRawText ?? null,
       alternativeMeasurement: ing.alternativeMeasurement ?? null,
@@ -1556,7 +1557,7 @@ export class RecipeEditorComponent implements OnInit {
                 unit: r.unit || null,
                 customUnitName: r.unit === 'Custom' ? r.customUnitName?.trim() || null : null,
                 foodItemId: r.foodItemId || null,
-                preparationNote: r.preparationNote?.trim() || null,
+                preparationNote: stripOuterParentheses(r.preparationNote),
               }))
           : null,
     }));

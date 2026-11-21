@@ -1269,6 +1269,50 @@ export function formatDimensionToken(
   };
 }
 
+/**
+ * Trims and strips redundant outer matching parentheses from a preparation note
+ * (e.g., "(8-inch square)" or "((8-inch square))" -> "8-inch square") while keeping
+ * internal or leading-only parentheticals intact (e.g., "minced (about 1 tbsp)" or "(8-inch) square").
+ */
+export function stripOuterParentheses(value: string | null | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+
+  let s = value
+    .trim()
+    .replace(/^[,;]+\s*/, '')
+    .trim();
+  while (s.length >= 2 && s.startsWith('(') && s.endsWith(')')) {
+    let depth = 0;
+    let outerPairsAtEnd = true;
+    for (let i = 0; i < s.length; i++) {
+      const ch = s[i];
+      if (ch === '(') {
+        depth++;
+      } else if (ch === ')') {
+        depth--;
+        if (depth === 0 && i < s.length - 1) {
+          outerPairsAtEnd = false;
+          break;
+        }
+        if (depth < 0) {
+          outerPairsAtEnd = false;
+          break;
+        }
+      }
+    }
+
+    if (!outerPairsAtEnd || depth !== 0) {
+      break;
+    }
+
+    s = s.slice(1, -1).trim();
+  }
+
+  return s.length > 0 ? s : null;
+}
+
 export function formatIngredientReplacement(
   rep: Pick<
     RecipeIngredientReplacementDto | IngestionDraftReplacementDto,
@@ -1288,6 +1332,7 @@ export function formatIngredientReplacement(
           targetSystem,
         ).formattedMeasurement.trim()
       : '';
-  const prep = rep.preparationNote?.trim() ? ` (${rep.preparationNote.trim()})` : '';
+  const cleanedPrep = stripOuterParentheses(rep.preparationNote);
+  const prep = cleanedPrep ? ` (${cleanedPrep})` : '';
   return [scaled, rep.displayName].filter(Boolean).join(' ') + prep;
 }

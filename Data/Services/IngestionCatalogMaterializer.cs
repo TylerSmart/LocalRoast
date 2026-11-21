@@ -1215,20 +1215,13 @@ public static partial class IngestionCatalogMaterializer
                         i.IsRecipeReference && !i.MatchedRecipeId.HasValue
                     ) == true;
 
-                var updatedScore = Math.Clamp(
-                    1.0m
-                        - (allIssues.Count * 0.15m)
-                        - (existingQualityWarnings.Count * 0.10m)
-                        - ((resolvedDraft.MeasurementWarnings?.Count ?? 0) * 0.05m),
-                    0.10m,
-                    0.99m
+                var draftWithIssues = resolvedDraft with { ValidationIssues = allIssues };
+                var updatedScore = IngestionConfidenceScorer.Compute(
+                    draftWithIssues,
+                    draftWithIssues.PipelineRepairCount
                 );
 
-                resolvedDraft = resolvedDraft with
-                {
-                    ValidationIssues = allIssues,
-                    ConfidenceScore = updatedScore,
-                };
+                resolvedDraft = draftWithIssues with { ConfidenceScore = updatedScore };
 
                 var canAutoPublish =
                     allIssues.Count == 0
@@ -1363,7 +1356,7 @@ public static partial class IngestionCatalogMaterializer
                     Unit: cleanUnit,
                     CustomUnitName: cleanUnit == MeasurementUnit.Custom ? rep.CustomUnitName : null,
                     FoodItemId: foodItemId,
-                    PreparationNote: IngestionMetadataAndTagHelper.CleanOptionalText(
+                    PreparationNote: RecipeUnitAndSectionHelpers.CleanPreparationNote(
                         rep.PreparationNote,
                         300
                     )

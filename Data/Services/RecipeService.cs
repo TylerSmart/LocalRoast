@@ -1756,7 +1756,10 @@ public sealed partial class RecipeService(
                                 : input.UnresolvedRecipeTitle.Trim()
                         ),
                 DisplayName = input.DisplayName.Trim(),
-                PreparationNote = input.PreparationNote?.Trim(),
+                PreparationNote = RecipeUnitAndSectionHelpers.CleanPreparationNote(
+                    input.PreparationNote,
+                    200
+                ),
                 IsOptional = input.IsOptional,
                 OriginalRawText = input.OriginalRawText?.Trim(),
             };
@@ -1802,9 +1805,10 @@ public sealed partial class RecipeService(
                             Unit = repUnit,
                             CustomUnitName = repCustomUnit,
                             FoodItemId = repInput.FoodItemId,
-                            PreparationNote = string.IsNullOrWhiteSpace(repInput.PreparationNote)
-                                ? null
-                                : repInput.PreparationNote.Trim(),
+                            PreparationNote = RecipeUnitAndSectionHelpers.CleanPreparationNote(
+                                repInput.PreparationNote,
+                                300
+                            ),
                         }
                     );
                 }

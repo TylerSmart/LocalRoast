@@ -663,15 +663,16 @@ public sealed class IngestionProcessor(
                     resolvedDraft.QualityWarnings,
                     resolvedDraft.Ingredients
                 );
-                var warningCount = filteredWarnings.Count;
-                draft = resolvedDraft with
+                var updatedDraft = resolvedDraft with
                 {
                     QualityWarnings = filteredWarnings,
                     ValidationIssues = distinctIssues,
-                    ConfidenceScore = Math.Clamp(
-                        0.96m - (distinctIssues.Count * 0.15m) - (warningCount * 0.10m),
-                        0.10m,
-                        0.99m
+                };
+                draft = updatedDraft with
+                {
+                    ConfidenceScore = IngestionConfidenceScorer.Compute(
+                        updatedDraft,
+                        updatedDraft.PipelineRepairCount
                     ),
                 };
             }

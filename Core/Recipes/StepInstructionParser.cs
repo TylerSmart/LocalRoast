@@ -48,7 +48,7 @@ public static partial class StepInstructionParser
     private static partial Regex DuplicateAtBeforeTempRegex();
 
     [GeneratedRegex(
-        @"(?<!\|)(\{\s*""(?:type|ingredient|displayName|canonicalFoodName|name|amount|maxAmount|displayAmount|displayText|unit|ingredientId|ingredientIndex|seconds|maxSeconds|fahrenheit|celsius|maxFahrenheit|maxCelsius|value|maxValue|hyphenated)""\s*:[^}\r\n]*?\})(?!\|)",
+        @"(?<!\|)(\{\s*""(?:type|ingredient|displayName|canonicalFoodName|name|amount|maxAmount|displayAmount|displayText|unit|ingredientId|ingredientIndex|seconds|maxSeconds|fahrenheit|celsius|maxFahrenheit|maxCelsius|value|maxValue|hyphenated|fixed)""\s*:[^}\r\n]*?\})(?!\|)",
         RegexOptions.Singleline,
         matchTimeoutMilliseconds: 1000
     )]
@@ -83,7 +83,7 @@ public static partial class StepInstructionParser
     private static partial Regex DelimitedBodyRegex();
 
     [GeneratedRegex(
-        @"(?<prefix>(?:^|,)\s*)""(?<key>type|ingredient|displayName|canonicalFoodName|name|amount|maxAmount|unit|displayAmount|displayUnit|customUnitName|displayCustomUnitName|displayText|notes|ingredientId|ingredientIndex|seconds|maxSeconds|label|fahrenheit|celsius|maxFahrenheit|maxCelsius|value|maxValue|hyphenated|temperature)""\s*(?=[0-9""\-]|true\b|false\b|null\b)",
+        @"(?<prefix>(?:^|,)\s*)""(?<key>type|ingredient|displayName|canonicalFoodName|name|amount|maxAmount|unit|displayAmount|displayUnit|customUnitName|displayCustomUnitName|displayText|notes|ingredientId|ingredientIndex|seconds|maxSeconds|label|fahrenheit|celsius|maxFahrenheit|maxCelsius|value|maxValue|hyphenated|fixed|temperature)""\s*(?=[0-9""\-]|true\b|false\b|null\b)",
         RegexOptions.IgnoreCase,
         matchTimeoutMilliseconds: 1000
     )]

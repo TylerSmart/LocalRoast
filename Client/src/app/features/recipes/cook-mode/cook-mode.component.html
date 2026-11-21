@@ -343,8 +343,8 @@
                       @if (item.ingredient.unresolvedRecipeTitle) {
                         <span class="unresolved-recipe-label">Recipe component not linked</span>
                       }
-                      @if (item.ingredient.preparationNote) {
-                        <span class="item-prep">({{ item.ingredient.preparationNote }})</span>
+                      @if (cleanPrepNote(item.ingredient.preparationNote); as prep) {
+                        <span class="item-prep">({{ prep }})</span>
                       }
                       @if (item.ingredient.replacements?.length) {
                         <span class="ingredient-replacements">
@@ -790,8 +790,8 @@
                       @if (item.ingredient.unresolvedRecipeTitle) {
                         <span class="unresolved-recipe-label">Recipe component not linked</span>
                       }
-                      @if (item.ingredient.preparationNote) {
-                        <span class="item-prep">({{ item.ingredient.preparationNote }})</span>
+                      @if (cleanPrepNote(item.ingredient.preparationNote); as prep) {
+                        <span class="item-prep">({{ prep }})</span>
                       }
                       @if (item.ingredient.replacements?.length) {
                         <span class="ingredient-replacements">

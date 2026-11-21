@@ -251,7 +251,8 @@ export class StepInstructionEditorComponent implements ControlValueAccessor, Aft
         availableIngredients: options.map((o) => o.displayName),
         availableIngredientOptions: options,
       },
-      width: '540px',
+      width: '580px',
+      maxWidth: '95vw',
     });
 
     dialogRef.afterClosed().subscribe((result) => {
@@ -303,7 +304,8 @@ export class StepInstructionEditorComponent implements ControlValueAccessor, Aft
         availableIngredients: options.map((o) => o.displayName),
         availableIngredientOptions: options,
       },
-      width: '540px',
+      width: '580px',
+      maxWidth: '95vw',
     });
 
     dialogRef.afterClosed().subscribe((result) => {
@@ -406,7 +408,12 @@ export class StepInstructionEditorComponent implements ControlValueAccessor, Aft
       labelText = formatMixtureDisplay(token as StepMixtureToken, 1, 'Original').text;
       editPrefix = 'Edit mixture';
     } else {
-      labelText = formatTokenDisplay(token as StepIngredientToken, 1, 'Original');
+      const ingTok = token as StepIngredientToken;
+      labelText = formatTokenDisplay(ingTok, 1, 'Original');
+      if (ingTok.fixed) {
+        kindClass = 'is-ingredient is-fixed-ingredient';
+        labelText = `${labelText} [fixed]`;
+      }
     }
 
     chip.className = `inline-step-chip ${kindClass}`;

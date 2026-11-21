@@ -211,6 +211,7 @@ export function parseStepInstruction(instruction: string | null | undefined): St
           customUnitName: (parsed['customUnitName'] as string) ?? null,
           displayText: (parsed['displayText'] as string) ?? null,
           notes: (parsed['notes'] as string) ?? null,
+          ...(parsed['fixed'] === true ? { fixed: true } : {}),
         } as StepIngredientToken;
       }
 
@@ -283,14 +284,15 @@ export function formatTokenDisplay(
     : normalizedUnit === 'Custom' && typeof unitStr === 'string'
       ? unitStr
       : null;
+  const effectiveFactor = token.fixed ? 1 : factor;
   const formatted = matchedIngredient?.alternativeMeasurement?.quantity
     ? scaleStepIngredient(
         matchedIngredient,
         { quantity: qty, maxQuantity: maxQty, unit: normalizedUnit, customUnitName },
-        factor,
+        effectiveFactor,
         system,
       )
-    : scaleAndConvert(qty, maxQty, normalizedUnit, customUnitName, factor, system);
+    : scaleAndConvert(qty, maxQty, normalizedUnit, customUnitName, effectiveFactor, system);
   const measurementStr = formatted.formattedMeasurement.trim();
 
   return measurementStr

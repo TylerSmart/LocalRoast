@@ -58,7 +58,12 @@ public sealed partial class IngestionRecipePipeline(
             "Stage 1/5: Extracting recipe structure..."
         );
 
-        var stage1 = await RunStage1Async(request.Config, request.SourceText, cancellationToken);
+        var (stage1, stage1Repairs) = await RunStage1Async(
+            request.Config,
+            request.SourceText,
+            cancellationToken
+        );
+        var pipelineRepairCount = stage1Repairs;
 
         var workIngredients = FlattenIngredients(stage1, request.SourceText);
         var workSteps = FlattenSteps(stage1);
@@ -161,13 +166,14 @@ public sealed partial class IngestionRecipePipeline(
             ))
             .ToList();
 
-        var (reconciledPrimary, reconciledReplacements) = await RunStage3Async(
+        var (reconciledPrimary, reconciledReplacements, stage3Repairs) = await RunStage3Async(
             request.Config,
             workIngredients,
             catalogFoods,
             catalogRecipes,
             cancellationToken
         );
+        pipelineRepairCount += stage3Repairs;
         workload?.CompleteSegment("stage3");
 
         // ============================================================
@@ -183,12 +189,13 @@ public sealed partial class IngestionRecipePipeline(
             "Stage 4/5: Tokenizing step instructions..."
         );
 
-        var validatedSteps = await RunStage4Async(
+        var (validatedSteps, stage4Repairs) = await RunStage4Async(
             request.Config,
             workIngredients,
             workSteps,
             cancellationToken
         );
+        pipelineRepairCount += stage4Repairs;
         workload?.CompleteSegment("stage4");
 
         // ============================================================
@@ -237,6 +244,8 @@ public sealed partial class IngestionRecipePipeline(
 
             if (polishRes is not null)
             {
+                pipelineRepairCount +=
+                    (polishRes.IngredientPatches?.Count ?? 0) + (polishRes.StepPatches?.Count ?? 0);
                 if (!string.IsNullOrWhiteSpace(polishRes.Title))
                 {
                     title = IngestionMetadataAndTagHelper.Truncate(polishRes.Title.Trim(), 200);
@@ -487,7 +496,8 @@ public sealed partial class IngestionRecipePipeline(
             reconciledReplacements,
             validatedSteps,
             incompatibleAlts,
-            catalogTags
+            catalogTags,
+            pipelineRepairCount
         );
 
         var isPlausible =
@@ -503,7 +513,7 @@ public sealed partial class IngestionRecipePipeline(
         );
     }
 
-    private async Task<Stage1RecipeDto> RunStage1Async(
+    private async Task<(Stage1RecipeDto Recipe, int RetryCount)> RunStage1Async(
         EffectiveLlmConnectionConfig config,
         string sourceText,
         CancellationToken cancellationToken
@@ -564,7 +574,7 @@ public sealed partial class IngestionRecipePipeline(
 
                 if (string.IsNullOrWhiteSpace(combinedFeedback) || attempt == 3)
                 {
-                    return parsed!;
+                    return (parsed!, attempt - 1);
                 }
 
                 lastError = combinedFeedback;
@@ -717,7 +727,8 @@ public sealed partial class IngestionRecipePipeline(
 
     private async Task<(
         Dictionary<int, ReconciledMatch> PrimaryMatches,
-        Dictionary<(int IngIndex, int RepIndex), ReconciledMatch> ReplacementMatches
+        Dictionary<(int IngIndex, int RepIndex), ReconciledMatch> ReplacementMatches,
+        int RepairCount
     )> RunStage3Async(
         EffectiveLlmConnectionConfig config,
         List<WorkIngredient> ingredients,
@@ -846,6 +857,7 @@ public sealed partial class IngestionRecipePipeline(
         }
 
         // Single-item retry via 03b for any missing or ID-invalid entries
+        var stage3RepairCount = 0;
         var singlePrompt = IngestionPromptLoader.LoadPrompt(
             IngestionPromptLoader.Stage3MatchIngredient
         );
@@ -859,6 +871,8 @@ public sealed partial class IngestionRecipePipeline(
             {
                 continue;
             }
+
+            stage3RepairCount++;
 
             liveTracker?.CurrentWorkload?.UpdateSegmentSubStatus(
                 "stage3",
@@ -949,10 +963,10 @@ public sealed partial class IngestionRecipePipeline(
             );
         }
 
-        return (primaryMatches, replacementMatches);
+        return (primaryMatches, replacementMatches, stage3RepairCount);
     }
 
-    private async Task<List<ValidatedStage4StepResult>> RunStage4Async(
+    private async Task<(List<ValidatedStage4StepResult> Steps, int RepairCount)> RunStage4Async(
         EffectiveLlmConnectionConfig config,
         List<WorkIngredient> ingredients,
         List<WorkStep> steps,
@@ -961,7 +975,7 @@ public sealed partial class IngestionRecipePipeline(
     {
         if (steps.Count == 0)
         {
-            return [];
+            return ([], 0);
         }
 
         var masterIngredientsPayload = ingredients
@@ -1039,6 +1053,7 @@ public sealed partial class IngestionRecipePipeline(
             IngestionPromptLoader.Stage4TokenizeStep
         );
         var finalSteps = new List<ValidatedStage4StepResult>(steps.Count);
+        var stage4RepairCount = 0;
 
         for (var i = 0; i < steps.Count; i++)
         {
@@ -1052,6 +1067,7 @@ public sealed partial class IngestionRecipePipeline(
 
             if (needsRepair)
             {
+                stage4RepairCount++;
                 var priorSteps = steps
                     .Take(i)
                     .Select(s => new { stepNumber = s.StepNumber, instruction = s.Instruction })
@@ -1184,7 +1200,7 @@ public sealed partial class IngestionRecipePipeline(
             finalSteps.Add(bestResult);
         }
 
-        return finalSteps;
+        return (finalSteps, stage4RepairCount);
     }
 
     private async Task<Stage5TargetedPolishResponseDto?> RunStage5PolishAsync(
@@ -1312,7 +1328,8 @@ public sealed partial class IngestionRecipePipeline(
         Dictionary<(int IngIndex, int RepIndex), ReconciledMatch> replacementMatches,
         List<ValidatedStage4StepResult> validatedSteps,
         List<(int Index, string Name, string Reason)> incompatibleAlts,
-        IReadOnlyList<CatalogTagLookupItem> catalogTags
+        IReadOnlyList<CatalogTagLookupItem> catalogTags,
+        int pipelineRepairCount
     )
     {
         var incompatibleSet = incompatibleAlts.Select(x => x.Index).ToHashSet();
@@ -1472,7 +1489,7 @@ public sealed partial class IngestionRecipePipeline(
                             MaxQuantity: repMaxQty,
                             Unit: repUnit,
                             CustomUnitName: repUnit == MeasurementUnit.Custom ? repCustom : null,
-                            PreparationNote: IngestionMetadataAndTagHelper.CleanOptionalText(
+                            PreparationNote: RecipeUnitAndSectionHelpers.CleanPreparationNote(
                                 rep.PrepNote,
                                 300
                             ),
@@ -1528,7 +1545,7 @@ public sealed partial class IngestionRecipePipeline(
                     SuggestedIsPantryStaple: match.SuggestedIsPantryStaple,
                     CreateNewFoodItem: match.CreateNewFoodItem,
                     DisplayName: displayName,
-                    PreparationNote: IngestionMetadataAndTagHelper.CleanOptionalText(
+                    PreparationNote: RecipeUnitAndSectionHelpers.CleanPreparationNote(
                         ing.PrepNote,
                         200
                     ),
@@ -1635,18 +1652,26 @@ public sealed partial class IngestionRecipePipeline(
             validationIssues.Add("Recipe has no preparation steps.");
         }
 
-        var confidence = ComputeConfidenceScore(
-            servings,
-            prepMinutes,
-            cookMinutes,
-            validationIssues.Count,
-            qualityWarnings.Count,
-            measurementWarnings.Count
+        var cleanDesc = IngestionMetadataAndTagHelper.CleanOptionalText(description, 2000);
+        var confidence = IngestionConfidenceScorer.Compute(
+            description: cleanDesc,
+            baseServings: baseServings,
+            hasExplicitServings: servings is > 0m,
+            yieldDisplay: yieldDisplay,
+            prepTimeMinutes: prepMinutes,
+            cookTimeMinutes: cookMinutes,
+            totalTimeMinutes: totalMinutes,
+            ingredients: compiledIngredients,
+            steps: compiledSteps,
+            validationIssues: validationIssues,
+            qualityWarnings: qualityWarnings,
+            measurementWarnings: measurementWarnings,
+            pipelineRepairCount: pipelineRepairCount
         );
 
         return new IngestionExtractedDraftDto(
             Title: title,
-            Description: IngestionMetadataAndTagHelper.CleanOptionalText(description, 2000),
+            Description: cleanDesc,
             BaseServings: baseServings,
             YieldDisplay: yieldDisplay,
             PrepTimeMinutes: prepMinutes,
@@ -1687,7 +1712,9 @@ public sealed partial class IngestionRecipePipeline(
             ProposedTagNames: proposedTagNames,
             MeasurementWarnings: measurementWarnings.Count > 0 ? measurementWarnings : null,
             QualityWarnings: qualityWarnings.Count > 0 ? qualityWarnings : null,
-            ValidationIssues: validationIssues.Count > 0 ? validationIssues : null
+            ValidationIssues: validationIssues.Count > 0 ? validationIssues : null,
+            RefinedModel: null,
+            PipelineRepairCount: pipelineRepairCount
         );
     }
 
@@ -2348,30 +2375,6 @@ public sealed partial class IngestionRecipePipeline(
         return RecipeDifficulty.Medium;
     }
 
-    private static decimal ComputeConfidenceScore(
-        decimal? servings,
-        int? prepMin,
-        int? cookMin,
-        int validationIssueCount,
-        int qualityWarningCount,
-        int measurementWarningCount
-    )
-    {
-        var score = 0.96m;
-        if (servings is null or <= 0m)
-        {
-            score -= 0.04m;
-        }
-        if (prepMin is null && cookMin is null)
-        {
-            score -= 0.04m;
-        }
-        score -= validationIssueCount * 0.15m;
-        score -= qualityWarningCount * 0.04m;
-        score -= measurementWarningCount * 0.05m;
-        return decimal.Round(Math.Clamp(score, 0.15m, 0.99m), 2);
-    }
-
     private static string BuildOriginalRawLine(
         decimal? qty,
         decimal? maxQty,
@@ -2395,9 +2398,10 @@ public sealed partial class IngestionRecipePipeline(
             parts.Add(rawUnit.Trim());
         }
         parts.Add(displayName);
-        if (!string.IsNullOrWhiteSpace(prepNote))
+        var cleanPrep = RecipeUnitAndSectionHelpers.CleanPreparationNote(prepNote, 200);
+        if (!string.IsNullOrWhiteSpace(cleanPrep))
         {
-            parts.Add($", {prepNote.Trim()}");
+            parts.Add($", {cleanPrep}");
         }
         if (isOptional)
         {

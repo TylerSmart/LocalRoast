@@ -997,6 +997,61 @@ public static class RecipeUnitAndSectionHelpers
         );
     }
 
+    /// <summary>
+    /// Trims and strips redundant outer matching parentheses from a preparation note
+    /// (e.g., "(8-inch square)" or "((8-inch square))" -> "8-inch square") while keeping
+    /// internal or leading-only parentheticals intact (e.g., "minced (about 1 tbsp)" or "(8-inch) square").
+    /// </summary>
+    public static string? CleanPreparationNote(string? value, int maxLength = 200)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var s = value.Trim().TrimStart(',', ';').Trim();
+        while (s.Length >= 2 && s[0] == '(' && s[^1] == ')')
+        {
+            var depth = 0;
+            var outerPairsAtEnd = true;
+            for (var i = 0; i < s.Length; i++)
+            {
+                if (s[i] == '(')
+                {
+                    depth++;
+                }
+                else if (s[i] == ')')
+                {
+                    depth--;
+                    if (depth == 0 && i < s.Length - 1)
+                    {
+                        outerPairsAtEnd = false;
+                        break;
+                    }
+                    if (depth < 0)
+                    {
+                        outerPairsAtEnd = false;
+                        break;
+                    }
+                }
+            }
+
+            if (!outerPairsAtEnd || depth != 0)
+            {
+                break;
+            }
+
+            s = s[1..^1].Trim();
+        }
+
+        if (string.IsNullOrWhiteSpace(s))
+        {
+            return null;
+        }
+
+        return s.Length > maxLength ? s[..maxLength].TrimEnd() : s;
+    }
+
     private static string SimpleSingularNoun(string word)
     {
         var lower = word.Trim().ToLowerInvariant();

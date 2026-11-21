@@ -40,17 +40,19 @@ describe('StepTokenDialogComponent', () => {
       expect(component['ingredientForm'].get('ingredient')?.value).toBe('Butter');
     });
 
-    it('closes dialog with serialized token on save', () => {
+    it('closes dialog with serialized token on save including fixed flag when checked', () => {
       component['ingredientForm'].patchValue({
-        ingredient: 'Eggs',
-        amount: 4,
-        unit: 'whole',
+        ingredient: 'Butter',
+        amount: 1,
+        unit: 'tbsp',
+        fixed: true,
       });
       component['onSave']();
 
       expect(mockDialogRef.close).toHaveBeenCalledWith(
         expect.objectContaining({
-          rawToken: '||{"type":"ingredient","ingredient":"Eggs","amount":4,"unit":"whole"}||',
+          rawToken:
+            '||{"type":"ingredient","ingredient":"Butter","amount":1,"unit":"tbsp","fixed":true}||',
         }),
       );
     });

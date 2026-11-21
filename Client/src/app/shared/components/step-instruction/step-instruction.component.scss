@@ -43,8 +43,6 @@
 
   &.is-unquantified {
     background: color-mix(in srgb, var(--mat-sys-primary-container) 48%, transparent);
-    text-decoration: underline dotted var(--mat-sys-primary);
-    text-underline-offset: 2px;
   }
 
   &.is-subrecipe {

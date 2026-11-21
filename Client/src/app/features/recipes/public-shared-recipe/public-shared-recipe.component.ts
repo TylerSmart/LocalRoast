@@ -27,6 +27,7 @@ import {
   formatIngredientReplacement,
   formatMinutes,
   scaleIngredient,
+  stripOuterParentheses,
 } from '../../../core/utils/culinary-math';
 import {
   formatIngredientUses,
@@ -93,6 +94,7 @@ export class PublicSharedRecipeComponent implements OnInit {
   protected readonly checkedIngredients = signal<Record<string, boolean>>({});
   protected readonly formatMinutes = formatMinutes;
   protected readonly formatReplacement = formatIngredientReplacement;
+  protected readonly cleanPrepNote = stripOuterParentheses;
 
   protected readonly scaleFactor = computed(() => {
     const r = this.recipe();

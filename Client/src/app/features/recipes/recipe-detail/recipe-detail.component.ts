@@ -38,6 +38,7 @@ import {
   formatIngredientReplacement,
   formatMinutes,
   scaleIngredient,
+  stripOuterParentheses,
 } from '../../../core/utils/culinary-math';
 import {
   formatIngredientUses,
@@ -153,6 +154,7 @@ export class RecipeDetailComponent implements OnInit {
   protected readonly isDismissingRefinement = signal<boolean>(false);
   protected readonly formatMinutes = formatMinutes;
   protected readonly formatReplacement = formatIngredientReplacement;
+  protected readonly cleanPrepNote = stripOuterParentheses;
   protected readonly previewPhotoUrl = signal<string | null>(null);
   private refinementPollSub: Subscription | null = null;
 

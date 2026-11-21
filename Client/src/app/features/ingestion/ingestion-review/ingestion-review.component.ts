@@ -70,6 +70,7 @@ import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialo
 import { MeasurementEditorComponent } from '../../../shared/components/measurement-editor/measurement-editor.component';
 import { RecipeAutocompleteComponent } from '../../../shared/components/recipe-autocomplete/recipe-autocomplete.component';
 import { ingredientMeasurementValidator } from '../../../core/utils/recipe-measurement-forms';
+import { stripOuterParentheses } from '../../../core/utils/culinary-math';
 import { RecipeDetailPreviewComponent } from '../recipe-detail-preview/recipe-detail-preview.component';
 import {
   RecipeDetailPreviewDialogComponent,
@@ -978,7 +979,7 @@ export class IngestionReviewComponent implements OnInit {
           displayName: val.isRecipeReference
             ? val.referencedRecipeTitle?.trim() || val.displayName.trim()
             : val.displayName.trim(),
-          preparationNote: val.preparationNote?.trim() || null,
+          preparationNote: stripOuterParentheses(val.preparationNote),
           isOptional: Boolean(val.isOptional),
           alternativeMeasurement: val.alternativeMeasurement ?? null,
           preferAlternativeMeasurement:
@@ -1036,7 +1037,7 @@ export class IngestionReviewComponent implements OnInit {
                         unit: (r.unit as IngestionDraftReplacementDto['unit']) || null,
                         customUnitName:
                           r.unit === 'Custom' ? r.customUnitName?.trim() || null : null,
-                        preparationNote: r.preparationNote?.trim() || null,
+                        preparationNote: stripOuterParentheses(r.preparationNote),
                         matchedFoodItemId: r.matchedFoodItemId || null,
                         matchedFoodItemName:
                           matchedFood?.name ?? r.matchedFoodItemName?.trim() ?? null,

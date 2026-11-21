@@ -344,6 +344,42 @@ public static partial class StepTokenValidator
     private static partial Regex UnnamedAtATimeFollowingRegex();
 
     [GeneratedRegex(
+        @"^\s*(?:of\s+(?:the\s+)?)?(?:liquid\s+|dry\s+)?(?:measuring\s+(?:cup|spoon)s?|portion\s+scoops?|scoops?|ladles?|measures?|skillets?|saucepans?|pans?|pots?|pitchers?|bowls?|dishes?|jars?|containers?|molds?|tins?|ramekins?)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex FixedVesselFollowingRegex();
+
+    [GeneratedRegex(
+        @"^\s*(?:each\b|apiece\b|per\s+\w+|(?:on|over|into|to)\s+each\b)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex FixedDistributiveFollowingRegex();
+
+    [GeneratedRegex(
+        @"\b(?:each|apiece|per\s+(?:serving|person|piece|slice|toast|portion|plate|dish|cake|muffin|cookie|taco|bowl|roll|bun|burger|sandwich|wrap|tortilla|pita|skewer|cutlet|fillet|steak|chop|breast|thigh|half|halves|egg|tart|biscuit|cut))\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex FixedDistributiveClauseRegex();
+
+    [GeneratedRegex(
+        @"\b(?:should\s+have|yields?|yielding|leaves?\s+about|makes?\s+about)\s*(?:about\s*)?(?:of\s+)?$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex FixedCheckYieldPrecedingRegex();
+
+    [GeneratedRegex(
+        @"^\s*(?:of\s+(?:the\s+)?)?(?<noun>(?:(?:cold|warm|hot|boiling|ice|lukewarm|room-temperature|tap|salted|unsalted|reserved|melted|rendered|defatted|pan|cooking|extra-virgin|olive|vegetable|canola)\s+){0,2}(?:water|milk|cream|broth|stock|wine|vinegar|juice|juices|oil|butter|fat|drippings|liquid|brine|marinade|sauce|glaze|syrup|honey|sugar|salt|flour))\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex FixedFalsePositiveFoodFollowingRegex();
+
+    [GeneratedRegex(
+        @"(?:^|\b)(?:fat|drippings|juices|pan\b|reserved\b|cooking\s+liquid|defatted\b|rendered\b|glaze|marinade|brine|sauce|liquid)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex FixedMixtureFoodNounRegex();
+
+    [GeneratedRegex(
         @"^,\s+(?<mods>[a-zA-Z][\p{L}\s-]{1,35}?)(?<tail>(?:,\s*|\s+)and\s+|\s+)$",
         RegexOptions.CultureInvariant
     )]
@@ -780,6 +816,19 @@ public static partial class StepTokenValidator
                     tokType = "fixed";
                 }
             }
+            else if (
+                tokType == "fixed"
+                && !GetBool(tokObj["hyphenated"])
+                && GetNullableDecimal(tokObj["amount"]) is decimal fxAmt
+                && fxAmt > 0m
+            )
+            {
+                var healedType = TryHealFalsePositiveFixedToken(sanitized, i, tokObj, fxAmt);
+                if (healedType is not null)
+                {
+                    tokType = healedType;
+                }
+            }
 
             if (
                 tokType is "ingredient" or "mixture"
@@ -1145,7 +1194,8 @@ public static partial class StepTokenValidator
                         Unit: unit,
                         CustomUnitName: unit == MeasurementUnit.Custom ? customUnit : null,
                         MaxAmount: maxQty,
-                        IngredientIndex: ing.IngredientIndex >= 0 ? ing.IngredientIndex : null
+                        IngredientIndex: ing.IngredientIndex >= 0 ? ing.IngredientIndex : null,
+                        Fixed: ing.Fixed
                     );
                     sb.Append(StepInstructionParser.FormatToken(stepToken));
                     break;
@@ -1345,7 +1395,8 @@ public static partial class StepTokenValidator
                             obj["name"]?.GetValue<string>() ?? string.Empty,
                             GetNullableDecimal(obj["quantity"]),
                             GetNullableDecimal(obj["maxQuantity"]),
-                            GetNullableString(obj["unit"])
+                            GetNullableString(obj["unit"]),
+                            GetBool(obj["fixed"])
                         )
                     );
                     break;
@@ -1423,10 +1474,12 @@ public static partial class StepTokenValidator
                     sb.Append(t.Text);
                     break;
                 case Stage4IngredientToken ing:
+                {
+                    var effScale = ing.Fixed ? 1m : scaleFactor;
                     sb.Append(
                         RenderAmountAndUnit(
-                            ing.Quantity.HasValue ? ing.Quantity.Value * scaleFactor : null,
-                            ing.MaxQuantity.HasValue ? ing.MaxQuantity.Value * scaleFactor : null,
+                            ing.Quantity.HasValue ? ing.Quantity.Value * effScale : null,
+                            ing.MaxQuantity.HasValue ? ing.MaxQuantity.Value * effScale : null,
                             ing.Unit,
                             convertToMetric,
                             hyphenated: false,
@@ -1434,6 +1487,7 @@ public static partial class StepTokenValidator
                         )
                     );
                     break;
+                }
                 case Stage4MixtureToken mix:
                     sb.Append(
                         RenderAmountAndUnit(
@@ -3225,6 +3279,165 @@ public static partial class StepTokenValidator
             "meter" => @"(?:meters?|metres?)\b",
             _ => Regex.Escape(unit.Trim()) + @"\b",
         };
+
+    private static string? TryHealFalsePositiveFixedToken(
+        JsonArray sanitized,
+        int index,
+        JsonObject tokObj,
+        decimal amount
+    )
+    {
+        var fxName = GetNullableString(tokObj["name"])?.Trim() ?? string.Empty;
+        var prevText =
+            index > 0
+            && sanitized[index - 1] is JsonValue prevVal
+            && prevVal.TryGetValue<string>(out var ps)
+                ? ps
+                : string.Empty;
+        var nextText =
+            index + 1 < sanitized.Count
+            && sanitized[index + 1] is JsonValue nextVal
+            && nextVal.TryGetValue<string>(out var ns)
+                ? ns
+                : string.Empty;
+
+        // 1. Physical vessels/tools keep fixed.
+        if (
+            (!string.IsNullOrEmpty(fxName) && ToolVesselSuffixRegex().IsMatch(fxName))
+            || (!string.IsNullOrEmpty(nextText) && FixedVesselFollowingRegex().IsMatch(nextText))
+        )
+        {
+            return null;
+        }
+
+        // 2. Incremental "at a time" rates or distributive per-item clauses keep fixed.
+        if (
+            (!string.IsNullOrEmpty(fxName) && AtATimeNameSuffixRegex().IsMatch(fxName))
+            || AtATimeFollowingPrefixRegex().IsMatch(nextText)
+            || (string.IsNullOrEmpty(fxName) && UnnamedAtATimeFollowingRegex().IsMatch(nextText))
+            || FixedDistributiveFollowingRegex().IsMatch(nextText)
+            || IsDistributiveInCurrentClause(prevText, nextText)
+        )
+        {
+            return null;
+        }
+
+        // 3. Parenthetical check-yields or explicit yield checks keep fixed.
+        if (
+            IsInsideParentheses(sanitized, index)
+            || FixedCheckYieldPrecedingRegex().IsMatch(prevText)
+        )
+        {
+            return null;
+        }
+
+        string? resolvedNoun = null;
+        var consumedFromNext = 0;
+
+        if (!string.IsNullOrWhiteSpace(fxName))
+        {
+            if (FixedFalsePositiveFoodFollowingRegex().IsMatch(" " + fxName))
+            {
+                resolvedNoun = fxName;
+            }
+        }
+        else if (!string.IsNullOrEmpty(nextText))
+        {
+            var m = FixedFalsePositiveFoodFollowingRegex().Match(nextText);
+            if (m.Success)
+            {
+                resolvedNoun = m.Groups["noun"].Value.Trim();
+                consumedFromNext = m.Length;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(resolvedNoun))
+        {
+            return null;
+        }
+
+        if (consumedFromNext > 0 && index + 1 < sanitized.Count)
+        {
+            sanitized[index + 1] = JsonValue.Create(nextText[consumedFromNext..]);
+        }
+
+        var isMixture = FixedMixtureFoodNounRegex().IsMatch(resolvedNoun);
+        var maxAmtNode = tokObj["maxAmount"]?.DeepClone();
+
+        tokObj["type"] = isMixture ? "mixture" : "ingredient";
+        tokObj["name"] = resolvedNoun;
+        tokObj["quantity"] = amount;
+        if (maxAmtNode is not null)
+        {
+            tokObj["maxQuantity"] = maxAmtNode;
+        }
+        else
+        {
+            tokObj.Remove("maxQuantity");
+        }
+        tokObj.Remove("amount");
+        tokObj.Remove("maxAmount");
+        tokObj.Remove("hyphenated");
+
+        if (isMixture)
+        {
+            tokObj.Remove("ingredientIndex");
+            return "mixture";
+        }
+
+        tokObj["ingredientIndex"] = null;
+        return "ingredient";
+    }
+
+    private static bool IsDistributiveInCurrentClause(string prevText, string nextText)
+    {
+        var lastBoundary = prevText.LastIndexOfAny(['.', '!', '?', ';']);
+        var prevClause = lastBoundary >= 0 ? prevText[(lastBoundary + 1)..] : prevText;
+        var nextBoundary = nextText.IndexOfAny(['.', '!', '?', ';']);
+        var nextClause = nextBoundary >= 0 ? nextText[..nextBoundary] : nextText;
+        return FixedDistributiveClauseRegex().IsMatch(prevClause)
+            || FixedDistributiveClauseRegex().IsMatch(nextClause);
+    }
+
+    private static bool IsInsideParentheses(JsonArray sanitized, int index)
+    {
+        var depth = 0;
+        for (var j = 0; j < index; j++)
+        {
+            if (sanitized[j] is JsonValue v && v.TryGetValue<string>(out var s))
+            {
+                foreach (var ch in s)
+                {
+                    if (ch == '(')
+                    {
+                        depth++;
+                    }
+                    else if (ch == ')' && depth > 0)
+                    {
+                        depth--;
+                    }
+                }
+            }
+        }
+
+        if (depth <= 0)
+        {
+            return false;
+        }
+
+        for (var j = index + 1; j < sanitized.Count; j++)
+        {
+            if (sanitized[j] is JsonValue v && v.TryGetValue<string>(out var s))
+            {
+                if (s.Contains(')', StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
 
     private static void ConvertIngredientOrMixtureToFixed(JsonObject tokObj, decimal amount)
     {

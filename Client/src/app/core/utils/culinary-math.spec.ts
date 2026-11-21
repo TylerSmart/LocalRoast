@@ -14,6 +14,7 @@ import {
   scaleAndConvert,
   scaleIngredient,
   scaleStepIngredient,
+  stripOuterParentheses,
   IngredientMeasurements,
 } from './culinary-math';
 
@@ -499,6 +500,16 @@ describe('culinary-math', () => {
           { baseServings: 1, yieldDisplay: null },
         ),
       ).toBe(1);
+    });
+  });
+
+  describe('stripOuterParentheses', () => {
+    it('strips redundant outer parens while preserving internal and prefix parens', () => {
+      expect(stripOuterParentheses('(8-inch square)')).toBe('8-inch square');
+      expect(stripOuterParentheses('((8-inch square))')).toBe('8-inch square');
+      expect(stripOuterParentheses('minced (about 1 tbsp)')).toBe('minced (about 1 tbsp)');
+      expect(stripOuterParentheses('(8-inch) square')).toBe('(8-inch) square');
+      expect(stripOuterParentheses('((   ))')).toBeNull();
     });
   });
 });

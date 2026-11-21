@@ -679,4 +679,28 @@ public sealed class StepInstructionParserTests
             StepInstructionParser.ToPlainText(bound)
         );
     }
+
+    [TestMethod]
+    public void FormatToken_FixedIngredientOmitsFixedWhenFalseAndEmitsWhenTrue()
+    {
+        var normal = new StepIngredientToken("butter", Amount: 2m, Unit: MeasurementUnit.Tbsp);
+        var fixedPerItem = new StepIngredientToken(
+            "butter",
+            Amount: 1m,
+            Unit: MeasurementUnit.Tbsp,
+            Fixed: true
+        );
+
+        var normalJson = StepInstructionParser.FormatToken(normal);
+        var fixedJson = StepInstructionParser.FormatToken(fixedPerItem);
+
+        Assert.DoesNotContain("\"fixed\"", normalJson);
+        StringAssert.Contains(fixedJson, "\"fixed\":true");
+
+        var roundTripped = StepInstructionParser
+            .ExtractTokens(fixedJson)
+            .OfType<StepIngredientToken>()
+            .Single();
+        Assert.IsTrue(roundTripped.Fixed);
+    }
 }

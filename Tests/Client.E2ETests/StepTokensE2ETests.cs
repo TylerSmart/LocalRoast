@@ -351,6 +351,10 @@ public sealed class StepTokensE2ETests : E2ETestBase
             );
         await Expect(step2Linked).ToHaveTextAsync("dressing");
         await Expect(step2Linked).ToHaveAttributeAsync("data-ingredient-id", dressingRowId);
+        var decStyle = await step2Linked.EvaluateAsync<string>(
+            "el => getComputedStyle(el).textDecorationStyle"
+        );
+        Assert.AreNotEqual("dotted", decStyle);
 
         // 3. Fixed "1 tbsp at a time" non-scaling vs ingredient scaling
         var twoXChip = Page.Locator(".mult-chip", new() { HasTextRegex = TwoX });
@@ -433,5 +437,132 @@ public sealed class StepTokensE2ETests : E2ETestBase
             "() => document.documentElement.scrollWidth > document.documentElement.clientWidth"
         );
         Assert.IsFalse(pageOverflow, "Cook Mode at 360px must not overflow horizontally.");
+    }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task StepTokens_FixedIngredientCheckbox_RoomyDialogAmount_AndSingleParenPrepNote_WorkEndToEnd()
+    {
+        await Page.SetViewportSizeAsync(1280, 900);
+        await RegisterAndLoginAsync();
+
+        var suffix = Guid.NewGuid().ToString("N")[..6];
+
+        // 1. Seed a recipe via API whose prepNote arrived double-parenthesized "(8-inch square)"
+        // and verify both Recipe Detail display & Cook Mode render a single pair "(8-inch square)".
+        var prepRecipeId = await CreateRecipeViaApiAsync(
+            new
+            {
+                title = $"Nori Rolls {suffix}",
+                baseServings = 4,
+                ingredients = new object[]
+                {
+                    new
+                    {
+                        displayName = "nori sheet",
+                        quantity = 1,
+                        unit = "Custom",
+                        customUnitName = "sheet",
+                        preparationNote = "(8-inch square)",
+                    },
+                    new
+                    {
+                        displayName = "unsalted butter",
+                        quantity = 4,
+                        unit = "Tbsp",
+                    },
+                },
+                steps = new object[]
+                {
+                    new
+                    {
+                        instruction = "Spread ||{\"type\":\"ingredient\",\"ingredient\":\"unsalted butter\",\"amount\":1,\"unit\":\"tbsp\",\"ingredientIndex\":1,\"fixed\":true}|| on each roll.",
+                    },
+                },
+            }
+        );
+
+        await Page.GotoAsync($"{ServerUrl}/recipes/{prepRecipeId}");
+        var firstIngText = await Page.Locator("li.ingredient-row").First.InnerTextAsync();
+        Assert.Contains("(8-inch square)", firstIngText);
+        Assert.DoesNotContain("((8-inch square))", firstIngText);
+
+        // Fixed ingredient token stays "1 tbsp" at 2x, links to butter row, and converts to Metric.
+        var butterRowId = await Page.Locator("li.ingredient-row")
+            .Nth(1)
+            .GetAttributeAsync("data-ingredient-id");
+        Assert.IsFalse(string.IsNullOrWhiteSpace(butterRowId));
+
+        var fixedIngChip = Page.Locator(
+            ".step-instruction-text .inline-amount.is-fixed-ingredient"
+        );
+        await Expect(fixedIngChip).ToHaveTextAsync("1 tbsp unsalted butter");
+        await Expect(fixedIngChip).ToHaveAttributeAsync("data-ingredient-id", butterRowId);
+
+        var twoXChip = Page.Locator(".mult-chip", new() { HasTextRegex = TwoX });
+        await twoXChip.ClickAsync();
+        await Expect(fixedIngChip).ToHaveTextAsync("1 tbsp unsalted butter");
+
+        await fixedIngChip.HoverAsync();
+        await Expect(Page.Locator($"li.ingredient-row[data-ingredient-id='{butterRowId}']"))
+            .ToHaveClassAsync(new Regex("is-highlighted"));
+
+        var metricChip = Page.Locator(
+            ".unit-sys-chip, mat-button-toggle",
+            new() { HasTextRegex = new(@"^\s*Metric\s*$") }
+        );
+        if (await metricChip.CountAsync() > 0)
+        {
+            await metricChip.First.ClickAsync();
+            await Expect(fixedIngChip).ToContainTextAsync("15 ml unsalted butter");
+        }
+
+        // 2. Open /recipes/new and verify Insert Ingredient Token dialog Amount input is not squished
+        // and the Fixed measurement checkbox toggles and serializes "fixed":true.
+        await Page.GotoAsync($"{ServerUrl}/recipes/new");
+        await Page.GetByRole(AriaRole.Button, new() { Name = "Add Ingredient", Exact = false })
+            .ClickAsync();
+        var ingCard = Page.Locator(".ingredient-row-card, .builder-item-card").First;
+        await ingCard.Locator("input[formcontrolname='displayName']").FillAsync("unsalted butter");
+        await ingCard.Locator("input[formcontrolname='quantity']").FillAsync("4");
+        await ingCard.Locator("mat-select[formcontrolname='unit']").ClickAsync();
+        await Page.Locator(
+                "mat-option",
+                new() { HasTextRegex = new(@"^\s*Tablespoon\b", RegexOptions.IgnoreCase) }
+            )
+            .ClickAsync();
+
+        await Page.GetByRole(AriaRole.Button, new() { Name = "Add Step", Exact = true })
+            .ClickAsync();
+        var stepCard = Page.Locator(".builder-list").Last.Locator(".builder-item-card").Last;
+        var editor = stepCard.Locator("[formcontrolname='instruction']");
+        var editable = editor.Locator(".step-instruction-editable");
+        await editable.ClickAsync();
+        await Page.Keyboard.TypeAsync("Brush ");
+
+        await stepCard.Locator(".add-ingredient-btn").ClickAsync();
+        var dialog = Page.Locator("app-step-token-dialog");
+        await Expect(dialog).ToBeVisibleAsync();
+
+        await dialog.Locator(".quick-chip-btn").First.ClickAsync();
+        var amountInput = dialog.Locator("input[formcontrolname='amount']");
+        var amountBox = await amountInput.BoundingBoxAsync();
+        Assert.IsNotNull(amountBox);
+        Assert.IsGreaterThanOrEqualTo(
+            90,
+            amountBox.Width,
+            $"Expected un-squished Amount input width >= 90px, actual {amountBox.Width}"
+        );
+
+        await amountInput.FillAsync("1");
+        await dialog.Locator("mat-checkbox[formcontrolname='fixed']").ClickAsync();
+        await dialog.Locator("button", new() { HasText = "Insert Token" }).ClickAsync();
+        await Expect(dialog).ToHaveCountAsync(0);
+
+        var serialized = await editor.GetAttributeAsync("data-serialized-value");
+        Assert.IsNotNull(serialized);
+        Assert.Contains("\"fixed\":true", serialized);
+        await Expect(editable.Locator(".inline-step-chip.is-fixed-ingredient"))
+            .ToContainTextAsync("[fixed]");
     }
 }

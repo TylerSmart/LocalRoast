@@ -292,8 +292,8 @@
                   } @else if (item.ingredient.unresolvedRecipeTitle) {
                     <span class="unresolved-recipe-label">Recipe component not linked</span>
                   }
-                  @if (item.ingredient.preparationNote) {
-                    <span class="prep-note">({{ item.ingredient.preparationNote }})</span>
+                  @if (cleanPrepNote(item.ingredient.preparationNote); as prep) {
+                    <span class="prep-note">({{ prep }})</span>
                   }
                   @if (item.ingredient.isOptional) {
                     <span class="optional-tag">optional</span>

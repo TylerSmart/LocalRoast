@@ -141,6 +141,7 @@ export class StepTokenDialogComponent implements OnInit {
         amount: [ingToken?.amount ?? null, [Validators.required, Validators.min(0.0001)]],
         maxAmount: [ingToken?.maxAmount ?? null],
         unit: [ingToken?.unit ?? ingToken?.customUnitName ?? ''],
+        fixed: [Boolean(ingToken?.fixed)],
         notes: [ingToken?.notes ?? ''],
       });
     } else if (this.mode() === 'mixture') {
@@ -362,6 +363,9 @@ export class StepTokenDialogComponent implements OnInit {
       }
       if (val.notes) {
         token.notes = String(val.notes).trim();
+      }
+      if (val.fixed) {
+        token.fixed = true;
       }
 
       this.dialogRef.close({

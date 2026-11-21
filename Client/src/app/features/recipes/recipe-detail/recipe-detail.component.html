@@ -524,8 +524,8 @@
                         <strong class="scaled-qty">{{ item.displayQuantityAndUnit }}</strong>
                       }
                       <span class="ing-name">{{ item.ingredient.displayName }}</span>
-                      @if (item.ingredient.preparationNote) {
-                        <span class="prep-note">({{ item.ingredient.preparationNote }})</span>
+                      @if (cleanPrepNote(item.ingredient.preparationNote); as prep) {
+                        <span class="prep-note">({{ prep }})</span>
                       }
                       @if (item.ingredient.isOptional) {
                         <span class="optional-tag">optional</span>
@@ -633,8 +633,8 @@
                               @for (subIng of subRecipe.ingredients; track subIng.id) {
                                 <li>
                                   {{ scaleSubRecipeIngredient(subIng, item.ingredient, subRecipe) }}
-                                  @if (subIng.preparationNote) {
-                                    ({{ subIng.preparationNote }})
+                                  @if (cleanPrepNote(subIng.preparationNote); as subPrep) {
+                                    ({{ subPrep }})
                                   }
                                 </li>
                               }

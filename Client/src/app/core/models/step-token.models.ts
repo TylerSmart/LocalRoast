@@ -16,6 +16,7 @@ export interface StepIngredientToken {
   customUnitName?: string | null;
   displayText?: string | null;
   notes?: string | null;
+  fixed?: boolean;
 }
 
 export interface StepMixtureToken {

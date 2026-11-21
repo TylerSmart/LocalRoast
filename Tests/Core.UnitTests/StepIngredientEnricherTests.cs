@@ -116,7 +116,7 @@ public sealed class StepIngredientEnricherTests
     }
 
     [TestMethod]
-    public void EnrichSteps_ToTasteGarnishAndExtra_StayUnquantified()
+    public void EnrichSteps_ToTasteGarnishAndExtra_DoNotInjectAndUnwrapToPlainText()
     {
         var ingredients = new List<IngestionDraftIngredientDto>
         {
@@ -137,11 +137,11 @@ public sealed class StepIngredientEnricherTests
             .OfType<StepIngredientToken>()
             .ToList();
 
-        Assert.HasCount(2, tokens);
-        Assert.IsNull(tokens[0].Amount);
-        Assert.AreEqual(0, tokens[0].IngredientIndex);
-        Assert.IsNull(tokens[1].Amount);
-        Assert.AreEqual(1, tokens[1].IngredientIndex);
+        Assert.HasCount(0, tokens);
+        Assert.AreEqual(
+            "Season with salt to taste and sprinkle with chives for garnish.",
+            enriched[0].Instruction
+        );
     }
 
     [TestMethod]
@@ -237,9 +237,11 @@ public sealed class StepIngredientEnricherTests
             .ExtractTokens(enriched[0].Instruction)
             .OfType<StepIngredientToken>()
             .ToList();
-        Assert.HasCount(1, tokens);
-        Assert.IsNull(tokens[0].Amount);
-        Assert.AreEqual(0, tokens[0].IngredientIndex);
+        Assert.HasCount(0, tokens);
+        Assert.AreEqual(
+            "The butter should be softened. Shock bowls in an ice bath.",
+            enriched[0].Instruction
+        );
     }
 
     [TestMethod]
@@ -597,5 +599,33 @@ public sealed class StepIngredientEnricherTests
         Assert.HasCount(5, allTokens);
         Assert.AreEqual(1m, allTokens.Where(t => t.IngredientIndex == 1).Sum(t => t.Amount ?? 0m));
         Assert.AreEqual(5m, allTokens.Where(t => t.IngredientIndex == 0).Sum(t => t.Amount ?? 0m));
+    }
+
+    [TestMethod]
+    public void EnrichSteps_MarksDistributivePerRollPortionAsFixedIngredient()
+    {
+        var ingredients = new List<IngestionDraftIngredientDto>
+        {
+            new(Quantity: 4m, Unit: MeasurementUnit.Tbsp, DisplayName: "unsalted butter"),
+        };
+
+        var steps = new List<IngestionDraftStepDto>
+        {
+            new(
+                Instruction: "Spread ||{\"type\":\"ingredient\",\"ingredient\":\"butter\",\"amount\":1,\"unit\":\"tbsp\",\"ingredientIndex\":0}|| on each roll."
+            ),
+        };
+
+        var warnings = new List<string>();
+        var enriched = StepIngredientEnricher.EnrichSteps(ingredients, steps, warnings);
+
+        Assert.HasCount(0, warnings);
+        var tok = StepInstructionParser
+            .ExtractTokens(enriched[0].Instruction)
+            .OfType<StepIngredientToken>()
+            .Single();
+        Assert.AreEqual(0, tok.IngredientIndex);
+        Assert.AreEqual(1m, tok.Amount);
+        Assert.IsTrue(tok.Fixed);
     }
 }

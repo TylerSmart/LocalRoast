@@ -226,4 +226,26 @@ describe('step-instruction utils', () => {
     expect(ingredientUses(steps, 'ing-salt', list).length).toBe(1);
     expect(ingredientUses(steps, 'ing-eggs', list).length).toBe(0);
   });
+
+  it('keeps fixed ingredient measurements constant across serving scales while still converting units and linking', () => {
+    const ingredients: InstructionIngredient[] = [
+      { id: 'ing-butter', displayName: 'unsalted butter', quantity: 4, unit: 'Tbsp' },
+    ];
+    const step = {
+      instruction:
+        'Spread ||{"type":"ingredient","ingredient":"butter","amount":1,"unit":"tbsp","ingredientIndex":0,"fixed":true}|| on each roll.',
+    };
+
+    const twoX = buildInstructionSegments(step, ingredients, 2, 'Original');
+    const twoXSeg = twoX.find((s) => s.amount?.kind === 'Ingredient');
+    expect(twoXSeg?.text).toBe('1 tbsp butter');
+    expect(twoXSeg?.amount?.ingredientId).toBe('ing-butter');
+    expect(twoXSeg?.amount?.isFixed).toBe(true);
+    expect(twoXSeg?.amount?.scaled).toBe(false);
+
+    const twoXMetric = buildInstructionSegments(step, ingredients, 2, 'Metric');
+    const metricSeg = twoXMetric.find((s) => s.amount?.kind === 'Ingredient');
+    expect(metricSeg?.text).toBe('15 ml butter');
+    expect(metricSeg?.amount?.scaled).toBe(true);
+  });
 });

@@ -396,7 +396,7 @@ public static class SourceMeasurementParser
                 : primary?.Unit?.ToString().ToLowerInvariant(),
             CanonicalFoodName: displayName,
             DisplayName: displayName,
-            PreparationNote: string.IsNullOrWhiteSpace(prepNote) ? null : prepNote,
+            PreparationNote: RecipeUnitAndSectionHelpers.CleanPreparationNote(prepNote, 200),
             IsOptional: isOptional,
             OriginalRawText: line,
             SuggestedIsPantryStaple: isStaple,
