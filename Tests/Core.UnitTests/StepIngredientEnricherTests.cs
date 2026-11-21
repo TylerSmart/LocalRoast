@@ -1,0 +1,244 @@
+using App.Core.Ingestion;
+using App.Core.Recipes;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
+
+namespace App.Core.UnitTests;
+
+[TestClass]
+public sealed class StepIngredientEnricherTests
+{
+    [TestMethod]
+    public void EnrichSteps_SingleUseUnquantified_InjectsQuantityCleansTheAndModifierAndAvoidsDuplicateUnit()
+    {
+        var ingredients = new List<IngestionDraftIngredientDto>
+        {
+            new(
+                Quantity: 2m,
+                Unit: MeasurementUnit.Tbsp,
+                DisplayName: "unsalted butter",
+                PreparationNote: "melted"
+            ),
+            new(Quantity: 4m, Unit: MeasurementUnit.Clove, DisplayName: "garlic cloves"),
+        };
+
+        var steps = new List<IngestionDraftStepDto>
+        {
+            new(
+                Instruction: "Stir in the melted ||{\"ingredient\":\"butter\"}|| and add the ||{\"ingredient\":\"garlic cloves\"}||."
+            ),
+        };
+
+        var warnings = new List<string>();
+        var enriched = StepIngredientEnricher.EnrichSteps(ingredients, steps, warnings);
+
+        Assert.HasCount(0, warnings);
+        var plain = StepInstructionParser.ToPlainText(enriched[0].Instruction);
+        Assert.AreEqual("Stir in 2 tbsp melted butter and add 4 clove garlic.", plain);
+
+        var tokens = StepInstructionParser
+            .ExtractTokens(enriched[0].Instruction)
+            .OfType<StepIngredientToken>()
+            .ToList();
+        Assert.HasCount(2, tokens);
+        Assert.AreEqual(0, tokens[0].IngredientIndex);
+        Assert.AreEqual(2m, tokens[0].Amount);
+        Assert.AreEqual(MeasurementUnit.Tbsp, tokens[0].Unit);
+        Assert.AreEqual(1, tokens[1].IngredientIndex);
+        Assert.AreEqual(4m, tokens[1].Amount);
+        Assert.AreEqual(MeasurementUnit.Clove, tokens[1].Unit);
+        Assert.AreEqual("garlic", tokens[1].Ingredient);
+    }
+
+    [TestMethod]
+    public void EnrichSteps_HummusPostPrepSubset_NeitherInjectsNorWarns()
+    {
+        var ingredients = new List<IngestionDraftIngredientDto>
+        {
+            new(
+                Quantity: 2m,
+                Unit: MeasurementUnit.Custom,
+                CustomUnitName: "can",
+                DisplayName: "chickpeas"
+            ),
+            new(Quantity: 4m, Unit: MeasurementUnit.Clove, DisplayName: "garlic"),
+        };
+
+        var steps = new List<IngestionDraftStepDto>
+        {
+            new(
+                Instruction: "Combine ||{\"ingredient\":\"chickpeas\",\"ingredientIndex\":0}|| and reserve ||{\"ingredient\":\"chickpeas\",\"amount\":2,\"unit\":\"tbsp\",\"ingredientIndex\":0}|| for topping."
+            ),
+            new(
+                Instruction: "Mince ||{\"ingredient\":\"garlic\",\"ingredientIndex\":1}||, then measure out ||{\"ingredient\":\"garlic\",\"amount\":1,\"unit\":\"tbsp\",\"ingredientIndex\":1}||."
+            ),
+        };
+
+        var warnings = new List<string>();
+        var enriched = StepIngredientEnricher.EnrichSteps(ingredients, steps, warnings);
+
+        Assert.HasCount(0, warnings);
+        Assert.AreEqual(
+            "Combine chickpeas and reserve 2 tbsp chickpeas for topping.",
+            StepInstructionParser.ToPlainText(enriched[0].Instruction)
+        );
+        Assert.AreEqual(
+            "Mince garlic, then measure out 1 tbsp garlic.",
+            StepInstructionParser.ToPlainText(enriched[1].Instruction)
+        );
+    }
+
+    [TestMethod]
+    public void EnrichSteps_FractionalAndRemaining_ResolvesDividedButterAmounts()
+    {
+        var ingredients = new List<IngestionDraftIngredientDto>
+        {
+            new(Quantity: 4m, Unit: MeasurementUnit.Tbsp, DisplayName: "unsalted butter"),
+        };
+
+        var steps = new List<IngestionDraftStepDto>
+        {
+            new(Instruction: "Melt half of the ||{\"ingredient\":\"butter\"}|| in skillet."),
+            new(Instruction: "Swirl in the remaining ||{\"ingredient\":\"butter\"}|| off heat."),
+        };
+
+        var warnings = new List<string>();
+        var enriched = StepIngredientEnricher.EnrichSteps(ingredients, steps, warnings);
+
+        Assert.HasCount(0, warnings);
+        Assert.AreEqual(
+            "Melt 2 tbsp butter in skillet.",
+            StepInstructionParser.ToPlainText(enriched[0].Instruction)
+        );
+        Assert.AreEqual(
+            "Swirl in the remaining 2 tbsp butter off heat.",
+            StepInstructionParser.ToPlainText(enriched[1].Instruction)
+        );
+    }
+
+    [TestMethod]
+    public void EnrichSteps_ToTasteGarnishAndExtra_StayUnquantified()
+    {
+        var ingredients = new List<IngestionDraftIngredientDto>
+        {
+            new(Quantity: 1m, Unit: MeasurementUnit.Tsp, DisplayName: "kosher salt"),
+            new(Quantity: 2m, Unit: MeasurementUnit.Tbsp, DisplayName: "fresh chives"),
+        };
+
+        var steps = new List<IngestionDraftStepDto>
+        {
+            new(
+                Instruction: "Season with ||{\"ingredient\":\"salt\"}|| to taste and sprinkle with ||{\"ingredient\":\"chives\"}|| for garnish."
+            ),
+        };
+
+        var enriched = StepIngredientEnricher.EnrichSteps(ingredients, steps);
+        var tokens = StepInstructionParser
+            .ExtractTokens(enriched[0].Instruction)
+            .OfType<StepIngredientToken>()
+            .ToList();
+
+        Assert.HasCount(2, tokens);
+        Assert.IsNull(tokens[0].Amount);
+        Assert.AreEqual(0, tokens[0].IngredientIndex);
+        Assert.IsNull(tokens[1].Amount);
+        Assert.AreEqual(1, tokens[1].IngredientIndex);
+    }
+
+    [TestMethod]
+    public void EnrichSteps_SubRecipeShortNounLinksPlainText_RespectsCountVsAbstractRecipeUnit()
+    {
+        var ingredients = new List<IngestionDraftIngredientDto>
+        {
+            new(
+                Quantity: 6m,
+                Unit: null,
+                DisplayName: "Easy-Peel Hard-Cooked Eggs",
+                IsRecipeReference: true,
+                ReferencedRecipeTitle: "Easy-Peel Hard-Cooked Eggs"
+            ),
+            new(
+                Quantity: 1m,
+                Unit: MeasurementUnit.Custom,
+                CustomUnitName: "recipe",
+                DisplayName: "Garlic Mayonnaise",
+                IsRecipeReference: true,
+                ReferencedRecipeTitle: "Garlic Mayonnaise"
+            ),
+        };
+
+        var steps = new List<IngestionDraftStepDto>
+        {
+            new(Instruction: "Peel eggs and fold into the mayonnaise."),
+        };
+
+        var enriched = StepIngredientEnricher.EnrichSteps(ingredients, steps);
+        var tokens = StepInstructionParser
+            .ExtractTokens(enriched[0].Instruction)
+            .OfType<StepIngredientToken>()
+            .ToList();
+
+        Assert.HasCount(2, tokens);
+        Assert.AreEqual(0, tokens[0].IngredientIndex);
+        Assert.AreEqual("eggs", tokens[0].Ingredient);
+        Assert.AreEqual(6m, tokens[0].Amount);
+
+        Assert.AreEqual(1, tokens[1].IngredientIndex);
+        Assert.AreEqual("mayonnaise", tokens[1].Ingredient);
+        Assert.IsNull(tokens[1].Amount);
+    }
+
+    [TestMethod]
+    public void EnrichSteps_DistributiveEachDoesNotWarn_TrueOverAllocationWarns()
+    {
+        var ingredients = new List<IngestionDraftIngredientDto>
+        {
+            new(Quantity: 4m, Unit: MeasurementUnit.Tbsp, DisplayName: "ricotta"),
+            new(Quantity: 2m, Unit: MeasurementUnit.Tbsp, DisplayName: "unsalted butter"),
+        };
+
+        var steps = new List<IngestionDraftStepDto>
+        {
+            new(
+                Instruction: "Top each toast with ||{\"ingredient\":\"ricotta\",\"amount\":1,\"unit\":\"tbsp\",\"ingredientIndex\":0}|| and spoon ||{\"ingredient\":\"ricotta\",\"amount\":1,\"unit\":\"tbsp\",\"ingredientIndex\":0}|| on each side (6 tbsp equivalent if non-distributive: ||{\"ingredient\":\"ricotta\",\"amount\":6,\"unit\":\"tbsp\",\"ingredientIndex\":0}|| per plate)."
+            ),
+            new(
+                Instruction: "Melt ||{\"ingredient\":\"butter\",\"amount\":2,\"unit\":\"tbsp\",\"ingredientIndex\":1}||, then add ||{\"ingredient\":\"butter\",\"amount\":2,\"unit\":\"tbsp\",\"ingredientIndex\":1}||."
+            ),
+        };
+
+        var warnings = new List<string>();
+        _ = StepIngredientEnricher.EnrichSteps(ingredients, steps, warnings);
+
+        Assert.HasCount(1, warnings);
+        StringAssert.Contains(warnings[0], "unsalted butter");
+    }
+
+    [TestMethod]
+    public void EnrichSteps_SkipsSentenceInitialSubjectAndEquipmentFalsePositives()
+    {
+        var ingredients = new List<IngestionDraftIngredientDto>
+        {
+            new(Quantity: 4m, Unit: MeasurementUnit.Tbsp, DisplayName: "unsalted butter"),
+            new(Quantity: 1m, Unit: MeasurementUnit.Cup, DisplayName: "ice"),
+        };
+
+        var steps = new List<IngestionDraftStepDto>
+        {
+            new(
+                Instruction: "The ||{\"ingredient\":\"butter\"}|| should be softened. Shock bowls in an ice bath."
+            ),
+        };
+
+        var enriched = StepIngredientEnricher.EnrichSteps(ingredients, steps);
+        var plain = StepInstructionParser.ToPlainText(enriched[0].Instruction);
+        Assert.AreEqual("The butter should be softened. Shock bowls in an ice bath.", plain);
+
+        var tokens = StepInstructionParser
+            .ExtractTokens(enriched[0].Instruction)
+            .OfType<StepIngredientToken>()
+            .ToList();
+        Assert.HasCount(1, tokens);
+        Assert.IsNull(tokens[0].Amount);
+        Assert.AreEqual(0, tokens[0].IngredientIndex);
+    }
+}

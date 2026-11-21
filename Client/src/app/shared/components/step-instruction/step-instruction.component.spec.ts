@@ -68,4 +68,38 @@ describe('StepInstructionComponent', () => {
     expect(el.querySelectorAll('.inline-amount.is-scaled').length).toBe(1);
     expect(el.querySelectorAll('.fixed-amount').length).toBe(2);
   });
+
+  it('highlights linked/sub-recipe/unquantified pills and emits hover & select events', () => {
+    const eggs: InstructionIngredient = {
+      id: 'ing-eggs',
+      displayName: 'Easy-Peel Hard-Cooked Eggs',
+      quantity: 6,
+      linkedRecipeId: 'sub-eggs',
+    };
+    fixture.componentRef.setInput('ingredients', [eggs]);
+    fixture.componentRef.setInput('step', {
+      instruction: 'Peel ||{"type":"ingredient","ingredient":"eggs","ingredientIndex":0}||.',
+    });
+    fixture.componentRef.setInput('highlightedIngredientId', 'ing-eggs');
+    fixture.detectChanges();
+
+    const hovered: (string | null)[] = [];
+    const selected: string[] = [];
+    fixture.componentInstance.ingredientHover.subscribe((id) => hovered.push(id));
+    fixture.componentInstance.ingredientSelect.subscribe((id) => selected.push(id));
+
+    const chip = fixture.nativeElement.querySelector('.inline-amount.is-linked') as HTMLElement;
+    expect(chip).toBeTruthy();
+    expect(chip.classList).toContain('is-linked');
+    expect(chip.classList).toContain('is-unquantified');
+    expect(chip.classList).toContain('is-subrecipe');
+    expect(chip.classList).toContain('is-highlighted');
+
+    chip.dispatchEvent(new MouseEvent('mouseenter'));
+    chip.dispatchEvent(new MouseEvent('click'));
+    chip.dispatchEvent(new MouseEvent('mouseleave'));
+
+    expect(hovered).toEqual(['ing-eggs', null]);
+    expect(selected).toEqual(['ing-eggs']);
+  });
 });

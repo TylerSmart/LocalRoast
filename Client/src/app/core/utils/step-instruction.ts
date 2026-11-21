@@ -26,6 +26,8 @@ export interface InstructionSegment {
     ingredientId: string | null;
     ingredientName: string | null;
     scaled: boolean;
+    linkedRecipeId?: string | null;
+    isUnquantified?: boolean;
   };
   mention?: {
     ingredientId: string;
@@ -46,6 +48,10 @@ export type InstructionIngredient = IngredientMeasurements & {
   id: string;
   displayName: string;
   sectionName?: string | null;
+  linkedRecipeId?: string | null;
+  linkedRecipeTitle?: string | null;
+  linkedSubRecipeId?: string | null;
+  linkedSubRecipeTitle?: string | null;
 };
 
 export function buildInstructionSegments(
@@ -134,9 +140,11 @@ export function buildInstructionSegments(
       const ing = seg.token as StepIngredientToken;
       const matched = matchIngredient(ing, _ingredients, step.sectionName);
       const matchedId = matched?.id ?? ing.ingredientId ?? null;
+      const linkedRecipeId = matched?.linkedRecipeId ?? matched?.linkedSubRecipeId ?? null;
       const displayText = formatTokenDisplay(ing, factor, system, matched);
       const noteText = ing.notes ? `Note: ${ing.notes}` : null;
-      const isScaled = (factor !== 1 || system !== 'Original') && ing.amount != null;
+      const isUnquantified = ing.amount == null || Number.isNaN(ing.amount);
+      const isScaled = (factor !== 1 || system !== 'Original') && !isUnquantified;
       segments.push({
         text: displayText,
         amount: {
@@ -144,6 +152,8 @@ export function buildInstructionSegments(
           ingredientId: matchedId,
           ingredientName: noteText ?? ing.ingredient,
           scaled: isScaled,
+          linkedRecipeId,
+          isUnquantified,
         },
       });
     }
@@ -171,6 +181,14 @@ export function matchIngredient(
   if (token.ingredientId) {
     const found = ingredients.find((i) => i.id === token.ingredientId);
     if (found) return found;
+  }
+  if (
+    token.ingredientIndex != null &&
+    Number.isInteger(token.ingredientIndex) &&
+    token.ingredientIndex >= 0 &&
+    token.ingredientIndex < ingredients.length
+  ) {
+    return ingredients[token.ingredientIndex];
   }
   const clean = token.ingredient.trim().toLowerCase();
   const nameMatches = ingredients.filter((i) => {
@@ -222,6 +240,9 @@ export function ingredientUses(
     for (const seg of segments) {
       if (seg.token && (seg.token.type === 'ingredient' || 'ingredient' in seg.token)) {
         const ingToken = seg.token as StepIngredientToken;
+        if (ingToken.amount == null || Number.isNaN(ingToken.amount)) {
+          continue;
+        }
         const matched = matchIngredient(ingToken, ingredients, step.sectionName);
         if (matched?.id === ingredientId) {
           uses.push({

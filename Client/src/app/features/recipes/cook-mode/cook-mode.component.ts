@@ -1,4 +1,13 @@
-import { Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
+import {
+  Component,
+  DestroyRef,
+  ElementRef,
+  OnDestroy,
+  OnInit,
+  computed,
+  inject,
+  signal,
+} from '@angular/core';
 import { CdkTrapFocus } from '@angular/cdk/a11y';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
@@ -51,6 +60,7 @@ import {
   ContiguousSectionGroup,
   groupContiguousBySection,
 } from '../../../core/utils/section-grouping';
+import { createIngredientHighlightController } from '../../../core/utils/ingredient-highlight';
 import { StepInstructionComponent } from '../../../shared/components/step-instruction/step-instruction.component';
 import { shouldShowTimerLabel } from '../../../core/utils/step-token-parser';
 import {
@@ -103,6 +113,31 @@ export class CookModeComponent implements OnInit, OnDestroy {
   protected readonly aiHelper = inject(AiKitchenHelperService);
   private readonly dialog = inject(MatDialog);
   private readonly title = inject(Title);
+  private readonly destroyRef = inject(DestroyRef);
+  private readonly elementRef = inject<ElementRef<HTMLElement>>(ElementRef);
+  private readonly ingredientHighlight = createIngredientHighlightController((hostEl) => {
+    const desktopPane = hostEl.querySelector<HTMLElement>('.cook-ingredients-pane');
+    const isDesktopHidden = desktopPane ? getComputedStyle(desktopPane).display === 'none' : false;
+    if (isDesktopHidden && !this.isMobileDrawerOpen()) {
+      this.isMobileDrawerOpen.set(true);
+      return 80;
+    }
+    return 0;
+  });
+
+  protected readonly highlightedIngredientId = this.ingredientHighlight.highlightedIngredientId;
+
+  constructor() {
+    this.destroyRef.onDestroy(() => this.ingredientHighlight.clear());
+  }
+
+  protected highlightIngredient(id: string | null): void {
+    this.ingredientHighlight.highlight(id);
+  }
+
+  protected scrollToIngredient(id: string): void {
+    this.ingredientHighlight.scrollTo(this.elementRef.nativeElement, id);
+  }
 
   protected readonly showVoiceHelp = signal<boolean>(false);
   private voiceSub?: Subscription;

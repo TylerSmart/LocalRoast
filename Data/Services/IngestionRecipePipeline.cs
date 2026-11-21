@@ -1578,6 +1578,12 @@ public sealed partial class IngestionRecipePipeline(
             );
         }
 
+        compiledSteps = StepIngredientEnricher.EnrichSteps(
+            compiledIngredients,
+            compiledSteps,
+            measurementWarnings
+        );
+
         var prepMinutes = IngestionMetadataAndTagHelper.ClampMinutes(timing?.Prep);
         var cookMinutes = IngestionMetadataAndTagHelper.ClampMinutes(timing?.Cook);
         var totalMinutes =

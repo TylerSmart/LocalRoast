@@ -570,6 +570,11 @@
     background-color: var(--mat-sys-surface-container);
   }
 
+  &.is-highlighted {
+    background-color: color-mix(in srgb, var(--mat-sys-primary-container) 55%, transparent);
+    box-shadow: 0 0 0 1px var(--mat-sys-primary);
+  }
+
   &.checked-row {
     opacity: 0.52;
     text-decoration: line-through;

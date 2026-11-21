@@ -508,7 +508,11 @@
               @for (item of group.items; track item.ingredient.id) {
                 <li
                   class="ingredient-row"
+                  [attr.data-ingredient-id]="item.ingredient.id"
                   [class.checked-row]="checkedIngredients()[item.ingredient.id]"
+                  [class.is-highlighted]="highlightedIngredientId() === item.ingredient.id"
+                  (mouseenter)="highlightIngredient(item.ingredient.id)"
+                  (mouseleave)="highlightIngredient(null)"
                 >
                   <mat-checkbox
                     [checked]="checkedIngredients()[item.ingredient.id]"
@@ -682,6 +686,9 @@
                         [ingredients]="displayIngredients()"
                         [factor]="scaleFactor()"
                         [unitSystem]="targetSystem()"
+                        [highlightedIngredientId]="highlightedIngredientId()"
+                        (ingredientHover)="highlightIngredient($event)"
+                        (ingredientSelect)="scrollToIngredient($event)"
                       ></app-step-instruction>
                     </p>
                     @if (aiHelper.isAvailable()) {

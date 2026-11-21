@@ -650,4 +650,33 @@ public sealed class StepInstructionParserTests
         StringAssert.Contains(StepInstructionParser.ToPlainText(tempRangeRaw), "350");
         StringAssert.Contains(StepInstructionParser.ToPlainText(tempRangeRaw), "375°F");
     }
+
+    [TestMethod]
+    public void BindIngredientIds_ReplacesIngredientIndexWithGuidAndClearsIndex()
+    {
+        var ing0 = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        var ing1 = Guid.Parse("22222222-2222-2222-2222-222222222222");
+        const string instruction =
+            "Mash ||{\"type\":\"ingredient\",\"ingredient\":\"eggs\",\"ingredientIndex\":1}|| with ||{\"ingredient\":\"salt\",\"ingredientIndex\":0,\"amount\":0.25,\"unit\":\"Tsp\"}.|| for ||{\"type\":\"timer\",\"seconds\":120}||.";
+
+        var bound = StepInstructionParser.BindIngredientIds(instruction, [ing0, ing1]);
+
+        var tokens = StepInstructionParser.ExtractTokens(bound);
+        var eggToken = tokens.OfType<StepIngredientToken>().ElementAt(0);
+        var saltToken = tokens.OfType<StepIngredientToken>().ElementAt(1);
+        var timerToken = tokens.OfType<StepTimerToken>().Single();
+
+        Assert.AreEqual(ing1, eggToken.IngredientId);
+        Assert.IsNull(eggToken.IngredientIndex);
+        Assert.AreEqual(ing0, saltToken.IngredientId);
+        Assert.IsNull(saltToken.IngredientIndex);
+        Assert.AreEqual(0.25m, saltToken.Amount);
+        Assert.AreEqual(120, timerToken.Seconds);
+        Assert.DoesNotContain("\"ingredientIndex\"", bound);
+        StringAssert.Contains(bound, "||.");
+        Assert.AreEqual(
+            "Mash eggs with 0.25 tsp salt. for 2 minutes.",
+            StepInstructionParser.ToPlainText(bound)
+        );
+    }
 }

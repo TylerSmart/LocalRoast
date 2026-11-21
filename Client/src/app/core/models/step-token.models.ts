@@ -9,6 +9,7 @@ export interface StepIngredientToken {
   type?: 'ingredient';
   ingredient: string;
   ingredientId?: string | null;
+  ingredientIndex?: number | null;
   amount?: number | null;
   maxAmount?: number | null;
   unit?: MeasurementUnit | string | null;

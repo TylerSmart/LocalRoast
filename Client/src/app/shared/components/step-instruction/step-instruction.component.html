@@ -17,18 +17,53 @@
       >{{ segment.text }}</span
     >
   } @else if (segment.amount; as amount) {
+    @if (amount.ingredientId) {
+      <span
+        role="button"
+        tabindex="0"
+        class="inline-amount is-linked"
+        [class.is-mixture]="amount.kind === 'Mixture'"
+        [class.is-scaled]="amount.scaled"
+        [class.is-unquantified]="amount.isUnquantified"
+        [class.is-subrecipe]="!!amount.linkedRecipeId"
+        [class.is-highlighted]="highlightedIngredientId() === amount.ingredientId"
+        [attr.data-kind]="amount.kind"
+        [attr.data-ingredient-id]="amount.ingredientId"
+        [attr.title]="amount.ingredientName ?? null"
+        (mouseenter)="ingredientHover.emit(amount.ingredientId)"
+        (mouseleave)="ingredientHover.emit(null)"
+        (click)="onIngredientClick($event, amount.ingredientId)"
+        (keydown.enter)="onIngredientKeydown($event, amount.ingredientId)"
+        (keydown.space)="onIngredientKeydown($event, amount.ingredientId)"
+        >{{ segment.text }}</span
+      >
+    } @else {
+      <span
+        class="inline-amount"
+        [class.is-mixture]="amount.kind === 'Mixture'"
+        [class.is-scaled]="amount.scaled"
+        [class.is-unquantified]="amount.isUnquantified"
+        [attr.data-kind]="amount.kind"
+        [attr.title]="amount.ingredientName ?? (amount.kind === 'Mixture' ? 'Mixture' : null)"
+        >{{ segment.text }}</span
+      >
+    }
+  } @else if (segment.mention; as mention) {
     <span
-      class="inline-amount"
-      [class.is-mixture]="amount.kind === 'Mixture'"
-      [class.is-scaled]="amount.scaled"
-      [attr.data-kind]="amount.kind"
-      [attr.title]="amount.ingredientName ?? (amount.kind === 'Mixture' ? 'Mixture' : null)"
+      role="button"
+      tabindex="0"
+      class="inline-mention is-linked"
+      [class.is-highlighted]="highlightedIngredientId() === mention.ingredientId"
+      data-kind="Ingredient"
+      [attr.data-ingredient-id]="mention.ingredientId"
+      [attr.title]="mention.ingredientName"
+      (mouseenter)="ingredientHover.emit(mention.ingredientId)"
+      (mouseleave)="ingredientHover.emit(null)"
+      (click)="onIngredientClick($event, mention.ingredientId)"
+      (keydown.enter)="onIngredientKeydown($event, mention.ingredientId)"
+      (keydown.space)="onIngredientKeydown($event, mention.ingredientId)"
       >{{ segment.text }}</span
     >
-  } @else if (segment.mention; as mention) {
-    <span class="inline-mention" data-kind="Ingredient" [attr.title]="mention.ingredientName">{{
-      segment.text
-    }}</span>
   } @else {
     <span>{{ segment.text }}</span>
   }

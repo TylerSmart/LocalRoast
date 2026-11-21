@@ -1,7 +1,10 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  DestroyRef,
+  ElementRef,
   computed,
+  inject,
   input,
   linkedSignal,
   output,
@@ -41,6 +44,7 @@ import {
   ContiguousSectionGroup,
   groupContiguousBySection,
 } from '../../../core/utils/section-grouping';
+import { createIngredientHighlightController } from '../../../core/utils/ingredient-highlight';
 
 export interface ScaledPreviewIngredientItem {
   ingredient: RecipePreviewIngredient;
@@ -87,6 +91,22 @@ export class RecipeDetailPreviewComponent {
   readonly targetServings = linkedSignal(() => this.recipe().baseServings || 4);
   readonly targetSystem = signal<UnitSystem>('Original');
   readonly formatReplacement = formatIngredientReplacement;
+  private readonly elementRef = inject<ElementRef<HTMLElement>>(ElementRef);
+  private readonly destroyRef = inject(DestroyRef);
+  private readonly ingredientHighlight = createIngredientHighlightController();
+  readonly highlightedIngredientId = this.ingredientHighlight.highlightedIngredientId;
+
+  constructor() {
+    this.destroyRef.onDestroy(() => this.ingredientHighlight.clear());
+  }
+
+  highlightIngredient(id: string | null): void {
+    this.ingredientHighlight.highlight(id);
+  }
+
+  scrollToIngredient(id: string): void {
+    this.ingredientHighlight.scrollTo(this.elementRef.nativeElement, id);
+  }
 
   readonly scaleFactor = computed(() => {
     const base = this.recipe().baseServings;

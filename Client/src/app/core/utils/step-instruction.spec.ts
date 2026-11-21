@@ -176,4 +176,54 @@ describe('step-instruction utils', () => {
     expect(metricDim?.text).toContain('cm');
     expect(metricDim?.amount?.scaled).toBe(true);
   });
+
+  it('matches sub-recipe tokens by ingredientIndex, exposes linkedRecipeId/isUnquantified, and ignores unquantified mentions in divided uses', () => {
+    const eggsSubRecipe: InstructionIngredient = {
+      id: 'ing-eggs',
+      displayName: 'Easy-Peel Hard-Cooked Eggs',
+      quantity: 6,
+      unit: null,
+      linkedRecipeId: 'recipe-eggs-1',
+      linkedRecipeTitle: 'Easy-Peel Hard-Cooked Eggs',
+    };
+    const salt: InstructionIngredient = {
+      id: 'ing-salt',
+      displayName: 'kosher salt',
+      quantity: 0.5,
+      unit: 'Tsp',
+    };
+    const list: InstructionIngredient[] = [salt, eggsSubRecipe];
+
+    const steps = [
+      {
+        stepNumber: 1,
+        instruction:
+          'Peel ||{"type":"ingredient","ingredient":"eggs","ingredientIndex":1}|| and slice in half.',
+      },
+      {
+        stepNumber: 2,
+        instruction:
+          'Mash yolks with ||{"type":"ingredient","ingredient":"salt","amount":0.5,"unit":"tsp","ingredientIndex":0}||, then season with ||{"type":"ingredient","ingredient":"salt","ingredientIndex":0}|| to taste.',
+      },
+    ];
+
+    const segs1 = buildInstructionSegments(steps[0], list, 1, 'Original');
+    const eggsSeg = segs1.find((s) => s.amount?.kind === 'Ingredient');
+    expect(eggsSeg?.amount?.ingredientId).toBe('ing-eggs');
+    expect(eggsSeg?.amount?.linkedRecipeId).toBe('recipe-eggs-1');
+    expect(eggsSeg?.amount?.isUnquantified).toBe(true);
+
+    const segs2 = buildInstructionSegments(steps[1], list, 1, 'Original');
+    const quantifiedSalt = segs2.find(
+      (s) => s.amount?.ingredientId === 'ing-salt' && !s.amount?.isUnquantified,
+    );
+    const unquantifiedSalt = segs2.find(
+      (s) => s.amount?.ingredientId === 'ing-salt' && s.amount?.isUnquantified,
+    );
+    expect(quantifiedSalt).toBeDefined();
+    expect(unquantifiedSalt).toBeDefined();
+
+    expect(ingredientUses(steps, 'ing-salt', list).length).toBe(1);
+    expect(ingredientUses(steps, 'ing-eggs', list).length).toBe(0);
+  });
 });

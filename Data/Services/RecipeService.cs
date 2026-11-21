@@ -1814,9 +1814,15 @@ public sealed partial class RecipeService(
             createdIngredients.Add(entity);
         }
 
+        var orderedIngredientIds = createdIngredients.Select(i => i.Id).ToList();
+
         for (var s = 0; s < stepsInput.Count; s++)
         {
             var sInput = stepsInput[s];
+            var boundInstruction = StepInstructionParser.BindIngredientIds(
+                sInput.Instruction.Trim(),
+                orderedIngredientIds
+            );
             var stepEntity = new RecipeStep
             {
                 RecipeId = recipe.Id,
@@ -1826,11 +1832,11 @@ public sealed partial class RecipeService(
                 )
                     ? null
                     : sInput.SectionName?.Trim(),
-                Instruction = sInput.Instruction.Trim(),
+                Instruction = boundInstruction,
                 ImagePath = ValidateAndNormalizeMediaPath(sInput.ImagePath),
             };
 
-            var tokens = StepInstructionParser.ExtractTokens(sInput.Instruction);
+            var tokens = StepInstructionParser.ExtractTokens(boundInstruction);
 
             foreach (var token in tokens)
             {

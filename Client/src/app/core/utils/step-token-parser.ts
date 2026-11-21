@@ -203,6 +203,8 @@ export function parseStepInstruction(instruction: string | null | undefined): St
           type: 'ingredient',
           ingredient: String(parsed['ingredient'] ?? '').trim(),
           ingredientId: (parsed['ingredientId'] as string) ?? null,
+          ingredientIndex:
+            parsed['ingredientIndex'] != null ? Number(parsed['ingredientIndex']) : null,
           amount: parsed['amount'] != null ? Number(parsed['amount']) : null,
           maxAmount: parsed['maxAmount'] != null ? Number(parsed['maxAmount']) : null,
           unit: (parsed['unit'] as string) ?? null,

@@ -20,6 +20,42 @@
 .inline-mention {
   background: var(--mat-sys-primary-container);
   color: var(--mat-sys-on-primary-container);
+  border: 0;
+  margin: 0;
+  font-family: inherit;
+  font-size: inherit;
+  text-align: inherit;
+  vertical-align: baseline;
+  transition:
+    background-color 140ms ease,
+    box-shadow 140ms ease,
+    transform 140ms ease;
+
+  &.is-linked {
+    cursor: pointer;
+
+    &:hover,
+    &:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 2px var(--mat-sys-primary);
+    }
+  }
+
+  &.is-unquantified {
+    background: color-mix(in srgb, var(--mat-sys-primary-container) 48%, transparent);
+    text-decoration: underline dotted var(--mat-sys-primary);
+    text-underline-offset: 2px;
+  }
+
+  &.is-subrecipe {
+    border-bottom: 2px solid var(--mat-sys-tertiary);
+  }
+
+  &.is-highlighted {
+    background: var(--mat-sys-primary);
+    color: var(--mat-sys-on-primary);
+    box-shadow: 0 0 0 2px var(--mat-sys-primary);
+  }
 
   &.is-mixture {
     background: var(--mat-sys-secondary-container);

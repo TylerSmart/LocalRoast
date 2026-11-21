@@ -1,6 +1,6 @@
 import { RecipeAttachmentViewerDialogComponent } from '../recipe-attachment-viewer-dialog/recipe-attachment-viewer-dialog.component';
 import { DatePipe, DecimalPipe } from '@angular/common';
-import { Component, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, DestroyRef, ElementRef, OnInit, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { Subscription, interval } from 'rxjs';
@@ -48,6 +48,7 @@ import {
   ContiguousSectionGroup,
   groupContiguousBySection,
 } from '../../../core/utils/section-grouping';
+import { createIngredientHighlightController } from '../../../core/utils/ingredient-highlight';
 import { StepInstructionComponent } from '../../../shared/components/step-instruction/step-instruction.component';
 import { getTodayIsoLocal } from '../../../core/utils/meal-plan-date';
 import { shouldShowTimerLabel } from '../../../core/utils/step-token-parser';
@@ -121,6 +122,22 @@ export class RecipeDetailComponent implements OnInit {
   private readonly snackBar = inject(MatSnackBar);
   protected readonly aiHelper = inject(AiKitchenHelperService);
   private readonly title = inject(Title);
+  private readonly elementRef = inject<ElementRef<HTMLElement>>(ElementRef);
+  private readonly ingredientHighlight = createIngredientHighlightController();
+
+  protected readonly highlightedIngredientId = this.ingredientHighlight.highlightedIngredientId;
+
+  constructor() {
+    this.destroyRef.onDestroy(() => this.ingredientHighlight.clear());
+  }
+
+  protected highlightIngredient(id: string | null): void {
+    this.ingredientHighlight.highlight(id);
+  }
+
+  protected scrollToIngredient(id: string): void {
+    this.ingredientHighlight.scrollTo(this.elementRef.nativeElement, id);
+  }
 
   protected readonly recipe = signal<RecipeDetailDto | null>(null);
   protected readonly isLoading = signal<boolean>(true);

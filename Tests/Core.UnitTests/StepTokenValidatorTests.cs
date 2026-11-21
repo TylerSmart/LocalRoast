@@ -1488,4 +1488,40 @@ public sealed class StepTokenValidatorTests
             rendered
         );
     }
+
+    [TestMethod]
+    public void BuildAndValidateStep_EmitsIngredientIndexOnCompiledToken()
+    {
+        const string original = "Fold in 2 teaspoons chives.";
+        var rawTokens = new JsonArray
+        {
+            "Fold in ",
+            new JsonObject
+            {
+                ["type"] = "ingredient",
+                ["ingredientIndex"] = 1,
+                ["name"] = "chives",
+                ["quantity"] = 2,
+                ["unit"] = "teaspoon",
+            },
+            ".",
+        };
+
+        var result = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 1,
+            sectionName: null,
+            originalInstruction: original,
+            rawTokensJson: rawTokens,
+            ingredientCount: 2
+        );
+
+        var compiledToken = StepInstructionParser
+            .ExtractTokens(result.CompiledInstruction)
+            .OfType<StepIngredientToken>()
+            .Single();
+        Assert.AreEqual(1, compiledToken.IngredientIndex);
+        Assert.IsNull(compiledToken.IngredientId);
+        Assert.AreEqual("chives", compiledToken.Ingredient);
+        Assert.AreEqual(2m, compiledToken.Amount);
+    }
 }

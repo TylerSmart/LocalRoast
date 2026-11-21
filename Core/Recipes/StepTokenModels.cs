@@ -366,7 +366,8 @@ public sealed record StepIngredientToken(
         JsonPropertyName("maxAmount"),
         JsonConverter(typeof(FlexibleNullableDecimalJsonConverter))
     ]
-        decimal? MaxAmount = null
+        decimal? MaxAmount = null,
+    [property: JsonPropertyName("ingredientIndex")] int? IngredientIndex = null
 ) : StepToken(StepTokenType.Ingredient);
 
 public sealed record StepMixtureToken(

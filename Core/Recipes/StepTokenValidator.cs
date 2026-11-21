@@ -1038,7 +1038,8 @@ public static partial class StepTokenValidator
                         Amount: qty,
                         Unit: unit,
                         CustomUnitName: unit == MeasurementUnit.Custom ? customUnit : null,
-                        MaxAmount: maxQty
+                        MaxAmount: maxQty,
+                        IngredientIndex: ing.IngredientIndex >= 0 ? ing.IngredientIndex : null
                     );
                     sb.Append(StepInstructionParser.FormatToken(stepToken));
                     break;

@@ -431,6 +431,16 @@
   border-radius: 8px;
   background-color: var(--mat-sys-surface-container-low);
   border: 1px solid var(--mat-sys-outline-variant);
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+
+  &.is-highlighted {
+    background-color: color-mix(in srgb, var(--mat-sys-primary-container) 55%, transparent);
+    border-color: var(--mat-sys-primary);
+    box-shadow: 0 0 0 1px var(--mat-sys-primary);
+  }
 
   .ingredient-bullet {
     color: var(--mat-sys-primary);

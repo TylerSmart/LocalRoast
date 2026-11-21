@@ -48,7 +48,7 @@ public static partial class StepInstructionParser
     private static partial Regex DuplicateAtBeforeTempRegex();
 
     [GeneratedRegex(
-        @"(?<!\|)(\{\s*""(?:type|ingredient|displayName|canonicalFoodName|name|amount|maxAmount|displayAmount|displayText|unit|seconds|maxSeconds|fahrenheit|celsius|maxFahrenheit|maxCelsius|value|maxValue|hyphenated)""\s*:[^}\r\n]*?\})(?!\|)",
+        @"(?<!\|)(\{\s*""(?:type|ingredient|displayName|canonicalFoodName|name|amount|maxAmount|displayAmount|displayText|unit|ingredientId|ingredientIndex|seconds|maxSeconds|fahrenheit|celsius|maxFahrenheit|maxCelsius|value|maxValue|hyphenated)""\s*:[^}\r\n]*?\})(?!\|)",
         RegexOptions.Singleline,
         matchTimeoutMilliseconds: 1000
     )]
@@ -83,7 +83,7 @@ public static partial class StepInstructionParser
     private static partial Regex DelimitedBodyRegex();
 
     [GeneratedRegex(
-        @"(?<prefix>(?:^|,)\s*)""(?<key>type|ingredient|displayName|canonicalFoodName|name|amount|maxAmount|unit|displayAmount|displayUnit|customUnitName|displayCustomUnitName|displayText|notes|ingredientId|seconds|maxSeconds|label|fahrenheit|celsius|maxFahrenheit|maxCelsius|value|maxValue|hyphenated|temperature)""\s*(?=[0-9""\-]|true\b|false\b|null\b)",
+        @"(?<prefix>(?:^|,)\s*)""(?<key>type|ingredient|displayName|canonicalFoodName|name|amount|maxAmount|unit|displayAmount|displayUnit|customUnitName|displayCustomUnitName|displayText|notes|ingredientId|ingredientIndex|seconds|maxSeconds|label|fahrenheit|celsius|maxFahrenheit|maxCelsius|value|maxValue|hyphenated|temperature)""\s*(?=[0-9""\-]|true\b|false\b|null\b)",
         RegexOptions.IgnoreCase,
         matchTimeoutMilliseconds: 1000
     )]
@@ -280,6 +280,73 @@ public static partial class StepInstructionParser
             .Where(s => s.Token != null)
             .Select(s => s.Token!)
             .ToList();
+    }
+
+    /// <summary>
+    /// Replaces transient <see cref="StepIngredientToken.IngredientIndex"/> indices with
+    /// persisted <see cref="StepIngredientToken.IngredientId"/> GUIDs when saving a recipe.
+    /// </summary>
+    public static string BindIngredientIds(
+        string? instruction,
+        IReadOnlyList<Guid> orderedIngredientIds
+    )
+    {
+        if (string.IsNullOrEmpty(instruction))
+        {
+            return string.Empty;
+        }
+
+        if (orderedIngredientIds.Count == 0)
+        {
+            return instruction;
+        }
+
+        var validIds = orderedIngredientIds.ToHashSet();
+        var normalized = NormalizeMalformedTokenSyntax(instruction);
+
+        return TokenRegex()
+            .Replace(
+                normalized,
+                match =>
+                {
+                    var token = TryParseToken(match.Groups["json"].Value);
+                    if (token is not StepIngredientToken ing)
+                    {
+                        return match.Value;
+                    }
+
+                    Guid? resolvedId =
+                        ing.IngredientId.HasValue && validIds.Contains(ing.IngredientId.Value)
+                            ? ing.IngredientId.Value
+                            : null;
+
+                    if (
+                        !resolvedId.HasValue
+                        && ing.IngredientIndex is int idx
+                        && idx >= 0
+                        && idx < orderedIngredientIds.Count
+                    )
+                    {
+                        resolvedId = orderedIngredientIds[idx];
+                    }
+
+                    if (!resolvedId.HasValue)
+                    {
+                        return match.Value;
+                    }
+
+                    if (resolvedId == ing.IngredientId && !ing.IngredientIndex.HasValue)
+                    {
+                        return match.Value;
+                    }
+
+                    var rebound = ing with { IngredientId = resolvedId, IngredientIndex = null };
+                    var punct = match.Groups["punct"].Value;
+                    return string.IsNullOrEmpty(punct)
+                        ? FormatToken(rebound)
+                        : $"{FormatToken(rebound)}{punct}";
+                }
+            );
     }
 
     public static string ToPlainText(string? instruction)
