@@ -46,6 +46,10 @@ import {
   scaleIngredient,
 } from '../../../core/utils/culinary-math';
 import { renderScaledInstruction } from '../../../core/utils/step-instruction';
+import {
+  ContiguousSectionGroup,
+  groupContiguousBySection,
+} from '../../../core/utils/section-grouping';
 import { StepInstructionComponent } from '../../../shared/components/step-instruction/step-instruction.component';
 import { shouldShowTimerLabel } from '../../../core/utils/step-token-parser';
 import {
@@ -64,10 +68,7 @@ export interface ScaledCookStep {
   step: RecipeStepDto;
 }
 
-export interface CookIngredientSection {
-  sectionName: string;
-  items: ScaledCookIngredient[];
-}
+export type CookIngredientSection = ContiguousSectionGroup<ScaledCookIngredient>;
 
 @Component({
   imports: [
@@ -173,22 +174,15 @@ export class CookModeComponent implements OnInit, OnDestroy {
     const map = this.scaledIngredientsMap();
     if (!r) return [];
 
-    const sectionsMap = new Map<string, ScaledCookIngredient[]>();
+    const items: ScaledCookIngredient[] = [];
     for (const ing of r.ingredients) {
-      const section = ing.sectionName?.trim() || '';
-      if (!sectionsMap.has(section)) {
-        sectionsMap.set(section, []);
-      }
       const item = map.get(ing.id);
       if (item) {
-        sectionsMap.get(section)!.push(item);
+        items.push(item);
       }
     }
 
-    return Array.from(sectionsMap.entries()).map(([sectionName, items]) => ({
-      sectionName,
-      items,
-    }));
+    return groupContiguousBySection(items, (item) => item.ingredient.sectionName);
   });
 
   protected readonly subRecipesList = computed<SubRecipePreviewDto[]>(() => {

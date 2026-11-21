@@ -431,8 +431,18 @@
   }
 }
 
+.ingredient-section-group + .ingredient-section-group,
+.step-section-group + .step-section-group {
+  margin-top: 1.25rem;
+}
+
+.section-continuation-divider {
+  border-top: 1px dashed var(--mat-sys-outline-variant);
+  padding-top: 1rem;
+}
+
 .group-subtitle {
-  margin: 1.15rem 0 0.5rem;
+  margin: 0 0 0.6rem;
   font-size: 0.92rem;
   font-weight: 700;
   text-transform: uppercase;
@@ -440,10 +450,6 @@
   color: var(--mat-sys-on-surface-variant);
   border-bottom: 1px solid var(--mat-sys-outline-variant);
   padding-bottom: 0.3rem;
-
-  &:first-child {
-    margin-top: 0;
-  }
 }
 
 .ingredients-list {

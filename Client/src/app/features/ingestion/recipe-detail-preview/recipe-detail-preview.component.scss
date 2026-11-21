@@ -391,10 +391,18 @@
   font-size: 0.9rem;
 }
 
+.ingredient-section-group + .ingredient-section-group,
+.step-section-group + .step-section-group {
+  margin-top: 1.15rem;
+}
+
+.section-continuation-divider {
+  border-top: 1px dashed var(--mat-sys-outline-variant);
+  padding-top: 0.9rem;
+}
+
 .ingredient-section-group,
 .step-section-group {
-  margin-bottom: 1.1rem;
-
   .group-subtitle {
     font-size: 0.95rem;
     font-weight: 600;

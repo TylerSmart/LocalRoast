@@ -43,6 +43,10 @@ import {
   ingredientUses,
   isIngredientDivided,
 } from '../../../core/utils/step-instruction';
+import {
+  ContiguousSectionGroup,
+  groupContiguousBySection,
+} from '../../../core/utils/section-grouping';
 import { StepInstructionComponent } from '../../../shared/components/step-instruction/step-instruction.component';
 import { getTodayIsoLocal } from '../../../core/utils/meal-plan-date';
 import { shouldShowTimerLabel } from '../../../core/utils/step-token-parser';
@@ -79,15 +83,9 @@ export interface ScaledStepItem {
   step: RecipeStepDto;
 }
 
-export interface IngredientSectionGroup {
-  sectionName: string;
-  items: ScaledIngredientItem[];
-}
+export type IngredientSectionGroup = ContiguousSectionGroup<ScaledIngredientItem>;
 
-export interface StepSectionGroup {
-  sectionName: string;
-  items: ScaledStepItem[];
-}
+export type StepSectionGroup = ContiguousSectionGroup<ScaledStepItem>;
 
 @Component({
   imports: [
@@ -264,7 +262,7 @@ export class RecipeDetailComponent implements OnInit {
     return result;
   });
 
-  // Ingredients grouped by section
+  // Ingredients grouped by contiguous section
   protected readonly groupedIngredients = computed<IngredientSectionGroup[]>(() => {
     const r = this.recipe();
     const map = this.scaledIngredientsMap();
@@ -272,48 +270,28 @@ export class RecipeDetailComponent implements OnInit {
       return [];
     }
 
-    const sectionsMap = new Map<string, ScaledIngredientItem[]>();
+    const items: ScaledIngredientItem[] = [];
     for (const ing of r.ingredients) {
-      const section = ing.sectionName?.trim() || '';
-      if (!sectionsMap.has(section)) {
-        sectionsMap.set(section, []);
-      }
       const item = map.get(ing.id);
       if (item) {
-        sectionsMap.get(section)!.push(item);
+        items.push(item);
       }
     }
 
-    return Array.from(sectionsMap.entries()).map(([sectionName, items]) => ({
-      sectionName,
-      items,
-    }));
+    return groupContiguousBySection(items, (item) => item.ingredient.sectionName);
   });
 
-  // Steps grouped by section
+  // Steps grouped by contiguous section
   protected readonly groupedSteps = computed<StepSectionGroup[]>(() => {
     const r = this.recipe();
     if (!r) {
       return [];
     }
 
-    const sectionsMap = new Map<string, ScaledStepItem[]>();
-
-    for (const step of r.steps) {
-      const section = step.sectionName?.trim() || '';
-      if (!sectionsMap.has(section)) {
-        sectionsMap.set(section, []);
-      }
-
-      sectionsMap.get(section)!.push({
-        step,
-      });
-    }
-
-    return Array.from(sectionsMap.entries()).map(([sectionName, items]) => ({
-      sectionName,
-      items,
-    }));
+    return groupContiguousBySection(
+      r.steps.map((step) => ({ step })),
+      (item) => item.step.sectionName,
+    );
   });
 
   ngOnInit(): void {

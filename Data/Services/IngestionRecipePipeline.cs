@@ -2061,17 +2061,34 @@ public sealed partial class IngestionRecipePipeline(
                 }
 
                 var stepSecName = currentSecName;
-                var forTheMatch = LeadForTheSectionRegex().Match(cleanInstruction);
-                if (forTheMatch.Success)
+                var inlineSecMatch = LeadInlineSectionRegex().Match(cleanInstruction);
+                if (inlineSecMatch.Success)
                 {
-                    cleanInstruction = cleanInstruction[forTheMatch.Length..].TrimStart();
-                    if (stepSecName is null)
+                    var hdrRaw = inlineSecMatch.Groups["hdr"].Value;
+                    var hdrUpper = hdrRaw.Trim().ToUpperInvariant();
+                    if (
+                        hdrUpper
+                        is not (
+                            "NOTE"
+                            or "NOTES"
+                            or "TIP"
+                            or "TIPS"
+                            or "VARIATION"
+                            or "VARIATIONS"
+                            or "WARNING"
+                            or "CAUTION"
+                        )
+                    )
                     {
-                        var parsedSec = NormalizeSection(forTheMatch.Groups["hdr"].Value);
-                        if (!string.IsNullOrWhiteSpace(parsedSec))
+                        cleanInstruction = cleanInstruction[inlineSecMatch.Length..].TrimStart();
+                        if (stepSecName is null)
                         {
-                            currentSecName = parsedSec;
-                            stepSecName = parsedSec;
+                            var parsedSec = NormalizeSection(hdrRaw);
+                            if (!string.IsNullOrWhiteSpace(parsedSec))
+                            {
+                                currentSecName = parsedSec;
+                                stepSecName = parsedSec;
+                            }
                         }
                     }
                 }
@@ -2087,23 +2104,8 @@ public sealed partial class IngestionRecipePipeline(
         return list;
     }
 
-    private static string? NormalizeSection(string? rawSection)
-    {
-        if (string.IsNullOrWhiteSpace(rawSection))
-        {
-            return null;
-        }
-
-        var trimmed = rawSection.Trim().Trim('[', ']').Trim();
-        if (
-            string.IsNullOrWhiteSpace(trimmed)
-            || RecipeUnitAndSectionHelpers.IsGenericTopLevelSection(trimmed)
-        )
-        {
-            return null;
-        }
-        return trimmed.Length > 150 ? trimmed[..150] : trimmed;
-    }
+    private static string? NormalizeSection(string? rawSection) =>
+        RecipeUnitAndSectionHelpers.FormatSectionDisplayName(rawSection);
 
     private static List<(int Index, string Name, string Reason)> FindAllIncompatibleAlts(
         List<WorkIngredient> ingredients
@@ -2670,10 +2672,10 @@ public sealed partial class IngestionRecipePipeline(
     private static partial Regex LeadUpperSectionPrefixRegex();
 
     [GeneratedRegex(
-        @"^FOR\s+THE\s+(?<hdr>[A-Z][A-Z0-9\s,'’&/-]{1,50}):\s+",
+        @"^(?:FOR\s+(?:THE\s+)?)?(?<hdr>[A-Z]{2}[A-Z0-9\s,'’&/-]{0,48}):\s+",
         RegexOptions.CultureInvariant
     )]
-    private static partial Regex LeadForTheSectionRegex();
+    private static partial Regex LeadInlineSectionRegex();
 
     [GeneratedRegex(
         @"^(?:(?:jumbo|extra[- ]large|large|medium|small)\s+)?(?:whites?|yolks?)$",

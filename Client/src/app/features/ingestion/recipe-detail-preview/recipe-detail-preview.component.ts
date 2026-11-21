@@ -37,6 +37,10 @@ import {
 } from '../../../core/utils/step-instruction';
 import { shouldShowTimerLabel } from '../../../core/utils/step-token-parser';
 import { StepInstructionComponent } from '../../../shared/components/step-instruction/step-instruction.component';
+import {
+  ContiguousSectionGroup,
+  groupContiguousBySection,
+} from '../../../core/utils/section-grouping';
 
 export interface ScaledPreviewIngredientItem {
   ingredient: RecipePreviewIngredient;
@@ -49,15 +53,9 @@ export interface ScaledPreviewStepItem {
   instructionStep: NumberedInstructionStep;
 }
 
-export interface PreviewIngredientSectionGroup {
-  sectionName: string;
-  items: ScaledPreviewIngredientItem[];
-}
+export type PreviewIngredientSectionGroup = ContiguousSectionGroup<ScaledPreviewIngredientItem>;
 
-export interface PreviewStepSectionGroup {
-  sectionName: string;
-  items: ScaledPreviewStepItem[];
-}
+export type PreviewStepSectionGroup = ContiguousSectionGroup<ScaledPreviewStepItem>;
 
 @Component({
   selector: 'app-recipe-detail-preview',
@@ -121,23 +119,16 @@ export class RecipeDetailPreviewComponent {
   readonly groupedIngredients = computed<PreviewIngredientSectionGroup[]>(() => {
     const r = this.recipe();
     const map = this.scaledIngredientsMap();
-    const sectionsMap = new Map<string, ScaledPreviewIngredientItem[]>();
+    const items: ScaledPreviewIngredientItem[] = [];
 
     for (const ing of r.ingredients) {
-      const section = ing.sectionName?.trim() || '';
-      if (!sectionsMap.has(section)) {
-        sectionsMap.set(section, []);
-      }
       const item = map.get(ing.index);
       if (item) {
-        sectionsMap.get(section)!.push(item);
+        items.push(item);
       }
     }
 
-    return Array.from(sectionsMap.entries()).map(([sectionName, items]) => ({
-      sectionName,
-      items,
-    }));
+    return groupContiguousBySection(items, (item) => item.ingredient.sectionName);
   });
 
   readonly displayIngredients = computed(() =>
@@ -182,25 +173,12 @@ export class RecipeDetailPreviewComponent {
   readonly groupedSteps = computed<PreviewStepSectionGroup[]>(() => {
     const r = this.recipe();
     const instructionSteps = this.instructionSteps();
-    const sectionsMap = new Map<string, ScaledPreviewStepItem[]>();
-
-    for (const [stepIndex, step] of r.steps.entries()) {
-      const instructionStep = instructionSteps[stepIndex];
-      const section = step.sectionName?.trim() || '';
-      if (!sectionsMap.has(section)) {
-        sectionsMap.set(section, []);
-      }
-
-      sectionsMap.get(section)!.push({
-        step,
-        instructionStep,
-      });
-    }
-
-    return Array.from(sectionsMap.entries()).map(([sectionName, items]) => ({
-      sectionName,
-      items,
+    const items: ScaledPreviewStepItem[] = r.steps.map((step, stepIndex) => ({
+      step,
+      instructionStep: instructionSteps[stepIndex],
     }));
+
+    return groupContiguousBySection(items, (item) => item.step.sectionName);
   });
 
   adjustServings(delta: number): void {

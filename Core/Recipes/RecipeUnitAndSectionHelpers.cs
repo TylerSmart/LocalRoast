@@ -170,6 +170,26 @@ public static class RecipeUnitAndSectionHelpers
         return (cleanQty, cleanMax);
     }
 
+    private static readonly HashSet<string> LowercaseTitleWords = new(
+        StringComparer.OrdinalIgnoreCase
+    )
+    {
+        "a",
+        "an",
+        "and",
+        "as",
+        "at",
+        "for",
+        "from",
+        "in",
+        "of",
+        "on",
+        "or",
+        "the",
+        "to",
+        "with",
+    };
+
     public static bool IsGenericTopLevelSection(string? sectionName)
     {
         if (string.IsNullOrWhiteSpace(sectionName))
@@ -177,8 +197,75 @@ public static class RecipeUnitAndSectionHelpers
             return false;
         }
 
-        var trimmed = sectionName.Trim().TrimEnd(':');
+        var trimmed = sectionName.Trim().Trim('[', ']').Trim().TrimEnd(':');
         return GenericTopLevelSectionNames.Contains(trimmed);
+    }
+
+    public static string? FormatSectionDisplayName(string? rawSection)
+    {
+        if (string.IsNullOrWhiteSpace(rawSection))
+        {
+            return null;
+        }
+
+        var cleaned = rawSection.Trim().Trim('[', ']').Trim().TrimEnd(':', '-', ';').Trim();
+        if (string.IsNullOrWhiteSpace(cleaned) || IsGenericTopLevelSection(cleaned))
+        {
+            return null;
+        }
+
+        // Convert ALL-CAPS cookbook headers (e.g., "PICADA", "FOR THE SAUCE") to readable Title Case
+        // while preserving deliberate mixed-case titles (e.g., "Crumble Topping", "For the Dough").
+        var hasUpper = cleaned.Any(char.IsUpper);
+        var hasLower = cleaned.Any(char.IsLower);
+        if (hasUpper && !hasLower)
+        {
+            cleaned = ToSectionTitleCase(cleaned);
+        }
+
+        return cleaned.Length > 150 ? cleaned[..150] : cleaned;
+    }
+
+    private static string ToSectionTitleCase(string input)
+    {
+        var tokens = input.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        for (var i = 0; i < tokens.Length; i++)
+        {
+            var token = tokens[i];
+            if (i > 0 && LowercaseTitleWords.Contains(token))
+            {
+                tokens[i] = token.ToLowerInvariant();
+                continue;
+            }
+
+            tokens[i] = CapitalizeHyphenatedToken(token);
+        }
+
+        return string.Join(' ', tokens);
+    }
+
+    private static string CapitalizeHyphenatedToken(string token)
+    {
+        var parts = token.Split('-');
+        for (var i = 0; i < parts.Length; i++)
+        {
+            var part = parts[i];
+            if (part.Length == 0)
+            {
+                continue;
+            }
+
+            if (part.Length == 1)
+            {
+                parts[i] = char.ToUpperInvariant(part[0]).ToString();
+            }
+            else
+            {
+                parts[i] = char.ToUpperInvariant(part[0]) + part[1..].ToLowerInvariant();
+            }
+        }
+
+        return string.Join('-', parts);
     }
 
     public static string NormalizeSectionName(string? section)

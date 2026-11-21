@@ -265,8 +265,11 @@
             <span>Ingredients</span>
           </h2>
 
-          @for (group of groupedIngredients(); track group.sectionName) {
-            <div class="ingredient-section-group">
+          @for (group of groupedIngredients(); track group.index) {
+            <div
+              class="ingredient-section-group"
+              [class.section-continuation-divider]="group.isContinuationAfterNamed"
+            >
               @if (group.sectionName) {
                 <h3 class="group-subtitle">{{ group.sectionName }}</h3>
               }
@@ -392,8 +395,11 @@
             <span>Instructions</span>
           </h2>
 
-          @for (group of groupedSteps(); track group.sectionName) {
-            <div class="step-section-group">
+          @for (group of groupedSteps(); track group.index) {
+            <div
+              class="step-section-group"
+              [class.section-continuation-divider]="group.isContinuationAfterNamed"
+            >
               @if (group.sectionName) {
                 <h3 class="group-subtitle">{{ group.sectionName }}</h3>
               }

@@ -157,4 +157,19 @@ public sealed class RecipeMeasurementTests
             )
         );
     }
+
+    [TestMethod]
+    [DataRow("[PICADA]", "Picada")]
+    [DataRow("FOR THE SAUCE:", "For the Sauce")]
+    [DataRow("HERB-GARLIC BUTTER", "Herb-Garlic Butter")]
+    [DataRow("For the Dough", "For the Dough")]
+    [DataRow("Ingredients:", null)]
+    [DataRow("General", null)]
+    public void FormatSectionDisplayName_NormalizesCapsAndFiltersGenericHeaders(
+        string? rawSection,
+        string? expected
+    )
+    {
+        Assert.AreEqual(expected, RecipeUnitAndSectionHelpers.FormatSectionDisplayName(rawSection));
+    }
 }

@@ -32,6 +32,10 @@ import {
   ingredientUses,
   isIngredientDivided,
 } from '../../../core/utils/step-instruction';
+import {
+  ContiguousSectionGroup,
+  groupContiguousBySection,
+} from '../../../core/utils/section-grouping';
 import { StepInstructionComponent } from '../../../shared/components/step-instruction/step-instruction.component';
 import { shouldShowTimerLabel } from '../../../core/utils/step-token-parser';
 
@@ -45,15 +49,9 @@ export interface PublicScaledStepItem {
   step: RecipeStepDto;
 }
 
-export interface PublicIngredientSectionGroup {
-  sectionName: string;
-  items: PublicScaledIngredientItem[];
-}
+export type PublicIngredientSectionGroup = ContiguousSectionGroup<PublicScaledIngredientItem>;
 
-export interface PublicStepSectionGroup {
-  sectionName: string;
-  items: PublicScaledStepItem[];
-}
+export type PublicStepSectionGroup = ContiguousSectionGroup<PublicScaledStepItem>;
 
 @Component({
   imports: [
@@ -172,22 +170,15 @@ export class PublicSharedRecipeComponent implements OnInit {
       return [];
     }
 
-    const sectionsMap = new Map<string, PublicScaledIngredientItem[]>();
+    const items: PublicScaledIngredientItem[] = [];
     for (const ing of r.ingredients) {
-      const section = ing.sectionName?.trim() || '';
-      if (!sectionsMap.has(section)) {
-        sectionsMap.set(section, []);
-      }
       const item = map.get(ing.id);
       if (item) {
-        sectionsMap.get(section)!.push(item);
+        items.push(item);
       }
     }
 
-    return Array.from(sectionsMap.entries()).map(([sectionName, items]) => ({
-      sectionName,
-      items,
-    }));
+    return groupContiguousBySection(items, (item) => item.ingredient.sectionName);
   });
 
   protected readonly groupedSteps = computed<PublicStepSectionGroup[]>(() => {
@@ -196,23 +187,10 @@ export class PublicSharedRecipeComponent implements OnInit {
       return [];
     }
 
-    const sectionsMap = new Map<string, PublicScaledStepItem[]>();
-
-    for (const step of r.steps) {
-      const section = step.sectionName?.trim() || '';
-      if (!sectionsMap.has(section)) {
-        sectionsMap.set(section, []);
-      }
-
-      sectionsMap.get(section)!.push({
-        step,
-      });
-    }
-
-    return Array.from(sectionsMap.entries()).map(([sectionName, items]) => ({
-      sectionName,
-      items,
-    }));
+    return groupContiguousBySection(
+      r.steps.map((step) => ({ step })),
+      (item) => item.step.sectionName,
+    );
   });
 
   ngOnInit(): void {

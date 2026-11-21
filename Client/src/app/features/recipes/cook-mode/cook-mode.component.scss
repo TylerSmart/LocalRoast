@@ -505,6 +505,11 @@
   gap: 0.85rem;
 }
 
+.ingredient-section.section-continuation-divider {
+  border-top: 1px dashed var(--mat-sys-outline-variant);
+  padding-top: 0.75rem;
+}
+
 .ingredient-section .section-heading,
 .sub-recipes-section .section-heading {
   font-size: 0.78rem;

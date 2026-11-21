@@ -305,8 +305,11 @@
         </div>
 
         <div class="ingredients-scroll">
-          @for (section of groupedIngredients(); track section.sectionName) {
-            <div class="ingredient-section">
+          @for (section of groupedIngredients(); track section.index) {
+            <div
+              class="ingredient-section"
+              [class.section-continuation-divider]="section.isContinuationAfterNamed"
+            >
               @if (section.sectionName) {
                 <h3 class="section-heading">{{ section.sectionName }}</h3>
               }
@@ -743,8 +746,11 @@
           </button>
         </div>
         <div class="drawer-body">
-          @for (section of groupedIngredients(); track section.sectionName) {
-            <div class="ingredient-section">
+          @for (section of groupedIngredients(); track section.index) {
+            <div
+              class="ingredient-section"
+              [class.section-continuation-divider]="section.isContinuationAfterNamed"
+            >
               @if (section.sectionName) {
                 <h4 class="section-heading">{{ section.sectionName }}</h4>
               }
