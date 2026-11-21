@@ -490,5 +490,19 @@ public sealed class CulinaryMathTests
                 subRecipeYieldDisplay: "MAKES 6 eggs"
             )
         );
+
+        // Persisted Whole unit without originalRawText (API DTO) against "MAKES 6 eggs" -> 1 full batch
+        Assert.AreEqual(
+            1m,
+            CulinaryMath.ComputeSubRecipeBatchMultiplier(
+                quantity: 1m,
+                unit: MeasurementUnit.Whole,
+                customUnitName: null,
+                originalRawText: null,
+                alternativeMeasurement: null,
+                subRecipeBaseServings: 6m,
+                subRecipeYieldDisplay: "MAKES 6 eggs"
+            )
+        );
     }
 }

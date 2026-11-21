@@ -1075,8 +1075,8 @@ public static partial class CulinaryMath
             }
         }
 
-        // Count/unitless or non-batch Whole (e.g., "2 Easy-Peel Hard-Cooked Eggs" or "1 crust") against count yields.
-        if (unit is null or MeasurementUnit.Whole or MeasurementUnit.Custom)
+        // Count/unitless or matching custom unit (e.g., "2 Easy-Peel Hard-Cooked Eggs" or "1 crust") against count yields.
+        if (unit is null or MeasurementUnit.Custom)
         {
             var customNoun =
                 unit == MeasurementUnit.Custom && !string.IsNullOrWhiteSpace(customUnitName)

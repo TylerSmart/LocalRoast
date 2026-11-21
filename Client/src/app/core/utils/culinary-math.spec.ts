@@ -468,6 +468,14 @@ describe('culinary-math', () => {
         ),
       ).toBe(1);
 
+      // Persisted Whole unit without originalRawText (UI DTO path) against "MAKES 6 eggs" -> 1x full batch
+      expect(
+        computeSubRecipeBatchMultiplier(
+          { quantity: 1, unit: 'Whole', originalRawText: null },
+          { baseServings: 6, yieldDisplay: 'MAKES 6 eggs' },
+        ),
+      ).toBe(1);
+
       // "1 crust" fallback when sub-recipe has no yieldDisplay
       expect(
         computeSubRecipeBatchMultiplier(

@@ -241,4 +241,87 @@ public sealed class StepIngredientEnricherTests
         Assert.IsNull(tokens[0].Amount);
         Assert.AreEqual(0, tokens[0].IngredientIndex);
     }
+
+    [TestMethod]
+    public void EnrichSteps_WholeSubRecipeToken_StripsOneWholeAndKeepsLink()
+    {
+        var ingredients = new List<IngestionDraftIngredientDto>
+        {
+            new(
+                Quantity: 1m,
+                Unit: MeasurementUnit.Whole,
+                DisplayName: "Vegan Ranch Dressing",
+                IsRecipeReference: true,
+                ReferencedRecipeTitle: "Vegan Ranch Dressing"
+            ),
+        };
+
+        var steps = new List<IngestionDraftStepDto>
+        {
+            new(
+                Instruction: "Serve immediately with ||{\"ingredient\":\"dressing\",\"amount\":1,\"unit\":\"whole\",\"ingredientIndex\":0}||."
+            ),
+        };
+
+        var enriched = StepIngredientEnricher.EnrichSteps(ingredients, steps);
+        var plain = StepInstructionParser.ToPlainText(enriched[0].Instruction);
+        Assert.AreEqual("Serve immediately with dressing.", plain);
+
+        var tok = StepInstructionParser
+            .ExtractTokens(enriched[0].Instruction)
+            .OfType<StepIngredientToken>()
+            .Single();
+        Assert.AreEqual(0, tok.IngredientIndex);
+        Assert.IsNull(tok.Amount);
+        Assert.IsNull(tok.Unit);
+    }
+
+    [TestMethod]
+    public void EnrichSteps_UnambiguousAliasesLinkPlainText_WithConflictCompoundAndOmitGuards()
+    {
+        var ingredients = new List<IngestionDraftIngredientDto>
+        {
+            new(Quantity: 1m, Unit: MeasurementUnit.Tsp, DisplayName: "table salt"),
+            new(Quantity: 1m, Unit: null, DisplayName: "plum tomato"),
+            new(Quantity: 1m, Unit: null, DisplayName: "serrano chile"),
+            new(
+                Quantity: 1m,
+                Unit: MeasurementUnit.Custom,
+                CustomUnitName: "block",
+                DisplayName: "feta cheese"
+            ),
+            new(Quantity: 0.25m, Unit: MeasurementUnit.Tsp, DisplayName: "cayenne pepper"),
+            new(Quantity: 0.25m, Unit: null, DisplayName: "green bell pepper"),
+            new(Quantity: 12m, Unit: null, DisplayName: "parsley leaves"),
+        };
+
+        var steps = new List<IngestionDraftStepDto>
+        {
+            new(
+                Instruction: "Combine chopped tomato, serrano, feta block, bell pepper, and pinch cayenne with salt. Avoid tomato paste and discard garlic powder. Omit parsley garnish."
+            ),
+        };
+
+        var enriched = StepIngredientEnricher.EnrichSteps(ingredients, steps);
+        var tokens = StepInstructionParser
+            .ExtractTokens(enriched[0].Instruction)
+            .OfType<StepIngredientToken>()
+            .ToList();
+
+        var linkedByIndex = tokens.ToDictionary(t => t.IngredientIndex!.Value);
+        Assert.AreEqual("salt", linkedByIndex[0].Ingredient);
+        Assert.AreEqual(1m, linkedByIndex[0].Amount);
+        Assert.AreEqual("chopped tomato", linkedByIndex[1].Ingredient);
+        Assert.AreEqual(1m, linkedByIndex[1].Amount);
+        Assert.AreEqual("serrano", linkedByIndex[2].Ingredient);
+        Assert.AreEqual("feta", linkedByIndex[3].Ingredient);
+        Assert.AreEqual("cayenne", linkedByIndex[4].Ingredient);
+        Assert.AreEqual("bell pepper", linkedByIndex[5].Ingredient);
+        Assert.IsFalse(linkedByIndex.ContainsKey(6));
+
+        // Verify compound phrase "tomato paste" stayed intact and wasn't turned into "1 plum tomato paste"
+        var plain = StepInstructionParser.ToPlainText(enriched[0].Instruction);
+        StringAssert.Contains(plain, "Avoid tomato paste");
+        StringAssert.Contains(plain, "Omit parsley garnish.");
+    }
 }

@@ -93,6 +93,84 @@ public static partial class StepIngredientEnricher
         "bone-in",
         "prepared",
         "store-bought",
+        "table",
+        "granulated",
+        "powdered",
+        "confectioners",
+        "all-purpose",
+        "brown",
+        "dark",
+        "light",
+        "white",
+        "yellow",
+        "red",
+        "green",
+        "black",
+        "dijon",
+        "whole-grain",
+        "distilled",
+        "cider",
+        "sherry",
+        "balsamic",
+        "dry",
+        "sweet",
+        "unsweetened",
+        "plain",
+        "canned",
+        "frozen",
+        "thawed",
+        "jarred",
+        "packed",
+        "crushed",
+        "firm",
+        "soft",
+        "sharp",
+        "mild",
+        "smoked",
+        "fire-roasted",
+        "plum",
+        "roma",
+        "cherry",
+        "yukon",
+        "gold",
+        "russet",
+        "hearty",
+        "sandwich",
+        "lean",
+        "percent",
+        "long-grain",
+        "short-grain",
+    };
+
+    private static readonly HashSet<string> FormSuffixWords = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "clove",
+        "cloves",
+        "leaf",
+        "leaves",
+        "floret",
+        "florets",
+        "wedge",
+        "wedges",
+        "sprig",
+        "sprigs",
+        "stalk",
+        "stalks",
+        "thread",
+        "threads",
+        "fillet",
+        "fillets",
+    };
+
+    private static readonly HashSet<string> GenericHeadNounsForModifierExtract = new(
+        StringComparer.OrdinalIgnoreCase
+    )
+    {
+        "pepper",
+        "cheese",
+        "chile",
+        "chiles",
+        "flakes",
     };
 
     private static readonly HashSet<string> StopAliases = new(StringComparer.OrdinalIgnoreCase)
@@ -116,6 +194,25 @@ public static partial class StepIngredientEnricher
         "pot",
         "bowl",
         "oven",
+        "white",
+        "black",
+        "red",
+        "green",
+        "hot",
+        "cold",
+        "warm",
+        "dry",
+        "fresh",
+        "dark",
+        "light",
+        "ground",
+        "large",
+        "small",
+        "medium",
+        "whole",
+        "extra",
+        "water",
+        "ice",
     };
 
     private static readonly Dictionary<MeasurementUnit, string[]> RedundantCountUnitWords = new()
@@ -178,10 +275,28 @@ public static partial class StepIngredientEnricher
     private static partial Regex TrailingCulinaryModifierRegex();
 
     [GeneratedRegex(
+        @"\b(?:omit|without|exclude)\s+(?:the\s+)?$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex OmitPrecedingRegex();
+
+    [GeneratedRegex(
         @"^\s+(?:pan|pot|skillet|sheet|bowl|bath|knife|rack|towel|paper|plate|spoon|whisk|processor|blender|strainer|colander|thermometer|oven|burner|grate|press|shaker|peeler|grater|mill)\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex EquipmentFollowingRegex();
+
+    [GeneratedRegex(
+        @"^\s+(?:powder|flakes|paste|sauce|oil|vinegar|broth|stock|juice|zest|seeds?|yolks?|whites?|shells?|skins?)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex CompoundFoodFollowingRegex();
+
+    [GeneratedRegex(
+        @"(?:cayenne|bell|chili|chile|jalapeñ?o|serrano|white|red|crushed|longhorn)\s+$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex PepperModifierPrecedingRegex();
 
     [GeneratedRegex(
         @"(?:\b(?<qty>\d+(?:\s+\d+/\d+|/\d+|\.\d+)?|[½¼¾⅓⅔⅛⅜⅝⅞])\s*(?:(?:to|-|–)\s*(?<maxQty>\d+(?:\s+\d+/\d+|/\d+|\.\d+)?|[½¼¾⅓⅔⅛⅜⅝⅞])\s*)?(?<unit>teaspoons?|tsp\.?|tablespoons?|tbsp\.?|cups?|fl(?:uid)?\.?\s*oz\.?|pints?|pt\.?|quarts?|qt\.?|gallons?|gal\.?|ounces?|oz\.?|pounds?|lbs?\.?|grams?|g|kilograms?|kg|milliliters?|ml|liters?|l|pinches?|dashes?|cloves?|slices?|cans?|heads?|sprigs?|stalks?|bunches?)?(?:\s+of)?)\s+$",
@@ -371,7 +486,7 @@ public static partial class StepIngredientEnricher
                 continue;
             }
 
-            var candStripped = StripPrepAdjectives(candFull);
+            var candStripped = StripPrepAdjectives(StripFormSuffixes(candFull));
             if (
                 !string.IsNullOrEmpty(candStripped)
                 && string.Equals(candStripped, tokenStripped, StringComparison.Ordinal)
@@ -537,7 +652,34 @@ public static partial class StepIngredientEnricher
                     continue;
                 }
 
+                var compoundMatch = CompoundFoodFollowingRegex().Match(after);
+                if (
+                    compoundMatch.Success
+                    && !alias.EndsWith(
+                        compoundMatch.Value.Trim(),
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                )
+                {
+                    match = match.NextMatch();
+                    continue;
+                }
+
                 var before = text[..match.Index];
+                if (OmitPrecedingRegex().IsMatch(before))
+                {
+                    match = match.NextMatch();
+                    continue;
+                }
+
+                if (
+                    string.Equals(alias, "pepper", StringComparison.OrdinalIgnoreCase)
+                    && PepperModifierPrecedingRegex().IsMatch(before)
+                )
+                {
+                    match = match.NextMatch();
+                    continue;
+                }
                 decimal? parsedQty = null;
                 decimal? parsedMaxQty = null;
                 MeasurementUnit? parsedUnit = null;
@@ -625,53 +767,100 @@ public static partial class StepIngredientEnricher
         var results = new List<string>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        void AddAlias(string? candidate)
+        void AddAlias(string? candidate, bool checkConflict)
         {
             var cleaned = NormalizePhrase(candidate);
-            if (cleaned.Length < 3 || StopAliases.Contains(cleaned) || !seen.Add(cleaned))
+            if (cleaned.Length < 3 || StopAliases.Contains(cleaned) || seen.Contains(cleaned))
             {
                 return;
             }
+            if (
+                checkConflict && AliasConflictsWithOtherIngredient(cleaned, allIngredients, selfIdx)
+            )
+            {
+                return;
+            }
+            seen.Add(cleaned);
             results.Add(cleaned);
         }
 
-        AddAlias(ing.DisplayName);
-        var strippedDisplay = StripPrepAdjectives(NormalizePhrase(ing.DisplayName));
-        if (
-            !string.IsNullOrEmpty(strippedDisplay)
-            && !HeadNounConflictsWithOtherIngredient(strippedDisplay, allIngredients, selfIdx)
-        )
+        var displayNorm = NormalizePhrase(ing.DisplayName);
+        AddAlias(displayNorm, checkConflict: false);
+
+        var formStripped = StripFormSuffixes(displayNorm);
+        AddAlias(formStripped, checkConflict: true);
+
+        var prepStripped = StripPrepAdjectives(formStripped);
+        AddAlias(prepStripped, checkConflict: true);
+
+        // Progressive trailing suffixes (e.g., "green bell pepper" -> "bell pepper", "table salt" -> "salt")
+        var words = formStripped.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        for (var start = 1; start < words.Length; start++)
         {
-            AddAlias(strippedDisplay);
+            AddAlias(string.Join(' ', words[start..]), checkConflict: true);
+        }
+
+        // Distinguishing modifier before generic head nouns (e.g., "serrano chile" -> "serrano", "feta cheese" -> "feta")
+        if (words.Length >= 2 && GenericHeadNounsForModifierExtract.Contains(words[^1]))
+        {
+            var end = words.Length - 1;
+            while (end > 0 && GenericHeadNounsForModifierExtract.Contains(words[end]))
+            {
+                end--;
+            }
+            var trimmedMod = string.Join(' ', words[..(end + 1)]);
+            AddAlias(trimmedMod, checkConflict: true);
+            var strippedMod = StripPrepAdjectives(trimmedMod);
+            AddAlias(strippedMod, checkConflict: true);
         }
 
         if (ing.IsRecipeReference)
         {
-            AddAlias(StripPrepAdjectives(NormalizePhrase(ing.ReferencedRecipeTitle)));
-            AddAlias(StripPrepAdjectives(NormalizePhrase(ing.MatchedRecipeTitle)));
+            AddAlias(
+                StripPrepAdjectives(NormalizePhrase(ing.ReferencedRecipeTitle)),
+                checkConflict: true
+            );
+            AddAlias(
+                StripPrepAdjectives(NormalizePhrase(ing.MatchedRecipeTitle)),
+                checkConflict: true
+            );
 
             var headWord = ExtractLastRawWord(ing.DisplayName);
-            if (
-                !string.IsNullOrEmpty(headWord)
-                && headWord.Length >= 3
-                && !StopAliases.Contains(headWord)
-                && !HeadNounConflictsWithOtherIngredient(headWord, allIngredients, selfIdx)
-            )
+            AddAlias(headWord, checkConflict: true);
+            if (!string.IsNullOrEmpty(headWord))
             {
-                AddAlias(headWord);
+                var singularHead = RecipeUnitAndSectionHelpers.Singularize(headWord);
+                AddAlias(singularHead, checkConflict: true);
             }
         }
 
         return results.OrderByDescending(a => a.Length).ToList();
     }
 
-    private static bool HeadNounConflictsWithOtherIngredient(
-        string headWord,
+    private static string StripFormSuffixes(string normalizedPhrase)
+    {
+        if (string.IsNullOrWhiteSpace(normalizedPhrase))
+        {
+            return string.Empty;
+        }
+
+        var words = normalizedPhrase.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var end = words.Length;
+        while (end > 1 && FormSuffixWords.Contains(words[end - 1]))
+        {
+            end--;
+        }
+        return end < words.Length ? string.Join(' ', words[..end]) : normalizedPhrase;
+    }
+
+    private static bool AliasConflictsWithOtherIngredient(
+        string candidate,
         IReadOnlyList<IngestionDraftIngredientDto> allIngredients,
         int selfIdx
     )
     {
-        var singular = RecipeUnitAndSectionHelpers.Singularize(headWord.ToLowerInvariant());
+        var singular = RecipeUnitAndSectionHelpers.Singularize(candidate.ToLowerInvariant());
+        var singleWord = !candidate.Contains(' ');
         for (var i = 0; i < allIngredients.Count; i++)
         {
             if (i == selfIdx)
@@ -679,10 +868,22 @@ public static partial class StepIngredientEnricher
                 continue;
             }
 
-            var otherHead = ExtractHeadNoun(NormalizePhrase(allIngredients[i].DisplayName));
-            if (string.Equals(otherHead, singular, StringComparison.OrdinalIgnoreCase))
+            var otherNorm = NormalizePhrase(allIngredients[i].DisplayName);
+            if (
+                ContainsWholePhrase(otherNorm, candidate)
+                || ContainsWholePhrase(otherNorm, singular)
+            )
             {
                 return true;
+            }
+
+            if (singleWord)
+            {
+                var otherHead = ExtractHeadNoun(otherNorm);
+                if (string.Equals(otherHead, singular, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
             }
         }
         return false;
@@ -772,7 +973,8 @@ public static partial class StepIngredientEnricher
                         && AdHocOrGarnishRegex().IsMatch(tok.Notes)
                     )
                     || AdHocOrGarnishRegex().IsMatch(prevWindow)
-                    || AdHocOrGarnishRegex().IsMatch(nextWindow);
+                    || AdHocOrGarnishRegex().IsMatch(nextWindow)
+                    || OmitPrecedingRegex().IsMatch(prevText);
 
                 var isDistributive =
                     DistributiveContextRegex().IsMatch(prevWindow)
@@ -821,6 +1023,33 @@ public static partial class StepIngredientEnricher
             var ing = ingredients[idx];
             if (ShouldSkipSubRecipeQuantityInjection(ing))
             {
+                if (
+                    ing.Unit == MeasurementUnit.Whole
+                    && ing.Quantity is 1m
+                    && !ing.MaxQuantity.HasValue
+                )
+                {
+                    for (var k = 0; k < occs.Count; k++)
+                    {
+                        var occ = occs[k];
+                        if (
+                            occ.Token.Amount is 1m
+                            && !occ.Token.MaxAmount.HasValue
+                            && occ.Token.Unit == MeasurementUnit.Whole
+                        )
+                        {
+                            var stripped = occ.Token with
+                            {
+                                Amount = null,
+                                MaxAmount = null,
+                                Unit = null,
+                                CustomUnitName = null,
+                            };
+                            stepSegments[occ.StepIndex][occ.SegmentIndex].Token = stripped;
+                            occs[k] = occ with { Token = stripped };
+                        }
+                    }
+                }
                 continue;
             }
 
@@ -1043,7 +1272,7 @@ public static partial class StepIngredientEnricher
 
         return ing.Quantity is 1m
             && !ing.MaxQuantity.HasValue
-            && ing.Unit is null
+            && (ing.Unit is null or MeasurementUnit.Whole)
             && string.IsNullOrWhiteSpace(ing.CustomUnitName);
     }
 

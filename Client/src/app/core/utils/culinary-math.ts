@@ -393,7 +393,7 @@ export function computeSubRecipeBatchMultiplier(
     }
   }
 
-  if (unit == null || unit === 'Whole' || unit === 'Custom') {
+  if (unit == null || unit === 'Custom') {
     const customNoun =
       unit === 'Custom' && customUnitName?.trim() ? singularizeSimple(customUnitName.trim()) : null;
     for (const entry of yieldEntries) {
