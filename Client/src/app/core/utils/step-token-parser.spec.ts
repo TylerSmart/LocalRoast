@@ -3,6 +3,7 @@ import {
   cleanStepInstruction,
   deriveStepMetadataFromInstruction,
   fahrenheitToCelsius,
+  formatMixtureDisplay,
   formatSeconds,
   formatTemperatureDisplay,
   formatTimerToken,
@@ -18,6 +19,7 @@ import {
 } from './step-token-parser';
 import {
   StepIngredientToken,
+  StepMixtureToken,
   StepTemperatureToken,
   StepTimerToken,
 } from '../models/step-token.models';
@@ -361,5 +363,22 @@ describe('step-token-parser', () => {
 
     const meta = deriveStepMetadataFromInstruction(raw);
     expect(meta.timers).toEqual([{ durationSeconds: 300, label: 'Timer' }]);
+  });
+
+  it('keeps fixed mixture tokens unscaled across serving multipliers while converting metric units', () => {
+    const raw =
+      'Shape ||{"type":"mixture","name":"pork mixture","amount":1,"unit":"tbsp","fixed":true}|| into meatball.';
+    const segments = parseStepInstruction(raw);
+    const mix = segments[1].token as StepMixtureToken;
+    expect(mix.fixed).toBe(true);
+
+    expect(formatMixtureDisplay(mix, 2, 'Original')).toEqual({
+      text: '1 tbsp pork mixture',
+      scaled: false,
+    });
+    expect(formatMixtureDisplay(mix, 2, 'Metric')).toEqual({
+      text: '15 ml pork mixture',
+      scaled: true,
+    });
   });
 });

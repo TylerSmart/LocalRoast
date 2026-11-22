@@ -403,9 +403,14 @@ export class StepInstructionEditorComponent implements ControlValueAccessor, Aft
       labelText = formatFixedDisplay(token as StepFixedToken, 'Original').text;
       editPrefix = 'Edit fixed measurement';
     } else if (token.type === 'mixture') {
+      const mixTok = token as StepMixtureToken;
       kindClass = 'is-mixture';
       iconName = 'blender';
-      labelText = formatMixtureDisplay(token as StepMixtureToken, 1, 'Original').text;
+      labelText = formatMixtureDisplay(mixTok, 1, 'Original').text;
+      if (mixTok.fixed) {
+        kindClass = 'is-mixture is-fixed-ingredient';
+        labelText = `${labelText} [fixed]`;
+      }
       editPrefix = 'Edit mixture';
     } else {
       const ingTok = token as StepIngredientToken;

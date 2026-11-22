@@ -565,4 +565,81 @@ public sealed class StepTokensE2ETests : E2ETestBase
         await Expect(editable.Locator(".inline-step-chip.is-fixed-ingredient"))
             .ToContainTextAsync("[fixed]");
     }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task StepTokens_FixedMixtureToken_StaysFixedAt2xConvertsToMetricAndSupportsDialogCheckbox()
+    {
+        await Page.SetViewportSizeAsync(1280, 800);
+        await RegisterAndLoginAsync();
+
+        var suffix = Guid.NewGuid().ToString("N")[..6];
+        var recipeId = await CreateRecipeViaApiAsync(
+            new
+            {
+                title = $"Meatballs {suffix}",
+                baseServings = 4,
+                ingredients = new object[]
+                {
+                    new
+                    {
+                        displayName = "ground pork",
+                        quantity = 1,
+                        unit = "Lb",
+                    },
+                },
+                steps = new object[]
+                {
+                    new
+                    {
+                        instruction = "Form ||{\"type\":\"mixture\",\"name\":\"pork mixture\",\"amount\":1,\"unit\":\"tbsp\",\"fixed\":true}|| into meatball; repeat.",
+                    },
+                },
+            }
+        );
+
+        await Page.GotoAsync($"{ServerUrl}/recipes/{recipeId}");
+        var fixedMixtureChip = Page.Locator(
+            ".step-instruction-text .inline-amount.is-mixture.is-fixed-ingredient"
+        );
+        await Expect(fixedMixtureChip).ToHaveTextAsync("1 tbsp pork mixture");
+
+        var twoXChip = Page.Locator(".mult-chip", new() { HasTextRegex = TwoX });
+        await twoXChip.ClickAsync();
+        await Expect(fixedMixtureChip).ToHaveTextAsync("1 tbsp pork mixture");
+
+        var metricChip = Page.Locator(
+            ".unit-sys-chip, mat-button-toggle",
+            new() { HasTextRegex = new(@"^\s*Metric\s*$") }
+        );
+        if (await metricChip.CountAsync() > 0)
+        {
+            await metricChip.First.ClickAsync();
+            await Expect(fixedMixtureChip).ToContainTextAsync("15 ml pork mixture");
+        }
+
+        // Open editor and insert a fixed Mixture token via dialog checkbox
+        await Page.GotoAsync($"{ServerUrl}/recipes/{recipeId}/edit");
+        var stepCard = Page.Locator(".builder-list").Last.Locator(".builder-item-card").Last;
+        var editor = stepCard.Locator("[formcontrolname='instruction']");
+        var editable = editor.Locator(".step-instruction-editable");
+        await editable.ClickAsync();
+        await Page.Keyboard.TypeAsync(" Shape ");
+
+        await stepCard.Locator(".add-mixture-btn").ClickAsync();
+        var dialog = Page.Locator("app-step-token-dialog");
+        await Expect(dialog).ToBeVisibleAsync();
+        await dialog.Locator("input[formcontrolname='name']").FillAsync("cheese filling");
+        await dialog.Locator("input[formcontrolname='amount']").FillAsync("2");
+        await dialog.Locator("input[formcontrolname='unit']").FillAsync("tbsp");
+        await dialog.Locator("input[formcontrolname='name']").ClickAsync();
+        await dialog.Locator("mat-checkbox[formcontrolname='fixed']").ClickAsync();
+        await dialog.Locator("button", new() { HasText = "Insert Token" }).ClickAsync();
+        await Expect(dialog).ToHaveCountAsync(0);
+
+        var updatedSerialized = await editor.GetAttributeAsync("data-serialized-value");
+        Assert.IsNotNull(updatedSerialized);
+        Assert.Contains("\"type\":\"mixture\"", updatedSerialized);
+        Assert.Contains("\"fixed\":true", updatedSerialized);
+    }
 }

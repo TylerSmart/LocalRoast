@@ -128,13 +128,15 @@ export function buildInstructionSegments(
     } else if (seg.token.type === 'mixture') {
       const mix = seg.token as StepMixtureToken;
       const { text: mixText, scaled: isScaled } = formatMixtureDisplay(mix, factor, system);
+      const isFixed = Boolean(mix.fixed);
       segments.push({
         text: mixText,
         amount: {
           kind: 'Mixture',
           ingredientId: null,
-          ingredientName: mix.name,
+          ingredientName: isFixed ? `${mix.name} (fixed per item)` : mix.name,
           scaled: isScaled,
+          isFixed,
         },
       });
     } else {

@@ -188,7 +188,8 @@ public sealed record Stage4MixtureToken(
     string Name,
     decimal Quantity,
     decimal? MaxQuantity,
-    string? Unit
+    string? Unit,
+    bool Fixed = false
 ) : Stage4ParsedToken("mixture");
 
 public sealed record Stage4TimerToken(decimal Amount, decimal? MaxAmount, string Unit, string Label)
@@ -366,6 +367,7 @@ public static class MultiStageSchemas
                             quantity = new { type = "number" },
                             maxQuantity = new { type = new[] { "number", "null" } },
                             unit = new { type = new[] { "string", "null" } },
+                            @fixed = new { type = new[] { "boolean", "null" } },
                         },
                         required = new[] { "type", "name", "quantity", "maxQuantity", "unit" },
                     },

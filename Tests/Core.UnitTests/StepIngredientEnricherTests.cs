@@ -425,8 +425,15 @@ public sealed class StepIngredientEnricherTests
             .ExtractTokens(enriched[0].Instruction)
             .OfType<StepIngredientToken>()
             .ToList();
+        Assert.HasCount(1, s1Toks);
         Assert.AreEqual(0, s1Toks[0].IngredientIndex);
-        Assert.IsNull(s1Toks[1].IngredientIndex);
+        var s1Mix = StepInstructionParser
+            .ExtractTokens(enriched[0].Instruction)
+            .OfType<StepMixtureToken>()
+            .Single();
+        Assert.AreEqual("fat", s1Mix.Name);
+        Assert.AreEqual(3m, s1Mix.Amount);
+        Assert.AreEqual(MeasurementUnit.Tbsp, s1Mix.Unit);
 
         var s2Tok = StepInstructionParser
             .ExtractTokens(enriched[1].Instruction)
@@ -627,5 +634,207 @@ public sealed class StepIngredientEnricherTests
         Assert.AreEqual(0, tok.IngredientIndex);
         Assert.AreEqual(1m, tok.Amount);
         Assert.IsTrue(tok.Fixed);
+    }
+
+    [TestMethod]
+    public void EnrichSteps_PreventsCrossSectionSoakingAndTemperingFalseWarnings()
+    {
+        var ingredients = new List<IngestionDraftIngredientDto>
+        {
+            new(
+                SectionName: "Slaw",
+                Quantity: 0.5m,
+                Unit: MeasurementUnit.Cup,
+                DisplayName: "water"
+            ),
+            new(Quantity: 7m, Unit: MeasurementUnit.Cup, DisplayName: "water"),
+            new(
+                SectionName: "Pastry Cream",
+                Quantity: 2.5m,
+                Unit: MeasurementUnit.Cup,
+                DisplayName: "whole milk"
+            ),
+        };
+
+        var steps = new List<IngestionDraftStepDto>
+        {
+            new(
+                SectionName: "Beef",
+                Instruction: "Add ||{\"ingredient\":\"water\",\"amount\":1,\"unit\":\"cup\",\"ingredientIndex\":0}||."
+            ),
+            new(
+                SectionName: null,
+                Instruction: "Soak lentils in ||{\"ingredient\":\"water\",\"amount\":4,\"unit\":\"cup\",\"ingredientIndex\":1}||; drain well."
+            ),
+            new(
+                SectionName: null,
+                Instruction: "Simmer lentils in ||{\"ingredient\":\"water\",\"amount\":7,\"unit\":\"cup\",\"ingredientIndex\":1}||."
+            ),
+            new(
+                SectionName: "Pastry Cream",
+                Instruction: "Heat ||{\"ingredient\":\"milk\",\"amount\":2,\"unit\":\"cup\",\"ingredientIndex\":2}||. Add remaining ||{\"ingredient\":\"milk\",\"amount\":0.5,\"unit\":\"cup\",\"ingredientIndex\":2}|| to flour. Slowly add ||{\"ingredient\":\"milk\",\"amount\":0.5,\"unit\":\"cup\",\"ingredientIndex\":2}|| to yolk mixture to temper."
+            ),
+        };
+
+        var warnings = new List<string>();
+        var enriched = StepIngredientEnricher.EnrichSteps(ingredients, steps, warnings);
+
+        Assert.HasCount(0, warnings, string.Join(" | ", warnings));
+
+        // Cross-section Beef water unlinked from Slaw water
+        var beefTok = StepInstructionParser
+            .ExtractTokens(enriched[0].Instruction)
+            .OfType<StepIngredientToken>()
+            .Single();
+        Assert.IsNull(beefTok.IngredientIndex);
+
+        // Soak-and-drain 4 cup water unlinked while cooking 7 cup water stays linked
+        var soakTok = StepInstructionParser
+            .ExtractTokens(enriched[1].Instruction)
+            .OfType<StepIngredientToken>()
+            .Single();
+        Assert.IsNull(soakTok.IngredientIndex);
+        var cookTok = StepInstructionParser
+            .ExtractTokens(enriched[2].Instruction)
+            .OfType<StepIngredientToken>()
+            .Single();
+        Assert.AreEqual(1, cookTok.IngredientIndex);
+
+        // Tempering milk transfer converted to StepMixtureToken
+        var milkMixToks = StepInstructionParser
+            .ExtractTokens(enriched[3].Instruction)
+            .OfType<StepMixtureToken>()
+            .ToList();
+        Assert.HasCount(1, milkMixToks);
+        Assert.AreEqual(0.5m, milkMixToks[0].Amount);
+        Assert.AreEqual(MeasurementUnit.Cup, milkMixToks[0].Unit);
+    }
+
+    [TestMethod]
+    public void EnrichSteps_MarksDiscreteSliceFixedAndRepeatPerItemMixtureFixed()
+    {
+        var ingredients = new List<IngestionDraftIngredientDto>
+        {
+            new(
+                Quantity: 4m,
+                Unit: MeasurementUnit.Slice,
+                DisplayName: "thin-sliced cooked deli ham"
+            ),
+        };
+
+        var steps = new List<IngestionDraftStepDto>
+        {
+            new(
+                Instruction: "Place ||{\"ingredient\":\"thin-sliced cooked deli ham\",\"amount\":1,\"ingredientIndex\":0}|| on each cutlet."
+            ),
+            new(
+                Instruction: "Form ||{\"type\":\"mixture\",\"name\":\"pork mixture\",\"amount\":1,\"unit\":\"tbsp\"}|| into ||{\"type\":\"dimension\",\"value\":1,\"unit\":\"inch\",\"hyphenated\":true}|| meatball; repeat with remaining pork mixture to form 24 meatballs."
+            ),
+        };
+
+        var warnings = new List<string>();
+        var enriched = StepIngredientEnricher.EnrichSteps(ingredients, steps, warnings);
+
+        Assert.HasCount(0, warnings, string.Join(" | ", warnings));
+        var hamTok = StepInstructionParser
+            .ExtractTokens(enriched[0].Instruction)
+            .OfType<StepIngredientToken>()
+            .Single();
+        Assert.IsTrue(hamTok.Fixed);
+
+        var porkMixTok = StepInstructionParser
+            .ExtractTokens(enriched[1].Instruction)
+            .OfType<StepMixtureToken>()
+            .Single();
+        Assert.IsTrue(porkMixTok.Fixed);
+    }
+
+    [TestMethod]
+    public void EnrichSteps_DisambiguatesRedOnionAndLinksSingleUseSpicesVanillaAndWater()
+    {
+        var ingredients = new List<IngestionDraftIngredientDto>
+        {
+            new(Quantity: 2m, Unit: null, DisplayName: "onion"),
+            new(Quantity: null, Unit: null, DisplayName: "red onion", IsOptional: true),
+            new(Quantity: 3m, Unit: MeasurementUnit.Clove, DisplayName: "garlic cloves"),
+            new(Quantity: 0.125m, Unit: MeasurementUnit.Tsp, DisplayName: "ground cloves"),
+            new(Quantity: 2m, Unit: MeasurementUnit.Tbsp, DisplayName: "sweet smoked paprika"),
+            new(Quantity: 2m, Unit: MeasurementUnit.Tsp, DisplayName: "vanilla extract"),
+            new(Quantity: 12m, Unit: MeasurementUnit.Cup, DisplayName: "water"),
+        };
+
+        var steps = new List<IngestionDraftStepDto>
+        {
+            new(
+                Instruction: "Add onions, garlic, and water. Add paprika, cloves, and vanilla, then stir paprika mixture into pot. Sprinkle with red onion, if using."
+            ),
+        };
+
+        var warnings = new List<string>();
+        var enriched = StepIngredientEnricher.EnrichSteps(ingredients, steps, warnings);
+
+        Assert.HasCount(0, warnings, string.Join(" | ", warnings));
+        var plain = StepInstructionParser.ToPlainText(enriched[0].Instruction);
+        Assert.DoesNotContain("red 2 onion", plain);
+        StringAssert.Contains(plain, "Sprinkle with red onion, if using.");
+
+        var byIdx = StepInstructionParser
+            .ExtractTokens(enriched[0].Instruction)
+            .OfType<StepIngredientToken>()
+            .Where(t => t.IngredientIndex.HasValue)
+            .ToDictionary(t => t.IngredientIndex!.Value);
+
+        Assert.AreEqual(2m, byIdx[0].Amount); // onions
+        Assert.AreEqual(3m, byIdx[2].Amount); // garlic
+        Assert.AreEqual(0.125m, byIdx[3].Amount); // cloves
+        Assert.AreEqual(2m, byIdx[4].Amount); // paprika (ignoring "paprika mixture")
+        Assert.AreEqual(2m, byIdx[5].Amount); // vanilla
+        Assert.AreEqual(12m, byIdx[6].Amount); // water
+    }
+
+    [TestMethod]
+    public void EnrichSteps_HandlesHyphenBoundarySherryAndPostAdditionStateOrDiscardMentions()
+    {
+        var ingredients = new List<IngestionDraftIngredientDto>
+        {
+            new(Quantity: 0.25m, Unit: MeasurementUnit.Cup, DisplayName: "almonds"),
+            new(Quantity: 0.25m, Unit: MeasurementUnit.Cup, DisplayName: "dry sherry"),
+            new(Quantity: 3m, Unit: MeasurementUnit.Oz, DisplayName: "bacon"),
+            new(Quantity: 1m, Unit: null, DisplayName: "bay leaf"),
+            new(Quantity: 6m, Unit: MeasurementUnit.Oz, DisplayName: "bittersweet chocolate"),
+        };
+
+        var steps = new List<IngestionDraftStepDto>
+        {
+            new(
+                Instruction: "Process almonds until fine and transfer almond-bread mixture to bowl. Fry the bacon until the bacon is crisp. Whisk in the sherry. Stir in bay leaf and simmer; discard the bay leaf. Off heat, add chocolate and let stand until chocolate is melted."
+            ),
+        };
+
+        var warnings = new List<string>();
+        var enriched = StepIngredientEnricher.EnrichSteps(ingredients, steps, warnings);
+
+        Assert.HasCount(0, warnings, string.Join(" | ", warnings));
+        var plain = StepInstructionParser.ToPlainText(enriched[0].Instruction);
+        StringAssert.Contains(plain, "almond-bread mixture");
+        StringAssert.Contains(plain, "until the bacon is crisp");
+        StringAssert.Contains(plain, "discard the bay leaf");
+        StringAssert.Contains(plain, "until chocolate is melted");
+
+        var byIdx = StepInstructionParser
+            .ExtractTokens(enriched[0].Instruction)
+            .OfType<StepIngredientToken>()
+            .Where(t => t.IngredientIndex.HasValue)
+            .ToDictionary(t => t.IngredientIndex!.Value);
+
+        Assert.AreEqual(0.25m, byIdx[0].Amount); // almonds
+        Assert.AreEqual(MeasurementUnit.Cup, byIdx[0].Unit);
+        Assert.AreEqual(0.25m, byIdx[1].Amount); // dry sherry -> sherry
+        Assert.AreEqual(MeasurementUnit.Cup, byIdx[1].Unit);
+        Assert.AreEqual(3m, byIdx[2].Amount); // bacon
+        Assert.AreEqual(MeasurementUnit.Oz, byIdx[2].Unit);
+        Assert.AreEqual(1m, byIdx[3].Amount); // bay leaf
+        Assert.AreEqual(6m, byIdx[4].Amount); // bittersweet chocolate -> chocolate
+        Assert.AreEqual(MeasurementUnit.Oz, byIdx[4].Unit);
     }
 }

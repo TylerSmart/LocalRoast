@@ -26,6 +26,7 @@ export interface StepMixtureToken {
   maxAmount?: number | null;
   unit?: MeasurementUnit | string | null;
   customUnitName?: string | null;
+  fixed?: boolean;
 }
 
 export interface StepFixedToken {

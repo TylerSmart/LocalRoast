@@ -159,6 +159,9 @@
           </mat-autocomplete>
         </mat-form-field>
       </div>
+      <mat-checkbox formControlName="fixed" class="token-option-checkbox">
+        Fixed measurement (converts units, doesn't multiply with servings)
+      </mat-checkbox>
     </form>
   } @else if (mode() === 'fixed') {
     <form [formGroup]="fixedForm" class="dialog-form">

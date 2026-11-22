@@ -151,6 +151,7 @@ export class StepTokenDialogComponent implements OnInit {
         amount: [mixToken?.amount ?? null, [Validators.required]],
         maxAmount: [mixToken?.maxAmount ?? null],
         unit: [mixToken?.unit ?? mixToken?.customUnitName ?? ''],
+        fixed: [Boolean(mixToken?.fixed)],
       });
     } else if (this.mode() === 'fixed') {
       const fixedToken = existing as StepFixedToken | undefined;
@@ -384,6 +385,7 @@ export class StepTokenDialogComponent implements OnInit {
           ? { maxAmount: Number(val.maxAmount) }
           : {}),
         ...(val.unit ? { unit: String(val.unit).trim() } : {}),
+        ...(val.fixed ? { fixed: true } : {}),
       };
       this.dialogRef.close({
         token,

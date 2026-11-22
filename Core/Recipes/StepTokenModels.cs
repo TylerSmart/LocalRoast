@@ -392,7 +392,12 @@ public sealed record StepMixtureToken(
         JsonPropertyName("maxAmount"),
         JsonConverter(typeof(FlexibleNullableDecimalJsonConverter))
     ]
-        decimal? MaxAmount = null
+        decimal? MaxAmount = null,
+    [property:
+        JsonPropertyName("fixed"),
+        JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)
+    ]
+        bool Fixed = false
 ) : StepToken(StepTokenType.Mixture);
 
 public sealed record StepFixedToken(

@@ -2206,10 +2206,263 @@ public sealed class MultiStageIngestionAndReplacementsIntegrationTests
         Assert.AreEqual(MeasurementUnit.Oz, tom.AlternativeMeasurement.Unit);
     }
 
+    [TestMethod]
+    public async Task Stage3CrossSkuGuardrail_AndStage1VariationOmitCleanup_WorkEndToEnd()
+    {
+        var sourCreamId = Guid.Empty;
+        var freshTomatoId = Guid.Empty;
+        var mockLlm = new FallbackExercisingLlmClient
+        {
+            ForceSimpleBatch = true,
+            Stage3cJsonFactory = (_, userContent) =>
+            {
+                using var doc = JsonDocument.Parse(userContent);
+                var matches = new List<object>();
+                foreach (var item in doc.RootElement.GetProperty("items").EnumerateArray())
+                {
+                    var idx = item.GetProperty("ingredientIndex").GetInt32();
+                    var name = item.GetProperty("name").GetString() ?? "";
+                    if (name.Contains("heavy cream", StringComparison.OrdinalIgnoreCase))
+                    {
+                        matches.Add(
+                            new
+                            {
+                                ingredientIndex = idx,
+                                matchType = "existing_ingredient",
+                                id = sourCreamId.ToString(),
+                                name = "sour cream",
+                                category = "DairyAndEggs",
+                            }
+                        );
+                    }
+                    else if (name.Contains("table salt", StringComparison.OrdinalIgnoreCase))
+                    {
+                        matches.Add(
+                            new
+                            {
+                                ingredientIndex = idx,
+                                matchType = "new_ingredient",
+                                id = (string?)null,
+                                name = "kosher salt",
+                                category = "SpicesAndSeasonings",
+                            }
+                        );
+                    }
+                    else
+                    {
+                        matches.Add(
+                            new
+                            {
+                                ingredientIndex = idx,
+                                matchType = "existing_ingredient",
+                                id = freshTomatoId.ToString(),
+                                name = "tomato",
+                                category = "Produce",
+                            }
+                        );
+                    }
+                }
+                return JsonSerializer.Serialize(new { matches });
+            },
+            Stage1JsonFactory = (_, messages) =>
+            {
+                var attemptCount = messages.Count(m =>
+                    string.Equals(m.Role, "assistant", StringComparison.OrdinalIgnoreCase)
+                );
+                if (attemptCount == 0)
+                {
+                    return """
+                        {
+                            "title": "Creamy Tomato Soup (Bacon Variation)",
+                            "description": "Silky tomato soup variation.",
+                            "servings": 4,
+                            "yield": "Serves 4",
+                            "sections": [
+                                {
+                                    "name": null,
+                                    "ingredients": [
+                                        { "name": "heavy cream", "quantity": 0.75, "maxQuantity": null, "unit": "cup", "prepNote": null, "isOptional": false, "replacements": [], "alternateMeasurements": [] },
+                                        { "name": "diced tomatoes", "quantity": 1, "maxQuantity": null, "unit": "can", "prepNote": "drained", "isOptional": false, "replacements": [], "alternateMeasurements": [] },
+                                        { "name": "table salt", "quantity": 0.5, "maxQuantity": null, "unit": "tsp", "prepNote": null, "isOptional": false, "replacements": [], "alternateMeasurements": [] },
+                                        { "name": "parsley leaves", "quantity": 12, "maxQuantity": null, "unit": null, "prepNote": "for garnishing", "isOptional": false, "replacements": [], "alternateMeasurements": [] }
+                                    ],
+                                    "instructions": [
+                                        "Simmer 1 can diced tomatoes and swirl in 3/4 cup heavy cream. Omit parsley leaf garnish. Serve hot."
+                                    ]
+                                }
+                            ],
+                            "timing": { "prep": 10, "cook": 20, "total": 30 },
+                            "tags": ["Soup"]
+                        }
+                        """;
+                }
+
+                return """
+                    {
+                        "title": "Creamy Tomato Soup (Bacon Variation)",
+                        "description": "Silky tomato soup variation.",
+                        "servings": 4,
+                        "yield": "Serves 4",
+                        "sections": [
+                            {
+                                "name": null,
+                                "ingredients": [
+                                    { "name": "heavy cream", "quantity": 0.75, "maxQuantity": null, "unit": "cup", "prepNote": null, "isOptional": false, "replacements": [], "alternateMeasurements": [] },
+                                    { "name": "diced tomatoes", "quantity": 1, "maxQuantity": null, "unit": "can", "prepNote": "drained", "isOptional": false, "replacements": [], "alternateMeasurements": [] },
+                                    { "name": "table salt", "quantity": 0.5, "maxQuantity": null, "unit": "tsp", "prepNote": null, "isOptional": false, "replacements": [], "alternateMeasurements": [] }
+                                ],
+                                "instructions": [
+                                    "Simmer 1 can diced tomatoes and swirl in 3/4 cup heavy cream and 1/2 tsp table salt. Serve hot."
+                                ]
+                            }
+                        ],
+                        "timing": { "prep": 10, "cook": 20, "total": 30 },
+                        "tags": ["Soup"]
+                    }
+                    """;
+            },
+            Stage4BatchJsonOverride = """
+                {
+                    "steps": [
+                        {
+                            "stepNumber": 1,
+                            "tokens": [
+                                "Simmer ",
+                                { "type": "ingredient", "ingredientIndex": 1, "name": "diced tomatoes", "quantity": 1, "maxQuantity": null, "unit": "can" },
+                                " and swirl in ",
+                                { "type": "ingredient", "ingredientIndex": 0, "name": "heavy cream", "quantity": 0.75, "maxQuantity": null, "unit": "cup" },
+                                " and ",
+                                { "type": "ingredient", "ingredientIndex": 2, "name": "table salt", "quantity": 0.5, "maxQuantity": null, "unit": "tsp" },
+                                ". Serve hot."
+                            ]
+                        }
+                    ]
+                }
+                """,
+        };
+
+        await using var customFactory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Llm:TextModel", "qwen2.5:14b");
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ILlmExtractionClient>();
+                services.AddSingleton<ILlmExtractionClient>(mockLlm);
+            });
+        });
+
+        using var client = customFactory.CreateClient();
+        await AuthenticateAsync(client);
+
+        var connRes = await client.PostAsJsonAsync(
+            "/api/llm-settings/connections",
+            new UpsertLlmConnectionRequest(
+                Name: "Local GPU",
+                Provider: LlmProvider.Ollama,
+                BaseUrl: "http://localhost:11434"
+            )
+        );
+        connRes.EnsureSuccessStatusCode();
+        var conn = (await connRes.Content.ReadFromJsonAsync<LlmConnectionDto>())!;
+
+        var textCfg = (
+            await (
+                await client.PostAsJsonAsync(
+                    "/api/llm-settings/model-configurations",
+                    new UpsertLlmModelConfigurationRequest("Qwen Text", conn.Id, "qwen2.5:14b")
+                )
+            ).Content.ReadFromJsonAsync<LlmModelConfigurationDto>()
+        )!;
+        await client.PutAsJsonAsync(
+            "/api/llm-settings/workflows",
+            new UpdateLlmWorkflowsRequest(TextModelProfileId: textCfg.DefaultProfileId)
+        );
+
+        var sourCreamFood = (
+            await (
+                await client.PostAsJsonAsync(
+                    "/api/food-items",
+                    new CreateFoodItemRequest("sour cream", Category: FoodCategory.DairyAndEggs)
+                )
+            ).Content.ReadFromJsonAsync<FoodItemDto>()
+        )!;
+        sourCreamId = sourCreamFood.Id;
+
+        var tomatoFood = (
+            await (
+                await client.PostAsJsonAsync(
+                    "/api/food-items",
+                    new CreateFoodItemRequest("tomato", Category: FoodCategory.Produce)
+                )
+            ).Content.ReadFromJsonAsync<FoodItemDto>()
+        )!;
+        freshTomatoId = tomatoFood.Id;
+
+        const string rawVariationSource = """
+            Title: Creamy Tomato Soup (Bacon Variation)
+            Variation of Creamy Tomato Soup.
+            Base Ingredients:
+            - 1 can diced tomatoes, drained
+            - 12 parsley leaves for garnishing
+            Variation Instructions (Creamy Tomato Soup):
+            1. Simmer 1 can diced tomatoes and swirl in 3/4 cup heavy cream. Omit parsley leaf garnish. Serve hot.
+            """;
+
+        var enqueueRes = await client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest(rawVariationSource, AutoPublish: true)
+        );
+        Assert.AreEqual(HttpStatusCode.Accepted, enqueueRes.StatusCode);
+        var job = (await enqueueRes.Content.ReadFromJsonAsync<IngestionJobSummaryDto>())!;
+
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            Assert.IsTrue(
+                await scope
+                    .ServiceProvider.GetRequiredService<IIngestionProcessor>()
+                    .ProcessNextQueuedJobAsync()
+            );
+        }
+
+        var jobDetail = (
+            await client.GetFromJsonAsync<IngestionJobDetailDto>($"/api/ingestion/jobs/{job.Id}")
+        )!;
+        Assert.AreEqual(IngestionJobStatus.Published, jobDetail.Status, jobDetail.StatusDetail);
+        Assert.IsNotNull(jobDetail.ResultingRecipeId);
+
+        var recipe = (
+            await client.GetFromJsonAsync<RecipeDetailDto>(
+                $"/api/recipes/{jobDetail.ResultingRecipeId}"
+            )
+        )!;
+
+        // Cross-SKU matches (both existing_ingredient and incompatible new_ingredient proposals like kosher salt)
+        // were rejected and clean distinct FoodItems were created
+        Assert.HasCount(3, recipe.Ingredients);
+        Assert.AreEqual("heavy cream", recipe.Ingredients[0].FoodItemName);
+        Assert.AreNotEqual(sourCreamId, recipe.Ingredients[0].FoodItemId);
+        Assert.AreEqual("diced tomato", recipe.Ingredients[1].FoodItemName);
+        Assert.AreNotEqual(freshTomatoId, recipe.Ingredients[1].FoodItemId);
+        Assert.AreEqual("salt", recipe.Ingredients[2].FoodItemName);
+
+        // Stage 1 retried on Variation "Omit ..." directive and dropped both the directive and parsley leaves
+        Assert.IsGreaterThanOrEqualTo(
+            2,
+            mockLlm.StageCalls.Count(s => s == "stage1_extract_recipe")
+        );
+        Assert.DoesNotContain("Omit parsley", recipe.Steps[0].Instruction);
+    }
+
     private sealed class FallbackExercisingLlmClient : ILlmExtractionClient
     {
         public bool ForceSimpleBatch { get; set; }
         public string? Stage1JsonOverride { get; set; }
+        public Func<
+            EffectiveLlmConnectionConfig,
+            IReadOnlyList<LlmStageChatMessage>,
+            string?
+        >? Stage1JsonFactory { get; set; }
+        public Func<EffectiveLlmConnectionConfig, string, string?>? Stage3cJsonFactory { get; set; }
         public string? Stage4BatchJsonOverride { get; set; }
         public string? Stage6JsonOverride { get; set; }
         public Func<EffectiveLlmConnectionConfig, string, string?>? Stage6JsonFactory { get; set; }
@@ -2293,7 +2546,8 @@ public sealed class MultiStageIngestionAndReplacementsIntegrationTests
 
             var raw = stageName switch
             {
-                "stage1_extract_recipe" => Stage1JsonOverride
+                "stage1_extract_recipe" => Stage1JsonFactory?.Invoke(config, messages)
+                    ?? Stage1JsonOverride
                     ?? """
                         {
                             "title": "Toasted Butter Bread",
@@ -2325,7 +2579,8 @@ public sealed class MultiStageIngestionAndReplacementsIntegrationTests
                         }
                         """,
                 "stage3a_ingredient_search_terms" => """{"searchTerms":["butter","margarine"]}""",
-                "stage3c_match_batch" => BuildStage3cResponse(userContent),
+                "stage3c_match_batch" => Stage3cJsonFactory?.Invoke(config, userContent)
+                    ?? BuildStage3cResponse(userContent),
                 "stage3b_match_ingredient" => BuildStage3bResponse(userContent),
                 "stage4b_tokenize_batch" => ForceSimpleBatch
                     ? (Stage4BatchJsonOverride ?? BuildStage4BatchValid())

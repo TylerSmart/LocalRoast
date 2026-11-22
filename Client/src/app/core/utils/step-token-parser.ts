@@ -182,6 +182,7 @@ export function parseStepInstruction(instruction: string | null | undefined): St
           maxAmount: parsed['maxAmount'] != null ? Number(parsed['maxAmount']) : null,
           unit: (parsed['unit'] as string) ?? null,
           customUnitName: (parsed['customUnitName'] as string) ?? null,
+          ...(parsed['fixed'] === true ? { fixed: true } : {}),
         } as StepMixtureToken;
       } else if (typeStr === 'fixed') {
         token = {
@@ -317,7 +318,15 @@ export function formatMixtureDisplay(
   const customUnitName =
     token.customUnitName ??
     (normalizedUnit === 'Custom' && typeof token.unit === 'string' ? token.unit : null);
-  const formatted = scaleAndConvert(qty, maxQty, normalizedUnit, customUnitName, factor, system);
+  const effectiveFactor = token.fixed ? 1 : factor;
+  const formatted = scaleAndConvert(
+    qty,
+    maxQty,
+    normalizedUnit,
+    customUnitName,
+    effectiveFactor,
+    system,
+  );
   const measurementStr = formatted.formattedMeasurement.trim();
   const text = measurementStr
     ? token.name
@@ -327,7 +336,9 @@ export function formatMixtureDisplay(
 
   return {
     text,
-    scaled: factor !== 1 || (system !== 'Original' && formatted.unit !== normalizedUnit),
+    scaled: token.fixed
+      ? system !== 'Original' && formatted.unit !== normalizedUnit
+      : factor !== 1 || (system !== 'Original' && formatted.unit !== normalizedUnit),
   };
 }
 

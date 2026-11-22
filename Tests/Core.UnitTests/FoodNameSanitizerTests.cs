@@ -88,4 +88,61 @@ public sealed class FoodNameSanitizerTests
     {
         Assert.AreEqual(expected, FoodNameSanitizer.NormalizeCanonicalFoodName(input));
     }
+
+    [TestMethod]
+    [DataRow("heavy cream", null, null, "sour cream", false)]
+    [DataRow("Thai green chile", null, "sliced", "jalapeño chile", false)]
+    [DataRow("diced tomatoes", "can", "drained", "tomato", false)]
+    [DataRow("crushed tomatoes", "can", null, "tomato", false)]
+    [DataRow("thin-sliced cooked deli ham", "slice", "thin-sliced", "smoked ham", false)]
+    [DataRow("table salt", null, null, "kosher salt", false)]
+    [DataRow("Yukon Gold potatoes", null, "unpeeled", "potato", false)]
+    [DataRow("mango", null, "peeled", "ataulfo mango", false)]
+    [DataRow("egg yolks", null, null, "egg", false)]
+    [DataRow("butter", null, null, "unsalted butter", true)]
+    [DataRow("butter", null, "unsalted, divided", "unsalted butter", true)]
+    [DataRow("thyme", "tsp", "dried", "dried thyme", true)]
+    [DataRow("thyme", "tsp", "minced fresh", "dried thyme", false)]
+    [DataRow("chopped onion", null, null, "onion", true)]
+    [DataRow("garlic cloves", "clove", null, "garlic", true)]
+    [DataRow("scallions", null, "sliced", "green onion", true)]
+    [DataRow("strawberries", "cup", "hulled", "strawberry", true)]
+    public void IsCompatibleFoodItemMatch_BlocksCrossSkuCollisionsAndAllowsTrueSynonyms(
+        string rawName,
+        string? rawUnit,
+        string? rawPrepNote,
+        string candidateFoodName,
+        bool expected
+    )
+    {
+        Assert.AreEqual(
+            expected,
+            FoodNameSanitizer.IsCompatibleFoodItemMatch(
+                rawName,
+                rawUnit,
+                rawPrepNote,
+                candidateFoodName
+            )
+        );
+    }
+
+    [TestMethod]
+    [DataRow("heavy cream", null, null, "heavy cream")]
+    [DataRow("diced tomatoes", "can", "drained", "diced tomato")]
+    [DataRow("crushed tomatoes", "can", null, "crushed tomato")]
+    [DataRow("thin-sliced cooked deli ham", "slice", "thin-sliced", "deli ham")]
+    [DataRow("Yukon Gold potatoes", null, "unpeeled", "Yukon Gold potato")]
+    [DataRow("thyme", "tsp", "dried", "dried thyme")]
+    public void NormalizeRejectedFallbackFoodName_PreservesIdentityModifiersAndSingularizes(
+        string rawName,
+        string? rawUnit,
+        string? rawPrepNote,
+        string expected
+    )
+    {
+        Assert.AreEqual(
+            expected,
+            FoodNameSanitizer.NormalizeRejectedFallbackFoodName(rawName, rawUnit, rawPrepNote)
+        );
+    }
 }

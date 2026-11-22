@@ -1733,4 +1733,292 @@ public sealed class StepTokenValidatorTests
         Assert.IsTrue(tok.Fixed);
         StringAssert.Contains(res.CompiledInstruction, "\"fixed\":true");
     }
+
+    [TestMethod]
+    public void BuildAndValidateStep_HealsFixedDimensionFixedTimeUnitlessCountPanFatMixtureAndTransposedOfThe()
+    {
+        // 1. Fixed with unit='inch' + customUnitName='inch' heals to Dimension and restores noun into text
+        var dimRes = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 1,
+            sectionName: null,
+            originalInstruction: "Heat oil in a 10-inch nonstick skillet, stirring every 20 seconds.",
+            rawTokensJson: new JsonArray
+            {
+                "Heat oil in a ",
+                new JsonObject
+                {
+                    ["type"] = "fixed",
+                    ["amount"] = 10m,
+                    ["unit"] = "custom",
+                    ["customUnitName"] = "inch",
+                    ["name"] = "nonstick skillet",
+                    ["hyphenated"] = true,
+                },
+                ", stirring every ",
+                new JsonObject
+                {
+                    ["type"] = "fixed",
+                    ["amount"] = 20m,
+                    ["unit"] = "second",
+                    ["name"] = null,
+                    ["hyphenated"] = false,
+                },
+                " .",
+            },
+            ingredientCount: 1
+        );
+        Assert.IsEmpty(dimRes.ValidationWarnings, string.Join(" | ", dimRes.ValidationWarnings));
+        var dimTok = StepInstructionParser
+            .ExtractTokens(dimRes.CompiledInstruction)
+            .OfType<StepDimensionToken>()
+            .Single();
+        Assert.AreEqual(10m, dimTok.Value);
+        Assert.AreEqual(DimensionUnit.Inch, dimTok.Unit);
+        Assert.IsTrue(dimTok.Hyphenated);
+        var timerTok = StepInstructionParser
+            .ExtractTokens(dimRes.CompiledInstruction)
+            .OfType<StepTimerToken>()
+            .Single();
+        Assert.AreEqual(20, timerTok.Seconds);
+        Assert.AreEqual(
+            "Heat oil in a 10-inch nonstick skillet, stirring every 20 seconds.",
+            StepTokenValidator.RenderForValidation(dimRes.ParsedTokens)
+        );
+
+        // 2. Unitless/'count' batch counts unwrap to plain text while check-yield stays Fixed
+        var yieldRes = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 2,
+            sectionName: null,
+            originalInstruction: "Drop dumplings (you should have about 18 dumplings and about 5 to 6 cups).",
+            rawTokensJson: new JsonArray
+            {
+                "Drop dumplings (you should have about ",
+                new JsonObject
+                {
+                    ["type"] = "fixed",
+                    ["amount"] = 18m,
+                    ["unit"] = "count",
+                    ["name"] = "dumplings",
+                    ["hyphenated"] = false,
+                },
+                " and about ",
+                new JsonObject
+                {
+                    ["type"] = "fixed",
+                    ["amount"] = 5m,
+                    ["maxAmount"] = 6m,
+                    ["unit"] = "cup",
+                    ["name"] = null,
+                    ["hyphenated"] = false,
+                },
+                ").",
+            },
+            ingredientCount: 0
+        );
+        Assert.IsEmpty(
+            yieldRes.ValidationWarnings,
+            string.Join(" | ", yieldRes.ValidationWarnings)
+        );
+        var keptFixed = StepInstructionParser
+            .ExtractTokens(yieldRes.CompiledInstruction)
+            .OfType<StepFixedToken>()
+            .Single();
+        Assert.AreEqual(5m, keptFixed.Amount);
+        Assert.AreEqual(6m, keptFixed.MaxAmount);
+
+        // 3. Unlinked pan fat heals to Mixture; unitless prose fraction Mixture heals back to prose;
+        //    and transposed "Heat of the ||2 tsp oil||" cleans "of the" while keeping "Add half of the ||2 lb chicken||"
+        var healRes = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 3,
+            sectionName: null,
+            originalInstruction: "Heat 2 teaspoons of the oil, add half of the 2 pounds chicken, spread one-quarter of the cheese mixture, and discard all but 1 teaspoon fat.",
+            rawTokensJson: new JsonArray
+            {
+                "Heat of the ",
+                new JsonObject
+                {
+                    ["type"] = "ingredient",
+                    ["ingredientIndex"] = 0,
+                    ["name"] = "oil",
+                    ["quantity"] = 2m,
+                    ["unit"] = "teaspoon",
+                },
+                ", add half of the ",
+                new JsonObject
+                {
+                    ["type"] = "ingredient",
+                    ["ingredientIndex"] = 1,
+                    ["name"] = "chicken",
+                    ["quantity"] = 2m,
+                    ["unit"] = "pound",
+                },
+                ", spread ",
+                new JsonObject
+                {
+                    ["type"] = "mixture",
+                    ["name"] = "cheese mixture",
+                    ["quantity"] = 0.25m,
+                    ["unit"] = null,
+                },
+                ", and discard all but ",
+                new JsonObject
+                {
+                    ["type"] = "ingredient",
+                    ["ingredientIndex"] = null,
+                    ["name"] = "fat",
+                    ["quantity"] = 1m,
+                    ["unit"] = "teaspoon",
+                },
+                ".",
+            },
+            ingredientCount: 2
+        );
+        Assert.IsEmpty(healRes.ValidationWarnings, string.Join(" | ", healRes.ValidationWarnings));
+        var fatMix = StepInstructionParser
+            .ExtractTokens(healRes.CompiledInstruction)
+            .OfType<StepMixtureToken>()
+            .Single();
+        Assert.AreEqual("fat", fatMix.Name);
+        Assert.AreEqual(1m, fatMix.Amount);
+        Assert.AreEqual(MeasurementUnit.Tsp, fatMix.Unit);
+        var renderedHeal = StepTokenValidator.RenderForValidation(healRes.ParsedTokens);
+        Assert.AreEqual(
+            "Heat 2 teaspoons oil, add half of the 2 pounds chicken, spread one-quarter of the cheese mixture, and discard all but 1 teaspoon fat.",
+            renderedHeal
+        );
+    }
+
+    [TestMethod]
+    public void BuildAndValidateStep_FixedMixtureDoesNotScaleAt2x()
+    {
+        var res = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 1,
+            sectionName: null,
+            originalInstruction: "Form 1 tablespoon pork mixture into meatball; repeat.",
+            rawTokensJson: new JsonArray
+            {
+                "Form ",
+                new JsonObject
+                {
+                    ["type"] = "mixture",
+                    ["name"] = "pork mixture",
+                    ["quantity"] = 1m,
+                    ["unit"] = "tablespoon",
+                    ["fixed"] = true,
+                },
+                " into meatball; repeat.",
+            },
+            ingredientCount: 0
+        );
+
+        Assert.IsEmpty(res.ValidationWarnings, string.Join(" | ", res.ValidationWarnings));
+        var mixTok = StepInstructionParser
+            .ExtractTokens(res.CompiledInstruction)
+            .OfType<StepMixtureToken>()
+            .Single();
+        Assert.IsTrue(mixTok.Fixed);
+        Assert.AreEqual(
+            "Form 1 tablespoon pork mixture into meatball; repeat.",
+            StepTokenValidator.RenderForValidation(res.ParsedTokens, scaleFactor: 2m)
+        );
+    }
+
+    [TestMethod]
+    public void BuildAndValidateStep_CleansDanglingBareOfAndAndPromotesSoupToMixture()
+    {
+        var res = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 1,
+            sectionName: null,
+            originalInstruction: "Repeat with remaining 2 tsp oil and remaining chicken, then puree 3 cups soup.",
+            rawTokensJson: new JsonArray
+            {
+                "Repeat with the remaining ",
+                new JsonObject
+                {
+                    ["type"] = "ingredient",
+                    ["ingredientIndex"] = 0,
+                    ["name"] = "oil",
+                    ["quantity"] = 2m,
+                    ["unit"] = "teaspoon",
+                },
+                " of and the remaining chicken, then puree ",
+                new JsonObject
+                {
+                    ["type"] = "ingredient",
+                    ["ingredientIndex"] = null,
+                    ["name"] = "soup",
+                    ["quantity"] = 3m,
+                    ["unit"] = "cup",
+                },
+                ".",
+            },
+            ingredientCount: 1
+        );
+
+        Assert.IsEmpty(res.ValidationWarnings, string.Join(" | ", res.ValidationWarnings));
+        var plain = StepInstructionParser.ToPlainText(res.CompiledInstruction);
+        Assert.DoesNotContain("of and", plain);
+        StringAssert.Contains(plain, "oil and the remaining chicken");
+        var mix = StepInstructionParser
+            .ExtractTokens(res.CompiledInstruction)
+            .OfType<StepMixtureToken>()
+            .Single();
+        Assert.AreEqual("soup", mix.Name);
+        Assert.AreEqual(3m, mix.Amount);
+        Assert.AreEqual(MeasurementUnit.Cup, mix.Unit);
+    }
+
+    [TestMethod]
+    public void BuildAndValidateStep_ExemptsPhysicalUtensilQuantitiesAndHealsSpaceBeforeParenAndDroppedPeriod()
+    {
+        var utensilRes = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 1,
+            sectionName: null,
+            originalInstruction: "Use back of 1 teaspoon dipped in bowl of cold water. Using a 1 tablespoon measure, scoop batter.",
+            rawTokensJson: new JsonArray
+            {
+                "Use back of 1 teaspoon dipped in bowl of cold water. Using a 1 tablespoon measure, scoop batter.",
+            },
+            ingredientCount: 0
+        );
+        Assert.IsEmpty(
+            utensilRes.ValidationWarnings,
+            string.Join(" | ", utensilRes.ValidationWarnings)
+        );
+
+        var punctRes = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 2,
+            sectionName: null,
+            originalInstruction: "Scoop 1 tbsp dough. Using second small spoon, bake for 15 minutes (do not open).",
+            rawTokensJson: new JsonArray
+            {
+                "Scoop ",
+                new JsonObject
+                {
+                    ["type"] = "fixed",
+                    ["amount"] = 1m,
+                    ["unit"] = "tablespoon",
+                    ["name"] = "dough",
+                    ["hyphenated"] = false,
+                },
+                " Using second small spoon, bake for ",
+                new JsonObject
+                {
+                    ["type"] = "timer",
+                    ["amount"] = 15m,
+                    ["unit"] = "minute",
+                    ["label"] = "bake",
+                },
+                "(do not open).",
+            },
+            ingredientCount: 0
+        );
+        Assert.IsEmpty(
+            punctRes.ValidationWarnings,
+            string.Join(" | ", punctRes.ValidationWarnings)
+        );
+        var plainPunct = StepInstructionParser.ToPlainText(punctRes.CompiledInstruction);
+        StringAssert.Contains(plainPunct, ". Using second small spoon");
+        StringAssert.Contains(plainPunct, " (do not open).");
+    }
 }

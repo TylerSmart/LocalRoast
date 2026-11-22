@@ -110,7 +110,6 @@ public static partial class StepIngredientEnricher
         "whole-grain",
         "distilled",
         "cider",
-        "sherry",
         "balsamic",
         "dry",
         "sweet",
@@ -171,6 +170,59 @@ public static partial class StepIngredientEnricher
         "chile",
         "chiles",
         "flakes",
+        "extract",
+    };
+
+    private static readonly HashSet<string> SafeSingleWordFallbackNouns = new(
+        StringComparer.OrdinalIgnoreCase
+    )
+    {
+        "oil",
+        "cream",
+        "butter",
+        "sugar",
+        "salt",
+        "flour",
+        "vinegar",
+        "wine",
+        "sherry",
+        "milk",
+        "buttermilk",
+        "spinach",
+        "rice",
+        "chocolate",
+        "broth",
+        "stock",
+    };
+
+    private static readonly HashSet<string> ConflictingModifierPrefixes = new(
+        StringComparer.OrdinalIgnoreCase
+    )
+    {
+        "red",
+        "green",
+        "yellow",
+        "white",
+        "sweet",
+        "spring",
+        "pearl",
+        "pickled",
+        "brown",
+        "powdered",
+        "confectioners",
+        "unsweetened",
+        "semisweet",
+        "bittersweet",
+        "baking",
+        "kosher",
+        "sea",
+        "smoked",
+        "balsamic",
+        "cider",
+        "sherry",
+        "distilled",
+        "rice",
+        "apple",
     };
 
     private static readonly HashSet<string> StopAliases = new(StringComparer.OrdinalIgnoreCase)
@@ -228,7 +280,7 @@ public static partial class StepIngredientEnricher
     };
 
     [GeneratedRegex(
-        @"\b(?:to\s+taste|as\s+needed|if\s+needed|for\s+garnish|to\s+garnish|for\s+serving|to\s+serve|extra(?![\s-]+virgin)|additional|more\s+for|for\s+dusting|for\s+greasing)\b",
+        @"\b(?:to\s+taste|as\s+needed|if\s+needed|if\s+using|\boptional\b|for\s+garnish|to\s+garnish|for\s+serving|to\s+serve|extra(?![\s-]+virgin)|additional|more\s+for|for\s+dusting|for\s+greasing)\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex AdHocOrGarnishRegex();
@@ -303,10 +355,40 @@ public static partial class StepIngredientEnricher
     private static partial Regex EquipmentFollowingRegex();
 
     [GeneratedRegex(
-        @"^\s+(?:powder|flakes|paste|sauce|oil|vinegar|broth|stock|juice|zest|seeds?|yolks?|whites?|shells?|skins?)\b",
+        @"^\s+(?:powder|flakes|paste|sauce|oil|vinegar|broth|stock|juice|zest|seeds?|yolks?|whites?|shells?|skins?|mixtures?|batters?|doughs?|fillings?|glazes?|slurr(?:y|ies)|crusts?|fats?|drippings?|liquids?)\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex CompoundFoodFollowingRegex();
+
+    [GeneratedRegex(
+        @"\binto\b[^.?!]{0,50}\b(?:meatballs?|balls?|mounds?|patt(?:ies|y)|cookies?|rolls?|cutlets?|dumplings?|puffs?|buns?|tartlets?|burgers?|cakes?|logs?|disks?)\b[^.?!]{0,90}\b(?:each|repeat)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex RepeatPerItemFollowingRegex();
+
+    [GeneratedRegex(
+        @"\b(?:soak|let\s+stand)\b.*\bdrain\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex SoakAndDrainStepRegex();
+
+    [GeneratedRegex(
+        @"\b(?:to\s+temper|tempering|from\s+(?:the\s+)?saucepan|from\s+(?:the\s+)?pot|hot\s+milk|warm\s+milk)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex TemperOrHotTransferClauseRegex();
+
+    [GeneratedRegex(
+        @"^(?:(?:rendered|pan|excess|skimmed|reserved|defatted|accumulated|cooking|poaching|braising|strained|simmering)\s+)?(?:fat|drippings|juices|liquid|soup|stew|batter|dough|puree|purée)$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex UnlinkedPanFatRegex();
+
+    [GeneratedRegex(
+        @"(?:(?:bowl|pot|saucepan|pan|skillet|cup|glass)\s+of\s+(?:[\p{L}-]+\s+)?|\b(?:excess|running|soaking|cooking|pasta)\s+)$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex ExcludedPlainWaterPrecedingRegex();
 
     [GeneratedRegex(
         @"(?:cayenne|bell|chili|chile|jalapeñ?o|serrano|white|red|crushed|longhorn)\s+$",
@@ -333,21 +415,39 @@ public static partial class StepIngredientEnricher
 
         var stepSegments = steps.Select(step => ParseToMutable(step.Instruction)).ToList();
 
-        // Pass 1A: Link unindexed StepIngredientTokens and revalidate ambiguous/mismatched indices.
+        // Pass 1A: Link unindexed StepIngredientTokens, mark fixed per-item mixtures, and heal unlinked pan fat.
         for (var s = 0; s < steps.Count; s++)
         {
             var segs = stepSegments[s];
             var section = steps[s].SectionName;
             for (var i = 0; i < segs.Count; i++)
             {
+                var prevText = i > 0 && !segs[i - 1].IsToken ? segs[i - 1].Text : string.Empty;
+                var nextText =
+                    i + 1 < segs.Count && !segs[i + 1].IsToken ? segs[i + 1].Text : string.Empty;
+
+                if (segs[i].Token is StepMixtureToken mixTok)
+                {
+                    if (
+                        mixTok.Amount is > 0m
+                        && mixTok.Unit is not null
+                        && !mixTok.Fixed
+                        && (
+                            HasDistributiveInClause(prevText, nextText)
+                            || RepeatPerItemFollowingRegex()
+                                .IsMatch(BuildStepRestAfterSegment(segs, i))
+                        )
+                    )
+                    {
+                        segs[i].Token = mixTok with { Fixed = true };
+                    }
+                    continue;
+                }
+
                 if (segs[i].Token is not StepIngredientToken ingTok)
                 {
                     continue;
                 }
-
-                var prevText = i > 0 && !segs[i - 1].IsToken ? segs[i - 1].Text : string.Empty;
-                var nextText =
-                    i + 1 < segs.Count && !segs[i + 1].IsToken ? segs[i + 1].Text : string.Empty;
 
                 var resolvedIdx = RevalidateOrMatchIngredientIndex(
                     ingTok,
@@ -377,6 +477,24 @@ public static partial class StepIngredientEnricher
                     updatedTok = updatedTok with { Fixed = true };
                 }
 
+                if (
+                    !resolvedIdx.HasValue
+                    && updatedTok.Amount is > 0m
+                    && updatedTok.Unit.HasValue
+                    && UnlinkedPanFatRegex().IsMatch(updatedTok.Ingredient.Trim())
+                )
+                {
+                    segs[i].Token = new StepMixtureToken(
+                        Name: updatedTok.Ingredient.Trim(),
+                        Amount: updatedTok.Amount,
+                        Unit: updatedTok.Unit,
+                        CustomUnitName: updatedTok.CustomUnitName,
+                        MaxAmount: updatedTok.MaxAmount,
+                        Fixed: updatedTok.Fixed
+                    );
+                    continue;
+                }
+
                 if (!Equals(updatedTok, ingTok))
                 {
                     segs[i].Token = updatedTok;
@@ -388,6 +506,9 @@ public static partial class StepIngredientEnricher
 
         // Balance duplicate-name ingredient allocations (e.g., 1 tbsp vs 5 tbsp olive oil across steps).
         RebalanceDuplicateIngredientAllocations(ingredients, steps, stepSegments);
+
+        // Unlink incidental soak-and-drain or splash water tokens when an exact water subset accounts for listed water.
+        UnlinkIncidentalOverAllocatedWaterTokens(ingredients, stepSegments);
 
         // Pass 1B: Link untokenized plain-text mentions for ingredients that have 0 token links.
         LinkUntokenizedIngredients(ingredients, steps, stepSegments);
@@ -493,8 +614,18 @@ public static partial class StepIngredientEnricher
                 stepSection: string.Empty
             );
 
-            // Reject impossible qualifier mismatches (e.g. 4 qt boiling water bound to 0.5 cup ice water).
-            if (IsQualifierMismatchForExisting(cleanFull, tok, curIng, prevText, nextText))
+            // Reject impossible qualifier or cross-section water mismatches (e.g. 4 qt boiling water bound to 0.5 cup ice water,
+            // or [Beef] water bound to [Slaw] water).
+            if (
+                IsQualifierMismatchForExisting(
+                    cleanFull,
+                    tok,
+                    curIng,
+                    prevText,
+                    nextText,
+                    stepSectionName
+                )
+            )
             {
                 return MatchBestDuplicateCandidate(
                     tok,
@@ -546,14 +677,39 @@ public static partial class StepIngredientEnricher
         );
     }
 
+    private static bool IsPlainWaterOrIce(IngestionDraftIngredientDto ing) =>
+        NormalizePhrase(ing.DisplayName)
+            is "water"
+                or "ice"
+                or "ice water"
+                or "cold water"
+                or "warm water"
+                or "hot water"
+                or "boiling water";
+
     private static bool IsQualifierMismatchForExisting(
         string tokenCleanFull,
         StepIngredientToken tok,
         IngestionDraftIngredientDto ing,
         string prevText,
-        string nextText
+        string nextText,
+        string? stepSectionName
     )
     {
+        if (
+            IsPlainWaterOrIce(ing)
+            && !string.IsNullOrWhiteSpace(stepSectionName)
+            && !string.IsNullOrWhiteSpace(ing.SectionName)
+            && !string.Equals(
+                stepSectionName.Trim(),
+                ing.SectionName.Trim(),
+                StringComparison.OrdinalIgnoreCase
+            )
+        )
+        {
+            return true;
+        }
+
         var ingNorm = NormalizePhrase(ing.DisplayName);
         if (
             !ingNorm.StartsWith("ice ", StringComparison.Ordinal)
@@ -633,6 +789,27 @@ public static partial class StepIngredientEnricher
                 }
                 else if (!string.IsNullOrEmpty(ingSection))
                 {
+                    if (IsPlainWaterOrIce(ingredients[i]))
+                    {
+                        continue;
+                    }
+
+                    if (
+                        tok.Amount.HasValue
+                        && ingredients[i].Quantity.HasValue
+                        && TrySumInTargetUnit(
+                            [tok],
+                            ingredients[i].Unit,
+                            ingredients[i].CustomUnitName,
+                            out var crossAmt
+                        )
+                        && crossAmt
+                            > (ingredients[i].MaxQuantity ?? ingredients[i].Quantity!.Value) * 1.05m
+                    )
+                    {
+                        continue;
+                    }
+
                     total -= 25;
                 }
             }
@@ -926,6 +1103,191 @@ public static partial class StepIngredientEnricher
         }
     }
 
+    private static void UnlinkIncidentalOverAllocatedWaterTokens(
+        IReadOnlyList<IngestionDraftIngredientDto> ingredients,
+        List<List<MutableSegment>> stepSegments
+    )
+    {
+        for (var idx = 0; idx < ingredients.Count; idx++)
+        {
+            var ing = ingredients[idx];
+            if (!IsPlainWaterOrIce(ing) || ing.Quantity is not > 0m)
+            {
+                continue;
+            }
+
+            var targetQty = ing.Quantity.Value;
+            var targetMax = ing.MaxQuantity ?? targetQty;
+            var entries =
+                new List<(
+                    int StepIdx,
+                    int SegIdx,
+                    StepIngredientToken Tok,
+                    decimal ConvAmt,
+                    bool IsSoakAndDrain
+                )>();
+            var allConvertible = true;
+
+            for (var s = 0; s < stepSegments.Count; s++)
+            {
+                var stepPlain = string.Concat(
+                    stepSegments[s].Select(seg => seg.IsToken ? " " : seg.Text)
+                );
+                var isSoakAndDrain = SoakAndDrainStepRegex().IsMatch(stepPlain);
+                var segs = stepSegments[s];
+                for (var i = 0; i < segs.Count; i++)
+                {
+                    if (
+                        segs[i].Token is not StepIngredientToken tok
+                        || tok.IngredientIndex != idx
+                        || !tok.Amount.HasValue
+                        || tok.Fixed
+                    )
+                    {
+                        continue;
+                    }
+
+                    var prevText = i > 0 && !segs[i - 1].IsToken ? segs[i - 1].Text : string.Empty;
+                    var nextText =
+                        i + 1 < segs.Count && !segs[i + 1].IsToken
+                            ? segs[i + 1].Text
+                            : string.Empty;
+                    if (HasDistributiveInClause(prevText, nextText))
+                    {
+                        continue;
+                    }
+
+                    if (!TrySumInTargetUnit([tok], ing.Unit, ing.CustomUnitName, out var convAmt))
+                    {
+                        allConvertible = false;
+                        break;
+                    }
+
+                    entries.Add((s, i, tok, convAmt, isSoakAndDrain));
+                }
+
+                if (!allConvertible)
+                {
+                    break;
+                }
+            }
+
+            if (!allConvertible || entries.Count < 2)
+            {
+                continue;
+            }
+
+            var totalSum = entries.Sum(e => e.ConvAmt);
+            if (totalSum <= targetMax * 1.05m)
+            {
+                continue;
+            }
+
+            var minMatch = targetQty * 0.95m;
+            var maxMatch = targetMax * 1.05m;
+            var bestSubset = FindExactWaterSubset(entries, minMatch, maxMatch, targetQty);
+            if (bestSubset is null)
+            {
+                continue;
+            }
+
+            var keepSet = bestSubset.ToHashSet();
+            for (var e = 0; e < entries.Count; e++)
+            {
+                if (!keepSet.Contains(e))
+                {
+                    var entry = entries[e];
+                    stepSegments[entry.StepIdx][entry.SegIdx].Token = entry.Tok with
+                    {
+                        IngredientIndex = null,
+                    };
+                }
+            }
+        }
+    }
+
+    private static List<int>? FindExactWaterSubset(
+        IReadOnlyList<(
+            int StepIdx,
+            int SegIdx,
+            StepIngredientToken Tok,
+            decimal ConvAmt,
+            bool IsSoakAndDrain
+        )> entries,
+        decimal minMatch,
+        decimal maxMatch,
+        decimal targetQty
+    )
+    {
+        var singleCandidates = Enumerable
+            .Range(0, entries.Count)
+            .Where(i => entries[i].ConvAmt >= minMatch && entries[i].ConvAmt <= maxMatch)
+            .OrderBy(i => entries[i].IsSoakAndDrain ? 1 : 0)
+            .ThenBy(i => Math.Abs(entries[i].ConvAmt - targetQty))
+            .ToList();
+        if (singleCandidates.Count > 0)
+        {
+            return [singleCandidates[0]];
+        }
+
+        var pairCandidates = new List<(int A, int B, int SoakCount, decimal Diff)>();
+        for (var a = 0; a < entries.Count; a++)
+        {
+            for (var b = a + 1; b < entries.Count; b++)
+            {
+                var pairSum = entries[a].ConvAmt + entries[b].ConvAmt;
+                if (pairSum >= minMatch && pairSum <= maxMatch)
+                {
+                    var soakCount =
+                        (entries[a].IsSoakAndDrain ? 1 : 0) + (entries[b].IsSoakAndDrain ? 1 : 0);
+                    pairCandidates.Add((a, b, soakCount, Math.Abs(pairSum - targetQty)));
+                }
+            }
+        }
+
+        if (pairCandidates.Count > 0)
+        {
+            var best = pairCandidates.OrderBy(p => p.SoakCount).ThenBy(p => p.Diff).First();
+            return [best.A, best.B];
+        }
+
+        return null;
+    }
+
+    private static string BuildStepRestAfterSegment(
+        IReadOnlyList<MutableSegment> segments,
+        int tokenSegmentIndex
+    )
+    {
+        var sb = new StringBuilder();
+        for (var i = tokenSegmentIndex + 1; i < segments.Count; i++)
+        {
+            if (segments[i].Token is not null)
+            {
+                sb.Append(' ');
+                sb.Append(
+                    segments[i].Token switch
+                    {
+                        StepIngredientToken ing => ing.Ingredient,
+                        StepMixtureToken mix => mix.Name,
+                        StepFixedToken fx => fx.Name ?? string.Empty,
+                        StepDimensionToken dim => dim.Unit.ToString().ToLowerInvariant(),
+                        _ => string.Empty,
+                    }
+                );
+                continue;
+            }
+
+            sb.Append(segments[i].Text);
+            if (segments[i].Text.IndexOfAny(['.', '!', '?']) >= 0 || sb.Length > 180)
+            {
+                break;
+            }
+        }
+
+        return sb.ToString();
+    }
+
     private static int ScoreIngredientMatch(
         string tokenFull,
         string tokenStripped,
@@ -1070,13 +1432,17 @@ public static partial class StepIngredientEnricher
             }
         }
 
-        for (var idx = 0; idx < ingredients.Count; idx++)
-        {
-            if (referencedIndices.Contains(idx))
-            {
-                continue;
-            }
+        // Process more specific (longer) unlinked ingredient names before shorter ones
+        // (e.g., "red onion" before "onion", "garlic cloves" before "ground cloves").
+        var orderedUnlinkedIndices = Enumerable
+            .Range(0, ingredients.Count)
+            .Where(i => !referencedIndices.Contains(i))
+            .OrderByDescending(i => NormalizePhrase(ingredients[i].DisplayName).Length)
+            .ThenBy(i => i)
+            .ToList();
 
+        foreach (var idx in orderedUnlinkedIndices)
+        {
             var ing = ingredients[idx];
             var hasSection = !string.IsNullOrWhiteSpace(ing.SectionName);
             var matchedInSameSection = false;
@@ -1096,7 +1462,8 @@ public static partial class StepIngredientEnricher
                         steps,
                         stepSegments,
                         requireSectionMatch: true,
-                        targetSectionName: ing.SectionName
+                        targetSectionName: ing.SectionName,
+                        ingredients
                     );
                 }
             }
@@ -1111,28 +1478,144 @@ public static partial class StepIngredientEnricher
                 );
                 if (globalAliases.Count > 0)
                 {
-                    TryWrapAliasesInSteps(
+                    matchedInSameSection = TryWrapAliasesInSteps(
                         idx,
                         globalAliases,
                         steps,
                         stepSegments,
                         requireSectionMatch: false,
-                        targetSectionName: null
+                        targetSectionName: null,
+                        ingredients
                     );
                 }
             }
+
+            if (
+                !matchedInSameSection
+                && ing.Quantity is > 0m
+                && string.Equals(
+                    NormalizePhrase(ing.DisplayName),
+                    "water",
+                    StringComparison.Ordinal
+                )
+            )
+            {
+                TryWrapSafeSingleUseWater(idx, ing.SectionName, steps, stepSegments);
+            }
         }
+    }
+
+    private static void TryWrapSafeSingleUseWater(
+        int ingredientIdx,
+        string? sectionName,
+        IReadOnlyList<IngestionDraftStepDto> steps,
+        List<List<MutableSegment>> stepSegments
+    )
+    {
+        var restrictSection = !string.IsNullOrWhiteSpace(sectionName);
+        var waterMatches = new List<(int StepIdx, int SegIdx, Match Match)>();
+
+        for (var s = 0; s < steps.Count; s++)
+        {
+            if (
+                restrictSection
+                && !string.Equals(
+                    steps[s].SectionName?.Trim(),
+                    sectionName!.Trim(),
+                    StringComparison.OrdinalIgnoreCase
+                )
+            )
+            {
+                continue;
+            }
+
+            var segs = stepSegments[s];
+            for (var i = 0; i < segs.Count; i++)
+            {
+                if (segs[i].IsToken || string.IsNullOrWhiteSpace(segs[i].Text))
+                {
+                    continue;
+                }
+
+                var text = segs[i].Text;
+                foreach (
+                    Match m in Regex.Matches(
+                        text,
+                        @"\bwater\b",
+                        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+                    )
+                )
+                {
+                    var before = text[..m.Index];
+                    var after = text[(m.Index + m.Length)..];
+                    if (
+                        EquipmentFollowingRegex().IsMatch(after)
+                        || CompoundFoodFollowingRegex().IsMatch(after)
+                        || OmitPrecedingRegex().IsMatch(before)
+                        || ExcludedPlainWaterPrecedingRegex().IsMatch(before)
+                    )
+                    {
+                        continue;
+                    }
+
+                    waterMatches.Add((s, i, m));
+                    if (waterMatches.Count > 1)
+                    {
+                        return;
+                    }
+                }
+            }
+        }
+
+        if (waterMatches.Count != 1)
+        {
+            return;
+        }
+
+        var (stepIdx, segIdx, match) = waterMatches[0];
+        var segsTarget = stepSegments[stepIdx];
+        var srcText = segsTarget[segIdx].Text;
+        var prefixText = srcText[..match.Index];
+        var suffixText = srcText[(match.Index + match.Length)..];
+        var replacement = new List<MutableSegment>(3);
+        if (!string.IsNullOrEmpty(prefixText))
+        {
+            replacement.Add(new MutableSegment { Text = prefixText });
+        }
+        replacement.Add(
+            new MutableSegment
+            {
+                Token = new StepIngredientToken(
+                    Ingredient: match.Value,
+                    IngredientIndex: ingredientIdx
+                ),
+            }
+        );
+        if (!string.IsNullOrEmpty(suffixText))
+        {
+            replacement.Add(new MutableSegment { Text = suffixText });
+        }
+
+        segsTarget.RemoveAt(segIdx);
+        segsTarget.InsertRange(segIdx, replacement);
     }
 
     private static List<MutableSegment>? TryWrapFirstAliasInText(
         string text,
         IReadOnlyList<string> aliases,
-        int ingredientIdx
+        int ingredientIdx,
+        IReadOnlyList<IngestionDraftIngredientDto> allIngredients,
+        string selfDisplayNorm
     )
     {
+        var selfWords = selfDisplayNorm
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Select(SingularizeWord)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
         foreach (var alias in aliases)
         {
-            var pattern = $@"\b{Regex.Escape(alias)}\b";
+            var pattern = $@"(?<![\p{{L}}\p{{N}}-]){Regex.Escape(alias)}(?![\p{{L}}\p{{N}}-])";
             var match = Regex.Match(
                 text,
                 pattern,
@@ -1175,6 +1658,21 @@ public static partial class StepIngredientEnricher
                     match = match.NextMatch();
                     continue;
                 }
+
+                if (
+                    ShouldSkipDueToPrecedingModifier(
+                        before,
+                        match.Value,
+                        ingredientIdx,
+                        allIngredients,
+                        selfWords
+                    )
+                )
+                {
+                    match = match.NextMatch();
+                    continue;
+                }
+
                 decimal? parsedQty = null;
                 decimal? parsedMaxQty = null;
                 MeasurementUnit? parsedUnit = null;
@@ -1235,7 +1733,13 @@ public static partial class StepIngredientEnricher
                 if (!string.IsNullOrEmpty(suffixText))
                 {
                     // Recursively wrap any additional mentions later in the same plain text segment
-                    var rest = TryWrapFirstAliasInText(suffixText, aliases, ingredientIdx);
+                    var rest = TryWrapFirstAliasInText(
+                        suffixText,
+                        aliases,
+                        ingredientIdx,
+                        allIngredients,
+                        selfDisplayNorm
+                    );
                     if (rest is not null)
                     {
                         list.AddRange(rest);
@@ -1253,6 +1757,63 @@ public static partial class StepIngredientEnricher
         return null;
     }
 
+    private static bool ShouldSkipDueToPrecedingModifier(
+        string before,
+        string matchedText,
+        int selfIdx,
+        IReadOnlyList<IngestionDraftIngredientDto> allIngredients,
+        HashSet<string> selfWords
+    )
+    {
+        var prevWordMatch = Regex.Match(before, @"(?<prevWord>[\p{L}-]+)\s+$");
+        if (!prevWordMatch.Success)
+        {
+            return false;
+        }
+
+        var prevWord = NormalizePhrase(prevWordMatch.Groups["prevWord"].Value);
+        var prevWordSing = SingularizeWord(prevWord);
+        if (string.IsNullOrWhiteSpace(prevWord) || selfWords.Contains(prevWordSing))
+        {
+            return false;
+        }
+
+        var matchSing = SingularizePhrase(NormalizePhrase(matchedText));
+        if (prevWordSing == "garlic" && matchSing is "clove" && !selfWords.Contains("garlic"))
+        {
+            return true;
+        }
+
+        if (ConflictingModifierPrefixes.Contains(prevWord))
+        {
+            return true;
+        }
+
+        var combined = NormalizePhrase($"{prevWord} {matchedText}");
+        var combinedSing = SingularizePhrase(combined);
+        for (var i = 0; i < allIngredients.Count; i++)
+        {
+            if (i == selfIdx)
+            {
+                continue;
+            }
+
+            var otherNorm = NormalizePhrase(allIngredients[i].DisplayName);
+            var otherSing = SingularizePhrase(otherNorm);
+            if (
+                string.Equals(otherNorm, combined, StringComparison.Ordinal)
+                || string.Equals(otherSing, combinedSing, StringComparison.Ordinal)
+                || ContainsWholePhrase(otherNorm, combined)
+                || ContainsWholePhrase(otherNorm, combinedSing)
+            )
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private static List<string> BuildSearchAliases(
         IngestionDraftIngredientDto ing,
         IReadOnlyList<IngestionDraftIngredientDto> allIngredients,
@@ -1263,7 +1824,7 @@ public static partial class StepIngredientEnricher
         var results = new List<string>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        void AddAlias(string? candidate, bool checkConflict)
+        void AddAlias(string? candidate, bool checkConflict, bool exactDisplayConflictOnly = false)
         {
             var cleaned = NormalizePhrase(candidate);
             if (cleaned.Length < 3 || StopAliases.Contains(cleaned) || seen.Contains(cleaned))
@@ -1276,7 +1837,8 @@ public static partial class StepIngredientEnricher
                     cleaned,
                     allIngredients,
                     selfIdx,
-                    sameSectionOnly
+                    sameSectionOnly,
+                    exactDisplayConflictOnly
                 )
             )
             {
@@ -1286,25 +1848,57 @@ public static partial class StepIngredientEnricher
             results.Add(cleaned);
         }
 
+        void AddAliasAndNumberVariants(
+            string? candidate,
+            bool checkConflict,
+            bool exactDisplayConflictOnly = false
+        )
+        {
+            var cleaned = NormalizePhrase(candidate);
+            if (string.IsNullOrWhiteSpace(cleaned))
+            {
+                return;
+            }
+
+            AddAlias(cleaned, checkConflict, exactDisplayConflictOnly);
+            var sing = SingularizePhrase(cleaned);
+            AddAlias(sing, checkConflict, exactDisplayConflictOnly);
+            var plur = PluralizePhrase(cleaned);
+            AddAlias(plur, checkConflict, exactDisplayConflictOnly);
+        }
+
         var displayNorm = NormalizePhrase(ing.DisplayName);
-        var checkFullDisplayConflict =
-            !string.IsNullOrWhiteSpace(ing.SectionName) && !sameSectionOnly;
-        AddAlias(displayNorm, checkConflict: checkFullDisplayConflict);
+        AddAliasAndNumberVariants(
+            displayNorm,
+            checkConflict: true,
+            exactDisplayConflictOnly: !sameSectionOnly && string.IsNullOrWhiteSpace(ing.SectionName)
+        );
 
         var formStripped = StripFormSuffixes(displayNorm);
-        AddAlias(formStripped, checkConflict: true);
+        AddAliasAndNumberVariants(formStripped, checkConflict: true);
 
         var prepStripped = StripPrepAdjectives(formStripped);
-        AddAlias(prepStripped, checkConflict: true);
+        AddAliasAndNumberVariants(prepStripped, checkConflict: true);
 
-        // Progressive trailing suffixes (e.g., "green bell pepper" -> "bell pepper", "table salt" -> "salt")
+        // Progressive trailing suffixes: always keep multi-word suffixes (e.g. "brown sugar"),
+        // and allow single-word tail fallbacks only for safe pantry staples (oil, cream, butter, sugar, salt, flour, etc.)
         var words = formStripped.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         for (var start = 1; start < words.Length; start++)
         {
-            AddAlias(string.Join(' ', words[start..]), checkConflict: true);
+            var suffix = string.Join(' ', words[start..]);
+            var remainingWordCount = words.Length - start;
+            var tailSing = SingularizeWord(words[^1]);
+            if (
+                remainingWordCount >= 2
+                || SafeSingleWordFallbackNouns.Contains(tailSing)
+                || tailSing == "clove"
+            )
+            {
+                AddAliasAndNumberVariants(suffix, checkConflict: true);
+            }
         }
 
-        // Distinguishing modifier before generic head nouns (e.g., "serrano chile" -> "serrano", "feta cheese" -> "feta")
+        // Distinguishing modifier before generic head nouns (e.g., "serrano chile" -> "serrano", "feta cheese" -> "feta", "vanilla extract" -> "vanilla")
         if (words.Length >= 2 && GenericHeadNounsForModifierExtract.Contains(words[^1]))
         {
             var end = words.Length - 1;
@@ -1352,6 +1946,10 @@ public static partial class StepIngredientEnricher
         var end = words.Length;
         while (end > 1 && FormSuffixWords.Contains(words[end - 1]))
         {
+            if (words[end - 1] is "clove" or "cloves" && words[end - 2] is "ground" or "whole")
+            {
+                break;
+            }
             end--;
         }
         return end < words.Length ? string.Join(' ', words[..end]) : normalizedPhrase;
@@ -1361,11 +1959,13 @@ public static partial class StepIngredientEnricher
         string candidate,
         IReadOnlyList<IngestionDraftIngredientDto> allIngredients,
         int selfIdx,
-        bool sameSectionOnly = false
+        bool sameSectionOnly = false,
+        bool exactDisplayConflictOnly = false
     )
     {
+        var selfNorm = NormalizePhrase(allIngredients[selfIdx].DisplayName);
         var selfSection = allIngredients[selfIdx].SectionName?.Trim() ?? string.Empty;
-        var singular = SingularizeWord(candidate.ToLowerInvariant());
+        var singular = SingularizePhrase(candidate.ToLowerInvariant());
         var singleWord = !candidate.Contains(' ');
         for (var i = 0; i < allIngredients.Count; i++)
         {
@@ -1384,6 +1984,34 @@ public static partial class StepIngredientEnricher
             }
 
             var otherNorm = NormalizePhrase(allIngredients[i].DisplayName);
+            var otherSing = SingularizePhrase(otherNorm);
+
+            if (exactDisplayConflictOnly)
+            {
+                if (
+                    string.Equals(otherNorm, candidate, StringComparison.Ordinal)
+                    || string.Equals(otherSing, singular, StringComparison.Ordinal)
+                )
+                {
+                    return true;
+                }
+                continue;
+            }
+
+            // Allow spice "ground/whole cloves" to use "cloves" without being blocked by "garlic cloves"
+            // ("garlic cloves" in step text is already guarded by ShouldSkipDueToPrecedingModifier).
+            if (
+                singular == "clove"
+                && (
+                    selfNorm.Contains("ground clove", StringComparison.Ordinal)
+                    || selfNorm.Contains("whole clove", StringComparison.Ordinal)
+                )
+                && otherNorm.Contains("garlic", StringComparison.Ordinal)
+            )
+            {
+                continue;
+            }
+
             if (
                 ContainsWholePhrase(otherNorm, candidate)
                 || ContainsWholePhrase(otherNorm, singular)
@@ -1410,9 +2038,11 @@ public static partial class StepIngredientEnricher
         IReadOnlyList<IngestionDraftStepDto> steps,
         List<List<MutableSegment>> stepSegments,
         bool requireSectionMatch,
-        string? targetSectionName
+        string? targetSectionName,
+        IReadOnlyList<IngestionDraftIngredientDto> allIngredients
     )
     {
+        var selfDisplayNorm = NormalizePhrase(allIngredients[ingredientIdx].DisplayName);
         var wrappedAny = false;
         for (var s = 0; s < steps.Count; s++)
         {
@@ -1436,7 +2066,13 @@ public static partial class StepIngredientEnricher
                     continue;
                 }
 
-                var replacement = TryWrapFirstAliasInText(segs[i].Text, aliases, ingredientIdx);
+                var replacement = TryWrapFirstAliasInText(
+                    segs[i].Text,
+                    aliases,
+                    ingredientIdx,
+                    allIngredients,
+                    selfDisplayNorm
+                );
                 if (replacement is null)
                 {
                     continue;
@@ -1695,9 +2331,19 @@ public static partial class StepIngredientEnricher
             var anyQuantified = occs.Any(o => o.Token.Amount.HasValue);
             var nonGarnishUnquantified = occs.Where(o => !o.Token.Amount.HasValue && !o.IsAdHoc)
                 .ToList();
-            if (!anyQuantified && nonGarnishUnquantified.Count == 1 && ing.Quantity.HasValue)
+            var primaryUnquantified =
+                nonGarnishUnquantified.Count == 1
+                    ? nonGarnishUnquantified[0]
+                    : (
+                        nonGarnishUnquantified.Count > 1
+                        && !IsPostAdditionStateOrDiscardReference(nonGarnishUnquantified[0])
+                        && nonGarnishUnquantified.Skip(1).All(IsPostAdditionStateOrDiscardReference)
+                            ? nonGarnishUnquantified[0]
+                            : null
+                    );
+            if (!anyQuantified && primaryUnquantified is not null && ing.Quantity.HasValue)
             {
-                var occ = nonGarnishUnquantified[0];
+                var occ = primaryUnquantified;
                 var segs = stepSegments[occ.StepIndex];
                 var prevText =
                     occ.SegmentIndex > 0 && !segs[occ.SegmentIndex - 1].IsToken
@@ -1755,6 +2401,89 @@ public static partial class StepIngredientEnricher
                 }
             }
 
+            // 3C-bis. Convert post-exhaustion tempering/transfer mentions to StepMixtureToken
+            if (ing.Quantity.HasValue)
+            {
+                var qtyListed = ing.Quantity.Value;
+                var maxListed = ing.MaxQuantity ?? qtyListed;
+                var nonDist = occs.Where(o => o.Token.Amount.HasValue && !o.IsDistributive)
+                    .ToList();
+                if (
+                    maxListed > 0m
+                    && nonDist.Count >= 2
+                    && TrySumInTargetUnit(
+                        nonDist.Select(o => o.Token),
+                        ing.Unit,
+                        ing.CustomUnitName,
+                        out var sumAll
+                    )
+                    && sumAll > maxListed * 1.05m
+                )
+                {
+                    var runningSum = 0m;
+                    var sawRemaining = false;
+                    var exhausted = false;
+                    var converted = new HashSet<TokenOccurrence>();
+
+                    foreach (var occ in nonDist)
+                    {
+                        if (
+                            !TrySumInTargetUnit(
+                                [occ.Token],
+                                ing.Unit,
+                                ing.CustomUnitName,
+                                out var convAmt
+                            )
+                        )
+                        {
+                            break;
+                        }
+
+                        if (!exhausted)
+                        {
+                            if (
+                                LeadingRemainingPhraseRegex().IsMatch(occ.PrevText)
+                                || occ.PrevText.Contains(
+                                    "remaining",
+                                    StringComparison.OrdinalIgnoreCase
+                                )
+                            )
+                            {
+                                sawRemaining = true;
+                            }
+                            runningSum += convAmt;
+                            if (runningSum >= qtyListed * 0.95m && runningSum <= maxListed * 1.05m)
+                            {
+                                exhausted = true;
+                            }
+                            continue;
+                        }
+
+                        var clause = $"{occ.PrevText} {occ.NextText}";
+                        if (sawRemaining || TemperOrHotTransferClauseRegex().IsMatch(clause))
+                        {
+                            var mixName = !string.IsNullOrWhiteSpace(occ.Token.Ingredient)
+                                ? occ.Token.Ingredient.Trim()
+                                : ing.DisplayName;
+                            stepSegments[occ.StepIndex][occ.SegmentIndex].Token =
+                                new StepMixtureToken(
+                                    Name: mixName,
+                                    Amount: occ.Token.Amount,
+                                    Unit: occ.Token.Unit,
+                                    CustomUnitName: occ.Token.CustomUnitName,
+                                    MaxAmount: occ.Token.MaxAmount
+                                );
+                            converted.Add(occ);
+                        }
+                    }
+
+                    if (converted.Count > 0)
+                    {
+                        occs.RemoveAll(converted.Contains);
+                    }
+                }
+            }
+
             // 3D. True over-allocation warning (excluding distributive uses)
             if (measurementWarnings is not null && ing.Quantity.HasValue)
             {
@@ -1783,6 +2512,55 @@ public static partial class StepIngredientEnricher
                 }
             }
         }
+    }
+
+    private static bool IsPostAdditionStateOrDiscardReference(TokenOccurrence occ)
+    {
+        var lastBoundary = occ.PrevText.LastIndexOfAny(['.', '!', '?', ';']);
+        var prevClause = lastBoundary >= 0 ? occ.PrevText[(lastBoundary + 1)..] : occ.PrevText;
+        var nextBoundary = occ.NextText.IndexOfAny(['.', '!', '?', ';']);
+        var nextClause = nextBoundary >= 0 ? occ.NextText[..nextBoundary] : occ.NextText;
+
+        if (
+            Regex.IsMatch(
+                prevClause,
+                @"\b(?:until|when|once|whether)\b[^.!?;]*$",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+            )
+            && Regex.IsMatch(
+                nextClause,
+                @"^\s*(?:is|are|was|were|has|have|should|begins?|starts?|turns?|becomes?|melts?|softens?|dissolves?|browns?|darkens?|thickens?|cools?|simmers?|boils?|registers?|reaches?|clings?|offers?|holds?|pulls?|comes?|looks?|feels?|appears?)\b",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+            )
+        )
+        {
+            return true;
+        }
+
+        if (
+            prevClause.TrimEnd().EndsWith('(')
+            && Regex.IsMatch(
+                nextClause,
+                @"^\s*should\s+be\b",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+            )
+        )
+        {
+            return true;
+        }
+
+        if (
+            Regex.IsMatch(
+                prevClause,
+                @"\b(?:discard(?:ing)?|remove\s+and\s+discard)\s+(?:the\s+|any\s+)?(?:[\p{L}-]+\s+){0,3}(?:and\s+(?:the\s+)?)?$",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+            )
+        )
+        {
+            return true;
+        }
+
+        return false;
     }
 
     private static bool HasDistributiveInClause(string prevText, string nextText)
@@ -2032,6 +2810,55 @@ public static partial class StepIngredientEnricher
         };
     }
 
+    private static readonly HashSet<string> DiscreteCountCustomUnits = new(
+        StringComparer.OrdinalIgnoreCase
+    )
+    {
+        "sheet",
+        "piece",
+        "leaf",
+        "sprig",
+        "stalk",
+        "rib",
+        "strip",
+        "ear",
+        "pod",
+        "fillet",
+        "wedge",
+        "loaf",
+        "head",
+        "stick",
+        "cutlet",
+        "roll",
+        "tortilla",
+        "wrapper",
+        "bun",
+        "half",
+    };
+
+    private static bool IsDiscreteCountUnit(MeasurementUnit? unit, string? customUnit)
+    {
+        if (
+            unit
+            is MeasurementUnit.Whole
+                or MeasurementUnit.Slice
+                or MeasurementUnit.Clove
+                or MeasurementUnit.Can
+                or MeasurementUnit.Bunch
+        )
+        {
+            return true;
+        }
+
+        if (unit == MeasurementUnit.Custom && !string.IsNullOrWhiteSpace(customUnit))
+        {
+            var sing = SingularizeWord(customUnit);
+            return DiscreteCountCustomUnits.Contains(sing);
+        }
+
+        return false;
+    }
+
     private static bool TrySumInTargetUnit(
         IEnumerable<StepIngredientToken> tokens,
         MeasurementUnit? targetUnit,
@@ -2056,6 +2883,15 @@ public static partial class StepIngredientEnricher
                     return false;
                 }
 
+                sum += tok.Amount.Value;
+                continue;
+            }
+
+            if (
+                (tok.Unit is null && IsDiscreteCountUnit(targetUnit, targetCustomUnit))
+                || (targetUnit is null && IsDiscreteCountUnit(tok.Unit, tok.CustomUnitName))
+            )
+            {
                 sum += tok.Amount.Value;
                 continue;
             }
@@ -2145,6 +2981,52 @@ public static partial class StepIngredientEnricher
 
         var parts = phrase.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         parts[^1] = SingularizeWord(parts[^1]);
+        return string.Join(' ', parts);
+    }
+
+    private static string PluralizeWord(string word)
+    {
+        var lower = word.Trim().ToLowerInvariant();
+        if (lower.Length < 2)
+        {
+            return lower;
+        }
+
+        var sing = SingularizeWord(lower);
+        if (!string.Equals(sing, lower, StringComparison.Ordinal))
+        {
+            return lower;
+        }
+
+        return lower switch
+        {
+            "leaf" => "leaves",
+            "loaf" => "loaves",
+            "half" => "halves",
+            "knife" => "knives",
+            "tomato" => "tomatoes",
+            "potato" => "potatoes",
+            _ when lower.EndsWith("y", StringComparison.Ordinal)
+                    && lower.Length > 2
+                    && lower[^2] is not ('a' or 'e' or 'i' or 'o' or 'u') => lower[..^1] + "ies",
+            _ when lower.EndsWith("ch", StringComparison.Ordinal)
+                    || lower.EndsWith("sh", StringComparison.Ordinal)
+                    || lower.EndsWith('x')
+                    || lower.EndsWith('z') => lower + "es",
+            _ when lower.EndsWith('s') => lower,
+            _ => lower + "s",
+        };
+    }
+
+    private static string PluralizePhrase(string phrase)
+    {
+        if (string.IsNullOrWhiteSpace(phrase))
+        {
+            return string.Empty;
+        }
+
+        var parts = phrase.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        parts[^1] = PluralizeWord(parts[^1]);
         return string.Join(' ', parts);
     }
 

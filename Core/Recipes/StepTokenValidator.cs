@@ -257,13 +257,13 @@ public static partial class StepTokenValidator
     private static partial Regex LeadingDanglingRangeRegex();
 
     [GeneratedRegex(
-        @"^\s+of\s+the\s*(?=[,.;:)\]])",
+        @"^\s+of(?:\s+the)?\s*(?=[,.;:)\]])",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex DanglingOfTheBeforePunctRegex();
 
     [GeneratedRegex(
-        @"^\s+of\s+the(?=\s+(?:in|into|to|on|over|left|with|and|or|from|until|for|at|as|before|after|then)\b|\s*\(|\s*$)",
+        @"^\s+of(?:\s+the)?(?=\s+(?:in|into|to|on|over|left|with|and|or|from|until|for|at|as|before|after|then)\b|\s*\(|\s*$)",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex DanglingOfTheBeforePrepRegex();
@@ -396,6 +396,18 @@ public static partial class StepTokenValidator
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex TrailingSwapNounPrefixRegex();
+
+    [GeneratedRegex(
+        @"^(?:(?:rendered|pan|excess|skimmed|reserved|defatted|accumulated|cooking|poaching|braising|strained|simmering)\s+)?(?:fat|drippings|juices|liquid|soup|stew|batter|dough|puree|purée)$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex UnlinkedPanFatRegex();
+
+    [GeneratedRegex(
+        @"(?<beforeWord>\b[\p{L}]{2,})\s+(?<dangling>of\s+(?:the\s+)?)$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex TransposedOfTheBeforeTokenRegex();
 
     [GeneratedRegex(@"[\p{L}]{3,}", RegexOptions.CultureInvariant)]
     private static partial Regex TokenContentWordRegex();
@@ -712,6 +724,20 @@ public static partial class StepTokenValidator
             }
 
             if (
+                tokType == "ingredient"
+                && GetNullableInt(tokObj["ingredientIndex"]) is null
+                && GetNullableDecimal(tokObj["quantity"]) is > 0m
+                && !string.IsNullOrWhiteSpace(GetNullableString(tokObj["unit"]))
+                && GetNullableString(tokObj["name"]) is string rawPanFatName
+                && UnlinkedPanFatRegex().IsMatch(rawPanFatName.Trim())
+            )
+            {
+                tokObj["type"] = "mixture";
+                tokObj.Remove("ingredientIndex");
+                tokType = "mixture";
+            }
+
+            if (
                 !string.IsNullOrWhiteSpace(originalInstruction)
                 && tokType == "ingredient"
                 && GetNullableDecimal(tokObj["quantity"]) is > 0m
@@ -818,15 +844,153 @@ public static partial class StepTokenValidator
             }
             else if (
                 tokType == "fixed"
-                && !GetBool(tokObj["hyphenated"])
                 && GetNullableDecimal(tokObj["amount"]) is decimal fxAmt
                 && fxAmt > 0m
             )
             {
-                var healedType = TryHealFalsePositiveFixedToken(sanitized, i, tokObj, fxAmt);
-                if (healedType is not null)
+                var rawFxUnit = GetNullableString(tokObj["unit"]);
+                var effFxUnit =
+                    rawFxUnit is not null
+                    && rawFxUnit.Trim().Equals("custom", StringComparison.OrdinalIgnoreCase)
+                        ? GetNullableString(tokObj["customUnitName"])
+                        : rawFxUnit;
+                var fxNameVal = GetNullableString(tokObj["name"])?.Trim();
+
+                if (
+                    !string.IsNullOrWhiteSpace(effFxUnit)
+                    && DimensionUnitHelper.TryParse(effFxUnit, out var dimEnum)
+                )
                 {
-                    tokType = healedType;
+                    tokObj["type"] = "dimension";
+                    tokObj["unit"] = DimensionUnitHelper.ToJsonString(dimEnum);
+                    tokObj.Remove("name");
+                    tokObj.Remove("customUnitName");
+                    tokType = "dimension";
+
+                    if (!string.IsNullOrEmpty(fxNameVal))
+                    {
+                        var insertText = " " + fxNameVal;
+                        if (
+                            i + 1 < sanitized.Count
+                            && sanitized[i + 1] is JsonValue nextDimVal
+                            && nextDimVal.TryGetValue<string>(out var nextDimStr)
+                        )
+                        {
+                            var trimmedNext = nextDimStr.TrimStart();
+                            var needsSpaceBeforeNext =
+                                trimmedNext.Length > 0
+                                && trimmedNext[0]
+                                    is not ('-' or '.' or ',' or ';' or ':' or '!' or '?' or ')');
+                            var updatedNext = needsSpaceBeforeNext
+                                ? $"{insertText} {trimmedNext}"
+                                : $"{insertText}{trimmedNext}";
+                            sanitized[i + 1] = JsonValue.Create(updatedNext);
+                        }
+                        else
+                        {
+                            sanitized.Insert(i + 1, JsonValue.Create(insertText));
+                        }
+                    }
+                }
+                else if (
+                    !string.IsNullOrWhiteSpace(effFxUnit)
+                    && string.IsNullOrWhiteSpace(fxNameVal)
+                    && NormalizeTimerUnitWord(effFxUnit)
+                        is ("second" or "minute" or "hour" or "day")
+                            and var normTimeUnit
+                )
+                {
+                    tokObj["type"] = "timer";
+                    tokObj["unit"] = normTimeUnit;
+                    tokObj["label"] = "Timer";
+                    tokObj.Remove("name");
+                    tokObj.Remove("hyphenated");
+                    tokObj.Remove("customUnitName");
+                    tokType = "timer";
+                }
+                else if (
+                    string.IsNullOrWhiteSpace(effFxUnit)
+                    || effFxUnit.Trim().Equals("count", StringComparison.OrdinalIgnoreCase)
+                )
+                {
+                    var fxMaxAmt = GetNullableDecimal(tokObj["maxAmount"]);
+                    var amtText =
+                        fxMaxAmt.HasValue && fxMaxAmt.Value > fxAmt
+                            ? $"{FormatNum(fxAmt, false)} to {FormatNum(fxMaxAmt.Value, false)}"
+                            : FormatNum(fxAmt, false);
+                    var plainText = string.IsNullOrWhiteSpace(fxNameVal)
+                        ? amtText
+                        : $"{amtText} {fxNameVal}";
+                    sanitized[i] = JsonValue.Create(plainText);
+                    continue;
+                }
+                else if (!GetBool(tokObj["hyphenated"]))
+                {
+                    var healedType = TryHealFalsePositiveFixedToken(sanitized, i, tokObj, fxAmt);
+                    if (healedType is not null)
+                    {
+                        tokType = healedType;
+                    }
+                }
+            }
+
+            if (
+                tokType == "mixture"
+                && !string.IsNullOrWhiteSpace(originalInstruction)
+                && string.IsNullOrWhiteSpace(GetNullableString(tokObj["unit"]))
+                && GetNullableString(tokObj["name"]) is string rawUnitlessMixName
+                && !string.IsNullOrWhiteSpace(rawUnitlessMixName)
+            )
+            {
+                var mixFracPattern =
+                    $@"(?:one-quarter|a\s+quarter|three-quarters|one-third|two-thirds|one-half|half)\s+of\s+(?:the\s+)?{Regex.Escape(rawUnitlessMixName.Trim())}";
+                var mixFracMatch = Regex.Match(
+                    originalInstruction,
+                    mixFracPattern,
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+                );
+                if (mixFracMatch.Success)
+                {
+                    var prevStrForMix =
+                        i > 0
+                        && sanitized[i - 1] is JsonValue pVal
+                        && pVal.TryGetValue<string>(out var ps)
+                            ? ps
+                            : string.Empty;
+                    if (
+                        !prevStrForMix
+                            .TrimEnd()
+                            .EndsWith("of the", StringComparison.OrdinalIgnoreCase)
+                    )
+                    {
+                        sanitized[i] = JsonValue.Create(mixFracMatch.Value);
+                        continue;
+                    }
+                }
+            }
+
+            if (
+                !string.IsNullOrWhiteSpace(originalInstruction)
+                && tokType is "ingredient" or "mixture" or "fixed"
+                && i > 0
+                && sanitized[i - 1] is JsonValue prevOfVal
+                && prevOfVal.TryGetValue<string>(out var prevOfStr)
+            )
+            {
+                var transposedOfMatch = TransposedOfTheBeforeTokenRegex().Match(prevOfStr);
+                if (transposedOfMatch.Success)
+                {
+                    var beforeWord = transposedOfMatch.Groups["beforeWord"].Value;
+                    var hasWordOfInSource = Regex.IsMatch(
+                        originalInstruction,
+                        $@"\b{Regex.Escape(beforeWord)}\s+of\b",
+                        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+                    );
+                    if (!hasWordOfInSource)
+                    {
+                        var danglingGroup = transposedOfMatch.Groups["dangling"];
+                        sanitized[i - 1] = JsonValue.Create(prevOfStr[..danglingGroup.Index]);
+                    }
                 }
             }
 
@@ -879,6 +1043,40 @@ public static partial class StepTokenValidator
             if (PeriodMissingSpacePrefixRegex().IsMatch(nextText))
             {
                 nextText = ". " + nextText[1..];
+                sanitized[i + 1] = JsonValue.Create(nextText);
+            }
+            else if (Regex.IsMatch(nextText, @"^[ \t]+[.,;:!?]"))
+            {
+                nextText = nextText.TrimStart(' ', '\t');
+                sanitized[i + 1] = JsonValue.Create(nextText);
+            }
+            else if (nextText.StartsWith('('))
+            {
+                nextText = " " + nextText;
+                sanitized[i + 1] = JsonValue.Create(nextText);
+            }
+            else if (
+                !string.IsNullOrWhiteSpace(originalInstruction)
+                && Regex.Match(
+                    nextText,
+                    @"^\s+(?<capWord>[A-Z][a-z]{2,})\b",
+                    RegexOptions.CultureInvariant
+                )
+                    is { Success: true } capMatch
+                && capMatch.Groups["capWord"].Value is var capWord
+                && Regex.IsMatch(
+                    originalInstruction,
+                    $@"\.\s+{Regex.Escape(capWord)}\b",
+                    RegexOptions.CultureInvariant
+                )
+                && !Regex.IsMatch(
+                    originalInstruction,
+                    $@"[a-zA-Z0-9,;:)\]]\s+{Regex.Escape(capWord)}\b",
+                    RegexOptions.CultureInvariant
+                )
+            )
+            {
+                nextText = ". " + nextText.TrimStart();
                 sanitized[i + 1] = JsonValue.Create(nextText);
             }
 
@@ -1036,7 +1234,7 @@ public static partial class StepTokenValidator
             }
         }
 
-        return sanitized;
+        return MergeAdjacentStrings(sanitized);
     }
 
     public static ValidatedStage4StepResult BuildAndValidateStep(
@@ -1224,7 +1422,8 @@ public static partial class StepTokenValidator
                         Amount: qty,
                         Unit: unit,
                         CustomUnitName: unit == MeasurementUnit.Custom ? customUnit : null,
-                        MaxAmount: maxQty
+                        MaxAmount: maxQty,
+                        Fixed: mix.Fixed
                     );
                     sb.Append(StepInstructionParser.FormatToken(stepToken));
                     break;
@@ -1406,7 +1605,8 @@ public static partial class StepTokenValidator
                             obj["name"]?.GetValue<string>() ?? string.Empty,
                             GetNullableDecimal(obj["quantity"]) ?? 0m,
                             GetNullableDecimal(obj["maxQuantity"]),
-                            GetNullableString(obj["unit"])
+                            GetNullableString(obj["unit"]),
+                            GetBool(obj["fixed"])
                         )
                     );
                     break;
@@ -1489,10 +1689,12 @@ public static partial class StepTokenValidator
                     break;
                 }
                 case Stage4MixtureToken mix:
+                {
+                    var effScale = mix.Fixed ? 1m : scaleFactor;
                     sb.Append(
                         RenderAmountAndUnit(
-                            mix.Quantity * scaleFactor,
-                            mix.MaxQuantity.HasValue ? mix.MaxQuantity.Value * scaleFactor : null,
+                            mix.Quantity * effScale,
+                            mix.MaxQuantity.HasValue ? mix.MaxQuantity.Value * effScale : null,
                             mix.Unit,
                             convertToMetric,
                             hyphenated: false,
@@ -1500,6 +1702,7 @@ public static partial class StepTokenValidator
                         )
                     );
                     break;
+                }
                 case Stage4TimerToken timer:
                     sb.Append(
                         RenderAmountAndUnit(
@@ -2078,12 +2281,11 @@ public static partial class StepTokenValidator
                                 "unit",
                                 StringComparison.OrdinalIgnoreCase
                             )
-                        )
-                        && mix.Quantity == 1m
+                        ) && !UnitlessNumericFractionInProseRegex().IsMatch(origClean)
                     )
                     {
                         warnings.Add(
-                            $"Mixture token '{mix.Name}' has unit='{mix.Unit ?? "null"}' and quantity=1; unmeasured mixture references should stay plain text."
+                            $"Mixture token '{mix.Name}' has unit='{mix.Unit ?? "null"}' (quantity={mix.Quantity}); unmeasured mixture references and prose fractions without a unit must stay plain text."
                         );
                     }
                     if (
@@ -2401,8 +2603,27 @@ public static partial class StepTokenValidator
             }
         }
 
+        var before = text[..untok.Index];
+        var after = text[(untok.Index + untok.Length)..];
+
+        if (
+            Regex.IsMatch(
+                before,
+                @"\b(?:back|tip|handle|bottom|underside|rim)\s+of\s+(?:a\s+|the\s+)?$",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+            )
+            || Regex.IsMatch(
+                after,
+                @"^\s*(?:-\s*)?(?:(?:liquid|dry)\s+)?(?:measuring\s+(?:cup|spoon)s?|measures?|portion\s+scoops?|scoops?|ladles?|skillets?|saucepans?|pans?|pots?|pitchers?|jars?|containers?|molds?|tins?|ramekins?|dipped\s+in\b)",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+            )
+        )
+        {
+            return true;
+        }
+
         return TimeUnitOnlyValueRegex().IsMatch(untok.Value)
-            && RetrospectiveAfterPrefixRegex().IsMatch(text[..untok.Index]);
+            && RetrospectiveAfterPrefixRegex().IsMatch(before);
     }
 
     private static void CheckTrailingDanglingOrComma(

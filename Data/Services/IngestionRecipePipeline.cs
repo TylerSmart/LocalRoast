@@ -565,9 +565,10 @@ public sealed partial class IngestionRecipePipeline(
                     parsed!
                 );
                 var ingredientFeedback = ValidateStage1IngredientsFeedback(parsed!, sourceText);
+                var variationFeedback = ValidateStage1VariationFeedback(parsed!, sourceText);
                 var combinedFeedback = string.Join(
                     " ",
-                    new[] { missingStepsFeedback, ingredientFeedback }.Where(f =>
+                    new[] { missingStepsFeedback, ingredientFeedback, variationFeedback }.Where(f =>
                         !string.IsNullOrWhiteSpace(f)
                     )
                 );
@@ -1516,12 +1517,17 @@ public sealed partial class IngestionRecipePipeline(
                     200
                 );
 
+            var cleanPrepNote = DeduplicatePreparationNoteAgainstDisplayName(
+                displayName,
+                RecipeUnitAndSectionHelpers.CleanPreparationNote(ing.PrepNote, 200)
+            );
+
             var rawLine = BuildOriginalRawLine(
                 cleanQty,
                 cleanMaxQty,
                 ing.Unit,
                 displayName,
-                ing.PrepNote,
+                cleanPrepNote,
                 ing.IsOptional
             );
 
@@ -1545,10 +1551,7 @@ public sealed partial class IngestionRecipePipeline(
                     SuggestedIsPantryStaple: match.SuggestedIsPantryStaple,
                     CreateNewFoodItem: match.CreateNewFoodItem,
                     DisplayName: displayName,
-                    PreparationNote: RecipeUnitAndSectionHelpers.CleanPreparationNote(
-                        ing.PrepNote,
-                        200
-                    ),
+                    PreparationNote: cleanPrepNote,
                     IsOptional: ing.IsOptional,
                     OriginalRawText: IngestionMetadataAndTagHelper.CleanOptionalText(rawLine, 500),
                     AlternativeMeasurement: altMeasurement,
@@ -1772,8 +1775,12 @@ public sealed partial class IngestionRecipePipeline(
 
             if (
                 food is not null
-                && food.Name.Equals("egg", StringComparison.OrdinalIgnoreCase)
-                && EggPartWordRegex().IsMatch(rawName)
+                && !FoodNameSanitizer.IsCompatibleFoodItemMatch(
+                    rawName,
+                    rawUnit,
+                    rawPrepNote,
+                    food.Name
+                )
             )
             {
                 food = null;
@@ -1872,11 +1879,31 @@ public sealed partial class IngestionRecipePipeline(
         }
 
         // New grocery ingredient (or safety exact-normalized match when decision was missing/invalid)
+        if (
+            !rejectedGenericMatch
+            && !string.IsNullOrWhiteSpace(decision?.Name)
+            && !FoodNameSanitizer.IsCompatibleFoodItemMatch(
+                rawName,
+                rawUnit,
+                rawPrepNote,
+                decision.Name
+            )
+        )
+        {
+            rejectedGenericMatch = true;
+        }
+
         var candidateName =
             !rejectedGenericMatch && !string.IsNullOrWhiteSpace(decision?.Name)
                 ? decision!.Name.Trim()
                 : rawName.Trim();
-        var canonical = FoodNameSanitizer.NormalizeCanonicalFoodName(candidateName);
+        var canonical = rejectedGenericMatch
+            ? FoodNameSanitizer.NormalizeRejectedFallbackFoodName(rawName, rawUnit, rawPrepNote)
+            : FoodNameSanitizer.NormalizeCanonicalFoodName(candidateName);
+        if (string.IsNullOrWhiteSpace(canonical))
+        {
+            canonical = FoodNameSanitizer.NormalizeCanonicalFoodName(rawName);
+        }
         if (string.IsNullOrWhiteSpace(canonical))
         {
             canonical = RecipeUnitAndSectionHelpers.StripLeadingBulletOrIndex(candidateName);
@@ -2270,6 +2297,9 @@ public sealed partial class IngestionRecipePipeline(
 
                 var cleanInstruction = LeadStepPrefixRegex()
                     .Replace(instruction.Trim(), string.Empty)
+                    .Trim();
+                cleanInstruction = StepMetaOmitSentenceRegex()
+                    .Replace(cleanInstruction, string.Empty)
                     .Trim();
                 if (cleanInstruction.EndsWith(".).", StringComparison.Ordinal))
                 {
@@ -2751,6 +2781,318 @@ public sealed partial class IngestionRecipePipeline(
             : null;
     }
 
+    private static string? DeduplicatePreparationNoteAgainstDisplayName(
+        string displayName,
+        string? prepNote
+    )
+    {
+        if (string.IsNullOrWhiteSpace(prepNote) || string.IsNullOrWhiteSpace(displayName))
+        {
+            return prepNote;
+        }
+
+        var parts = prepNote
+            .Split(',', StringSplitOptions.RemoveEmptyEntries)
+            .Select(p => p.Trim())
+            .Where(p => !string.IsNullOrWhiteSpace(p))
+            .ToList();
+        if (parts.Count == 0)
+        {
+            return null;
+        }
+
+        var kept = new List<string>(parts.Count);
+        foreach (var part in parts)
+        {
+            var pattern = $@"(?:^|\s){Regex.Escape(part)}(?:\s|$|,)";
+            if (
+                Regex.IsMatch(
+                    displayName,
+                    pattern,
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+                )
+            )
+            {
+                continue;
+            }
+            kept.Add(part);
+        }
+
+        return kept.Count > 0 ? string.Join(", ", kept) : null;
+    }
+
+    private static string? ValidateStage1VariationFeedback(Stage1RecipeDto dto, string sourceText)
+    {
+        if (
+            !sourceText.Contains("Variation of ", StringComparison.OrdinalIgnoreCase)
+            && !sourceText.Contains("Variation Instructions", StringComparison.OrdinalIgnoreCase)
+        )
+        {
+            return null;
+        }
+
+        var issues = new List<string>();
+        var allInstructions = (dto.Sections ?? [])
+            .SelectMany(s => s.Instructions ?? [])
+            .Where(i => !string.IsNullOrWhiteSpace(i))
+            .ToList();
+
+        var hasMetaOmit = allInstructions.Any(instr => MetaOmitDirectiveRegex().IsMatch(instr));
+        if (hasMetaOmit)
+        {
+            issues.Add(
+                "Remove meta-editing 'Omit ...' directives from instructions and remove the omitted items from ingredients."
+            );
+        }
+
+        var allIngs = (dto.Sections ?? [])
+            .SelectMany(s =>
+                (s.Ingredients ?? []).Select(i => (Section: s.Name ?? string.Empty, Ing: i))
+            )
+            .ToList();
+
+        var seenIngCanonicalInSection = new Dictionary<string, string>(
+            StringComparer.OrdinalIgnoreCase
+        );
+        var dupCanonicalNames = new List<string>();
+        foreach (var (sec, ing) in allIngs)
+        {
+            var head = ExtractCanonicalVariationKey(ing.Name);
+            if (string.IsNullOrWhiteSpace(head))
+            {
+                continue;
+            }
+
+            var key = $"{sec.Trim().ToLowerInvariant()}|{head}";
+            if (seenIngCanonicalInSection.TryGetValue(key, out var prevName))
+            {
+                dupCanonicalNames.Add($"'{prevName}' / '{ing.Name}'");
+            }
+            else
+            {
+                seenIngCanonicalInSection[key] = ing.Name;
+            }
+        }
+
+        if (dupCanonicalNames.Count > 0)
+        {
+            issues.Add(
+                $"Deduplicate overlapping ingredients in the same section: {string.Join(", ", dupCanonicalNames.Take(3))}."
+            );
+        }
+
+        var (hasVariationBlock, baseIngLines, varInstBlock) = ExtractVariationSourceBlocks(
+            sourceText
+        );
+        if (hasVariationBlock && baseIngLines.Count > 0 && !string.IsNullOrWhiteSpace(varInstBlock))
+        {
+            var varInstLower = varInstBlock.ToLowerInvariant();
+            var allExtractedInstLower = string.Join(" ", allInstructions).ToLowerInvariant();
+            var supersededMasterTextLower = ExtractSupersededMasterBranchText(
+                allInstructions,
+                varInstBlock
+            );
+
+            var staleBaseIngs = new List<string>();
+            foreach (var (_, ing) in allIngs)
+            {
+                var ingLower = ing.Name.Trim().ToLowerInvariant();
+                if (
+                    ingLower
+                        is "salt"
+                            or "table salt"
+                            or "pepper"
+                            or "black pepper"
+                            or "water"
+                            or "oil"
+                    || (
+                        !string.IsNullOrWhiteSpace(ing.Unit)
+                        && ing.Unit.Trim().Equals("recipe", StringComparison.OrdinalIgnoreCase)
+                    )
+                )
+                {
+                    continue;
+                }
+
+                var sigWords = ExtractDistinctLongWords(ing.Name)
+                    .Where(w =>
+                        w is not ("fresh" or "whole" or "small" or "large" or "ground" or "minced")
+                    )
+                    .ToList();
+                if (sigWords.Count == 0)
+                {
+                    continue;
+                }
+
+                var inBaseList = baseIngLines.Any(line =>
+                    sigWords.Any(w => line.Contains(w, StringComparison.OrdinalIgnoreCase))
+                );
+                if (!inBaseList)
+                {
+                    continue;
+                }
+
+                var mentionedInVariation = sigWords.Any(w =>
+                    varInstLower.Contains(w, StringComparison.Ordinal)
+                );
+                if (mentionedInVariation)
+                {
+                    continue;
+                }
+
+                var mentionedInExtractedSteps = sigWords.Any(w =>
+                    allExtractedInstLower.Contains(w, StringComparison.Ordinal)
+                );
+                var mentionedInSupersededBranch =
+                    supersededMasterTextLower.Length > 0
+                    && sigWords.Any(w =>
+                        supersededMasterTextLower.Contains(w, StringComparison.Ordinal)
+                    );
+                if (!mentionedInExtractedSteps || mentionedInSupersededBranch)
+                {
+                    staleBaseIngs.Add(ing.Name);
+                }
+            }
+
+            if (staleBaseIngs.Count > 0)
+            {
+                issues.Add(
+                    $"Variation replaced/omitted base ingredients that should be excluded from both ingredients and replaced steps: {string.Join(", ", staleBaseIngs.Distinct(StringComparer.OrdinalIgnoreCase).Take(6))}."
+                );
+            }
+        }
+
+        return issues.Count > 0
+            ? $"Fix variation extraction issues: {string.Join(" ", issues)}"
+            : null;
+    }
+
+    private static string ExtractSupersededMasterBranchText(
+        IReadOnlyList<string> allInstructions,
+        string varInstBlock
+    )
+    {
+        var anchorMatch = Regex.Match(
+            varInstBlock,
+            @"To\s+(?<anchor>[^.?!]{4,60}?)\s+add\b",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+        );
+        if (!anchorMatch.Success)
+        {
+            return string.Empty;
+        }
+
+        var sentences = allInstructions
+            .SelectMany(instr => Regex.Split(instr, @"(?<=[.?!])\s+"))
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .ToList();
+
+        var anchorIdx = -1;
+        var anchorWords = ExtractDistinctLongWords(anchorMatch.Groups["anchor"].Value);
+        for (var i = 0; i < sentences.Count; i++)
+        {
+            var s = sentences[i];
+            if (
+                anchorWords.Count > 0
+                && anchorWords.Count(w => s.Contains(w, StringComparison.OrdinalIgnoreCase))
+                    >= Math.Min(2, anchorWords.Count)
+                && !s.TrimStart().StartsWith("To ", StringComparison.OrdinalIgnoreCase)
+            )
+            {
+                anchorIdx = i;
+                break;
+            }
+        }
+
+        var varBranchIdx = sentences.FindIndex(s =>
+            s.TrimStart().StartsWith("To ", StringComparison.OrdinalIgnoreCase)
+            && s.Contains(" add ", StringComparison.OrdinalIgnoreCase)
+        );
+        if (anchorIdx < 0 || varBranchIdx <= anchorIdx + 1)
+        {
+            return string.Empty;
+        }
+
+        return string.Join(" ", sentences.Skip(anchorIdx + 1).Take(varBranchIdx - anchorIdx - 1))
+            .ToLowerInvariant();
+    }
+
+    private static (
+        bool HasVariationBlock,
+        List<string> BaseIngredientLines,
+        string VariationInstructionsBlock
+    ) ExtractVariationSourceBlocks(string sourceText)
+    {
+        var lines = sourceText.Replace("\r\n", "\n").Split('\n');
+        var inBaseIng = false;
+        var inVarInst = false;
+        var baseIngLines = new List<string>();
+        var varInstLines = new List<string>();
+
+        foreach (var raw in lines)
+        {
+            var trimmed = raw.Trim();
+            if (trimmed.StartsWith("Base Ingredients:", StringComparison.OrdinalIgnoreCase))
+            {
+                inBaseIng = true;
+                inVarInst = false;
+                continue;
+            }
+
+            if (trimmed.StartsWith("Variation Instructions", StringComparison.OrdinalIgnoreCase))
+            {
+                inBaseIng = false;
+                inVarInst = true;
+                continue;
+            }
+
+            if (
+                trimmed.StartsWith("Base Master Instructions", StringComparison.OrdinalIgnoreCase)
+                || trimmed.StartsWith("Instructions:", StringComparison.OrdinalIgnoreCase)
+            )
+            {
+                inBaseIng = false;
+                inVarInst = false;
+                continue;
+            }
+
+            if (inBaseIng && !string.IsNullOrWhiteSpace(trimmed))
+            {
+                baseIngLines.Add(trimmed);
+            }
+            else if (inVarInst && !string.IsNullOrWhiteSpace(trimmed))
+            {
+                varInstLines.Add(trimmed);
+            }
+        }
+
+        return (varInstLines.Count > 0, baseIngLines, string.Join(" ", varInstLines));
+    }
+
+    private static string ExtractCanonicalVariationKey(string name)
+    {
+        var words = Regex
+            .Replace(name.ToLowerInvariant(), @"[^a-z\s]", " ")
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Where(w =>
+                w
+                    is not (
+                        "fresh"
+                        or "minced"
+                        or "chopped"
+                        or "ground"
+                        or "whole"
+                        or "small"
+                        or "large"
+                        or "leaves"
+                        or "leaf"
+                        or "pepper"
+                    )
+            )
+            .ToList();
+        return words.Count > 0 ? words[^1] : name.Trim().ToLowerInvariant();
+    }
+
     private static (bool FoundIngredientsHeader, List<string> Lines) ExtractSourceIngredientLines(
         string sourceText
     )
@@ -2932,10 +3274,16 @@ public sealed partial class IngestionRecipePipeline(
     private static partial Regex BareEggPartRegex();
 
     [GeneratedRegex(
-        @"\b(?:yolks?|whites?)\b",
+        @"(?:^|[.?!]\s+)Omit\s+[^.?!;]{2,80}[.?!]",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
-    private static partial Regex EggPartWordRegex();
+    private static partial Regex MetaOmitDirectiveRegex();
+
+    [GeneratedRegex(
+        @"(?:^|(?<=[.?!]\s+))Omit\s+[\p{L}\s,'’-]{2,60}[.?!]\s*",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex StepMetaOmitSentenceRegex();
 
     [GeneratedRegex(@"\s+(?:and/)?or\s+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex OrAlternativeRegex();

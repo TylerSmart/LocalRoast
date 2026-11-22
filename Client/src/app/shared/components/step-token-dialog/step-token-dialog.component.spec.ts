@@ -147,25 +147,27 @@ describe('StepTokenDialogComponent', () => {
   });
 
   describe('mixture, dimension, and fixed modes', () => {
-    it('serializes mixture token on save', async () => {
+    it('serializes mixture token on save including fixed flag when checked', async () => {
       await createComponent({ mode: 'mixture' });
       component['mixtureForm'].patchValue({
         name: 'herb butter',
         amount: 1,
         maxAmount: 2,
         unit: 'tbsp',
+        fixed: true,
       });
       component['onSave']();
 
       expect(mockDialogRef.close).toHaveBeenCalledWith({
         rawToken:
-          '||{"type":"mixture","name":"herb butter","amount":1,"maxAmount":2,"unit":"tbsp"}||',
+          '||{"type":"mixture","name":"herb butter","amount":1,"maxAmount":2,"unit":"tbsp","fixed":true}||',
         token: {
           type: 'mixture',
           name: 'herb butter',
           amount: 1,
           maxAmount: 2,
           unit: 'tbsp',
+          fixed: true,
         },
       });
     });
