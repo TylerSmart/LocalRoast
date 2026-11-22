@@ -2479,6 +2479,23 @@ public sealed partial class IngestionRecipePipeline(
         }
     }
 
+    private static bool IsLeadingEditorialOrStorageNoteStep(string text)
+    {
+        var first = text.Trim();
+        if (string.IsNullOrWhiteSpace(first) || first.Length > 650)
+        {
+            return false;
+        }
+
+        if (StandaloneStorageStepRegex().IsMatch(first))
+        {
+            return true;
+        }
+
+        return LeadingEditorialNoteStepRegex().IsMatch(first)
+            && !ImperativeCookingVerbStartRegex().IsMatch(first);
+    }
+
     private static (List<WorkStep> Steps, string? Description) RelocateLeadingStorageNoteStep(
         List<WorkStep> steps,
         string? description
@@ -2490,11 +2507,7 @@ public sealed partial class IngestionRecipePipeline(
         }
 
         var first = steps[0].Instruction.Trim();
-        if (
-            first.Length > 220
-            || SentenceEndRegex().Matches(first).Count > 1
-            || !StandaloneStorageStepRegex().IsMatch(first)
-        )
+        if (!IsLeadingEditorialOrStorageNoteStep(first))
         {
             return (steps, description);
         }
@@ -2963,11 +2976,7 @@ public sealed partial class IngestionRecipePipeline(
         }
 
         var first = steps[0].Instruction.Trim();
-        if (
-            first.Length > 220
-            || SentenceEndRegex().Matches(first).Count > 1
-            || !StandaloneStorageStepRegex().IsMatch(first)
-        )
+        if (!IsLeadingEditorialOrStorageNoteStep(first))
         {
             return (steps, description);
         }
@@ -3555,6 +3564,9 @@ public sealed partial class IngestionRecipePipeline(
             return null;
         }
 
+        var skipFirstEditorialStep =
+            numberedSteps.Count >= 2 && IsLeadingEditorialOrStorageNoteStep(numberedSteps[0].Text);
+
         if (numberedSteps.Count >= 3)
         {
             var extractedLower = StepWordNonAlnumRegex()
@@ -3570,6 +3582,11 @@ public sealed partial class IngestionRecipePipeline(
             var omitted = new List<string>();
             foreach (var (num, text) in numberedSteps)
             {
+                if (skipFirstEditorialStep && num == 1)
+                {
+                    continue;
+                }
+
                 if (text.Length < 30)
                 {
                     continue;
@@ -3605,17 +3622,21 @@ public sealed partial class IngestionRecipePipeline(
             .SelectMany(s => s.Instructions ?? [])
             .Where(x => !string.IsNullOrWhiteSpace(x))
             .ToList();
-        if (extractedInstructions.Count < numberedSteps.Count)
+        var requiredSteps =
+            skipFirstEditorialStep && extractedInstructions.Count == numberedSteps.Count - 1
+                ? numberedSteps.Skip(1).ToList()
+                : numberedSteps;
+        if (extractedInstructions.Count < requiredSteps.Count)
         {
-            return $"Source has {numberedSteps.Count} numbered instruction steps, but you extracted {extractedInstructions.Count}. Map EVERY source numbered step 1-to-1 into sections[].instructions without skipping or merging steps.";
+            return $"Source has {requiredSteps.Count} numbered instruction steps, but you extracted {extractedInstructions.Count}. Map EVERY source numbered step 1-to-1 into sections[].instructions without skipping or merging steps.";
         }
 
-        if (extractedInstructions.Count == numberedSteps.Count)
+        if (extractedInstructions.Count == requiredSteps.Count)
         {
-            for (var k = 0; k < numberedSteps.Count; k++)
+            for (var k = 0; k < requiredSteps.Count; k++)
             {
                 var srcClean = LeadUpperSectionPrefixRegex()
-                    .Replace(numberedSteps[k].Text.Trim(), string.Empty)
+                    .Replace(requiredSteps[k].Text.Trim(), string.Empty)
                     .Trim();
                 var extClean = LeadUpperSectionPrefixRegex()
                     .Replace(
@@ -3633,7 +3654,7 @@ public sealed partial class IngestionRecipePipeline(
                 )
                 {
                     var snippet = srcClean.Length > 70 ? srcClean[..70] + "..." : srcClean;
-                    return $"Step {numberedSteps[k].Num} omitted sentences from the source ('{snippet}'). Copy EVERY sentence of Step {numberedSteps[k].Num} verbatim from start to finish.";
+                    return $"Step {requiredSteps[k].Num} omitted sentences from the source ('{snippet}'). Copy EVERY sentence of Step {requiredSteps[k].Num} verbatim from start to finish.";
                 }
             }
         }
@@ -3865,7 +3886,7 @@ public sealed partial class IngestionRecipePipeline(
             )
             .ToList();
 
-        var seenIngCanonicalInSection = new Dictionary<string, string>(
+        var seenIngCanonicalInSection = new Dictionary<string, List<string>>(
             StringComparer.OrdinalIgnoreCase
         );
         var dupCanonicalNames = new List<string>();
@@ -3878,13 +3899,23 @@ public sealed partial class IngestionRecipePipeline(
             }
 
             var key = $"{sec.Trim().ToLowerInvariant()}|{head}";
-            if (seenIngCanonicalInSection.TryGetValue(key, out var prevName))
+            if (!seenIngCanonicalInSection.TryGetValue(key, out var seenNames))
             {
-                dupCanonicalNames.Add($"'{prevName}' / '{ing.Name}'");
+                seenIngCanonicalInSection[key] = [ing.Name];
+                continue;
+            }
+
+            var compatPrev = seenNames.FirstOrDefault(prevName =>
+                FoodNameSanitizer.IsCompatibleFoodItemMatch(prevName, null, null, ing.Name)
+                || FoodNameSanitizer.IsCompatibleFoodItemMatch(ing.Name, null, null, prevName)
+            );
+            if (compatPrev is not null)
+            {
+                dupCanonicalNames.Add($"'{compatPrev}' / '{ing.Name}'");
             }
             else
             {
-                seenIngCanonicalInSection[key] = ing.Name;
+                seenNames.Add(ing.Name);
             }
         }
 
@@ -4360,10 +4391,22 @@ public sealed partial class IngestionRecipePipeline(
     private static partial Regex AdditivePlusLineRegex();
 
     [GeneratedRegex(
-        @"^(?:The\s+)?[\p{L}\s'-]{2,40}\s+can\s+be\s+(?:refrigerated|stored|kept|frozen|made\s+(?:in\s+advance|ahead)|prepared\s+(?:in\s+advance|ahead))\b",
+        @"^(?:Once\s+cooled,\s*)?(?:you\s+can\s+(?:store|refrigerate|freeze|keep)\b|(?:The\s+)?[\p{L}\s'-]{2,40}\s+can\s+be\s+(?:refrigerated|stored|kept|frozen|made\s+(?:in\s+advance|ahead)|prepared\s+(?:in\s+advance|ahead))\b)",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex StandaloneStorageStepRegex();
+
+    [GeneratedRegex(
+        @"^(?:We\s+(?:prefer|recommend|like|found|tested)\b|For\s+best\s+results\b|Do\s+not\s+use\s+quick-cooking\b)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex LeadingEditorialNoteStepRegex();
+
+    [GeneratedRegex(
+        @"^(?:Bring|Heat|Combine|Whisk|Cook|Stir|Place|Add|Adjust|Melt|Bake|Roast|Simmer|Boil|Season|In\s+a\b|Using\b)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex ImperativeCookingVerbStartRegex();
 
     [GeneratedRegex(
         @"(?:^|(?<=[.!?][ \t]+))[ \t]*(?:WHY\s+THIS\s+RECIPES?\s+WORKS?|WHY\s+IT\s+WORKS)[ \t]*(?:[:.\-–—]+[ \t]*|\n+[ \t]*)",

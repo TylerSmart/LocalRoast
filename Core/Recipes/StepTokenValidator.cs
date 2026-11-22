@@ -723,6 +723,32 @@ public static partial class StepTokenValidator
                 var leadGroup = leadMatch.Groups["lead"];
                 sanitized[i] = JsonValue.Create(prevText[..leadGroup.Index]);
             }
+            else if (
+                minVal.HasValue
+                && !maxVal.HasValue
+                && TryParseSimpleAmount(leadMatch.Groups["dupMin"].Value, out var lowerVal)
+                && lowerVal > 0m
+                && lowerVal < minVal.Value
+                && !(minVal.Value < 10m && lowerVal >= 10m)
+            )
+            {
+                var leadGroup = leadMatch.Groups["lead"];
+                var prefixBefore = prevText[..leadGroup.Index];
+                if (!prefixBefore.EndsWith("Step ", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (nextTok["quantity"] is not null)
+                    {
+                        nextTok["maxQuantity"] = minVal.Value;
+                        nextTok["quantity"] = lowerVal;
+                    }
+                    else
+                    {
+                        nextTok["maxAmount"] = minVal.Value;
+                        nextTok["amount"] = lowerVal;
+                    }
+                    sanitized[i] = JsonValue.Create(prefixBefore);
+                }
+            }
         }
 
         for (var i = 0; i < sanitized.Count; i++)
@@ -1054,12 +1080,107 @@ public static partial class StepTokenValidator
             }
 
             if (
+                i > 0
+                && sanitized[i - 1] is JsonValue prevTokVal
+                && prevTokVal.TryGetValue<string>(out var prevTokStr)
+                && prevTokStr.Length > 0
+            )
+            {
+                var primaryVal = GetNullableDecimal(tokObj["amount"] ?? tokObj["quantity"]);
+                var isHyphenFixed =
+                    tokType == "fixed" && tokObj["hyphenated"]?.GetValue<bool>() == true;
+                if (
+                    !isHyphenFixed
+                    && primaryVal.HasValue
+                    && TryMatchSpelledNumber(prevTokStr, primaryVal.Value, out var wordNum)
+                    && (
+                        string.IsNullOrWhiteSpace(originalInstruction)
+                        || !Regex.IsMatch(
+                            originalInstruction,
+                            $@"\b{Regex.Escape(wordNum)}[\s-]+{primaryVal.Value:0.####}\b",
+                            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+                        )
+                    )
+                )
+                {
+                    var strippedPrev = Regex.Replace(
+                        prevTokStr,
+                        $@"{Regex.Escape(wordNum)}\s*$",
+                        string.Empty,
+                        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+                    );
+                    if (
+                        !string.IsNullOrWhiteSpace(strippedPrev)
+                        && !char.IsWhiteSpace(strippedPrev[^1])
+                        && !strippedPrev.EndsWith('(')
+                    )
+                    {
+                        strippedPrev += " ";
+                    }
+                    prevTokStr = strippedPrev;
+                    sanitized[i - 1] = JsonValue.Create(prevTokStr);
+                }
+
+                if (prevTokStr.Length > 0 && char.IsLetterOrDigit(prevTokStr[^1]))
+                {
+                    sanitized[i - 1] = JsonValue.Create(prevTokStr + " ");
+                }
+            }
+
+            if (
                 i + 1 >= sanitized.Count
                 || sanitized[i + 1] is not JsonValue textVal
                 || !textVal.TryGetValue<string>(out var nextText)
             )
             {
                 continue;
+            }
+
+            if (
+                tokType is "ingredient" or "mixture" or "fixed"
+                && GetNullableString(tokObj["name"]) is string dupCheckName
+                && !string.IsNullOrWhiteSpace(dupCheckName)
+            )
+            {
+                var nameTrim = dupCheckName.Trim();
+                var lastSp = nameTrim.LastIndexOf(' ');
+                var lastWord = lastSp >= 0 ? nameTrim[(lastSp + 1)..] : nameTrim;
+                if (
+                    lastWord.Length >= 3
+                    && lastWord.All(char.IsLetter)
+                    && Regex.Match(
+                        nextText,
+                        $@"^[ \t]+{Regex.Escape(lastWord)}\b",
+                        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+                    )
+                        is { Success: true } dupTrailMatch
+                    && (
+                        string.IsNullOrWhiteSpace(originalInstruction)
+                        || !Regex.IsMatch(
+                            originalInstruction,
+                            $@"\b{Regex.Escape(lastWord)}\s+{Regex.Escape(lastWord)}\b",
+                            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+                        )
+                    )
+                )
+                {
+                    nextText = nextText[dupTrailMatch.Length..];
+                    sanitized[i + 1] = JsonValue.Create(nextText);
+                }
+            }
+
+            if (
+                tokType == "ingredient"
+                && Regex.Match(
+                    nextText,
+                    @"^[ \t]*\((?:about\s+|approx\.?\s*)?(?:\d+\s+\d+/\d+|\d+/\d+|\d+(?:\.\d+)?)\s+(?:ounces?|oz|pounds?|lbs?|grams?|g|kilograms?|kg|cups?|tablespoons?|tbsp|teaspoons?|tsp|sticks?|quarts?|pints?|liters?|milliliters?|ml)\)(?=[ \t.,;:])",
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+                )
+                    is { Success: true } parenEqMatch
+            )
+            {
+                nextText = nextText[parenEqMatch.Length..];
+                sanitized[i + 1] = JsonValue.Create(nextText);
             }
 
             if (PeriodMissingSpacePrefixRegex().IsMatch(nextText))
@@ -2065,11 +2186,20 @@ public static partial class StepTokenValidator
             if (
                 i > 0
                 && tokens[i - 1] is Stage4TextToken prevSpelledTxt
+                && tokens[i] is not Stage4FixedToken { Hyphenated: true }
                 && tokenPrimaryVal.HasValue
                 && TryMatchSpelledNumber(
                     prevSpelledTxt.Text,
                     tokenPrimaryVal.Value,
                     out var wordNum
+                )
+                && (
+                    string.IsNullOrWhiteSpace(originalInstruction)
+                    || !Regex.IsMatch(
+                        originalInstruction,
+                        $@"\b{Regex.Escape(wordNum)}[\s-]+{tokenPrimaryVal.Value:0.####}\b",
+                        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+                    )
                 )
             )
             {

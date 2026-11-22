@@ -2,15 +2,29 @@
 name: bulk-import-recipes
 description: >-
   Bulk-import queued cookbook recipes into LocalRoast using Antigravity's
-  `run_workflow` orchestrator (`flash` batched single-pass extraction + `pro`
-  targeted warning repair) backed by LocalRoast's deterministic C# compilation,
-  catalog SKU guardrails, and sub-recipe promotion pipeline. Use when importing
-  large queued recipe waves without running slow local Ollama text stages.
+  `run_workflow` orchestrator (single-pass parallel extraction using `model="inherit"`
+  from your selected chat model, e.g. Hydrogen Low/Medium) backed by LocalRoast's
+  deterministic C# compilation, catalog SKU guardrails, and sub-recipe promotion
+  pipeline. Leaves flagged edge cases in `ReadyForReview` for the paired
+  `repair-review-recipes` skill (switch model to Neon).
 ---
 
 # Bulk Import Recipes (`bulk-import-recipes`)
 
 Imports queued `IngestionJob`s into LocalRoast (either **local dev** or a remote **production deployment** over HTTPS — zero direct SQL access required) using parallel Antigravity workflow agents while keeping **100% of domain rules, SKU matching guardrails, step token healing/validation, measurement enrichment, sub-recipe auto-promotion, and confidence scoring** inside C# (`POST /api/bulk-import/jobs/{id}/submit-extraction`).
+
+## Two-Skill / Two-Model Workflow (Recommended)
+
+`run_workflow`'s `agent()` primitive selects specific custom models (like **Hydrogen** or **Neon**) via `model="inherit"` from the active Antigravity chat conversation:
+
+1. **Pass 1 — Bulk Extraction (`bulk-import-recipes`, Hydrogen Low/Medium):**
+   - Switch your Antigravity chat model to **Hydrogen Low** or **Hydrogen Medium**.
+   - Run `bulk_import_workflow.py` (`agentModel: "inherit"`, `runRepairInWave: false` by default). Clean recipes publish straight to `Published`; edge cases requiring repair or missing sub-recipes land in `ReadyForReview` without spending premium repair quota during the bulk pass.
+2. **Pass 2 — Multi-Round Targeted Repair ([`repair-review-recipes`](../repair-review-recipes/SKILL.md), Neon):**
+   - After your bulk wave(s) complete, switch your Antigravity chat model to **Neon**.
+   - Run `repair_review_workflow.py` via [`repair-review-recipes`](../repair-review-recipes/SKILL.md). It first runs a 0-token C# re-check (auto-publishing anything cleared by updated validator rules or newly published sub-recipes) and then drives up to **3 stateful back-and-forth repair rounds** per remaining recipe against live C# diagnostics.
+
+*(Optional: pass `"runRepairInWave": true` to `bulk_import_workflow.py` if you ever want single-round inline repair in the same wave.)*
 
 ## Targets & Authentication
 
@@ -40,9 +54,9 @@ Imports queued `IngestionJob`s into LocalRoast (either **local dev** or a remote
 
 ## Workflow Files
 
-- [`resources/extraction-prompt.md`](resources/extraction-prompt.md): Unified single-pass extraction + step-tokenization prompt guide.
-- [`scripts/bulk_import_helper.py`](scripts/bulk_import_helper.py): CLI providing `enqueue-epub`, `plan-wave`, `submit-batch`, `submit-one`, and `audit` (all supporting `--mcp-config`, `--url`, `--token`).
-- [`scripts/bulk_import_workflow.py`](scripts/bulk_import_workflow.py): Antigravity `run_workflow` script (`Optional Enqueue EPUB` -> `Plan Wave` -> `Extract Batches (Flash)` -> `Targeted Repair (Pro)` -> `Wave Audit`).
+- [`resources/extraction-prompt.md`](resources/extraction-prompt.md): Unified single-pass extraction + step-tokenization prompt guide (also shared with `repair-review-recipes`).
+- [`scripts/bulk_import_helper.py`](scripts/bulk_import_helper.py): CLI providing `enqueue-epub`, `plan-wave`, `plan-repairs`, `submit-batch`, `submit-one`, and `audit` (all supporting `--mcp-config`, `--url`, `--token`).
+- [`scripts/bulk_import_workflow.py`](scripts/bulk_import_workflow.py): Antigravity `run_workflow` script (`Optional Enqueue EPUB` -> `Plan Wave` -> `Extract Batches (agentModel="inherit")` -> `Wave Audit`, plus optional `runRepairInWave`).
 
 ## Running Waves via `run_workflow`
 
@@ -56,6 +70,7 @@ Imports queued `IngestionJob`s into LocalRoast (either **local dev** or a remote
     "batchSize": 5,
     "maxParallel": 4,
     "pilotBenchmark": false,
+    "agentModel": "inherit",
     "computeEmbeddings": true
   }
 }

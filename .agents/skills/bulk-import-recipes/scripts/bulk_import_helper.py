@@ -1833,6 +1833,484 @@ def cmd_audit(args: argparse.Namespace) -> int:
     return 0
 
 
+_DRAFT_UNIT_TO_EXT: dict[str, str | None] = {
+    "0": "teaspoon",
+    "tsp": "teaspoon",
+    "1": "tablespoon",
+    "tbsp": "tablespoon",
+    "2": "fluid ounce",
+    "floz": "fluid ounce",
+    "3": "cup",
+    "cup": "cup",
+    "4": "pint",
+    "pt": "pint",
+    "5": "quart",
+    "qt": "quart",
+    "6": "gallon",
+    "gal": "gallon",
+    "7": "milliliter",
+    "ml": "milliliter",
+    "8": "liter",
+    "l": "liter",
+    "9": "ounce",
+    "oz": "ounce",
+    "10": "pound",
+    "lb": "pound",
+    "11": "gram",
+    "g": "gram",
+    "12": "kilogram",
+    "kg": "kilogram",
+    "13": "pinch",
+    "pinch": "pinch",
+    "14": "dash",
+    "dash": "dash",
+    "15": "clove",
+    "clove": "clove",
+    "16": "can",
+    "can": "can",
+    "17": "bunch",
+    "bunch": "bunch",
+    "18": "slice",
+    "slice": "slice",
+    "19": None,
+    "whole": None,
+}
+
+_DIM_UNIT_TO_EXT: dict[str, str] = {
+    "1": "inch",
+    "inch": "inch",
+    "inches": "inch",
+    "2": "foot",
+    "foot": "foot",
+    "feet": "foot",
+    "3": "yard",
+    "yard": "yard",
+    "yards": "yard",
+    "4": "millimeter",
+    "mm": "millimeter",
+    "5": "centimeter",
+    "cm": "centimeter",
+    "6": "meter",
+    "m": "meter",
+}
+
+
+def _map_draft_unit(unit_val: Any, custom_unit: str | None) -> str | None:
+    if unit_val is None:
+        return str(custom_unit).strip() if custom_unit and str(custom_unit).strip() else None
+    key = str(unit_val).strip().lower()
+    if key in ("20", "custom"):
+        return str(custom_unit).strip() if custom_unit and str(custom_unit).strip() else None
+    if key in _DRAFT_UNIT_TO_EXT:
+        return _DRAFT_UNIT_TO_EXT[key]
+    return key or None
+
+
+def _format_qty_range(amt: float, max_amt: float | None) -> str:
+    def fmt(v: float) -> str:
+        return f"{v:g}" if abs(v - round(v)) < 1e-6 else f"{v:.4f}".rstrip("0").rstrip(".")
+
+    if max_amt is not None and max_amt > amt:
+        return f"{fmt(amt)} to {fmt(max_amt)}"
+    return fmt(amt)
+
+
+def _draft_step_to_external(instruction: str) -> tuple[str, list[dict[str, Any]]]:
+    segs = parse_tokens(instruction)
+    ext_tokens: list[dict[str, Any]] = []
+    plain_parts: list[str] = []
+
+    for is_tok, obj, raw in segs:
+        if not is_tok:
+            ext_tokens.append({"type": "text", "text": raw})
+            plain_parts.append(raw)
+            continue
+
+        if not isinstance(obj, dict):
+            ext_tokens.append({"type": "text", "text": raw})
+            plain_parts.append(raw)
+            continue
+
+        ttype = str(obj.get("type") or "ingredient").strip().lower()
+        if ttype in ("ingredient", "mixture"):
+            name = str(obj.get("ingredient") if ttype == "ingredient" else obj.get("name") or "").strip()
+            amt = _opt_float(obj.get("amount"))
+            max_amt = _opt_float(obj.get("maxAmount"))
+            if max_amt is not None and amt is not None and max_amt <= amt:
+                max_amt = None
+            unit = _map_draft_unit(obj.get("unit"), obj.get("customUnitName"))
+            if amt is None or amt <= 0:
+                ext_tokens.append({"type": "text", "text": name})
+                plain_parts.append(name)
+            else:
+                qtxt = _format_qty_range(amt, max_amt)
+                plain = " ".join(p for p in [qtxt, unit, name] if p)
+                plain_parts.append(plain)
+                tok_out: dict[str, Any] = {
+                    "type": ttype,
+                    "name": name,
+                    "quantity": amt,
+                    "maxQuantity": max_amt,
+                    "unit": unit,
+                    "fixed": bool(obj.get("fixed", False)),
+                }
+                if ttype == "ingredient":
+                    raw_idx = obj.get("ingredientIndex")
+                    tok_out["ingredientIndex"] = int(raw_idx) if raw_idx is not None else None
+                ext_tokens.append(tok_out)
+        elif ttype == "fixed":
+            name = str(obj["name"]).strip() if obj.get("name") else None
+            amt = _opt_float(obj.get("amount"))
+            max_amt = _opt_float(obj.get("maxAmount"))
+            unit = _map_draft_unit(obj.get("unit"), obj.get("customUnitName"))
+            hyph = bool(obj.get("hyphenated", False))
+            if amt is None or amt <= 0:
+                txt = name or raw
+                ext_tokens.append({"type": "text", "text": txt})
+                plain_parts.append(txt)
+            else:
+                qtxt = _format_qty_range(amt, max_amt)
+                joiner = "-" if hyph else " "
+                head = f"{qtxt}{joiner}{unit}" if unit else qtxt
+                plain = f"{head} {name}".strip() if name else head
+                plain_parts.append(plain)
+                ext_tokens.append(
+                    {
+                        "type": "fixed",
+                        "name": name,
+                        "amount": amt,
+                        "maxAmount": max_amt,
+                        "unit": unit,
+                        "hyphenated": hyph,
+                    }
+                )
+        elif ttype == "dimension":
+            val = _opt_float(obj.get("value")) or 0.0
+            max_val = _opt_float(obj.get("maxValue"))
+            dim_key = str(obj.get("unit") or "inch").strip().lower()
+            dim_unit = _DIM_UNIT_TO_EXT.get(dim_key, "inch")
+            hyph = bool(obj.get("hyphenated", False))
+            qtxt = _format_qty_range(val, max_val)
+            plain_parts.append(f"{qtxt}{'-' if hyph else ' '}{dim_unit}")
+            ext_tokens.append(
+                {
+                    "type": "dimension",
+                    "amount": val,
+                    "maxAmount": max_val,
+                    "unit": dim_unit,
+                    "hyphenated": hyph,
+                }
+            )
+        elif ttype == "timer":
+            sec = int(obj.get("seconds") or 0)
+            max_sec = _opt_int(obj.get("maxSeconds"))
+            if sec > 0 and sec % 86400 == 0 and (max_sec is None or max_sec % 86400 == 0):
+                t_unit, div = "day", 86400.0
+            elif sec > 0 and sec % 3600 == 0 and (max_sec is None or max_sec % 3600 == 0):
+                t_unit, div = "hour", 3600.0
+            elif sec >= 60 and (max_sec is None or max_sec >= 60):
+                t_unit, div = "minute", 60.0
+            else:
+                t_unit, div = "second", 1.0
+            amt = round(sec / div, 4)
+            max_amt = round(max_sec / div, 4) if max_sec and max_sec > sec else None
+            label = str(obj.get("label") or "").strip() or "Timer"
+            plain_parts.append(f"{_format_qty_range(amt, max_amt)} {t_unit}")
+            ext_tokens.append(
+                {
+                    "type": "timer",
+                    "amount": amt,
+                    "maxAmount": max_amt,
+                    "unit": t_unit,
+                    "label": label,
+                }
+            )
+        elif ttype == "temperature":
+            f_val = _opt_float(obj.get("fahrenheit"))
+            c_val = _opt_float(obj.get("celsius"))
+            if f_val is not None:
+                amt, max_amt, t_unit = f_val, _opt_float(obj.get("maxFahrenheit")), "fahrenheit"
+            else:
+                amt = c_val or 0.0
+                max_amt, t_unit = _opt_float(obj.get("maxCelsius")), "celsius"
+            plain_parts.append(f"{_format_qty_range(amt, max_amt)} degrees")
+            ext_tokens.append(
+                {
+                    "type": "temperature",
+                    "amount": amt,
+                    "maxAmount": max_amt,
+                    "unit": t_unit,
+                }
+            )
+        else:
+            ext_tokens.append({"type": "text", "text": raw})
+            plain_parts.append(raw)
+
+    return "".join(plain_parts).strip(), ext_tokens
+
+
+def draft_to_external_extraction(draft: dict[str, Any]) -> dict[str, Any]:
+    """Reconstruct an ExternalRecipeExtractionDto dict from a server IngestionExtractedDraftDto."""
+    sections_map: dict[str | None, dict[str, Any]] = {}
+    section_order: list[str | None] = []
+
+    def get_sec(sec_name_raw: Any) -> dict[str, Any]:
+        key = str(sec_name_raw).strip() if sec_name_raw and str(sec_name_raw).strip() else None
+        if key not in sections_map:
+            sections_map[key] = {"name": key, "ingredients": [], "steps": []}
+            section_order.append(key)
+        return sections_map[key]
+
+    for ing in draft.get("ingredients") or []:
+        sec = get_sec(ing.get("sectionName"))
+        reps_out: list[dict[str, Any]] = []
+        for rep in ing.get("replacements") or []:
+            rname = str(rep.get("displayName") or "").strip()
+            if not rname:
+                continue
+            r_unit = _map_draft_unit(rep.get("unit"), rep.get("customUnitName"))
+            r_cat = str(rep.get("suggestedCategory") or "").strip() or None
+            reps_out.append(
+                {
+                    "name": rname,
+                    "quantity": _opt_float(rep.get("quantity")),
+                    "maxQuantity": _opt_float(rep.get("maxQuantity")),
+                    "unit": r_unit,
+                    "prepNote": (str(rep["preparationNote"]).strip() if rep.get("preparationNote") else None),
+                    "canonicalFoodName": (
+                        str(rep.get("matchedFoodItemName") or rep.get("proposedFoodItemName") or "").strip().lower()
+                        or None
+                    ),
+                    "category": r_cat,
+                    "isPantryStaple": None,
+                }
+            )
+
+        alt_list: list[dict[str, Any]] = []
+        alt_m = ing.get("alternativeMeasurement")
+        if isinstance(alt_m, dict) and _opt_float(alt_m.get("quantity")) is not None:
+            alt_list.append(
+                {
+                    "quantity": _opt_float(alt_m.get("quantity")),
+                    "unit": _map_draft_unit(alt_m.get("unit"), alt_m.get("customUnitName")),
+                }
+            )
+
+        is_ref = bool(ing.get("isRecipeReference", False))
+        canon_name = None
+        if not is_ref:
+            raw_canon = ing.get("matchedFoodItemName") or ing.get("proposedFoodItemName")
+            canon_name = str(raw_canon).strip().lower() if raw_canon and str(raw_canon).strip() else None
+
+        sec["ingredients"].append(
+            {
+                "name": str(ing.get("displayName") or "").strip(),
+                "quantity": _opt_float(ing.get("quantity")),
+                "maxQuantity": _opt_float(ing.get("maxQuantity")),
+                "unit": _map_draft_unit(ing.get("unit"), ing.get("customUnitName")),
+                "prepNote": (str(ing["preparationNote"]).strip() if ing.get("preparationNote") else None),
+                "isOptional": bool(ing.get("isOptional", False)),
+                "canonicalFoodName": canon_name,
+                "category": (str(ing["suggestedCategory"]).strip() if ing.get("suggestedCategory") else None),
+                "isPantryStaple": bool(ing["suggestedIsPantryStaple"]) if "suggestedIsPantryStaple" in ing else None,
+                "isRecipeReference": is_ref,
+                "referencedRecipeTitle": (
+                    str(ing["referencedRecipeTitle"]).strip() if ing.get("referencedRecipeTitle") else None
+                ),
+                "replacements": reps_out,
+                "alternateMeasurements": alt_list,
+            }
+        )
+
+    for st in draft.get("steps") or []:
+        sec = get_sec(st.get("sectionName"))
+        plain_instr, ext_tokens = _draft_step_to_external(str(st.get("instruction") or ""))
+        sec["steps"].append({"instruction": plain_instr, "tokens": ext_tokens})
+
+    timing = None
+    if any(draft.get(k) is not None for k in ("prepTimeMinutes", "cookTimeMinutes", "totalTimeMinutes")):
+        timing = {
+            "prep": _opt_int(draft.get("prepTimeMinutes")),
+            "cook": _opt_int(draft.get("cookTimeMinutes")),
+            "total": _opt_int(draft.get("totalTimeMinutes")),
+        }
+
+    return normalize_extraction(
+        {
+            "title": draft.get("title") or "Untitled Recipe",
+            "description": draft.get("description"),
+            "servings": draft.get("baseServings"),
+            "yield": draft.get("yieldDisplay"),
+            "sections": [sections_map[k] for k in section_order],
+            "timing": timing,
+            "tags": draft.get("proposedTagNames") or [],
+        }
+    )
+
+
+def _fetch_paged_items(
+    token: str,
+    base_path: str,
+) -> list[dict[str, Any]]:
+    all_items: list[dict[str, Any]] = []
+    page = 1
+    sep = "&" if "?" in base_path else "?"
+    while True:
+        res = http_json("GET", f"{base_path}{sep}page={page}&pageSize=100", token=token, timeout=60) or {}
+        items = res.get("items") or []
+        all_items.extend(items)
+        if not items or not (res.get("hasNextPage") or res.get("hasMore")):
+            break
+        page += 1
+    return all_items
+
+
+def _index_cached_extractions() -> dict[str, dict[str, Any]]:
+    cached: dict[str, dict[str, Any]] = {}
+    search_roots = [
+        STATE_DIR,
+        REPO_ROOT / ".agents" / "skills" / "repair-review-recipes" / ".state",
+    ]
+    files: list[Path] = []
+    for root in search_roots:
+        if root.exists():
+            files.extend(root.rglob("batch_*_submitted.json"))
+            files.extend(root.rglob("repair_*_submitted.json"))
+    files.sort(key=lambda p: p.stat().st_mtime)
+
+    for fp in files:
+        try:
+            data = json.loads(fp.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        rows = data if isinstance(data, list) else ([data] if isinstance(data, dict) else [])
+        for row in rows:
+            if isinstance(row, dict) and row.get("jobId") and isinstance(row.get("extraction"), dict):
+                ext = row["extraction"]
+                if ext.get("sections"):
+                    cached[str(row["jobId"])] = ext
+    return cached
+
+
+def cmd_plan_repairs(args: argparse.Namespace) -> int:
+    token = get_token()
+    set_ingestion_enabled(token, False)
+
+    review_jobs = _fetch_paged_items(token, "/bulk-import/jobs?status=ReadyForReview")
+    published_recipes = _fetch_paged_items(token, "/bulk-import/recipes")
+    published_titles_norm = {
+        norm_title(r.get("title") or "") for r in published_recipes if r.get("title")
+    }
+    cached_by_job = _index_cached_extractions()
+
+    limit = max(1, int(args.limit))
+    auto_published_precheck = 0
+    skipped_waiting_sub = 0
+    repair_items: list[dict[str, Any]] = []
+
+    for job_sum in review_jobs[:limit]:
+        jid = str(job_sum["id"])
+        det = http_json("GET", f"/bulk-import/jobs/{jid}", token=token, timeout=60)
+        draft = det.get("extractedDraft") or {}
+        source_text = (det.get("normalizedSourceText") or det.get("rawText") or "").strip()
+        if not source_text:
+            continue
+
+        v_issues = draft.get("validationIssues") or []
+        q_warn = draft.get("qualityWarnings") or []
+        m_warn = draft.get("measurementWarnings") or []
+
+        def is_only_unpublished_subrecipe(val_list: list[str], qual_list: list[str], meas_list: list[str]) -> bool:
+            non_sub = [i for i in val_list if not MISSING_SUBRECIPE_ISSUE_RE.search(i or "")]
+            sub_only = [i for i in val_list if MISSING_SUBRECIPE_ISSUE_RE.search(i or "")]
+            if non_sub or qual_list or meas_list or not sub_only:
+                return False
+            for si in sub_only:
+                m = re.search(r"'([^']+)'", si)
+                if m and norm_title(m.group(1)) in published_titles_norm:
+                    return False
+            return True
+
+        if is_only_unpublished_subrecipe(v_issues, q_warn, m_warn):
+            skipped_waiting_sub += 1
+            continue
+
+        prev_ext = cached_by_job.get(jid)
+        if not prev_ext and draft.get("ingredients") and draft.get("steps"):
+            prev_ext = draft_to_external_extraction(draft)
+        if not prev_ext:
+            prev_ext = {
+                "title": det.get("displayTitle") or "Untitled Recipe",
+                "description": None,
+                "servings": None,
+                "yield": None,
+                "sections": [],
+                "timing": None,
+                "tags": [],
+            }
+
+        if not args.skip_precheck and prev_ext.get("sections"):
+            try:
+                res = http_json(
+                    "POST",
+                    f"/bulk-import/jobs/{jid}/submit-extraction",
+                    token=token,
+                    body={
+                        "extraction": normalize_extraction(prev_ext),
+                        "extractedModel": det.get("extractedModel") or "agy-recheck",
+                        "autoPublish": True,
+                        "allowOverwritePublished": False,
+                        "computeEmbeddings": not bool(args.no_embeddings),
+                        "repairCount": int(draft.get("pipelineRepairCount") or 0),
+                    },
+                    timeout=120,
+                )
+                if res.get("status") == "Published":
+                    auto_published_precheck += 1
+                    pub_title = (res.get("draft") or {}).get("title") or det.get("displayTitle") or ""
+                    if pub_title:
+                        published_titles_norm.add(norm_title(pub_title))
+                    continue
+
+                v_issues = res.get("validationIssues") or []
+                q_warn = res.get("qualityWarnings") or []
+                m_warn = res.get("measurementWarnings") or []
+                if is_only_unpublished_subrecipe(v_issues, q_warn, m_warn):
+                    skipped_waiting_sub += 1
+                    continue
+            except Exception:
+                pass
+
+        repair_items.append(
+            {
+                "jobId": jid,
+                "title": draft.get("title") or det.get("displayTitle") or jid,
+                "sourceText": source_text,
+                "sourceBookTitle": det.get("sourceBookTitle"),
+                "sourceBookPage": det.get("sourceBookPage"),
+                "extraction": prev_ext,
+                "validationIssues": v_issues,
+                "qualityWarnings": q_warn,
+                "measurementWarnings": m_warn,
+                "baseRepairCount": int(draft.get("pipelineRepairCount") or 0),
+            }
+        )
+
+    summary = {
+        "totalReadyForReview": len(review_jobs),
+        "inspectedCount": min(len(review_jobs), limit),
+        "autoPublishedOnPrecheck": auto_published_precheck,
+        "skippedWaitingOnSubRecipe": skipped_waiting_sub,
+        "queuedForRepair": len(repair_items),
+    }
+
+    out_path = Path(args.out)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps({"summary": summary, "items": repair_items}, indent=2), encoding="utf-8")
+    print(json.dumps(summary))
+    return 0
+
+
 def cmd_enqueue_epub(args: argparse.Namespace) -> int:
     epub_script = REPO_ROOT / "scripts" / "import_atk_epub.py"
     if not epub_script.exists():
@@ -1909,7 +2387,7 @@ def build_parser() -> argparse.ArgumentParser:
     sb.add_argument("--in", dest="in_file", required=True)
     sb.add_argument("--wave", required=False)
     sb.add_argument("--out", required=True)
-    sb.add_argument("--extracted-model", default="gemini-flash (agy-workflow)")
+    sb.add_argument("--extracted-model", default="gemini-hydrogen (agy-workflow)")
     sb.add_argument("--repair-count", type=int, default=0)
     sb.add_argument("--allow-overwrite-published", action="store_true")
     sb.add_argument("--no-embeddings", action="store_true")
@@ -1952,6 +2430,17 @@ def build_parser() -> argparse.ArgumentParser:
     eq.add_argument("--no-images", action="store_true")
     eq.add_argument("--no-skip-existing", action="store_true")
     eq.set_defaults(func=cmd_enqueue_epub)
+
+    pr = sub.add_parser(
+        "plan-repairs",
+        parents=[conn_parent],
+        help="Sweep ReadyForReview jobs, run 0-token C# pre-check, and queue repairable items",
+    )
+    pr.add_argument("--out", required=True)
+    pr.add_argument("--limit", type=int, default=200)
+    pr.add_argument("--skip-precheck", action="store_true")
+    pr.add_argument("--no-embeddings", action="store_true")
+    pr.set_defaults(func=cmd_plan_repairs)
 
     return p
 

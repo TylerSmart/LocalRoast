@@ -2021,4 +2021,149 @@ public sealed class StepTokenValidatorTests
         StringAssert.Contains(plainPunct, ". Using second small spoon");
         StringAssert.Contains(plainPunct, " (do not open).");
     }
+
+    [TestMethod]
+    public void BuildAndValidateStep_HealsDanglingRangeBounds_DuplicateNouns_ParenEquivalents_MissingSpace_AndHyphenFixedSpelledCount()
+    {
+        // 1. Hyphenated fixed vessel count ("six 6-ounce ramekins") is valid prose, not a duplicate spelled number.
+        var ramekinRes = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 1,
+            sectionName: null,
+            originalInstruction: "Lightly spray six 6-ounce ramekins with oil spray.",
+            rawTokensJson: new JsonArray
+            {
+                "Lightly spray six ",
+                new JsonObject
+                {
+                    ["type"] = "fixed",
+                    ["name"] = "ramekins",
+                    ["amount"] = 6m,
+                    ["unit"] = "ounce",
+                    ["hyphenated"] = true,
+                },
+                " with oil spray.",
+            },
+            ingredientCount: 0
+        );
+        Assert.IsEmpty(
+            ramekinRes.ValidationWarnings,
+            string.Join(" | ", ramekinRes.ValidationWarnings)
+        );
+        StringAssert.Contains(
+            StepInstructionParser.ToPlainText(ramekinRes.CompiledInstruction),
+            "six 6-oz ramekins"
+        );
+
+        // 2. Duplicate spelled number before non-fixed token ("six " + {6 eggs}) IS healed deterministically.
+        var dupSpelledEggs = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 2,
+            sectionName: null,
+            originalInstruction: "Add 6 eggs and whisk.",
+            rawTokensJson: new JsonArray
+            {
+                "Add six ",
+                new JsonObject
+                {
+                    ["type"] = "ingredient",
+                    ["ingredientIndex"] = 0,
+                    ["name"] = "eggs",
+                    ["quantity"] = 6m,
+                },
+                " and whisk.",
+            },
+            ingredientCount: 1
+        );
+        Assert.IsEmpty(
+            dupSpelledEggs.ValidationWarnings,
+            string.Join(" | ", dupSpelledEggs.ValidationWarnings)
+        );
+
+        // 3. Dangling range starts ("1 to " before 1.25 inch; "370 to " before 380°F) + missing space ("about" + {timer}).
+        var rangeAndSpaceRes = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 3,
+            sectionName: null,
+            originalInstruction: "Space mounds 1 to 1.25 inches apart, heat oil to 370 to 380 degrees, and fry about 45 seconds.",
+            rawTokensJson: new JsonArray
+            {
+                "Space mounds 1 to ",
+                new JsonObject
+                {
+                    ["type"] = "dimension",
+                    ["amount"] = 1.25m,
+                    ["unit"] = "inch",
+                    ["hyphenated"] = false,
+                },
+                " apart, heat oil to 370 to ",
+                new JsonObject
+                {
+                    ["type"] = "temperature",
+                    ["amount"] = 380m,
+                    ["unit"] = "fahrenheit",
+                },
+                ", and fry about",
+                new JsonObject
+                {
+                    ["type"] = "timer",
+                    ["amount"] = 45m,
+                    ["unit"] = "second",
+                    ["label"] = "Fry fritters",
+                },
+                ".",
+            },
+            ingredientCount: 0
+        );
+        Assert.IsEmpty(
+            rangeAndSpaceRes.ValidationWarnings,
+            string.Join(" | ", rangeAndSpaceRes.ValidationWarnings)
+        );
+        Assert.IsTrue(
+            rangeAndSpaceRes
+                .ParsedTokens.OfType<Stage4DimensionToken>()
+                .Any(d => d.Amount == 1m && d.MaxAmount == 1.25m)
+        );
+        Assert.IsTrue(
+            rangeAndSpaceRes
+                .ParsedTokens.OfType<Stage4TemperatureToken>()
+                .Any(t => t.Amount == 370m && t.MaxAmount == 380m)
+        );
+
+        // 4. Duplicate trailing noun ("jars" + " jars in rack") & redundant parenthetical eq ("(about 1 cup)").
+        var dupNounAndParenRes = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 4,
+            sectionName: null,
+            originalInstruction: "Place four 1-cup jars in rack and sprinkle 2 ounces (about 1 cup) grated cheese on top.",
+            rawTokensJson: new JsonArray
+            {
+                "Place four ",
+                new JsonObject
+                {
+                    ["type"] = "fixed",
+                    ["name"] = "jars",
+                    ["amount"] = 1m,
+                    ["unit"] = "cup",
+                    ["hyphenated"] = true,
+                },
+                " jars in rack and sprinkle ",
+                new JsonObject
+                {
+                    ["type"] = "ingredient",
+                    ["ingredientIndex"] = 0,
+                    ["name"] = "grated cheese",
+                    ["quantity"] = 2m,
+                    ["unit"] = "ounce",
+                },
+                " (about 1 cup) on top.",
+            },
+            ingredientCount: 1
+        );
+        Assert.IsEmpty(
+            dupNounAndParenRes.ValidationWarnings,
+            string.Join(" | ", dupNounAndParenRes.ValidationWarnings)
+        );
+        var plainDupNoun = StepInstructionParser.ToPlainText(
+            dupNounAndParenRes.CompiledInstruction
+        );
+        Assert.IsFalse(plainDupNoun.Contains("jars jars", StringComparison.OrdinalIgnoreCase));
+        Assert.IsFalse(plainDupNoun.Contains("1 cup)", StringComparison.OrdinalIgnoreCase));
+    }
 }

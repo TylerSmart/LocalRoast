@@ -357,7 +357,7 @@ public static partial class StepIngredientEnricher
     private static partial Regex EquipmentFollowingRegex();
 
     [GeneratedRegex(
-        @"^\s+(?:powder|flakes|paste|pur[eé]es?|sauce|oil|vinegar|broth|stock|juice|zest|seeds?|yolks?|whites?|shells?|skins?|mixtures?|batters?|doughs?|fillings?|glazes?|slurr(?:y|ies)|crusts?|fats?|drippings?|liquids?)\b",
+        @"^\s+(?:powder|flakes|paste|pur[eé]es?|sauce|oil|vinegar|broth|stock|juice|zest|seeds?|yolks?|whites?|shells?|skins?|mixtures?|batters?|doughs?|fillings?|glazes?|slurr(?:y|ies)|crusts?|fats?|drippings?|liquids?|quarters?|halves|half|wedges?|slices?|pieces?|chunks?|strips?|spears?|rounds?|rings?|cubes?|segments?)\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex CompoundFoodFollowingRegex();
@@ -369,10 +369,29 @@ public static partial class StepIngredientEnricher
     private static partial Regex RepeatPerItemFollowingRegex();
 
     [GeneratedRegex(
-        @"\b(?:soak|let\s+stand)\b.*\bdrain\b",
+        @"\b(?:soak|let\s+stand|boil|simmer|blanch|parboil)\b.*\bdrain\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex SoakAndDrainStepRegex();
+
+    [GeneratedRegex(
+        @"\bplus\s+(?:more|extra|additional|[a-z\s]{2,30}?)\s+(?:for\s+|as\s+needed\b|to\s+taste\b)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex PlusExtraPrepAllowanceRegex();
+
+    private static bool HasOpenEndedPlusExtraAllowance(
+        string? preparationNote,
+        string? originalRawText
+    ) =>
+        (
+            !string.IsNullOrWhiteSpace(preparationNote)
+            && PlusExtraPrepAllowanceRegex().IsMatch(preparationNote)
+        )
+        || (
+            !string.IsNullOrWhiteSpace(originalRawText)
+            && PlusExtraPrepAllowanceRegex().IsMatch(originalRawText)
+        );
 
     [GeneratedRegex(
         @"\b(?:to\s+temper|tempering|from\s+(?:the\s+)?saucepan|from\s+(?:the\s+)?pot|hot\s+milk|warm\s+milk)\b",
@@ -1113,7 +1132,12 @@ public static partial class StepIngredientEnricher
         for (var idx = 0; idx < ingredients.Count; idx++)
         {
             var ing = ingredients[idx];
-            if (!IsPlainWaterOrIce(ing) || ing.Quantity is not > 0m)
+            var isWaterOrIce = IsPlainWaterOrIce(ing);
+            var hasPlusExtra = HasOpenEndedPlusExtraAllowance(
+                ing.PreparationNote,
+                ing.OriginalRawText
+            );
+            if ((!isWaterOrIce && !hasPlusExtra) || ing.Quantity is not > 0m)
             {
                 continue;
             }
@@ -1135,7 +1159,9 @@ public static partial class StepIngredientEnricher
                 var stepPlain = string.Concat(
                     stepSegments[s].Select(seg => seg.IsToken ? " " : seg.Text)
                 );
-                var isSoakAndDrain = SoakAndDrainStepRegex().IsMatch(stepPlain);
+                var isSoakAndDrain =
+                    SoakAndDrainStepRegex().IsMatch(stepPlain)
+                    || (!isWaterOrIce && hasPlusExtra && BoilingContextRegex().IsMatch(stepPlain));
                 var segs = stepSegments[s];
                 for (var i = 0; i < segs.Count; i++)
                 {
@@ -1221,6 +1247,64 @@ public static partial class StepIngredientEnricher
         decimal targetQty
     )
     {
+        if (entries.Count <= 12)
+        {
+            List<int>? bestIndices = null;
+            var bestSoakCount = int.MaxValue;
+            var bestDiff = decimal.MaxValue;
+            var bestPopCount = int.MinValue;
+
+            var totalMasks = 1 << entries.Count;
+            for (var mask = 1; mask < totalMasks; mask++)
+            {
+                var sum = 0m;
+                var soakCount = 0;
+                var popCount = 0;
+                for (var bit = 0; bit < entries.Count; bit++)
+                {
+                    if ((mask & (1 << bit)) == 0)
+                    {
+                        continue;
+                    }
+
+                    sum += entries[bit].ConvAmt;
+                    if (entries[bit].IsSoakAndDrain)
+                    {
+                        soakCount++;
+                    }
+                    popCount++;
+                }
+
+                if (sum < minMatch || sum > maxMatch)
+                {
+                    continue;
+                }
+
+                var diff = Math.Abs(sum - targetQty);
+                var isBetter =
+                    bestIndices is null
+                    || soakCount < bestSoakCount
+                    || (soakCount == bestSoakCount && diff < bestDiff)
+                    || (soakCount == bestSoakCount && diff == bestDiff && popCount > bestPopCount);
+                if (isBetter)
+                {
+                    bestSoakCount = soakCount;
+                    bestDiff = diff;
+                    bestPopCount = popCount;
+                    bestIndices = [];
+                    for (var bit = 0; bit < entries.Count; bit++)
+                    {
+                        if ((mask & (1 << bit)) != 0)
+                        {
+                            bestIndices.Add(bit);
+                        }
+                    }
+                }
+            }
+
+            return bestIndices;
+        }
+
         var singleCandidates = Enumerable
             .Range(0, entries.Count)
             .Where(i => entries[i].ConvAmt >= minMatch && entries[i].ConvAmt <= maxMatch)
@@ -2486,14 +2570,20 @@ public static partial class StepIngredientEnricher
                 }
             }
 
-            // 3D. True over-allocation warning (excluding distributive uses)
-            if (measurementWarnings is not null && ing.Quantity.HasValue)
+            // 3D. True over-allocation warning (excluding distributive and hypothetical/discard uses)
+            if (
+                measurementWarnings is not null
+                && ing.Quantity.HasValue
+                && !HasOpenEndedPlusExtraAllowance(ing.PreparationNote, ing.OriginalRawText)
+            )
             {
                 var maxAllowed = ing.MaxQuantity ?? ing.Quantity.Value;
                 if (maxAllowed > 0m)
                 {
                     var nonDistQuantified = occs.Where(o =>
-                            o.Token.Amount.HasValue && !o.IsDistributive
+                            o.Token.Amount.HasValue
+                            && !o.IsDistributive
+                            && !IsPostAdditionStateOrDiscardReference(o)
                         )
                         .ToList();
                     if (
@@ -2555,6 +2645,17 @@ public static partial class StepIngredientEnricher
             Regex.IsMatch(
                 prevClause,
                 @"\b(?:discard(?:ing)?|remove\s+and\s+discard)\s+(?:the\s+|any\s+)?(?:[\p{L}-]+\s+){0,3}(?:and\s+(?:the\s+)?)?$",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+            )
+        )
+        {
+            return true;
+        }
+
+        if (
+            Regex.IsMatch(
+                prevClause,
+                @"\b(?:instead\s+of(?:\s+[\p{L}-]+)?|rather\s+than(?:\s+[\p{L}-]+)?)\s*$",
                 RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
             )
         )

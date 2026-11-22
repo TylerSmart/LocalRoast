@@ -4177,6 +4177,317 @@ public sealed class MultiStageIngestionAndReplacementsIntegrationTests
         Assert.AreEqual(HttpStatusCode.Unauthorized, revokedPing.StatusCode);
     }
 
+    [TestMethod]
+    public async Task SubmitExternalExtraction_ValidatorFalsePositiveFixes_AutoPublishWithoutWarnings()
+    {
+        using var client = _factory.CreateClient();
+        await AuthenticateAsync(client);
+
+        // 1. Variation recipe with incompatible flour SKUs + leading editorial/storage Step 1 relocated/omitted.
+        const string varText = """
+            Title: Whole-Wheat Pie Dough
+            Yield: Makes one 9-inch crust
+
+            Description & Kitchen Notes:
+            Variation of All-Butter Pie Dough.
+
+            Master Recipe: All-Butter Pie Dough
+            Base Ingredients:
+            - 1 1/2 cups (8 1/4 ounces) whole-wheat flour
+            - 1 cup (5 ounces) all-purpose flour
+            - 1/2 teaspoon table salt
+
+            Variation Instructions (Whole-Wheat Pie Dough):
+            1. Once cooled, you can store the dough in the refrigerator for up to 3 days. You can freeze it for up to 1 month.
+            2. Pulse whole-wheat flour, all-purpose flour, and salt to combine.
+            """;
+
+        var enqVar = await client.PostAsJsonAsync(
+            "/api/bulk-import/jobs/text",
+            new EnqueueRawTextIngestionRequest(RawText: varText, TitleHint: "Whole-Wheat Pie Dough")
+        );
+        Assert.AreEqual(HttpStatusCode.Accepted, enqVar.StatusCode);
+        var varJob = (await enqVar.Content.ReadFromJsonAsync<IngestionJobSummaryDto>())!;
+
+        var varSubmit = await client.PostAsJsonAsync(
+            $"/api/bulk-import/jobs/{varJob.Id}/submit-extraction",
+            new SubmitExternalExtractionRequest(
+                Extraction: new ExternalRecipeExtractionDto(
+                    Title: "Whole-Wheat Pie Dough",
+                    Description: "Flaky whole-wheat pastry crust blending nuttier whole-wheat flour with all-purpose flour.",
+                    Servings: 4m,
+                    Yield: "Makes one 9-inch crust",
+                    Sections:
+                    [
+                        new ExternalExtractedSectionDto(
+                            Name: null,
+                            Ingredients:
+                            [
+                                new ExternalExtractedIngredientDto(
+                                    Name: "whole-wheat flour",
+                                    Quantity: 1.5m,
+                                    Unit: "cup",
+                                    CanonicalFoodName: "whole-wheat flour",
+                                    Category: "Baking",
+                                    IsPantryStaple: true
+                                ),
+                                new ExternalExtractedIngredientDto(
+                                    Name: "all-purpose flour",
+                                    Quantity: 1m,
+                                    Unit: "cup",
+                                    CanonicalFoodName: "all-purpose flour",
+                                    Category: "Baking",
+                                    IsPantryStaple: true
+                                ),
+                                new ExternalExtractedIngredientDto(
+                                    Name: "table salt",
+                                    Quantity: 0.5m,
+                                    Unit: "teaspoon",
+                                    CanonicalFoodName: "table salt",
+                                    Category: "SpicesAndSeasonings",
+                                    IsPantryStaple: true
+                                ),
+                            ],
+                            Steps:
+                            [
+                                new ExternalExtractedStepDto(
+                                    Instruction: "Pulse whole-wheat flour, all-purpose flour, and salt to combine.",
+                                    Tokens:
+                                    [
+                                        new JsonObject
+                                        {
+                                            ["type"] = "text",
+                                            ["text"] =
+                                                "Pulse whole-wheat flour, all-purpose flour, and salt to combine.",
+                                        },
+                                    ]
+                                ),
+                            ]
+                        ),
+                    ],
+                    Timing: null,
+                    Tags: ["Baking"]
+                ),
+                ExtractedModel: "agy-bulk-inherit",
+                AutoPublish: true,
+                ComputeEmbeddings: false
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.OK, varSubmit.StatusCode);
+        var varRes = (
+            await varSubmit.Content.ReadFromJsonAsync<SubmitExternalExtractionResultDto>()
+        )!;
+        Assert.AreEqual(IngestionJobStatus.Published, varRes.Status);
+        Assert.IsEmpty(varRes.QualityWarnings);
+        Assert.IsEmpty(varRes.ValidationIssues);
+
+        // 2. "plus salt for cooking", 3-way water split + boil-and-drain water, and cut-piece ("onion quarters").
+        const string stewText = """
+            Title: Poached Shrimp and Onion Stew
+            Yield: Serves 4
+
+            Description & Kitchen Notes:
+            Quick poached shrimp stew with sweet quartered onions.
+
+            Ingredients:
+            - 1/4 teaspoon table salt, plus salt for cooking shrimp
+            - 2 1/2 cups water
+            - 2 onions, quartered
+
+            Instructions:
+            1. Bring 3 cups water to boil with 1 tablespoon salt, add shrimp for 2 minutes, and drain well.
+            2. Simmer 6 onion quarters with 1/2 cup water in skillet for 5 minutes.
+            3. Stir in 1/2 cup water and 1 1/2 cups water with remaining 2 onion quarters until tender, about 5 minutes.
+            """;
+
+        var enqStew = await client.PostAsJsonAsync(
+            "/api/bulk-import/jobs/text",
+            new EnqueueRawTextIngestionRequest(
+                RawText: stewText,
+                TitleHint: "Poached Shrimp and Onion Stew"
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Accepted, enqStew.StatusCode);
+        var stewJob = (await enqStew.Content.ReadFromJsonAsync<IngestionJobSummaryDto>())!;
+
+        var stewSubmit = await client.PostAsJsonAsync(
+            $"/api/bulk-import/jobs/{stewJob.Id}/submit-extraction",
+            new SubmitExternalExtractionRequest(
+                Extraction: new ExternalRecipeExtractionDto(
+                    Title: "Poached Shrimp and Onion Stew",
+                    Description: "Quick poached shrimp stew with sweet quartered onions.",
+                    Servings: 4m,
+                    Yield: "Serves 4",
+                    Sections:
+                    [
+                        new ExternalExtractedSectionDto(
+                            Name: null,
+                            Ingredients:
+                            [
+                                new ExternalExtractedIngredientDto(
+                                    Name: "table salt",
+                                    Quantity: 0.25m,
+                                    Unit: "teaspoon",
+                                    PrepNote: "plus salt for cooking shrimp",
+                                    CanonicalFoodName: "table salt",
+                                    Category: "SpicesAndSeasonings",
+                                    IsPantryStaple: true
+                                ),
+                                new ExternalExtractedIngredientDto(
+                                    Name: "water",
+                                    Quantity: 2.5m,
+                                    Unit: "cup",
+                                    CanonicalFoodName: "water",
+                                    Category: "Beverages",
+                                    IsPantryStaple: true
+                                ),
+                                new ExternalExtractedIngredientDto(
+                                    Name: "onions",
+                                    Quantity: 2m,
+                                    PrepNote: "quartered",
+                                    CanonicalFoodName: "onion",
+                                    Category: "Produce",
+                                    IsPantryStaple: false
+                                ),
+                            ],
+                            Steps:
+                            [
+                                new ExternalExtractedStepDto(
+                                    Instruction: "Bring 3 cups water to boil with 1 tablespoon salt, add shrimp for 2 minutes, and drain well.",
+                                    Tokens:
+                                    [
+                                        new JsonObject { ["type"] = "text", ["text"] = "Bring " },
+                                        new JsonObject
+                                        {
+                                            ["type"] = "ingredient",
+                                            ["ingredientIndex"] = 1,
+                                            ["name"] = "water",
+                                            ["quantity"] = 3,
+                                            ["unit"] = "cup",
+                                        },
+                                        new JsonObject
+                                        {
+                                            ["type"] = "text",
+                                            ["text"] = " to boil with ",
+                                        },
+                                        new JsonObject
+                                        {
+                                            ["type"] = "ingredient",
+                                            ["ingredientIndex"] = 0,
+                                            ["name"] = "salt",
+                                            ["quantity"] = 1,
+                                            ["unit"] = "tablespoon",
+                                        },
+                                        new JsonObject
+                                        {
+                                            ["type"] = "text",
+                                            ["text"] = ", add shrimp for ",
+                                        },
+                                        new JsonObject
+                                        {
+                                            ["type"] = "timer",
+                                            ["amount"] = 2,
+                                            ["unit"] = "minute",
+                                            ["label"] = "Poach shrimp",
+                                        },
+                                        new JsonObject
+                                        {
+                                            ["type"] = "text",
+                                            ["text"] = ", and drain well.",
+                                        },
+                                    ]
+                                ),
+                                new ExternalExtractedStepDto(
+                                    Instruction: "Simmer 6 onion quarters with 1/2 cup water in skillet for 5 minutes.",
+                                    Tokens:
+                                    [
+                                        new JsonObject
+                                        {
+                                            ["type"] = "text",
+                                            ["text"] = "Simmer 6 onion quarters with ",
+                                        },
+                                        new JsonObject
+                                        {
+                                            ["type"] = "ingredient",
+                                            ["ingredientIndex"] = 1,
+                                            ["name"] = "water",
+                                            ["quantity"] = 0.5,
+                                            ["unit"] = "cup",
+                                        },
+                                        new JsonObject
+                                        {
+                                            ["type"] = "text",
+                                            ["text"] = " in skillet for ",
+                                        },
+                                        new JsonObject
+                                        {
+                                            ["type"] = "timer",
+                                            ["amount"] = 5,
+                                            ["unit"] = "minute",
+                                            ["label"] = "Simmer onions",
+                                        },
+                                        new JsonObject { ["type"] = "text", ["text"] = "." },
+                                    ]
+                                ),
+                                new ExternalExtractedStepDto(
+                                    Instruction: "Stir in 1/2 cup water and 1 1/2 cups water with remaining 2 onion quarters until tender, about 5 minutes.",
+                                    Tokens:
+                                    [
+                                        new JsonObject { ["type"] = "text", ["text"] = "Stir in " },
+                                        new JsonObject
+                                        {
+                                            ["type"] = "ingredient",
+                                            ["ingredientIndex"] = 1,
+                                            ["name"] = "water",
+                                            ["quantity"] = 0.5,
+                                            ["unit"] = "cup",
+                                        },
+                                        new JsonObject { ["type"] = "text", ["text"] = " and " },
+                                        new JsonObject
+                                        {
+                                            ["type"] = "ingredient",
+                                            ["ingredientIndex"] = 1,
+                                            ["name"] = "water",
+                                            ["quantity"] = 1.5,
+                                            ["unit"] = "cup",
+                                        },
+                                        new JsonObject
+                                        {
+                                            ["type"] = "text",
+                                            ["text"] =
+                                                " with remaining 2 onion quarters until tender, about ",
+                                        },
+                                        new JsonObject
+                                        {
+                                            ["type"] = "timer",
+                                            ["amount"] = 5,
+                                            ["unit"] = "minute",
+                                            ["label"] = "Simmer stew",
+                                        },
+                                        new JsonObject { ["type"] = "text", ["text"] = "." },
+                                    ]
+                                ),
+                            ]
+                        ),
+                    ],
+                    Timing: null,
+                    Tags: ["Stew"]
+                ),
+                ExtractedModel: "agy-bulk-inherit",
+                AutoPublish: true,
+                ComputeEmbeddings: false
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.OK, stewSubmit.StatusCode);
+        var stewRes = (
+            await stewSubmit.Content.ReadFromJsonAsync<SubmitExternalExtractionResultDto>()
+        )!;
+        Assert.AreEqual(IngestionJobStatus.Published, stewRes.Status);
+        Assert.IsEmpty(stewRes.MeasurementWarnings);
+        Assert.IsEmpty(stewRes.QualityWarnings);
+        Assert.IsEmpty(stewRes.ValidationIssues);
+    }
+
     private sealed class FallbackExercisingLlmClient : ILlmExtractionClient
     {
         public bool ForceSimpleBatch { get; set; }

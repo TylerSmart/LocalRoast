@@ -3,10 +3,10 @@
 Invoke via Antigravity's `run_workflow` tool:
   ScriptPath: "d:/Personal/LocalRoast/.agents/skills/bulk-import-recipes/scripts/bulk_import_workflow.py"
   Args: {
-    "waveSize": 30,
+    "waveSize": 150,
     "batchSize": 5,
     "maxParallel": 4,
-    "pilotBenchmark": true,
+    "pilotBenchmark": false,
     "computeEmbeddings": true
   }
 """
@@ -269,7 +269,7 @@ def build_repair_prompt(guide: str, item: dict, source_text: str) -> str:
     )
 
 
-async def extract_batch_safe(batch: dict, guide: str) -> dict:
+async def extract_batch_safe(batch: dict, guide: str, model_tier: str = "inherit") -> dict:
     bidx = batch["batchIndex"]
     jobs = batch["jobs"]
     prompt = build_batch_prompt(guide, jobs)
@@ -278,14 +278,14 @@ async def extract_batch_safe(batch: dict, guide: str) -> dict:
             prompt=prompt,
             schema=BATCH_EXTRACTION_SCHEMA,
             role=f"Extract batch {bidx} ({len(jobs)} recipes)",
-            model="flash",
+            model=model_tier,
         )
         return {"ok": True, "batchIndex": bidx, "data": res}
     except Exception as exc:
         return {"ok": False, "batchIndex": bidx, "error": str(exc)}
 
 
-async def repair_one_safe(item: dict, source_text: str, guide: str) -> dict:
+async def repair_one_safe(item: dict, source_text: str, guide: str, model_tier: str = "inherit") -> dict:
     jid = item["jobId"]
     title = item.get("title") or jid
     prompt = build_repair_prompt(guide, item, source_text)
@@ -294,7 +294,7 @@ async def repair_one_safe(item: dict, source_text: str, guide: str) -> dict:
             prompt=prompt,
             schema=RECIPE_ENTRY_SCHEMA,
             role=f"Repair: {title[:45]}",
-            model="pro",
+            model=model_tier,
         )
         return {"ok": True, "jobId": jid, "data": res}
     except Exception as exc:
@@ -302,12 +302,15 @@ async def repair_one_safe(item: dict, source_text: str, guide: str) -> dict:
 
 
 async def main() -> dict:
-    wave_size = int(args.get("waveSize", 30))
+    wave_size = int(args.get("waveSize", 150))
     batch_size = int(args.get("batchSize", 5))
     max_parallel = max(1, int(args.get("maxParallel", 4)))
     pilot_benchmark = bool(args.get("pilotBenchmark", False))
-    extracted_model = str(args.get("extractedModel", "gemini-flash (agy-workflow)"))
-    repaired_model = str(args.get("repairedModel", "gemini-pro (agy-workflow)"))
+    agent_model = str(args.get("agentModel") or args.get("extractModelTier") or "inherit")
+    run_repair_in_wave = bool(args.get("runRepairInWave", False))
+    repair_model_tier = str(args.get("repairModelTier") or agent_model)
+    extracted_model = str(args.get("extractedModel", "agy-bulk-inherit"))
+    repaired_model = str(args.get("repairedModel", "agy-repair-inherit"))
     compute_embeddings = bool(args.get("computeEmbeddings", True))
     allow_overwrite = bool(args.get("allowOverwritePublished", False))
 
@@ -410,17 +413,18 @@ async def main() -> dict:
         }
 
         # ============================================================
-        # PHASE 2: Batched Parallel Extraction (Flash) + Sequential Submit
+        # PHASE 2: Batched Parallel Extraction + Sequential Submit
         # ============================================================
-        phase(f"Extract Batches - Flash ({len(batches)} batches, maxParallel={max_parallel})")
+        phase(f"Extract Batches - {agent_model} ({len(batches)} batches, maxParallel={max_parallel})")
         all_submission_outcomes: dict[str, dict] = {}
-        failed_or_missing_for_pro: list[dict] = []
+        flagged_for_repair: list[dict] = []
+        unsubmitted_jobs: list[dict] = []
 
         for chunk_start in range(0, len(batches), max_parallel):
             chunk_batches = batches[chunk_start : chunk_start + max_parallel]
             batch_results = await parallel(
                 chunk_batches,
-                lambda b: extract_batch_safe(b, guide),
+                lambda b: extract_batch_safe(b, guide, agent_model),
             )
 
             # Submit sequentially in deterministic batch order so prerequisites & FoodItems persist in order
@@ -429,9 +433,9 @@ async def main() -> dict:
                 expected_ids = [j["id"] for j in batch["jobs"]]
 
                 if not bres.get("ok"):
-                    log(f"Batch {bidx} Flash agent error: {bres.get('error')}")
+                    log(f"Batch {bidx} extraction agent error: {bres.get('error')}")
                     for jid in expected_ids:
-                        failed_or_missing_for_pro.append(
+                        unsubmitted_jobs.append(
                             {
                                 "jobId": jid,
                                 "title": title_by_job_id.get(jid, jid),
@@ -479,16 +483,16 @@ async def main() -> dict:
                     seen_ids.add(jid)
                     all_submission_outcomes[jid] = row
                     if row.get("needsRepair"):
-                        failed_or_missing_for_pro.append(row)
+                        flagged_for_repair.append(row)
 
                 for jid in expected_ids:
                     if jid not in seen_ids:
-                        log(f"Batch {bidx} omitted job {jid} ({title_by_job_id.get(jid)}); queuing for Phase 3.")
-                        failed_or_missing_for_pro.append(
+                        log(f"Batch {bidx} omitted job {jid} ({title_by_job_id.get(jid)}); keeping Queued for next wave.")
+                        unsubmitted_jobs.append(
                             {
                                 "jobId": jid,
                                 "title": title_by_job_id.get(jid, jid),
-                                "error": "Omitted from Flash batch response.",
+                                "error": "Omitted from batch extraction response.",
                                 "validationIssues": [],
                                 "qualityWarnings": [],
                                 "measurementWarnings": [],
@@ -497,63 +501,73 @@ async def main() -> dict:
                         )
 
         # ============================================================
-        # PHASE 3: Targeted Repair (Pro)
+        # PHASE 3: Optional In-Wave Repair (disabled by default; use repair-review-recipes on Neon)
         # ============================================================
-        phase(f"Targeted Repair - Pro ({len(failed_or_missing_for_pro)} job(s))")
         repaired_count = 0
-        if failed_or_missing_for_pro:
-            for r_start in range(0, len(failed_or_missing_for_pro), max_parallel):
-                r_chunk = failed_or_missing_for_pro[r_start : r_start + max_parallel]
-                repair_results = await parallel(
-                    r_chunk,
-                    lambda item: repair_one_safe(
-                        item,
-                        source_by_job_id.get(item["jobId"], ""),
-                        guide,
-                    ),
-                )
-
-                for item, rres in zip(r_chunk, repair_results):
-                    jid = item["jobId"]
-                    if not rres.get("ok"):
-                        log(f"Repair failed on Pro for {item.get('title')}: {rres.get('error')}")
-                        continue
-
-                    rep_in_path = work_dir / f"repair_{jid}.json"
-                    rep_out_path = work_dir / f"repair_{jid}_submitted.json"
-                    rep_in_path.write_text(
-                        json.dumps(rres["data"], indent=2),
-                        encoding="utf-8",
+        if run_repair_in_wave:
+            inline_repair_queue = [*flagged_for_repair, *unsubmitted_jobs]
+            phase(f"Targeted Repair - {repair_model_tier} ({len(inline_repair_queue)} job(s))")
+            if inline_repair_queue:
+                for r_start in range(0, len(inline_repair_queue), max_parallel):
+                    r_chunk = inline_repair_queue[r_start : r_start + max_parallel]
+                    repair_results = await parallel(
+                        r_chunk,
+                        lambda item: repair_one_safe(
+                            item,
+                            source_by_job_id.get(item["jobId"], ""),
+                            guide,
+                            repair_model_tier,
+                        ),
                     )
 
-                    so_cmd = [
-                        "submit-one",
-                        *conn_args,
-                        "--job-id",
-                        jid,
-                        "--in",
-                        str(rep_in_path),
-                        "--wave",
-                        str(wave_file),
-                        "--out",
-                        str(rep_out_path),
-                        "--extracted-model",
-                        repaired_model,
-                        "--repair-count",
-                        "1",
-                    ]
-                    if allow_overwrite:
-                        so_cmd.append("--allow-overwrite-published")
-                    if not compute_embeddings:
-                        so_cmd.append("--no-embeddings")
+                    for item, rres in zip(r_chunk, repair_results):
+                        jid = item["jobId"]
+                        if not rres.get("ok"):
+                            log(f"Repair failed for {item.get('title')}: {rres.get('error')}")
+                            continue
 
-                    so_stdout = run_helper(so_cmd)
-                    log(f"Repaired {item.get('title')}: {so_stdout}")
-                    repaired_row = json.loads(rep_out_path.read_text(encoding="utf-8"))
-                    all_submission_outcomes[jid] = repaired_row
-                    repaired_count += 1
+                        rep_in_path = work_dir / f"repair_{jid}.json"
+                        rep_out_path = work_dir / f"repair_{jid}_submitted.json"
+                        rep_in_path.write_text(
+                            json.dumps(rres["data"], indent=2),
+                            encoding="utf-8",
+                        )
+
+                        so_cmd = [
+                            "submit-one",
+                            *conn_args,
+                            "--job-id",
+                            jid,
+                            "--in",
+                            str(rep_in_path),
+                            "--wave",
+                            str(wave_file),
+                            "--out",
+                            str(rep_out_path),
+                            "--extracted-model",
+                            repaired_model,
+                            "--repair-count",
+                            "1",
+                        ]
+                        if allow_overwrite:
+                            so_cmd.append("--allow-overwrite-published")
+                        if not compute_embeddings:
+                            so_cmd.append("--no-embeddings")
+
+                        so_stdout = run_helper(so_cmd)
+                        log(f"Repaired {item.get('title')}: {so_stdout}")
+                        repaired_row = json.loads(rep_out_path.read_text(encoding="utf-8"))
+                        all_submission_outcomes[jid] = repaired_row
+                        repaired_count += 1
+            else:
+                log("Zero recipes needed in-wave repair!")
         else:
-            log("Zero recipes needed Phase 3 Pro repair!")
+            log(
+                f"Skipped in-wave repair (runRepairInWave=false): "
+                f"{len(flagged_for_repair)} job(s) in ReadyForReview need repair "
+                "(switch model to Neon and run `repair-review-recipes`), "
+                f"{len(unsubmitted_jobs)} omitted/errored job(s) remain Queued."
+            )
 
         # ============================================================
         # PHASE 4: Deep Audit & Summary
@@ -565,7 +579,7 @@ async def main() -> dict:
             log(line)
 
         audit_data = json.loads(audit_path.read_text(encoding="utf-8"))
-        return {
+        summary: dict = {
             "workDir": str(work_dir),
             "totals": audit_data.get("totals"),
             "categoryCounts": audit_data.get("categoryCounts"),
@@ -578,8 +592,16 @@ async def main() -> dict:
                 "totalFoodItems": (audit_data.get("foodCatalog") or {}).get("totalFoodItems")
             },
             "repairedAttempted": repaired_count,
+            "needsRepairCount": len(flagged_for_repair),
+            "unsubmittedCount": len(unsubmitted_jobs),
             "nonPublishedCount": len(audit_data.get("nonPublished") or []),
         }
+        if not run_repair_in_wave and flagged_for_repair:
+            summary["nextStep"] = (
+                "Switch chat model to Neon and run repair-review-recipes "
+                f"to repair {len(flagged_for_repair)} flagged recipe(s) across up to 3 rounds."
+            )
+        return summary
     finally:
         if temp_mcp_file is not None and temp_mcp_file.exists():
             try:
