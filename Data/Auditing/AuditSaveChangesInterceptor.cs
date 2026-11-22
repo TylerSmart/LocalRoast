@@ -7,6 +7,10 @@ namespace App.Data.Auditing;
 
 public sealed class AuditSaveChangesInterceptor(IUserContext userContext) : SaveChangesInterceptor
 {
+    private static readonly AsyncLocal<int> RestoreScopeDepth = new();
+
+    public static IDisposable BeginRestoreScope() => new RestoreScope();
+
     public override InterceptionResult<int> SavingChanges(
         DbContextEventData eventData,
         InterceptionResult<int> result
@@ -28,7 +32,7 @@ public sealed class AuditSaveChangesInterceptor(IUserContext userContext) : Save
 
     private void ApplyAudit(DbContext? context)
     {
-        if (context is null)
+        if (context is null || RestoreScopeDepth.Value > 0)
             return;
 
         var userId = ResolveUserId();
@@ -61,6 +65,25 @@ public sealed class AuditSaveChangesInterceptor(IUserContext userContext) : Save
         catch (InvalidOperationException)
         {
             return "System";
+        }
+    }
+
+    private sealed class RestoreScope : IDisposable
+    {
+        private readonly int _previousDepth = RestoreScopeDepth.Value;
+        private int _disposed;
+
+        public RestoreScope()
+        {
+            RestoreScopeDepth.Value = _previousDepth + 1;
+        }
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+            {
+                RestoreScopeDepth.Value = _previousDepth;
+            }
         }
     }
 }

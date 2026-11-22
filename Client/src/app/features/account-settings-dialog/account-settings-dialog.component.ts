@@ -19,6 +19,7 @@ import {
   Validators,
 } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
+import { MatCheckboxModule } from '@angular/material/checkbox';
 import { ErrorStateMatcher } from '@angular/material/core';
 import {
   MAT_DIALOG_DATA,
@@ -39,6 +40,10 @@ import { AccountDto } from '../../core/models/account.models';
 import { AccountService, AccountSettingsTab } from '../../core/services/account/account.service';
 import { AuthService } from '../../core/services/auth/auth.service';
 import { PersonalAccessTokensPanelComponent } from '../mcp-tokens/personal-access-tokens-panel/personal-access-tokens-panel.component';
+import {
+  ImportAppDataDialogComponent,
+  ImportAppDataDialogResult,
+} from './import-app-data-dialog/import-app-data-dialog.component';
 import {
   ResetAppDataDialogComponent,
   ResetAppDataDialogResult,
@@ -76,6 +81,7 @@ class ConfirmPasswordErrorStateMatcher implements ErrorStateMatcher {
     MatDialogContent,
     MatDialogActions,
     MatButtonModule,
+    MatCheckboxModule,
     MatFormFieldModule,
     MatInputModule,
     MatIconModule,
@@ -115,6 +121,10 @@ export class AccountSettingsDialogComponent implements OnInit {
 
   protected readonly isSavingPassword = signal<boolean>(false);
   protected readonly passwordError = signal<string | null>(null);
+
+  protected readonly includeMediaInBackup = signal<boolean>(true);
+  protected readonly isExportingBackup = signal<boolean>(false);
+  protected readonly backupError = signal<string | null>(null);
 
   protected readonly hideProfilePassword = signal<boolean>(true);
   protected readonly hideCurrentPassword = signal<boolean>(true);
@@ -314,6 +324,50 @@ export class AccountSettingsDialogComponent implements OnInit {
       });
   }
 
+  exportBackup(): void {
+    if (this.isExportingBackup()) {
+      return;
+    }
+
+    this.isExportingBackup.set(true);
+    this.backupError.set(null);
+
+    this.accountService.exportBackup(this.includeMediaInBackup()).subscribe({
+      next: (response) => {
+        this.isExportingBackup.set(false);
+        const blob = response.body ?? new Blob();
+        const filename =
+          this.extractFileNameFromDisposition(response.headers.get('Content-Disposition')) ??
+          'localroast-backup.zip';
+        this.triggerBlobDownload(blob, filename);
+        this.snackBar.open('Backup archive downloaded.', 'Close', { duration: 4000 });
+      },
+      error: async (err: { error?: unknown }) => {
+        this.isExportingBackup.set(false);
+        this.backupError.set(await this.extractBlobErrorMessage(err?.error));
+      },
+    });
+  }
+
+  openImportAppDataDialog(): void {
+    const importRef = this.dialog.open<
+      ImportAppDataDialogComponent,
+      void,
+      ImportAppDataDialogResult
+    >(ImportAppDataDialogComponent, {
+      width: '560px',
+      maxWidth: '95vw',
+      disableClose: true,
+    });
+
+    importRef.afterClosed().subscribe((res) => {
+      if (res?.success && res.result) {
+        const message = `Backup restored successfully (${res.result.importedRecipesCount} recipes, ${res.result.importedMediaFilesCount} media files).`;
+        this.completeDataMutationReload(message);
+      }
+    });
+  }
+
   openResetAppDataDialog(): void {
     const resetRef = this.dialog.open<ResetAppDataDialogComponent, void, ResetAppDataDialogResult>(
       ResetAppDataDialogComponent,
@@ -330,17 +384,76 @@ export class AccountSettingsDialogComponent implements OnInit {
           resetJobsCount > 0
             ? `Application data reset successfully. ${res.result.deletedRecipesCount} recipes deleted and ${resetJobsCount} ingestion jobs re-queued.`
             : `Application data reset successfully. ${res.result.deletedRecipesCount} recipes deleted.`;
-        this.snackBar.open(message, 'Close', { duration: 5000 });
-        this.dialogRef.close();
-        this.router.navigate(['/recipes']).then(() => {
-          window.location.reload();
-        });
+        this.completeDataMutationReload(message);
       }
     });
   }
 
   close(): void {
     this.dialogRef.close();
+  }
+
+  protected triggerBlobDownload(blob: Blob, filename: string): void {
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.style.display = 'none';
+    document.body.appendChild(anchor);
+    try {
+      anchor.click();
+    } finally {
+      document.body.removeChild(anchor);
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  protected reloadWindow(): void {
+    window.location.reload();
+  }
+
+  private completeDataMutationReload(message: string): void {
+    this.snackBar.open(message, 'Close', { duration: 5000 });
+    this.dialogRef.close();
+    this.router.navigate(['/recipes']).then(() => {
+      this.reloadWindow();
+    });
+  }
+
+  private extractFileNameFromDisposition(header: string | null): string | null {
+    if (!header) {
+      return null;
+    }
+    const utf8Match = /filename\*=UTF-8''([^;\n]+)/i.exec(header);
+    if (utf8Match?.[1]) {
+      try {
+        return decodeURIComponent(utf8Match[1].trim());
+      } catch {
+        return utf8Match[1].trim();
+      }
+    }
+    const quotedMatch = /filename="?([^";\n]+)"?/i.exec(header);
+    return quotedMatch?.[1]?.trim() || null;
+  }
+
+  private async extractBlobErrorMessage(errorBody: unknown): Promise<string> {
+    if (errorBody instanceof Blob) {
+      try {
+        const text = await errorBody.text();
+        const parsed = JSON.parse(text) as { detail?: string; title?: string };
+        if (parsed?.detail || parsed?.title) {
+          return parsed.detail || parsed.title || 'Failed to export backup archive.';
+        }
+      } catch {
+        // Ignore non-JSON error blob
+      }
+    } else if (errorBody && typeof errorBody === 'object') {
+      const errObj = errorBody as { detail?: string; title?: string };
+      if (errObj.detail || errObj.title) {
+        return errObj.detail || errObj.title || 'Failed to export backup archive.';
+      }
+    }
+    return 'Failed to export backup archive. Please try again.';
   }
 
   private applyProfileValues(username: string, email: string): void {

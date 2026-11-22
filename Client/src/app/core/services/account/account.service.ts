@@ -1,4 +1,4 @@
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpResponse } from '@angular/common/http';
 import { Service, inject } from '@angular/core';
 import { MatDialog, MatDialogRef } from '@angular/material/dialog';
 import { Observable, tap } from 'rxjs';
@@ -7,6 +7,7 @@ import { apiUrl } from '../../api/api-url';
 import {
   AccountDto,
   ChangePasswordRequest,
+  ImportAppDataBackupResultDto,
   ResetAppDataRequest,
   ResetAppDataResultDto,
   UpdateProfileRequest,
@@ -36,6 +37,21 @@ export class AccountService {
   resetAppData(request: ResetAppDataRequest = {}): Observable<ResetAppDataResultDto> {
     return this.http
       .post<ResetAppDataResultDto>(apiUrl('/account/reset-data'), request)
+      .pipe(tap(() => void clearPwaRuntimeDataCaches()));
+  }
+
+  exportBackup(includeMedia = true): Observable<HttpResponse<Blob>> {
+    return this.http.get(apiUrl(`/account/backup/export?includeMedia=${includeMedia}`), {
+      observe: 'response',
+      responseType: 'blob',
+    });
+  }
+
+  importBackup(file: File): Observable<ImportAppDataBackupResultDto> {
+    const formData = new FormData();
+    formData.append('file', file, file.name);
+    return this.http
+      .post<ImportAppDataBackupResultDto>(apiUrl('/account/backup/import'), formData)
       .pipe(tap(() => void clearPwaRuntimeDataCaches()));
   }
 

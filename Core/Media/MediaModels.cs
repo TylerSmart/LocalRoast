@@ -21,3 +21,5 @@ public record SavedRecipeAttachmentFileDto(
 );
 
 public record UploadedCookLogPhotoDto(string PhotoImagePath, string PhotoThumbnailPath);
+
+public record StoredMediaFileEntry(string RelativePath, Func<Stream> OpenReadStream);

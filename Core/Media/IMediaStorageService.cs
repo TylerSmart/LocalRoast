@@ -88,4 +88,14 @@ public interface IMediaStorageService
         long contentLength,
         CancellationToken cancellationToken = default
     );
+
+    Task<IReadOnlyList<StoredMediaFileEntry>> ListAllMediaFilesAsync(
+        CancellationToken cancellationToken = default
+    );
+
+    Task RestoreMediaFileAsync(
+        string relativePath,
+        Stream content,
+        CancellationToken cancellationToken = default
+    );
 }

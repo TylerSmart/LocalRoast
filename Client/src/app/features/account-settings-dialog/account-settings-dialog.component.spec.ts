@@ -1,3 +1,4 @@
+import { HttpHeaders, HttpResponse } from '@angular/common/http';
 import { provideAnimationsAsync } from '@angular/platform-browser/animations/async';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { MAT_DIALOG_DATA, MatDialog, MatDialogRef } from '@angular/material/dialog';
@@ -22,6 +23,8 @@ describe('AccountSettingsDialogComponent', () => {
     getAccount: ReturnType<typeof vi.fn>;
     updateProfile: ReturnType<typeof vi.fn>;
     changePassword: ReturnType<typeof vi.fn>;
+    exportBackup: ReturnType<typeof vi.fn>;
+    importBackup: ReturnType<typeof vi.fn>;
   };
 
   let mockAuthService: {
@@ -68,6 +71,8 @@ describe('AccountSettingsDialogComponent', () => {
       getAccount: vi.fn().mockReturnValue(of(defaultAccount)),
       updateProfile: vi.fn(),
       changePassword: vi.fn(),
+      exportBackup: vi.fn(),
+      importBackup: vi.fn(),
     };
 
     mockAuthService = {
@@ -271,5 +276,70 @@ describe('AccountSettingsDialogComponent', () => {
 
     confirmControl.setValue('NewPassword123!');
     expect(component['confirmPasswordErrorMatcher'].isErrorState(confirmControl, null)).toBe(false);
+  });
+
+  it('downloads backup zip archive when exportBackup is invoked', () => {
+    const mockResponse = new HttpResponse({
+      body: new Blob(['zip'], { type: 'application/zip' }),
+      headers: new HttpHeaders({
+        'Content-Disposition': 'attachment; filename="localroast-backup-2026.zip"',
+      }),
+    });
+    mockAccountService.exportBackup.mockReturnValue(of(mockResponse));
+
+    createComponent();
+    const downloadSpy = vi
+      .spyOn(component as unknown as { triggerBlobDownload: () => void }, 'triggerBlobDownload')
+      .mockImplementation(() => undefined);
+
+    component.exportBackup();
+
+    expect(mockAccountService.exportBackup).toHaveBeenCalledWith(true);
+    expect(downloadSpy).toHaveBeenCalledWith(expect.any(Blob), 'localroast-backup-2026.zip');
+    expect(mockSnackBar.open).toHaveBeenCalledWith('Backup archive downloaded.', 'Close', {
+      duration: 4000,
+    });
+  });
+
+  it('opens ImportAppDataDialogComponent and reloads on successful restore', async () => {
+    mockDialog.open.mockReturnValue({
+      afterClosed: () =>
+        of({
+          success: true,
+          result: {
+            importedRecipesCount: 10,
+            importedFoodItemsCount: 25,
+            importedTagsCount: 15,
+            importedCollectionsCount: 2,
+            importedMealPlansCount: 1,
+            importedShoppingListsCount: 1,
+            importedIngestionJobsCount: 3,
+            importedCookLogsCount: 2,
+            importedMediaFilesCount: 6,
+            importedAt: '2026-11-22T20:00:00Z',
+          },
+        }),
+    });
+    mockRouter.navigate.mockResolvedValue(true);
+
+    createComponent();
+    const reloadSpy = vi
+      .spyOn(component as unknown as { reloadWindow: () => void }, 'reloadWindow')
+      .mockImplementation(() => undefined);
+
+    component.openImportAppDataDialog();
+
+    expect(mockDialog.open).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        width: '560px',
+        disableClose: true,
+      }),
+    );
+    expect(mockDialogRef.close).toHaveBeenCalled();
+    expect(mockRouter.navigate).toHaveBeenCalledWith(['/recipes']);
+    await vi.waitFor(() => {
+      expect(reloadSpy).toHaveBeenCalled();
+    });
   });
 });

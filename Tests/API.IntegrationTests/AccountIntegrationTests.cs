@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -510,5 +511,147 @@ public sealed class AccountIntegrationTests
         using var anonClient = _factory.CreateClient();
         var res = await anonClient.PostAsync("/api/account/reset-data", null);
         Assert.AreEqual(HttpStatusCode.Unauthorized, res.StatusCode);
+    }
+
+    [TestMethod]
+    public async Task BackupExportAndImport_ViaAccountAndPatBulkImportEndpoints_RoundTripsDataAndPreservesAuth()
+    {
+        await RegisterAndAuthorizeAsync("backup@example.com", "backupchef", "Password123!");
+
+        // 1. Create a Personal Access Token so we can test PAT-authenticated import via /api/bulk-import/backup/import
+        var patRes = await _client.PostAsJsonAsync(
+            "/api/account/tokens",
+            new CreatePersonalAccessTokenRequest("Backup CLI PAT")
+        );
+        Assert.AreEqual(HttpStatusCode.Created, patRes.StatusCode);
+        var createdPat = await patRes.Content.ReadFromJsonAsync<CreatedPersonalAccessTokenDto>();
+        Assert.IsNotNull(createdPat);
+
+        // 2. Seed culinary data (collection + recipe)
+        var colRes = await _client.PostAsJsonAsync(
+            "/api/collections",
+            new UpsertCollectionRequest("Weekend Baking", "Breads & pastries", 1)
+        );
+        Assert.AreEqual(HttpStatusCode.Created, colRes.StatusCode);
+        var collection = await colRes.Content.ReadFromJsonAsync<CollectionDto>();
+        Assert.IsNotNull(collection);
+
+        var recipeRes = await _client.PostAsJsonAsync(
+            "/api/recipes",
+            new UpsertRecipeRequest(
+                Title: "Backup Brioche",
+                Description: "Rich buttery bread",
+                BaseServings: 8m,
+                YieldDisplay: "1 loaf",
+                PrepTimeMinutes: 30,
+                CookTimeMinutes: 35,
+                Difficulty: RecipeDifficulty.Medium,
+                Ingredients:
+                [
+                    new RecipeIngredientInput(
+                        SectionName: null,
+                        Quantity: 500m,
+                        MaxQuantity: null,
+                        Unit: MeasurementUnit.G,
+                        CustomUnitName: null,
+                        FoodItemId: null,
+                        LinkedRecipeId: null,
+                        DisplayName: "bread flour",
+                        PreparationNote: null
+                    ),
+                ],
+                Steps: [new RecipeStepInput(null, "Knead dough and bake until golden.")],
+                CollectionIds: [collection.Id],
+                TagIds: []
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Created, recipeRes.StatusCode);
+
+        // 3. Export backup ZIP via /api/account/backup/export
+        var exportRes = await _client.GetAsync("/api/account/backup/export?includeMedia=true");
+        Assert.AreEqual(HttpStatusCode.OK, exportRes.StatusCode);
+        Assert.AreEqual("application/zip", exportRes.Content.Headers.ContentType?.MediaType);
+        var backupBytes = await exportRes.Content.ReadAsByteArrayAsync();
+        Assert.IsGreaterThan(0, backupBytes.Length);
+
+        using (var verifyZip = new ZipArchive(new MemoryStream(backupBytes), ZipArchiveMode.Read))
+        {
+            Assert.IsNotNull(verifyZip.GetEntry("manifest.json"));
+            Assert.IsNotNull(verifyZip.GetEntry("data/snapshot.json"));
+        }
+
+        // 4. Wipe all app data and confirm empty state
+        var resetRes = await _client.PostAsJsonAsync(
+            "/api/account/reset-data",
+            new ResetAppDataRequest(KeepIngestionJobs: false)
+        );
+        Assert.AreEqual(HttpStatusCode.OK, resetRes.StatusCode);
+
+        var recipesAfterReset = await _client.GetFromJsonAsync<List<RecipeSummaryDto>>(
+            "/api/recipes"
+        );
+        Assert.IsNotNull(recipesAfterReset);
+        Assert.IsEmpty(recipesAfterReset);
+
+        // 5. Restore backup ZIP via PAT-authenticated /api/bulk-import/backup/import
+        using var patClient = _factory.CreateClient();
+        patClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer",
+            createdPat.PlaintextToken
+        );
+
+        using var multipart = new MultipartFormDataContent();
+        using var fileContent = new ByteArrayContent(backupBytes);
+        fileContent.Headers.ContentType = new MediaTypeHeaderValue("application/zip");
+        multipart.Add(fileContent, "file", "localroast-backup.zip");
+
+        var importRes = await patClient.PostAsync("/api/bulk-import/backup/import", multipart);
+        Assert.AreEqual(HttpStatusCode.OK, importRes.StatusCode);
+
+        var importResult =
+            await importRes.Content.ReadFromJsonAsync<ImportAppDataBackupResultDto>();
+        Assert.IsNotNull(importResult);
+        Assert.AreEqual(1, importResult.ImportedRecipesCount);
+        Assert.AreEqual(1, importResult.ImportedCollectionsCount);
+
+        // 6. Verify data restored and both JWT + PAT auth still work
+        var restoredRecipes = await _client.GetFromJsonAsync<List<RecipeSummaryDto>>(
+            "/api/recipes"
+        );
+        Assert.IsNotNull(restoredRecipes);
+        Assert.HasCount(1, restoredRecipes);
+        Assert.AreEqual("Backup Brioche", restoredRecipes[0].Title);
+
+        var restoredCollections = await _client.GetFromJsonAsync<List<CollectionDto>>(
+            "/api/collections"
+        );
+        Assert.IsNotNull(restoredCollections);
+        Assert.IsTrue(restoredCollections.Any(c => c.Name == "Weekend Baking"));
+
+        var pingRes = await patClient.GetAsync("/api/bulk-import/ping");
+        Assert.AreEqual(HttpStatusCode.OK, pingRes.StatusCode);
+    }
+
+    [TestMethod]
+    public async Task BackupEndpoints_Unauthorized_Return401()
+    {
+        using var anonClient = _factory.CreateClient();
+
+        Assert.AreEqual(
+            HttpStatusCode.Unauthorized,
+            (await anonClient.GetAsync("/api/account/backup/export")).StatusCode
+        );
+        Assert.AreEqual(
+            HttpStatusCode.Unauthorized,
+            (await anonClient.PostAsync("/api/account/backup/import", null)).StatusCode
+        );
+        Assert.AreEqual(
+            HttpStatusCode.Unauthorized,
+            (await anonClient.GetAsync("/api/bulk-import/backup/export")).StatusCode
+        );
+        Assert.AreEqual(
+            HttpStatusCode.Unauthorized,
+            (await anonClient.PostAsync("/api/bulk-import/backup/import", null)).StatusCode
+        );
     }
 }

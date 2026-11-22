@@ -113,6 +113,16 @@ public sealed class CookLogServiceTests
             IReadOnlyCollection<string> preservedMediaUrlPaths,
             CancellationToken cancellationToken = default
         ) => Task.CompletedTask;
+
+        public Task<IReadOnlyList<StoredMediaFileEntry>> ListAllMediaFilesAsync(
+            CancellationToken cancellationToken = default
+        ) => Task.FromResult<IReadOnlyList<StoredMediaFileEntry>>([]);
+
+        public Task RestoreMediaFileAsync(
+            string relativePath,
+            Stream content,
+            CancellationToken cancellationToken = default
+        ) => Task.CompletedTask;
     }
 
     private sealed class TestUserContext(string userId) : IUserContext

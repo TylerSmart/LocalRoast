@@ -877,13 +877,119 @@ public sealed class LocalFileMediaStorageService : IMediaStorageService
         }
     }
 
+    public Task<IReadOnlyList<StoredMediaFileEntry>> ListAllMediaFilesAsync(
+        CancellationToken cancellationToken = default
+    )
+    {
+        if (!Directory.Exists(_uploadsRoot))
+        {
+            return Task.FromResult<IReadOnlyList<StoredMediaFileEntry>>([]);
+        }
+
+        var entries = new List<StoredMediaFileEntry>();
+
+        foreach (var sub in MediaBackupPathValidator.AllowedSubdirectories)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var dirPath = Path.Combine(_uploadsRoot, sub);
+            if (!Directory.Exists(dirPath))
+            {
+                continue;
+            }
+
+            foreach (
+                var file in Directory.EnumerateFiles(dirPath, "*", SearchOption.AllDirectories)
+            )
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var rawRelative = Path.GetRelativePath(_uploadsRoot, file);
+                if (
+                    !MediaBackupPathValidator.TryNormalizeRelativePath(
+                        rawRelative,
+                        out var normalizedRelative
+                    )
+                )
+                {
+                    continue;
+                }
+
+                var capturedFullPath = Path.GetFullPath(file);
+                entries.Add(
+                    new StoredMediaFileEntry(
+                        normalizedRelative,
+                        () =>
+                            new FileStream(
+                                capturedFullPath,
+                                FileMode.Open,
+                                FileAccess.Read,
+                                FileShare.Read,
+                                65536,
+                                FileOptions.SequentialScan
+                            )
+                    )
+                );
+            }
+        }
+
+        entries.Sort((a, b) => string.CompareOrdinal(a.RelativePath, b.RelativePath));
+        return Task.FromResult<IReadOnlyList<StoredMediaFileEntry>>(entries);
+    }
+
+    public async Task RestoreMediaFileAsync(
+        string relativePath,
+        Stream content,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(content);
+
+        if (
+            !MediaBackupPathValidator.TryNormalizeRelativePath(
+                relativePath,
+                out var normalizedRelative
+            )
+        )
+        {
+            throw new DomainValidationException(
+                $"Invalid media path '{relativePath}' in backup archive."
+            );
+        }
+
+        var osRelative = normalizedRelative.Replace('/', Path.DirectorySeparatorChar);
+        var fullPath = Path.GetFullPath(Path.Combine(_uploadsRoot, osRelative));
+        var rootWithSep = _uploadsRoot.EndsWith(Path.DirectorySeparatorChar)
+            ? _uploadsRoot
+            : _uploadsRoot + Path.DirectorySeparatorChar;
+
+        if (!fullPath.StartsWith(rootWithSep, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new DomainValidationException(
+                $"Invalid path traversal detected for '{relativePath}' in backup archive."
+            );
+        }
+
+        var parentDir = Path.GetDirectoryName(fullPath);
+        if (!string.IsNullOrWhiteSpace(parentDir))
+        {
+            Directory.CreateDirectory(parentDir);
+        }
+
+        await using var destStream = new FileStream(
+            fullPath,
+            FileMode.Create,
+            FileAccess.Write,
+            FileShare.None,
+            65536,
+            FileOptions.Asynchronous
+        );
+        await content.CopyToAsync(destStream, cancellationToken);
+    }
+
     public Task PurgeAllMediaAsync(CancellationToken cancellationToken = default)
     {
         if (Directory.Exists(_uploadsRoot))
         {
-            var subDirs = new[] { "recipes", "steps", "ingestion", "attachments", "cook-logs" };
-
-            foreach (var sub in subDirs)
+            foreach (var sub in MediaBackupPathValidator.AllowedSubdirectories)
             {
                 var dirPath = Path.Combine(_uploadsRoot, sub);
 
@@ -953,9 +1059,7 @@ public sealed class LocalFileMediaStorageService : IMediaStorageService
             return Task.CompletedTask;
         }
 
-        var subDirs = new[] { "recipes", "steps", "ingestion", "attachments", "cook-logs" };
-
-        foreach (var sub in subDirs)
+        foreach (var sub in MediaBackupPathValidator.AllowedSubdirectories)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var dirPath = Path.Combine(_uploadsRoot, sub);

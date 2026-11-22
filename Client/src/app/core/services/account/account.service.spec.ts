@@ -3,7 +3,11 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { TestBed } from '@angular/core/testing';
 import { MatDialog } from '@angular/material/dialog';
 import { firstValueFrom } from 'rxjs';
-import { AccountDto, ResetAppDataResultDto } from '../../models/account.models';
+import {
+  AccountDto,
+  ImportAppDataBackupResultDto,
+  ResetAppDataResultDto,
+} from '../../models/account.models';
 import { AuthResponse } from '../../models/auth.models';
 import { AccountService } from './account.service';
 
@@ -156,5 +160,43 @@ describe('AccountService', () => {
         width: '640px',
       }),
     );
+  });
+
+  it('exports application backup blob via GET /api/account/backup/export', async () => {
+    const mockBlob = new Blob(['zip-bytes'], { type: 'application/zip' });
+    const promise = firstValueFrom(service.exportBackup(false));
+    const req = httpMock.expectOne('/api/account/backup/export?includeMedia=false');
+    expect(req.request.method).toBe('GET');
+    expect(req.request.responseType).toBe('blob');
+    req.flush(mockBlob, {
+      headers: { 'Content-Disposition': 'attachment; filename="localroast-backup.zip"' },
+    });
+
+    const response = await promise;
+    expect(response.body).toEqual(mockBlob);
+  });
+
+  it('imports application backup multipart archive via POST /api/account/backup/import', async () => {
+    const expectedRes: ImportAppDataBackupResultDto = {
+      importedRecipesCount: 12,
+      importedFoodItemsCount: 40,
+      importedTagsCount: 18,
+      importedCollectionsCount: 2,
+      importedMealPlansCount: 3,
+      importedShoppingListsCount: 1,
+      importedIngestionJobsCount: 4,
+      importedCookLogsCount: 5,
+      importedMediaFilesCount: 9,
+      importedAt: '2026-11-22T20:00:00Z',
+    };
+    const archiveFile = new File(['zip'], 'backup.zip', { type: 'application/zip' });
+
+    const promise = firstValueFrom(service.importBackup(archiveFile));
+    const req = httpMock.expectOne('/api/account/backup/import');
+    expect(req.request.method).toBe('POST');
+    expect(req.request.body instanceof FormData).toBe(true);
+    req.flush(expectedRes);
+
+    await expect(promise).resolves.toEqual(expectedRes);
   });
 });

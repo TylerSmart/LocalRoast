@@ -14,3 +14,18 @@ public sealed record ResetAppDataResultDto(
     int RestoredDefaultTagsCount = 0,
     int ResetIngestionJobsCount = 0
 );
+
+public sealed record ExportAppDataBackupRequest(bool IncludeMedia = true);
+
+public sealed record ImportAppDataBackupResultDto(
+    int ImportedRecipesCount,
+    int ImportedFoodItemsCount,
+    int ImportedTagsCount,
+    int ImportedCollectionsCount,
+    int ImportedMealPlansCount,
+    int ImportedShoppingListsCount,
+    int ImportedIngestionJobsCount,
+    int ImportedCookLogsCount,
+    int ImportedMediaFilesCount,
+    DateTimeOffset ImportedAt
+);

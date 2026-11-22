@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 from collections import defaultdict, deque
+import http.client
 import json
 import os
 from pathlib import Path
@@ -21,6 +22,7 @@ import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from typing import Any
 
 SKILL_DIR = Path(__file__).resolve().parent.parent
@@ -2376,6 +2378,125 @@ def cmd_enqueue_epub(args: argparse.Namespace) -> int:
     return int(res.returncode)
 
 
+def cmd_backup_export(args: argparse.Namespace) -> int:
+    token = get_token()
+    include_media = not bool(getattr(args, "no_media", False))
+    query = "true" if include_media else "false"
+    url = f"{_CONN['api_base']}/bulk-import/backup/export?includeMedia={query}"
+
+    out_path = Path(args.out).resolve()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    part_path = out_path.with_name(out_path.name + ".part")
+
+    req = urllib.request.Request(
+        url,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/zip",
+        },
+        method="GET",
+    )
+
+    bytes_written = 0
+    try:
+        with urllib.request.urlopen(req, timeout=int(args.timeout)) as resp:
+            with part_path.open("wb") as out_f:
+                while True:
+                    chunk = resp.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    out_f.write(chunk)
+                    bytes_written += len(chunk)
+        os.replace(part_path, out_path)
+    except urllib.error.HTTPError as exc:
+        err_body = exc.read().decode("utf-8", errors="replace")
+        if part_path.exists():
+            part_path.unlink(missing_ok=True)
+        raise RuntimeError(f"GET {url} -> HTTP {exc.code}: {err_body}") from exc
+    except Exception:
+        if part_path.exists():
+            part_path.unlink(missing_ok=True)
+        raise
+
+    print(
+        json.dumps(
+            {
+                "status": "ok",
+                "outputPath": str(out_path),
+                "bytes": bytes_written,
+                "includeMedia": include_media,
+            },
+            indent=2,
+        )
+    )
+    return 0
+
+
+def cmd_backup_import(args: argparse.Namespace) -> int:
+    in_path = Path(args.in_file).resolve()
+    if not in_path.is_file():
+        raise FileNotFoundError(f"Backup archive not found at '{in_path}'.")
+
+    token = get_token()
+    api_base = _CONN["api_base"].rstrip("/")
+    parsed = urllib.parse.urlparse(api_base)
+    if not parsed.hostname:
+        raise ValueError(f"Invalid API base URL '{api_base}'.")
+
+    target_path = f"{parsed.path.rstrip('/')}/bulk-import/backup/import"
+    if not target_path.startswith("/"):
+        target_path = "/" + target_path
+
+    boundary = f"----LocalRoastBackupBoundary{uuid.uuid4().hex}"
+    safe_filename = in_path.name.replace('"', "")
+    preamble = (
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="file"; filename="{safe_filename}"\r\n'
+        "Content-Type: application/zip\r\n\r\n"
+    ).encode("utf-8")
+    epilogue = f"\r\n--{boundary}--\r\n".encode("utf-8")
+
+    file_size = in_path.stat().st_size
+    total_length = len(preamble) + file_size + len(epilogue)
+    timeout = int(args.timeout)
+
+    conn: http.client.HTTPConnection
+    if parsed.scheme.lower() == "https":
+        conn = http.client.HTTPSConnection(parsed.hostname, parsed.port or 443, timeout=timeout)
+    else:
+        conn = http.client.HTTPConnection(parsed.hostname, parsed.port or 80, timeout=timeout)
+
+    try:
+        conn.putrequest("POST", target_path)
+        conn.putheader("Authorization", f"Bearer {token}")
+        conn.putheader("Accept", "application/json")
+        conn.putheader("Content-Type", f"multipart/form-data; boundary={boundary}")
+        conn.putheader("Content-Length", str(total_length))
+        conn.endheaders()
+
+        conn.send(preamble)
+        with in_path.open("rb") as in_f:
+            while True:
+                chunk = in_f.read(1024 * 1024)
+                if not chunk:
+                    break
+                conn.send(chunk)
+        conn.send(epilogue)
+
+        resp = conn.getresponse()
+        raw_body = resp.read().decode("utf-8", errors="replace")
+        if resp.status >= 400:
+            raise RuntimeError(
+                f"POST {api_base}/bulk-import/backup/import -> HTTP {resp.status}: {raw_body}"
+            )
+    finally:
+        conn.close()
+
+    parsed_resp = json.loads(raw_body) if raw_body.strip() else {"status": "ok"}
+    print(json.dumps(parsed_resp, indent=2))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     conn_parent = argparse.ArgumentParser(add_help=False)
     conn_parent.add_argument(
@@ -2473,6 +2594,25 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--skip-precheck", action="store_true")
     pr.add_argument("--no-embeddings", action="store_true")
     pr.set_defaults(func=cmd_plan_repairs)
+
+    be = sub.add_parser(
+        "backup-export",
+        parents=[conn_parent],
+        help="Export full LocalRoast culinary & media backup .zip via /api/bulk-import/backup/export",
+    )
+    be.add_argument("--out", required=True, help="Output .zip file path")
+    be.add_argument("--no-media", action="store_true", help="Exclude uploaded media files")
+    be.add_argument("--timeout", type=int, default=600, help="HTTP timeout in seconds")
+    be.set_defaults(func=cmd_backup_export)
+
+    bi = sub.add_parser(
+        "backup-import",
+        parents=[conn_parent],
+        help="Import/restore a LocalRoast backup .zip via /api/bulk-import/backup/import",
+    )
+    bi.add_argument("--in", dest="in_file", required=True, help="Input .zip backup path")
+    bi.add_argument("--timeout", type=int, default=900, help="HTTP timeout in seconds")
+    bi.set_defaults(func=cmd_backup_import)
 
     return p
 

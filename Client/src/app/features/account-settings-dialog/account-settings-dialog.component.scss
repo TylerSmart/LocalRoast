@@ -159,7 +159,89 @@
 }
 
 .data-management-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
   padding: 16px 2px 6px;
+}
+
+.backup-restore-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 18px;
+  border-radius: 12px;
+  border: 1px solid var(--mat-sys-outline-variant);
+  background-color: var(--mat-sys-surface-container-low);
+
+  .backup-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+  }
+
+  .backup-icon-badge {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    background-color: var(--mat-sys-primary-container);
+    color: var(--mat-sys-on-primary-container);
+    flex-shrink: 0;
+
+    mat-icon {
+      font-size: 22px;
+      width: 22px;
+      height: 22px;
+    }
+  }
+
+  .backup-info {
+    flex: 1;
+    min-width: 0;
+
+    .backup-title {
+      margin: 0 0 4px;
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--mat-sys-on-surface);
+    }
+
+    .backup-description {
+      margin: 0;
+      font-size: 0.8125rem;
+      line-height: 1.45;
+      color: var(--mat-sys-on-surface-variant);
+    }
+  }
+
+  .backup-options {
+    display: flex;
+    align-items: center;
+    padding: 2px 0;
+  }
+
+  .backup-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 10px;
+
+    .export-backup-button,
+    .import-backup-button {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+
+      .btn-label-group {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+    }
+  }
 }
 
 .danger-zone-card {
@@ -247,6 +329,21 @@
 
     .mdc-tab__text-label {
       font-size: 0.82rem;
+    }
+  }
+
+  .backup-restore-card {
+    padding: 14px;
+
+    .backup-actions {
+      flex-direction: column;
+      align-items: stretch;
+
+      .export-backup-button,
+      .import-backup-button {
+        width: 100%;
+        justify-content: center;
+      }
     }
   }
 

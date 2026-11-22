@@ -1,0 +1,152 @@
+<div class="import-dialog-container">
+  <div class="dialog-header" mat-dialog-title>
+    <div class="header-title-group">
+      <div class="warning-header-badge">
+        <mat-icon aria-hidden="true">restore_page</mat-icon>
+      </div>
+      <div class="header-text">
+        <h2 class="dialog-title">Restore from Backup Archive?</h2>
+        <p class="dialog-subtitle">
+          Replaces existing recipes and culinary data with the selected backup.
+        </p>
+      </div>
+    </div>
+    <button
+      mat-icon-button
+      type="button"
+      aria-label="Close restore backup dialog"
+      [disabled]="isImporting()"
+      (click)="close()"
+    >
+      <mat-icon>close</mat-icon>
+    </button>
+  </div>
+
+  <mat-dialog-content class="dialog-content">
+    <div class="warning-banner">
+      <mat-icon aria-hidden="true">warning</mat-icon>
+      <p>
+        Restoring a backup replaces all current recipes, food catalog entries, meal plans, shopping
+        lists, ingestion jobs, cook logs, and uploaded media on this instance.
+      </p>
+    </div>
+
+    <div class="file-picker-card">
+      <input
+        #fileInput
+        type="file"
+        accept=".zip,application/zip"
+        class="sr-only-file-input"
+        data-testid="import-backup-file-input"
+        aria-label="Select LocalRoast backup zip file"
+        [disabled]="isImporting()"
+        (change)="onFileSelected($event)"
+      />
+
+      <div class="file-picker-row">
+        <button
+          mat-stroked-button
+          type="button"
+          class="choose-file-btn"
+          data-testid="choose-backup-file-button"
+          [disabled]="isImporting()"
+          (click)="triggerFilePicker()"
+        >
+          <mat-icon aria-hidden="true">folder_zip</mat-icon>
+          <span>{{
+            selectedFile() ? 'Change Backup (.zip)...' : 'Choose Backup Archive (.zip)...'
+          }}</span>
+        </button>
+
+        @if (selectedFile(); as file) {
+          <div class="selected-file-pill" data-testid="selected-backup-file-info">
+            <mat-icon aria-hidden="true">check_circle</mat-icon>
+            <span class="file-name">{{ file.name }}</span>
+            <span class="file-size">({{ formatFileSize(file.size) }})</span>
+          </div>
+        } @else {
+          <span class="no-file-hint">No backup file selected yet.</span>
+        }
+      </div>
+    </div>
+
+    <div class="restore-breakdown">
+      <div class="breakdown-section will-replace">
+        <div class="section-title">
+          <mat-icon aria-hidden="true">sync</mat-icon>
+          <span>What will be replaced &amp; restored:</span>
+        </div>
+        <ul>
+          <li>All recipes, ingredients, steps, and photos</li>
+          <li>Meal plans, templates, and leftovers</li>
+          <li>Shopping lists, items, and cook logs</li>
+          <li>Ingestion jobs and review drafts</li>
+          <li>Food catalog items, aliases, and matcher embeddings</li>
+          <li>Tags, collections, share links, and uploaded media</li>
+        </ul>
+      </div>
+
+      <div class="breakdown-section will-keep">
+        <div class="section-title">
+          <mat-icon aria-hidden="true">shield</mat-icon>
+          <span>What will be preserved on this instance:</span>
+        </div>
+        <ul>
+          <li>Your user account, email, and password</li>
+          <li>Configured LLM providers and API keys</li>
+          <li>Personal Access Tokens (MCP)</li>
+          <li>Ingestion worker (paused after restore for safety)</li>
+        </ul>
+      </div>
+    </div>
+
+    @if (errorMessage()) {
+      <div class="alert-banner alert-error" role="alert" data-testid="import-backup-error">
+        <mat-icon aria-hidden="true">error_outline</mat-icon>
+        <span>{{ errorMessage() }}</span>
+      </div>
+    }
+
+    <div class="confirmation-prompt">
+      <p class="prompt-text">
+        To confirm, type <span class="confirm-keyword">IMPORT</span> in the box below:
+      </p>
+      <mat-form-field appearance="outline" class="full-width">
+        <mat-label>Type IMPORT to confirm</mat-label>
+        <input
+          matInput
+          [ngModel]="confirmationText()"
+          (ngModelChange)="confirmationText.set($event)"
+          placeholder="IMPORT"
+          autocomplete="off"
+          data-testid="import-backup-confirm-input"
+          [disabled]="isImporting()"
+          aria-label="Confirm backup restore by typing IMPORT"
+        />
+      </mat-form-field>
+    </div>
+  </mat-dialog-content>
+
+  <mat-dialog-actions align="end" class="dialog-actions">
+    <button mat-button type="button" (click)="close()" [disabled]="isImporting()">Cancel</button>
+    <button
+      mat-flat-button
+      color="warn"
+      type="button"
+      class="restore-submit-btn"
+      data-testid="confirm-import-backup-button"
+      (click)="confirmImport()"
+      [disabled]="!isConfirmed() || isImporting()"
+    >
+      @if (isImporting()) {
+        <mat-spinner diameter="18"></mat-spinner>
+        <span>Restoring Backup...</span>
+      } @else {
+        <span class="btn-label-group">
+          <mat-icon aria-hidden="true">upload</mat-icon>
+          <span>Restore Backup</span>
+        </span>
+      }
+    </button>
+  </mat-dialog-actions>
+</div>

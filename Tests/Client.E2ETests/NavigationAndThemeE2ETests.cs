@@ -426,6 +426,114 @@ public sealed class NavigationAndThemeE2ETests : E2ETestBase
         );
     }
 
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task BackupExportAndImport_ViaAccountSettingsDialog_DownloadsZipAndRestoresAfterReset()
+    {
+        await RegisterAndLoginAsync();
+
+        // 1. Seed a recipe so the backup contains concrete data
+        await CreateRecipeWithIngredientViaApiAsync(
+            "Backup Roundtrip Sourdough",
+            "Sourdough Starter"
+        );
+
+        // 2. Open User Menu -> Account Settings -> Data tab
+        await Page.Locator("button.user-profile-btn").ClickAsync();
+        await Page.Locator("button[role='menuitem']", new() { HasText = "Account Settings" })
+            .ClickAsync();
+
+        var accountDialog = Page.Locator("app-account-settings-dialog");
+        await Expect(accountDialog).ToBeVisibleAsync();
+        await accountDialog.Locator(".mat-mdc-tab", new() { HasText = "Data" }).ClickAsync();
+
+        var backupCard = accountDialog.Locator(".backup-restore-card");
+        await Expect(backupCard).ToBeVisibleAsync();
+
+        // Verify mobile responsiveness at 360px width (no horizontal overflow on the backup card)
+        await Page.SetViewportSizeAsync(360, 640);
+        var hasMobileOverflow = await backupCard.EvaluateAsync<bool>(
+            "el => el.scrollWidth > el.clientWidth + 1"
+        );
+        Assert.IsFalse(hasMobileOverflow, "Backup card should fit within 360px mobile viewport.");
+        await Page.SetViewportSizeAsync(1280, 800);
+
+        // 3. Download backup .zip via Download Backup button
+        var tempZipPath = Path.Combine(
+            Path.GetTempPath(),
+            $"e2e-localroast-backup-{Guid.NewGuid():N}.zip"
+        );
+        try
+        {
+            var download = await Page.RunAndWaitForDownloadAsync(async () =>
+            {
+                await accountDialog.Locator("[data-testid='export-backup-button']").ClickAsync();
+            });
+            await download.SaveAsAsync(tempZipPath);
+            Assert.IsTrue(File.Exists(tempZipPath));
+            Assert.IsGreaterThan(0, new FileInfo(tempZipPath).Length);
+
+            // 4. Reset app data to verify restore brings back the wiped recipe
+            await accountDialog.Locator("button.reset-data-button").ClickAsync();
+            var resetDialog = Page.Locator("app-reset-app-data-dialog");
+            await Expect(resetDialog).ToBeVisibleAsync();
+            await resetDialog
+                .Locator("input[aria-label='Confirm data reset by typing DELETE']")
+                .FillAsync("DELETE");
+            await resetDialog.Locator("button.destructive-btn").ClickAsync();
+            await Expect(resetDialog).Not.ToBeVisibleAsync();
+            await Expect(accountDialog).Not.ToBeVisibleAsync();
+
+            await Page.GotoAsync($"{ServerUrl}/recipes");
+            await Expect(Page.Locator(".empty-state")).ToBeVisibleAsync();
+
+            // 5. Open Account Settings -> Data tab -> Restore from Backup...
+            await Page.Locator("button.user-profile-btn").ClickAsync();
+            await Page.Locator("button[role='menuitem']", new() { HasText = "Account Settings" })
+                .ClickAsync();
+            await Expect(accountDialog).ToBeVisibleAsync();
+            await accountDialog.Locator(".mat-mdc-tab", new() { HasText = "Data" }).ClickAsync();
+
+            await accountDialog.Locator("[data-testid='import-backup-button']").ClickAsync();
+            var importDialog = Page.Locator("app-import-app-data-dialog");
+            await Expect(importDialog).ToBeVisibleAsync();
+
+            var confirmImportBtn = importDialog.Locator(
+                "[data-testid='confirm-import-backup-button']"
+            );
+            await Expect(confirmImportBtn).ToBeDisabledAsync();
+
+            await importDialog
+                .Locator("[data-testid='import-backup-file-input']")
+                .SetInputFilesAsync(tempZipPath);
+            await Expect(importDialog.Locator("[data-testid='selected-backup-file-info']"))
+                .ToContainTextAsync(".zip");
+
+            await importDialog
+                .Locator("[data-testid='import-backup-confirm-input']")
+                .FillAsync("IMPORT");
+            await Expect(confirmImportBtn).ToBeEnabledAsync();
+            await confirmImportBtn.ClickAsync();
+
+            await Expect(importDialog).Not.ToBeVisibleAsync();
+            await Expect(accountDialog).Not.ToBeVisibleAsync();
+
+            // 6. Verify restored recipe appears in /recipes
+            await Page.GotoAsync($"{ServerUrl}/recipes");
+            await Expect(
+                    Page.Locator(".recipe-card", new() { HasText = "Backup Roundtrip Sourdough" })
+                )
+                .ToBeVisibleAsync();
+        }
+        finally
+        {
+            if (File.Exists(tempZipPath))
+            {
+                File.Delete(tempZipPath);
+            }
+        }
+    }
+
     private sealed class NavMetrics
     {
         public double NavClientWidth { get; set; }

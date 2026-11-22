@@ -6,4 +6,16 @@ public interface IAppDataMaintenanceService
         ResetAppDataRequest? request = null,
         CancellationToken cancellationToken = default
     );
+
+    Task ExportBackupToStreamAsync(
+        Stream destination,
+        ExportAppDataBackupRequest? request = null,
+        CancellationToken cancellationToken = default
+    );
+
+    Task<ImportAppDataBackupResultDto> ImportBackupAsync(
+        Stream archiveStream,
+        Guid? importingUserId = null,
+        CancellationToken cancellationToken = default
+    );
 }

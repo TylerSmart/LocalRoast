@@ -40,3 +40,16 @@ export interface ResetAppDataResultDto {
   restoredDefaultTagsCount?: number;
   resetIngestionJobsCount?: number;
 }
+
+export interface ImportAppDataBackupResultDto {
+  importedRecipesCount: number;
+  importedFoodItemsCount: number;
+  importedTagsCount: number;
+  importedCollectionsCount: number;
+  importedMealPlansCount: number;
+  importedShoppingListsCount: number;
+  importedIngestionJobsCount: number;
+  importedCookLogsCount: number;
+  importedMediaFilesCount: number;
+  importedAt: string;
+}

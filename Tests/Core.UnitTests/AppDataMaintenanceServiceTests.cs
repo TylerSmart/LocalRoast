@@ -1,9 +1,17 @@
+using System.IO.Compression;
+using System.Text;
 using System.Text.Json;
+using App.Core.Exceptions;
+using App.Core.FoodCatalog;
 using App.Core.Ingestion;
+using App.Core.Interfaces;
 using App.Core.Maintenance;
+using App.Core.MealPlans;
 using App.Core.Media;
 using App.Core.Recipes;
+using App.Core.Shopping;
 using App.Data;
+using App.Data.Auditing;
 using App.Data.Entities;
 using App.Data.Services;
 using Microsoft.EntityFrameworkCore;
@@ -66,6 +74,7 @@ public sealed class AppDataMaintenanceServiceTests
 
     private sealed class FakeMediaStorageService : IMediaStorageService
     {
+        public Dictionary<string, byte[]> Files { get; } = new(StringComparer.OrdinalIgnoreCase);
         public bool PurgeCalled { get; private set; }
         public bool PurgeUnreferencedCalled { get; private set; }
         public IReadOnlyCollection<string> PreservedPaths { get; private set; } = [];
@@ -153,6 +162,7 @@ public sealed class AppDataMaintenanceServiceTests
         public Task PurgeAllMediaAsync(CancellationToken cancellationToken = default)
         {
             PurgeCalled = true;
+            Files.Clear();
             return Task.CompletedTask;
         }
 
@@ -164,6 +174,38 @@ public sealed class AppDataMaintenanceServiceTests
             PurgeUnreferencedCalled = true;
             PreservedPaths = preservedMediaUrlPaths.ToList();
             return Task.CompletedTask;
+        }
+
+        public Task<IReadOnlyList<StoredMediaFileEntry>> ListAllMediaFilesAsync(
+            CancellationToken cancellationToken = default
+        )
+        {
+            var entries = Files
+                .OrderBy(kvp => kvp.Key, StringComparer.Ordinal)
+                .Select(kvp => new StoredMediaFileEntry(
+                    kvp.Key,
+                    () => new MemoryStream(kvp.Value, writable: false)
+                ))
+                .ToList();
+            return Task.FromResult<IReadOnlyList<StoredMediaFileEntry>>(entries);
+        }
+
+        public async Task RestoreMediaFileAsync(
+            string relativePath,
+            Stream content,
+            CancellationToken cancellationToken = default
+        )
+        {
+            if (
+                !MediaBackupPathValidator.TryNormalizeRelativePath(relativePath, out var normalized)
+            )
+            {
+                throw new InvalidOperationException($"Invalid media path '{relativePath}'.");
+            }
+
+            using var ms = new MemoryStream();
+            await content.CopyToAsync(ms, cancellationToken);
+            Files[normalized] = ms.ToArray();
         }
     }
 
@@ -452,5 +494,547 @@ public sealed class AppDataMaintenanceServiceTests
         Assert.IsNull(resetWeb.DownloadedCoverImagePath);
         Assert.IsNull(resetWeb.DownloadedThumbnailImagePath);
         Assert.AreEqual("https://example.com/pasta", resetWeb.SourceUrl);
+    }
+
+    [TestMethod]
+    public async Task ExportAndImportBackup_RoundTripsAllTablesMediaAndEmbeddings_AcrossEnvironments()
+    {
+        var historicalCreatedAt = new DateTimeOffset(2025, 1, 15, 12, 0, 0, TimeSpan.Zero);
+        const string historicalCreator = "prod-origin-user";
+
+        var tag = new Tag
+        {
+            Id = Guid.NewGuid(),
+            Name = "Weeknight Backup",
+            NormalizedName = "weeknight backup",
+            Slug = "custom-weeknight-backup",
+            Category = TagCategory.Custom,
+            SortOrder = 99,
+            CreatedAt = historicalCreatedAt,
+            CreatedBy = historicalCreator,
+            ModifiedAt = historicalCreatedAt,
+            ModifiedBy = historicalCreator,
+        };
+        var collection = new Collection
+        {
+            Id = Guid.NewGuid(),
+            Name = "ATK Favorites",
+            NormalizedName = "atk favorites",
+            Slug = "atk-favorites",
+            SortOrder = 1,
+            CreatedAt = historicalCreatedAt,
+            CreatedBy = historicalCreator,
+            ModifiedAt = historicalCreatedAt,
+            ModifiedBy = historicalCreator,
+        };
+        var foodItem = new FoodItem
+        {
+            Id = Guid.NewGuid(),
+            Name = "Kosher Salt",
+            NormalizedName = "kosher salt",
+            Category = FoodCategory.SpicesAndSeasonings,
+            IsPantryStaple = true,
+            CreatedAt = historicalCreatedAt,
+            CreatedBy = historicalCreator,
+            ModifiedAt = historicalCreatedAt,
+            ModifiedBy = historicalCreator,
+        };
+        var foodAlias = new FoodItemAlias
+        {
+            Id = Guid.NewGuid(),
+            FoodItemId = foodItem.Id,
+            Alias = "Diamond Crystal Salt",
+            NormalizedAlias = "diamond crystal salt",
+            CreatedAt = historicalCreatedAt,
+            CreatedBy = historicalCreator,
+            ModifiedAt = historicalCreatedAt,
+            ModifiedBy = historicalCreator,
+        };
+        var catalogEmbedding = new CatalogEmbedding
+        {
+            Id = Guid.NewGuid(),
+            ModelTag = "qwen3-embedding:0.6b",
+            NormalizedText = "kosher salt",
+            Dimensions = 4,
+            VectorBytes = [1, 2, 3, 4],
+            CreatedAt = historicalCreatedAt,
+            CreatedBy = historicalCreator,
+            ModifiedAt = historicalCreatedAt,
+            ModifiedBy = historicalCreator,
+        };
+
+        var subRecipe = new Recipe
+        {
+            Id = Guid.NewGuid(),
+            Title = "Brown Butter Sauce",
+            Slug = "brown-butter-sauce",
+            Status = RecipeStatus.Published,
+            BaseServings = 2m,
+            CreatedAt = historicalCreatedAt,
+            CreatedBy = historicalCreator,
+            ModifiedAt = historicalCreatedAt,
+            ModifiedBy = historicalCreator,
+        };
+        var parentRecipe = new Recipe
+        {
+            Id = Guid.NewGuid(),
+            Title = "Brown Butter Pasta",
+            Slug = "brown-butter-pasta",
+            Status = RecipeStatus.Published,
+            BaseServings = 4m,
+            CoverImagePath = "/api/uploads/recipes/hero.webp",
+            ThumbnailImagePath = "/api/uploads/recipes/hero-thumb.webp",
+            TimesCooked = 1,
+            RatingCount = 1,
+            AverageRating = 5m,
+            CreatedAt = historicalCreatedAt,
+            CreatedBy = historicalCreator,
+            ModifiedAt = historicalCreatedAt,
+            ModifiedBy = historicalCreator,
+        };
+        var subLinkIngredient = new RecipeIngredient
+        {
+            Id = Guid.NewGuid(),
+            RecipeId = parentRecipe.Id,
+            SortOrder = 1,
+            Quantity = 1m,
+            Unit = MeasurementUnit.Whole,
+            FoodItemId = foodItem.Id,
+            LinkedRecipeId = subRecipe.Id,
+            DisplayName = "Brown Butter Sauce",
+            CreatedAt = historicalCreatedAt,
+            CreatedBy = historicalCreator,
+            ModifiedAt = historicalCreatedAt,
+            ModifiedBy = historicalCreator,
+        };
+        var replacement = new RecipeIngredientReplacement
+        {
+            Id = Guid.NewGuid(),
+            RecipeIngredientId = subLinkIngredient.Id,
+            SortOrder = 1,
+            DisplayName = "olive oil",
+            Quantity = 2m,
+            Unit = MeasurementUnit.Tbsp,
+            FoodItemId = foodItem.Id,
+            CreatedAt = historicalCreatedAt,
+            CreatedBy = historicalCreator,
+            ModifiedAt = historicalCreatedAt,
+            ModifiedBy = historicalCreator,
+        };
+        var step = new RecipeStep
+        {
+            Id = Guid.NewGuid(),
+            RecipeId = parentRecipe.Id,
+            StepNumber = 1,
+            Instruction = "Simmer sauce for 5 minutes.",
+            ImagePath = "/api/uploads/steps/step1.webp",
+            CreatedAt = historicalCreatedAt,
+            CreatedBy = historicalCreator,
+            ModifiedAt = historicalCreatedAt,
+            ModifiedBy = historicalCreator,
+        };
+        var timer = new RecipeStepTimer
+        {
+            Id = Guid.NewGuid(),
+            RecipeStepId = step.Id,
+            SortOrder = 1,
+            DurationSeconds = 300,
+            Label = "Simmer",
+            CreatedAt = historicalCreatedAt,
+            CreatedBy = historicalCreator,
+            ModifiedAt = historicalCreatedAt,
+            ModifiedBy = historicalCreator,
+        };
+        var recipeTag = new RecipeTag
+        {
+            Id = Guid.NewGuid(),
+            RecipeId = parentRecipe.Id,
+            TagId = tag.Id,
+            CreatedAt = historicalCreatedAt,
+            CreatedBy = historicalCreator,
+            ModifiedAt = historicalCreatedAt,
+            ModifiedBy = historicalCreator,
+        };
+        var recipeCollection = new RecipeCollection
+        {
+            Id = Guid.NewGuid(),
+            RecipeId = parentRecipe.Id,
+            CollectionId = collection.Id,
+            CreatedAt = historicalCreatedAt,
+            CreatedBy = historicalCreator,
+            ModifiedAt = historicalCreatedAt,
+            ModifiedBy = historicalCreator,
+        };
+        var attachment = new RecipeAttachment
+        {
+            Id = Guid.NewGuid(),
+            RecipeId = parentRecipe.Id,
+            SortOrder = 1,
+            FileName = "notes.pdf",
+            MediaUrlPath = "/api/uploads/attachments/notes.pdf",
+            ContentType = "application/pdf",
+            FileSizeBytes = 12,
+            CreatedAt = historicalCreatedAt,
+            CreatedBy = historicalCreator,
+            ModifiedAt = historicalCreatedAt,
+            ModifiedBy = historicalCreator,
+        };
+        var recipeEmbedding = new RecipeEmbedding
+        {
+            Id = Guid.NewGuid(),
+            RecipeId = parentRecipe.Id,
+            ModelTag = "qwen3-embedding:0.6b",
+            ContentHash = "abc123",
+            EmbeddingText = "Brown Butter Pasta",
+            Dimensions = 4,
+            VectorBytes = [9, 8, 7, 6],
+            CreatedAt = historicalCreatedAt,
+            CreatedBy = historicalCreator,
+            ModifiedAt = historicalCreatedAt,
+            ModifiedBy = historicalCreator,
+        };
+        var shareLink = new ShareLink
+        {
+            Id = Guid.NewGuid(),
+            RecipeId = parentRecipe.Id,
+            Token = "share-token-001",
+            Label = "Mom",
+            IncludeCookLogs = true,
+            CreatedAt = historicalCreatedAt,
+            CreatedBy = historicalCreator,
+            ModifiedAt = historicalCreatedAt,
+            ModifiedBy = historicalCreator,
+        };
+        var ingestionJob = new IngestionJob
+        {
+            Id = Guid.NewGuid(),
+            Channel = IngestionChannel.RawText,
+            Status = IngestionJobStatus.Published,
+            DisplayTitle = "Brown Butter Pasta",
+            RawText = "Original pasta recipe",
+            ResultingRecipeId = parentRecipe.Id,
+            DownloadedCoverImagePath = "/api/uploads/ingestion/source.webp",
+            CreatedAt = historicalCreatedAt,
+            CreatedBy = historicalCreator,
+            ModifiedAt = historicalCreatedAt,
+            ModifiedBy = historicalCreator,
+        };
+        var template = new MealPlanTemplate
+        {
+            Id = Guid.NewGuid(),
+            Name = "Autumn Week",
+            NormalizedName = "autumn week",
+            CreatedAt = historicalCreatedAt,
+            CreatedBy = historicalCreator,
+            ModifiedAt = historicalCreatedAt,
+            ModifiedBy = historicalCreator,
+        };
+        var templateItem = new MealPlanTemplateItem
+        {
+            Id = Guid.NewGuid(),
+            TemplateId = template.Id,
+            DayOffset = 1,
+            Slot = MealSlot.Dinner,
+            SortOrder = 1,
+            EntryType = MealPlanEntryType.Recipe,
+            RecipeId = parentRecipe.Id,
+            CreatedAt = historicalCreatedAt,
+            CreatedBy = historicalCreator,
+            ModifiedAt = historicalCreatedAt,
+            ModifiedBy = historicalCreator,
+        };
+        var rootMealPlanEntry = new MealPlanEntry
+        {
+            Id = Guid.NewGuid(),
+            WeekStartDate = new DateOnly(2026, 11, 16),
+            ScheduledDate = new DateOnly(2026, 11, 17),
+            Slot = MealSlot.Dinner,
+            SortOrder = 1,
+            EntryType = MealPlanEntryType.Recipe,
+            RecipeId = parentRecipe.Id,
+            CreatedAt = historicalCreatedAt,
+            CreatedBy = historicalCreator,
+            ModifiedAt = historicalCreatedAt,
+            ModifiedBy = historicalCreator,
+        };
+        var leftoverMealPlanEntry = new MealPlanEntry
+        {
+            Id = Guid.NewGuid(),
+            WeekStartDate = new DateOnly(2026, 11, 16),
+            ScheduledDate = new DateOnly(2026, 11, 18),
+            Slot = MealSlot.Lunch,
+            SortOrder = 1,
+            EntryType = MealPlanEntryType.Recipe,
+            RecipeId = parentRecipe.Id,
+            IsLeftovers = true,
+            SourceMealPlanEntryId = rootMealPlanEntry.Id,
+            CreatedAt = historicalCreatedAt,
+            CreatedBy = historicalCreator,
+            ModifiedAt = historicalCreatedAt,
+            ModifiedBy = historicalCreator,
+        };
+        var shoppingList = new ShoppingList
+        {
+            Id = Guid.NewGuid(),
+            Name = "Weekly Groceries",
+            NormalizedName = "weekly groceries",
+            IsPinned = true,
+            CreatedAt = historicalCreatedAt,
+            CreatedBy = historicalCreator,
+            ModifiedAt = historicalCreatedAt,
+            ModifiedBy = historicalCreator,
+        };
+        var shoppingItem = new ShoppingListItem
+        {
+            Id = Guid.NewGuid(),
+            ShoppingListId = shoppingList.Id,
+            FoodItemId = foodItem.Id,
+            DisplayName = "Kosher Salt",
+            IsChecked = true,
+            CheckedByUserId = _userId,
+            CheckedByDisplayName = "ProdChef",
+            SortOrder = 1,
+            CreatedAt = historicalCreatedAt,
+            CreatedBy = historicalCreator,
+            ModifiedAt = historicalCreatedAt,
+            ModifiedBy = historicalCreator,
+        };
+        var shoppingSource = new ShoppingListItemSource
+        {
+            Id = Guid.NewGuid(),
+            ShoppingListItemId = shoppingItem.Id,
+            SourceKind = ShoppingListSourceKind.MealPlanEntry,
+            MealPlanEntryId = rootMealPlanEntry.Id,
+            RecipeId = parentRecipe.Id,
+            SourceLabel = "Brown Butter Pasta",
+            CreatedAt = historicalCreatedAt,
+            CreatedBy = historicalCreator,
+            ModifiedAt = historicalCreatedAt,
+            ModifiedBy = historicalCreator,
+        };
+        var cookLog = new CookLog
+        {
+            Id = Guid.NewGuid(),
+            RecipeId = parentRecipe.Id,
+            CookedByUserId = _userId,
+            CookedByDisplayName = "ProdChef",
+            CookedAt = historicalCreatedAt,
+            Rating = 5,
+            PhotoImagePath = "/api/uploads/cook-logs/log.webp",
+            CreatedAt = historicalCreatedAt,
+            CreatedBy = historicalCreator,
+            ModifiedAt = historicalCreatedAt,
+            ModifiedBy = historicalCreator,
+        };
+
+        _dbContext.Tags.Add(tag);
+        _dbContext.Collections.Add(collection);
+        _dbContext.FoodItems.Add(foodItem);
+        _dbContext.FoodItemAliases.Add(foodAlias);
+        _dbContext.CatalogEmbeddings.Add(catalogEmbedding);
+        _dbContext.Recipes.AddRange(subRecipe, parentRecipe);
+        _dbContext.RecipeIngredients.Add(subLinkIngredient);
+        _dbContext.RecipeIngredientReplacements.Add(replacement);
+        _dbContext.RecipeSteps.Add(step);
+        _dbContext.RecipeStepTimers.Add(timer);
+        _dbContext.RecipeTags.Add(recipeTag);
+        _dbContext.RecipeCollections.Add(recipeCollection);
+        _dbContext.RecipeAttachments.Add(attachment);
+        _dbContext.RecipeEmbeddings.Add(recipeEmbedding);
+        _dbContext.ShareLinks.Add(shareLink);
+        _dbContext.IngestionJobs.Add(ingestionJob);
+        _dbContext.MealPlanTemplates.Add(template);
+        _dbContext.MealPlanTemplateItems.Add(templateItem);
+        _dbContext.MealPlanEntries.AddRange(rootMealPlanEntry, leftoverMealPlanEntry);
+        _dbContext.ShoppingLists.Add(shoppingList);
+        _dbContext.ShoppingListItems.Add(shoppingItem);
+        _dbContext.ShoppingListItemSources.Add(shoppingSource);
+        _dbContext.CookLogs.Add(cookLog);
+        await _dbContext.SaveChangesAsync();
+
+        _mediaStorage.Files["recipes/hero.webp"] = [10, 20, 30];
+        _mediaStorage.Files["cook-logs/log.webp"] = [40, 50, 60];
+
+        using var archiveStream = new MemoryStream();
+        await _service.ExportBackupToStreamAsync(archiveStream);
+        archiveStream.Position = 0;
+
+        // Import into a completely separate target database with a different user + AuditSaveChangesInterceptor
+        var targetUserId = Guid.NewGuid();
+        var interceptor = new AuditSaveChangesInterceptor(
+            new StubUserContext(targetUserId.ToString())
+        );
+        var targetOptions = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .AddInterceptors(interceptor)
+            .Options;
+
+        await using var targetDb = new AppDbContext(targetOptions);
+        targetDb.Users.Add(
+            new User
+            {
+                Id = targetUserId,
+                Username = "LocalChef",
+                Email = "local@example.com",
+                PasswordHash = "hash",
+            }
+        );
+        targetDb.PersonalAccessTokens.Add(
+            new PersonalAccessToken
+            {
+                Id = Guid.NewGuid(),
+                UserId = targetUserId,
+                Name = "Local Token",
+                TokenHash = "hash",
+                TokenPrefix = "lr_pat_local",
+            }
+        );
+        targetDb.HouseholdLlmSettings.Add(
+            new HouseholdLlmSettings
+            {
+                Id = Guid.NewGuid(),
+                SingletonKey = HouseholdLlmSettings.DefaultSingletonKey,
+                EnableIngestion = true,
+                AutoResumeQueue = false,
+            }
+        );
+        targetDb.Recipes.Add(
+            new Recipe
+            {
+                Id = Guid.NewGuid(),
+                Title = "Stale Local Recipe",
+                Slug = "stale-local-recipe",
+            }
+        );
+        await targetDb.SaveChangesAsync();
+
+        var targetMedia = new FakeMediaStorageService();
+        targetMedia.Files["recipes/stale.webp"] = [99, 99];
+
+        var targetService = new AppDataMaintenanceService(
+            targetDb,
+            targetMedia,
+            NullLogger<AppDataMaintenanceService>.Instance
+        );
+
+        var importResult = await targetService.ImportBackupAsync(archiveStream, targetUserId);
+
+        Assert.AreEqual(2, importResult.ImportedRecipesCount);
+        Assert.AreEqual(1, importResult.ImportedFoodItemsCount);
+        Assert.AreEqual(1, importResult.ImportedTagsCount);
+        Assert.AreEqual(1, importResult.ImportedCollectionsCount);
+        Assert.AreEqual(3, importResult.ImportedMealPlansCount);
+        Assert.AreEqual(1, importResult.ImportedShoppingListsCount);
+        Assert.AreEqual(1, importResult.ImportedIngestionJobsCount);
+        Assert.AreEqual(1, importResult.ImportedCookLogsCount);
+        Assert.AreEqual(2, importResult.ImportedMediaFilesCount);
+
+        // Verify stale local culinary data & media were wiped while target auth & settings survived
+        Assert.IsFalse(await targetDb.Recipes.AnyAsync(r => r.Title == "Stale Local Recipe"));
+        Assert.IsFalse(targetMedia.Files.ContainsKey("recipes/stale.webp"));
+        CollectionAssert.AreEqual(
+            new byte[] { 10, 20, 30 },
+            targetMedia.Files["recipes/hero.webp"]
+        );
+        CollectionAssert.AreEqual(
+            new byte[] { 40, 50, 60 },
+            targetMedia.Files["cook-logs/log.webp"]
+        );
+
+        Assert.AreEqual(1, await targetDb.Users.CountAsync());
+        Assert.AreEqual(1, await targetDb.PersonalAccessTokens.CountAsync());
+        var targetSettings = await targetDb.HouseholdLlmSettings.SingleAsync();
+        Assert.IsFalse(targetSettings.EnableIngestion);
+
+        // Verify historical audit metadata & relationships survived AuditSaveChangesInterceptor
+        var restoredParent = await targetDb.Recipes.SingleAsync(r => r.Id == parentRecipe.Id);
+        Assert.AreEqual(historicalCreatedAt, restoredParent.CreatedAt);
+        Assert.AreEqual(historicalCreator, restoredParent.CreatedBy);
+
+        var restoredIng = await targetDb.RecipeIngredients.SingleAsync(i =>
+            i.Id == subLinkIngredient.Id
+        );
+        Assert.AreEqual(subRecipe.Id, restoredIng.LinkedRecipeId);
+
+        var restoredLeftover = await targetDb.MealPlanEntries.SingleAsync(e =>
+            e.Id == leftoverMealPlanEntry.Id
+        );
+        Assert.AreEqual(rootMealPlanEntry.Id, restoredLeftover.SourceMealPlanEntryId);
+
+        var restoredCatEmb = await targetDb.CatalogEmbeddings.SingleAsync();
+        CollectionAssert.AreEqual(new byte[] { 1, 2, 3, 4 }, restoredCatEmb.VectorBytes);
+
+        // Verify cross-env user FK remapped cleanly while display name stayed intact
+        var restoredCookLog = await targetDb.CookLogs.SingleAsync();
+        Assert.AreEqual(targetUserId, restoredCookLog.CookedByUserId);
+        Assert.AreEqual("ProdChef", restoredCookLog.CookedByDisplayName);
+
+        var restoredShoppingItem = await targetDb.ShoppingListItems.SingleAsync();
+        Assert.AreEqual(targetUserId, restoredShoppingItem.CheckedByUserId);
+        Assert.AreEqual("ProdChef", restoredShoppingItem.CheckedByDisplayName);
+    }
+
+    [TestMethod]
+    public async Task ImportBackup_InvalidZipOrPathTraversal_ThrowsDomainValidationWithoutWipingData()
+    {
+        var existingRecipe = new Recipe
+        {
+            Id = Guid.NewGuid(),
+            Title = "Do Not Wipe Me",
+            Slug = "do-not-wipe-me",
+        };
+        _dbContext.Recipes.Add(existingRecipe);
+        await _dbContext.SaveChangesAsync();
+        _mediaStorage.Files["recipes/keep.webp"] = [7, 7, 7];
+
+        // 1. Corrupt non-ZIP stream
+        using (var invalidStream = new MemoryStream(Encoding.UTF8.GetBytes("not-a-zip")))
+        {
+            await Assert.ThrowsAsync<DomainValidationException>(async () =>
+                await _service.ImportBackupAsync(invalidStream, _userId)
+            );
+        }
+
+        // 2. Crafted ZIP with unsafe path traversal upload entry
+        using (var traversalZipStream = new MemoryStream())
+        {
+            using (
+                var zip = new ZipArchive(traversalZipStream, ZipArchiveMode.Create, leaveOpen: true)
+            )
+            {
+                var mEntry = zip.CreateEntry("manifest.json");
+                await using (var s = new StreamWriter(mEntry.Open()))
+                {
+                    await s.WriteAsync(
+                        """{"formatVersion":1,"exportedAt":"2026-11-22T00:00:00Z","application":"LocalRoast","includesMedia":true,"counts":{},"mediaFilesCount":1}"""
+                    );
+                }
+
+                var dEntry = zip.CreateEntry("data/snapshot.json");
+                await using (var s = new StreamWriter(dEntry.Open()))
+                {
+                    await s.WriteAsync("{}");
+                }
+
+                var badMedia = zip.CreateEntry("uploads/../../evil.txt");
+                await using var badStream = badMedia.Open();
+                await badStream.WriteAsync(Encoding.UTF8.GetBytes("evil"));
+            }
+
+            traversalZipStream.Position = 0;
+            await Assert.ThrowsAsync<DomainValidationException>(async () =>
+                await _service.ImportBackupAsync(traversalZipStream, _userId)
+            );
+        }
+
+        // Existing recipe & media must be completely untouched
+        Assert.IsFalse(_mediaStorage.PurgeCalled);
+        Assert.IsTrue(_mediaStorage.Files.ContainsKey("recipes/keep.webp"));
+        Assert.IsTrue(await _dbContext.Recipes.AnyAsync(r => r.Id == existingRecipe.Id));
+    }
+
+    private sealed class StubUserContext(string userId) : IUserContext
+    {
+        public string UserId => userId;
     }
 }

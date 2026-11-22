@@ -240,6 +240,79 @@
         <!-- Data Management Tab -->
         <mat-tab label="Data Management">
           <div class="data-management-tab">
+            <div class="backup-restore-card">
+              <div class="backup-header">
+                <div class="backup-icon-badge">
+                  <mat-icon aria-hidden="true">archive</mat-icon>
+                </div>
+                <div class="backup-info">
+                  <h3 class="backup-title">Backup &amp; Restore</h3>
+                  <p class="backup-description">
+                    Export a portable .zip archive containing all recipes, food catalog items, tags,
+                    collections, meal plans, shopping lists, ingestion jobs, cook logs, and uploaded
+                    media so you can store a safe copy or restore into another environment. User
+                    passwords, LLM API keys, and MCP tokens are excluded.
+                  </p>
+                </div>
+              </div>
+
+              <div class="backup-options">
+                <mat-checkbox
+                  [checked]="includeMediaInBackup()"
+                  (change)="includeMediaInBackup.set($event.checked)"
+                  [disabled]="isExportingBackup()"
+                  data-testid="include-media-backup-checkbox"
+                >
+                  Include uploaded photos, covers, and PDFs
+                </mat-checkbox>
+              </div>
+
+              @if (backupError()) {
+                <div
+                  class="alert-banner alert-error"
+                  role="alert"
+                  data-testid="export-backup-error"
+                >
+                  <mat-icon aria-hidden="true">error_outline</mat-icon>
+                  <span>{{ backupError() }}</span>
+                </div>
+              }
+
+              <div class="backup-actions">
+                <button
+                  mat-flat-button
+                  color="primary"
+                  type="button"
+                  class="export-backup-button"
+                  data-testid="export-backup-button"
+                  [disabled]="isExportingBackup()"
+                  (click)="exportBackup()"
+                >
+                  @if (isExportingBackup()) {
+                    <mat-spinner diameter="18"></mat-spinner>
+                    <span>Preparing Backup...</span>
+                  } @else {
+                    <span class="btn-label-group">
+                      <mat-icon aria-hidden="true">download</mat-icon>
+                      <span>Download Backup (.zip)</span>
+                    </span>
+                  }
+                </button>
+
+                <button
+                  mat-stroked-button
+                  type="button"
+                  class="import-backup-button"
+                  data-testid="import-backup-button"
+                  [disabled]="isExportingBackup()"
+                  (click)="openImportAppDataDialog()"
+                >
+                  <mat-icon aria-hidden="true">upload</mat-icon>
+                  <span>Restore from Backup...</span>
+                </button>
+              </div>
+            </div>
+
             <div class="danger-zone-card">
               <div class="danger-zone-header">
                 <div class="danger-zone-icon-badge">

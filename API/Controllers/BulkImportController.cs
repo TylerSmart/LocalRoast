@@ -1,7 +1,9 @@
+using App.API.Http;
 using App.Core.Common;
 using App.Core.Exceptions;
 using App.Core.FoodCatalog;
 using App.Core.Ingestion;
+using App.Core.Maintenance;
 using App.Core.Media;
 using App.Core.Recipes;
 using Microsoft.AspNetCore.Authorization;
@@ -277,6 +279,42 @@ public sealed class BulkImportController(
         var items = await foodCatalogService.GetFoodItemsAsync(query, cancellationToken);
         return Ok(items);
     }
+
+    [HttpGet("backup/export")]
+    [Produces("application/zip")]
+    [ProducesResponseType(typeof(FileStreamResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public Task<IActionResult> ExportBackup(
+        [FromServices] IAppDataMaintenanceService maintenanceService,
+        [FromQuery] bool includeMedia = true,
+        CancellationToken cancellationToken = default
+    ) =>
+        AppDataBackupHttpHelper.ExportBackupAsync(
+            this,
+            maintenanceService,
+            includeMedia,
+            cancellationToken
+        );
+
+    [HttpPost("backup/import")]
+    [Consumes("multipart/form-data")]
+    [RequestSizeLimit(AppDataBackupHttpHelper.MaxBackupUploadBytes)]
+    [RequestFormLimits(MultipartBodyLengthLimit = AppDataBackupHttpHelper.MaxBackupUploadBytes)]
+    [ProducesResponseType(typeof(ImportAppDataBackupResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public Task<IActionResult> ImportBackup(
+        [FromServices] IAppDataMaintenanceService maintenanceService,
+        IFormFile? file,
+        CancellationToken cancellationToken = default
+    ) =>
+        AppDataBackupHttpHelper.ImportBackupAsync(
+            this,
+            maintenanceService,
+            file,
+            AppDataBackupHttpHelper.TryGetUserId(User),
+            cancellationToken
+        );
 
     private async Task<IActionResult> ExecuteSafeAsync(Func<Task<IActionResult>> action)
     {
