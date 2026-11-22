@@ -186,7 +186,7 @@ RECIPE_EXTRACTION_SCHEMA = {
         "timing": TIMING_SCHEMA,
         "tags": {"type": "array", "items": {"type": "string"}},
     },
-    "required": ["title", "sections"],
+    "required": ["title", "description", "sections"],
 }
 
 RECIPE_ENTRY_SCHEMA = {
@@ -238,7 +238,7 @@ def build_batch_prompt(guide: str, jobs: list[dict]) -> str:
         f"{guide}\n\n"
         "## Output Instructions\n"
         "- Return `{ \"recipes\": [ { \"jobId\": \"...\", \"extraction\": { ... } }, ... ] }` with ONE entry per input `jobId` in order.\n"
-        "- Omit optional properties (`description`, `unit`, `prepNote`, `maxQuantity`, `maxAmount`, `canonicalFoodName`, `referencedRecipeTitle`, `replacements`, `alternateMeasurements`, `text`, etc.) whenever absent/not applicable rather than emitting JSON null.\n"
+        "- Omit optional properties (`unit`, `prepNote`, `maxQuantity`, `maxAmount`, `canonicalFoodName`, `referencedRecipeTitle`, `replacements`, `alternateMeasurements`, `text`, etc.) whenever absent/not applicable rather than emitting JSON null.\n"
         "- NEVER call `read_file`, `run_command`, `search_web`, or any tools — call `finish` directly.\n\n"
         f"## Input Recipes ({len(jobs)})\n\n{joined_recipes}"
     )

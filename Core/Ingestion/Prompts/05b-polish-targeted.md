@@ -7,7 +7,8 @@ Your job is to perform a **targeted end-to-end polish pass** and emit **ONLY sur
 ## What to Inspect & Patch
 
 1. **Metadata & Tags (`title`, `description`, `servings`, `yield`, `timing`, `tags`)**:
-   - Keep as `null` unless something is wrong (e.g., an invalid category-heading tag like `"Protein"` or `"Dinner"` on a dip, a wrong serving count, or truncated/garbled text). If updating `tags`, return the complete corrected tag list.
+   - For `description`: if `currentRecipe.description` is `null` or empty, generate a concise, grounded **1–2 sentence culinary description** based strictly on the dish, ingredients, and cooking method (without listing raw measurements). Otherwise keep `description` as `null` unless truncated/garbled or carrying unstripped `"WHY THIS RECIPE WORKS"` / `"BEFORE YOU BEGIN"` headers or SEO promo boilerplate.
+   - Keep `title`, `servings`, `yield`, `timing`, and `tags` as `null` unless something is wrong (e.g., an invalid category-heading tag like `"Protein"` or `"Dinner"` on a dip, a wrong serving count, or truncated/garbled text). If updating `tags`, return the complete corrected tag list.
 2. **Ingredients (`ingredientPatches`)**:
    - Emit an entry ONLY for an ingredient whose `name`, `quantity`, `maxQuantity`, `unit`, `prepNote`, `isOptional`, or `alternateMeasurements` clearly disagrees with `originalSourceText` (referencing its exact `index`). Keep unchanged patch fields `null`, NEVER blank out a valid printed quantity (`"2 tablespoons minced onion"` keeps `quantity: 2`), and NEVER add physical cut/roast dimensions (`"12 inches long"`, `"4 inches in diameter"`) into `alternateMeasurements`.
    - **Quantity vs. `maxQuantity` vs. `alternateMeasurements` invariant**:

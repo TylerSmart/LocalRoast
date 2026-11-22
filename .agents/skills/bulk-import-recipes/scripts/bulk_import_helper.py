@@ -1276,6 +1276,22 @@ def cmd_audit(args: argparse.Namespace) -> int:
         )
         pub_details.append({"id": jid, "title": rec["title"], "recipeId": rid, "confidenceScore": conf})
 
+        desc_text = (rec.get("description") or "").strip()
+        if not desc_text:
+            categories["proseArtifacts"].append(
+                {"title": rec["title"], "kind": "missing_description"}
+            )
+        elif re.search(r"\bWHY\s+THIS\s+RECIPES?\s+WORKS?\b", desc_text, re.I) or re.search(
+            r"(?:^|\n)\s*BEFORE\s+YOU\s+BEGIN\b", desc_text
+        ):
+            categories["proseArtifacts"].append(
+                {
+                    "title": rec["title"],
+                    "kind": "description_header_leak",
+                    "snippet": desc_text[:140],
+                }
+            )
+
         qw = draft.get("qualityWarnings") or []
         mw = draft.get("measurementWarnings") or []
         if qw or mw:

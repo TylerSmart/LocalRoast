@@ -2456,13 +2456,14 @@ public sealed class MultiStageIngestionAndReplacementsIntegrationTests
     [TestMethod]
     public async Task MultiStagePipeline_LongAtkDescriptionWithin4000Chars_SkipsStage2AndEmitsUnnumberedSegments()
     {
-        var longAtkDesc = string.Join(
+        var expectedCleanDesc = string.Join(
             " ",
             Enumerable.Repeat(
-                "WHY THIS RECIPE WORKS: Searing the rack of lamb gently and finishing it over indirect heat keeps the interior rosy from edge to edge while forming a deeply flavorful herb crust.",
-                14
+                "Searing the rack of lamb gently and finishing it over indirect heat keeps the interior rosy from edge to edge while forming a deeply flavorful herb crust.",
+                15
             )
         );
+        var longAtkDesc = $"WHY THIS RECIPE WORKS: {expectedCleanDesc}";
         Assert.IsGreaterThan(2200, longAtkDesc.Length);
         Assert.IsLessThanOrEqualTo(RecipeFieldLimits.MaxDescriptionLength, longAtkDesc.Length);
 
@@ -2548,7 +2549,7 @@ public sealed class MultiStageIngestionAndReplacementsIntegrationTests
             await client.GetFromJsonAsync<IngestionJobDetailDto>($"/api/ingestion/jobs/{job.Id}")
         )!;
         Assert.IsNotNull(detail.ExtractedDraft);
-        Assert.AreEqual(longAtkDesc, detail.ExtractedDraft.Description);
+        Assert.AreEqual(expectedCleanDesc, detail.ExtractedDraft.Description);
 
         // Live workflow segments must not contain hardcoded leading numbers like "3. Match"
         var tracker = customFactory.Services.GetRequiredService<IIngestionLiveTracker>();
@@ -3690,11 +3691,321 @@ public sealed class MultiStageIngestionAndReplacementsIntegrationTests
         Assert.Contains("then add corn puree to pan.", plainCornStep, StringComparison.Ordinal);
     }
 
+    [TestMethod]
+    public async Task SubmitExternalExtraction_StructuredBookHeadnote_PreservedVerbatimWithBannerStripped_AndBareVariationFallsBackToGeneratedDescription()
+    {
+        using var client = _factory.CreateClient();
+        await AuthenticateAsync(client);
+
+        const string bookBody =
+            "Homemade mayonnaise takes just a few minutes in a food processor and tastes far brighter than jarred versions. "
+            + "Before you begin, chill the mixing bowl for the best emulsion and refrigerate leftovers for up to 1 week.";
+        var rawTextBook = $"""
+            Title: DIY Citrus Mayonnaise
+            Yield: Makes 1 cup
+
+            Description & Kitchen Notes:
+            WHY THIS RECIPES WORKS {bookBody}
+
+            Ingredients:
+            - 1 large egg yolk
+            - 1 cup vegetable oil
+
+            Instructions:
+            1. Whisk egg yolk and slowly drizzle in 1 cup vegetable oil until thick.
+            """;
+
+        var enqueueBook = await client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest(
+                RawText: rawTextBook,
+                TitleHint: "DIY Citrus Mayonnaise"
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Accepted, enqueueBook.StatusCode);
+        var bookJob = (await enqueueBook.Content.ReadFromJsonAsync<IngestionJobSummaryDto>())!;
+
+        var bookSubmit = await client.PostAsJsonAsync(
+            $"/api/ingestion/jobs/{bookJob.Id}/submit-extraction",
+            new SubmitExternalExtractionRequest(
+                Extraction: new ExternalRecipeExtractionDto(
+                    Title: "DIY Citrus Mayonnaise",
+                    Description: "Shortened summary from model that should be overridden by book headnote.",
+                    Servings: 4m,
+                    Yield: "Makes 1 cup",
+                    Sections:
+                    [
+                        new ExternalExtractedSectionDto(
+                            Name: null,
+                            Ingredients:
+                            [
+                                new ExternalExtractedIngredientDto(
+                                    Name: "large egg yolk",
+                                    Quantity: 1m,
+                                    CanonicalFoodName: "egg yolk",
+                                    Category: "DairyAndEggs",
+                                    IsPantryStaple: true
+                                ),
+                                new ExternalExtractedIngredientDto(
+                                    Name: "vegetable oil",
+                                    Quantity: 1m,
+                                    Unit: "cup",
+                                    CanonicalFoodName: "vegetable oil",
+                                    Category: "CondimentsAndSauces",
+                                    IsPantryStaple: true
+                                ),
+                            ],
+                            Steps:
+                            [
+                                new ExternalExtractedStepDto(
+                                    Instruction: "Whisk egg yolk and slowly drizzle in 1 cup vegetable oil until thick.",
+                                    Tokens:
+                                    [
+                                        new JsonObject
+                                        {
+                                            ["type"] = "text",
+                                            ["text"] = "Whisk egg yolk and slowly drizzle in ",
+                                        },
+                                        new JsonObject
+                                        {
+                                            ["type"] = "ingredient",
+                                            ["ingredientIndex"] = 1,
+                                            ["name"] = "vegetable oil",
+                                            ["quantity"] = 1,
+                                            ["unit"] = "cup",
+                                        },
+                                        new JsonObject
+                                        {
+                                            ["type"] = "text",
+                                            ["text"] = " until thick.",
+                                        },
+                                    ]
+                                ),
+                            ]
+                        ),
+                    ],
+                    Timing: null,
+                    Tags: ["Condiment", "Sauce"]
+                ),
+                ExtractedModel: "gemini-flash (agy-workflow)",
+                AutoPublish: true,
+                ComputeEmbeddings: false
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.OK, bookSubmit.StatusCode);
+        var bookResult = (
+            await bookSubmit.Content.ReadFromJsonAsync<SubmitExternalExtractionResultDto>()
+        )!;
+        Assert.AreEqual(IngestionJobStatus.Published, bookResult.Status);
+
+        var bookRecipe = (
+            await client.GetFromJsonAsync<RecipeDetailDto>(
+                $"/api/recipes/{bookResult.ResultingRecipeId}"
+            )
+        )!;
+        Assert.AreEqual(bookBody, bookRecipe.Description);
+
+        // Bare "Variation of ..." stub in Description & Kitchen Notes must NOT override the generated summary.
+        const string varText = """
+            Title: Honey Oat Crisp
+            Yield: Serves 6
+
+            Description & Kitchen Notes:
+            Variation of Peach Crisp.
+
+            Ingredients:
+            - 1/2 cup rolled oats
+
+            Instructions:
+            1. Toast 1/2 cup rolled oats until golden.
+            """;
+        var enqueueVar = await client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest(RawText: varText, TitleHint: "Honey Oat Crisp")
+        );
+        Assert.AreEqual(HttpStatusCode.Accepted, enqueueVar.StatusCode);
+        var varJob = (await enqueueVar.Content.ReadFromJsonAsync<IngestionJobSummaryDto>())!;
+
+        const string generatedVarDesc =
+            "Warm, toasted oat topping sweetened with honey for spooning over roasted seasonal fruit.";
+        var varSubmit = await client.PostAsJsonAsync(
+            $"/api/ingestion/jobs/{varJob.Id}/submit-extraction",
+            new SubmitExternalExtractionRequest(
+                Extraction: new ExternalRecipeExtractionDto(
+                    Title: "Honey Oat Crisp",
+                    Description: generatedVarDesc,
+                    Servings: 6m,
+                    Yield: "Serves 6",
+                    Sections:
+                    [
+                        new ExternalExtractedSectionDto(
+                            Name: null,
+                            Ingredients:
+                            [
+                                new ExternalExtractedIngredientDto(
+                                    Name: "rolled oats",
+                                    Quantity: 0.5m,
+                                    Unit: "cup",
+                                    CanonicalFoodName: "rolled oats",
+                                    Category: "PantryDryGoods",
+                                    IsPantryStaple: true
+                                ),
+                            ],
+                            Steps:
+                            [
+                                new ExternalExtractedStepDto(
+                                    Instruction: "Toast 1/2 cup rolled oats until golden.",
+                                    Tokens:
+                                    [
+                                        new JsonObject { ["type"] = "text", ["text"] = "Toast " },
+                                        new JsonObject
+                                        {
+                                            ["type"] = "ingredient",
+                                            ["ingredientIndex"] = 0,
+                                            ["name"] = "rolled oats",
+                                            ["quantity"] = 0.5,
+                                            ["unit"] = "cup",
+                                        },
+                                        new JsonObject
+                                        {
+                                            ["type"] = "text",
+                                            ["text"] = " until golden.",
+                                        },
+                                    ]
+                                ),
+                            ]
+                        ),
+                    ],
+                    Timing: null,
+                    Tags: ["Dessert"]
+                ),
+                ExtractedModel: "gemini-flash (agy-workflow)",
+                AutoPublish: true,
+                ComputeEmbeddings: false
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.OK, varSubmit.StatusCode);
+        var varResult = (
+            await varSubmit.Content.ReadFromJsonAsync<SubmitExternalExtractionResultDto>()
+        )!;
+        Assert.AreEqual(IngestionJobStatus.Published, varResult.Status);
+
+        var varRecipe = (
+            await client.GetFromJsonAsync<RecipeDetailDto>(
+                $"/api/recipes/{varResult.ResultingRecipeId}"
+            )
+        )!;
+        Assert.AreEqual(generatedVarDesc, varRecipe.Description);
+    }
+
+    [TestMethod]
+    public async Task MultiStagePipeline_NullStage1Description_TriggersStage5bDescriptionGeneration()
+    {
+        const string generatedUrlDesc =
+            "Rich stovetop butter sauce gently melted for whisking over warm vegetables or seafood.";
+        var mockLlm = new FallbackExercisingLlmClient
+        {
+            ForceSimpleBatch = true,
+            Stage1JsonOverride = JsonSerializer.Serialize(
+                new
+                {
+                    title = "Simple Melted Butter Sauce",
+                    description = (string?)null,
+                    servings = 4,
+                    yield = "Serves 4",
+                    sections = new[]
+                    {
+                        new
+                        {
+                            name = (string?)null,
+                            ingredients = new[]
+                            {
+                                new
+                                {
+                                    name = "butter",
+                                    quantity = 2,
+                                    maxQuantity = (decimal?)null,
+                                    unit = "tbsp",
+                                    prepNote = (string?)null,
+                                    isOptional = false,
+                                    replacements = Array.Empty<object>(),
+                                    alternateMeasurements = Array.Empty<object>(),
+                                },
+                            },
+                            instructions = new[] { "Melt 2 tablespoons butter." },
+                        },
+                    },
+                    timing = new
+                    {
+                        prep = 2,
+                        cook = 5,
+                        total = 7,
+                    },
+                    tags = new[] { "Sauce" },
+                }
+            ),
+            Stage5bJsonOverride = JsonSerializer.Serialize(
+                new
+                {
+                    title = (string?)null,
+                    description = $"BEFORE YOU BEGIN: {generatedUrlDesc}",
+                    servings = (decimal?)null,
+                    yield = (string?)null,
+                    timing = (object?)null,
+                    tags = (string[]?)null,
+                    ingredientPatches = Array.Empty<object>(),
+                    stepPatches = Array.Empty<object>(),
+                    polishNotes = new[] { "Generated concise culinary description." },
+                }
+            ),
+        };
+
+        await using var customFactory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Llm:TextModel", "qwen2.5:14b");
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ILlmExtractionClient>();
+                services.AddSingleton<ILlmExtractionClient>(mockLlm);
+            });
+        });
+
+        using var client = customFactory.CreateClient();
+        await AuthenticateAsync(client);
+
+        var submitRes = await client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest(
+                RawText: "Simple Melted Butter Sauce\nIngredients:\n2 tbsp butter\nInstructions:\n1. Melt 2 tablespoons butter.",
+                TitleHint: "Simple Melted Butter Sauce"
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Accepted, submitRes.StatusCode);
+        var job = (await submitRes.Content.ReadFromJsonAsync<IngestionJobSummaryDto>())!;
+
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            Assert.IsTrue(
+                await scope
+                    .ServiceProvider.GetRequiredService<IIngestionProcessor>()
+                    .ProcessNextQueuedJobAsync()
+            );
+        }
+
+        Assert.Contains("stage5b_polish_targeted", mockLlm.StageCalls);
+        var detail = (
+            await client.GetFromJsonAsync<IngestionJobDetailDto>($"/api/ingestion/jobs/{job.Id}")
+        )!;
+        Assert.IsNotNull(detail.ExtractedDraft);
+        Assert.AreEqual(generatedUrlDesc, detail.ExtractedDraft.Description);
+    }
+
     private sealed class FallbackExercisingLlmClient : ILlmExtractionClient
     {
         public bool ForceSimpleBatch { get; set; }
         public string? Stage1JsonOverride { get; set; }
         public string? Stage2JsonOverride { get; set; }
+        public string? Stage5bJsonOverride { get; set; }
         public Func<
             EffectiveLlmConnectionConfig,
             IReadOnlyList<LlmStageChatMessage>,
@@ -3841,19 +4152,20 @@ public sealed class MultiStageIngestionAndReplacementsIntegrationTests
                         ]
                     }
                     """,
-                "stage5b_polish_targeted" => """
-                    {
-                        "title": null,
-                        "description": null,
-                        "servings": null,
-                        "yield": null,
-                        "timing": { "prep": 2, "cook": 10, "total": 12 },
-                        "tags": null,
-                        "ingredientPatches": [],
-                        "stepPatches": [],
-                        "polishNotes": ["Populated missing timing."]
-                    }
-                    """,
+                "stage5b_polish_targeted" => Stage5bJsonOverride
+                    ?? """
+                        {
+                            "title": null,
+                            "description": null,
+                            "servings": null,
+                            "yield": null,
+                            "timing": { "prep": 2, "cook": 10, "total": 12 },
+                            "tags": null,
+                            "ingredientPatches": [],
+                            "stepPatches": [],
+                            "polishNotes": ["Populated missing timing."]
+                        }
+                        """,
                 "stage6_refine_recipe" => Stage6JsonFactory?.Invoke(config, userContent)
                     ?? Stage6JsonOverride
                     ?? """

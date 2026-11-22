@@ -69,10 +69,13 @@ public sealed partial class IngestionRecipePipeline(
         var title = string.IsNullOrWhiteSpace(stage1.Title)
             ? "Untitled Recipe"
             : IngestionMetadataAndTagHelper.Truncate(stage1.Title.Trim(), 200);
-        var description = string.IsNullOrWhiteSpace(stage1.Description)
-            ? null
-            : stage1.Description.Trim();
+        var structuredHeadnote = TryExtractStructuredSourceHeadnote(
+            request.SourceText,
+            request.SourceUrl
+        );
+        var description = structuredHeadnote ?? CleanExtractedDescription(stage1.Description);
         (workSteps, description) = RelocateLeadingStorageNoteStep(workSteps, description);
+        description = CleanExtractedDescription(description);
         var servings = stage1.Servings;
         var yieldDisplay = IngestionMetadataAndTagHelper.ResolveYieldDisplay(
             stage1.Yield,
@@ -99,11 +102,13 @@ public sealed partial class IngestionRecipePipeline(
             );
             await ReportProgressAsync(request.OnStageProgress, "Condensing recipe summary...");
 
-            description = await RunStage2ShortenDescriptionAsync(
-                request.Config,
-                title,
-                description,
-                cancellationToken
+            description = CleanExtractedDescription(
+                await RunStage2ShortenDescriptionAsync(
+                    request.Config,
+                    title,
+                    description,
+                    cancellationToken
+                )
             );
             workload?.CompleteSegment("stage2");
         }
@@ -196,7 +201,9 @@ public sealed partial class IngestionRecipePipeline(
             .Where(s => s.ValidationWarnings.Count > 0)
             .ToList();
         var missingMetadata =
-            (timing?.Prep is null && timing?.Cook is null) || servings is null or <= 0m;
+            (timing?.Prep is null && timing?.Cook is null)
+            || servings is null or <= 0m
+            || string.IsNullOrWhiteSpace(description);
 
         if (incompatibleAlts.Count > 0 || remainingStepWarnings.Count > 0 || missingMetadata)
         {
@@ -244,11 +251,17 @@ public sealed partial class IngestionRecipePipeline(
 
                 if (!string.IsNullOrWhiteSpace(polishRes.Description))
                 {
-                    var polishedDesc = polishRes.Description.Trim();
-                    description =
-                        ShouldCondenseDescription(polishedDesc) && description is not null
-                            ? description
-                            : polishedDesc;
+                    var polishedDesc = CleanExtractedDescription(polishRes.Description);
+                    if (
+                        !string.IsNullOrWhiteSpace(polishedDesc)
+                        && (structuredHeadnote is null || string.IsNullOrWhiteSpace(description))
+                    )
+                    {
+                        description =
+                            ShouldCondenseDescription(polishedDesc) && description is not null
+                                ? description
+                                : polishedDesc;
+                    }
                 }
 
                 if (polishRes.Servings is > 0m and <= 999m)
@@ -548,22 +561,19 @@ public sealed partial class IngestionRecipePipeline(
         var title = string.IsNullOrWhiteSpace(request.Extraction.Title)
             ? "Untitled Recipe"
             : IngestionMetadataAndTagHelper.Truncate(request.Extraction.Title.Trim(), 200);
-        var description = string.IsNullOrWhiteSpace(request.Extraction.Description)
-            ? null
-            : StripWhyThisRecipeWorksHeading(request.Extraction.Description.Trim());
-        if (string.IsNullOrWhiteSpace(description))
-        {
-            description = null;
-        }
+        var description =
+            TryExtractStructuredSourceHeadnote(request.SourceText, request.SourceUrl)
+            ?? CleanExtractedDescription(request.Extraction.Description);
 
         (externalWorkSteps, description) = RelocateLeadingStorageNoteStep(
             externalWorkSteps,
             description
         );
+        description = CleanExtractedDescription(description);
         if (!string.IsNullOrWhiteSpace(description) && ShouldCondenseDescription(description))
         {
             AddSourceWarning(
-                $"Description is {description.Length} characters (max {DescriptionMaxLength}); condense description to 1-2 concise sentences (<= 240 characters) without 'WHY THIS RECIPE WORKS' boilerplate."
+                $"Description is {description.Length} characters (max {DescriptionMaxLength}); condense description to <= 3000 characters while preserving core technique, ingredient, variation, and storage notes without 'WHY THIS RECIPE WORKS' headers."
             );
         }
 
@@ -3085,11 +3095,56 @@ public sealed partial class IngestionRecipePipeline(
         return candidates[0].Index;
     }
 
-    private static string StripWhyThisRecipeWorksHeading(string description)
+    private static string? CleanExtractedDescription(string? description)
     {
-        var cleaned = WhyThisRecipeWorksHeadingRegex()
-            .Replace(description.Trim(), string.Empty)
+        if (string.IsNullOrWhiteSpace(description))
+        {
+            return null;
+        }
+
+        var normalized = description
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace("\r", "\n", StringComparison.Ordinal)
             .Trim();
+
+        for (var i = 0; i < 6; i++)
+        {
+            var next = WhyThisRecipeWorksPunctuatedRegex().Replace(normalized, string.Empty);
+            next = WhyThisRecipeWorksAllCapsInlineRegex().Replace(next, string.Empty);
+            next = EditorialBannerColonOrNewlineRegex().Replace(next, string.Empty);
+            next = EditorialBannerAllCapsInlineRegex().Replace(next, string.Empty).Trim();
+            if (string.Equals(next, normalized, StringComparison.Ordinal))
+            {
+                break;
+            }
+            normalized = next;
+        }
+
+        normalized = ExcessNewlinesRegex().Replace(normalized, "\n\n").Trim();
+        return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
+    }
+
+    private static string? TryExtractStructuredSourceHeadnote(string sourceText, string? sourceUrl)
+    {
+        // Scraped web URLs frequently carry site/SEO blurbs rather than clean cookbook headnotes,
+        // so let the LLM evaluate and summarize URL descriptions instead of copying verbatim.
+        if (!string.IsNullOrWhiteSpace(sourceUrl) || string.IsNullOrWhiteSpace(sourceText))
+        {
+            return null;
+        }
+
+        var match = StructuredDescriptionBlockRegex().Match(sourceText);
+        if (!match.Success)
+        {
+            return null;
+        }
+
+        var cleaned = CleanExtractedDescription(match.Groups["body"].Value);
+        if (string.IsNullOrWhiteSpace(cleaned) || BareVariationStubRegex().IsMatch(cleaned))
+        {
+            return null;
+        }
+
         return cleaned;
     }
 
@@ -4311,8 +4366,41 @@ public sealed partial class IngestionRecipePipeline(
     private static partial Regex StandaloneStorageStepRegex();
 
     [GeneratedRegex(
-        @"^\s*WHY\s+THIS\s+RECIPE\s+WORKS(?:\s*[:.\-–—]*\s*|\s+)",
+        @"(?:^|(?<=[.!?][ \t]+))[ \t]*(?:WHY\s+THIS\s+RECIPES?\s+WORKS?|WHY\s+IT\s+WORKS)[ \t]*(?:[:.\-–—]+[ \t]*|\n+[ \t]*)",
+        RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex WhyThisRecipeWorksPunctuatedRegex();
+
+    [GeneratedRegex(
+        @"(?:^|(?<=[.!?][ \t]+))[ \t]*(?:WHY\s+THIS\s+RECIPES?\s+WORKS?|WHY\s+IT\s+WORKS)[ \t]+(?=[A-Z0-9""“'(])",
+        RegexOptions.Multiline | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex WhyThisRecipeWorksAllCapsInlineRegex();
+
+    [GeneratedRegex(
+        @"^[ \t]*(?:BEFORE\s+YOU\s+BEGIN|ABOUT\s+THIS\s+RECIPE|(?:TEST\s+KITCHEN|COOK['’]?S|CHEF['’]?S|KITCHEN|RECIPE)\s+NOTES?|DESCRIPTION\s*(?:&|AND)\s*KITCHEN\s+NOTES)[ \t]*(?::[ \t]*|\n+[ \t]*)",
+        RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex EditorialBannerColonOrNewlineRegex();
+
+    [GeneratedRegex(
+        @"(?:^|(?<=[.!?][ \t]+))[ \t]*(?:BEFORE\s+YOU\s+BEGIN|ABOUT\s+THIS\s+RECIPE|(?:TEST\s+KITCHEN|COOK['’]?S|CHEF['’]?S|KITCHEN|RECIPE)\s+NOTES?)(?:[ \t]*[:.\-–—]+[ \t]*|[ \t]+)(?=[A-Z0-9""“'(])",
+        RegexOptions.Multiline | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex EditorialBannerAllCapsInlineRegex();
+
+    [GeneratedRegex(@"\n{3,}", RegexOptions.CultureInvariant)]
+    private static partial Regex ExcessNewlinesRegex();
+
+    [GeneratedRegex(
+        @"^Description\s*&\s*Kitchen\s+Notes\s*:\s*\r?\n(?<body>[\s\S]*?)(?=(?:\r?\n[^\S\r\n]*)+(?:Master\s+Recipe\s*:|(?:Base\s+)?Ingredients?\s*:))",
+        RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex StructuredDescriptionBlockRegex();
+
+    [GeneratedRegex(
+        @"^\s*Variation\s+of\s+[^.\n]+\.?\s*$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
-    private static partial Regex WhyThisRecipeWorksHeadingRegex();
+    private static partial Regex BareVariationStubRegex();
 }
