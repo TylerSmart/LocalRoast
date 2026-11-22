@@ -53,6 +53,7 @@ import {
   groupContiguousBySection,
 } from '../../../core/utils/section-grouping';
 import { createIngredientHighlightController } from '../../../core/utils/ingredient-highlight';
+import { RecipeDescriptionComponent } from '../../../shared/components/recipe-description/recipe-description.component';
 import { StepInstructionComponent } from '../../../shared/components/step-instruction/step-instruction.component';
 import { getTodayIsoLocal } from '../../../core/utils/meal-plan-date';
 import { shouldShowTimerLabel } from '../../../core/utils/step-token-parser';
@@ -110,6 +111,7 @@ export type StepSectionGroup = ContiguousSectionGroup<ScaledStepItem>;
     MatMenuModule,
     MatTooltipModule,
     MatProgressSpinnerModule,
+    RecipeDescriptionComponent,
     StepInstructionComponent,
   ],
   selector: 'app-recipe-detail',

@@ -41,6 +41,7 @@ import {
   ContiguousSectionGroup,
   groupContiguousBySection,
 } from '../../../core/utils/section-grouping';
+import { RecipeDescriptionComponent } from '../../../shared/components/recipe-description/recipe-description.component';
 import { StepInstructionComponent } from '../../../shared/components/step-instruction/step-instruction.component';
 import { shouldShowTimerLabel } from '../../../core/utils/step-token-parser';
 
@@ -72,6 +73,7 @@ export type PublicStepSectionGroup = ContiguousSectionGroup<PublicScaledStepItem
     MatExpansionModule,
     MatTooltipModule,
     MatProgressSpinnerModule,
+    RecipeDescriptionComponent,
     StepInstructionComponent,
   ],
   selector: 'app-public-shared-recipe',

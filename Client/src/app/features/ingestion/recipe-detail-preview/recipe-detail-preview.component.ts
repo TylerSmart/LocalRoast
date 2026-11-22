@@ -39,6 +39,7 @@ import {
   ingredientUses,
 } from '../../../core/utils/step-instruction';
 import { shouldShowTimerLabel } from '../../../core/utils/step-token-parser';
+import { RecipeDescriptionComponent } from '../../../shared/components/recipe-description/recipe-description.component';
 import { StepInstructionComponent } from '../../../shared/components/step-instruction/step-instruction.component';
 import {
   ContiguousSectionGroup,
@@ -74,6 +75,7 @@ export type PreviewStepSectionGroup = ContiguousSectionGroup<ScaledPreviewStepIt
     MatIconModule,
     MatProgressSpinnerModule,
     MatTooltipModule,
+    RecipeDescriptionComponent,
     StepInstructionComponent,
   ],
   templateUrl: './recipe-detail-preview.component.html',

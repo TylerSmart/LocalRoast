@@ -662,4 +662,32 @@ describe('RecipeDetailComponent', () => {
     expect(component['targetSystem']()).toBe('UsCustomary');
     expect(component['checkedIngredients']()['i-1']).toBe(true);
   });
+
+  it('renders long descriptions with app-recipe-description expand/collapse toggle', () => {
+    const longDescription =
+      'Slow-braised short ribs finished with gremolata and bone marrow butter. '.repeat(4);
+    component['recipe'].set({
+      ...sampleRecipe,
+      description: longDescription,
+    });
+    fixture.detectChanges();
+
+    const hostEl = fixture.nativeElement as HTMLElement;
+    const descComponent = hostEl.querySelector('app-recipe-description');
+    expect(descComponent).toBeTruthy();
+
+    const descEl = hostEl.querySelector('app-recipe-description .recipe-description');
+    const toggleBtn = hostEl.querySelector(
+      'app-recipe-description .description-toggle-btn',
+    ) as HTMLButtonElement | null;
+    expect(descEl?.textContent).toBe(longDescription);
+    expect(toggleBtn).toBeTruthy();
+    expect(toggleBtn?.textContent).toContain('Show more');
+
+    toggleBtn!.click();
+    fixture.detectChanges();
+
+    expect(descEl?.classList.contains('is-expanded')).toBe(true);
+    expect(toggleBtn?.textContent).toContain('Show less');
+  });
 });

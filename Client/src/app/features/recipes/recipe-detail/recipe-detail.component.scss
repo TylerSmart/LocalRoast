@@ -137,15 +137,6 @@
   flex-wrap: wrap;
 }
 
-.recipe-description {
-  margin: 0;
-  font-size: 1.02rem;
-  line-height: 1.55;
-  max-width: 72ch;
-  white-space: pre-line;
-  color: var(--mat-sys-on-surface-variant);
-}
-
 .recipe-hero-image {
   width: 100%;
   max-height: 440px;
@@ -1309,10 +1300,6 @@
   .recipe-title {
     font-size: 20pt !important;
     color: #111111 !important;
-  }
-
-  .recipe-description {
-    color: #333333 !important;
   }
 
   .stat-pill {

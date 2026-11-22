@@ -70,6 +70,242 @@ public sealed class QueryParamAndUiEnhancementsE2ETests : E2ETestBase
 
     [TestMethod]
     [Timeout(DefaultTestTimeoutMs)]
+    public async Task RecipeDescription_FullWidthOnDesktop_AndCollapsibleOnMobile360px()
+    {
+        await RegisterAndLoginAsync();
+
+        var paragraph =
+            "To achieve a deeply browned herb crust without overcooking the center, we salt the roast ahead of time, rest it uncovered so the exterior dries evenly, and sear gently before transferring to indirect oven heat until perfectly tender.";
+        var longDescription = string.Join("\n\n", Enumerable.Repeat(paragraph, 7));
+        Assert.IsGreaterThan(1400, longDescription.Length);
+
+        var longRecipeId = await CreateRecipeViaApiAsync(
+            new
+            {
+                title = $"Herb Roast {Guid.NewGuid():N}"[..24],
+                description = longDescription,
+                status = "Published",
+                baseServings = 4,
+                ingredients = new object[]
+                {
+                    new
+                    {
+                        displayName = "olive oil",
+                        quantity = 2,
+                        unit = "Tbsp",
+                    },
+                },
+                steps = new object[]
+                {
+                    new { instruction = "Rub roast with olive oil and herbs, then sear." },
+                },
+            }
+        );
+
+        var shortRecipeId = await CreateRecipeViaApiAsync(
+            new
+            {
+                title = $"Quick Skillet {Guid.NewGuid():N}"[..24],
+                description = "Crisp weeknight skillet dinner.",
+                status = "Published",
+                baseServings = 2,
+                ingredients = new object[]
+                {
+                    new
+                    {
+                        displayName = "butter",
+                        quantity = 1,
+                        unit = "Tbsp",
+                    },
+                },
+                steps = new object[] { new { instruction = "Melt butter in a hot skillet." } },
+            }
+        );
+
+        // 1. Desktop (1280x720) on Recipe Detail: full width (no 72ch cap), unclamped, no toggle button
+        await Page.SetViewportSizeAsync(1280, 720);
+        await Page.GotoAsync($"{ServerUrl}/recipes/{longRecipeId}");
+        var descEl = Page.Locator(".recipe-description");
+        var toggleBtn = Page.Locator(".description-toggle-btn");
+        await Expect(descEl).ToBeVisibleAsync();
+        await Expect(toggleBtn).ToBeHiddenAsync();
+
+        var desktopMetrics = await Page.EvaluateAsync<double[]>(
+            """
+            () => {
+                const hero = document.querySelector('.recipe-hero').getBoundingClientRect();
+                const desc = document.querySelector('.recipe-description');
+                const descRect = desc.getBoundingClientRect();
+                return [hero.width, descRect.width, desc.scrollHeight, desc.clientHeight];
+            }
+            """
+        );
+        Assert.IsLessThanOrEqualTo(
+            2.0,
+            Math.Abs(desktopMetrics[1] - desktopMetrics[0]),
+            $"Expected desktop description ({desktopMetrics[1]}px) to span full .recipe-hero width ({desktopMetrics[0]}px)."
+        );
+        Assert.IsGreaterThan(
+            900.0,
+            desktopMetrics[1],
+            $"Expected desktop description width > 900px without 72ch cap, got {desktopMetrics[1]}px."
+        );
+        Assert.IsLessThanOrEqualTo(
+            desktopMetrics[3] + 2.0,
+            desktopMetrics[2],
+            $"Expected desktop description to be unclamped (scrollHeight={desktopMetrics[2]}, clientHeight={desktopMetrics[3]})."
+        );
+
+        // 2. Mobile (360x740) on Recipe Detail: clamped to 3 lines, Show more / Show less toggle works, print is unclamped
+        await Page.SetViewportSizeAsync(360, 740);
+        await Expect(toggleBtn).ToBeVisibleAsync();
+        await Expect(toggleBtn).ToContainTextAsync("Show more");
+        await Expect(toggleBtn).ToHaveAttributeAsync("aria-expanded", "false");
+
+        var mobileCollapsedMetrics = await Page.EvaluateAsync<double[]>(
+            """
+            () => {
+                const desc = document.querySelector('.recipe-description');
+                return [desc.scrollHeight, desc.clientHeight, desc.getBoundingClientRect().height, document.documentElement.scrollWidth];
+            }
+            """
+        );
+        Assert.IsGreaterThan(
+            mobileCollapsedMetrics[1] + 50.0,
+            mobileCollapsedMetrics[0],
+            $"Expected mobile description to be clamped (scrollHeight={mobileCollapsedMetrics[0]}, clientHeight={mobileCollapsedMetrics[1]})."
+        );
+        Assert.IsLessThan(
+            110.0,
+            mobileCollapsedMetrics[2],
+            $"Expected collapsed mobile description height < 110px, got {mobileCollapsedMetrics[2]}px."
+        );
+        Assert.IsLessThanOrEqualTo(
+            362.0,
+            mobileCollapsedMetrics[3],
+            $"Expected no horizontal overflow at 360px, got scrollWidth={mobileCollapsedMetrics[3]}."
+        );
+
+        await toggleBtn.ClickAsync();
+        await Expect(toggleBtn).ToContainTextAsync("Show less");
+        await Expect(toggleBtn).ToHaveAttributeAsync("aria-expanded", "true");
+
+        var mobileExpandedMetrics = await Page.EvaluateAsync<double[]>(
+            """
+            () => {
+                const desc = document.querySelector('.recipe-description');
+                return [desc.scrollHeight, desc.clientHeight, desc.getBoundingClientRect().height];
+            }
+            """
+        );
+        Assert.IsLessThanOrEqualTo(
+            mobileExpandedMetrics[1] + 2.0,
+            mobileExpandedMetrics[0],
+            $"Expected expanded description to be unclamped (scrollHeight={mobileExpandedMetrics[0]}, clientHeight={mobileExpandedMetrics[1]})."
+        );
+        Assert.IsGreaterThan(
+            mobileCollapsedMetrics[2] + 150.0,
+            mobileExpandedMetrics[2],
+            $"Expected expanded height ({mobileExpandedMetrics[2]}) to exceed collapsed height ({mobileCollapsedMetrics[2]}) by >150px."
+        );
+
+        await toggleBtn.ClickAsync();
+        await Expect(toggleBtn).ToContainTextAsync("Show more");
+        await Expect(toggleBtn).ToHaveAttributeAsync("aria-expanded", "false");
+        var recollapsedBox = await descEl.BoundingBoxAsync();
+        Assert.IsNotNull(recollapsedBox);
+        Assert.IsLessThan(110.0, recollapsedBox.Height);
+
+        await Page.EmulateMediaAsync(new() { Media = Media.Print });
+        await Expect(toggleBtn).ToBeHiddenAsync();
+        var printMetrics = await Page.EvaluateAsync<double[]>(
+            """
+            () => {
+                const desc = document.querySelector('.recipe-description');
+                return [desc.scrollHeight, desc.clientHeight];
+            }
+            """
+        );
+        Assert.IsLessThanOrEqualTo(
+            printMetrics[1] + 2.0,
+            printMetrics[0],
+            $"Expected print media description to be unclamped (scrollHeight={printMetrics[0]}, clientHeight={printMetrics[1]})."
+        );
+        await Page.EmulateMediaAsync(new() { Media = Media.Screen });
+
+        // 3. Mobile (360x740) short description: no toggle button rendered
+        await Page.GotoAsync($"{ServerUrl}/recipes/{shortRecipeId}");
+        await Expect(descEl).ToBeVisibleAsync();
+        await Expect(toggleBtn).ToBeHiddenAsync();
+        await Expect(toggleBtn).ToHaveCountAsync(0);
+
+        // 4. Public Share View (/share/{token}): full-width on desktop, collapsible on mobile 360px
+        var shareToken = await Page.EvaluateAsync<string>(
+            """
+            async (recipeId) => {
+                const tokenKey = Object.keys(localStorage).find(k => k.endsWith('-token'));
+                const authToken = tokenKey ? localStorage.getItem(tokenKey) : null;
+                const res = await fetch(`/api/recipes/${recipeId}/shares`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${authToken}`
+                    },
+                    body: JSON.stringify({ label: 'Description Test Share', includeCookLogs: false })
+                });
+                const text = await res.text();
+                if (!res.ok) return 'ERROR ' + res.status + ': ' + text;
+                return JSON.parse(text).token;
+            }
+            """,
+            longRecipeId
+        );
+        Assert.IsFalse(shareToken.StartsWith("ERROR", StringComparison.Ordinal), shareToken);
+
+        await Page.SetViewportSizeAsync(1280, 720);
+        await Page.GotoAsync($"{ServerUrl}/share/{shareToken}");
+        await Expect(descEl).ToBeVisibleAsync();
+        await Expect(toggleBtn).ToBeHiddenAsync();
+
+        var shareDesktopWidth = await Page.EvaluateAsync<double>(
+            "() => document.querySelector('.recipe-description').getBoundingClientRect().width"
+        );
+        Assert.IsGreaterThan(
+            900.0,
+            shareDesktopWidth,
+            $"Expected public share desktop description width > 900px, got {shareDesktopWidth}px."
+        );
+
+        await Page.SetViewportSizeAsync(360, 740);
+        await Expect(toggleBtn).ToBeVisibleAsync();
+        await Expect(toggleBtn).ToContainTextAsync("Show more");
+        var shareCollapsedMetrics = await Page.EvaluateAsync<double[]>(
+            """
+            () => {
+                const desc = document.querySelector('.recipe-description');
+                return [desc.scrollHeight, desc.clientHeight, document.documentElement.scrollWidth];
+            }
+            """
+        );
+        Assert.IsGreaterThan(shareCollapsedMetrics[1] + 50.0, shareCollapsedMetrics[0]);
+        Assert.IsLessThanOrEqualTo(362.0, shareCollapsedMetrics[2]);
+
+        await toggleBtn.ClickAsync();
+        await Expect(toggleBtn).ToContainTextAsync("Show less");
+        await Expect(toggleBtn).ToHaveAttributeAsync("aria-expanded", "true");
+        var shareExpandedMetrics = await Page.EvaluateAsync<double[]>(
+            """
+            () => {
+                const desc = document.querySelector('.recipe-description');
+                return [desc.scrollHeight, desc.clientHeight];
+            }
+            """
+        );
+        Assert.IsLessThanOrEqualTo(shareExpandedMetrics[1] + 2.0, shareExpandedMetrics[0]);
+    }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
     public async Task DividedIngredients_RenderEachUseOnSeparateLines_DesktopAndMobile360px()
     {
         await RegisterAndLoginAsync();

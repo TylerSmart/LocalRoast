@@ -73,8 +73,8 @@
       </div>
     }
 
-    @if (recipe().description) {
-      <p class="recipe-description">{{ recipe().description }}</p>
+    @if (recipe().description; as description) {
+      <app-recipe-description [description]="description"></app-recipe-description>
     }
 
     <!-- Metadata Summary Row -->

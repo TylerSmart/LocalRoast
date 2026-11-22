@@ -1,0 +1,19 @@
+<p
+  #descriptionEl
+  [id]="descriptionId"
+  class="recipe-description"
+  [class.is-expanded]="isExpanded()"
+  [textContent]="description()"
+></p>
+@if (isOverflowing()) {
+  <button
+    type="button"
+    class="description-toggle-btn no-print"
+    (click)="toggleExpanded()"
+    [attr.aria-expanded]="isExpanded()"
+    [attr.aria-controls]="descriptionId"
+  >
+    <span>{{ isExpanded() ? 'Show less' : 'Show more' }}</span>
+    <mat-icon aria-hidden="true">{{ isExpanded() ? 'expand_less' : 'expand_more' }}</mat-icon>
+  </button>
+}

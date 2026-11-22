@@ -308,4 +308,34 @@ describe('PublicSharedRecipeComponent', () => {
     expect(brandImg).toBeTruthy();
     expect(brandImg?.getAttribute('src')).toBe(APP_BRAND_MARK_SRC);
   });
+
+  it('renders long descriptions with app-recipe-description expand/collapse toggle', () => {
+    const longDescription =
+      'Crisp pork carnitas braised slowly with citrus, garlic, and warm spices. '.repeat(4);
+    shareLinkServiceSpy.getPublicSharedRecipe.mockReturnValue(
+      of({
+        ...mockPublicRecipe,
+        description: longDescription,
+      }),
+    );
+
+    component.loadSharedRecipe('test-token');
+    fixture.detectChanges();
+
+    const hostEl = fixture.nativeElement as HTMLElement;
+    const descEl = hostEl.querySelector('app-recipe-description .recipe-description');
+    const toggleBtn = hostEl.querySelector(
+      'app-recipe-description .description-toggle-btn',
+    ) as HTMLButtonElement | null;
+
+    expect(descEl?.textContent).toBe(longDescription);
+    expect(toggleBtn).toBeTruthy();
+    expect(toggleBtn?.textContent).toContain('Show more');
+
+    toggleBtn!.click();
+    fixture.detectChanges();
+
+    expect(descEl?.classList.contains('is-expanded')).toBe(true);
+    expect(toggleBtn?.textContent).toContain('Show less');
+  });
 });
