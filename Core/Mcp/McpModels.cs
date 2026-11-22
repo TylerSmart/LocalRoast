@@ -235,3 +235,27 @@ public sealed record McpSetShoppingItemCheckedRequest(
     Guid? ItemId = null,
     [MaxLength(200)] string? ItemName = null
 );
+
+public sealed record McpListFoodItemsRequest(
+    string? Search = null,
+    bool? IsPantryStaple = null,
+    string? Category = null,
+    int Page = 1,
+    int PageSize = 50
+);
+
+public sealed record McpFoodItemUpdateInput(
+    Guid? FoodItemId = null,
+    [MaxLength(150)] string? CurrentName = null,
+    [MaxLength(150)] string? Name = null,
+    bool? IsPantryStaple = null,
+    [MaxLength(60)] string? Category = null,
+    IReadOnlyList<string>? Aliases = null
+);
+
+public sealed record McpUpdateFoodItemsRequest(IReadOnlyList<McpFoodItemUpdateInput> Items);
+
+public sealed record McpUpdateFoodItemsResultDto(
+    int UpdatedCount,
+    IReadOnlyList<FoodItemDto> UpdatedItems
+);

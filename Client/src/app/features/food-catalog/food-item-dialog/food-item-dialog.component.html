@@ -28,6 +28,20 @@
       </div>
     }
 
+    @if (isEdit() && data?.item; as existingItem) {
+      <div class="item-usage-summary">
+        <mat-icon aria-hidden="true">menu_book</mat-icon>
+        <span>
+          Used in {{ existingItem.referencedRecipeCount }}
+          {{ existingItem.referencedRecipeCount === 1 ? 'recipe' : 'recipes' }}
+          @if ((existingItem.referencedShoppingListItemCount ?? 0) > 0) {
+            · {{ existingItem.referencedShoppingListItemCount }} shopping list
+            {{ existingItem.referencedShoppingListItemCount === 1 ? 'item' : 'items' }}
+          }
+        </span>
+      </div>
+    }
+
     <!-- Item Name -->
     <mat-form-field appearance="outline" class="full-width" subscriptSizing="dynamic">
       <mat-label>Item Name</mat-label>

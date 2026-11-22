@@ -73,14 +73,15 @@ describe('PersonalAccessTokensPanelComponent', () => {
     expect(compiled.querySelector('.endpoint-url')?.textContent).toContain('/api/mcp');
   });
 
-  it('renders MCP capability chips for all 4 tool groups', () => {
+  it('renders MCP capability chips for all 5 tool groups', () => {
     const compiled = fixture.nativeElement as HTMLElement;
     const chips = compiled.querySelectorAll('.mcp-cap-chip');
-    expect(chips.length).toBe(4);
+    expect(chips.length).toBe(5);
     const chipText = Array.from(chips)
       .map((c) => c.textContent?.trim())
       .join(' ');
     expect(chipText).toContain('Cookbook & Search');
+    expect(chipText).toContain('Food Catalog');
     expect(chipText).toContain('Recipe Ingestion');
     expect(chipText).toContain('Meal Planning');
     expect(chipText).toContain('Live Shopping Lists');

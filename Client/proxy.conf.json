@@ -10,7 +10,9 @@
     "target": "http://localhost:5041",
     "secure": false,
     "changeOrigin": true,
-    "logLevel": "silent"
+    "logLevel": "silent",
+    "timeout": 600000,
+    "proxyTimeout": 600000
   },
   "/HealthCheck.svc": {
     "target": "http://localhost:5041",

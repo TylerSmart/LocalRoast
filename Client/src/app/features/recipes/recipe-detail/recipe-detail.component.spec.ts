@@ -8,6 +8,9 @@ import { RecipeDetailDto } from '../../../core/models/recipe.models';
 import { RecipeService } from '../../../core/services/recipe/recipe.service';
 import { IngestionService } from '../../../core/services/ingestion/ingestion.service';
 import { AiKitchenHelperService } from '../../../core/services/ai-helpers/ai-kitchen-helper.service';
+import { FoodCatalogService } from '../../../core/services/food-catalog/food-catalog.service';
+import { FoodItemDto } from '../../../core/models/food-catalog.models';
+import { FoodItemDialogComponent } from '../../food-catalog/food-item-dialog/food-item-dialog.component';
 import { RecipeShareDialogComponent } from '../recipe-share-dialog/recipe-share-dialog.component';
 import { KitchenQuestionDialogComponent } from '../kitchen-question-dialog/kitchen-question-dialog.component';
 import { RecipeDetailComponent } from './recipe-detail.component';
@@ -137,6 +140,23 @@ describe('RecipeDetailComponent', () => {
     open: vi.fn(),
   };
 
+  const sampleFoodItem: FoodItemDto = {
+    id: 'f-1',
+    name: 'Egg Noodles',
+    isPantryStaple: false,
+    aliases: ['Wide Egg Noodles'],
+    referencedRecipeCount: 3,
+    referencedShoppingListItemCount: 1,
+    category: 'PantryDryGoods',
+    createdAt: '2026-01-01T00:00:00Z',
+    modifiedAt: '2026-01-01T00:00:00Z',
+  };
+
+  const mockFoodCatalogService = {
+    getFoodItemById: vi.fn().mockReturnValue(of(sampleFoodItem)),
+  };
+
+  const mockAiIsAvailable = signal(true);
   const mockHasRefinementModel = signal(true);
   const mockRefineModel = signal<string | null>('gemma4:26b-a4b');
 
@@ -155,14 +175,17 @@ describe('RecipeDetailComponent', () => {
       latencyMs: 25,
       refineModel: 'gemma4:26b-a4b',
     }),
-    isAvailable: signal(true),
+    isAvailable: mockAiIsAvailable,
     refineModel: mockRefineModel,
     hasRefinementModel: mockHasRefinementModel,
   };
 
   beforeEach(async () => {
+    mockAiIsAvailable.set(true);
     mockHasRefinementModel.set(true);
     mockRefineModel.set('gemma4:26b-a4b');
+    mockFoodCatalogService.getFoodItemById.mockClear();
+    mockFoodCatalogService.getFoodItemById.mockReturnValue(of(sampleFoodItem));
     mockRecipeService.refineRecipeNow.mockClear();
     mockRecipeService.dismissRefinementFailure.mockClear();
     await TestBed.configureTestingModule({
@@ -171,6 +194,7 @@ describe('RecipeDetailComponent', () => {
         provideRouter([]),
         { provide: RecipeService, useValue: mockRecipeService },
         { provide: IngestionService, useValue: mockIngestionService },
+        { provide: FoodCatalogService, useValue: mockFoodCatalogService },
         { provide: MatDialog, useValue: mockDialog },
         { provide: MatSnackBar, useValue: mockSnackBar },
         { provide: AiKitchenHelperService, useValue: mockAiHelperService },
@@ -185,10 +209,10 @@ describe('RecipeDetailComponent', () => {
 
   it('opens Kitchen AI with the selected ingredient, step, or recipe', () => {
     mockDialog.open.mockClear();
-    const ingredientAiMenuBtn: HTMLButtonElement =
-      fixture.nativeElement.querySelector('.ingredient-ai-menu-btn');
-    expect(ingredientAiMenuBtn).toBeTruthy();
-    ingredientAiMenuBtn.click();
+    const ingredientMenuBtn: HTMLButtonElement =
+      fixture.nativeElement.querySelector('.ingredient-menu-btn');
+    expect(ingredientMenuBtn).toBeTruthy();
+    ingredientMenuBtn.click();
     fixture.detectChanges();
 
     const ingredientButton = document.querySelector('.explain-ing-btn') as HTMLButtonElement;
@@ -661,6 +685,73 @@ describe('RecipeDetailComponent', () => {
     expect(component['targetServings']()).toBe(6);
     expect(component['targetSystem']()).toBe('UsCustomary');
     expect(component['checkedIngredients']()['i-1']).toBe(true);
+  });
+
+  it('opens FoodItemDialogComponent from ingredient menu and updates ingredient pantry status in place', () => {
+    const updatedFood: FoodItemDto = {
+      ...sampleFoodItem,
+      name: 'Artisan Egg Noodles',
+      isPantryStaple: true,
+    };
+    mockDialog.open.mockReturnValueOnce({ afterClosed: () => of(updatedFood) });
+
+    component['recipe'].set({
+      ...sampleRecipe,
+      ingredients: [
+        { ...sampleRecipe.ingredients[0], foodItemId: 'f-1', foodItemName: 'Egg Noodles' },
+        sampleRecipe.ingredients[1],
+      ],
+    });
+    fixture.detectChanges();
+
+    const firstRow = fixture.nativeElement.querySelector('.ingredient-row') as HTMLElement;
+    expect(firstRow.querySelector('.pantry-tag')).toBeNull();
+
+    const menuBtn = firstRow.querySelector('.ingredient-menu-btn') as HTMLButtonElement;
+    expect(menuBtn).toBeTruthy();
+    menuBtn.click();
+    fixture.detectChanges();
+
+    const editFoodBtn = document.querySelector('.edit-food-item-btn') as HTMLButtonElement;
+    expect(editFoodBtn).toBeTruthy();
+    editFoodBtn.click();
+    fixture.detectChanges();
+
+    expect(mockFoodCatalogService.getFoodItemById).toHaveBeenCalledWith('f-1');
+    expect(mockDialog.open).toHaveBeenLastCalledWith(
+      FoodItemDialogComponent,
+      expect.objectContaining({
+        data: { item: sampleFoodItem },
+      }),
+    );
+    expect(component['recipe']()?.ingredients[0].isPantryStaple).toBe(true);
+    expect(component['recipe']()?.ingredients[0].foodItemName).toBe('Artisan Egg Noodles');
+    expect(firstRow.querySelector('.pantry-tag')).toBeTruthy();
+  });
+
+  it('keeps ingredient menu visible for linked food items when Kitchen AI is unavailable and hides AI actions', () => {
+    mockAiIsAvailable.set(false);
+    component['recipe'].set({
+      ...sampleRecipe,
+      ingredients: [
+        { ...sampleRecipe.ingredients[0], foodItemId: 'f-1', foodItemName: 'Egg Noodles' },
+        { ...sampleRecipe.ingredients[1], foodItemId: null, foodItemName: null },
+      ],
+    });
+    fixture.detectChanges();
+
+    const rows = fixture.nativeElement.querySelectorAll('.ingredient-row');
+    const firstMenuBtn = rows[0].querySelector('.ingredient-menu-btn') as HTMLButtonElement | null;
+    const secondMenuBtn = rows[1].querySelector('.ingredient-menu-btn') as HTMLButtonElement | null;
+    expect(firstMenuBtn).toBeTruthy();
+    expect(secondMenuBtn).toBeNull();
+
+    firstMenuBtn!.click();
+    fixture.detectChanges();
+
+    expect(document.querySelector('.edit-food-item-btn')).toBeTruthy();
+    expect(document.querySelector('.substitute-ing-btn')).toBeNull();
+    expect(document.querySelector('.explain-ing-btn')).toBeNull();
   });
 
   it('renders long descriptions with app-recipe-description expand/collapse toggle', () => {

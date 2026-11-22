@@ -81,4 +81,54 @@ describe('FoodItemDialogComponent', () => {
       expect.objectContaining({ category: 'Baking' }),
     );
   });
+
+  it('renders usage summary and submits updateFoodItem in edit mode', () => {
+    const existingItem: FoodItemDto = {
+      id: 'f-edit-1',
+      name: 'Kosher Salt',
+      isPantryStaple: true,
+      aliases: ['Salt'],
+      referencedRecipeCount: 4,
+      referencedShoppingListItemCount: 2,
+      category: 'SpicesAndSeasonings',
+      createdAt: '2026-01-01T00:00:00Z',
+      modifiedAt: '2026-01-01T00:00:00Z',
+    };
+    const updatedItem: FoodItemDto = { ...existingItem, isPantryStaple: false };
+    mockCatalogService.updateFoodItem.mockReturnValue(of(updatedItem));
+
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      imports: [FoodItemDialogComponent],
+      providers: [
+        { provide: MAT_DIALOG_DATA, useValue: { item: existingItem } satisfies FoodItemDialogData },
+        { provide: MatDialogRef, useValue: mockDialogRef },
+        { provide: FoodCatalogService, useValue: mockCatalogService },
+      ],
+    }).compileComponents();
+
+    const editFixture = TestBed.createComponent(FoodItemDialogComponent);
+    const editComponent = editFixture.componentInstance;
+    editFixture.detectChanges();
+
+    const usageBanner = editFixture.nativeElement.querySelector(
+      '.item-usage-summary',
+    ) as HTMLElement | null;
+    expect(usageBanner?.textContent).toContain('Used in 4 recipes');
+    expect(usageBanner?.textContent).toContain('2 shopping list items');
+
+    editComponent['form'].controls.isPantryStaple.setValue(false);
+    editComponent.onSave();
+
+    expect(mockCatalogService.updateFoodItem).toHaveBeenCalledWith(
+      'f-edit-1',
+      expect.objectContaining({
+        name: 'Kosher Salt',
+        isPantryStaple: false,
+        category: 'SpicesAndSeasonings',
+        aliases: ['Salt'],
+      }),
+    );
+    expect(mockDialogRef.close).toHaveBeenCalledWith(updatedItem);
+  });
 });

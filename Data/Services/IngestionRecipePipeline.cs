@@ -424,11 +424,7 @@ public sealed partial class IngestionRecipePipeline(
                                 {
                                     ProposedFoodItemName = updatedCanonical,
                                     SuggestedCategory = updatedCategory,
-                                    SuggestedIsPantryStaple =
-                                        FoodCategoryClassifier.IsLikelyPantryStaple(
-                                            updatedCanonical,
-                                            updatedCategory
-                                        ),
+                                    SuggestedIsPantryStaple = false,
                                 };
                             }
                         }
@@ -2178,7 +2174,6 @@ public sealed partial class IngestionRecipePipeline(
             withinRecipeNewFoods[canonical] = (canonical, category);
         }
 
-        var isPantry = FoodCategoryClassifier.IsLikelyPantryStaple(canonical, category);
         return new ReconciledMatch(
             IsRecipeReference: false,
             MatchedFoodItemId: null,
@@ -2187,7 +2182,7 @@ public sealed partial class IngestionRecipePipeline(
             CreateNewFoodItem: true,
             ProposedFoodItemName: canonical,
             SuggestedCategory: category,
-            SuggestedIsPantryStaple: isPantry,
+            SuggestedIsPantryStaple: false,
             ReferencedRecipeTitle: null,
             MatchedRecipeId: null,
             MatchedRecipeTitle: null
@@ -3193,7 +3188,6 @@ public sealed partial class IngestionRecipePipeline(
                 rawPrepNote: ing.PrepNote,
                 canonicalHint: ing.ExternalCanonicalFoodName,
                 categoryHint: ing.ExternalCategory,
-                isPantryHint: ing.ExternalIsPantryStaple,
                 isRecipeReferenceHint: ing.ExternalIsRecipeReference,
                 referencedRecipeTitleHint: ing.ExternalReferencedRecipeTitle,
                 sourceText: sourceText,
@@ -3232,7 +3226,6 @@ public sealed partial class IngestionRecipePipeline(
                     rawPrepNote: rep.PrepNote,
                     canonicalHint: extRep?.CanonicalFoodName,
                     categoryHint: extRep?.Category,
-                    isPantryHint: extRep?.IsPantryStaple,
                     isRecipeReferenceHint: false,
                     referencedRecipeTitleHint: null,
                     sourceText: sourceText,
@@ -3256,7 +3249,6 @@ public sealed partial class IngestionRecipePipeline(
         string? rawPrepNote,
         string? canonicalHint,
         string? categoryHint,
-        bool? isPantryHint,
         bool isRecipeReferenceHint,
         string? referencedRecipeTitleHint,
         string sourceText,
@@ -3404,14 +3396,6 @@ public sealed partial class IngestionRecipePipeline(
             withinRecipeNewFoods,
             allowRecipeReference
         );
-
-        if (reconciled.IsNewFoodItem && !reconciled.IsRecipeReference && isPantryHint.HasValue)
-        {
-            reconciled = reconciled with
-            {
-                SuggestedIsPantryStaple = isPantryHint.Value || reconciled.SuggestedIsPantryStaple,
-            };
-        }
 
         return reconciled;
     }

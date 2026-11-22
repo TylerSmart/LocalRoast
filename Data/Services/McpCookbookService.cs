@@ -480,7 +480,7 @@ public sealed class McpCookbookService(
                         {
                             Name = proposedName,
                             NormalizedName = normName,
-                            IsPantryStaple = ing.IsPantryStaple,
+                            IsPantryStaple = false,
                             Category =
                                 ing.Category ?? FoodCategoryClassifier.Classify(proposedName),
                         };

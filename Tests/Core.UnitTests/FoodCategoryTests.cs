@@ -115,30 +115,6 @@ public sealed class FoodCategoryTests
     }
 
     [TestMethod]
-    [DataRow("extra-virgin olive oil", FoodCategory.CondimentsAndSauces, true)]
-    [DataRow("vegetable oil", FoodCategory.CondimentsAndSauces, true)]
-    [DataRow("baking soda", FoodCategory.Baking, true)]
-    [DataRow("water", FoodCategory.Other, true)]
-    [DataRow("black pepper", FoodCategory.SpicesAndSeasonings, true)]
-    [DataRow("sugar snap peas", FoodCategory.Produce, false)]
-    [DataRow("mustard greens", FoodCategory.Produce, false)]
-    [DataRow("watercress", FoodCategory.Produce, false)]
-    [DataRow("mayonnaise", FoodCategory.CondimentsAndSauces, false)]
-    [DataRow("tahini", FoodCategory.PantryDryGoods, false)]
-    [DataRow("egg", FoodCategory.DairyAndEggs, false)]
-    [DataRow("ice cube", FoodCategory.Beverages, true)]
-    [DataRow("chive", FoodCategory.Produce, false)]
-    [DataRow("Kashmiri chile powder", FoodCategory.SpicesAndSeasonings, true)]
-    public void IsLikelyPantryStaple_ClassifiesStaplesWithoutProduceFalsePositives(
-        string foodName,
-        FoodCategory category,
-        bool expected
-    )
-    {
-        Assert.AreEqual(expected, FoodCategoryClassifier.IsLikelyPantryStaple(foodName, category));
-    }
-
-    [TestMethod]
     [DataRow("ice cube", FoodCategory.Beverages)]
     [DataRow("chive", FoodCategory.Produce)]
     [DataRow("lemon", FoodCategory.Produce)]

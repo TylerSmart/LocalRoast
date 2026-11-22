@@ -113,7 +113,13 @@ public sealed class McpServerIntegrationTests
         Assert.IsNotNull(tools);
         var toolNames = tools.Select(t => t.Name).ToHashSet();
 
-        Assert.AreEqual(16, toolNames.Count, "Expected exactly 16 MCP tools");
+        Assert.AreEqual(20, toolNames.Count, "Expected exactly 20 MCP tools");
+
+        // Food Catalog tools
+        Assert.IsTrue(toolNames.Contains("list_food_items"), "Missing list_food_items");
+        Assert.IsTrue(toolNames.Contains("create_food_item"), "Missing create_food_item");
+        Assert.IsTrue(toolNames.Contains("update_food_items"), "Missing update_food_items");
+        Assert.IsTrue(toolNames.Contains("merge_food_items"), "Missing merge_food_items");
 
         // Milestone 2 tools
         Assert.IsTrue(toolNames.Contains("search_recipes"), "Missing search_recipes");
@@ -534,6 +540,153 @@ public sealed class McpServerIntegrationTests
         Assert.IsFalse(detailRes.IsError == true);
         var detailJson = ((TextContentBlock)detailRes.Content[0]).Text;
         StringAssert.Contains(detailJson, "MCP Test Toast");
+    }
+
+    [TestMethod]
+    public async Task McpClient_FoodCatalogTools_CreateListBatchUpdateAndMerge_EndToEnd()
+    {
+        await RegisterAndAuthorizeAsync(
+            "foodcatalogmcp@example.com",
+            "foodcatalogmcp",
+            "Password123!"
+        );
+        var pat = await CreatePatAsync("Food Catalog Assistant");
+
+        var testClient = _factory.CreateClient();
+        var transport = new HttpClientTransport(
+            new HttpClientTransportOptions
+            {
+                Endpoint = new Uri(testClient.BaseAddress!, "/api/mcp"),
+                TransportMode = HttpTransportMode.StreamableHttp,
+                AdditionalHeaders = new Dictionary<string, string>
+                {
+                    ["Authorization"] = $"Bearer {pat.PlaintextToken}",
+                },
+            },
+            httpClient: testClient,
+            ownsHttpClient: false
+        );
+
+        await using var mcpClient = await McpClient.CreateAsync(transport);
+
+        // 1. Create two pantry staple items and one duplicate
+        var saltCreate = await mcpClient.CallToolAsync(
+            "create_food_item",
+            new Dictionary<string, object?>
+            {
+                ["name"] = "Kosher Salt",
+                ["isPantryStaple"] = true,
+                ["category"] = "SpicesAndSeasonings",
+                ["aliases"] = new[] { "Coarse Salt" },
+            }
+        );
+        Assert.IsFalse(saltCreate.IsError == true);
+        using var saltDoc = JsonDocument.Parse(((TextContentBlock)saltCreate.Content[0]).Text);
+        var saltId = saltDoc.RootElement.GetProperty("id").GetGuid();
+
+        var oilCreate = await mcpClient.CallToolAsync(
+            "create_food_item",
+            new Dictionary<string, object?>
+            {
+                ["name"] = "Extra-Virgin Olive Oil",
+                ["isPantryStaple"] = true,
+                ["category"] = "CondimentsAndSauces",
+                ["aliases"] = new[] { "EVOO" },
+            }
+        );
+        Assert.IsFalse(oilCreate.IsError == true);
+        using var oilDoc = JsonDocument.Parse(((TextContentBlock)oilCreate.Content[0]).Text);
+        var oilId = oilDoc.RootElement.GetProperty("id").GetGuid();
+
+        var dupCreate = await mcpClient.CallToolAsync(
+            "create_food_item",
+            new Dictionary<string, object?>
+            {
+                ["name"] = "Olive Oil",
+                ["isPantryStaple"] = false,
+                ["category"] = "CondimentsAndSauces",
+            }
+        );
+        Assert.IsFalse(dupCreate.IsError == true);
+        using var dupDoc = JsonDocument.Parse(((TextContentBlock)dupCreate.Content[0]).Text);
+        var dupId = dupDoc.RootElement.GetProperty("id").GetGuid();
+
+        // 2. List only pantry staples
+        var listStaples = await mcpClient.CallToolAsync(
+            "list_food_items",
+            new Dictionary<string, object?>
+            {
+                ["isPantryStaple"] = true,
+                ["page"] = 1,
+                ["pageSize"] = 50,
+            }
+        );
+        Assert.IsFalse(listStaples.IsError == true);
+        using var listDoc = JsonDocument.Parse(((TextContentBlock)listStaples.Content[0]).Text);
+        Assert.AreEqual(2, listDoc.RootElement.GetProperty("totalCount").GetInt32());
+
+        // 3. Batch toggle pantry staple off while preserving aliases & categories
+        var batchUpdate = await mcpClient.CallToolAsync(
+            "update_food_items",
+            new Dictionary<string, object?>
+            {
+                ["items"] = new object[]
+                {
+                    new Dictionary<string, object?>
+                    {
+                        ["foodItemId"] = saltId,
+                        ["isPantryStaple"] = false,
+                    },
+                    new Dictionary<string, object?>
+                    {
+                        ["currentName"] = "EVOO",
+                        ["isPantryStaple"] = false,
+                    },
+                },
+            }
+        );
+        Assert.IsFalse(batchUpdate.IsError == true);
+        using var updateDoc = JsonDocument.Parse(((TextContentBlock)batchUpdate.Content[0]).Text);
+        Assert.AreEqual(2, updateDoc.RootElement.GetProperty("updatedCount").GetInt32());
+        var updatedArray = updateDoc.RootElement.GetProperty("updatedItems");
+        foreach (var itemEl in updatedArray.EnumerateArray())
+        {
+            Assert.IsFalse(itemEl.GetProperty("isPantryStaple").GetBoolean());
+        }
+
+        var remainingStaples = await mcpClient.CallToolAsync(
+            "list_food_items",
+            new Dictionary<string, object?> { ["isPantryStaple"] = true }
+        );
+        Assert.IsFalse(remainingStaples.IsError == true);
+        using var remainingDoc = JsonDocument.Parse(
+            ((TextContentBlock)remainingStaples.Content[0]).Text
+        );
+        Assert.AreEqual(0, remainingDoc.RootElement.GetProperty("totalCount").GetInt32());
+
+        // Verify aliases & categories were preserved
+        var searchSalt = await mcpClient.CallToolAsync(
+            "list_food_items",
+            new Dictionary<string, object?> { ["search"] = "Coarse Salt" }
+        );
+        Assert.IsFalse(searchSalt.IsError == true);
+        var searchSaltJson = ((TextContentBlock)searchSalt.Content[0]).Text;
+        StringAssert.Contains(searchSaltJson, "Kosher Salt");
+        StringAssert.Contains(searchSaltJson, "SpicesAndSeasonings");
+
+        // 4. Merge duplicate item into Extra-Virgin Olive Oil
+        var mergeRes = await mcpClient.CallToolAsync(
+            "merge_food_items",
+            new Dictionary<string, object?>
+            {
+                ["targetFoodItemId"] = oilId,
+                ["sourceFoodItemIds"] = new[] { dupId },
+                ["keepSourceNamesAsAliases"] = true,
+            }
+        );
+        Assert.IsFalse(mergeRes.IsError == true);
+        var mergeJson = ((TextContentBlock)mergeRes.Content[0]).Text;
+        StringAssert.Contains(mergeJson, "Olive Oil");
     }
 
     private async Task<AuthResponse> RegisterAndAuthorizeAsync(

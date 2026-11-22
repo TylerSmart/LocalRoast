@@ -558,45 +558,65 @@
                         <mat-icon>swap_horiz</mat-icon>
                       </button>
                     }
-                    @if (aiHelper.isAvailable()) {
+                    @if (item.ingredient.foodItemId || aiHelper.isAvailable()) {
                       <button
                         type="button"
                         mat-icon-button
-                        class="ingredient-ai-menu-btn no-print"
-                        [matMenuTriggerFor]="ingredientAiMenu"
-                        matTooltip="Kitchen AI options"
-                        [attr.aria-label]="'Kitchen AI options for ' + item.ingredient.displayName"
+                        class="ingredient-menu-btn no-print"
+                        [matMenuTriggerFor]="ingredientMenu"
+                        matTooltip="Ingredient options"
+                        [attr.aria-label]="'Options for ' + item.ingredient.displayName"
                       >
-                        <mat-icon>auto_awesome</mat-icon>
+                        <mat-icon>more_vert</mat-icon>
                       </button>
-                      <mat-menu #ingredientAiMenu="matMenu" xPosition="before">
-                        @if (!item.ingredient.linkedRecipeId) {
+                      <mat-menu #ingredientMenu="matMenu" xPosition="before">
+                        @if (item.ingredient.foodItemId; as foodItemId) {
                           <button
                             mat-menu-item
                             type="button"
-                            class="substitute-ing-btn"
-                            aria-label="Suggest ingredient substitution"
-                            (click)="openIngredientSubstitution(item)"
+                            class="edit-food-item-btn"
+                            [disabled]="openingFoodItemId() === foodItemId"
+                            [attr.aria-label]="
+                              'View or edit food item for ' + item.ingredient.displayName
+                            "
+                            (click)="openFoodItemDialog(foodItemId)"
                           >
-                            <mat-icon>swap_horiz</mat-icon>
-                            <span>Suggest Substitution</span>
+                            <mat-icon>inventory_2</mat-icon>
+                            <span>View / Edit Food Item</span>
                           </button>
                         }
-                        <button
-                          mat-menu-item
-                          type="button"
-                          class="explain-ing-btn"
-                          [attr.aria-label]="'Ask AI about ' + item.ingredient.displayName"
-                          (click)="
-                            openKitchenQuestion({
-                              recipeIngredientId: item.ingredient.id,
-                              ingredientName: item.ingredient.displayName,
-                            })
-                          "
-                        >
-                          <mat-icon>help_outline</mat-icon>
-                          <span>Ask AI About Ingredient</span>
-                        </button>
+                        @if (item.ingredient.foodItemId && aiHelper.isAvailable()) {
+                          <mat-divider></mat-divider>
+                        }
+                        @if (aiHelper.isAvailable()) {
+                          @if (!item.ingredient.linkedRecipeId) {
+                            <button
+                              mat-menu-item
+                              type="button"
+                              class="substitute-ing-btn"
+                              aria-label="Suggest ingredient substitution"
+                              (click)="openIngredientSubstitution(item)"
+                            >
+                              <mat-icon>swap_horiz</mat-icon>
+                              <span>Suggest Substitution</span>
+                            </button>
+                          }
+                          <button
+                            mat-menu-item
+                            type="button"
+                            class="explain-ing-btn"
+                            [attr.aria-label]="'Ask AI about ' + item.ingredient.displayName"
+                            (click)="
+                              openKitchenQuestion({
+                                recipeIngredientId: item.ingredient.id,
+                                ingredientName: item.ingredient.displayName,
+                              })
+                            "
+                          >
+                            <mat-icon>help_outline</mat-icon>
+                            <span>Ask AI About Ingredient</span>
+                          </button>
+                        }
                       </mat-menu>
                     }
                   </div>

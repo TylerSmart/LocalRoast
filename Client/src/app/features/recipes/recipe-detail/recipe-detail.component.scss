@@ -582,13 +582,14 @@
   }
 }
 
-.ingredient-ai-menu-btn {
+.ingredient-menu-btn {
   flex-shrink: 0;
   opacity: 0.82;
-  color: var(--mat-sys-primary);
+  color: var(--mat-sys-on-surface-variant);
 
   &:hover {
     opacity: 1;
+    color: var(--mat-sys-on-surface);
   }
 
   mat-icon {

@@ -269,7 +269,8 @@ public sealed class FoodItemMergeAndAiHelpersE2ETests : E2ETestBase
         string ingredientName,
         string instruction = "Heat skillet and cook ingredients thoroughly for 5 minutes.",
         int baseServings = 4,
-        string? preparationNote = null
+        string? preparationNote = null,
+        bool linkFoodCatalog = false
     )
     {
         await Page.Locator("nav.desktop-nav a", new() { HasText = "Cookbook" }).ClickAsync();
@@ -280,6 +281,14 @@ public sealed class FoodItemMergeAndAiHelpersE2ETests : E2ETestBase
         await Page.Locator("input[formcontrolname='baseServings']")
             .FillAsync(baseServings.ToString());
         await Page.Locator("input[formcontrolname='displayName']").First.FillAsync(ingredientName);
+        if (linkFoodCatalog)
+        {
+            await Page.Locator("button.create-catalog-btn").First.ClickAsync();
+            var foodDialog = Page.Locator("app-food-item-dialog");
+            await Expect(foodDialog).ToBeVisibleAsync();
+            await foodDialog.Locator("button", new() { HasText = "Create Item" }).ClickAsync();
+            await Expect(foodDialog).Not.ToBeVisibleAsync();
+        }
         await Page.Locator("input[formcontrolname='quantity']").First.FillAsync("1");
         if (preparationNote is not null)
         {
@@ -387,16 +396,17 @@ public sealed class FoodItemMergeAndAiHelpersE2ETests : E2ETestBase
         await RegisterAndLoginAsync();
         await ConfigureLlmProviderAsync(mockServer.BaseUrl);
 
-        // Create recipe with ingredient Buttermilk
+        // Create recipe with ingredient Buttermilk (linked to Food Catalog)
         var recipeUrl = await CreateRecipeWithIngredientAsync(
             "Southern Fluffy Biscuits",
-            "Buttermilk"
+            "Buttermilk",
+            linkFoodCatalog: true
         );
 
-        // 1. Verify ingredient AI menu is visible when AI host is online and offers substitution
-        var aiMenuBtn = Page.Locator(".ingredient-ai-menu-btn").First;
-        await Expect(aiMenuBtn).ToBeVisibleAsync();
-        await aiMenuBtn.ClickAsync();
+        // 1. Verify ingredient menu is visible when AI host is online and offers substitution
+        var ingredientMenuBtn = Page.Locator(".ingredient-menu-btn").First;
+        await Expect(ingredientMenuBtn).ToBeVisibleAsync();
+        await ingredientMenuBtn.ClickAsync();
 
         var subBtn = Page.Locator("button.substitute-ing-btn");
         await Expect(subBtn).ToBeVisibleAsync();
@@ -443,9 +453,76 @@ public sealed class FoodItemMergeAndAiHelpersE2ETests : E2ETestBase
         // Invalidate status by reloading recipe detail page
         await Page.ReloadAsync();
 
-        // Verify ingredient AI menu cleanly hides when offline
-        await Expect(Page.Locator(".ingredient-ai-menu-btn")).Not.ToBeVisibleAsync();
+        // Verify ingredient menu remains available for food item editing while AI options cleanly hide when offline
+        var offlineMenuBtn = Page.Locator(".ingredient-menu-btn").First;
+        await Expect(offlineMenuBtn).ToBeVisibleAsync();
+        await offlineMenuBtn.ClickAsync();
+        await Expect(Page.Locator("button.edit-food-item-btn")).ToBeVisibleAsync();
+        await Expect(Page.Locator("button.substitute-ing-btn")).Not.ToBeVisibleAsync();
+        await Expect(Page.Locator("button.explain-ing-btn")).Not.ToBeVisibleAsync();
+        await Page.Keyboard.PressAsync("Escape");
+        await Expect(Page.Locator("button.edit-food-item-btn")).Not.ToBeVisibleAsync();
         await Expect(Page.Locator(".explain-step-btn")).Not.ToBeVisibleAsync();
+    }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task RecipeDetail_ViewAndEditFoodItemFromIngredientMenu_UpdatesPantryBadgeOnDesktopAndMobile()
+    {
+        await RegisterAndLoginAsync();
+
+        var uniqueSalt = $"Flaky Sea Salt {Guid.NewGuid():N}"[..24];
+        var uniqueRecipe = $"Salted Pasta {Guid.NewGuid():N}"[..22];
+        var foodItemId = await CreateFoodItemViaApiAsync(uniqueSalt, isPantryStaple: false);
+        var recipeId = await CreateRecipeWithIngredientViaApiAsync(
+            uniqueRecipe,
+            uniqueSalt,
+            foodItemId
+        );
+
+        await Page.GotoAsync($"{ServerUrl}/recipes/{recipeId}");
+        var row = Page.Locator(".ingredient-row").First;
+        await Expect(row).ToBeVisibleAsync();
+        await Expect(row.Locator(".pantry-tag")).Not.ToBeVisibleAsync();
+
+        await row.Locator(".ingredient-menu-btn").ClickAsync();
+        await Page.Locator("button.edit-food-item-btn").ClickAsync();
+
+        var dialog = Page.Locator("app-food-item-dialog");
+        await Expect(dialog).ToBeVisibleAsync();
+        await Expect(dialog).ToContainTextAsync("Used in 1 recipe");
+
+        await dialog
+            .GetByRole(AriaRole.Checkbox, new() { Name = "Always stocked pantry staple" })
+            .ClickAsync();
+        await dialog.Locator("button", new() { HasText = "Save Changes" }).ClickAsync();
+        await Expect(dialog).Not.ToBeVisibleAsync();
+
+        await Expect(row.Locator(".pantry-tag")).ToBeVisibleAsync();
+
+        await Page.SetViewportSizeAsync(360, 740);
+        await row.Locator(".ingredient-menu-btn").ClickAsync();
+        await Page.Locator("button.edit-food-item-btn").ClickAsync();
+        await Expect(dialog).ToBeVisibleAsync();
+
+        Assert.IsLessThanOrEqualTo(
+            await dialog.EvaluateAsync<int>("el => el.clientWidth"),
+            await dialog.EvaluateAsync<int>("el => el.scrollWidth"),
+            "Food item dialog must fit on a 360px mobile viewport."
+        );
+
+        await dialog
+            .GetByRole(AriaRole.Checkbox, new() { Name = "Always stocked pantry staple" })
+            .ClickAsync();
+        await dialog.Locator("button", new() { HasText = "Save Changes" }).ClickAsync();
+        await Expect(dialog).Not.ToBeVisibleAsync();
+
+        await Expect(row.Locator(".pantry-tag")).Not.ToBeVisibleAsync();
+        Assert.IsLessThanOrEqualTo(
+            360,
+            await Page.EvaluateAsync<int>("() => document.documentElement.scrollWidth"),
+            "Recipe detail must not overflow horizontally at 360px."
+        );
     }
 
     [TestMethod]
@@ -465,7 +542,7 @@ public sealed class FoodItemMergeAndAiHelpersE2ETests : E2ETestBase
         {
             await Page.SetViewportSizeAsync(width, 740);
             var row = Page.Locator(".ingredient-row").First;
-            var aiMenu = row.Locator(".ingredient-ai-menu-btn");
+            var aiMenu = row.Locator(".ingredient-menu-btn");
             await Expect(aiMenu).ToBeVisibleAsync();
             var checkboxBox = await row.Locator("mat-checkbox").BoundingBoxAsync();
             var aiMenuBox = await aiMenu.BoundingBoxAsync();
@@ -506,7 +583,7 @@ public sealed class FoodItemMergeAndAiHelpersE2ETests : E2ETestBase
             await Expect(dialog).ToHaveCountAsync(0);
         }
 
-        await Page.Locator(".ingredient-ai-menu-btn").First.ClickAsync();
+        await Page.Locator(".ingredient-menu-btn").First.ClickAsync();
         await Page.Locator("button.explain-ing-btn").ClickAsync();
         await Expect(dialog.Locator(".answer-text")).ToContainTextAsync("thin matchsticks");
         Assert.IsNotNull(mockServer.LastKitchenPrompt);
@@ -540,7 +617,7 @@ public sealed class FoodItemMergeAndAiHelpersE2ETests : E2ETestBase
         await CloseKitchenDialogAsync();
 
         await Page.SetViewportSizeAsync(360, 740);
-        await Page.Locator(".ingredient-ai-menu-btn").First.ClickAsync();
+        await Page.Locator(".ingredient-menu-btn").First.ClickAsync();
         await Page.Locator("button.explain-ing-btn").ClickAsync();
         await Expect(dialog.Locator(".answer-text")).ToBeVisibleAsync();
         Assert.IsLessThanOrEqualTo(

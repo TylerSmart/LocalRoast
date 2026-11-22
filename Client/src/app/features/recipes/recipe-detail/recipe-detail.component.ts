@@ -31,6 +31,12 @@ import {
 import { RecipeService } from '../../../core/services/recipe/recipe.service';
 import { IngestionService } from '../../../core/services/ingestion/ingestion.service';
 import { AiKitchenHelperService } from '../../../core/services/ai-helpers/ai-kitchen-helper.service';
+import { FoodCatalogService } from '../../../core/services/food-catalog/food-catalog.service';
+import { FoodItemDto } from '../../../core/models/food-catalog.models';
+import {
+  FoodItemDialogComponent,
+  FoodItemDialogData,
+} from '../../food-catalog/food-item-dialog/food-item-dialog.component';
 import {
   FormattedQuantityResult,
   computeSubRecipeBatchMultiplier,
@@ -124,6 +130,7 @@ export class RecipeDetailComponent implements OnInit {
   private readonly destroyRef = inject(DestroyRef);
   private readonly recipeService = inject(RecipeService);
   private readonly ingestionService = inject(IngestionService);
+  private readonly foodCatalogService = inject(FoodCatalogService);
   private readonly dialog = inject(MatDialog);
   private readonly snackBar = inject(MatSnackBar);
   protected readonly aiHelper = inject(AiKitchenHelperService);
@@ -157,6 +164,7 @@ export class RecipeDetailComponent implements OnInit {
   protected readonly isRerunningIngestion = signal<boolean>(false);
   protected readonly isQueueingRefinement = signal<boolean>(false);
   protected readonly isDismissingRefinement = signal<boolean>(false);
+  protected readonly openingFoodItemId = signal<string | null>(null);
   protected readonly formatMinutes = formatMinutes;
   protected readonly formatReplacement = formatIngredientReplacement;
   protected readonly cleanPrepNote = stripOuterParentheses;
@@ -350,6 +358,77 @@ export class RecipeDetailComponent implements OnInit {
       maxHeight: '90vh',
       autoFocus: 'textarea',
       data: { ...context, recipeId: recipe.id, recipeTitle: recipe.title },
+    });
+  }
+
+  openFoodItemDialog(foodItemId: string): void {
+    if (this.openingFoodItemId()) {
+      return;
+    }
+
+    this.openingFoodItemId.set(foodItemId);
+    this.foodCatalogService.getFoodItemById(foodItemId).subscribe({
+      next: (foodItem) => {
+        this.openingFoodItemId.set(null);
+        const dialogRef = this.dialog.open<
+          FoodItemDialogComponent,
+          FoodItemDialogData,
+          FoodItemDto | null
+        >(FoodItemDialogComponent, {
+          width: '460px',
+          maxWidth: '95vw',
+          data: { item: foodItem },
+        });
+
+        dialogRef.afterClosed().subscribe((updated) => {
+          if (!updated) {
+            return;
+          }
+
+          this.applyUpdatedFoodItemToRecipe(updated);
+          this.snackBar.open(`Updated "${updated.name}"`, 'Close', { duration: 3000 });
+        });
+      },
+      error: (err: { error?: { detail?: string; title?: string } }) => {
+        this.openingFoodItemId.set(null);
+        this.snackBar.open(
+          err?.error?.detail || err?.error?.title || 'Failed to load food item.',
+          'Close',
+          { duration: 4000 },
+        );
+      },
+    });
+  }
+
+  private applyUpdatedFoodItemToRecipe(updated: FoodItemDto): void {
+    this.recipe.update((current) => {
+      if (!current) {
+        return current;
+      }
+
+      const mapIngredient = (ing: RecipeIngredientDto): RecipeIngredientDto => ({
+        ...ing,
+        foodItemName: ing.foodItemId === updated.id ? updated.name : ing.foodItemName,
+        isPantryStaple: ing.foodItemId === updated.id ? updated.isPantryStaple : ing.isPantryStaple,
+        replacements: ing.replacements?.map((rep) =>
+          rep.foodItemId === updated.id
+            ? {
+                ...rep,
+                foodItemName: updated.name,
+                isPantryStaple: updated.isPantryStaple,
+              }
+            : rep,
+        ),
+      });
+
+      return {
+        ...current,
+        ingredients: current.ingredients.map(mapIngredient),
+        linkedSubRecipes: current.linkedSubRecipes.map((sub) => ({
+          ...sub,
+          ingredients: sub.ingredients.map(mapIngredient),
+        })),
+      };
     });
   }
 

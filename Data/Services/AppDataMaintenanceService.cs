@@ -55,6 +55,7 @@ public sealed class AppDataMaintenanceService(
         var result = await strategy.ExecuteAsync(async () =>
         {
             preservedMediaPaths.Clear();
+            using var _ = BeginExtendedCommandTimeoutScope();
 
             await using var tx = dbContext.Database.IsRelational()
                 ? await dbContext.Database.BeginTransactionAsync(cancellationToken)
@@ -253,6 +254,8 @@ public sealed class AppDataMaintenanceService(
 
             await strategy.ExecuteAsync(async () =>
             {
+                using var _ = BeginExtendedCommandTimeoutScope();
+
                 await using var tx = dbContext.Database.IsRelational()
                     ? await dbContext.Database.BeginTransactionAsync(cancellationToken)
                     : null;
@@ -342,30 +345,28 @@ public sealed class AppDataMaintenanceService(
     )
     {
         // Stage 1: Leaf dependencies & ingestion jobs
-        var cookLogs = await dbContext.CookLogs.ToListAsync(cancellationToken);
-        dbContext.CookLogs.RemoveRange(cookLogs);
+        await DeleteAllAsync(dbContext.CookLogs, cancellationToken);
+        await DeleteAllAsync(dbContext.ShoppingListItemSources, cancellationToken);
+        await DeleteAllAsync(dbContext.ShoppingListItems, cancellationToken);
+        var deletedShoppingListsCount = await DeleteAllAsync(
+            dbContext.ShoppingLists,
+            cancellationToken
+        );
 
-        var listSources = await dbContext.ShoppingListItemSources.ToListAsync(cancellationToken);
-        dbContext.ShoppingListItemSources.RemoveRange(listSources);
-
-        var listItems = await dbContext.ShoppingListItems.ToListAsync(cancellationToken);
-        dbContext.ShoppingListItems.RemoveRange(listItems);
-
-        var shoppingLists = await dbContext.ShoppingLists.ToListAsync(cancellationToken);
-        dbContext.ShoppingLists.RemoveRange(shoppingLists);
-
-        var ingestionJobs = await dbContext.IngestionJobs.ToListAsync(cancellationToken);
         var deletedIngestionJobsCount = 0;
         var resetIngestionJobsCount = 0;
         var referencedCollectionIds = new HashSet<Guid>();
 
         if (!keepIngestionJobs)
         {
-            dbContext.IngestionJobs.RemoveRange(ingestionJobs);
-            deletedIngestionJobsCount = ingestionJobs.Count;
+            deletedIngestionJobsCount = await DeleteAllAsync(
+                dbContext.IngestionJobs,
+                cancellationToken
+            );
         }
         else
         {
+            var ingestionJobs = await dbContext.IngestionJobs.ToListAsync(cancellationToken);
             var discardedJobs = new List<IngestionJob>();
             var jobsToReset = new List<IngestionJob>();
 
@@ -395,89 +396,158 @@ public sealed class AppDataMaintenanceService(
         await dbContext.SaveChangesAsync(cancellationToken);
 
         // Stage 2: Meal plans & templates
-        var templateItems = await dbContext.MealPlanTemplateItems.ToListAsync(cancellationToken);
-        dbContext.MealPlanTemplateItems.RemoveRange(templateItems);
+        await DeleteAllAsync(dbContext.MealPlanTemplateItems, cancellationToken);
+        var deletedTemplatesCount = await DeleteAllAsync(
+            dbContext.MealPlanTemplates,
+            cancellationToken
+        );
 
-        var templates = await dbContext.MealPlanTemplates.ToListAsync(cancellationToken);
-        dbContext.MealPlanTemplates.RemoveRange(templates);
+        if (dbContext.Database.IsRelational())
+        {
+            await dbContext
+                .MealPlanEntries.Where(e => e.SourceMealPlanEntryId != null)
+                .ExecuteUpdateAsync(
+                    s => s.SetProperty(e => e.SourceMealPlanEntryId, (Guid?)null),
+                    cancellationToken
+                );
+        }
 
-        var mealPlanEntries = await dbContext.MealPlanEntries.ToListAsync(cancellationToken);
-        dbContext.MealPlanEntries.RemoveRange(mealPlanEntries);
+        var deletedMealPlanEntriesCount = await DeleteAllAsync(
+            dbContext.MealPlanEntries,
+            cancellationToken
+        );
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
         // Stage 3: Recipe children
-        var stepTimers = await dbContext.RecipeStepTimers.ToListAsync(cancellationToken);
-        dbContext.RecipeStepTimers.RemoveRange(stepTimers);
-
-        var steps = await dbContext.RecipeSteps.ToListAsync(cancellationToken);
-        dbContext.RecipeSteps.RemoveRange(steps);
-
-        var replacements = await dbContext.RecipeIngredientReplacements.ToListAsync(
-            cancellationToken
-        );
-        dbContext.RecipeIngredientReplacements.RemoveRange(replacements);
-
-        var recipeIngredients = await dbContext.RecipeIngredients.ToListAsync(cancellationToken);
-        dbContext.RecipeIngredients.RemoveRange(recipeIngredients);
-
-        var recipeTags = await dbContext.RecipeTags.ToListAsync(cancellationToken);
-        dbContext.RecipeTags.RemoveRange(recipeTags);
-
-        var recipeCollections = await dbContext.RecipeCollections.ToListAsync(cancellationToken);
-        dbContext.RecipeCollections.RemoveRange(recipeCollections);
-
-        var recipeAttachments = await dbContext.RecipeAttachments.ToListAsync(cancellationToken);
-        dbContext.RecipeAttachments.RemoveRange(recipeAttachments);
-
-        var shareLinks = await dbContext.ShareLinks.ToListAsync(cancellationToken);
-        dbContext.ShareLinks.RemoveRange(shareLinks);
-
-        var recipeEmbeddings = await dbContext.RecipeEmbeddings.ToListAsync(cancellationToken);
-        dbContext.RecipeEmbeddings.RemoveRange(recipeEmbeddings);
+        await DeleteAllAsync(dbContext.RecipeStepTimers, cancellationToken);
+        await DeleteAllAsync(dbContext.RecipeSteps, cancellationToken);
+        await DeleteAllAsync(dbContext.RecipeIngredientReplacements, cancellationToken);
+        await DeleteAllAsync(dbContext.RecipeIngredients, cancellationToken);
+        await DeleteAllAsync(dbContext.RecipeTags, cancellationToken);
+        await DeleteAllAsync(dbContext.RecipeCollections, cancellationToken);
+        await DeleteAllAsync(dbContext.RecipeAttachments, cancellationToken);
+        await DeleteAllAsync(dbContext.ShareLinks, cancellationToken);
+        await DeleteAllAsync(dbContext.RecipeEmbeddings, cancellationToken);
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
         // Stage 4: Recipes
-        var recipes = await dbContext.Recipes.ToListAsync(cancellationToken);
-        dbContext.Recipes.RemoveRange(recipes);
+        var deletedRecipesCount = await DeleteAllAsync(dbContext.Recipes, cancellationToken);
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
         // Stage 5: Food items, aliases & catalog embeddings
-        var aliases = await dbContext.FoodItemAliases.ToListAsync(cancellationToken);
-        dbContext.FoodItemAliases.RemoveRange(aliases);
-
-        var embeddings = await dbContext.CatalogEmbeddings.ToListAsync(cancellationToken);
-        dbContext.CatalogEmbeddings.RemoveRange(embeddings);
-
-        var foodItems = await dbContext.FoodItems.ToListAsync(cancellationToken);
-        dbContext.FoodItems.RemoveRange(foodItems);
+        await DeleteAllAsync(dbContext.FoodItemAliases, cancellationToken);
+        await DeleteAllAsync(dbContext.CatalogEmbeddings, cancellationToken);
+        var deletedFoodItemsCount = await DeleteAllAsync(dbContext.FoodItems, cancellationToken);
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
         // Stage 6: Tags & Collections
-        var tags = await dbContext.Tags.ToListAsync(cancellationToken);
-        dbContext.Tags.RemoveRange(tags);
+        var deletedTagsCount = await DeleteAllAsync(dbContext.Tags, cancellationToken);
+        var deletedCollectionsCount = 0;
 
-        var collections = await dbContext.Collections.ToListAsync(cancellationToken);
-        var collectionsToDelete = keepIngestionJobs
-            ? collections.Where(c => !referencedCollectionIds.Contains(c.Id)).ToList()
-            : collections;
-        dbContext.Collections.RemoveRange(collectionsToDelete);
+        if (!keepIngestionJobs)
+        {
+            deletedCollectionsCount = await DeleteAllAsync(
+                dbContext.Collections,
+                cancellationToken
+            );
+        }
+        else
+        {
+            var collections = await dbContext.Collections.ToListAsync(cancellationToken);
+            var collectionsToDelete = collections
+                .Where(c => !referencedCollectionIds.Contains(c.Id))
+                .ToList();
+            dbContext.Collections.RemoveRange(collectionsToDelete);
+            deletedCollectionsCount = collectionsToDelete.Count;
+        }
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return new WipeCounts(
-            DeletedRecipesCount: recipes.Count,
-            DeletedMealPlansCount: mealPlanEntries.Count + templates.Count,
-            DeletedShoppingListsCount: shoppingLists.Count,
+            DeletedRecipesCount: deletedRecipesCount,
+            DeletedMealPlansCount: deletedMealPlanEntriesCount + deletedTemplatesCount,
+            DeletedShoppingListsCount: deletedShoppingListsCount,
             DeletedIngestionJobsCount: deletedIngestionJobsCount,
-            DeletedFoodItemsCount: foodItems.Count,
-            DeletedTagsCount: tags.Count,
-            DeletedCollectionsCount: collectionsToDelete.Count,
+            DeletedFoodItemsCount: deletedFoodItemsCount,
+            DeletedTagsCount: deletedTagsCount,
+            DeletedCollectionsCount: deletedCollectionsCount,
             ResetIngestionJobsCount: resetIngestionJobsCount
         );
+    }
+
+    private async Task<int> DeleteAllAsync<TEntity>(
+        DbSet<TEntity> dbSet,
+        CancellationToken cancellationToken
+    )
+        where TEntity : class
+    {
+        if (dbContext.Database.IsRelational())
+        {
+            return await dbSet.ExecuteDeleteAsync(cancellationToken);
+        }
+
+        var items = await dbSet.ToListAsync(cancellationToken);
+        dbSet.RemoveRange(items);
+        return items.Count;
+    }
+
+    private async Task InsertBatchedAsync<TSnapshot, TEntity>(
+        IReadOnlyList<TSnapshot> snapshots,
+        Func<TSnapshot, TEntity> projector,
+        int batchSize,
+        CancellationToken cancellationToken
+    )
+        where TEntity : class
+    {
+        if (snapshots.Count == 0)
+        {
+            return;
+        }
+
+        var dbSet = dbContext.Set<TEntity>();
+        for (var offset = 0; offset < snapshots.Count; offset += batchSize)
+        {
+            var take = Math.Min(batchSize, snapshots.Count - offset);
+            var batch = new List<TEntity>(take);
+            for (var i = 0; i < take; i++)
+            {
+                batch.Add(projector(snapshots[offset + i]));
+            }
+
+            await dbSet.AddRangeAsync(batch, cancellationToken);
+            await dbContext.SaveChangesAsync(cancellationToken);
+            dbContext.ChangeTracker.Clear();
+        }
+    }
+
+    private IDisposable? BeginExtendedCommandTimeoutScope()
+    {
+        if (!dbContext.Database.IsRelational())
+        {
+            return null;
+        }
+
+        var previousTimeout = dbContext.Database.GetCommandTimeout();
+        dbContext.Database.SetCommandTimeout(TimeSpan.FromMinutes(10));
+        return new CommandTimeoutScope(dbContext, previousTimeout);
+    }
+
+    private sealed class CommandTimeoutScope(AppDbContext dbContext, int? previousTimeout)
+        : IDisposable
+    {
+        private int _disposed;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+            {
+                dbContext.Database.SetCommandTimeout(previousTimeout);
+            }
+        }
     }
 
     private async Task<AppDataBackupSnapshot> BuildBackupSnapshotAsync(
@@ -1134,11 +1204,17 @@ public sealed class AppDataMaintenanceService(
         CancellationToken cancellationToken
     )
     {
-        // Stage A: Independent root tables
-        if (snapshot.Tags.Count > 0)
+        const int standardBatchSize = 500;
+        const int largePayloadBatchSize = 100;
+
+        var previousAutoDetect = dbContext.ChangeTracker.AutoDetectChangesEnabled;
+        dbContext.ChangeTracker.AutoDetectChangesEnabled = false;
+        try
         {
-            await dbContext.Tags.AddRangeAsync(
-                snapshot.Tags.Select(t => new Tag
+            // Stage A: Independent root tables
+            await InsertBatchedAsync(
+                snapshot.Tags,
+                t => new Tag
                 {
                     Id = t.Id,
                     Name = t.Name,
@@ -1151,15 +1227,14 @@ public sealed class AppDataMaintenanceService(
                     CreatedBy = t.CreatedBy,
                     ModifiedAt = t.ModifiedAt,
                     ModifiedBy = t.ModifiedBy,
-                }),
+                },
+                standardBatchSize,
                 cancellationToken
             );
-        }
 
-        if (snapshot.Collections.Count > 0)
-        {
-            await dbContext.Collections.AddRangeAsync(
-                snapshot.Collections.Select(c => new Collection
+            await InsertBatchedAsync(
+                snapshot.Collections,
+                c => new Collection
                 {
                     Id = c.Id,
                     Name = c.Name,
@@ -1172,15 +1247,14 @@ public sealed class AppDataMaintenanceService(
                     CreatedBy = c.CreatedBy,
                     ModifiedAt = c.ModifiedAt,
                     ModifiedBy = c.ModifiedBy,
-                }),
+                },
+                standardBatchSize,
                 cancellationToken
             );
-        }
 
-        if (snapshot.FoodItems.Count > 0)
-        {
-            await dbContext.FoodItems.AddRangeAsync(
-                snapshot.FoodItems.Select(f => new FoodItem
+            await InsertBatchedAsync(
+                snapshot.FoodItems,
+                f => new FoodItem
                 {
                     Id = f.Id,
                     Name = f.Name,
@@ -1191,15 +1265,14 @@ public sealed class AppDataMaintenanceService(
                     CreatedBy = f.CreatedBy,
                     ModifiedAt = f.ModifiedAt,
                     ModifiedBy = f.ModifiedBy,
-                }),
+                },
+                standardBatchSize,
                 cancellationToken
             );
-        }
 
-        if (snapshot.CatalogEmbeddings.Count > 0)
-        {
-            await dbContext.CatalogEmbeddings.AddRangeAsync(
-                snapshot.CatalogEmbeddings.Select(e => new CatalogEmbedding
+            await InsertBatchedAsync(
+                snapshot.CatalogEmbeddings,
+                e => new CatalogEmbedding
                 {
                     Id = e.Id,
                     ModelTag = e.ModelTag,
@@ -1210,18 +1283,15 @@ public sealed class AppDataMaintenanceService(
                     CreatedBy = e.CreatedBy,
                     ModifiedAt = e.ModifiedAt,
                     ModifiedBy = e.ModifiedBy,
-                }),
+                },
+                largePayloadBatchSize,
                 cancellationToken
             );
-        }
 
-        await dbContext.SaveChangesAsync(cancellationToken);
-
-        // Stage B: Food item aliases & Recipes
-        if (snapshot.FoodItemAliases.Count > 0)
-        {
-            await dbContext.FoodItemAliases.AddRangeAsync(
-                snapshot.FoodItemAliases.Select(a => new FoodItemAlias
+            // Stage B: Food item aliases & Recipes
+            await InsertBatchedAsync(
+                snapshot.FoodItemAliases,
+                a => new FoodItemAlias
                 {
                     Id = a.Id,
                     FoodItemId = a.FoodItemId,
@@ -1231,15 +1301,14 @@ public sealed class AppDataMaintenanceService(
                     CreatedBy = a.CreatedBy,
                     ModifiedAt = a.ModifiedAt,
                     ModifiedBy = a.ModifiedBy,
-                }),
+                },
+                standardBatchSize,
                 cancellationToken
             );
-        }
 
-        if (snapshot.Recipes.Count > 0)
-        {
-            await dbContext.Recipes.AddRangeAsync(
-                snapshot.Recipes.Select(r => new Recipe
+            await InsertBatchedAsync(
+                snapshot.Recipes,
+                r => new Recipe
                 {
                     Id = r.Id,
                     Title = r.Title,
@@ -1272,18 +1341,15 @@ public sealed class AppDataMaintenanceService(
                     CreatedBy = r.CreatedBy,
                     ModifiedAt = r.ModifiedAt,
                     ModifiedBy = r.ModifiedBy,
-                }),
+                },
+                standardBatchSize,
                 cancellationToken
             );
-        }
 
-        await dbContext.SaveChangesAsync(cancellationToken);
-
-        // Stage C: Recipe children, sub-recipe links & Ingestion jobs
-        if (snapshot.RecipeIngredients.Count > 0)
-        {
-            await dbContext.RecipeIngredients.AddRangeAsync(
-                snapshot.RecipeIngredients.Select(i => new RecipeIngredient
+            // Stage C: Recipe children, sub-recipe links & Ingestion jobs
+            await InsertBatchedAsync(
+                snapshot.RecipeIngredients,
+                i => new RecipeIngredient
                 {
                     Id = i.Id,
                     RecipeId = i.RecipeId,
@@ -1309,15 +1375,14 @@ public sealed class AppDataMaintenanceService(
                     CreatedBy = i.CreatedBy,
                     ModifiedAt = i.ModifiedAt,
                     ModifiedBy = i.ModifiedBy,
-                }),
+                },
+                standardBatchSize,
                 cancellationToken
             );
-        }
 
-        if (snapshot.RecipeSteps.Count > 0)
-        {
-            await dbContext.RecipeSteps.AddRangeAsync(
-                snapshot.RecipeSteps.Select(s => new RecipeStep
+            await InsertBatchedAsync(
+                snapshot.RecipeSteps,
+                s => new RecipeStep
                 {
                     Id = s.Id,
                     RecipeId = s.RecipeId,
@@ -1329,15 +1394,14 @@ public sealed class AppDataMaintenanceService(
                     CreatedBy = s.CreatedBy,
                     ModifiedAt = s.ModifiedAt,
                     ModifiedBy = s.ModifiedBy,
-                }),
+                },
+                standardBatchSize,
                 cancellationToken
             );
-        }
 
-        if (snapshot.RecipeTags.Count > 0)
-        {
-            await dbContext.RecipeTags.AddRangeAsync(
-                snapshot.RecipeTags.Select(rt => new RecipeTag
+            await InsertBatchedAsync(
+                snapshot.RecipeTags,
+                rt => new RecipeTag
                 {
                     Id = rt.Id,
                     RecipeId = rt.RecipeId,
@@ -1346,15 +1410,14 @@ public sealed class AppDataMaintenanceService(
                     CreatedBy = rt.CreatedBy,
                     ModifiedAt = rt.ModifiedAt,
                     ModifiedBy = rt.ModifiedBy,
-                }),
+                },
+                standardBatchSize,
                 cancellationToken
             );
-        }
 
-        if (snapshot.RecipeCollections.Count > 0)
-        {
-            await dbContext.RecipeCollections.AddRangeAsync(
-                snapshot.RecipeCollections.Select(rc => new RecipeCollection
+            await InsertBatchedAsync(
+                snapshot.RecipeCollections,
+                rc => new RecipeCollection
                 {
                     Id = rc.Id,
                     RecipeId = rc.RecipeId,
@@ -1363,15 +1426,14 @@ public sealed class AppDataMaintenanceService(
                     CreatedBy = rc.CreatedBy,
                     ModifiedAt = rc.ModifiedAt,
                     ModifiedBy = rc.ModifiedBy,
-                }),
+                },
+                standardBatchSize,
                 cancellationToken
             );
-        }
 
-        if (snapshot.RecipeAttachments.Count > 0)
-        {
-            await dbContext.RecipeAttachments.AddRangeAsync(
-                snapshot.RecipeAttachments.Select(a => new RecipeAttachment
+            await InsertBatchedAsync(
+                snapshot.RecipeAttachments,
+                a => new RecipeAttachment
                 {
                     Id = a.Id,
                     RecipeId = a.RecipeId,
@@ -1385,15 +1447,14 @@ public sealed class AppDataMaintenanceService(
                     CreatedBy = a.CreatedBy,
                     ModifiedAt = a.ModifiedAt,
                     ModifiedBy = a.ModifiedBy,
-                }),
+                },
+                standardBatchSize,
                 cancellationToken
             );
-        }
 
-        if (snapshot.RecipeEmbeddings.Count > 0)
-        {
-            await dbContext.RecipeEmbeddings.AddRangeAsync(
-                snapshot.RecipeEmbeddings.Select(e => new RecipeEmbedding
+            await InsertBatchedAsync(
+                snapshot.RecipeEmbeddings,
+                e => new RecipeEmbedding
                 {
                     Id = e.Id,
                     RecipeId = e.RecipeId,
@@ -1406,15 +1467,14 @@ public sealed class AppDataMaintenanceService(
                     CreatedBy = e.CreatedBy,
                     ModifiedAt = e.ModifiedAt,
                     ModifiedBy = e.ModifiedBy,
-                }),
+                },
+                largePayloadBatchSize,
                 cancellationToken
             );
-        }
 
-        if (snapshot.ShareLinks.Count > 0)
-        {
-            await dbContext.ShareLinks.AddRangeAsync(
-                snapshot.ShareLinks.Select(s => new ShareLink
+            await InsertBatchedAsync(
+                snapshot.ShareLinks,
+                s => new ShareLink
                 {
                     Id = s.Id,
                     RecipeId = s.RecipeId,
@@ -1429,15 +1489,14 @@ public sealed class AppDataMaintenanceService(
                     CreatedBy = s.CreatedBy,
                     ModifiedAt = s.ModifiedAt,
                     ModifiedBy = s.ModifiedBy,
-                }),
+                },
+                standardBatchSize,
                 cancellationToken
             );
-        }
 
-        if (snapshot.IngestionJobs.Count > 0)
-        {
-            await dbContext.IngestionJobs.AddRangeAsync(
-                snapshot.IngestionJobs.Select(j => new IngestionJob
+            await InsertBatchedAsync(
+                snapshot.IngestionJobs,
+                j => new IngestionJob
                 {
                     Id = j.Id,
                     Channel = j.Channel,
@@ -1475,18 +1534,15 @@ public sealed class AppDataMaintenanceService(
                     CreatedBy = j.CreatedBy,
                     ModifiedAt = j.ModifiedAt,
                     ModifiedBy = j.ModifiedBy,
-                }),
+                },
+                largePayloadBatchSize,
                 cancellationToken
             );
-        }
 
-        await dbContext.SaveChangesAsync(cancellationToken);
-
-        // Stage D: Step timers & Ingredient replacements
-        if (snapshot.RecipeIngredientReplacements.Count > 0)
-        {
-            await dbContext.RecipeIngredientReplacements.AddRangeAsync(
-                snapshot.RecipeIngredientReplacements.Select(r => new RecipeIngredientReplacement
+            // Stage D: Step timers & Ingredient replacements
+            await InsertBatchedAsync(
+                snapshot.RecipeIngredientReplacements,
+                r => new RecipeIngredientReplacement
                 {
                     Id = r.Id,
                     RecipeIngredientId = r.RecipeIngredientId,
@@ -1502,15 +1558,14 @@ public sealed class AppDataMaintenanceService(
                     CreatedBy = r.CreatedBy,
                     ModifiedAt = r.ModifiedAt,
                     ModifiedBy = r.ModifiedBy,
-                }),
+                },
+                standardBatchSize,
                 cancellationToken
             );
-        }
 
-        if (snapshot.RecipeStepTimers.Count > 0)
-        {
-            await dbContext.RecipeStepTimers.AddRangeAsync(
-                snapshot.RecipeStepTimers.Select(t => new RecipeStepTimer
+            await InsertBatchedAsync(
+                snapshot.RecipeStepTimers,
+                t => new RecipeStepTimer
                 {
                     Id = t.Id,
                     RecipeStepId = t.RecipeStepId,
@@ -1521,18 +1576,15 @@ public sealed class AppDataMaintenanceService(
                     CreatedBy = t.CreatedBy,
                     ModifiedAt = t.ModifiedAt,
                     ModifiedBy = t.ModifiedBy,
-                }),
+                },
+                standardBatchSize,
                 cancellationToken
             );
-        }
 
-        await dbContext.SaveChangesAsync(cancellationToken);
-
-        // Stage E: MealPlanTemplates & ShoppingLists
-        if (snapshot.MealPlanTemplates.Count > 0)
-        {
-            await dbContext.MealPlanTemplates.AddRangeAsync(
-                snapshot.MealPlanTemplates.Select(t => new MealPlanTemplate
+            // Stage E: MealPlanTemplates & ShoppingLists
+            await InsertBatchedAsync(
+                snapshot.MealPlanTemplates,
+                t => new MealPlanTemplate
                 {
                     Id = t.Id,
                     Name = t.Name,
@@ -1542,15 +1594,14 @@ public sealed class AppDataMaintenanceService(
                     CreatedBy = t.CreatedBy,
                     ModifiedAt = t.ModifiedAt,
                     ModifiedBy = t.ModifiedBy,
-                }),
+                },
+                standardBatchSize,
                 cancellationToken
             );
-        }
 
-        if (snapshot.ShoppingLists.Count > 0)
-        {
-            await dbContext.ShoppingLists.AddRangeAsync(
-                snapshot.ShoppingLists.Select(l => new ShoppingList
+            await InsertBatchedAsync(
+                snapshot.ShoppingLists,
+                l => new ShoppingList
                 {
                     Id = l.Id,
                     Name = l.Name,
@@ -1560,18 +1611,15 @@ public sealed class AppDataMaintenanceService(
                     CreatedBy = l.CreatedBy,
                     ModifiedAt = l.ModifiedAt,
                     ModifiedBy = l.ModifiedBy,
-                }),
+                },
+                standardBatchSize,
                 cancellationToken
             );
-        }
 
-        await dbContext.SaveChangesAsync(cancellationToken);
-
-        // Stage F: Template items, shopping list items, and self-referential MealPlanEntries (topological waves)
-        if (snapshot.MealPlanTemplateItems.Count > 0)
-        {
-            await dbContext.MealPlanTemplateItems.AddRangeAsync(
-                snapshot.MealPlanTemplateItems.Select(i => new MealPlanTemplateItem
+            // Stage F: Template items, shopping list items, and self-referential MealPlanEntries (topological waves)
+            await InsertBatchedAsync(
+                snapshot.MealPlanTemplateItems,
+                i => new MealPlanTemplateItem
                 {
                     Id = i.Id,
                     TemplateId = i.TemplateId,
@@ -1589,15 +1637,14 @@ public sealed class AppDataMaintenanceService(
                     CreatedBy = i.CreatedBy,
                     ModifiedAt = i.ModifiedAt,
                     ModifiedBy = i.ModifiedBy,
-                }),
+                },
+                standardBatchSize,
                 cancellationToken
             );
-        }
 
-        if (snapshot.ShoppingListItems.Count > 0)
-        {
-            await dbContext.ShoppingListItems.AddRangeAsync(
-                snapshot.ShoppingListItems.Select(i => new ShoppingListItem
+            await InsertBatchedAsync(
+                snapshot.ShoppingListItems,
+                i => new ShoppingListItem
                 {
                     Id = i.Id,
                     ShoppingListId = i.ShoppingListId,
@@ -1619,74 +1666,71 @@ public sealed class AppDataMaintenanceService(
                     CreatedBy = i.CreatedBy,
                     ModifiedAt = i.ModifiedAt,
                     ModifiedBy = i.ModifiedBy,
-                }),
+                },
+                standardBatchSize,
                 cancellationToken
             );
-        }
 
-        await dbContext.SaveChangesAsync(cancellationToken);
-
-        if (snapshot.MealPlanEntries.Count > 0)
-        {
-            var allEntryIds = snapshot.MealPlanEntries.Select(e => e.Id).ToHashSet();
-            var insertedEntryIds = new HashSet<Guid>();
-            var remainingEntries = snapshot.MealPlanEntries.ToList();
-
-            while (remainingEntries.Count > 0)
+            if (snapshot.MealPlanEntries.Count > 0)
             {
-                var wave = remainingEntries
-                    .Where(e =>
-                        !e.SourceMealPlanEntryId.HasValue
-                        || insertedEntryIds.Contains(e.SourceMealPlanEntryId.Value)
-                        || !allEntryIds.Contains(e.SourceMealPlanEntryId.Value)
-                    )
-                    .ToList();
+                var allEntryIds = snapshot.MealPlanEntries.Select(e => e.Id).ToHashSet();
+                var insertedEntryIds = new HashSet<Guid>();
+                var remainingEntries = snapshot.MealPlanEntries.ToList();
 
-                if (wave.Count == 0)
+                while (remainingEntries.Count > 0)
                 {
-                    // Cycle guard: break self-referential cycle cleanly if snapshot is malformed
-                    wave = remainingEntries;
-                }
+                    var wave = remainingEntries
+                        .Where(e =>
+                            !e.SourceMealPlanEntryId.HasValue
+                            || insertedEntryIds.Contains(e.SourceMealPlanEntryId.Value)
+                            || !allEntryIds.Contains(e.SourceMealPlanEntryId.Value)
+                        )
+                        .ToList();
 
-                await dbContext.MealPlanEntries.AddRangeAsync(
-                    wave.Select(e => new MealPlanEntry
+                    if (wave.Count == 0)
                     {
-                        Id = e.Id,
-                        WeekStartDate = e.WeekStartDate,
-                        IsOnDeck = e.IsOnDeck,
-                        ScheduledDate = e.ScheduledDate,
-                        Slot = e.Slot,
-                        SortOrder = e.SortOrder,
-                        EntryType = e.EntryType,
-                        RecipeId = e.RecipeId,
-                        TargetServings = e.TargetServings,
-                        IsLeftovers = e.IsLeftovers,
-                        SourceMealPlanEntryId = e.SourceMealPlanEntryId,
-                        CustomTitle = e.CustomTitle,
-                        Notes = e.Notes,
-                        CreatedAt = e.CreatedAt,
-                        CreatedBy = e.CreatedBy,
-                        ModifiedAt = e.ModifiedAt,
-                        ModifiedBy = e.ModifiedBy,
-                    }),
-                    cancellationToken
-                );
+                        // Cycle guard: break self-referential cycle cleanly if snapshot is malformed
+                        wave = remainingEntries;
+                    }
 
-                await dbContext.SaveChangesAsync(cancellationToken);
+                    await InsertBatchedAsync(
+                        wave,
+                        e => new MealPlanEntry
+                        {
+                            Id = e.Id,
+                            WeekStartDate = e.WeekStartDate,
+                            IsOnDeck = e.IsOnDeck,
+                            ScheduledDate = e.ScheduledDate,
+                            Slot = e.Slot,
+                            SortOrder = e.SortOrder,
+                            EntryType = e.EntryType,
+                            RecipeId = e.RecipeId,
+                            TargetServings = e.TargetServings,
+                            IsLeftovers = e.IsLeftovers,
+                            SourceMealPlanEntryId = e.SourceMealPlanEntryId,
+                            CustomTitle = e.CustomTitle,
+                            Notes = e.Notes,
+                            CreatedAt = e.CreatedAt,
+                            CreatedBy = e.CreatedBy,
+                            ModifiedAt = e.ModifiedAt,
+                            ModifiedBy = e.ModifiedBy,
+                        },
+                        standardBatchSize,
+                        cancellationToken
+                    );
 
-                foreach (var inserted in wave)
-                {
-                    insertedEntryIds.Add(inserted.Id);
-                    remainingEntries.Remove(inserted);
+                    foreach (var inserted in wave)
+                    {
+                        insertedEntryIds.Add(inserted.Id);
+                        remainingEntries.Remove(inserted);
+                    }
                 }
             }
-        }
 
-        // Stage G: Shopping list item sources & CookLogs
-        if (snapshot.ShoppingListItemSources.Count > 0)
-        {
-            await dbContext.ShoppingListItemSources.AddRangeAsync(
-                snapshot.ShoppingListItemSources.Select(s => new ShoppingListItemSource
+            // Stage G: Shopping list item sources & CookLogs
+            await InsertBatchedAsync(
+                snapshot.ShoppingListItemSources,
+                s => new ShoppingListItemSource
                 {
                     Id = s.Id,
                     ShoppingListItemId = s.ShoppingListItemId,
@@ -1701,15 +1745,14 @@ public sealed class AppDataMaintenanceService(
                     CreatedBy = s.CreatedBy,
                     ModifiedAt = s.ModifiedAt,
                     ModifiedBy = s.ModifiedBy,
-                }),
+                },
+                standardBatchSize,
                 cancellationToken
             );
-        }
 
-        if (snapshot.CookLogs.Count > 0)
-        {
-            await dbContext.CookLogs.AddRangeAsync(
-                snapshot.CookLogs.Select(c => new CookLog
+            await InsertBatchedAsync(
+                snapshot.CookLogs,
+                c => new CookLog
                 {
                     Id = c.Id,
                     RecipeId = c.RecipeId,
@@ -1725,12 +1768,16 @@ public sealed class AppDataMaintenanceService(
                     CreatedBy = c.CreatedBy,
                     ModifiedAt = c.ModifiedAt,
                     ModifiedBy = c.ModifiedBy,
-                }),
+                },
+                standardBatchSize,
                 cancellationToken
             );
         }
-
-        await dbContext.SaveChangesAsync(cancellationToken);
+        finally
+        {
+            dbContext.ChangeTracker.AutoDetectChangesEnabled = previousAutoDetect;
+            dbContext.ChangeTracker.Clear();
+        }
     }
 
     private async Task CancelActiveIngestionIfRunningAsync(CancellationToken cancellationToken)

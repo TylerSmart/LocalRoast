@@ -101,13 +101,9 @@ export class ImportAppDataDialogComponent {
         this.isImporting.set(false);
         this.dialogRef.close({ success: true, result });
       },
-      error: (err: { error?: { detail?: string; title?: string } }) => {
+      error: (err: { status?: number; error?: { detail?: string; title?: string } | string }) => {
         this.isImporting.set(false);
-        this.errorMessage.set(
-          err?.error?.detail ||
-            err?.error?.title ||
-            'Failed to restore backup archive. Please verify the file is a valid LocalRoast .zip backup.',
-        );
+        this.errorMessage.set(this.formatImportError(err));
       },
     });
   }
@@ -115,6 +111,34 @@ export class ImportAppDataDialogComponent {
   close(): void {
     if (!this.isImporting()) {
       this.dialogRef.close({ success: false });
+    }
+  }
+
+  private formatImportError(err: {
+    status?: number;
+    error?: { detail?: string; title?: string } | string;
+  }): string {
+    const body = err?.error;
+    if (body && typeof body === 'object') {
+      if (body.detail || body.title) {
+        return body.detail || body.title || 'Failed to restore backup archive.';
+      }
+    }
+
+    switch (err?.status) {
+      case 404:
+        return 'Backup import endpoint was not found (HTTP 404). Restart the backend API server so it runs the latest build.';
+      case 413:
+        return 'Backup archive exceeds the maximum upload size allowed by the server (HTTP 413).';
+      case 0:
+      case 502:
+      case 504:
+        return 'Connection to the backend API server failed or timed out while uploading the backup archive.';
+      default:
+        if (typeof err?.status === 'number' && err.status > 0) {
+          return `Backup restore failed (HTTP ${err.status}). Please check the server logs and try again.`;
+        }
+        return 'Failed to restore backup archive. Please verify the file is a valid LocalRoast .zip backup.';
     }
   }
 

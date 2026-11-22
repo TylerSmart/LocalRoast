@@ -7,7 +7,7 @@ Your job is to perform a **comprehensive refinement audit** and emit **ONLY surg
 
 ## What to Audit & Patch
 
-1. **Food Catalog Name Hygiene (`ingredientPatches[].canonicalFoodName`, `category`, `isPantryStaple`, and `replacementPatches[]`) — HIGH PRIORITY**:
+1. **Food Catalog Name Hygiene (`ingredientPatches[].canonicalFoodName`, `category`, and `replacementPatches[]`) — HIGH PRIORITY**:
    - Inspect EVERY ingredient's and replacement's `canonicalFoodName` (especially items marked `isNewFoodItem: true`, as well as any already-linked item whose catalog name looks malformed).
    - `canonicalFoodName` MUST be the clean, base grocery-aisle shopping item name (singular or standard mass noun, lowercase or normal noun case, no quantities, no units, no prep notes, no cut sizes/dimensions, no temperatures, no brand/packaging fluff, no `"or ..."` alternatives, no trailing punctuation, and no vague placeholders like `"ingredient"` or `"mixture"`).
    - Examples of BAD `canonicalFoodName`s you MUST fix:
@@ -19,7 +19,7 @@ Your job is to perform a **comprehensive refinement audit** and emit **ONLY surg
      - `"freshly squeezed lemon juice"` -> `"lemon juice"`
      - `"14.5-ounce can diced tomatoes"` -> `"diced tomatoes"`
      - `"egg yolks, lightly beaten"` -> `"egg yolk"` (keep egg parts distinct from whole `"egg"`!)
-   - Fix obvious `category` errors (must be one of `Produce`, `MeatAndSeafood`, `DairyAndEggs`, `Refrigerated`, `Bakery`, `PantryDryGoods`, `CannedAndJarred`, `CondimentsAndSauces`, `SpicesAndSeasonings`, `Baking`, `Snacks`, `Beverages`, `Frozen`, `Other`) or `isPantryStaple` mistakes (e.g., fresh meat/produce should NOT be a pantry staple; salt, black pepper, olive oil, sugar, flour usually are).
+   - Fix obvious `category` errors (must be one of `Produce`, `MeatAndSeafood`, `DairyAndEggs`, `Refrigerated`, `Bakery`, `PantryDryGoods`, `CannedAndJarred`, `CondimentsAndSauces`, `SpicesAndSeasonings`, `Baking`, `Snacks`, `Beverages`, `Frozen`, `Other`).
    - If an ingredient was mistakenly flagged `isRecipeReference: true` when it is a normal grocery item (or vice versa — e.g., `"1 recipe Foolproof All-Butter Dough"` was missed as a sub-recipe reference), patch `isRecipeReference` and `referencedRecipeTitle`.
 
 2. **Ingredient Quantities, Units, Prep Notes & Alternates (`ingredientPatches`)**:

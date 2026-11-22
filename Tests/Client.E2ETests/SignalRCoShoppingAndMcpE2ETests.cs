@@ -227,15 +227,19 @@ public sealed class SignalRCoShoppingAndMcpE2ETests : E2ETestBase
 
         await using var mcpClient = await McpClient.CreateAsync(transport);
 
-        // Assert all 16 tools are advertised (6 Milestone 2 + 7 Milestone 3 + 3 Ingestion inspection tools)
+        // Assert all 20 tools are advertised (6 Milestone 2 + 7 Milestone 3 + 3 Ingestion inspection + 4 Food Catalog tools)
         var tools = await mcpClient.ListToolsAsync();
         Assert.IsNotNull(tools);
         var toolNames = tools.Select(t => t.Name).ToHashSet();
-        Assert.HasCount(16, toolNames);
+        Assert.HasCount(20, toolNames);
         Assert.Contains("search_recipes", toolNames);
         Assert.Contains("get_recipe", toolNames);
         Assert.Contains("match_recipes_by_ingredients", toolNames);
         Assert.Contains("list_collections_and_tags", toolNames);
+        Assert.Contains("list_food_items", toolNames);
+        Assert.Contains("create_food_item", toolNames);
+        Assert.Contains("update_food_items", toolNames);
+        Assert.Contains("merge_food_items", toolNames);
         Assert.Contains("enqueue_recipe_ingestion", toolNames);
         Assert.Contains("save_structured_recipe", toolNames);
         Assert.Contains("get_meal_plan", toolNames);

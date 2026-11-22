@@ -25,6 +25,7 @@
   - Individual user attribution is tracked via `IAuditable` (`CreatedBy`, `ModifiedBy`) and explicit actor fields (e.g., `CookLog.CookedByUserId`, `PersonalAccessToken.UserId`).
 - **Canonical `FoodItem` & Culinary Math:**
   - Structured `RecipeIngredient` rows link to a canonical `FoodItem` (`DefaultStoreAisleId`, `IsPantryStaple`, synonyms/aliases) while preserving `OriginalRawText` and recipe-specific `DisplayName` / `PreparationNote`.
+  - Newly ingested `FoodItem`s default to `IsPantryStaple = false` so pantry staples are curated manually (existing matched catalog items preserve their current `IsPantryStaple` setting).
   - Sub-recipe component links (`LinkedRecipeId`) must enforce a strict Directed Acyclic Graph (DAG)—rejecting self-links or circular recipe chains with `DomainValidationException` / `ConflictException`.
   - Nutritional tracking is deferred out of scope, so do not introduce macro/calorie UI unless `docs/prd.md` is updated.
 - **Resilient Ingestion Queue & LLM Isolation:**

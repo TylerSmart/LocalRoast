@@ -173,7 +173,135 @@ public sealed class IngestionRecipeRefinerTests
         Assert.IsTrue(ing1.CreateNewFoodItem);
         Assert.AreEqual("smoked paprika", ing1.ProposedFoodItemName);
         Assert.AreEqual(FoodCategory.SpicesAndSeasonings, ing1.SuggestedCategory);
-        Assert.IsTrue(ing1.SuggestedIsPantryStaple);
+        Assert.IsFalse(ing1.SuggestedIsPantryStaple);
+    }
+
+    [TestMethod]
+    public async Task RefineDraftAsync_PreservesExistingPantryStapleAndDefaultsNewItemsToFalse()
+    {
+        var kosherSalt = new FoodItem
+        {
+            Id = Guid.NewGuid(),
+            Name = "Kosher Salt",
+            NormalizedName = "kosher salt",
+            Category = FoodCategory.SpicesAndSeasonings,
+            IsPantryStaple = true,
+            CreatedBy = "Test",
+            ModifiedBy = "Test",
+        };
+        _dbContext.FoodItems.Add(kosherSalt);
+        await _dbContext.SaveChangesAsync();
+
+        var llm = new StubRefinerLlmClient(
+            """
+            {
+              "title": null,
+              "description": null,
+              "servings": null,
+              "yield": null,
+              "timing": null,
+              "tags": null,
+              "ingredientPatches": [
+                {
+                  "index": 0,
+                  "displayName": null,
+                  "canonicalFoodName": "kosher salt",
+                  "category": "SpicesAndSeasonings",
+                  "isPantryStaple": false,
+                  "quantity": null,
+                  "maxQuantity": null,
+                  "unit": null,
+                  "prepNote": null,
+                  "isOptional": null,
+                  "isRecipeReference": null,
+                  "referencedRecipeTitle": null,
+                  "alternateMeasurements": null,
+                  "replacementPatches": null
+                },
+                {
+                  "index": 1,
+                  "displayName": null,
+                  "canonicalFoodName": null,
+                  "category": "CondimentsAndSauces",
+                  "isPantryStaple": true,
+                  "quantity": null,
+                  "maxQuantity": null,
+                  "unit": null,
+                  "prepNote": null,
+                  "isOptional": null,
+                  "isRecipeReference": null,
+                  "referencedRecipeTitle": null,
+                  "alternateMeasurements": null,
+                  "replacementPatches": null
+                }
+              ],
+              "stepPatches": [],
+              "refinementNotes": ["Verified kosher salt and olive oil category."]
+            }
+            """
+        );
+
+        var refiner = new IngestionRecipeRefiner(_dbContext, llm);
+        var draft = new IngestionExtractedDraftDto(
+            Title: "Simple Vinaigrette",
+            Description: "Quick dressing.",
+            BaseServings: 4m,
+            ExtractedModel: "gemma4:e4b",
+            Ingredients:
+            [
+                new IngestionDraftIngredientDto(
+                    Quantity: 1m,
+                    Unit: MeasurementUnit.Tsp,
+                    DisplayName: "table salt",
+                    IsNewFoodItem: true,
+                    CreateNewFoodItem: true,
+                    ProposedFoodItemName: "table salt",
+                    SuggestedCategory: FoodCategory.SpicesAndSeasonings,
+                    SuggestedIsPantryStaple: false
+                ),
+                new IngestionDraftIngredientDto(
+                    Quantity: 2m,
+                    Unit: MeasurementUnit.Tbsp,
+                    DisplayName: "olive oil",
+                    IsNewFoodItem: true,
+                    CreateNewFoodItem: true,
+                    ProposedFoodItemName: "olive oil",
+                    SuggestedCategory: FoodCategory.Other,
+                    SuggestedIsPantryStaple: false
+                ),
+            ],
+            Steps: [new IngestionDraftStepDto(Instruction: "Whisk ingredients together.")]
+        );
+
+        var config = new EffectiveLlmConnectionConfig(
+            Provider: LlmProvider.Ollama,
+            BaseUrl: "http://localhost:11434",
+            ApiKey: null,
+            TextModel: "gemma4:e4b",
+            VisionModel: null,
+            OllamaKeepAlive: "5m",
+            RequestTimeoutSeconds: 120,
+            AutoPublishHighConfidenceText: false,
+            RefineModel: "gemma4:12b",
+            RefineDuringIngestion: true
+        );
+
+        var result = await refiner.RefineDraftAsync(
+            new IngestionRefineDraftRequest(
+                SourceText: "Simple Vinaigrette\nIngredients:\n- 1 tsp kosher salt\n- 2 tbsp olive oil\nInstructions:\n1. Whisk ingredients together.",
+                Draft: draft,
+                Config: config
+            )
+        );
+
+        var ing0 = result.Draft.Ingredients![0];
+        Assert.AreEqual(kosherSalt.Id, ing0.MatchedFoodItemId);
+        Assert.IsTrue(ing0.SuggestedIsPantryStaple);
+
+        var ing1 = result.Draft.Ingredients![1];
+        Assert.IsNull(ing1.MatchedFoodItemId);
+        Assert.AreEqual(FoodCategory.CondimentsAndSauces, ing1.SuggestedCategory);
+        Assert.IsFalse(ing1.SuggestedIsPantryStaple);
     }
 
     [TestMethod]

@@ -104,4 +104,25 @@ describe('ImportAppDataDialogComponent', () => {
     expect(component.errorMessage()).toBe('Unsupported backup archive format version 99.');
     expect(mockDialogRef.close).not.toHaveBeenCalled();
   });
+
+  it('shows actionable message when backend returns HTTP 404 (stale server build)', () => {
+    mockAccountService.importBackup.mockReturnValue(
+      throwError(() => ({
+        status: 404,
+      })),
+    );
+
+    const file = new File(['zip-bytes'], 'backup.zip', { type: 'application/zip' });
+    component.onFileSelected({
+      target: { files: [file] },
+    } as unknown as Event);
+    component.confirmationText.set('IMPORT');
+
+    component.confirmImport();
+
+    expect(component.isImporting()).toBe(false);
+    expect(component.errorMessage()).toContain('HTTP 404');
+    expect(component.errorMessage()).toContain('Restart the backend API server');
+    expect(mockDialogRef.close).not.toHaveBeenCalled();
+  });
 });

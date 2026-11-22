@@ -562,7 +562,7 @@ public sealed class ResponsiveUiE2ETests : E2ETestBase
         await AssertDialogAsync("kitchen-answer");
         await Page.Keyboard.PressAsync("Escape");
 
-        await Page.Locator(".ingredient-ai-menu-btn").First.ClickAsync();
+        await Page.Locator(".ingredient-menu-btn").First.ClickAsync();
         await Page.Locator("button.substitute-ing-btn").ClickAsync();
         await Expect(Page.Locator(".substitution-card")).ToBeVisibleAsync();
         await AssertDialogAsync("substitution-results");

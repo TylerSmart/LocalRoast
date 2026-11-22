@@ -943,12 +943,12 @@ public sealed class IngestionIntegrationTests
 
         Assert.HasCount(2, capturedContexts);
 
-        // Verify FoodItems catalog has exactly 3 deduplicated items (Kosher Salt reused, marked as pantry staple)
+        // Verify FoodItems catalog has exactly 3 deduplicated items (Kosher Salt reused, defaulting to manual pantry staple curation)
         var foods = await client.GetFromJsonAsync<IReadOnlyList<FoodItemDto>>("/api/food-items");
         Assert.IsNotNull(foods);
         Assert.AreEqual(3, foods.Count);
         var salt = foods.Single(f => f.Name == "Kosher Salt");
-        Assert.IsTrue(salt.IsPantryStaple);
+        Assert.IsFalse(salt.IsPantryStaple);
 
         // Verify Tags catalog has exactly 4 deduplicated tags with inferred categories
         var allTags = await client.GetFromJsonAsync<IReadOnlyList<TagDto>>("/api/tags");

@@ -56,7 +56,19 @@ public sealed class PlaywrightServerFixture : IAsyncDisposable
         ServerUrl = $"http://127.0.0.1:{port}";
 
         var solutionDir = FindSolutionRoot();
-        var apiDllPath = Path.Combine(solutionDir, "API", "bin", "Debug", "net10.0", "App.API.dll");
+#if RELEASE
+        const string buildConfig = "Release";
+#else
+        const string buildConfig = "Debug";
+#endif
+        var apiDllPath = Path.Combine(
+            solutionDir,
+            "API",
+            "bin",
+            buildConfig,
+            "net10.0",
+            "App.API.dll"
+        );
         var webRootPath = Path.Combine(solutionDir, "Client", "dist", "App.Client", "browser");
 
         if (!File.Exists(apiDllPath))

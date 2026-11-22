@@ -869,7 +869,6 @@ public sealed partial class IngestionRecipeRefiner(
                     TryResolveCanonicalFood(
                         rawCandidate,
                         patchedCategory ?? updated.SuggestedCategory,
-                        patch.IsPantryStaple,
                         foodsLookup,
                         withinRecipeNewFoods,
                         out var matchedFood,
@@ -915,10 +914,6 @@ public sealed partial class IngestionRecipeRefiner(
                 if (patchedCategory.HasValue)
                 {
                     updated = updated with { SuggestedCategory = patchedCategory.Value };
-                }
-                if (patch.IsPantryStaple.HasValue)
-                {
-                    updated = updated with { SuggestedIsPantryStaple = patch.IsPantryStaple.Value };
                 }
             }
         }
@@ -1034,7 +1029,6 @@ public sealed partial class IngestionRecipeRefiner(
                 TryResolveCanonicalFood(
                     patch.CanonicalFoodName.Trim(),
                     patchedCategory ?? updated.SuggestedCategory,
-                    patch.IsPantryStaple,
                     foodsLookup,
                     withinRecipeNewFoods,
                     out var matchedFood,
@@ -1081,10 +1075,6 @@ public sealed partial class IngestionRecipeRefiner(
             {
                 updated = updated with { SuggestedCategory = patchedCategory.Value };
             }
-            if (patch.IsPantryStaple.HasValue)
-            {
-                updated = updated with { SuggestedIsPantryStaple = patch.IsPantryStaple.Value };
-            }
         }
 
         changed = !Equals(existing, updated);
@@ -1094,7 +1084,6 @@ public sealed partial class IngestionRecipeRefiner(
     private static bool TryResolveCanonicalFood(
         string rawCandidate,
         FoodCategory? preferredCategory,
-        bool? preferredIsPantryStaple,
         Dictionary<string, CatalogFoodLookupItem> foodsLookup,
         Dictionary<string, (string Name, FoodCategory Category)> withinRecipeNewFoods,
         out CatalogFoodLookupItem? matchedFood,
@@ -1154,9 +1143,7 @@ public sealed partial class IngestionRecipeRefiner(
             withinRecipeNewFoods[lower] = (cleanCanonical, resolvedCategory);
         }
 
-        resolvedPantry =
-            preferredIsPantryStaple
-            ?? FoodCategoryClassifier.IsLikelyPantryStaple(cleanCanonical, resolvedCategory);
+        resolvedPantry = false;
         return true;
     }
 

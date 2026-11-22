@@ -35,6 +35,7 @@ Usage:
 
 import argparse
 from collections import defaultdict
+import difflib
 import heapq
 import io
 import json
@@ -158,6 +159,12 @@ def _norm_recipe_key(text, strip_leading_the=False):
     if strip_leading_the and key.startswith("the") and len(key) > 5:
         key = key[3:]
     return key
+
+
+def norm_dedupe_title(text):
+    nfd = unicodedata.normalize("NFD", (text or "").replace("\u2019", "'").replace("\u2018", "'"))
+    stripped = "".join(ch for ch in nfd if unicodedata.category(ch) != "Mn")
+    return " ".join(stripped.lower().split())[:200]
 
 
 def _hyphen_space_lower(text):
@@ -504,6 +511,176 @@ def _resolve_sibling_subrecipe_references(final_recipes):
                                 var_links.append(ms["title"])
 
 
+def _norm_ingredient_sig(recipe):
+    """Return a normalized tuple of ingredient lines for comparing duplicate recipes."""
+    return tuple(
+        re.sub(r"[^a-z0-9/]+", " ", _hyphen_space_lower(ing.get("text", ""))).strip()
+        for ing in recipe.get("ingredients", [])
+    )
+
+
+def _norm_steps_text(recipe):
+    """Return normalized concatenated step text for duplicate-recipe similarity comparison."""
+    joined = " ".join(
+        re.sub(r"^(\[[^\]]+\]\s*)?\d+\.\s*", "", step)
+        for step in recipe.get("steps", [])
+    )
+    return re.sub(r"[^a-z0-9]+", " ", _hyphen_space_lower(joined)).strip()
+
+
+def _recipes_are_identical_duplicates(first, second):
+    """Return True when two same-titled recipes have identical ingredients and near-identical steps."""
+    sig_a = _norm_ingredient_sig(first)
+    sig_b = _norm_ingredient_sig(second)
+    if sig_a != sig_b:
+        return False
+    steps_a = _norm_steps_text(first)
+    steps_b = _norm_steps_text(second)
+    if not sig_a and not steps_a:
+        return False
+    if steps_a == steps_b:
+        return True
+    if not steps_a or not steps_b:
+        return False
+    return difflib.SequenceMatcher(None, steps_a, steps_b).ratio() >= 0.85
+
+
+def _build_disambiguated_title(recipe, used_keys):
+    """Generate a unique, ATK-style disambiguated title (<=200 chars) for a colliding recipe."""
+    base_title = recipe["title"].strip()
+    parent = recipe.get("source_parent_recipe")
+    candidates = []
+    if parent and parent.get("title"):
+        parent_title = parent["title"].strip()
+        if parent_title.lower() not in base_title.lower():
+            candidates.append(f"{base_title} for {parent_title}")
+    chapter = (recipe.get("chapter") or "").strip()
+    if chapter:
+        ch_short = re.sub(r"^Chapter\s+\d+\s*:\s*", "", chapter, flags=re.IGNORECASE).strip()
+        if ch_short:
+            candidates.append(f"{base_title} ({ch_short})")
+    if recipe.get("page"):
+        candidates.append(f"{base_title} (p. {recipe['page']})")
+
+    for cand in candidates:
+        cand_trimmed = cand[:200].strip()
+        key = norm_dedupe_title(cand_trimmed)
+        if key and key not in used_keys:
+            return cand_trimmed
+
+    suffix = 2
+    while True:
+        tag = f" ({suffix})"
+        cand_trimmed = (base_title[: 200 - len(tag)].rstrip() + tag).strip()
+        key = norm_dedupe_title(cand_trimmed)
+        if key and key not in used_keys:
+            return cand_trimmed
+        suffix += 1
+
+
+def _rewrite_group_subrecipe_title(group_recipes, target_recipe, old_title, new_title):
+    """Update references within a recipe's master/sibling group when a colliding title is renamed."""
+    old_norm = norm_dedupe_title(old_title)
+    new_norm = norm_dedupe_title(new_title)
+    if not old_norm or old_norm == new_norm:
+        return
+
+    tokens = [t for t in re.split(r"[-–—\s]+", old_title.strip()) if t]
+    title_re = (
+        re.compile(
+            r"(?<![A-Za-z0-9])" + r"[-–—\s]+".join(re.escape(t) for t in tokens) + r"(?![A-Za-z0-9])",
+            re.IGNORECASE,
+        )
+        if tokens
+        else None
+    )
+
+    for member in group_recipes:
+        if member is target_recipe:
+            continue
+        if member.get("parent_recipe_title") and norm_dedupe_title(member["parent_recipe_title"]) == old_norm:
+            member["parent_recipe_title"] = new_title
+        if member.get("variations"):
+            member["variations"] = [
+                new_title if norm_dedupe_title(v) == old_norm else v
+                for v in member["variations"]
+            ]
+        for ing in member.get("ingredients", []):
+            links = ing.get("linked_recipes")
+            if not links:
+                continue
+            matched = any(norm_dedupe_title(lt) == old_norm for lt in links)
+            if not matched:
+                continue
+            updated_links = []
+            for lt in links:
+                rep = new_title if norm_dedupe_title(lt) == old_norm else lt
+                if rep not in updated_links:
+                    updated_links.append(rep)
+            ing["linked_recipes"] = updated_links
+
+            text = ing.get("text", "")
+            if title_re and new_title.lower() not in text.lower():
+                ing["text"] = title_re.sub(lambda _: new_title, text, count=1)
+
+
+def _dedupe_and_disambiguate_titles(final_recipes):
+    """
+    Resolve intra-book normalized title collisions:
+    - Prune genuinely identical duplicate recipes (e.g., identical Whipped Cream sub-recipes).
+    - Disambiguate distinct recipes that share a title (e.g., 'Spice Rub for <Parent>')
+      and rewrite references within their master/sibling recipe group to match.
+    Returns: (resolved_recipes, pruned_duplicates, disambiguated_titles)
+    """
+    group_members = defaultdict(list)
+    for r in final_recipes:
+        root_obj = r.get("source_parent_recipe") or r
+        group_members[id(root_obj)].append(r)
+
+    resolved = []
+    used_keys = set()
+    kept_by_orig_key = defaultdict(list)
+    pruned_duplicates = []
+    disambiguated_titles = []
+
+    for r in final_recipes:
+        orig_title = r["title"].strip()
+        orig_key = norm_dedupe_title(orig_title[:200])
+        root_obj = r.get("source_parent_recipe") or r
+        grp = group_members[id(root_obj)]
+
+        if not orig_key or orig_key not in used_keys:
+            if orig_key:
+                used_keys.add(orig_key)
+                kept_by_orig_key[orig_key].append(r)
+            resolved.append(r)
+            continue
+
+        matched_existing = next(
+            (existing for existing in kept_by_orig_key[orig_key] if _recipes_are_identical_duplicates(existing, r)),
+            None,
+        )
+        if matched_existing is not None:
+            if not matched_existing.get("image_path") and r.get("image_path"):
+                matched_existing["image_path"] = r["image_path"]
+            if norm_dedupe_title(matched_existing["title"]) != orig_key:
+                _rewrite_group_subrecipe_title(grp, r, orig_title, matched_existing["title"])
+            pruned_duplicates.append((orig_title, matched_existing["title"]))
+            continue
+
+        new_title = _build_disambiguated_title(r, used_keys)
+        r["title"] = new_title
+        new_key = norm_dedupe_title(new_title)
+        if new_key:
+            used_keys.add(new_key)
+        kept_by_orig_key[orig_key].append(r)
+        _rewrite_group_subrecipe_title(grp, r, orig_title, new_title)
+        disambiguated_titles.append((orig_title, new_title))
+        resolved.append(r)
+
+    return resolved, pruned_duplicates, disambiguated_titles
+
+
 def parse_atk_epub(epub_path):
     """
     Parse the ATK EPUB archive into structured recipe dictionaries.
@@ -792,10 +969,24 @@ def parse_atk_epub(epub_path):
             final_recipes.append(r)
 
     _resolve_sibling_subrecipe_references(final_recipes)
-
-    print(
-        f"Parsed {len(final_recipes)} complete recipes ({variation_count} variations extracted as standalone recipes, {empty_pruned_count} empty placeholders pruned)."
+    final_recipes, pruned_duplicates, disambiguated_titles = _dedupe_and_disambiguate_titles(
+        final_recipes
     )
+
+    summary_notes = [
+        f"{variation_count} variations extracted as standalone recipes",
+        f"{empty_pruned_count} empty placeholders pruned",
+    ]
+    if pruned_duplicates:
+        summary_notes.append(f"{len(pruned_duplicates)} identical duplicate(s) pruned")
+    if disambiguated_titles:
+        summary_notes.append(f"{len(disambiguated_titles)} duplicate title(s) disambiguated")
+
+    print(f"Parsed {len(final_recipes)} complete recipes ({', '.join(summary_notes)}).")
+    for old_t, new_t in disambiguated_titles:
+        print(f"  Disambiguated duplicate title: '{old_t}' -> '{new_t}'")
+    for dup_t, kept_t in pruned_duplicates:
+        print(f"  Pruned identical duplicate: '{dup_t}' (matches '{kept_t}')")
     return final_recipes
 
 
@@ -1004,12 +1195,6 @@ def parse_mcp_config(config_path):
             return _extract_from_mcp_entry(candidates[0][2])
 
     return _extract_from_mcp_entry(data)
-
-
-def norm_dedupe_title(text):
-    nfd = unicodedata.normalize("NFD", (text or "").replace("\u2019", "'").replace("\u2018", "'"))
-    stripped = "".join(ch for ch in nfd if unicodedata.category(ch) != "Mn")
-    return " ".join(stripped.lower().split())[:200]
 
 
 def api_json_request(method, url, token=None, payload_obj=None):
@@ -1631,6 +1816,7 @@ def main():
             mode_desc = "Direct Recipe Creation (Bypassing LLM)"
 
         existing_titles = set()
+        queued_this_run_titles = set()
         if skip_existing:
             existing_titles, existing_jobs, existing_recipes = fetch_existing_titles(api_base, token)
             print(
@@ -1643,6 +1829,7 @@ def main():
         print(f"\nStarting {mode_desc} for {len(recipes)} recipe(s) -> {api_base}...")
         success_count = 0
         skipped_count = 0
+        skipped_duplicate_count = 0
         error_count = 0
 
         with zipfile.ZipFile(args.epub, "r") as epub_zip:
@@ -1654,6 +1841,10 @@ def main():
                     dedupe_key = norm_dedupe_title(title)
                     if dedupe_key and dedupe_key in existing_titles:
                         skipped_count += 1
+                        continue
+                    if dedupe_key and dedupe_key in queued_this_run_titles:
+                        skipped_duplicate_count += 1
+                        print(f"[{i+1}/{len(recipes)}] Skipping (duplicate title in run): {title}")
                         continue
 
                 action_verb = "Queueing" if use_llm_queue else "Importing"
@@ -1680,7 +1871,7 @@ def main():
                         )
                         dedupe_key = norm_dedupe_title(title)
                         if dedupe_key:
-                            existing_titles.add(dedupe_key)
+                            queued_this_run_titles.add(dedupe_key)
                         success_count += 1
                         print(f" Queued! (Job ID: {job.get('id')})")
                     else:
@@ -1701,9 +1892,10 @@ def main():
                     error_count += 1
                     print(f" FAILED: {ex}")
 
-        print(
-            f"\nFinished! {success_count} succeeded, {skipped_count} skipped (already present), {error_count} failed."
-        )
+        skip_summary = f"{skipped_count} skipped (already present)"
+        if skipped_duplicate_count:
+            skip_summary += f", {skipped_duplicate_count} skipped (duplicate in run)"
+        print(f"\nFinished! {success_count} succeeded, {skip_summary}, {error_count} failed.")
         if use_llm_queue and success_count > 0:
             print(
                 "Background worker is now extracting recipes sequentially, reusing and creating "

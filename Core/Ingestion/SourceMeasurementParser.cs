@@ -371,12 +371,6 @@ public static class SourceMeasurementParser
                 prepNote = null;
         }
 
-        var isStaple = Regex.IsMatch(
-            displayName,
-            @"\b(?:salt|water|black\s+pepper|pepper|flour|sugar|olive\s+oil|vegetable\s+oil)\b",
-            RegexOptions.IgnoreCase
-        );
-
         LlmExtractedMeasurementItem? altItem = alternative is not null
             ? new LlmExtractedMeasurementItem(
                 alternative.Quantity,
@@ -399,7 +393,7 @@ public static class SourceMeasurementParser
             PreparationNote: RecipeUnitAndSectionHelpers.CleanPreparationNote(prepNote, 200),
             IsOptional: isOptional,
             OriginalRawText: line,
-            SuggestedIsPantryStaple: isStaple,
+            SuggestedIsPantryStaple: false,
             AlternativeMeasurement: altItem,
             CustomUnitName: primary?.Unit == MeasurementUnit.Custom ? primary.CustomUnitName : null
         );
