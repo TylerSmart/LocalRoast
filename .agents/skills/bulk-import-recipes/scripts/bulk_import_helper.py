@@ -2046,6 +2046,20 @@ def _draft_step_to_external(instruction: str) -> tuple[str, list[dict[str, Any]]
             ext_tokens.append({"type": "text", "text": raw})
             plain_parts.append(raw)
 
+    for idx in range(len(ext_tokens) - 1):
+        left = ext_tokens[idx]
+        right = ext_tokens[idx + 1]
+        if left.get("type") == "text" and right.get("type") != "text":
+            ltxt = str(left.get("text") or "")
+            if ltxt and ltxt[-1].isalpha():
+                left["text"] = ltxt + " "
+                plain_parts[idx] = plain_parts[idx] + " "
+        elif left.get("type") != "text" and right.get("type") == "text":
+            rtxt = str(right.get("text") or "")
+            if rtxt and rtxt[0].isalpha():
+                right["text"] = " " + rtxt
+                plain_parts[idx + 1] = " " + plain_parts[idx + 1]
+
     return "".join(plain_parts).strip(), ext_tokens
 
 
@@ -2192,15 +2206,30 @@ def _index_cached_extractions() -> dict[str, dict[str, Any]]:
     return cached
 
 
+def _norm_subrecipe_lookup(title: str) -> str:
+    norm = norm_title(title)
+    if norm.startswith("the ") and len(norm) > 4:
+        norm = norm[4:].strip()
+    if " " in norm:
+        for prefix in ("easy-peel ", "foolproof ", "easiest-ever ", "ultimate ", "classic ", "best "):
+            if norm.startswith(prefix) and len(norm) > len(prefix):
+                norm = norm[len(prefix) :].strip()
+                break
+    return norm
+
+
 def cmd_plan_repairs(args: argparse.Namespace) -> int:
     token = get_token()
     set_ingestion_enabled(token, False)
 
     review_jobs = _fetch_paged_items(token, "/bulk-import/jobs?status=ReadyForReview")
     published_recipes = _fetch_paged_items(token, "/bulk-import/recipes")
-    published_titles_norm = {
-        norm_title(r.get("title") or "") for r in published_recipes if r.get("title")
-    }
+    published_titles_norm: set[str] = set()
+    for r in published_recipes:
+        rt = r.get("title") or ""
+        if rt:
+            published_titles_norm.add(norm_title(rt))
+            published_titles_norm.add(_norm_subrecipe_lookup(rt))
     cached_by_job = _index_cached_extractions()
 
     limit = max(1, int(args.limit))
@@ -2227,7 +2256,10 @@ def cmd_plan_repairs(args: argparse.Namespace) -> int:
                 return False
             for si in sub_only:
                 m = re.search(r"'([^']+)'", si)
-                if m and norm_title(m.group(1)) in published_titles_norm:
+                if m and (
+                    norm_title(m.group(1)) in published_titles_norm
+                    or _norm_subrecipe_lookup(m.group(1)) in published_titles_norm
+                ):
                     return False
             return True
 

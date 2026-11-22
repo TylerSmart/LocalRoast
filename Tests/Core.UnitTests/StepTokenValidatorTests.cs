@@ -2166,4 +2166,52 @@ public sealed class StepTokenValidatorTests
         Assert.IsFalse(plainDupNoun.Contains("jars jars", StringComparison.OrdinalIgnoreCase));
         Assert.IsFalse(plainDupNoun.Contains("1 cup)", StringComparison.OrdinalIgnoreCase));
     }
+
+    [TestMethod]
+    public void BuildAndValidateStep_MissingSpacesAroundNonTextTokens_AutoHealsWithoutBreakingHyphenatedDimensions()
+    {
+        const string original =
+            "Heat the oven to 375 degrees and bake in a 12-inch skillet for 15 minutes until golden.";
+        var rawTokens = new JsonArray
+        {
+            "Heat the oven to",
+            new JsonObject
+            {
+                ["type"] = "temperature",
+                ["amount"] = 375m,
+                ["unit"] = "fahrenheit",
+            },
+            "and bake in a",
+            new JsonObject
+            {
+                ["type"] = "dimension",
+                ["amount"] = 12m,
+                ["unit"] = "inch",
+                ["hyphenated"] = true,
+            },
+            "skillet for",
+            new JsonObject
+            {
+                ["type"] = "timer",
+                ["amount"] = 15m,
+                ["unit"] = "minute",
+                ["label"] = "Bake",
+            },
+            "until golden.",
+        };
+
+        var result = StepTokenValidator.BuildAndValidateStep(
+            stepNumber: 1,
+            sectionName: null,
+            originalInstruction: original,
+            rawTokensJson: rawTokens,
+            ingredientCount: 0
+        );
+
+        Assert.IsEmpty(result.ValidationWarnings, string.Join(" | ", result.ValidationWarnings));
+        Assert.AreEqual(
+            "Heat the oven to 375°F and bake in a 12-inch skillet for 15 minutes until golden.",
+            StepTokenValidator.RenderForValidation(result.ParsedTokens)
+        );
+    }
 }

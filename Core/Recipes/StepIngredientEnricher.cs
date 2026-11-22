@@ -1045,13 +1045,24 @@ public static partial class StepIngredientEnricher
                     .Where(u =>
                         u != overIdx
                         && sumByMember[u] >= 0m
-                        && sumByMember[u]
-                            < (ingredients[u].MaxQuantity ?? ingredients[u].Quantity!.Value)
-                                - 0.001m
+                        && (
+                            HasOpenEndedPlusExtraAllowance(
+                                ingredients[u].PreparationNote,
+                                ingredients[u].OriginalRawText
+                            )
+                            || sumByMember[u]
+                                < (ingredients[u].MaxQuantity ?? ingredients[u].Quantity!.Value)
+                                    - 0.001m
+                        )
                     )
                     .OrderByDescending(u =>
-                        (ingredients[u].MaxQuantity ?? ingredients[u].Quantity!.Value)
-                        - sumByMember[u]
+                        HasOpenEndedPlusExtraAllowance(
+                            ingredients[u].PreparationNote,
+                            ingredients[u].OriginalRawText
+                        )
+                            ? decimal.MaxValue
+                            : (ingredients[u].MaxQuantity ?? ingredients[u].Quantity!.Value)
+                                - sumByMember[u]
                     )
                     .FirstOrDefault(-1);
 
@@ -1062,12 +1073,26 @@ public static partial class StepIngredientEnricher
 
                 var underIng = ingredients[underIdx];
                 var underMax = underIng.MaxQuantity ?? underIng.Quantity!.Value;
+                var underHasPlusExtra = HasOpenEndedPlusExtraAllowance(
+                    underIng.PreparationNote,
+                    underIng.OriginalRawText
+                );
                 var overSec = overIng.SectionName?.Trim() ?? string.Empty;
                 var underSec = underIng.SectionName?.Trim() ?? string.Empty;
 
                 var ordered = tokensByMember[overIdx]
                     .OrderByDescending(t =>
                     {
+                        if (underHasPlusExtra)
+                        {
+                            var stepPlain = string.Concat(
+                                stepSegments[t.StepIdx].Select(seg => seg.IsToken ? " " : seg.Text)
+                            );
+                            if (BoilingContextRegex().IsMatch(stepPlain))
+                            {
+                                return 3;
+                            }
+                        }
                         var stepSec = steps[t.StepIdx].SectionName?.Trim() ?? string.Empty;
                         var matchesUnder =
                             !string.IsNullOrEmpty(underSec)
@@ -1110,7 +1135,10 @@ public static partial class StepIngredientEnricher
                         continue;
                     }
 
-                    if (sumByMember[underIdx] + convInUnder <= underMax * 1.05m)
+                    if (
+                        underHasPlusExtra
+                        || sumByMember[underIdx] + convInUnder <= underMax * 1.05m
+                    )
                     {
                         stepSegments[entry.StepIdx][entry.SegIdx].Token = entry.Tok with
                         {
@@ -1152,6 +1180,7 @@ public static partial class StepIngredientEnricher
                     decimal ConvAmt,
                     bool IsSoakAndDrain
                 )>();
+            var hasPlainOrUnquantifiedWaterInOtherStep = false;
             var allConvertible = true;
 
             for (var s = 0; s < stepSegments.Count; s++)
@@ -1162,15 +1191,33 @@ public static partial class StepIngredientEnricher
                 var isSoakAndDrain =
                     SoakAndDrainStepRegex().IsMatch(stepPlain)
                     || (!isWaterOrIce && hasPlusExtra && BoilingContextRegex().IsMatch(stepPlain));
+                if (
+                    !isSoakAndDrain
+                    && isWaterOrIce
+                    && Regex.IsMatch(
+                        stepPlain,
+                        @"\bwater\b",
+                        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+                    )
+                )
+                {
+                    hasPlainOrUnquantifiedWaterInOtherStep = true;
+                }
                 var segs = stepSegments[s];
                 for (var i = 0; i < segs.Count; i++)
                 {
-                    if (
-                        segs[i].Token is not StepIngredientToken tok
-                        || tok.IngredientIndex != idx
-                        || !tok.Amount.HasValue
-                        || tok.Fixed
-                    )
+                    if (segs[i].Token is not StepIngredientToken tok || tok.IngredientIndex != idx)
+                    {
+                        continue;
+                    }
+
+                    if (!tok.Amount.HasValue)
+                    {
+                        hasPlainOrUnquantifiedWaterInOtherStep = true;
+                        continue;
+                    }
+
+                    if (tok.Fixed)
                     {
                         continue;
                     }
@@ -1200,7 +1247,7 @@ public static partial class StepIngredientEnricher
                 }
             }
 
-            if (!allConvertible || entries.Count < 2)
+            if (!allConvertible || entries.Count == 0)
             {
                 continue;
             }
@@ -1213,18 +1260,36 @@ public static partial class StepIngredientEnricher
 
             var minMatch = targetQty * 0.95m;
             var maxMatch = targetMax * 1.05m;
-            var bestSubset = FindExactWaterSubset(entries, minMatch, maxMatch, targetQty);
-            if (bestSubset is null)
+            var bestSubset =
+                entries.Count >= 2
+                    ? FindExactWaterSubset(entries, minMatch, maxMatch, targetQty)
+                    : null;
+            if (bestSubset is not null)
             {
-                continue;
-            }
-
-            var keepSet = bestSubset.ToHashSet();
-            for (var e = 0; e < entries.Count; e++)
-            {
-                if (!keepSet.Contains(e))
+                var keepSet = bestSubset.ToHashSet();
+                for (var e = 0; e < entries.Count; e++)
                 {
-                    var entry = entries[e];
+                    if (!keepSet.Contains(e))
+                    {
+                        var entry = entries[e];
+                        stepSegments[entry.StepIdx][entry.SegIdx].Token = entry.Tok with
+                        {
+                            IngredientIndex = null,
+                        };
+                    }
+                }
+            }
+            else if (
+                isWaterOrIce
+                && hasPlainOrUnquantifiedWaterInOtherStep
+                && entries.Any(e => e.IsSoakAndDrain && e.ConvAmt > maxMatch)
+                && entries
+                    .Where(e => !(e.IsSoakAndDrain && e.ConvAmt > maxMatch))
+                    .Sum(e => e.ConvAmt) <= maxMatch
+            )
+            {
+                foreach (var entry in entries.Where(e => e.IsSoakAndDrain && e.ConvAmt > maxMatch))
+                {
                     stepSegments[entry.StepIdx][entry.SegIdx].Token = entry.Tok with
                     {
                         IngredientIndex = null,
@@ -1579,11 +1644,8 @@ public static partial class StepIngredientEnricher
             if (
                 !matchedInSameSection
                 && ing.Quantity is > 0m
-                && string.Equals(
-                    NormalizePhrase(ing.DisplayName),
-                    "water",
-                    StringComparison.Ordinal
-                )
+                && IsPlainWaterOrIce(ing)
+                && !string.Equals(NormalizePhrase(ing.DisplayName), "ice", StringComparison.Ordinal)
             )
             {
                 TryWrapSafeSingleUseWater(idx, ing.SectionName, steps, stepSegments);
@@ -1616,6 +1678,11 @@ public static partial class StepIngredientEnricher
             }
 
             var segs = stepSegments[s];
+            var stepPlain = string.Concat(segs.Select(seg => seg.IsToken ? " " : seg.Text));
+            if (SoakAndDrainStepRegex().IsMatch(stepPlain))
+            {
+                continue;
+            }
             for (var i = 0; i < segs.Count; i++)
             {
                 if (segs[i].IsToken || string.IsNullOrWhiteSpace(segs[i].Text))

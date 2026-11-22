@@ -152,6 +152,10 @@ public static partial class IngestionCatalogMaterializer
         }
 
         var prefixUpper = normalizedStraight + " (";
+        var noTheUpper = StripLeadingArticleThe(normalizedStraight).ToUpperInvariant();
+        var withTheUpper = "THE " + noTheUpper;
+        var isMultiWordRef = noTheUpper.Contains(' ');
+        var suffixUpper = " " + noTheUpper;
         var candidates = await dbContext
             .Recipes.AsNoTracking()
             .Where(r => !excludedRecipeId.HasValue || r.Id != excludedRecipeId.Value)
@@ -160,13 +164,24 @@ public static partial class IngestionCatalogMaterializer
                     .Replace("\u2018", "'")
                     .ToUpper()
                     .StartsWith(prefixUpper)
+                || r.Title.Replace("\u2019", "'").Replace("\u2018", "'").ToUpper() == noTheUpper
+                || r.Title.Replace("\u2019", "'").Replace("\u2018", "'").ToUpper() == withTheUpper
+                || (
+                    isMultiWordRef
+                    && r.Title.Replace("\u2019", "'")
+                        .Replace("\u2018", "'")
+                        .ToUpper()
+                        .EndsWith(suffixUpper)
+                )
                 || r.Title.EndsWith(")")
                 || (normalizedStraight.EndsWith("PIE DOUGH") && r.Title.ToUpper().Contains("PIE"))
             )
             .Select(r => new MatchedRecipeReference(r.Id, r.Title, r.Slug))
             .ToListAsync(cancellationToken);
 
-        return candidates.FirstOrDefault(c => IsRecipeReferenceTitleMatch(c.Title, cleanTitle));
+        return candidates
+            .OrderBy(c => c.Title, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault(c => IsRecipeReferenceTitleMatch(c.Title, cleanTitle));
     }
 
     public static bool IsRecipeReferenceTitleMatch(
@@ -186,15 +201,41 @@ public static partial class IngestionCatalogMaterializer
             return true;
         }
 
-        if (normPublished.StartsWith(normRef + " (", StringComparison.OrdinalIgnoreCase))
+        var pubNoThe = StripLeadingArticleThe(normPublished);
+        var refNoThe = StripLeadingArticleThe(normRef);
+        if (string.Equals(pubNoThe, refNoThe, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (
+            normPublished.StartsWith(normRef + " (", StringComparison.OrdinalIgnoreCase)
+            || pubNoThe.StartsWith(refNoThe + " (", StringComparison.OrdinalIgnoreCase)
+        )
         {
             return true;
         }
 
         var strippedPublished = Regex.Replace(normPublished, @"\s*\([^()]+\)\s*$", "").Trim();
+        var strippedPubNoThe = StripLeadingArticleThe(strippedPublished);
         if (
             !string.IsNullOrWhiteSpace(strippedPublished)
-            && string.Equals(strippedPublished, normRef, StringComparison.OrdinalIgnoreCase)
+            && (
+                string.Equals(strippedPublished, normRef, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(strippedPubNoThe, refNoThe, StringComparison.OrdinalIgnoreCase)
+            )
+        )
+        {
+            return true;
+        }
+
+        if (
+            refNoThe.Contains(' ')
+            && string.Equals(
+                StripCookbookTechniquePrefix(strippedPubNoThe),
+                refNoThe,
+                StringComparison.OrdinalIgnoreCase
+            )
         )
         {
             return true;
@@ -223,6 +264,37 @@ public static partial class IngestionCatalogMaterializer
 
     private static string NormalizeTitleComparisonKey(string title) =>
         title.Replace('\u2019', '\'').Replace('\u2018', '\'').Trim();
+
+    private static string StripLeadingArticleThe(string value) =>
+        value.StartsWith("the ", StringComparison.OrdinalIgnoreCase) && value.Length > 4
+            ? value[4..].TrimStart()
+            : value;
+
+    private static readonly string[] CookbookTechniquePrefixes =
+    [
+        "easy-peel ",
+        "foolproof ",
+        "easiest-ever ",
+        "ultimate ",
+        "classic ",
+        "best ",
+    ];
+
+    private static string StripCookbookTechniquePrefix(string value)
+    {
+        foreach (var prefix in CookbookTechniquePrefixes)
+        {
+            if (
+                value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                && value.Length > prefix.Length
+            )
+            {
+                return value[prefix.Length..].TrimStart();
+            }
+        }
+
+        return value;
+    }
 
     public static async Task<Guid?> ResolveRecipeReferenceAsync(
         AppDbContext dbContext,

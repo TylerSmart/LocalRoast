@@ -1467,6 +1467,8 @@ public static partial class StepTokenValidator
             }
         }
 
+        HealMissingBoundarySpaces(sanitized, originalInstruction);
+
         var parsedTokens = ParseRawTokens(sanitized, out var parseErrors);
         if (!string.IsNullOrWhiteSpace(extraParseError))
         {
@@ -3864,4 +3866,64 @@ public static partial class StepTokenValidator
 
     private static bool GetBool(JsonNode? node) =>
         node is JsonValue v && v.TryGetValue<bool>(out var b) && b;
+
+    private static void HealMissingBoundarySpaces(JsonArray sanitized, string originalInstruction)
+    {
+        for (var i = 0; i + 1 < sanitized.Count; i++)
+        {
+            if (
+                sanitized[i] is JsonValue leftVal
+                && leftVal.TryGetValue<string>(out var leftStr)
+                && leftStr.Length > 0
+                && char.IsLetter(leftStr[^1])
+                && sanitized[i + 1] is JsonObject
+            )
+            {
+                var trailingWordMatch = Regex.Match(
+                    leftStr,
+                    @"\p{L}+$",
+                    RegexOptions.CultureInvariant
+                );
+                if (
+                    string.IsNullOrWhiteSpace(originalInstruction)
+                    || !trailingWordMatch.Success
+                    || !Regex.IsMatch(
+                        originalInstruction,
+                        $@"\b{Regex.Escape(trailingWordMatch.Value)}\d",
+                        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+                    )
+                )
+                {
+                    leftStr += " ";
+                    sanitized[i] = JsonValue.Create(leftStr);
+                }
+            }
+            else if (
+                sanitized[i] is JsonObject
+                && sanitized[i + 1] is JsonValue rightVal
+                && rightVal.TryGetValue<string>(out var rightStr)
+                && rightStr.Length > 0
+                && char.IsLetter(rightStr[0])
+            )
+            {
+                var leadingWordMatch = Regex.Match(
+                    rightStr,
+                    @"^\p{L}+",
+                    RegexOptions.CultureInvariant
+                );
+                if (
+                    string.IsNullOrWhiteSpace(originalInstruction)
+                    || !leadingWordMatch.Success
+                    || !Regex.IsMatch(
+                        originalInstruction,
+                        $@"\d{Regex.Escape(leadingWordMatch.Value)}\b",
+                        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+                    )
+                )
+                {
+                    sanitized[i + 1] = JsonValue.Create(" " + rightStr);
+                }
+            }
+        }
+    }
 }

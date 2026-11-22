@@ -837,4 +837,100 @@ public sealed class StepIngredientEnricherTests
         Assert.AreEqual(6m, byIdx[4].Amount); // bittersweet chocolate -> chocolate
         Assert.AreEqual(MeasurementUnit.Oz, byIdx[4].Unit);
     }
+
+    [TestMethod]
+    public void EnrichSteps_BoilAndDrainSingleBathWaterWithUnquantifiedDoughWater_UnlinksBathAndInjectsListedWater()
+    {
+        var ingredients = new List<IngestionDraftIngredientDto>
+        {
+            new(
+                SectionName: "DOUGH",
+                Quantity: 1m,
+                Unit: MeasurementUnit.Cup,
+                DisplayName: "warm water"
+            ),
+            new(SectionName: "DOUGH", Quantity: 1m, Unit: null, DisplayName: "russet potato"),
+        };
+
+        var steps = new List<IngestionDraftStepDto>
+        {
+            new(
+                SectionName: "DOUGH",
+                Instruction: "Bring ||{\"ingredient\":\"water\",\"amount\":4,\"unit\":\"cup\",\"ingredientIndex\":0}|| and ||{\"ingredient\":\"potato\",\"amount\":1,\"ingredientIndex\":1}|| to boil; cook 10 minutes and before the water returns to a boil, drain."
+            ),
+            new(
+                SectionName: "DOUGH",
+                Instruction: "With motor running, pour oil and then the water through feed tube."
+            ),
+        };
+
+        var warnings = new List<string>();
+        var enriched = StepIngredientEnricher.EnrichSteps(ingredients, steps, warnings);
+
+        Assert.IsEmpty(warnings, string.Join(" | ", warnings));
+
+        var step1Water = StepInstructionParser
+            .ExtractTokens(enriched[0].Instruction)
+            .OfType<StepIngredientToken>()
+            .First(t => t.Ingredient == "water");
+        Assert.IsNull(step1Water.IngredientIndex);
+
+        var step2Water = StepInstructionParser
+            .ExtractTokens(enriched[1].Instruction)
+            .OfType<StepIngredientToken>()
+            .Single(t => t.Ingredient == "water");
+        Assert.AreEqual(0, step2Water.IngredientIndex);
+        Assert.AreEqual(1m, step2Water.Amount);
+        Assert.AreEqual(MeasurementUnit.Cup, step2Water.Unit);
+    }
+
+    [TestMethod]
+    public void EnrichSteps_CrossSectionCookingWaterSalt_RebalancesToPlusExtraSaltIngredient()
+    {
+        var ingredients = new List<IngestionDraftIngredientDto>
+        {
+            new(
+                SectionName: "GNUDI",
+                Quantity: 0.75m,
+                Unit: MeasurementUnit.Tsp,
+                DisplayName: "table salt",
+                PreparationNote: "plus salt for cooking gnudi"
+            ),
+            new(
+                SectionName: "SAUCE",
+                Quantity: 0.25m,
+                Unit: MeasurementUnit.Tsp,
+                DisplayName: "table salt"
+            ),
+        };
+
+        var steps = new List<IngestionDraftStepDto>
+        {
+            new(
+                SectionName: "SAUCE",
+                Instruction: "Bring 1 quart water to boil in Dutch oven. Add ||{\"ingredient\":\"salt\",\"amount\":1.5,\"unit\":\"tsp\",\"ingredientIndex\":1}|| and cook gnudi."
+            ),
+            new(
+                SectionName: "SAUCE",
+                Instruction: "Add ||{\"ingredient\":\"salt\",\"amount\":0.25,\"unit\":\"tsp\",\"ingredientIndex\":1}|| to sauce."
+            ),
+        };
+
+        var warnings = new List<string>();
+        var enriched = StepIngredientEnricher.EnrichSteps(ingredients, steps, warnings);
+
+        Assert.IsEmpty(warnings, string.Join(" | ", warnings));
+
+        var boilSalt = StepInstructionParser
+            .ExtractTokens(enriched[0].Instruction)
+            .OfType<StepIngredientToken>()
+            .Single();
+        Assert.AreEqual(0, boilSalt.IngredientIndex);
+
+        var sauceSalt = StepInstructionParser
+            .ExtractTokens(enriched[1].Instruction)
+            .OfType<StepIngredientToken>()
+            .Single();
+        Assert.AreEqual(1, sauceSalt.IngredientIndex);
+    }
 }

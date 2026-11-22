@@ -4488,6 +4488,301 @@ public sealed class MultiStageIngestionAndReplacementsIntegrationTests
         Assert.IsEmpty(stewRes.ValidationIssues);
     }
 
+    [TestMethod]
+    public async Task SubmitExternalExtraction_VariationFalsePositivesAndSubRecipePrefixMatches_AutoPublishCleanly()
+    {
+        await AuthenticateAsync(_client);
+
+        async Task PublishSeedRecipeAsync(string title, string ingName, string stepText)
+        {
+            var enq = await _client.PostAsJsonAsync(
+                "/api/bulk-import/jobs/text",
+                new EnqueueRawTextIngestionRequest(
+                    RawText: $"Title: {title}\nYield: Serves 4\nIngredients:\n- 1 cup {ingName}\nInstructions:\n1. {stepText}",
+                    TitleHint: title
+                )
+            );
+            Assert.AreEqual(HttpStatusCode.Accepted, enq.StatusCode);
+            var job = (await enq.Content.ReadFromJsonAsync<IngestionJobSummaryDto>())!;
+
+            var sub = await _client.PostAsJsonAsync(
+                $"/api/bulk-import/jobs/{job.Id}/submit-extraction",
+                new SubmitExternalExtractionRequest(
+                    Extraction: new ExternalRecipeExtractionDto(
+                        Title: title,
+                        Description: $"Seed recipe for {title}.",
+                        Servings: 4m,
+                        Yield: "Serves 4",
+                        Sections:
+                        [
+                            new ExternalExtractedSectionDto(
+                                Name: null,
+                                Ingredients:
+                                [
+                                    new ExternalExtractedIngredientDto(
+                                        Name: ingName,
+                                        Quantity: 1m,
+                                        Unit: "cup",
+                                        CanonicalFoodName: ingName,
+                                        Category: "PantryDryGoods",
+                                        IsPantryStaple: true
+                                    ),
+                                ],
+                                Steps:
+                                [
+                                    new ExternalExtractedStepDto(
+                                        Instruction: stepText,
+                                        Tokens:
+                                        [
+                                            new JsonObject
+                                            {
+                                                ["type"] = "text",
+                                                ["text"] = stepText,
+                                            },
+                                        ]
+                                    ),
+                                ]
+                            ),
+                        ],
+                        Timing: null,
+                        Tags: []
+                    ),
+                    ExtractedModel: "agy-bulk-inherit",
+                    AutoPublish: true,
+                    ComputeEmbeddings: false
+                )
+            );
+            Assert.AreEqual(HttpStatusCode.OK, sub.StatusCode);
+            var subRes = (
+                await sub.Content.ReadFromJsonAsync<SubmitExternalExtractionResultDto>()
+            )!;
+            Assert.AreEqual(IngestionJobStatus.Published, subRes.Status);
+        }
+
+        await PublishSeedRecipeAsync(
+            "The America’s Test Kitchen All-Purpose Gluten-Free Flour Blend",
+            "white rice flour",
+            "Whisk white rice flour together."
+        );
+        await PublishSeedRecipeAsync(
+            "Easy-Peel Hard-Cooked Eggs",
+            "water",
+            "Steam eggs over water."
+        );
+
+        // 1. Variation recipe with 3-letter food nouns (oil, rum), hypernyms (pecans -> nuts),
+        //    and measured table salt + unquantified cooking-water salt in the same section.
+        const string varSource = """
+            Title: Peach Crisp with Rum Sauce
+            Yield: Serves 8
+
+            Description & Kitchen Notes:
+            Variation of Peach Crisp.
+
+            Master Recipe: Peach Crisp
+            Base Ingredients:
+            - 1 tablespoon vegetable oil
+            - 3/4 cup coarsely chopped pecans, walnuts, or almonds
+            - 2 tablespoons dark rum
+            - 1/4 teaspoon table salt
+            - Salt for cooking vegetables
+
+            Variation Instructions (Peach Crisp with Rum Sauce):
+            1. Omit cinnamon. Serve warm.
+
+            Base Master Instructions (from Peach Crisp):
+            1. Heat the oil in a skillet, add the nuts, and whisk in rum with table salt.
+            """;
+
+        var enqVar = await _client.PostAsJsonAsync(
+            "/api/bulk-import/jobs/text",
+            new EnqueueRawTextIngestionRequest(
+                RawText: varSource,
+                TitleHint: "Peach Crisp with Rum Sauce"
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Accepted, enqVar.StatusCode);
+        var varJob = (await enqVar.Content.ReadFromJsonAsync<IngestionJobSummaryDto>())!;
+
+        var varSubmit = await _client.PostAsJsonAsync(
+            $"/api/bulk-import/jobs/{varJob.Id}/submit-extraction",
+            new SubmitExternalExtractionRequest(
+                Extraction: new ExternalRecipeExtractionDto(
+                    Title: "Peach Crisp with Rum Sauce",
+                    Description: "Warm crisp finished with rum and toasted nuts.",
+                    Servings: 8m,
+                    Yield: "Serves 8",
+                    Sections:
+                    [
+                        new ExternalExtractedSectionDto(
+                            Name: null,
+                            Ingredients:
+                            [
+                                new ExternalExtractedIngredientDto(
+                                    Name: "vegetable oil",
+                                    Quantity: 1m,
+                                    Unit: "tablespoon",
+                                    CanonicalFoodName: "vegetable oil",
+                                    Category: "PantryDryGoods",
+                                    IsPantryStaple: true
+                                ),
+                                new ExternalExtractedIngredientDto(
+                                    Name: "pecans",
+                                    Quantity: 0.75m,
+                                    Unit: "cup",
+                                    PrepNote: "coarsely chopped",
+                                    CanonicalFoodName: "pecan",
+                                    Category: "Baking",
+                                    IsPantryStaple: false
+                                ),
+                                new ExternalExtractedIngredientDto(
+                                    Name: "dark rum",
+                                    Quantity: 2m,
+                                    Unit: "tablespoon",
+                                    CanonicalFoodName: "dark rum",
+                                    Category: "Beverages",
+                                    IsPantryStaple: false
+                                ),
+                                new ExternalExtractedIngredientDto(
+                                    Name: "table salt",
+                                    Quantity: 0.25m,
+                                    Unit: "teaspoon",
+                                    CanonicalFoodName: "table salt",
+                                    Category: "SpicesAndSeasonings",
+                                    IsPantryStaple: true
+                                ),
+                                new ExternalExtractedIngredientDto(
+                                    Name: "salt",
+                                    Quantity: null,
+                                    Unit: null,
+                                    PrepNote: "for cooking vegetables",
+                                    CanonicalFoodName: "salt",
+                                    Category: "SpicesAndSeasonings",
+                                    IsPantryStaple: true
+                                ),
+                            ],
+                            Steps:
+                            [
+                                new ExternalExtractedStepDto(
+                                    Instruction: "Heat the oil in a skillet, add the nuts, and whisk in rum with table salt.",
+                                    Tokens:
+                                    [
+                                        new JsonObject
+                                        {
+                                            ["type"] = "text",
+                                            ["text"] =
+                                                "Heat the oil in a skillet, add the nuts, and whisk in rum with table salt.",
+                                        },
+                                    ]
+                                ),
+                            ]
+                        ),
+                    ],
+                    Timing: null,
+                    Tags: []
+                ),
+                ExtractedModel: "agy-bulk-inherit",
+                AutoPublish: true,
+                ComputeEmbeddings: false
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.OK, varSubmit.StatusCode);
+        var varRes = (
+            await varSubmit.Content.ReadFromJsonAsync<SubmitExternalExtractionResultDto>()
+        )!;
+        Assert.AreEqual(
+            IngestionJobStatus.Published,
+            varRes.Status,
+            string.Join(" | ", varRes.QualityWarnings)
+        );
+        Assert.IsEmpty(varRes.QualityWarnings);
+
+        // 2. Sub-recipe references missing leading "The " and cookbook prefix "Easy-Peel ".
+        const string refSource = """
+            Title: Gluten-Free Egg Cookie Salad
+            Yield: Serves 4
+            Ingredients:
+            - 1 cup America’s Test Kitchen All-Purpose Gluten-Free Flour Blend
+            - 3 hard-cooked eggs (recipe follows)
+            Instructions:
+            1. Whisk flour blend with chopped eggs.
+            """;
+
+        var enqRef = await _client.PostAsJsonAsync(
+            "/api/bulk-import/jobs/text",
+            new EnqueueRawTextIngestionRequest(
+                RawText: refSource,
+                TitleHint: "Gluten-Free Egg Cookie Salad"
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Accepted, enqRef.StatusCode);
+        var refJob = (await enqRef.Content.ReadFromJsonAsync<IngestionJobSummaryDto>())!;
+
+        var refSubmit = await _client.PostAsJsonAsync(
+            $"/api/bulk-import/jobs/{refJob.Id}/submit-extraction",
+            new SubmitExternalExtractionRequest(
+                Extraction: new ExternalRecipeExtractionDto(
+                    Title: "Gluten-Free Egg Cookie Salad",
+                    Description: "Test recipe linking sub-recipes across leading article and prefix.",
+                    Servings: 4m,
+                    Yield: "Serves 4",
+                    Sections:
+                    [
+                        new ExternalExtractedSectionDto(
+                            Name: null,
+                            Ingredients:
+                            [
+                                new ExternalExtractedIngredientDto(
+                                    Name: "America’s Test Kitchen All-Purpose Gluten-Free Flour Blend",
+                                    Quantity: 1m,
+                                    Unit: "cup",
+                                    IsRecipeReference: true,
+                                    ReferencedRecipeTitle: "America’s Test Kitchen All-Purpose Gluten-Free Flour Blend"
+                                ),
+                                new ExternalExtractedIngredientDto(
+                                    Name: "Hard-Cooked Eggs",
+                                    Quantity: 3m,
+                                    IsRecipeReference: true,
+                                    ReferencedRecipeTitle: "Hard-Cooked Eggs"
+                                ),
+                            ],
+                            Steps:
+                            [
+                                new ExternalExtractedStepDto(
+                                    Instruction: "Whisk flour blend with chopped eggs.",
+                                    Tokens:
+                                    [
+                                        new JsonObject
+                                        {
+                                            ["type"] = "text",
+                                            ["text"] = "Whisk flour blend with chopped eggs.",
+                                        },
+                                    ]
+                                ),
+                            ]
+                        ),
+                    ],
+                    Timing: null,
+                    Tags: []
+                ),
+                ExtractedModel: "agy-bulk-inherit",
+                AutoPublish: true,
+                ComputeEmbeddings: false
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.OK, refSubmit.StatusCode);
+        var refRes = (
+            await refSubmit.Content.ReadFromJsonAsync<SubmitExternalExtractionResultDto>()
+        )!;
+        Assert.AreEqual(
+            IngestionJobStatus.Published,
+            refRes.Status,
+            string.Join(" | ", refRes.ValidationIssues)
+        );
+        Assert.IsNotNull(refRes.Draft?.Ingredients);
+        Assert.IsTrue(refRes.Draft.Ingredients.All(i => i.MatchedRecipeId.HasValue));
+    }
+
     private sealed class FallbackExercisingLlmClient : ILlmExtractionClient
     {
         public bool ForceSimpleBatch { get; set; }

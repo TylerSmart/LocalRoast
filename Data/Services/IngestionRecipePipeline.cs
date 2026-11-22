@@ -548,9 +548,12 @@ public sealed partial class IngestionRecipePipeline(
         var stepCount = stage1.Sections?.Sum(s => s.Instructions?.Count ?? 0) ?? 0;
         if (ingCount > 0 && stepCount > 0)
         {
+            var linkedIndices = CollectExternalLinkedIngredientIndices(request.Extraction);
             AddSourceWarning(FindMissingSourceInstructionFeedback(request.SourceText, stage1));
             AddSourceWarning(ValidateStage1IngredientsFeedback(stage1, request.SourceText));
-            AddSourceWarning(ValidateStage1VariationFeedback(stage1, request.SourceText));
+            AddSourceWarning(
+                ValidateStage1VariationFeedback(stage1, request.SourceText, linkedIndices)
+            );
         }
 
         var workIngredients = FlattenIngredients(stage1, request.SourceText);
@@ -3856,7 +3859,49 @@ public sealed partial class IngestionRecipePipeline(
         return kept.Count > 0 ? string.Join(", ", kept) : null;
     }
 
-    private static string? ValidateStage1VariationFeedback(Stage1RecipeDto dto, string sourceText)
+    private static HashSet<int> CollectExternalLinkedIngredientIndices(
+        ExternalRecipeExtractionDto extraction
+    )
+    {
+        var linked = new HashSet<int>();
+        foreach (var sec in extraction.Sections ?? [])
+        {
+            foreach (var st in sec.Steps ?? [])
+            {
+                if (st.Tokens is null)
+                {
+                    continue;
+                }
+
+                foreach (var node in st.Tokens)
+                {
+                    if (
+                        node is JsonObject obj
+                        && obj["type"] is JsonValue typeVal
+                        && typeVal.TryGetValue<string>(out var typeStr)
+                        && string.Equals(
+                            typeStr.Trim(),
+                            "ingredient",
+                            StringComparison.OrdinalIgnoreCase
+                        )
+                        && TryReadJsonInt(obj["ingredientIndex"], out var idx)
+                        && idx >= 0
+                    )
+                    {
+                        linked.Add(idx);
+                    }
+                }
+            }
+        }
+
+        return linked;
+    }
+
+    private static string? ValidateStage1VariationFeedback(
+        Stage1RecipeDto dto,
+        string sourceText,
+        IReadOnlySet<int>? linkedIngredientIndices = null
+    )
     {
         if (
             !sourceText.Contains("Variation of ", StringComparison.OrdinalIgnoreCase)
@@ -3884,13 +3929,14 @@ public sealed partial class IngestionRecipePipeline(
             .SelectMany(s =>
                 (s.Ingredients ?? []).Select(i => (Section: s.Name ?? string.Empty, Ing: i))
             )
+            .Select((pair, flatIdx) => (pair.Section, pair.Ing, FlatIndex: flatIdx))
             .ToList();
 
-        var seenIngCanonicalInSection = new Dictionary<string, List<string>>(
+        var seenIngCanonicalInSection = new Dictionary<string, List<Stage1IngredientDto>>(
             StringComparer.OrdinalIgnoreCase
         );
         var dupCanonicalNames = new List<string>();
-        foreach (var (sec, ing) in allIngs)
+        foreach (var (sec, ing, _) in allIngs)
         {
             var head = ExtractCanonicalVariationKey(ing.Name);
             if (string.IsNullOrWhiteSpace(head))
@@ -3899,23 +3945,33 @@ public sealed partial class IngestionRecipePipeline(
             }
 
             var key = $"{sec.Trim().ToLowerInvariant()}|{head}";
-            if (!seenIngCanonicalInSection.TryGetValue(key, out var seenNames))
+            if (!seenIngCanonicalInSection.TryGetValue(key, out var seenIngs))
             {
-                seenIngCanonicalInSection[key] = [ing.Name];
+                seenIngCanonicalInSection[key] = [ing];
                 continue;
             }
 
-            var compatPrev = seenNames.FirstOrDefault(prevName =>
-                FoodNameSanitizer.IsCompatibleFoodItemMatch(prevName, null, null, ing.Name)
-                || FoodNameSanitizer.IsCompatibleFoodItemMatch(ing.Name, null, null, prevName)
+            var isCurrentAllowance = HasVariationCookingOrGarnishAllowance(ing);
+            var compatPrev = seenIngs.FirstOrDefault(prevIng =>
+                !isCurrentAllowance
+                && !HasVariationCookingOrGarnishAllowance(prevIng)
+                && (
+                    FoodNameSanitizer.IsCompatibleFoodItemMatch(prevIng.Name, null, null, ing.Name)
+                    || FoodNameSanitizer.IsCompatibleFoodItemMatch(
+                        ing.Name,
+                        null,
+                        null,
+                        prevIng.Name
+                    )
+                )
             );
             if (compatPrev is not null)
             {
-                dupCanonicalNames.Add($"'{compatPrev}' / '{ing.Name}'");
+                dupCanonicalNames.Add($"'{compatPrev.Name}' / '{ing.Name}'");
             }
             else
             {
-                seenNames.Add(ing.Name);
+                seenIngs.Add(ing);
             }
         }
 
@@ -3938,78 +3994,208 @@ public sealed partial class IngestionRecipePipeline(
                 varInstBlock
             );
 
-            var staleBaseIngs = new List<string>();
-            foreach (var (_, ing) in allIngs)
+            if (
+                VariationOmitOrSubstituteCueRegex().IsMatch(varInstBlock)
+                || supersededMasterTextLower.Length > 0
+            )
             {
-                var ingLower = ing.Name.Trim().ToLowerInvariant();
-                if (
-                    ingLower
-                        is "salt"
-                            or "table salt"
-                            or "pepper"
-                            or "black pepper"
-                            or "water"
-                            or "oil"
-                    || (
-                        !string.IsNullOrWhiteSpace(ing.Unit)
-                        && ing.Unit.Trim().Equals("recipe", StringComparison.OrdinalIgnoreCase)
+                var staleBaseIngs = new List<string>();
+                foreach (var (_, ing, flatIdx) in allIngs)
+                {
+                    var ingLower = ing.Name.Trim().ToLowerInvariant();
+                    if (
+                        ingLower
+                            is "salt"
+                                or "table salt"
+                                or "pepper"
+                                or "black pepper"
+                                or "water"
+                                or "oil"
+                        || (
+                            !string.IsNullOrWhiteSpace(ing.Unit)
+                            && ing.Unit.Trim().Equals("recipe", StringComparison.OrdinalIgnoreCase)
+                        )
                     )
-                )
-                {
-                    continue;
-                }
+                    {
+                        continue;
+                    }
 
-                var sigWords = ExtractDistinctLongWords(ing.Name)
-                    .Where(w =>
-                        w is not ("fresh" or "whole" or "small" or "large" or "ground" or "minced")
-                    )
-                    .ToList();
-                if (sigWords.Count == 0)
-                {
-                    continue;
-                }
+                    var sigWords = ExtractVariationSignificantWords(ing.Name);
+                    if (sigWords.Count == 0)
+                    {
+                        continue;
+                    }
 
-                var inBaseList = baseIngLines.Any(line =>
-                    sigWords.Any(w => line.Contains(w, StringComparison.OrdinalIgnoreCase))
-                );
-                if (!inBaseList)
-                {
-                    continue;
-                }
-
-                var mentionedInVariation = sigWords.Any(w =>
-                    varInstLower.Contains(w, StringComparison.Ordinal)
-                );
-                if (mentionedInVariation)
-                {
-                    continue;
-                }
-
-                var mentionedInExtractedSteps = sigWords.Any(w =>
-                    allExtractedInstLower.Contains(w, StringComparison.Ordinal)
-                );
-                var mentionedInSupersededBranch =
-                    supersededMasterTextLower.Length > 0
-                    && sigWords.Any(w =>
-                        supersededMasterTextLower.Contains(w, StringComparison.Ordinal)
+                    var inBaseList = baseIngLines.Any(line =>
+                        sigWords.Any(w => line.Contains(w, StringComparison.OrdinalIgnoreCase))
                     );
-                if (!mentionedInExtractedSteps || mentionedInSupersededBranch)
-                {
-                    staleBaseIngs.Add(ing.Name);
-                }
-            }
+                    if (!inBaseList)
+                    {
+                        continue;
+                    }
 
-            if (staleBaseIngs.Count > 0)
-            {
-                issues.Add(
-                    $"Variation replaced/omitted base ingredients that should be excluded from both ingredients and replaced steps: {string.Join(", ", staleBaseIngs.Distinct(StringComparer.OrdinalIgnoreCase).Take(6))}."
-                );
+                    var mentionedInVariation = sigWords.Any(w =>
+                        varInstLower.Contains(w, StringComparison.Ordinal)
+                    );
+                    if (mentionedInVariation)
+                    {
+                        continue;
+                    }
+
+                    var mentionedInSupersededBranch =
+                        supersededMasterTextLower.Length > 0
+                        && sigWords.Any(w =>
+                            supersededMasterTextLower.Contains(w, StringComparison.Ordinal)
+                        );
+                    if (
+                        linkedIngredientIndices is not null
+                        && linkedIngredientIndices.Contains(flatIdx)
+                        && !mentionedInSupersededBranch
+                    )
+                    {
+                        continue;
+                    }
+
+                    var mentionedInExtractedSteps = HasExtractedStepMentionOrHypernym(
+                        sigWords,
+                        allExtractedInstLower
+                    );
+                    if (!mentionedInExtractedSteps || mentionedInSupersededBranch)
+                    {
+                        staleBaseIngs.Add(ing.Name);
+                    }
+                }
+
+                if (staleBaseIngs.Count > 0)
+                {
+                    issues.Add(
+                        $"Variation replaced/omitted base ingredients that should be excluded from both ingredients and replaced steps: {string.Join(", ", staleBaseIngs.Distinct(StringComparer.OrdinalIgnoreCase).Take(6))}."
+                    );
+                }
             }
         }
 
         return issues.Count > 0
             ? $"Fix variation extraction issues: {string.Join(" ", issues)}"
             : null;
+    }
+
+    private static readonly HashSet<string> ThreeLetterVariationFoodNouns = new(
+        StringComparer.Ordinal
+    )
+    {
+        "oil",
+        "rum",
+        "egg",
+        "ham",
+        "jam",
+        "gin",
+        "soy",
+        "oat",
+        "pea",
+        "rib",
+        "cod",
+        "nut",
+        "tea",
+        "ice",
+        "rye",
+    };
+
+    private static readonly HashSet<string> NutHypernymWords = new(StringComparer.Ordinal)
+    {
+        "pecan",
+        "pecans",
+        "walnut",
+        "walnuts",
+        "almond",
+        "almonds",
+        "hazelnut",
+        "hazelnuts",
+        "pistachio",
+        "pistachios",
+        "cashew",
+        "cashews",
+        "peanut",
+        "peanuts",
+    };
+
+    private static readonly HashSet<string> BerryHypernymWords = new(StringComparer.Ordinal)
+    {
+        "raspberry",
+        "raspberries",
+        "blueberry",
+        "blueberries",
+        "blackberry",
+        "blackberries",
+        "strawberry",
+        "strawberries",
+        "cranberry",
+        "cranberries",
+    };
+
+    private static readonly HashSet<string> BeefCutHypernymWords = new(StringComparer.Ordinal)
+    {
+        "sirloin",
+        "chuck",
+        "brisket",
+        "flank",
+        "skirt",
+        "tenderloin",
+    };
+
+    private static bool HasVariationCookingOrGarnishAllowance(Stage1IngredientDto ing) =>
+        !ing.Quantity.HasValue
+        || (
+            !string.IsNullOrWhiteSpace(ing.PrepNote)
+            && VariationCookingOrGarnishAllowanceRegex().IsMatch(ing.PrepNote)
+        );
+
+    private static List<string> ExtractVariationSignificantWords(string ingName) =>
+        StepWordNonAlnumRegex()
+            .Replace(ingName.ToLowerInvariant(), " ")
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Where(w =>
+                (w.Length >= 4 || ThreeLetterVariationFoodNouns.Contains(w))
+                && w is not ("fresh" or "whole" or "small" or "large" or "ground" or "minced")
+            )
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+    private static bool HasExtractedStepMentionOrHypernym(
+        IReadOnlyList<string> sigWords,
+        string allExtractedInstLower
+    )
+    {
+        if (sigWords.Any(w => allExtractedInstLower.Contains(w, StringComparison.Ordinal)))
+        {
+            return true;
+        }
+
+        if (
+            sigWords.Any(w => NutHypernymWords.Contains(w))
+            && VariationNutHypernymRegex().IsMatch(allExtractedInstLower)
+        )
+        {
+            return true;
+        }
+
+        if (
+            sigWords.Any(w => BerryHypernymWords.Contains(w))
+            && VariationBerryHypernymRegex().IsMatch(allExtractedInstLower)
+        )
+        {
+            return true;
+        }
+
+        if (
+            sigWords.Any(w => BeefCutHypernymWords.Contains(w))
+            && VariationBeefHypernymRegex().IsMatch(allExtractedInstLower)
+        )
+        {
+            return true;
+        }
+
+        return false;
     }
 
     private static string ExtractSupersededMasterBranchText(
@@ -4446,4 +4632,25 @@ public sealed partial class IngestionRecipePipeline(
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex BareVariationStubRegex();
+
+    [GeneratedRegex(
+        @"\b(?:for\s+(?:cooking|boiling|blanching|serving|garnish(?:ing)?|sprinkling|dusting|greasing|oiling)|to\s+taste|as\s+needed)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex VariationCookingOrGarnishAllowanceRegex();
+
+    [GeneratedRegex(
+        @"\b(?:omit(?:ting|ted)?|skip(?:ping)?|without|leave\s+out|substitut(?:e|ing|ed)|replac(?:e|ing|ed)|instead\s+of|in\s+place\s+of)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex VariationOmitOrSubstituteCueRegex();
+
+    [GeneratedRegex(@"\bnuts?\b", RegexOptions.CultureInvariant)]
+    private static partial Regex VariationNutHypernymRegex();
+
+    [GeneratedRegex(@"\b(?:berries|berry)\b", RegexOptions.CultureInvariant)]
+    private static partial Regex VariationBerryHypernymRegex();
+
+    [GeneratedRegex(@"\b(?:beef|meat|steak|burgers?)\b", RegexOptions.CultureInvariant)]
+    private static partial Regex VariationBeefHypernymRegex();
 }
