@@ -473,7 +473,7 @@ public sealed partial class IngestionRecipePipeline(
         // COMPILE FINAL DRAFT
         // ============================================================
         var draft = CompileDraft(
-            request,
+            CompileDraftMetadata.FromPipelineRequest(request),
             title,
             description,
             servings,
@@ -499,6 +499,186 @@ public sealed partial class IngestionRecipePipeline(
             Draft: draft,
             IsPlausibleRecipe: isPlausible,
             ExtractedModel: request.Config.TextModel?.Trim() ?? "unknown"
+        );
+    }
+
+    public async Task<IngestionPipelineResult> CompileExternalExtractionAsync(
+        ExternalExtractionPipelineRequest request,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(request.Extraction);
+        if (string.IsNullOrWhiteSpace(request.SourceText))
+        {
+            throw new ArgumentException(
+                "SourceText cannot be empty when compiling external extraction.",
+                nameof(request)
+            );
+        }
+
+        var (stage1, rawFlatIngredients) = ConvertExternalExtractionToStage1(request.Extraction);
+        var sourceQualityWarnings = new List<string>();
+
+        void AddSourceWarning(string? warning)
+        {
+            if (
+                !string.IsNullOrWhiteSpace(warning)
+                && !sourceQualityWarnings.Contains(warning, StringComparer.Ordinal)
+            )
+            {
+                sourceQualityWarnings.Add(warning.Trim());
+            }
+        }
+
+        var ingCount = stage1.Sections?.Sum(s => s.Ingredients?.Count ?? 0) ?? 0;
+        var stepCount = stage1.Sections?.Sum(s => s.Instructions?.Count ?? 0) ?? 0;
+        if (ingCount > 0 && stepCount > 0)
+        {
+            AddSourceWarning(FindMissingSourceInstructionFeedback(request.SourceText, stage1));
+            AddSourceWarning(ValidateStage1IngredientsFeedback(stage1, request.SourceText));
+            AddSourceWarning(ValidateStage1VariationFeedback(stage1, request.SourceText));
+        }
+
+        var workIngredients = FlattenIngredients(stage1, request.SourceText);
+        AttachExternalIngredientHints(workIngredients, rawFlatIngredients);
+        var externalWorkSteps = FlattenExternalSteps(request.Extraction);
+        var incompatibleAlts = FindAllIncompatibleAlts(workIngredients);
+
+        var title = string.IsNullOrWhiteSpace(request.Extraction.Title)
+            ? "Untitled Recipe"
+            : IngestionMetadataAndTagHelper.Truncate(request.Extraction.Title.Trim(), 200);
+        var description = string.IsNullOrWhiteSpace(request.Extraction.Description)
+            ? null
+            : StripWhyThisRecipeWorksHeading(request.Extraction.Description.Trim());
+        if (string.IsNullOrWhiteSpace(description))
+        {
+            description = null;
+        }
+
+        (externalWorkSteps, description) = RelocateLeadingStorageNoteStep(
+            externalWorkSteps,
+            description
+        );
+        if (!string.IsNullOrWhiteSpace(description) && ShouldCondenseDescription(description))
+        {
+            AddSourceWarning(
+                $"Description is {description.Length} characters (max {DescriptionMaxLength}); condense description to 1-2 concise sentences (<= 240 characters) without 'WHY THIS RECIPE WORKS' boilerplate."
+            );
+        }
+
+        var servings = request.Extraction.Servings;
+        var yieldDisplay = IngestionMetadataAndTagHelper.ResolveYieldDisplay(
+            request.Extraction.Yield,
+            request.SourceText
+        );
+        var timing = request.Extraction.Timing;
+        var rawTags = request.Extraction.Tags?.ToList() ?? [];
+
+        var catalogFoods = await dbContext
+            .FoodItems.AsNoTracking()
+            .Include(f => f.Aliases)
+            .Select(f => new CatalogFoodLookupItem(
+                f.Id,
+                f.Name,
+                f.NormalizedName,
+                f.IsPantryStaple,
+                f.Aliases.Select(a => a.NormalizedAlias).ToList(),
+                f.Category
+            ))
+            .ToListAsync(cancellationToken);
+
+        var catalogTags = await dbContext
+            .Tags.AsNoTracking()
+            .Select(t => new CatalogTagLookupItem(t.Id, t.Name, t.NormalizedName, t.Slug))
+            .ToListAsync(cancellationToken);
+
+        var rawRecipes = await dbContext
+            .Recipes.AsNoTracking()
+            .Where(r =>
+                r.Status != RecipeStatus.Archived
+                && (!request.ExcludeRecipeId.HasValue || r.Id != request.ExcludeRecipeId.Value)
+            )
+            .Select(r => new { r.Id, r.Title })
+            .ToListAsync(cancellationToken);
+
+        var catalogRecipes = rawRecipes
+            .Select(r => new CatalogRecipeLookupItem(
+                r.Id,
+                r.Title,
+                RecipeUnitAndSectionHelpers.NormalizeRecipeLookupKey(r.Title)
+            ))
+            .ToList();
+
+        var (reconciledPrimary, reconciledReplacements) = ResolveExternalCatalogMatches(
+            workIngredients,
+            catalogFoods,
+            catalogRecipes,
+            request.SourceText
+        );
+
+        var validatedSteps = new List<ValidatedStage4StepResult>(externalWorkSteps.Count);
+        foreach (var step in externalWorkSteps)
+        {
+            var remappedTokens = RemapExternalStepTokens(step.Tokens, workIngredients);
+            validatedSteps.Add(
+                StepTokenValidator.BuildAndValidateStep(
+                    step.StepNumber,
+                    step.SectionName,
+                    step.Instruction,
+                    remappedTokens,
+                    workIngredients.Count
+                )
+            );
+        }
+
+        var draft = CompileDraft(
+            CompileDraftMetadata.FromExternalRequest(request),
+            title,
+            description,
+            servings,
+            yieldDisplay,
+            timing,
+            rawTags,
+            workIngredients,
+            reconciledPrimary,
+            reconciledReplacements,
+            validatedSteps,
+            incompatibleAlts,
+            catalogTags,
+            Math.Max(0, request.RepairCount)
+        );
+
+        if (sourceQualityWarnings.Count > 0)
+        {
+            var mergedQualityWarnings = (draft.QualityWarnings ?? [])
+                .Concat(sourceQualityWarnings)
+                .Where(w => !string.IsNullOrWhiteSpace(w))
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+            var updatedDraft = draft with { QualityWarnings = mergedQualityWarnings };
+            draft = updatedDraft with
+            {
+                ConfidenceScore = IngestionConfidenceScorer.Compute(
+                    updatedDraft,
+                    Math.Max(0, request.RepairCount)
+                ),
+            };
+        }
+
+        var isPlausible =
+            !string.IsNullOrWhiteSpace(title)
+            && !title.Equals("Untitled Recipe", StringComparison.Ordinal)
+            && (draft.Ingredients?.Count ?? 0) > 0
+            && (draft.Steps?.Count ?? 0) > 0;
+
+        return new IngestionPipelineResult(
+            Draft: draft,
+            IsPlausibleRecipe: isPlausible,
+            ExtractedModel: IngestionMetadataAndTagHelper.CleanOptionalText(
+                request.ExtractedModel,
+                200
+            ) ?? "external-workflow"
         );
     }
 
@@ -1302,8 +1482,52 @@ public sealed partial class IngestionRecipePipeline(
         };
     }
 
+    private sealed record CompileDraftMetadata(
+        string? SourceUrl,
+        string? SourceName,
+        string? SourceAuthor,
+        string? SourceBookTitle,
+        int? SourceBookPage,
+        string? CoverImagePath,
+        string? ThumbnailImagePath,
+        bool RetainSourceAttachments,
+        IReadOnlyList<Guid>? SuggestedCollectionIds,
+        string? ExtractedModel
+    )
+    {
+        public static CompileDraftMetadata FromPipelineRequest(IngestionPipelineRequest request) =>
+            new(
+                request.SourceUrl,
+                request.SourceName,
+                request.SourceAuthor,
+                request.SourceBookTitle,
+                request.SourceBookPage,
+                request.CoverImagePath,
+                request.ThumbnailImagePath,
+                request.RetainSourceAttachments,
+                request.SuggestedCollectionIds,
+                request.Config.TextModel
+            );
+
+        public static CompileDraftMetadata FromExternalRequest(
+            ExternalExtractionPipelineRequest request
+        ) =>
+            new(
+                request.SourceUrl,
+                request.SourceName,
+                request.SourceAuthor,
+                request.SourceBookTitle,
+                request.SourceBookPage,
+                request.CoverImagePath,
+                request.ThumbnailImagePath,
+                request.RetainSourceAttachments,
+                request.SuggestedCollectionIds,
+                request.ExtractedModel
+            );
+    }
+
     private static IngestionExtractedDraftDto CompileDraft(
-        IngestionPipelineRequest request,
+        CompileDraftMetadata request,
         string title,
         string? description,
         decimal? servings,
@@ -1698,7 +1922,7 @@ public sealed partial class IngestionRecipePipeline(
                 : null,
             RetainSourceAttachments: request.RetainSourceAttachments,
             ExtractedModel: IngestionMetadataAndTagHelper.CleanOptionalText(
-                request.Config.TextModel,
+                request.ExtractedModel,
                 200
             ),
             ProposedTagNames: proposedTagNames,
@@ -1965,11 +2189,13 @@ public sealed partial class IngestionRecipePipeline(
         var (foundIngHeader, sourceIngLines) = ExtractSourceIngredientLines(sourceText);
         var list = new List<WorkIngredient>();
         var idx = 0;
+        var rawIdx = -1;
         foreach (var section in stage1.Sections ?? [])
         {
             var secName = NormalizeSection(section.Name);
             foreach (var ing in section.Ingredients ?? [])
             {
+                rawIdx++;
                 var ingName = ing.Name?.Trim() ?? string.Empty;
                 var ingQty = ing.Quantity;
                 var ingMaxQty = ing.MaxQuantity;
@@ -2099,6 +2325,7 @@ public sealed partial class IngestionRecipePipeline(
                             IsOptional = ing.IsOptional,
                             Replacements = null,
                             AlternateMeasurements = null,
+                            OriginRawIndices = [rawIdx],
                         }
                     );
                     list.Add(
@@ -2114,6 +2341,7 @@ public sealed partial class IngestionRecipePipeline(
                             IsOptional = ing.IsOptional,
                             Replacements = null,
                             AlternateMeasurements = null,
+                            OriginRawIndices = [rawIdx],
                         }
                     );
                     continue;
@@ -2132,6 +2360,7 @@ public sealed partial class IngestionRecipePipeline(
                         IsOptional = ing.IsOptional,
                         Replacements = ing.Replacements,
                         AlternateMeasurements = ing.AlternateMeasurements,
+                        OriginRawIndices = [rawIdx],
                     }
                 );
             }
@@ -2229,6 +2458,13 @@ public sealed partial class IngestionRecipePipeline(
                 MidpointRounding.AwayFromZero
             );
             first.PrepNote ??= second.PrepNote;
+            foreach (var rawOrigin in second.OriginRawIndices)
+            {
+                if (!first.OriginRawIndices.Contains(rawOrigin))
+                {
+                    first.OriginRawIndices.Add(rawOrigin);
+                }
+            }
             items.RemoveAt(i + 1);
         }
     }
@@ -2462,9 +2698,751 @@ public sealed partial class IngestionRecipePipeline(
         public bool IsOptional { get; set; }
         public IReadOnlyList<Stage1ReplacementDto>? Replacements { get; set; }
         public IReadOnlyList<Stage1AlternateMeasurementDto>? AlternateMeasurements { get; set; }
+        public List<int> OriginRawIndices { get; init; } = [];
+        public string? ExternalCanonicalFoodName { get; set; }
+        public string? ExternalCategory { get; set; }
+        public bool? ExternalIsPantryStaple { get; set; }
+        public bool ExternalIsRecipeReference { get; set; }
+        public string? ExternalReferencedRecipeTitle { get; set; }
+        public IReadOnlyList<ExternalExtractedReplacementDto>? ExternalReplacements { get; set; }
     }
 
     private sealed record WorkStep(int StepNumber, string? SectionName, string Instruction);
+
+    private sealed record ExternalWorkStep(
+        int StepNumber,
+        string? SectionName,
+        string Instruction,
+        JsonArray Tokens
+    );
+
+    private static (
+        Stage1RecipeDto Stage1,
+        List<ExternalExtractedIngredientDto> FlatIngredients
+    ) ConvertExternalExtractionToStage1(ExternalRecipeExtractionDto extraction)
+    {
+        var flatIngredients = new List<ExternalExtractedIngredientDto>();
+        var sections = new List<Stage1SectionDto>();
+
+        foreach (var sec in extraction.Sections ?? [])
+        {
+            var stage1Ings = new List<Stage1IngredientDto>();
+            foreach (var ing in sec.Ingredients ?? [])
+            {
+                flatIngredients.Add(ing);
+                var reps = ing.Replacements is { Count: > 0 }
+                    ? ing
+                        .Replacements.Select(r => new Stage1ReplacementDto(
+                            Name: r.Name,
+                            Quantity: r.Quantity,
+                            Unit: r.Unit,
+                            PrepNote: r.PrepNote,
+                            MaxQuantity: r.MaxQuantity
+                        ))
+                        .ToList()
+                    : null;
+
+                stage1Ings.Add(
+                    new Stage1IngredientDto(
+                        Name: ing.Name,
+                        Quantity: ing.Quantity,
+                        MaxQuantity: ing.MaxQuantity,
+                        Unit: ing.Unit,
+                        PrepNote: ing.PrepNote,
+                        IsOptional: ing.IsOptional,
+                        Replacements: reps,
+                        AlternateMeasurements: ing.AlternateMeasurements
+                    )
+                );
+            }
+
+            var stage1Instructions = (sec.Steps ?? []).Select(s => s.Instruction).ToList();
+
+            sections.Add(
+                new Stage1SectionDto(
+                    Name: sec.Name,
+                    Ingredients: stage1Ings,
+                    Instructions: stage1Instructions
+                )
+            );
+        }
+
+        var stage1 = new Stage1RecipeDto(
+            Title: extraction.Title,
+            Description: extraction.Description,
+            Servings: extraction.Servings,
+            Yield: extraction.Yield,
+            Sections: sections,
+            Timing: extraction.Timing,
+            Tags: extraction.Tags ?? []
+        );
+
+        return (stage1, flatIngredients);
+    }
+
+    private static void AttachExternalIngredientHints(
+        List<WorkIngredient> workIngredients,
+        List<ExternalExtractedIngredientDto> rawFlatIngredients
+    )
+    {
+        foreach (var work in workIngredients)
+        {
+            if (work.OriginRawIndices.Count == 0)
+            {
+                continue;
+            }
+
+            var primaryOrigin = work.OriginRawIndices[0];
+            if (primaryOrigin < 0 || primaryOrigin >= rawFlatIngredients.Count)
+            {
+                continue;
+            }
+
+            var ext = rawFlatIngredients[primaryOrigin];
+            var isSplitSaltAndPepper =
+                SaltAndPepperSplitRegex().IsMatch(ext.Name?.Trim() ?? string.Empty)
+                && !string.Equals(
+                    work.Name.Trim(),
+                    ext.Name?.Trim(),
+                    StringComparison.OrdinalIgnoreCase
+                );
+
+            if (!isSplitSaltAndPepper)
+            {
+                work.ExternalCanonicalFoodName = ext.CanonicalFoodName;
+                work.ExternalCategory = ext.Category;
+                work.ExternalIsPantryStaple = ext.IsPantryStaple;
+                work.ExternalIsRecipeReference = ext.IsRecipeReference;
+                work.ExternalReferencedRecipeTitle = ext.ReferencedRecipeTitle;
+                work.ExternalReplacements = ext.Replacements;
+            }
+        }
+    }
+
+    private static List<ExternalWorkStep> FlattenExternalSteps(
+        ExternalRecipeExtractionDto extraction
+    )
+    {
+        var list = new List<ExternalWorkStep>();
+        var num = 1;
+        foreach (var section in extraction.Sections ?? [])
+        {
+            var currentSecName = NormalizeSection(section.Name);
+            foreach (var step in section.Steps ?? [])
+            {
+                if (string.IsNullOrWhiteSpace(step.Instruction))
+                {
+                    continue;
+                }
+
+                var rawTokens = CloneJsonArray(step.Tokens ?? []);
+                var cleanInstruction = LeadStepPrefixRegex()
+                    .Replace(step.Instruction.Trim(), string.Empty)
+                    .Trim();
+                rawTokens = StripLeadingPrefixFromTokens(rawTokens, LeadStepPrefixRegex());
+
+                cleanInstruction = StepMetaOmitSentenceRegex()
+                    .Replace(cleanInstruction, string.Empty)
+                    .Trim();
+                if (cleanInstruction.EndsWith(".).", StringComparison.Ordinal))
+                {
+                    cleanInstruction = cleanInstruction[..^3] + ".)";
+                }
+
+                var stepSecName = currentSecName;
+                var inlineSecMatch = LeadInlineSectionRegex().Match(cleanInstruction);
+                if (inlineSecMatch.Success)
+                {
+                    var hdrRaw = inlineSecMatch.Groups["hdr"].Value;
+                    var hdrUpper = hdrRaw.Trim().ToUpperInvariant();
+                    if (
+                        hdrUpper
+                        is not (
+                            "NOTE"
+                            or "NOTES"
+                            or "TIP"
+                            or "TIPS"
+                            or "VARIATION"
+                            or "VARIATIONS"
+                            or "WARNING"
+                            or "CAUTION"
+                        )
+                    )
+                    {
+                        cleanInstruction = cleanInstruction[inlineSecMatch.Length..].TrimStart();
+                        rawTokens = StripLeadingPrefixFromTokens(
+                            rawTokens,
+                            LeadInlineSectionRegex()
+                        );
+                        if (stepSecName is null)
+                        {
+                            var parsedSec = NormalizeSection(hdrRaw);
+                            if (!string.IsNullOrWhiteSpace(parsedSec))
+                            {
+                                currentSecName = parsedSec;
+                                stepSecName = parsedSec;
+                            }
+                        }
+                    }
+                }
+
+                if (string.IsNullOrWhiteSpace(cleanInstruction))
+                {
+                    continue;
+                }
+
+                list.Add(new ExternalWorkStep(num++, stepSecName, cleanInstruction, rawTokens));
+            }
+        }
+        return list;
+    }
+
+    private static JsonArray CloneJsonArray(JsonArray source)
+    {
+        var clone = new JsonArray();
+        foreach (var node in source)
+        {
+            clone.Add(node?.DeepClone());
+        }
+        return clone;
+    }
+
+    private static JsonArray StripLeadingPrefixFromTokens(JsonArray tokens, Regex prefixRegex)
+    {
+        if (tokens.Count == 0)
+        {
+            return tokens;
+        }
+
+        var first = tokens[0];
+        if (first is JsonValue val && val.TryGetValue<string>(out var rawStr))
+        {
+            var cleaned = prefixRegex.Replace(rawStr.TrimStart(), string.Empty, 1).TrimStart();
+            if (cleaned.Length != rawStr.Length)
+            {
+                tokens[0] = JsonValue.Create(cleaned);
+            }
+        }
+        else if (
+            first is JsonObject obj
+            && obj["type"] is JsonValue tv
+            && tv.TryGetValue<string>(out var tStr)
+            && string.Equals(tStr.Trim(), "text", StringComparison.OrdinalIgnoreCase)
+            && obj["text"] is JsonValue textVal
+            && textVal.TryGetValue<string>(out var rawObjText)
+        )
+        {
+            var cleaned = prefixRegex.Replace(rawObjText.TrimStart(), string.Empty, 1).TrimStart();
+            if (cleaned.Length != rawObjText.Length)
+            {
+                obj["text"] = JsonValue.Create(cleaned);
+            }
+        }
+
+        return tokens;
+    }
+
+    private static (
+        List<ExternalWorkStep> Steps,
+        string? Description
+    ) RelocateLeadingStorageNoteStep(List<ExternalWorkStep> steps, string? description)
+    {
+        if (steps.Count < 2)
+        {
+            return (steps, description);
+        }
+
+        var first = steps[0].Instruction.Trim();
+        if (
+            first.Length > 220
+            || SentenceEndRegex().Matches(first).Count > 1
+            || !StandaloneStorageStepRegex().IsMatch(first)
+        )
+        {
+            return (steps, description);
+        }
+
+        var updatedDesc = string.IsNullOrWhiteSpace(description)
+            ? first
+            : (
+                description.Contains(first, StringComparison.OrdinalIgnoreCase)
+                    ? description
+                    : $"{description.TrimEnd()} {first}"
+            );
+
+        var relocated = new List<ExternalWorkStep>(steps.Count - 1);
+        for (var i = 1; i < steps.Count; i++)
+        {
+            relocated.Add(steps[i] with { StepNumber = i });
+        }
+
+        return (relocated, updatedDesc);
+    }
+
+    private static JsonArray RemapExternalStepTokens(
+        JsonArray rawTokens,
+        List<WorkIngredient> workIngredients
+    )
+    {
+        var remapped = new JsonArray();
+        foreach (var node in rawTokens)
+        {
+            if (node is null)
+            {
+                remapped.Add((JsonNode?)null);
+                continue;
+            }
+
+            var copy = node.DeepClone();
+            if (
+                copy is JsonObject obj
+                && obj["type"] is JsonValue typeVal
+                && typeVal.TryGetValue<string>(out var typeStr)
+                && string.Equals(typeStr.Trim(), "ingredient", StringComparison.OrdinalIgnoreCase)
+                && TryReadJsonInt(obj["ingredientIndex"], out var rawIdx)
+            )
+            {
+                var tokenName =
+                    obj["name"] is JsonValue nameVal && nameVal.TryGetValue<string>(out var nameStr)
+                        ? nameStr
+                        : null;
+                var mappedIdx = ResolveWorkIngredientIndex(rawIdx, tokenName, workIngredients);
+                obj["ingredientIndex"] = mappedIdx.HasValue
+                    ? JsonValue.Create(mappedIdx.Value)
+                    : null;
+            }
+            remapped.Add(copy);
+        }
+        return remapped;
+    }
+
+    private static bool TryReadJsonInt(JsonNode? node, out int value)
+    {
+        value = 0;
+        if (node is not JsonValue jv)
+        {
+            return false;
+        }
+
+        if (jv.TryGetValue<int>(out value))
+        {
+            return true;
+        }
+        if (jv.TryGetValue<long>(out var l) && l >= int.MinValue && l <= int.MaxValue)
+        {
+            value = (int)l;
+            return true;
+        }
+        if (jv.TryGetValue<decimal>(out var d) && d == decimal.Truncate(d))
+        {
+            value = (int)d;
+            return true;
+        }
+        if (
+            jv.TryGetValue<string>(out var s)
+            && int.TryParse(s.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out value)
+        )
+        {
+            return true;
+        }
+        return false;
+    }
+
+    private static int? ResolveWorkIngredientIndex(
+        int rawIdx,
+        string? tokenName,
+        List<WorkIngredient> workIngredients
+    )
+    {
+        var candidates = workIngredients.Where(w => w.OriginRawIndices.Contains(rawIdx)).ToList();
+        if (candidates.Count == 0)
+        {
+            return null;
+        }
+        if (candidates.Count == 1 || string.IsNullOrWhiteSpace(tokenName))
+        {
+            return candidates[0].Index;
+        }
+
+        var tokLower = tokenName.Trim().ToLowerInvariant();
+        if (tokLower.Contains("pepper", StringComparison.Ordinal))
+        {
+            return (
+                candidates.FirstOrDefault(c =>
+                    c.Name.Contains("pepper", StringComparison.OrdinalIgnoreCase)
+                ) ?? candidates[^1]
+            ).Index;
+        }
+        if (tokLower.Contains("salt", StringComparison.Ordinal))
+        {
+            return (
+                candidates.FirstOrDefault(c =>
+                    c.Name.Contains("salt", StringComparison.OrdinalIgnoreCase)
+                ) ?? candidates[0]
+            ).Index;
+        }
+
+        return candidates[0].Index;
+    }
+
+    private static string StripWhyThisRecipeWorksHeading(string description)
+    {
+        var cleaned = WhyThisRecipeWorksHeadingRegex()
+            .Replace(description.Trim(), string.Empty)
+            .Trim();
+        return cleaned;
+    }
+
+    private static (
+        Dictionary<int, ReconciledMatch> Primary,
+        Dictionary<(int IngIndex, int RepIndex), ReconciledMatch> Replacements
+    ) ResolveExternalCatalogMatches(
+        List<WorkIngredient> ingredients,
+        IReadOnlyList<CatalogFoodLookupItem> catalogFoods,
+        IReadOnlyList<CatalogRecipeLookupItem> catalogRecipes,
+        string sourceText
+    )
+    {
+        var foodsById = catalogFoods.ToDictionary(f => f.Id);
+        var foodsByNormName = new Dictionary<string, CatalogFoodLookupItem>(
+            StringComparer.OrdinalIgnoreCase
+        );
+        foreach (var f in catalogFoods)
+        {
+            foodsByNormName.TryAdd(f.NormalizedName, f);
+        }
+        var recipesById = catalogRecipes.ToDictionary(r => r.Id);
+        var withinRecipeNewFoods = new Dictionary<string, (string Name, FoodCategory Category)>(
+            StringComparer.OrdinalIgnoreCase
+        );
+
+        var primaryMatches = new Dictionary<int, ReconciledMatch>(ingredients.Count);
+        for (var i = 0; i < ingredients.Count; i++)
+        {
+            var ing = ingredients[i];
+            primaryMatches[i] = ResolveSingleExternalCatalogMatch(
+                rawName: ing.Name,
+                rawUnit: ing.Unit,
+                rawPrepNote: ing.PrepNote,
+                canonicalHint: ing.ExternalCanonicalFoodName,
+                categoryHint: ing.ExternalCategory,
+                isPantryHint: ing.ExternalIsPantryStaple,
+                isRecipeReferenceHint: ing.ExternalIsRecipeReference,
+                referencedRecipeTitleHint: ing.ExternalReferencedRecipeTitle,
+                sourceText: sourceText,
+                catalogFoods: catalogFoods,
+                catalogRecipes: catalogRecipes,
+                foodsById: foodsById,
+                foodsByNormName: foodsByNormName,
+                recipesById: recipesById,
+                withinRecipeNewFoods: withinRecipeNewFoods,
+                allowRecipeReference: true
+            );
+        }
+
+        var replacementMatches = new Dictionary<(int IngIndex, int RepIndex), ReconciledMatch>();
+        for (var i = 0; i < ingredients.Count; i++)
+        {
+            var reps = ingredients[i].Replacements;
+            if (reps is null || reps.Count == 0)
+            {
+                continue;
+            }
+
+            var extReps = ingredients[i].ExternalReplacements;
+            for (var r = 0; r < reps.Count; r++)
+            {
+                var rep = reps[r];
+                if (string.IsNullOrWhiteSpace(rep.Name))
+                {
+                    continue;
+                }
+
+                var extRep = extReps is not null && r < extReps.Count ? extReps[r] : null;
+                replacementMatches[(i, r)] = ResolveSingleExternalCatalogMatch(
+                    rawName: rep.Name,
+                    rawUnit: rep.Unit,
+                    rawPrepNote: rep.PrepNote,
+                    canonicalHint: extRep?.CanonicalFoodName,
+                    categoryHint: extRep?.Category,
+                    isPantryHint: extRep?.IsPantryStaple,
+                    isRecipeReferenceHint: false,
+                    referencedRecipeTitleHint: null,
+                    sourceText: sourceText,
+                    catalogFoods: catalogFoods,
+                    catalogRecipes: catalogRecipes,
+                    foodsById: foodsById,
+                    foodsByNormName: foodsByNormName,
+                    recipesById: recipesById,
+                    withinRecipeNewFoods: withinRecipeNewFoods,
+                    allowRecipeReference: false
+                );
+            }
+        }
+
+        return (primaryMatches, replacementMatches);
+    }
+
+    private static ReconciledMatch ResolveSingleExternalCatalogMatch(
+        string rawName,
+        string? rawUnit,
+        string? rawPrepNote,
+        string? canonicalHint,
+        string? categoryHint,
+        bool? isPantryHint,
+        bool isRecipeReferenceHint,
+        string? referencedRecipeTitleHint,
+        string sourceText,
+        IReadOnlyList<CatalogFoodLookupItem> catalogFoods,
+        IReadOnlyList<CatalogRecipeLookupItem> catalogRecipes,
+        Dictionary<Guid, CatalogFoodLookupItem> foodsById,
+        Dictionary<string, CatalogFoodLookupItem> foodsByNormName,
+        Dictionary<Guid, CatalogRecipeLookupItem> recipesById,
+        Dictionary<string, (string Name, FoodCategory Category)> withinRecipeNewFoods,
+        bool allowRecipeReference
+    )
+    {
+        if (allowRecipeReference)
+        {
+            var combinedLine = $"{rawName} {rawPrepNote}".Trim();
+            var isSeePageGroceryNote = IngestionMetadataAndTagHelper.IsRawGrocerySeePageNote(
+                combinedLine
+            );
+            var hasRecipeUnit =
+                string.Equals(rawUnit?.Trim(), "recipe", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(rawUnit?.Trim(), "batch", StringComparison.OrdinalIgnoreCase);
+            var hasServingUnit =
+                string.Equals(rawUnit?.Trim(), "serving", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(rawUnit?.Trim(), "servings", StringComparison.OrdinalIgnoreCase);
+            var hasExplicitCue = !isSeePageGroceryNote && RecipeCueRegex().IsMatch(combinedLine);
+
+            if (
+                !isSeePageGroceryNote
+                && (isRecipeReferenceHint || hasRecipeUnit || hasServingUnit || hasExplicitCue)
+            )
+            {
+                var rawRef = !string.IsNullOrWhiteSpace(referencedRecipeTitleHint)
+                    ? referencedRecipeTitleHint.Trim()
+                    : rawName.Trim();
+                var cleanRefTitle =
+                    RecipeUnitAndSectionHelpers.NormalizeRecipeReferenceTitle(rawRef) ?? rawRef;
+
+                var candidateTitles = new List<string> { cleanRefTitle };
+                if (
+                    !string.IsNullOrWhiteSpace(rawPrepNote)
+                    && rawPrepNote
+                        .TrimStart()
+                        .StartsWith("for ", StringComparison.OrdinalIgnoreCase)
+                )
+                {
+                    var expanded =
+                        RecipeUnitAndSectionHelpers.NormalizeRecipeReferenceTitle(
+                            $"{cleanRefTitle} {rawPrepNote.Trim()}"
+                        ) ?? $"{cleanRefTitle} {rawPrepNote.Trim()}";
+                    if (!candidateTitles.Contains(expanded, StringComparer.OrdinalIgnoreCase))
+                    {
+                        candidateTitles.Add(expanded);
+                    }
+                }
+
+                CatalogRecipeLookupItem? matchedRecipe = null;
+                foreach (var candidateTitle in candidateTitles)
+                {
+                    matchedRecipe = catalogRecipes.FirstOrDefault(r =>
+                        IngestionCatalogMaterializer.IsRecipeReferenceTitleMatch(
+                            r.Title,
+                            candidateTitle
+                        )
+                    );
+                    if (matchedRecipe is not null)
+                    {
+                        break;
+                    }
+                }
+
+                if (matchedRecipe is not null)
+                {
+                    return new ReconciledMatch(
+                        IsRecipeReference: true,
+                        MatchedFoodItemId: null,
+                        MatchedFoodItemName: null,
+                        IsNewFoodItem: false,
+                        CreateNewFoodItem: false,
+                        ProposedFoodItemName: null,
+                        SuggestedCategory: null,
+                        SuggestedIsPantryStaple: false,
+                        ReferencedRecipeTitle: matchedRecipe.Title,
+                        MatchedRecipeId: matchedRecipe.Id,
+                        MatchedRecipeTitle: matchedRecipe.Title
+                    );
+                }
+
+                if (isRecipeReferenceHint || hasRecipeUnit || hasExplicitCue)
+                {
+                    var preferredUnlinked = candidateTitles[^1];
+                    return new ReconciledMatch(
+                        IsRecipeReference: true,
+                        MatchedFoodItemId: null,
+                        MatchedFoodItemName: null,
+                        IsNewFoodItem: false,
+                        CreateNewFoodItem: false,
+                        ProposedFoodItemName: null,
+                        SuggestedCategory: null,
+                        SuggestedIsPantryStaple: false,
+                        ReferencedRecipeTitle: preferredUnlinked,
+                        MatchedRecipeId: null,
+                        MatchedRecipeTitle: null
+                    );
+                }
+            }
+        }
+
+        var compatibleFood = FindCompatibleExternalCatalogFood(
+            rawName,
+            rawUnit,
+            rawPrepNote,
+            canonicalHint,
+            catalogFoods
+        );
+
+        Stage3MatchDecisionDto decision;
+        if (compatibleFood is not null)
+        {
+            decision = new Stage3MatchDecisionDto(
+                MatchType: "existing_ingredient",
+                Id: compatibleFood.Id.ToString(),
+                Name: compatibleFood.Name,
+                Category: compatibleFood.Category?.ToString()
+            );
+        }
+        else
+        {
+            decision = new Stage3MatchDecisionDto(
+                MatchType: "new_ingredient",
+                Id: null,
+                Name: !string.IsNullOrWhiteSpace(canonicalHint) ? canonicalHint.Trim() : rawName,
+                Category: categoryHint
+            );
+        }
+
+        var reconciled = ReconcileStage3Decision(
+            rawName,
+            rawUnit,
+            rawPrepNote,
+            decision,
+            candidates: null,
+            foodsById,
+            foodsByNormName,
+            recipesById,
+            withinRecipeNewFoods,
+            allowRecipeReference
+        );
+
+        if (reconciled.IsNewFoodItem && !reconciled.IsRecipeReference && isPantryHint.HasValue)
+        {
+            reconciled = reconciled with
+            {
+                SuggestedIsPantryStaple = isPantryHint.Value || reconciled.SuggestedIsPantryStaple,
+            };
+        }
+
+        return reconciled;
+    }
+
+    private static CatalogFoodLookupItem? FindCompatibleExternalCatalogFood(
+        string rawName,
+        string? rawUnit,
+        string? rawPrepNote,
+        string? canonicalHint,
+        IReadOnlyList<CatalogFoodLookupItem> catalogFoods
+    )
+    {
+        var normRaw = FoodNameSanitizer.NormalizeCanonicalFoodName(rawName);
+        var normHint = !string.IsNullOrWhiteSpace(canonicalHint)
+            ? FoodNameSanitizer.NormalizeCanonicalFoodName(canonicalHint)
+            : string.Empty;
+
+        CatalogFoodLookupItem? best = null;
+        var bestScore = -1;
+
+        foreach (var food in catalogFoods)
+        {
+            if (
+                !FoodNameSanitizer.IsCompatibleFoodItemMatch(
+                    rawName,
+                    rawUnit,
+                    rawPrepNote,
+                    food.Name
+                )
+            )
+            {
+                continue;
+            }
+
+            var score = 85;
+            if (
+                !string.IsNullOrWhiteSpace(normRaw)
+                && string.Equals(food.NormalizedName, normRaw, StringComparison.OrdinalIgnoreCase)
+            )
+            {
+                score = 100;
+            }
+            else if (
+                !string.IsNullOrWhiteSpace(normHint)
+                && string.Equals(food.NormalizedName, normHint, StringComparison.OrdinalIgnoreCase)
+            )
+            {
+                score = 98;
+            }
+            else if (
+                food.NormalizedAliases.Any(a =>
+                    (
+                        !string.IsNullOrWhiteSpace(normRaw)
+                        && string.Equals(a, normRaw, StringComparison.OrdinalIgnoreCase)
+                    )
+                    || (
+                        !string.IsNullOrWhiteSpace(normHint)
+                        && string.Equals(a, normHint, StringComparison.OrdinalIgnoreCase)
+                    )
+                )
+            )
+            {
+                score = 95;
+            }
+            else if (
+                (
+                    string.Equals(normRaw, "butter", StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(
+                        food.NormalizedName,
+                        "unsalted butter",
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                )
+                || (
+                    string.Equals(normRaw, "milk", StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(
+                        food.NormalizedName,
+                        "whole milk",
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                )
+            )
+            {
+                score = 80;
+            }
+
+            if (
+                score > bestScore
+                || (score == bestScore && best is not null && food.Name.Length < best.Name.Length)
+            )
+            {
+                best = food;
+                bestScore = score;
+            }
+        }
+
+        return best;
+    }
 
     private sealed record ReconciledMatch(
         bool IsRecipeReference,
@@ -3216,7 +4194,7 @@ public sealed partial class IngestionRecipePipeline(
     };
 
     [GeneratedRegex(
-        @"^Ingredients?\s*:\s*$",
+        @"^(?:Base\s+)?Ingredients?\s*:\s*$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex IngredientsHeaderRegex();
@@ -3331,4 +4309,10 @@ public sealed partial class IngestionRecipePipeline(
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex StandaloneStorageStepRegex();
+
+    [GeneratedRegex(
+        @"^\s*WHY\s+THIS\s+RECIPE\s+WORKS(?:\s*[:.\-–—]*\s*|\s+)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex WhyThisRecipeWorksHeadingRegex();
 }

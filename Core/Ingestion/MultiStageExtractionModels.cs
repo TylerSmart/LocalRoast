@@ -170,6 +170,56 @@ public sealed record Stage6RefineRecipeResponseDto(
     IReadOnlyList<string> RefinementNotes
 );
 
+// Single-pass external extraction DTOs (Antigravity workflow bulk import)
+public sealed record ExternalExtractedReplacementDto(
+    string Name,
+    [property: JsonConverter(typeof(FlexibleNullableDecimalJsonConverter))]
+        decimal? Quantity = null,
+    [property: JsonConverter(typeof(FlexibleNullableDecimalJsonConverter))]
+        decimal? MaxQuantity = null,
+    string? Unit = null,
+    string? PrepNote = null,
+    string? CanonicalFoodName = null,
+    string? Category = null,
+    bool? IsPantryStaple = null
+);
+
+public sealed record ExternalExtractedIngredientDto(
+    string Name,
+    [property: JsonConverter(typeof(FlexibleNullableDecimalJsonConverter))]
+        decimal? Quantity = null,
+    [property: JsonConverter(typeof(FlexibleNullableDecimalJsonConverter))]
+        decimal? MaxQuantity = null,
+    string? Unit = null,
+    string? PrepNote = null,
+    bool IsOptional = false,
+    string? CanonicalFoodName = null,
+    string? Category = null,
+    bool? IsPantryStaple = null,
+    bool IsRecipeReference = false,
+    string? ReferencedRecipeTitle = null,
+    IReadOnlyList<ExternalExtractedReplacementDto>? Replacements = null,
+    IReadOnlyList<Stage1AlternateMeasurementDto>? AlternateMeasurements = null
+);
+
+public sealed record ExternalExtractedStepDto(string Instruction, JsonArray Tokens);
+
+public sealed record ExternalExtractedSectionDto(
+    string? Name,
+    IReadOnlyList<ExternalExtractedIngredientDto> Ingredients,
+    IReadOnlyList<ExternalExtractedStepDto> Steps
+);
+
+public sealed record ExternalRecipeExtractionDto(
+    string Title,
+    string? Description,
+    [property: JsonConverter(typeof(FlexibleNullableDecimalJsonConverter))] decimal? Servings,
+    string? Yield,
+    IReadOnlyList<ExternalExtractedSectionDto> Sections,
+    Stage1TimingDto? Timing,
+    IReadOnlyList<string>? Tags
+);
+
 // Parsed intermediate representation of Stage 4 token JSON nodes before compilation into ||{...}|| strings
 public abstract record Stage4ParsedToken(string Type);
 

@@ -111,5 +111,16 @@ public interface IIngestionService
         CancellationToken cancellationToken = default
     );
 
+    Task<SubmitExternalExtractionResultDto?> SubmitExternalExtractionAsync(
+        Guid id,
+        SubmitExternalExtractionRequest request,
+        CancellationToken cancellationToken = default
+    );
+
+    Task<IReadOnlyList<IngestionJobSourceItemDto>> GetBatchJobSourcesAsync(
+        BatchJobSourceRequest request,
+        CancellationToken cancellationToken = default
+    );
+
     Task<bool> DiscardJobAsync(Guid id, CancellationToken cancellationToken = default);
 }

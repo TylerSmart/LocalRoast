@@ -579,4 +579,80 @@ public sealed class IngestionJobsController(IIngestionService ingestionService) 
         var deleted = await ingestionService.DiscardJobAsync(id, cancellationToken);
         return deleted ? NoContent() : NotFound();
     }
+
+    [HttpPost("batch-source")]
+    [ProducesResponseType(
+        typeof(IReadOnlyList<IngestionJobSourceItemDto>),
+        StatusCodes.Status200OK
+    )]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> GetBatchJobSources(
+        [FromBody] BatchJobSourceRequest request,
+        CancellationToken cancellationToken
+    )
+    {
+        try
+        {
+            var sources = await ingestionService.GetBatchJobSourcesAsync(
+                request,
+                cancellationToken
+            );
+            return Ok(sources);
+        }
+        catch (DomainValidationException ex)
+        {
+            return BadRequest(
+                new ProblemDetails
+                {
+                    Status = StatusCodes.Status400BadRequest,
+                    Title = ex.Title,
+                    Detail = ex.Message,
+                }
+            );
+        }
+    }
+
+    [HttpPost("{id:guid}/submit-extraction")]
+    [ProducesResponseType(typeof(SubmitExternalExtractionResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> SubmitExternalExtraction(
+        Guid id,
+        [FromBody] SubmitExternalExtractionRequest request,
+        CancellationToken cancellationToken
+    )
+    {
+        try
+        {
+            var result = await ingestionService.SubmitExternalExtractionAsync(
+                id,
+                request,
+                cancellationToken
+            );
+            return result is not null ? Ok(result) : NotFound();
+        }
+        catch (DomainValidationException ex)
+        {
+            return BadRequest(
+                new ProblemDetails
+                {
+                    Status = StatusCodes.Status400BadRequest,
+                    Title = ex.Title,
+                    Detail = ex.Message,
+                }
+            );
+        }
+        catch (ConflictException ex)
+        {
+            return Conflict(
+                new ProblemDetails
+                {
+                    Status = StatusCodes.Status409Conflict,
+                    Title = ex.Title,
+                    Detail = ex.Message,
+                }
+            );
+        }
+    }
 }

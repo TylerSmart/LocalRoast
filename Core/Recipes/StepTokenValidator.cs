@@ -560,15 +560,37 @@ public static partial class StepTokenValidator
             var merged = new JsonArray();
             foreach (var node in source)
             {
-                if (
-                    node is JsonValue val
-                    && val.TryGetValue<string>(out var s)
-                    && merged.Count > 0
-                    && merged[^1] is JsonValue prevVal
-                    && prevVal.TryGetValue<string>(out var prevStr)
+                string? textVal = null;
+                if (node is JsonValue val && val.TryGetValue<string>(out var s))
+                {
+                    textVal = s;
+                }
+                else if (
+                    node is JsonObject obj
+                    && string.Equals(
+                        GetNullableString(obj["type"])?.Trim(),
+                        "text",
+                        StringComparison.OrdinalIgnoreCase
+                    )
                 )
                 {
-                    merged[^1] = JsonValue.Create(prevStr + s);
+                    textVal = GetNullableString(obj["text"]) ?? string.Empty;
+                }
+
+                if (textVal is not null)
+                {
+                    if (
+                        merged.Count > 0
+                        && merged[^1] is JsonValue prevVal
+                        && prevVal.TryGetValue<string>(out var prevStr)
+                    )
+                    {
+                        merged[^1] = JsonValue.Create(prevStr + textVal);
+                    }
+                    else
+                    {
+                        merged.Add(JsonValue.Create(textVal));
+                    }
                 }
                 else
                 {
@@ -1587,6 +1609,19 @@ public static partial class StepTokenValidator
             var type = obj["type"]?.GetValue<string>()?.Trim().ToLowerInvariant();
             switch (type)
             {
+                case "text":
+                {
+                    var textVal = GetNullableString(obj["text"]) ?? string.Empty;
+                    if (result.Count > 0 && result[^1] is Stage4TextToken prevObjTextTok)
+                    {
+                        result[^1] = new Stage4TextToken(prevObjTextTok.Text + textVal);
+                    }
+                    else
+                    {
+                        result.Add(new Stage4TextToken(textVal));
+                    }
+                    break;
+                }
                 case "ingredient":
                     result.Add(
                         new Stage4IngredientToken(

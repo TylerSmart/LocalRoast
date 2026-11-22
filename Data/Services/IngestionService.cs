@@ -8,6 +8,7 @@ using App.Core.Media;
 using App.Core.Recipes;
 using App.Data.Entities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace App.Data.Services;
 
@@ -17,7 +18,10 @@ public sealed class IngestionService(
     IMediaStorageService mediaStorageService,
     IIngestionQueueSignal queueSignal,
     ILlmSettingsService? llmSettingsService = null,
-    IIngestionRealtimeNotifier? realtimeNotifier = null
+    IIngestionRealtimeNotifier? realtimeNotifier = null,
+    IIngestionRecipePipeline? recipePipeline = null,
+    IRecipeEmbeddingService? recipeEmbeddingService = null,
+    ILogger<IngestionService>? logger = null
 ) : IIngestionService
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -2211,6 +2215,468 @@ public sealed class IngestionService(
         }
 
         return new IngestionReviewDiagnosticsDto(validationIssues, qualityWarnings, targeted);
+    }
+
+    public async Task<IReadOnlyList<IngestionJobSourceItemDto>> GetBatchJobSourcesAsync(
+        BatchJobSourceRequest request,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var limit = Math.Clamp(request.Limit, 1, 2000);
+        var query = dbContext.IngestionJobs.AsNoTracking().AsQueryable();
+
+        if (request.JobIds is { Count: > 0 } requestedIds)
+        {
+            var distinctIds = requestedIds.Distinct().ToList();
+            var rows = await query
+                .Where(j => distinctIds.Contains(j.Id) && j.Status != IngestionJobStatus.Discarded)
+                .Select(j => new
+                {
+                    j.Id,
+                    j.Status,
+                    j.DisplayTitle,
+                    j.NormalizedSourceText,
+                    j.RawText,
+                    j.SourceBookTitle,
+                    j.SourceBookPage,
+                    j.CreatedAt,
+                })
+                .ToListAsync(cancellationToken);
+
+            var byId = rows.ToDictionary(r => r.Id);
+            var ordered = new List<IngestionJobSourceItemDto>(Math.Min(distinctIds.Count, limit));
+            foreach (var jobId in distinctIds)
+            {
+                if (!byId.TryGetValue(jobId, out var row))
+                {
+                    continue;
+                }
+
+                ordered.Add(
+                    new IngestionJobSourceItemDto(
+                        Id: row.Id,
+                        Status: row.Status,
+                        DisplayTitle: row.DisplayTitle,
+                        SourceText: !string.IsNullOrWhiteSpace(row.NormalizedSourceText)
+                            ? row.NormalizedSourceText
+                            : (row.RawText ?? string.Empty),
+                        SourceBookTitle: row.SourceBookTitle,
+                        SourceBookPage: row.SourceBookPage,
+                        CreatedAt: row.CreatedAt
+                    )
+                );
+
+                if (ordered.Count >= limit)
+                {
+                    break;
+                }
+            }
+
+            return ordered;
+        }
+
+        if (request.Status.HasValue)
+        {
+            query = query.Where(j => j.Status == request.Status.Value);
+        }
+        else
+        {
+            query = query.Where(j => j.Status != IngestionJobStatus.Discarded);
+        }
+
+        var filtered = await query
+            .OrderBy(j => j.CreatedAt)
+            .ThenBy(j => j.Id)
+            .Take(limit)
+            .Select(j => new
+            {
+                j.Id,
+                j.Status,
+                j.DisplayTitle,
+                j.NormalizedSourceText,
+                j.RawText,
+                j.SourceBookTitle,
+                j.SourceBookPage,
+                j.CreatedAt,
+            })
+            .ToListAsync(cancellationToken);
+
+        return filtered
+            .Select(j => new IngestionJobSourceItemDto(
+                Id: j.Id,
+                Status: j.Status,
+                DisplayTitle: j.DisplayTitle,
+                SourceText: !string.IsNullOrWhiteSpace(j.NormalizedSourceText)
+                    ? j.NormalizedSourceText
+                    : (j.RawText ?? string.Empty),
+                SourceBookTitle: j.SourceBookTitle,
+                SourceBookPage: j.SourceBookPage,
+                CreatedAt: j.CreatedAt
+            ))
+            .ToList();
+    }
+
+    public async Task<SubmitExternalExtractionResultDto?> SubmitExternalExtractionAsync(
+        Guid id,
+        SubmitExternalExtractionRequest request,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (recipePipeline is null)
+        {
+            throw new InvalidOperationException(
+                "IIngestionRecipePipeline is required for external extraction submission."
+            );
+        }
+
+        var job = await dbContext
+            .IngestionJobs.Include(j => j.ResultingRecipe)
+            .FirstOrDefaultAsync(j => j.Id == id, cancellationToken);
+
+        if (job is null)
+        {
+            return null;
+        }
+
+        if (job.Status == IngestionJobStatus.Discarded)
+        {
+            throw new ConflictException("Cannot submit extraction for a discarded ingestion job.");
+        }
+
+        if (job.Status is IngestionJobStatus.Preprocessing or IngestionJobStatus.Extracting)
+        {
+            throw new ConflictException(
+                "Cannot submit external extraction while the job is actively processing."
+            );
+        }
+
+        if (job.Status == IngestionJobStatus.Published && !request.AllowOverwritePublished)
+        {
+            throw new ConflictException(
+                "Job is already published. Set allowOverwritePublished to true to overwrite it."
+            );
+        }
+
+        var sourceText = !string.IsNullOrWhiteSpace(job.NormalizedSourceText)
+            ? job.NormalizedSourceText
+            : job.RawText;
+        if (string.IsNullOrWhiteSpace(sourceText))
+        {
+            throw new DomainValidationException(
+                "Ingestion job has no source text to validate against."
+            );
+        }
+
+        List<Guid>? initialCollectionIds = null;
+        if (!string.IsNullOrWhiteSpace(job.InitialCollectionIdsJson))
+        {
+            try
+            {
+                initialCollectionIds = JsonSerializer.Deserialize<List<Guid>>(
+                    job.InitialCollectionIdsJson,
+                    JsonOptions
+                );
+            }
+            catch
+            {
+                // Ignore malformed historical collection IDs JSON
+            }
+        }
+
+        var pipelineResult = await recipePipeline.CompileExternalExtractionAsync(
+            new ExternalExtractionPipelineRequest(
+                SourceText: sourceText,
+                Extraction: request.Extraction,
+                ExtractedModel: request.ExtractedModel.Trim(),
+                ExcludeRecipeId: job.ResultingRecipeId,
+                SourceUrl: job.SourceUrl,
+                SourceName: job.SourceName,
+                SourceAuthor: job.SourceAuthor,
+                SourceBookTitle: job.SourceBookTitle,
+                SourceBookPage: job.SourceBookPage,
+                CoverImagePath: job.DownloadedCoverImagePath,
+                ThumbnailImagePath: job.DownloadedThumbnailImagePath,
+                RetainSourceAttachments: job.Channel
+                    is IngestionChannel.Images
+                        or IngestionChannel.Pdf
+                        or IngestionChannel.RawText,
+                SuggestedCollectionIds: initialCollectionIds,
+                RepairCount: request.RepairCount
+            ),
+            cancellationToken
+        );
+
+        var draft = pipelineResult.Draft;
+        var modelUsed = pipelineResult.ExtractedModel;
+
+        if (draft.Ingredients is { Count: > 0 })
+        {
+            var allValidationIssues = new List<string>(draft.ValidationIssues ?? []);
+            var (resolvedDraft, referenceIssues) =
+                await IngestionCatalogMaterializer.ResolveDraftRecipeReferencesAsync(
+                    dbContext,
+                    draft,
+                    job.ResultingRecipeId,
+                    cancellationToken
+                );
+            allValidationIssues.RemoveAll(s =>
+                s.Contains("references sub-recipe", StringComparison.OrdinalIgnoreCase)
+            );
+            allValidationIssues.AddRange(referenceIssues);
+            var distinctIssues = allValidationIssues
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+            var filteredWarnings = IngestionProcessor.FilterBenignSubRecipeQualityWarnings(
+                resolvedDraft.QualityWarnings,
+                resolvedDraft.Ingredients
+            );
+            var updatedDraft = resolvedDraft with
+            {
+                QualityWarnings = filteredWarnings,
+                ValidationIssues = distinctIssues,
+            };
+            draft = updatedDraft with
+            {
+                ConfidenceScore = IngestionConfidenceScorer.Compute(
+                    updatedDraft,
+                    updatedDraft.PipelineRepairCount
+                ),
+            };
+        }
+
+        var hasUnresolvedRecipeReferences =
+            draft.Ingredients?.Any(i => i.IsRecipeReference && !i.MatchedRecipeId.HasValue) == true;
+        var validationIssues = draft.ValidationIssues ?? [];
+        var qualityWarnings = draft.QualityWarnings ?? [];
+        var measurementWarnings = draft.MeasurementWarnings ?? [];
+
+        var canAutoPublish =
+            request.AutoPublish
+            && pipelineResult.IsPlausibleRecipe
+            && validationIssues.Count == 0
+            && qualityWarnings.Count == 0
+            && measurementWarnings.Count == 0
+            && !hasUnresolvedRecipeReferences
+            && !string.IsNullOrWhiteSpace(draft.Title)
+            && (draft.Ingredients?.Count ?? 0) >= 1
+            && (draft.Steps?.Count ?? 0) >= 1
+            && draft.ConfidenceScore >= 0.85m;
+
+        var promotedIds = new List<Guid>();
+        var resultingSlug = job.ResultingRecipe?.Slug;
+        var publishedSuccessfully = false;
+
+        if (canAutoPublish)
+        {
+            job.ExtractedModel = modelUsed;
+            job.RefinedModel = null;
+            job.RefinedAt = null;
+            job.RefinementAttemptCount = 0;
+            job.RefinementNextRetryAt = null;
+
+            try
+            {
+                var createdRecipe = await IngestionCatalogMaterializer.PublishDraftAsync(
+                    dbContext,
+                    recipeService,
+                    mediaStorageService,
+                    job,
+                    draft,
+                    cancellationToken
+                );
+
+                await IngestionCatalogMaterializer.BacklinkUnresolvedRecipeReferencesAsync(
+                    dbContext,
+                    createdRecipe.Id,
+                    createdRecipe.Title,
+                    cancellationToken
+                );
+
+                job.Status = IngestionJobStatus.Published;
+                job.ResultingRecipeId = createdRecipe.Id;
+                job.ExtractedDraftJson = JsonSerializer.Serialize(draft, JsonOptions);
+                job.ConfidenceScore = draft.ConfidenceScore;
+                job.DisplayTitle = draft.Title;
+                job.ProcessedAt = DateTimeOffset.UtcNow;
+                job.NextRetryAt = null;
+                job.RunNowRequested = false;
+                job.StatusDetail = $"Auto-published external extraction ({modelUsed}).";
+                resultingSlug = createdRecipe.Slug;
+                publishedSuccessfully = true;
+
+                await dbContext.SaveChangesAsync(cancellationToken);
+
+                await IngestionCatalogMaterializer.PromoteWaitingRecipeReferenceJobsAsync(
+                    dbContext,
+                    recipeService,
+                    mediaStorageService,
+                    globalAutoPublish: true,
+                    cancellationToken,
+                    promotedRecipeIds: promotedIds
+                );
+
+                if (
+                    request.ComputeEmbeddings
+                    && recipeEmbeddingService is not null
+                    && llmSettingsService is not null
+                )
+                {
+                    await TryEmbedExternalRecipesAsync(
+                        [createdRecipe.Id, .. promotedIds],
+                        cancellationToken
+                    );
+                }
+            }
+            catch (DomainValidationException ex)
+            {
+                logger?.LogWarning(
+                    ex,
+                    "External extraction auto-publish failed validation for job {JobId}; demoting to ReadyForReview.",
+                    job.Id
+                );
+
+                var combinedIssues = (draft.ValidationIssues ?? [])
+                    .Append(ex.Message)
+                    .Where(s => !string.IsNullOrWhiteSpace(s))
+                    .Distinct(StringComparer.Ordinal)
+                    .ToList();
+                draft = draft with
+                {
+                    ValidationIssues = combinedIssues,
+                    ConfidenceScore = Math.Min(draft.ConfidenceScore, 0.70m),
+                };
+
+                var preservedBookTitle = job.SourceBookTitle;
+                var preservedBookPage = job.SourceBookPage;
+                dbContext.ChangeTracker.Clear();
+                job =
+                    await dbContext
+                        .IngestionJobs.Include(j => j.ResultingRecipe)
+                        .FirstOrDefaultAsync(j => j.Id == id, cancellationToken)
+                    ?? job;
+                resultingSlug = job.ResultingRecipe?.Slug;
+                if (!string.IsNullOrWhiteSpace(preservedBookTitle))
+                {
+                    job.SourceBookTitle = preservedBookTitle;
+                }
+                if (preservedBookPage.HasValue)
+                {
+                    job.SourceBookPage = preservedBookPage;
+                }
+            }
+        }
+
+        if (!publishedSuccessfully)
+        {
+            job.Status = IngestionJobStatus.ReadyForReview;
+            job.ExtractedModel = modelUsed;
+            job.RefinedModel = null;
+            job.RefinedAt = null;
+            job.RefinementAttemptCount = 0;
+            job.RefinementNextRetryAt = null;
+            job.ExtractedDraftJson = JsonSerializer.Serialize(draft, JsonOptions);
+            job.ConfidenceScore = draft.ConfidenceScore;
+            job.DisplayTitle = draft.Title;
+            job.ProcessedAt = DateTimeOffset.UtcNow;
+            job.NextRetryAt = null;
+            job.RunNowRequested = false;
+            job.StatusDetail = BuildExternalReviewStatusDetail(
+                modelUsed,
+                draft.ValidationIssues,
+                draft.QualityWarnings,
+                draft.MeasurementWarnings
+            );
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        await NotifyQueueChangedSafeAsync(
+            "external-extraction-submitted",
+            job.Id,
+            cancellationToken
+        );
+
+        return new SubmitExternalExtractionResultDto(
+            JobId: job.Id,
+            Status: job.Status,
+            ConfidenceScore: draft.ConfidenceScore,
+            ResultingRecipeId: job.ResultingRecipeId,
+            ResultingRecipeSlug: resultingSlug,
+            PromotedWaitingRecipeIds: promotedIds,
+            ValidationIssues: draft.ValidationIssues ?? [],
+            QualityWarnings: draft.QualityWarnings ?? [],
+            MeasurementWarnings: draft.MeasurementWarnings ?? [],
+            Draft: draft
+        );
+    }
+
+    private async Task TryEmbedExternalRecipesAsync(
+        IReadOnlyCollection<Guid> recipeIds,
+        CancellationToken cancellationToken
+    )
+    {
+        if (recipeEmbeddingService is null || llmSettingsService is null || recipeIds.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            var config = await llmSettingsService.GetEffectiveConfigAsync(cancellationToken);
+            var embConfig = config.ForEmbedding();
+            if (embConfig is null || string.IsNullOrWhiteSpace(embConfig.TextModel))
+            {
+                return;
+            }
+
+            await recipeEmbeddingService.UpsertRecipeEmbeddingsAsync(
+                embConfig,
+                recipeIds,
+                cancellationToken
+            );
+        }
+        catch (Exception ex)
+            when (!(ex is OperationCanceledException && cancellationToken.IsCancellationRequested))
+        {
+            logger?.LogWarning(
+                ex,
+                "Post-publish recipe embedding failed during external extraction submission for {Count} recipe(s); background sync will retry later.",
+                recipeIds.Count
+            );
+        }
+    }
+
+    private static string BuildExternalReviewStatusDetail(
+        string modelUsed,
+        IReadOnlyList<string>? validationIssues,
+        IReadOnlyList<string>? qualityWarnings,
+        IReadOnlyList<string>? measurementWarnings
+    )
+    {
+        var detail = $"Ready for side-by-side review ({modelUsed}).";
+        var summaryParts = new List<string>();
+        if (validationIssues is { Count: > 0 })
+        {
+            summaryParts.Add($"Validation: {string.Join(" ", validationIssues)}");
+        }
+        if (qualityWarnings is { Count: > 0 })
+        {
+            summaryParts.Add($"Quality: {string.Join(" ", qualityWarnings)}");
+        }
+        if (measurementWarnings is { Count: > 0 })
+        {
+            summaryParts.Add($"Measurements: {string.Join(" ", measurementWarnings)}");
+        }
+
+        if (summaryParts.Count > 0)
+        {
+            detail = $"{detail} {string.Join(" ", summaryParts)}";
+        }
+
+        return detail.Length <= 2000 ? detail : detail[..2000];
     }
 
     private async Task NotifyQueueChangedSafeAsync(

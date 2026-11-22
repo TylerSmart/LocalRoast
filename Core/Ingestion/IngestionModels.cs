@@ -349,3 +349,41 @@ public sealed record IngestionReviewDiagnosticsDto(
 };
 
 public sealed record IngestionDraftDiagnosticsRequest([Required] IngestionExtractedDraftDto Draft);
+
+public sealed record SubmitExternalExtractionRequest(
+    [Required] ExternalRecipeExtractionDto Extraction,
+    [Required, MaxLength(200)] string ExtractedModel,
+    bool AutoPublish = true,
+    bool AllowOverwritePublished = false,
+    bool ComputeEmbeddings = true,
+    [Range(0, 10)] int RepairCount = 0
+);
+
+public sealed record SubmitExternalExtractionResultDto(
+    Guid JobId,
+    IngestionJobStatus Status,
+    decimal ConfidenceScore,
+    Guid? ResultingRecipeId,
+    string? ResultingRecipeSlug,
+    IReadOnlyList<Guid> PromotedWaitingRecipeIds,
+    IReadOnlyList<string> ValidationIssues,
+    IReadOnlyList<string> QualityWarnings,
+    IReadOnlyList<string> MeasurementWarnings,
+    IngestionExtractedDraftDto Draft
+);
+
+public sealed record BatchJobSourceRequest(
+    IReadOnlyList<Guid>? JobIds = null,
+    IngestionJobStatus? Status = IngestionJobStatus.Queued,
+    [Range(1, 2000)] int Limit = 500
+);
+
+public sealed record IngestionJobSourceItemDto(
+    Guid Id,
+    IngestionJobStatus Status,
+    string DisplayTitle,
+    string SourceText,
+    string? SourceBookTitle,
+    int? SourceBookPage,
+    DateTimeOffset CreatedAt
+);

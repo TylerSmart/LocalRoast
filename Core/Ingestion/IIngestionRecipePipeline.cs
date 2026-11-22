@@ -70,6 +70,23 @@ public sealed record IngestionPipelineRequest(
     Func<string, Task>? OnStageProgress = null
 );
 
+public sealed record ExternalExtractionPipelineRequest(
+    string SourceText,
+    ExternalRecipeExtractionDto Extraction,
+    string ExtractedModel,
+    Guid? ExcludeRecipeId = null,
+    string? SourceUrl = null,
+    string? SourceName = null,
+    string? SourceAuthor = null,
+    string? SourceBookTitle = null,
+    int? SourceBookPage = null,
+    string? CoverImagePath = null,
+    string? ThumbnailImagePath = null,
+    bool RetainSourceAttachments = false,
+    IReadOnlyList<Guid>? SuggestedCollectionIds = null,
+    int RepairCount = 0
+);
+
 public sealed record IngestionPipelineResult(
     IngestionExtractedDraftDto Draft,
     bool IsPlausibleRecipe,
@@ -80,6 +97,11 @@ public interface IIngestionRecipePipeline
 {
     Task<IngestionPipelineResult> RunAsync(
         IngestionPipelineRequest request,
+        CancellationToken cancellationToken = default
+    );
+
+    Task<IngestionPipelineResult> CompileExternalExtractionAsync(
+        ExternalExtractionPipelineRequest request,
         CancellationToken cancellationToken = default
     );
 }

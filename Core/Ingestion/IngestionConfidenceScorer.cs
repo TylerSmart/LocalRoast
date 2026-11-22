@@ -112,7 +112,8 @@ public static class IngestionConfidenceScorer
                         );
                         var isIncidentalWaterOrIce =
                             normTokName.EndsWith("water", StringComparison.Ordinal)
-                            || string.Equals(normTokName, "ice", StringComparison.Ordinal);
+                            || string.Equals(normTokName, "ice", StringComparison.Ordinal)
+                            || normTokName.StartsWith("ice cube", StringComparison.Ordinal);
                         if (!isIncidentalWaterOrIce)
                         {
                             unlinkedNonWaterTokenCount++;

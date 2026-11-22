@@ -2654,6 +2654,1042 @@ public sealed class MultiStageIngestionAndReplacementsIntegrationTests
         Assert.AreEqual(condensedDesc, detail.ExtractedDraft.Description);
     }
 
+    [TestMethod]
+    public async Task BatchJobSource_And_SubmitExternalExtraction_ZeroLlmCalls_AutoPublishesWithCatalogGuardsAndIndexRemapping()
+    {
+        var mockLlm = new FallbackExercisingLlmClient();
+
+        await using var customFactory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Llm:TextModel", "qwen2.5:14b");
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ILlmExtractionClient>();
+                services.AddSingleton<ILlmExtractionClient>(mockLlm);
+            });
+        });
+
+        using var client = customFactory.CreateClient();
+        await AuthenticateAsync(client);
+
+        // Seed existing catalog items to verify compatible match ("Unsalted Butter") and
+        // blocked cross-SKU mismatches ("heavy cream" !-> "Sour Cream", "Table salt" !-> "Kosher Salt").
+        var butterRes = await client.PostAsJsonAsync(
+            "/api/food-items",
+            new CreateFoodItemRequest(
+                "Unsalted Butter",
+                IsPantryStaple: true,
+                Category: FoodCategory.DairyAndEggs
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Created, butterRes.StatusCode);
+        var seededButter = (await butterRes.Content.ReadFromJsonAsync<FoodItemDto>())!;
+
+        var sourCreamRes = await client.PostAsJsonAsync(
+            "/api/food-items",
+            new CreateFoodItemRequest(
+                "Sour Cream",
+                IsPantryStaple: false,
+                Category: FoodCategory.DairyAndEggs
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Created, sourCreamRes.StatusCode);
+        var seededSourCream = (await sourCreamRes.Content.ReadFromJsonAsync<FoodItemDto>())!;
+
+        var kosherSaltRes = await client.PostAsJsonAsync(
+            "/api/food-items",
+            new CreateFoodItemRequest(
+                "Kosher Salt",
+                IsPantryStaple: true,
+                Category: FoodCategory.SpicesAndSeasonings
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Created, kosherSaltRes.StatusCode);
+        var seededKosherSalt = (await kosherSaltRes.Content.ReadFromJsonAsync<FoodItemDto>())!;
+
+        var rawText1 = """
+            Buttered Cream Rolls
+            Yield: Serves 4
+            Prep Time: 10 minutes
+            Cook Time: 15 minutes
+            Total Time: 25 minutes
+            A tender warm roll finished with melted butter, cream, and pepper.
+
+            Ingredients:
+            - 2 tablespoons butter
+            - 1/2 cup heavy cream
+            - Table salt and ground black pepper
+
+            Instructions:
+            1. Brush 1 teaspoon butter on each roll, season with 1/2 teaspoon pepper, and pour in heavy cream.
+            """;
+
+        var enqueue1 = await client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest(RawText: rawText1, TitleHint: "Buttered Cream Rolls")
+        );
+        Assert.AreEqual(HttpStatusCode.Accepted, enqueue1.StatusCode);
+        var job1 = (await enqueue1.Content.ReadFromJsonAsync<IngestionJobSummaryDto>())!;
+
+        var enqueue2 = await client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest(
+                RawText: "Quick Toast\nIngredients:\n- 1 slice bread\nInstructions:\n1. Toast bread.",
+                TitleHint: "Quick Toast"
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Accepted, enqueue2.StatusCode);
+        var job2 = (await enqueue2.Content.ReadFromJsonAsync<IngestionJobSummaryDto>())!;
+
+        // 1. Verify POST /api/ingestion/jobs/batch-source returns queued job payloads in one round trip.
+        var batchSrcRes = await client.PostAsJsonAsync(
+            "/api/ingestion/jobs/batch-source",
+            new BatchJobSourceRequest(
+                JobIds: [job2.Id, job1.Id],
+                Status: IngestionJobStatus.Queued,
+                Limit: 10
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.OK, batchSrcRes.StatusCode);
+        var sources = (
+            await batchSrcRes.Content.ReadFromJsonAsync<List<IngestionJobSourceItemDto>>()
+        )!;
+        Assert.HasCount(2, sources);
+        Assert.AreEqual(job2.Id, sources[0].Id);
+        Assert.AreEqual(job1.Id, sources[1].Id);
+        Assert.Contains("Buttered Cream Rolls", sources[1].SourceText);
+
+        // 2. Submit single-pass external extraction (using raw index 2 before SaltAndPepper split
+        //    and uniform {"type":"text",...} objects) and verify zero text-LLM stage calls.
+        var extraction = new ExternalRecipeExtractionDto(
+            Title: "Buttered Cream Rolls",
+            Description: "A tender warm roll finished with melted butter, cream, and pepper.",
+            Servings: 4m,
+            Yield: "Serves 4",
+            Sections:
+            [
+                new ExternalExtractedSectionDto(
+                    Name: null,
+                    Ingredients:
+                    [
+                        new ExternalExtractedIngredientDto(
+                            Name: "butter",
+                            Quantity: 2m,
+                            MaxQuantity: null,
+                            Unit: "tablespoon",
+                            PrepNote: null,
+                            IsOptional: false,
+                            CanonicalFoodName: "unsalted butter",
+                            Category: "DairyAndEggs",
+                            IsPantryStaple: true
+                        ),
+                        new ExternalExtractedIngredientDto(
+                            Name: "heavy cream",
+                            Quantity: 0.5m,
+                            MaxQuantity: null,
+                            Unit: "cup",
+                            PrepNote: null,
+                            IsOptional: false,
+                            CanonicalFoodName: "Sour Cream",
+                            Category: "DairyAndEggs"
+                        ),
+                        new ExternalExtractedIngredientDto(
+                            Name: "Table salt and ground black pepper",
+                            Quantity: null,
+                            MaxQuantity: null,
+                            Unit: null
+                        ),
+                    ],
+                    Steps:
+                    [
+                        new ExternalExtractedStepDto(
+                            Instruction: "Brush 1 teaspoon butter on each roll, season with 1/2 teaspoon pepper, and pour in heavy cream.",
+                            Tokens:
+                            [
+                                new JsonObject { ["type"] = "text", ["text"] = "Brush " },
+                                new JsonObject
+                                {
+                                    ["type"] = "ingredient",
+                                    ["ingredientIndex"] = 0,
+                                    ["name"] = "butter",
+                                    ["quantity"] = 1,
+                                    ["maxQuantity"] = null,
+                                    ["unit"] = "teaspoon",
+                                    ["fixed"] = true,
+                                },
+                                new JsonObject
+                                {
+                                    ["type"] = "text",
+                                    ["text"] = " on each roll, season with ",
+                                },
+                                new JsonObject
+                                {
+                                    ["type"] = "ingredient",
+                                    ["ingredientIndex"] = 2,
+                                    ["name"] = "pepper",
+                                    ["quantity"] = 0.5,
+                                    ["maxQuantity"] = null,
+                                    ["unit"] = "teaspoon",
+                                    ["fixed"] = false,
+                                },
+                                new JsonObject
+                                {
+                                    ["type"] = "text",
+                                    ["text"] = ", and pour in heavy cream.",
+                                },
+                            ]
+                        ),
+                    ]
+                ),
+            ],
+            Timing: new Stage1TimingDto(10, 15, 25),
+            Tags: ["Baked Goods", "Side Dish"]
+        );
+
+        var submitRes = await client.PostAsJsonAsync(
+            $"/api/ingestion/jobs/{job1.Id}/submit-extraction",
+            new SubmitExternalExtractionRequest(
+                Extraction: extraction,
+                ExtractedModel: "gemini-flash (agy-workflow)",
+                AutoPublish: true,
+                AllowOverwritePublished: false,
+                ComputeEmbeddings: false,
+                RepairCount: 0
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.OK, submitRes.StatusCode);
+        var submitDto = (
+            await submitRes.Content.ReadFromJsonAsync<SubmitExternalExtractionResultDto>()
+        )!;
+
+        Assert.IsEmpty(mockLlm.StageCalls);
+        Assert.IsEmpty(submitDto.ValidationIssues);
+        Assert.IsEmpty(submitDto.QualityWarnings);
+        Assert.IsEmpty(submitDto.MeasurementWarnings);
+        Assert.AreEqual(IngestionJobStatus.Published, submitDto.Status);
+        Assert.IsNotNull(submitDto.ResultingRecipeId);
+
+        var recipe = (
+            await client.GetFromJsonAsync<RecipeDetailDto>(
+                $"/api/recipes/{submitDto.ResultingRecipeId}"
+            )
+        )!;
+        Assert.AreEqual("gemini-flash (agy-workflow)", recipe.ExtractedModel);
+        Assert.HasCount(4, recipe.Ingredients);
+
+        var butterIng = recipe.Ingredients[0];
+        var creamIng = recipe.Ingredients[1];
+        var saltIng = recipe.Ingredients[2];
+        var pepperIng = recipe.Ingredients[3];
+
+        Assert.AreEqual(seededButter.Id, butterIng.FoodItemId);
+        Assert.AreNotEqual(seededSourCream.Id, creamIng.FoodItemId);
+        Assert.AreEqual("heavy cream", creamIng.FoodItemName);
+        Assert.AreNotEqual(seededKosherSalt.Id, saltIng.FoodItemId);
+        Assert.AreEqual("salt", saltIng.FoodItemName);
+        Assert.AreEqual("black pepper", pepperIng.FoodItemName);
+
+        var draftTokens = StepInstructionParser
+            .ExtractTokens(submitDto.Draft.Steps![0].Instruction)
+            .OfType<StepIngredientToken>()
+            .ToList();
+        Assert.AreEqual(0, draftTokens.First(t => t.Ingredient == "butter").IngredientIndex);
+        Assert.AreEqual(3, draftTokens.First(t => t.Ingredient == "pepper").IngredientIndex);
+        Assert.AreEqual(
+            1,
+            draftTokens
+                .First(t => t.Ingredient.Contains("cream", StringComparison.OrdinalIgnoreCase))
+                .IngredientIndex
+        );
+
+        var compiledStep = recipe.Steps[0].Instruction;
+        var stepTokens = StepInstructionParser
+            .ExtractTokens(compiledStep)
+            .OfType<StepIngredientToken>()
+            .ToList();
+
+        var butterToken = stepTokens.First(t => t.Ingredient == "butter");
+        Assert.AreEqual(butterIng.Id, butterToken.IngredientId);
+        Assert.IsTrue(butterToken.Fixed);
+
+        var pepperToken = stepTokens.First(t => t.Ingredient == "pepper");
+        Assert.AreEqual(pepperIng.Id, pepperToken.IngredientId);
+
+        var creamToken = stepTokens.First(t =>
+            t.Ingredient.Contains("cream", StringComparison.OrdinalIgnoreCase)
+        );
+        Assert.AreEqual(creamIng.Id, creamToken.IngredientId);
+        Assert.AreEqual(0.5m, creamToken.Amount);
+        Assert.AreEqual(MeasurementUnit.Cup, creamToken.Unit);
+    }
+
+    [TestMethod]
+    public async Task SubmitExternalExtraction_SubRecipeDependency_AutoPromotesWaitingDependentWhenPrerequisiteSubmitted()
+    {
+        using var client = _factory.CreateClient();
+        await AuthenticateAsync(client);
+
+        var bruschettaSource = """
+            Classic Tomato Bruschetta
+            Yield: Serves 6
+            Prep Time: 10 minutes
+            Total Time: 10 minutes
+            Crisp grilled bread topped with sweet garlic-rubbed tomatoes and basil.
+
+            Ingredients:
+            - 1 recipe Toasted Bread for Bruschetta (recipe follows)
+            - 2 tablespoons extra-virgin olive oil
+
+            Instructions:
+            1. Drizzle 2 tablespoons extra-virgin olive oil over 1 recipe Toasted Bread for Bruschetta.
+            """;
+
+        var breadSource = """
+            Toasted Bread for Bruschetta
+            Yield: Makes 12 slices
+            Prep Time: 5 minutes
+            Cook Time: 5 minutes
+            Total Time: 10 minutes
+            Crisp golden baguette slices brushed with oil.
+
+            Ingredients:
+            - 1 tablespoon extra-virgin olive oil
+
+            Instructions:
+            1. Brush 1 tablespoon extra-virgin olive oil over bread and bake at 400 degrees for 5 minutes.
+            """;
+
+        var enqueueB = await client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest(
+                RawText: bruschettaSource,
+                TitleHint: "Classic Tomato Bruschetta"
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Accepted, enqueueB.StatusCode);
+        var jobB = (await enqueueB.Content.ReadFromJsonAsync<IngestionJobSummaryDto>())!;
+
+        var enqueueA = await client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest(
+                RawText: breadSource,
+                TitleHint: "Toasted Bread for Bruschetta"
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Accepted, enqueueA.StatusCode);
+        var jobA = (await enqueueA.Content.ReadFromJsonAsync<IngestionJobSummaryDto>())!;
+
+        var bruschettaExtraction = new ExternalRecipeExtractionDto(
+            Title: "Classic Tomato Bruschetta",
+            Description: "Crisp grilled bread topped with sweet garlic-rubbed tomatoes and basil.",
+            Servings: 6m,
+            Yield: "Serves 6",
+            Sections:
+            [
+                new ExternalExtractedSectionDto(
+                    Name: null,
+                    Ingredients:
+                    [
+                        new ExternalExtractedIngredientDto(
+                            Name: "Toasted Bread for Bruschetta",
+                            Quantity: 1m,
+                            Unit: "recipe",
+                            PrepNote: "recipe follows",
+                            IsRecipeReference: true,
+                            ReferencedRecipeTitle: "Toasted Bread for Bruschetta"
+                        ),
+                        new ExternalExtractedIngredientDto(
+                            Name: "extra-virgin olive oil",
+                            Quantity: 2m,
+                            Unit: "tablespoon",
+                            CanonicalFoodName: "extra-virgin olive oil",
+                            Category: "CondimentsAndSauces",
+                            IsPantryStaple: true
+                        ),
+                    ],
+                    Steps:
+                    [
+                        new ExternalExtractedStepDto(
+                            Instruction: "Drizzle 2 tablespoons extra-virgin olive oil over 1 recipe Toasted Bread for Bruschetta.",
+                            Tokens:
+                            [
+                                "Drizzle ",
+                                new JsonObject
+                                {
+                                    ["type"] = "ingredient",
+                                    ["ingredientIndex"] = 1,
+                                    ["name"] = "extra-virgin olive oil",
+                                    ["quantity"] = 2,
+                                    ["maxQuantity"] = null,
+                                    ["unit"] = "tablespoon",
+                                },
+                                " over ",
+                                new JsonObject
+                                {
+                                    ["type"] = "ingredient",
+                                    ["ingredientIndex"] = 0,
+                                    ["name"] = "Toasted Bread for Bruschetta",
+                                    ["quantity"] = 1,
+                                    ["maxQuantity"] = null,
+                                    ["unit"] = "recipe",
+                                },
+                                ".",
+                            ]
+                        ),
+                    ]
+                ),
+            ],
+            Timing: new Stage1TimingDto(10, 0, 10),
+            Tags: ["Appetizer", "Italian"]
+        );
+
+        var submitBRes = await client.PostAsJsonAsync(
+            $"/api/ingestion/jobs/{jobB.Id}/submit-extraction",
+            new SubmitExternalExtractionRequest(
+                Extraction: bruschettaExtraction,
+                ExtractedModel: "gemini-flash (agy-workflow)",
+                AutoPublish: true,
+                ComputeEmbeddings: false
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.OK, submitBRes.StatusCode);
+        var submitBDto = (
+            await submitBRes.Content.ReadFromJsonAsync<SubmitExternalExtractionResultDto>()
+        )!;
+        Assert.AreEqual(IngestionJobStatus.ReadyForReview, submitBDto.Status);
+        Assert.IsNull(submitBDto.ResultingRecipeId);
+        Assert.IsNotEmpty(submitBDto.ValidationIssues);
+        Assert.Contains(
+            i => i.Contains("Toasted Bread for Bruschetta", StringComparison.OrdinalIgnoreCase),
+            submitBDto.ValidationIssues
+        );
+
+        var breadExtraction = new ExternalRecipeExtractionDto(
+            Title: "Toasted Bread for Bruschetta",
+            Description: "Crisp golden baguette slices brushed with oil.",
+            Servings: 12m,
+            Yield: "Makes 12 slices",
+            Sections:
+            [
+                new ExternalExtractedSectionDto(
+                    Name: null,
+                    Ingredients:
+                    [
+                        new ExternalExtractedIngredientDto(
+                            Name: "extra-virgin olive oil",
+                            Quantity: 1m,
+                            Unit: "tablespoon",
+                            CanonicalFoodName: "extra-virgin olive oil",
+                            Category: "CondimentsAndSauces",
+                            IsPantryStaple: true
+                        ),
+                    ],
+                    Steps:
+                    [
+                        new ExternalExtractedStepDto(
+                            Instruction: "Brush 1 tablespoon extra-virgin olive oil over bread and bake at 400 degrees for 5 minutes.",
+                            Tokens:
+                            [
+                                "Brush ",
+                                new JsonObject
+                                {
+                                    ["type"] = "ingredient",
+                                    ["ingredientIndex"] = 0,
+                                    ["name"] = "extra-virgin olive oil",
+                                    ["quantity"] = 1,
+                                    ["maxQuantity"] = null,
+                                    ["unit"] = "tablespoon",
+                                },
+                                " over bread and bake at ",
+                                new JsonObject
+                                {
+                                    ["type"] = "temperature",
+                                    ["amount"] = 400,
+                                    ["maxQuantity"] = null,
+                                    ["unit"] = "fahrenheit",
+                                },
+                                " for ",
+                                new JsonObject
+                                {
+                                    ["type"] = "timer",
+                                    ["amount"] = 5,
+                                    ["maxAmount"] = null,
+                                    ["unit"] = "minute",
+                                    ["label"] = "Bake bread slices",
+                                },
+                                ".",
+                            ]
+                        ),
+                    ]
+                ),
+            ],
+            Timing: new Stage1TimingDto(5, 5, 10),
+            Tags: ["Bread", "Appetizer"]
+        );
+
+        var submitARes = await client.PostAsJsonAsync(
+            $"/api/ingestion/jobs/{jobA.Id}/submit-extraction",
+            new SubmitExternalExtractionRequest(
+                Extraction: breadExtraction,
+                ExtractedModel: "gemini-flash (agy-workflow)",
+                AutoPublish: true,
+                ComputeEmbeddings: false
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.OK, submitARes.StatusCode);
+        var submitADto = (
+            await submitARes.Content.ReadFromJsonAsync<SubmitExternalExtractionResultDto>()
+        )!;
+
+        Assert.AreEqual(IngestionJobStatus.Published, submitADto.Status);
+        Assert.IsNotNull(submitADto.ResultingRecipeId);
+        Assert.HasCount(1, submitADto.PromotedWaitingRecipeIds);
+
+        var refreshedBJob = (
+            await client.GetFromJsonAsync<IngestionJobDetailDto>($"/api/ingestion/jobs/{jobB.Id}")
+        )!;
+        Assert.AreEqual(IngestionJobStatus.Published, refreshedBJob.Status);
+        Assert.AreEqual(submitADto.PromotedWaitingRecipeIds[0], refreshedBJob.ResultingRecipeId);
+
+        var promotedBRecipe = (
+            await client.GetFromJsonAsync<RecipeDetailDto>(
+                $"/api/recipes/{refreshedBJob.ResultingRecipeId}"
+            )
+        )!;
+        Assert.AreEqual(
+            submitADto.ResultingRecipeId,
+            promotedBRecipe.Ingredients[0].LinkedRecipeId
+        );
+    }
+
+    [TestMethod]
+    public async Task SubmitExternalExtraction_WithUntokenizedStepWarning_ReturnsDiagnosticsAndPublishesOnRepairResubmit()
+    {
+        using var client = _factory.CreateClient();
+        await AuthenticateAsync(client);
+
+        var rawText = """
+            Roasted Winter Squash
+            Yield: Serves 4
+            Prep Time: 5 minutes
+            Cook Time: 20 minutes
+            Total Time: 25 minutes
+            Tender caramelized winter squash roasted with olive oil.
+
+            Ingredients:
+            - 1 tablespoon olive oil
+
+            Instructions:
+            1. Drizzle 1 tablespoon olive oil on squash and bake at 350 degrees for 20 minutes.
+            """;
+
+        var enqueueRes = await client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest(RawText: rawText, TitleHint: "Roasted Winter Squash")
+        );
+        Assert.AreEqual(HttpStatusCode.Accepted, enqueueRes.StatusCode);
+        var job = (await enqueueRes.Content.ReadFromJsonAsync<IngestionJobSummaryDto>())!;
+
+        var initialWithMissingTimer = new ExternalRecipeExtractionDto(
+            Title: "Roasted Winter Squash",
+            Description: "Tender caramelized winter squash roasted with olive oil.",
+            Servings: 4m,
+            Yield: "Serves 4",
+            Sections:
+            [
+                new ExternalExtractedSectionDto(
+                    Name: null,
+                    Ingredients:
+                    [
+                        new ExternalExtractedIngredientDto(
+                            Name: "olive oil",
+                            Quantity: 1m,
+                            Unit: "tablespoon",
+                            CanonicalFoodName: "olive oil",
+                            Category: "CondimentsAndSauces",
+                            IsPantryStaple: true
+                        ),
+                    ],
+                    Steps:
+                    [
+                        new ExternalExtractedStepDto(
+                            Instruction: "Drizzle 1 tablespoon olive oil on squash and bake at 350 degrees for 20 minutes.",
+                            Tokens:
+                            [
+                                "Drizzle ",
+                                new JsonObject
+                                {
+                                    ["type"] = "ingredient",
+                                    ["ingredientIndex"] = 0,
+                                    ["name"] = "olive oil",
+                                    ["quantity"] = 1,
+                                    ["maxQuantity"] = null,
+                                    ["unit"] = "tablespoon",
+                                },
+                                " on squash and bake at ",
+                                new JsonObject
+                                {
+                                    ["type"] = "temperature",
+                                    ["amount"] = 350,
+                                    ["maxAmount"] = null,
+                                    ["unit"] = "fahrenheit",
+                                },
+                                " for 20 minutes.",
+                            ]
+                        ),
+                    ]
+                ),
+            ],
+            Timing: new Stage1TimingDto(5, 20, 25),
+            Tags: ["Side Dish", "Roasting"]
+        );
+
+        var firstRes = await client.PostAsJsonAsync(
+            $"/api/ingestion/jobs/{job.Id}/submit-extraction",
+            new SubmitExternalExtractionRequest(
+                Extraction: initialWithMissingTimer,
+                ExtractedModel: "gemini-flash (agy-workflow)",
+                AutoPublish: true,
+                ComputeEmbeddings: false,
+                RepairCount: 0
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.OK, firstRes.StatusCode);
+        var firstDto = (
+            await firstRes.Content.ReadFromJsonAsync<SubmitExternalExtractionResultDto>()
+        )!;
+
+        Assert.AreEqual(IngestionJobStatus.ReadyForReview, firstDto.Status);
+        Assert.IsNull(firstDto.ResultingRecipeId);
+        Assert.IsNotEmpty(firstDto.QualityWarnings);
+        Assert.Contains(
+            w => w.Contains("20 minutes", StringComparison.OrdinalIgnoreCase),
+            firstDto.QualityWarnings
+        );
+
+        var repaired = initialWithMissingTimer with
+        {
+            Sections =
+            [
+                initialWithMissingTimer.Sections[0] with
+                {
+                    Steps =
+                    [
+                        new ExternalExtractedStepDto(
+                            Instruction: "Drizzle 1 tablespoon olive oil on squash and bake at 350 degrees for 20 minutes.",
+                            Tokens:
+                            [
+                                "Drizzle ",
+                                new JsonObject
+                                {
+                                    ["type"] = "ingredient",
+                                    ["ingredientIndex"] = 0,
+                                    ["name"] = "olive oil",
+                                    ["quantity"] = 1,
+                                    ["maxQuantity"] = null,
+                                    ["unit"] = "tablespoon",
+                                },
+                                " on squash and bake at ",
+                                new JsonObject
+                                {
+                                    ["type"] = "temperature",
+                                    ["amount"] = 350,
+                                    ["maxAmount"] = null,
+                                    ["unit"] = "fahrenheit",
+                                },
+                                " for ",
+                                new JsonObject
+                                {
+                                    ["type"] = "timer",
+                                    ["amount"] = 20,
+                                    ["maxAmount"] = null,
+                                    ["unit"] = "minute",
+                                    ["label"] = "Roast squash",
+                                },
+                                ".",
+                            ]
+                        ),
+                    ],
+                },
+            ],
+        };
+
+        var repairRes = await client.PostAsJsonAsync(
+            $"/api/ingestion/jobs/{job.Id}/submit-extraction",
+            new SubmitExternalExtractionRequest(
+                Extraction: repaired,
+                ExtractedModel: "gemini-pro (agy-workflow)",
+                AutoPublish: true,
+                ComputeEmbeddings: false,
+                RepairCount: 1
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.OK, repairRes.StatusCode);
+        var repairDto = (
+            await repairRes.Content.ReadFromJsonAsync<SubmitExternalExtractionResultDto>()
+        )!;
+
+        Assert.AreEqual(IngestionJobStatus.Published, repairDto.Status);
+        Assert.IsNotNull(repairDto.ResultingRecipeId);
+        Assert.IsEmpty(repairDto.QualityWarnings);
+        Assert.IsEmpty(repairDto.ValidationIssues);
+    }
+
+    [TestMethod]
+    public async Task SubmitExternalExtraction_RegressionFixes_BaseIngredientsSubRecipeCue_CornKernelsAndPuree_AndInlineSectionStrip()
+    {
+        using var client = _factory.CreateClient();
+        await AuthenticateAsync(client);
+
+        // 1. Prerequisite sub-recipe: Easy-Peel Hard-Cooked Eggs
+        var prereqEnqueue = await client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest(
+                RawText: "Easy-Peel Hard-Cooked Eggs\nYield: Makes 6 eggs\nIngredients:\n- 6 large eggs\nInstructions:\n1. Boil 1 inch water and steam 6 eggs for 13 minutes. Cool in 2 cups ice cubes and 2 cups cold water.",
+                TitleHint: "Easy-Peel Hard-Cooked Eggs"
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Accepted, prereqEnqueue.StatusCode);
+        var prereqJob = (await prereqEnqueue.Content.ReadFromJsonAsync<IngestionJobSummaryDto>())!;
+
+        var prereqSubmit = await client.PostAsJsonAsync(
+            $"/api/ingestion/jobs/{prereqJob.Id}/submit-extraction",
+            new SubmitExternalExtractionRequest(
+                Extraction: new ExternalRecipeExtractionDto(
+                    Title: "Easy-Peel Hard-Cooked Eggs",
+                    Description: "Steamed hard-cooked eggs cooled in an ice bath.",
+                    Servings: 6m,
+                    Yield: "Makes 6 eggs",
+                    Sections:
+                    [
+                        new ExternalExtractedSectionDto(
+                            Name: null,
+                            Ingredients:
+                            [
+                                new ExternalExtractedIngredientDto(
+                                    Name: "eggs",
+                                    Quantity: 6m,
+                                    Unit: null,
+                                    PrepNote: "large",
+                                    CanonicalFoodName: "egg",
+                                    Category: "DairyAndEggs",
+                                    IsPantryStaple: true
+                                ),
+                            ],
+                            Steps:
+                            [
+                                new ExternalExtractedStepDto(
+                                    Instruction: "Boil 1 inch water and steam 6 eggs for 13 minutes. Cool in 2 cups ice cubes and 2 cups cold water.",
+                                    Tokens:
+                                    [
+                                        "Boil ",
+                                        new JsonObject
+                                        {
+                                            ["type"] = "dimension",
+                                            ["amount"] = 1,
+                                            ["unit"] = "inch",
+                                            ["hyphenated"] = false,
+                                        },
+                                        " water and steam ",
+                                        new JsonObject
+                                        {
+                                            ["type"] = "ingredient",
+                                            ["ingredientIndex"] = 0,
+                                            ["name"] = "eggs",
+                                            ["quantity"] = 6,
+                                            ["unit"] = null,
+                                        },
+                                        " for ",
+                                        new JsonObject
+                                        {
+                                            ["type"] = "timer",
+                                            ["amount"] = 13,
+                                            ["unit"] = "minute",
+                                            ["label"] = "Steam eggs",
+                                        },
+                                        ". Cool in ",
+                                        new JsonObject
+                                        {
+                                            ["type"] = "ingredient",
+                                            ["ingredientIndex"] = null,
+                                            ["name"] = "ice cubes",
+                                            ["quantity"] = 2,
+                                            ["unit"] = "cup",
+                                        },
+                                        " and ",
+                                        new JsonObject
+                                        {
+                                            ["type"] = "ingredient",
+                                            ["ingredientIndex"] = null,
+                                            ["name"] = "cold water",
+                                            ["quantity"] = 2,
+                                            ["unit"] = "cup",
+                                        },
+                                        ".",
+                                    ]
+                                ),
+                            ]
+                        ),
+                    ],
+                    Timing: null,
+                    Tags: ["Eggs"]
+                ),
+                ExtractedModel: "gemini-flash (agy-workflow)",
+                AutoPublish: true,
+                ComputeEmbeddings: false
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.OK, prereqSubmit.StatusCode);
+        var prereqRes = (
+            await prereqSubmit.Content.ReadFromJsonAsync<SubmitExternalExtractionResultDto>()
+        )!;
+        Assert.AreEqual(IngestionJobStatus.Published, prereqRes.Status);
+        // Incidental 'ice cubes' and 'cold water' must not reduce high confidence score.
+        Assert.IsGreaterThanOrEqualTo(0.95m, prereqRes.ConfidenceScore);
+
+        // 2. Variation-style 'Base Ingredients:' source must NOT contaminate groceries ('bacon', 'mayonnaise') into sub-recipes.
+        var deviledSource = """
+            Bacon and Chive Deviled Eggs
+            Yield: Makes 12 eggs
+            Base Ingredients:
+            - 1 recipe Easy-Peel Hard-Cooked Eggs
+            - 2 slices bacon
+            - 3 tablespoons mayonnaise
+            Variation Instructions:
+            1. Crisp 2 slices bacon for 5 minutes and stir with 3 tablespoons mayonnaise and 1 recipe Easy-Peel Hard-Cooked Eggs.
+            """;
+
+        var deviledEnqueue = await client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest(
+                RawText: deviledSource,
+                TitleHint: "Bacon and Chive Deviled Eggs"
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Accepted, deviledEnqueue.StatusCode);
+        var deviledJob = (
+            await deviledEnqueue.Content.ReadFromJsonAsync<IngestionJobSummaryDto>()
+        )!;
+
+        var deviledSubmit = await client.PostAsJsonAsync(
+            $"/api/ingestion/jobs/{deviledJob.Id}/submit-extraction",
+            new SubmitExternalExtractionRequest(
+                Extraction: new ExternalRecipeExtractionDto(
+                    Title: "Bacon and Chive Deviled Eggs",
+                    Description: "Deviled eggs enriched with crisp bacon and mayonnaise.",
+                    Servings: 12m,
+                    Yield: "Makes 12 eggs",
+                    Sections:
+                    [
+                        new ExternalExtractedSectionDto(
+                            Name: null,
+                            Ingredients:
+                            [
+                                new ExternalExtractedIngredientDto(
+                                    Name: "Easy-Peel Hard-Cooked Eggs",
+                                    Quantity: 1m,
+                                    Unit: "recipe",
+                                    IsRecipeReference: true,
+                                    ReferencedRecipeTitle: "Easy-Peel Hard-Cooked Eggs"
+                                ),
+                                new ExternalExtractedIngredientDto(
+                                    Name: "bacon",
+                                    Quantity: 2m,
+                                    Unit: "slice",
+                                    CanonicalFoodName: "bacon",
+                                    Category: "MeatAndSeafood"
+                                ),
+                                new ExternalExtractedIngredientDto(
+                                    Name: "mayonnaise",
+                                    Quantity: 3m,
+                                    Unit: "tablespoon",
+                                    CanonicalFoodName: "mayonnaise",
+                                    Category: "CondimentsAndSauces",
+                                    IsPantryStaple: true
+                                ),
+                            ],
+                            Steps:
+                            [
+                                new ExternalExtractedStepDto(
+                                    Instruction: "Crisp 2 slices bacon for 5 minutes and stir with 3 tablespoons mayonnaise and 1 recipe Easy-Peel Hard-Cooked Eggs.",
+                                    Tokens:
+                                    [
+                                        "Crisp ",
+                                        new JsonObject
+                                        {
+                                            ["type"] = "ingredient",
+                                            ["ingredientIndex"] = 1,
+                                            ["name"] = "bacon",
+                                            ["quantity"] = 2,
+                                            ["unit"] = "slice",
+                                        },
+                                        " for ",
+                                        new JsonObject
+                                        {
+                                            ["type"] = "timer",
+                                            ["amount"] = 5,
+                                            ["unit"] = "minute",
+                                            ["label"] = "Crisp bacon",
+                                        },
+                                        " and stir with ",
+                                        new JsonObject
+                                        {
+                                            ["type"] = "ingredient",
+                                            ["ingredientIndex"] = 2,
+                                            ["name"] = "mayonnaise",
+                                            ["quantity"] = 3,
+                                            ["unit"] = "tablespoon",
+                                        },
+                                        " and ",
+                                        new JsonObject
+                                        {
+                                            ["type"] = "ingredient",
+                                            ["ingredientIndex"] = 0,
+                                            ["name"] = "Easy-Peel Hard-Cooked Eggs",
+                                            ["quantity"] = 1,
+                                            ["unit"] = "recipe",
+                                        },
+                                        ".",
+                                    ]
+                                ),
+                            ]
+                        ),
+                    ],
+                    Timing: null,
+                    Tags: ["Appetizer", "Eggs"]
+                ),
+                ExtractedModel: "gemini-flash (agy-workflow)",
+                AutoPublish: true,
+                ComputeEmbeddings: false
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.OK, deviledSubmit.StatusCode);
+        var deviledRes = (
+            await deviledSubmit.Content.ReadFromJsonAsync<SubmitExternalExtractionResultDto>()
+        )!;
+        Assert.IsEmpty(deviledRes.ValidationIssues);
+        Assert.IsEmpty(deviledRes.QualityWarnings);
+        Assert.AreEqual(IngestionJobStatus.Published, deviledRes.Status);
+        var deviledRecipe = (
+            await client.GetFromJsonAsync<RecipeDetailDto>(
+                $"/api/recipes/{deviledRes.ResultingRecipeId}"
+            )
+        )!;
+        Assert.AreEqual(prereqRes.ResultingRecipeId, deviledRecipe.Ingredients[0].LinkedRecipeId);
+        Assert.IsNotNull(deviledRecipe.Ingredients[1].FoodItemId);
+        Assert.IsNotNull(deviledRecipe.Ingredients[2].FoodItemId);
+
+        // 3. Corn kernels ('FormSuffixWords') stays linked, corn puree ('CompoundFoodFollowingRegex') is NOT injected with '4 ear',
+        //    and redundant 'FOR THE CORN: ' prefix is stripped cleanly from tokens[0].
+        var cornEnqueue = await client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest(
+                RawText: "Corn Fritters\nYield: Serves 4\nIngredients:\n[FOR THE CORN]\n- 4 ears corn (3 cups)\nInstructions:\n1. FOR THE CORN: Process 1 1/2 cups corn kernels in processor, add remaining 1 1/2 cups corn kernels, then add corn puree to pan.",
+                TitleHint: "Corn Fritters"
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Accepted, cornEnqueue.StatusCode);
+        var cornJob = (await cornEnqueue.Content.ReadFromJsonAsync<IngestionJobSummaryDto>())!;
+
+        var cornSubmit = await client.PostAsJsonAsync(
+            $"/api/ingestion/jobs/{cornJob.Id}/submit-extraction",
+            new SubmitExternalExtractionRequest(
+                Extraction: new ExternalRecipeExtractionDto(
+                    Title: "Corn Fritters",
+                    Description: "Crisp fresh corn fritters.",
+                    Servings: 4m,
+                    Yield: "Serves 4",
+                    Sections:
+                    [
+                        new ExternalExtractedSectionDto(
+                            Name: "For the Corn",
+                            Ingredients:
+                            [
+                                new ExternalExtractedIngredientDto(
+                                    Name: "corn",
+                                    Quantity: 4m,
+                                    Unit: "ear",
+                                    CanonicalFoodName: "corn",
+                                    Category: "Produce",
+                                    AlternateMeasurements:
+                                    [
+                                        new Stage1AlternateMeasurementDto(3m, "cup"),
+                                    ]
+                                ),
+                            ],
+                            Steps:
+                            [
+                                new ExternalExtractedStepDto(
+                                    Instruction: "FOR THE CORN: Process 1 1/2 cups corn kernels in processor, add remaining 1 1/2 cups corn kernels, then add corn puree to pan.",
+                                    Tokens:
+                                    [
+                                        new JsonObject
+                                        {
+                                            ["type"] = "text",
+                                            ["text"] = "FOR THE CORN: Process ",
+                                        },
+                                        new JsonObject
+                                        {
+                                            ["type"] = "ingredient",
+                                            ["ingredientIndex"] = 0,
+                                            ["name"] = "corn kernels",
+                                            ["quantity"] = 1.5,
+                                            ["unit"] = "cup",
+                                        },
+                                        new JsonObject
+                                        {
+                                            ["type"] = "text",
+                                            ["text"] = " in processor, add remaining ",
+                                        },
+                                        new JsonObject
+                                        {
+                                            ["type"] = "ingredient",
+                                            ["ingredientIndex"] = 0,
+                                            ["name"] = "corn kernels",
+                                            ["quantity"] = 1.5,
+                                            ["unit"] = "cup",
+                                        },
+                                        new JsonObject
+                                        {
+                                            ["type"] = "text",
+                                            ["text"] = ", then add corn puree to pan.",
+                                        },
+                                    ]
+                                ),
+                            ]
+                        ),
+                    ],
+                    Timing: null,
+                    Tags: ["Side Dish"]
+                ),
+                ExtractedModel: "gemini-flash (agy-workflow)",
+                AutoPublish: true,
+                ComputeEmbeddings: false
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.OK, cornSubmit.StatusCode);
+        var cornRes = (
+            await cornSubmit.Content.ReadFromJsonAsync<SubmitExternalExtractionResultDto>()
+        )!;
+        Assert.AreEqual(IngestionJobStatus.Published, cornRes.Status);
+
+        var cornRecipe = (
+            await client.GetFromJsonAsync<RecipeDetailDto>(
+                $"/api/recipes/{cornRes.ResultingRecipeId}"
+            )
+        )!;
+        var cornStep = cornRecipe.Steps[0].Instruction;
+        Assert.IsFalse(cornStep.StartsWith("FOR THE CORN:", StringComparison.OrdinalIgnoreCase));
+        var cornStepIngTokens = StepInstructionParser
+            .ExtractTokens(cornStep)
+            .OfType<StepIngredientToken>()
+            .ToList();
+        Assert.HasCount(2, cornStepIngTokens);
+        Assert.IsTrue(cornStepIngTokens.All(t => t.IngredientId == cornRecipe.Ingredients[0].Id));
+        var plainCornStep = StepInstructionParser.ToPlainText(cornStep);
+        Assert.Contains("then add corn puree to pan.", plainCornStep, StringComparison.Ordinal);
+    }
+
     private sealed class FallbackExercisingLlmClient : ILlmExtractionClient
     {
         public bool ForceSimpleBatch { get; set; }

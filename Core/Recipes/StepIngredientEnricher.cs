@@ -159,6 +159,8 @@ public static partial class StepIngredientEnricher
         "threads",
         "fillet",
         "fillets",
+        "kernel",
+        "kernels",
     };
 
     private static readonly HashSet<string> GenericHeadNounsForModifierExtract = new(
@@ -355,7 +357,7 @@ public static partial class StepIngredientEnricher
     private static partial Regex EquipmentFollowingRegex();
 
     [GeneratedRegex(
-        @"^\s+(?:powder|flakes|paste|sauce|oil|vinegar|broth|stock|juice|zest|seeds?|yolks?|whites?|shells?|skins?|mixtures?|batters?|doughs?|fillings?|glazes?|slurr(?:y|ies)|crusts?|fats?|drippings?|liquids?)\b",
+        @"^\s+(?:powder|flakes|paste|pur[eé]es?|sauce|oil|vinegar|broth|stock|juice|zest|seeds?|yolks?|whites?|shells?|skins?|mixtures?|batters?|doughs?|fillings?|glazes?|slurr(?:y|ies)|crusts?|fats?|drippings?|liquids?)\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex CompoundFoodFollowingRegex();
