@@ -387,3 +387,7 @@ public sealed record IngestionJobSourceItemDto(
     int? SourceBookPage,
     DateTimeOffset CreatedAt
 );
+
+public sealed record BulkImportWorkerStateDto(bool Authenticated, bool EnableIngestion);
+
+public sealed record SetBulkImportWorkerRequest(bool EnableIngestion);

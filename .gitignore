@@ -388,3 +388,5 @@ IngestionPoc/runs/
 IngestionPoc/cache/
 .agents/skills/bulk-import-recipes/.state/
 .agents/skills/bulk-import-recipes/**/.runner_token.json
+*.mcp.local.json
+mcp-config*.json

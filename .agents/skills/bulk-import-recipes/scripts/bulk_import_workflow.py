@@ -318,214 +318,274 @@ async def main() -> dict:
     work_dir.mkdir(parents=True, exist_ok=True)
     wave_file = work_dir / "wave.json"
 
+    conn_args: list[str] = []
+    temp_mcp_file: Path | None = None
+    raw_mcp = args.get("mcpConfig")
+    if isinstance(raw_mcp, dict):
+        temp_mcp_file = work_dir / ".mcp_config.json"
+        temp_mcp_file.write_text(json.dumps(raw_mcp, indent=2), encoding="utf-8")
+        conn_args.extend(["--mcp-config", str(temp_mcp_file)])
+    elif isinstance(raw_mcp, str) and raw_mcp.strip():
+        stripped_mcp = raw_mcp.strip()
+        if stripped_mcp.startswith("{"):
+            parsed_mcp = json.loads(stripped_mcp)
+            temp_mcp_file = work_dir / ".mcp_config.json"
+            temp_mcp_file.write_text(json.dumps(parsed_mcp, indent=2), encoding="utf-8")
+            conn_args.extend(["--mcp-config", str(temp_mcp_file)])
+        else:
+            conn_args.extend(["--mcp-config", stripped_mcp])
+
+    raw_api_url = args.get("apiUrl")
+    if isinstance(raw_api_url, str) and raw_api_url.strip():
+        conn_args.extend(["--url", raw_api_url.strip()])
+
     guide = PROMPT_GUIDE_PATH.read_text(encoding="utf-8")
 
-    # ============================================================
-    # PHASE 1: Topological Wave Planning
-    # ============================================================
-    phase("Plan Wave")
-    plan_cmd = [
-        "plan-wave",
-        "--size",
-        str(wave_size),
-        "--batch-size",
-        str(batch_size),
-        "--out",
-        str(wave_file),
-    ]
-    if pilot_benchmark:
-        plan_cmd.append("--pilot-benchmark")
+    try:
+        # ============================================================
+        # PHASE 0: Optional Idempotent EPUB Enqueueing
+        # ============================================================
+        enqueue_epub = bool(args.get("enqueueEpub", False))
+        enqueue_summary: str | None = None
+        if enqueue_epub:
+            phase("Enqueue EPUB")
+            eq_cmd = ["enqueue-epub", *conn_args]
+            if args.get("epubPath"):
+                eq_cmd.extend(["--epub", str(args["epubPath"])])
+            if args.get("collection"):
+                eq_cmd.extend(["--collection", str(args["collection"])])
+            if args.get("chapter"):
+                eq_cmd.extend(["--chapter", str(args["chapter"])])
+            if args.get("enqueueLimit") is not None:
+                eq_cmd.extend(["--limit", str(int(args["enqueueLimit"]))])
+            if args.get("enqueueOffset"):
+                eq_cmd.extend(["--offset", str(int(args["enqueueOffset"]))])
+            if bool(args.get("noImages", False)):
+                eq_cmd.append("--no-images")
+            enqueue_stdout = run_helper(eq_cmd)
+            tail_lines = enqueue_stdout.splitlines()[-8:] if enqueue_stdout else []
+            enqueue_summary = "\n".join(tail_lines)
+            for line in tail_lines:
+                log(line)
 
-    plan_stdout = run_helper(plan_cmd)
-    plan_summary = json.loads(plan_stdout)
-    log(f"Planned wave in {work_dir}: {json.dumps(plan_summary)}")
+        if wave_size <= 0:
+            return {"workDir": str(work_dir), "enqueued": enqueue_summary, "submitted": 0, "repaired": 0}
 
-    wave_data = json.loads(wave_file.read_text(encoding="utf-8"))
-    batches = wave_data.get("batches") or []
-    if not batches:
-        log("No queued recipes selected for this wave.")
-        return {"planned": plan_summary, "submitted": 0, "repaired": 0}
+        # ============================================================
+        # PHASE 1: Topological Wave Planning
+        # ============================================================
+        phase("Plan Wave")
+        plan_cmd = [
+            "plan-wave",
+            *conn_args,
+            "--size",
+            str(wave_size),
+            "--batch-size",
+            str(batch_size),
+            "--out",
+            str(wave_file),
+        ]
+        if pilot_benchmark:
+            plan_cmd.append("--pilot-benchmark")
 
-    source_by_job_id = {
-        j["id"]: j["sourceText"]
-        for b in batches
-        for j in b.get("jobs") or []
-    }
-    title_by_job_id = {
-        j["id"]: j["displayTitle"]
-        for b in batches
-        for j in b.get("jobs") or []
-    }
+        plan_stdout = run_helper(plan_cmd)
+        plan_summary = json.loads(plan_stdout)
+        log(f"Planned wave in {work_dir}: {json.dumps(plan_summary)}")
 
-    # ============================================================
-    # PHASE 2: Batched Parallel Extraction (Flash) + Sequential Submit
-    # ============================================================
-    phase(f"Extract Batches - Flash ({len(batches)} batches, maxParallel={max_parallel})")
-    all_submission_outcomes: dict[str, dict] = {}
-    failed_or_missing_for_pro: list[dict] = []
+        wave_data = json.loads(wave_file.read_text(encoding="utf-8"))
+        batches = wave_data.get("batches") or []
+        if not batches:
+            log("No queued recipes selected for this wave.")
+            return {"planned": plan_summary, "submitted": 0, "repaired": 0}
 
-    for chunk_start in range(0, len(batches), max_parallel):
-        chunk_batches = batches[chunk_start : chunk_start + max_parallel]
-        batch_results = await parallel(
-            chunk_batches,
-            lambda b: extract_batch_safe(b, guide),
-        )
+        source_by_job_id = {
+            j["id"]: j["sourceText"]
+            for b in batches
+            for j in b.get("jobs") or []
+        }
+        title_by_job_id = {
+            j["id"]: j["displayTitle"]
+            for b in batches
+            for j in b.get("jobs") or []
+        }
 
-        # Submit sequentially in deterministic batch order so prerequisites & FoodItems persist in order
-        for batch, bres in zip(chunk_batches, batch_results):
-            bidx = batch["batchIndex"]
-            expected_ids = [j["id"] for j in batch["jobs"]]
+        # ============================================================
+        # PHASE 2: Batched Parallel Extraction (Flash) + Sequential Submit
+        # ============================================================
+        phase(f"Extract Batches - Flash ({len(batches)} batches, maxParallel={max_parallel})")
+        all_submission_outcomes: dict[str, dict] = {}
+        failed_or_missing_for_pro: list[dict] = []
 
-            if not bres.get("ok"):
-                log(f"Batch {bidx} Flash agent error: {bres.get('error')}")
-                for jid in expected_ids:
-                    failed_or_missing_for_pro.append(
-                        {
-                            "jobId": jid,
-                            "title": title_by_job_id.get(jid, jid),
-                            "error": bres.get("error"),
-                            "validationIssues": [],
-                            "qualityWarnings": [],
-                            "measurementWarnings": [],
-                            "extraction": {},
-                        }
-                    )
-                continue
-
-            recipes_list = (bres.get("data") or {}).get("recipes") or []
-            extracted_in_path = work_dir / f"batch_{bidx:03d}_extracted.json"
-            submitted_out_path = work_dir / f"batch_{bidx:03d}_submitted.json"
-            extracted_in_path.write_text(
-                json.dumps({"recipes": recipes_list}, indent=2),
-                encoding="utf-8",
+        for chunk_start in range(0, len(batches), max_parallel):
+            chunk_batches = batches[chunk_start : chunk_start + max_parallel]
+            batch_results = await parallel(
+                chunk_batches,
+                lambda b: extract_batch_safe(b, guide),
             )
 
-            submit_cmd = [
-                "submit-batch",
-                "--in",
-                str(extracted_in_path),
-                "--wave",
-                str(wave_file),
-                "--out",
-                str(submitted_out_path),
-                "--extracted-model",
-                extracted_model,
-            ]
-            if allow_overwrite:
-                submit_cmd.append("--allow-overwrite-published")
-            if not compute_embeddings:
-                submit_cmd.append("--no-embeddings")
+            # Submit sequentially in deterministic batch order so prerequisites & FoodItems persist in order
+            for batch, bres in zip(chunk_batches, batch_results):
+                bidx = batch["batchIndex"]
+                expected_ids = [j["id"] for j in batch["jobs"]]
 
-            submit_stdout = run_helper(submit_cmd)
-            log(f"Batch {bidx} submit summary: {submit_stdout}")
-
-            submitted_rows = json.loads(submitted_out_path.read_text(encoding="utf-8"))
-            seen_ids = set()
-            for row in submitted_rows:
-                jid = row["jobId"]
-                seen_ids.add(jid)
-                all_submission_outcomes[jid] = row
-                if row.get("needsRepair"):
-                    failed_or_missing_for_pro.append(row)
-
-            for jid in expected_ids:
-                if jid not in seen_ids:
-                    log(f"Batch {bidx} omitted job {jid} ({title_by_job_id.get(jid)}); queuing for Phase 3.")
-                    failed_or_missing_for_pro.append(
-                        {
-                            "jobId": jid,
-                            "title": title_by_job_id.get(jid, jid),
-                            "error": "Omitted from Flash batch response.",
-                            "validationIssues": [],
-                            "qualityWarnings": [],
-                            "measurementWarnings": [],
-                            "extraction": {},
-                        }
-                    )
-
-    # ============================================================
-    # PHASE 3: Targeted Repair (Pro)
-    # ============================================================
-    phase(f"Targeted Repair - Pro ({len(failed_or_missing_for_pro)} job(s))")
-    repaired_count = 0
-    if failed_or_missing_for_pro:
-        for r_start in range(0, len(failed_or_missing_for_pro), max_parallel):
-            r_chunk = failed_or_missing_for_pro[r_start : r_start + max_parallel]
-            repair_results = await parallel(
-                r_chunk,
-                lambda item: repair_one_safe(
-                    item,
-                    source_by_job_id.get(item["jobId"], ""),
-                    guide,
-                ),
-            )
-
-            for item, rres in zip(r_chunk, repair_results):
-                jid = item["jobId"]
-                if not rres.get("ok"):
-                    log(f"Repair failed on Pro for {item.get('title')}: {rres.get('error')}")
+                if not bres.get("ok"):
+                    log(f"Batch {bidx} Flash agent error: {bres.get('error')}")
+                    for jid in expected_ids:
+                        failed_or_missing_for_pro.append(
+                            {
+                                "jobId": jid,
+                                "title": title_by_job_id.get(jid, jid),
+                                "error": bres.get("error"),
+                                "validationIssues": [],
+                                "qualityWarnings": [],
+                                "measurementWarnings": [],
+                                "extraction": {},
+                            }
+                        )
                     continue
 
-                rep_in_path = work_dir / f"repair_{jid}.json"
-                rep_out_path = work_dir / f"repair_{jid}_submitted.json"
-                rep_in_path.write_text(
-                    json.dumps(rres["data"], indent=2),
+                recipes_list = (bres.get("data") or {}).get("recipes") or []
+                extracted_in_path = work_dir / f"batch_{bidx:03d}_extracted.json"
+                submitted_out_path = work_dir / f"batch_{bidx:03d}_submitted.json"
+                extracted_in_path.write_text(
+                    json.dumps({"recipes": recipes_list}, indent=2),
                     encoding="utf-8",
                 )
 
-                so_cmd = [
-                    "submit-one",
-                    "--job-id",
-                    jid,
+                submit_cmd = [
+                    "submit-batch",
+                    *conn_args,
                     "--in",
-                    str(rep_in_path),
+                    str(extracted_in_path),
                     "--wave",
                     str(wave_file),
                     "--out",
-                    str(rep_out_path),
+                    str(submitted_out_path),
                     "--extracted-model",
-                    repaired_model,
-                    "--repair-count",
-                    "1",
+                    extracted_model,
                 ]
                 if allow_overwrite:
-                    so_cmd.append("--allow-overwrite-published")
+                    submit_cmd.append("--allow-overwrite-published")
                 if not compute_embeddings:
-                    so_cmd.append("--no-embeddings")
+                    submit_cmd.append("--no-embeddings")
 
-                so_stdout = run_helper(so_cmd)
-                log(f"Repaired {item.get('title')}: {so_stdout}")
-                repaired_row = json.loads(rep_out_path.read_text(encoding="utf-8"))
-                all_submission_outcomes[jid] = repaired_row
-                repaired_count += 1
-    else:
-        log("Zero recipes needed Phase 3 Pro repair!")
+                submit_stdout = run_helper(submit_cmd)
+                log(f"Batch {bidx} submit summary: {submit_stdout}")
 
-    # ============================================================
-    # PHASE 4: Deep Audit & Summary
-    # ============================================================
-    phase("Wave Audit")
-    audit_path = work_dir / "audit.json"
-    audit_stdout = run_helper(["audit", "--wave", str(wave_file), "--out", str(audit_path)])
-    for line in audit_stdout.splitlines():
-        log(line)
+                submitted_rows = json.loads(submitted_out_path.read_text(encoding="utf-8"))
+                seen_ids = set()
+                for row in submitted_rows:
+                    jid = row["jobId"]
+                    seen_ids.add(jid)
+                    all_submission_outcomes[jid] = row
+                    if row.get("needsRepair"):
+                        failed_or_missing_for_pro.append(row)
 
-    audit_data = json.loads(audit_path.read_text(encoding="utf-8"))
-    return {
-        "workDir": str(work_dir),
-        "totals": audit_data.get("totals"),
-        "categoryCounts": audit_data.get("categoryCounts"),
-        "confidenceStats": {
-            k: v
-            for k, v in (audit_data.get("confidenceStats") or {}).items()
-            if k != "scoresByRecipe"
-        },
-        "foodCatalog": {
-            "totalFoodItems": (audit_data.get("foodCatalog") or {}).get("totalFoodItems")
-        },
-        "repairedAttempted": repaired_count,
-        "nonPublishedCount": len(audit_data.get("nonPublished") or []),
-    }
+                for jid in expected_ids:
+                    if jid not in seen_ids:
+                        log(f"Batch {bidx} omitted job {jid} ({title_by_job_id.get(jid)}); queuing for Phase 3.")
+                        failed_or_missing_for_pro.append(
+                            {
+                                "jobId": jid,
+                                "title": title_by_job_id.get(jid, jid),
+                                "error": "Omitted from Flash batch response.",
+                                "validationIssues": [],
+                                "qualityWarnings": [],
+                                "measurementWarnings": [],
+                                "extraction": {},
+                            }
+                        )
+
+        # ============================================================
+        # PHASE 3: Targeted Repair (Pro)
+        # ============================================================
+        phase(f"Targeted Repair - Pro ({len(failed_or_missing_for_pro)} job(s))")
+        repaired_count = 0
+        if failed_or_missing_for_pro:
+            for r_start in range(0, len(failed_or_missing_for_pro), max_parallel):
+                r_chunk = failed_or_missing_for_pro[r_start : r_start + max_parallel]
+                repair_results = await parallel(
+                    r_chunk,
+                    lambda item: repair_one_safe(
+                        item,
+                        source_by_job_id.get(item["jobId"], ""),
+                        guide,
+                    ),
+                )
+
+                for item, rres in zip(r_chunk, repair_results):
+                    jid = item["jobId"]
+                    if not rres.get("ok"):
+                        log(f"Repair failed on Pro for {item.get('title')}: {rres.get('error')}")
+                        continue
+
+                    rep_in_path = work_dir / f"repair_{jid}.json"
+                    rep_out_path = work_dir / f"repair_{jid}_submitted.json"
+                    rep_in_path.write_text(
+                        json.dumps(rres["data"], indent=2),
+                        encoding="utf-8",
+                    )
+
+                    so_cmd = [
+                        "submit-one",
+                        *conn_args,
+                        "--job-id",
+                        jid,
+                        "--in",
+                        str(rep_in_path),
+                        "--wave",
+                        str(wave_file),
+                        "--out",
+                        str(rep_out_path),
+                        "--extracted-model",
+                        repaired_model,
+                        "--repair-count",
+                        "1",
+                    ]
+                    if allow_overwrite:
+                        so_cmd.append("--allow-overwrite-published")
+                    if not compute_embeddings:
+                        so_cmd.append("--no-embeddings")
+
+                    so_stdout = run_helper(so_cmd)
+                    log(f"Repaired {item.get('title')}: {so_stdout}")
+                    repaired_row = json.loads(rep_out_path.read_text(encoding="utf-8"))
+                    all_submission_outcomes[jid] = repaired_row
+                    repaired_count += 1
+        else:
+            log("Zero recipes needed Phase 3 Pro repair!")
+
+        # ============================================================
+        # PHASE 4: Deep Audit & Summary
+        # ============================================================
+        phase("Wave Audit")
+        audit_path = work_dir / "audit.json"
+        audit_stdout = run_helper(["audit", *conn_args, "--wave", str(wave_file), "--out", str(audit_path)])
+        for line in audit_stdout.splitlines():
+            log(line)
+
+        audit_data = json.loads(audit_path.read_text(encoding="utf-8"))
+        return {
+            "workDir": str(work_dir),
+            "totals": audit_data.get("totals"),
+            "categoryCounts": audit_data.get("categoryCounts"),
+            "confidenceStats": {
+                k: v
+                for k, v in (audit_data.get("confidenceStats") or {}).items()
+                if k != "scoresByRecipe"
+            },
+            "foodCatalog": {
+                "totalFoodItems": (audit_data.get("foodCatalog") or {}).get("totalFoodItems")
+            },
+            "repairedAttempted": repaired_count,
+            "nonPublishedCount": len(audit_data.get("nonPublished") or []),
+        }
+    finally:
+        if temp_mcp_file is not None and temp_mcp_file.exists():
+            try:
+                temp_mcp_file.unlink()
+            except OSError:
+                pass
 
 
 result = await main()

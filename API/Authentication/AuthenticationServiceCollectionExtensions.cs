@@ -10,6 +10,7 @@ public static class AuthenticationServiceCollectionExtensions
     public const string LocalJwtScheme = JwtBearerDefaults.AuthenticationScheme;
     public const string McpPatScheme = "McpPat";
     public const string McpAuthorizationPolicy = "McpPersonalAccessTokenPolicy";
+    public const string BulkImportAuthorizationPolicy = "BulkImportJwtOrPatPolicy";
 
     public static IServiceCollection AddAppAuthentication(
         this IServiceCollection services,
@@ -45,6 +46,13 @@ public static class AuthenticationServiceCollectionExtensions
             options.AddPolicy(
                 McpAuthorizationPolicy,
                 policy => policy.AddAuthenticationSchemes(McpPatScheme).RequireAuthenticatedUser()
+            );
+            options.AddPolicy(
+                BulkImportAuthorizationPolicy,
+                policy =>
+                    policy
+                        .AddAuthenticationSchemes(LocalJwtScheme, McpPatScheme)
+                        .RequireAuthenticatedUser()
             );
         });
 

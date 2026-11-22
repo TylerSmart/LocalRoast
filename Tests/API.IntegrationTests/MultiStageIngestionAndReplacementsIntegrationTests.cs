@@ -4000,6 +4000,183 @@ public sealed class MultiStageIngestionAndReplacementsIntegrationTests
         Assert.AreEqual(generatedUrlDesc, detail.ExtractedDraft.Description);
     }
 
+    [TestMethod]
+    public async Task BulkImportController_AcceptsMcpPatAndJwt_WhileKeepingStandardRestEndpointsProtected()
+    {
+        using var unauthClient = _factory.CreateClient();
+        var unauthPing = await unauthClient.GetAsync("/api/bulk-import/ping");
+        Assert.AreEqual(HttpStatusCode.Unauthorized, unauthPing.StatusCode);
+
+        using var jwtClient = _factory.CreateClient();
+        await AuthenticateAsync(jwtClient);
+
+        var jwtPing = await jwtClient.GetAsync("/api/bulk-import/ping");
+        Assert.AreEqual(HttpStatusCode.OK, jwtPing.StatusCode);
+        var jwtState = await jwtPing.Content.ReadFromJsonAsync<BulkImportWorkerStateDto>();
+        Assert.IsNotNull(jwtState);
+        Assert.IsTrue(jwtState.Authenticated);
+
+        var createPatRes = await jwtClient.PostAsJsonAsync(
+            "/api/account/tokens",
+            new CreatePersonalAccessTokenRequest("Production Bulk Import Runner")
+        );
+        Assert.AreEqual(HttpStatusCode.Created, createPatRes.StatusCode);
+        var pat = (await createPatRes.Content.ReadFromJsonAsync<CreatedPersonalAccessTokenDto>())!;
+
+        using var patClient = _factory.CreateClient();
+        patClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer",
+            pat.PlaintextToken
+        );
+
+        // Standard REST endpoints must still reject MCP Personal Access Tokens.
+        Assert.AreEqual(
+            HttpStatusCode.Unauthorized,
+            (await patClient.GetAsync("/api/account")).StatusCode
+        );
+        Assert.AreEqual(
+            HttpStatusCode.Unauthorized,
+            (
+                await patClient.PostAsJsonAsync(
+                    "/api/account/reset-data",
+                    new { keepIngestionJobs = true }
+                )
+            ).StatusCode
+        );
+
+        // Scoped /api/bulk-import/* endpoints accept lr_pat_... cleanly.
+        var patPing = await patClient.GetAsync("/api/bulk-import/ping");
+        Assert.AreEqual(HttpStatusCode.OK, patPing.StatusCode);
+
+        var workerRes = await patClient.PutAsJsonAsync(
+            "/api/bulk-import/worker",
+            new SetBulkImportWorkerRequest(EnableIngestion: false)
+        );
+        Assert.AreEqual(HttpStatusCode.OK, workerRes.StatusCode);
+        var workerState = await workerRes.Content.ReadFromJsonAsync<BulkImportWorkerStateDto>();
+        Assert.IsNotNull(workerState);
+        Assert.IsFalse(workerState.EnableIngestion);
+
+        var colRes = await patClient.PostAsJsonAsync(
+            "/api/bulk-import/collections",
+            new UpsertCollectionRequest(
+                Name: "ATK Remote Import",
+                Description: "Book",
+                SortOrder: 1
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Created, colRes.StatusCode);
+        var createdCol = (await colRes.Content.ReadFromJsonAsync<CollectionDto>())!;
+
+        var enqueueRes = await patClient.PostAsJsonAsync(
+            "/api/bulk-import/jobs/text",
+            new EnqueueRawTextIngestionRequest(
+                RawText: "Pat Scoped Oats\nWarm toasted rolled oats.\nIngredients:\n- 1 cup rolled oats\nInstructions:\n1. Toast 1 cup rolled oats for 5 minutes.",
+                TitleHint: "Pat Scoped Oats",
+                CollectionIds: [createdCol.Id]
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Accepted, enqueueRes.StatusCode);
+        var job = (await enqueueRes.Content.ReadFromJsonAsync<IngestionJobSummaryDto>())!;
+
+        var batchSrcRes = await patClient.PostAsJsonAsync(
+            "/api/bulk-import/jobs/batch-source",
+            new BatchJobSourceRequest(JobIds: [job.Id], Status: IngestionJobStatus.Queued, Limit: 5)
+        );
+        Assert.AreEqual(HttpStatusCode.OK, batchSrcRes.StatusCode);
+        var sources = await batchSrcRes.Content.ReadFromJsonAsync<
+            List<IngestionJobSourceItemDto>
+        >();
+        Assert.IsNotNull(sources);
+        Assert.HasCount(1, sources);
+        Assert.AreEqual(job.Id, sources[0].Id);
+
+        var submitRes = await patClient.PostAsJsonAsync(
+            $"/api/bulk-import/jobs/{job.Id}/submit-extraction",
+            new SubmitExternalExtractionRequest(
+                Extraction: new ExternalRecipeExtractionDto(
+                    Title: "Pat Scoped Oats",
+                    Description: "Warm toasted rolled oats.",
+                    Servings: 2m,
+                    Yield: "Serves 2",
+                    Sections:
+                    [
+                        new ExternalExtractedSectionDto(
+                            Name: null,
+                            Ingredients:
+                            [
+                                new ExternalExtractedIngredientDto(
+                                    Name: "rolled oats",
+                                    Quantity: 1m,
+                                    Unit: "cup",
+                                    CanonicalFoodName: "rolled oats",
+                                    Category: "PantryDryGoods",
+                                    IsPantryStaple: true
+                                ),
+                            ],
+                            Steps:
+                            [
+                                new ExternalExtractedStepDto(
+                                    Instruction: "Toast 1 cup rolled oats for 5 minutes.",
+                                    Tokens:
+                                    [
+                                        new JsonObject { ["type"] = "text", ["text"] = "Toast " },
+                                        new JsonObject
+                                        {
+                                            ["type"] = "ingredient",
+                                            ["ingredientIndex"] = 0,
+                                            ["name"] = "rolled oats",
+                                            ["quantity"] = 1,
+                                            ["unit"] = "cup",
+                                        },
+                                        new JsonObject { ["type"] = "text", ["text"] = " for " },
+                                        new JsonObject
+                                        {
+                                            ["type"] = "timer",
+                                            ["amount"] = 5,
+                                            ["unit"] = "minute",
+                                            ["label"] = "Toast oats",
+                                        },
+                                        new JsonObject { ["type"] = "text", ["text"] = "." },
+                                    ]
+                                ),
+                            ]
+                        ),
+                    ],
+                    Timing: null,
+                    Tags: ["Breakfast"]
+                ),
+                ExtractedModel: "gemini-flash (agy-workflow)",
+                AutoPublish: true,
+                ComputeEmbeddings: false
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.OK, submitRes.StatusCode);
+        var submitDto =
+            await submitRes.Content.ReadFromJsonAsync<SubmitExternalExtractionResultDto>();
+        Assert.IsNotNull(submitDto);
+        Assert.AreEqual(IngestionJobStatus.Published, submitDto.Status);
+        Assert.IsNotNull(submitDto.ResultingRecipeId);
+
+        var recipeRes = await patClient.GetAsync(
+            $"/api/bulk-import/recipes/{submitDto.ResultingRecipeId}"
+        );
+        Assert.AreEqual(HttpStatusCode.OK, recipeRes.StatusCode);
+
+        var foodsRes = await patClient.GetAsync("/api/bulk-import/food-items");
+        Assert.AreEqual(HttpStatusCode.OK, foodsRes.StatusCode);
+
+        // Revoking the PAT immediately blocks /api/bulk-import/* access.
+        var revokeRes = await jwtClient.PostAsync(
+            $"/api/account/tokens/{pat.Token.Id}/revoke",
+            null
+        );
+        Assert.AreEqual(HttpStatusCode.OK, revokeRes.StatusCode);
+
+        var revokedPing = await patClient.GetAsync("/api/bulk-import/ping");
+        Assert.AreEqual(HttpStatusCode.Unauthorized, revokedPing.StatusCode);
+    }
+
     private sealed class FallbackExercisingLlmClient : ILlmExtractionClient
     {
         public bool ForceSimpleBatch { get; set; }

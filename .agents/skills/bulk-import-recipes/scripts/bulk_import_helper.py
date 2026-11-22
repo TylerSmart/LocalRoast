@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 import re
 import statistics
+import subprocess
 import sys
 import unicodedata
 import urllib.error
@@ -22,14 +23,21 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
-API_BASE = os.environ.get("LOCALROAST_API", "http://localhost:5041/api")
 SKILL_DIR = Path(__file__).resolve().parent.parent
+REPO_ROOT = SKILL_DIR.parent.parent.parent
 STATE_DIR = SKILL_DIR / ".state"
 TOKEN_CACHE = STATE_DIR / ".runner_token.json"
 
 DEFAULT_EMAIL = os.environ.get("LOCALROAST_RUNNER_EMAIL", "dev-runner@localroast.local")
 DEFAULT_USER = os.environ.get("LOCALROAST_RUNNER_USER", "devrunner")
 DEFAULT_PASS = os.environ.get("LOCALROAST_RUNNER_PASS", "LocalRoast_DevRunner_2026!")
+
+_CONN: dict[str, Any] = {
+    "api_base": "http://localhost:5041/api",
+    "explicit_token": None,
+    "mcp_config": None,
+    "verified_token": None,
+}
 
 TOKEN_REGEX = re.compile(r"\|\|(\{.*?\})\|\|", re.S)
 
@@ -214,6 +222,130 @@ STOP_HEADS = {
 }
 
 
+def normalize_api_base(raw_url: str) -> str:
+    u = (raw_url or "").strip().rstrip("/")
+    if not u:
+        return "http://localhost:5041/api"
+    lower = u.lower()
+    if lower.endswith("/api/mcp"):
+        u = u[:-4]
+    elif lower.endswith("/mcp"):
+        u = u[:-4].rstrip("/") + "/api"
+    elif not lower.endswith("/api"):
+        u = u + "/api"
+    return u
+
+
+def _strip_bearer(val: str | None) -> str | None:
+    if not val or not isinstance(val, str):
+        return None
+    cleaned = re.sub(r"^bearer\s+", "", val.strip(), flags=re.I).strip()
+    return cleaned or None
+
+
+def _extract_from_server_entry(entry: dict[str, Any]) -> tuple[str | None, str | None]:
+    raw_url: str | None = None
+    for k in ("url", "serverUrl", "httpUrl", "endpoint"):
+        v = entry.get(k)
+        if isinstance(v, str) and v.strip():
+            raw_url = v.strip()
+            break
+
+    args_list = entry.get("args") if isinstance(entry.get("args"), list) else []
+    if not raw_url:
+        for a in args_list:
+            if isinstance(a, str) and re.match(r"^https?://", a.strip(), re.I):
+                raw_url = a.strip()
+                break
+
+    tok: str | None = None
+    headers = entry.get("headers") if isinstance(entry.get("headers"), dict) else {}
+    for hk, hv in headers.items():
+        if str(hk).lower() == "authorization" and isinstance(hv, str):
+            tok = _strip_bearer(hv)
+            if tok:
+                break
+    if not tok:
+        for k in ("bearerToken", "token", "apiKey"):
+            v = entry.get(k)
+            if isinstance(v, str):
+                tok = _strip_bearer(v)
+                if tok:
+                    break
+    if not tok and args_list:
+        for idx, a in enumerate(args_list):
+            if not isinstance(a, str):
+                continue
+            header_val = None
+            if a == "--header" and idx + 1 < len(args_list) and isinstance(args_list[idx + 1], str):
+                header_val = args_list[idx + 1]
+            elif a.startswith("--header="):
+                header_val = a[len("--header=") :]
+            elif a.lower().startswith("authorization:"):
+                header_val = a
+            if header_val:
+                m = re.match(r"^authorization\s*:\s*(.+)$", header_val.strip(), re.I)
+                if m:
+                    tok = _strip_bearer(m.group(1))
+                    if tok:
+                        break
+    return raw_url, tok
+
+
+def parse_mcp_config(config_path: str) -> tuple[str | None, str | None]:
+    raw_text = Path(config_path).read_text(encoding="utf-8")
+    data = json.loads(raw_text)
+    if not isinstance(data, dict):
+        raise ValueError(f"Invalid MCP config JSON in '{config_path}'.")
+
+    servers = data.get("mcpServers") or data.get("servers")
+    if isinstance(servers, dict) and servers:
+        candidates: list[tuple[int, str, dict[str, Any]]] = []
+        for name, entry in servers.items():
+            if not isinstance(entry, dict):
+                continue
+            url_cand, tok_cand = _extract_from_server_entry(entry)
+            if not url_cand and not tok_cand:
+                continue
+            score = 0
+            if "localroast" in str(name).lower():
+                score += 10
+            if url_cand and "localroast" in url_cand.lower():
+                score += 8
+            if tok_cand and tok_cand.startswith("lr_pat_"):
+                score += 5
+            if url_cand and url_cand.lower().rstrip("/").endswith("/mcp"):
+                score += 2
+            candidates.append((score, str(name), entry))
+
+        if candidates:
+            candidates.sort(key=lambda x: -x[0])
+            return _extract_from_server_entry(candidates[0][2])
+
+    return _extract_from_server_entry(data)
+
+
+def configure_connection(args: argparse.Namespace) -> None:
+    mcp_cfg = getattr(args, "mcp_config", None) or os.environ.get("LOCALROAST_MCP_CONFIG")
+    cli_url = getattr(args, "url", None) or os.environ.get("LOCALROAST_API")
+    cli_tok = _strip_bearer(getattr(args, "token", None) or os.environ.get("LOCALROAST_TOKEN"))
+
+    mcp_url: str | None = None
+    mcp_tok: str | None = None
+    if mcp_cfg:
+        mcp_url, mcp_tok = parse_mcp_config(mcp_cfg)
+
+    resolved_url = cli_url or mcp_url or "http://localhost:5041"
+    resolved_tok = cli_tok or mcp_tok
+    if mcp_cfg and not resolved_url:
+        raise ValueError(f"Could not find server URL in MCP config '{mcp_cfg}'.")
+
+    _CONN["api_base"] = normalize_api_base(resolved_url)
+    _CONN["explicit_token"] = resolved_tok
+    _CONN["mcp_config"] = mcp_cfg
+    _CONN["verified_token"] = None
+
+
 def http_json(
     method: str,
     path: str,
@@ -221,7 +353,7 @@ def http_json(
     body: Any = None,
     timeout: int = 60,
 ) -> Any:
-    url = f"{API_BASE}{path}"
+    url = f"{_CONN['api_base']}{path}"
     data = json.dumps(body).encode("utf-8") if body is not None else None
     headers = {"Accept": "application/json"}
     if data is not None:
@@ -239,17 +371,56 @@ def http_json(
         raise RuntimeError(f"{method} {url} -> HTTP {exc.code}: {err_body}") from exc
 
 
+def _is_localhost_api(api_base: str) -> bool:
+    host = (urllib.parse.urlparse(api_base).hostname or "").lower()
+    return host in ("localhost", "127.0.0.1", "::1")
+
+
 def get_token(force_refresh: bool = False) -> str:
-    STATE_DIR.mkdir(parents=True, exist_ok=True)
-    if not force_refresh and TOKEN_CACHE.exists():
+    api_base = _CONN["api_base"]
+    explicit = _CONN.get("explicit_token")
+    if explicit:
+        if _CONN.get("verified_token") == explicit and not force_refresh:
+            return explicit
         try:
-            cached = json.loads(TOKEN_CACHE.read_text(encoding="utf-8"))
-            token = cached.get("token")
-            if token:
-                http_json("GET", "/account", token=token, timeout=10)
-                return token
+            http_json("GET", "/bulk-import/ping", token=explicit, timeout=15)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Authentication against {api_base}/bulk-import/ping failed using provided token/MCP config: {exc}"
+            ) from exc
+        _CONN["verified_token"] = explicit
+        return explicit
+
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    cache_map: dict[str, str] = {}
+    if TOKEN_CACHE.exists():
+        try:
+            raw_cache = json.loads(TOKEN_CACHE.read_text(encoding="utf-8"))
+            if isinstance(raw_cache, dict):
+                if isinstance(raw_cache.get("tokens"), dict):
+                    cache_map = {str(k): str(v) for k, v in raw_cache["tokens"].items() if v}
+                if (
+                    raw_cache.get("token")
+                    and api_base == "http://localhost:5041/api"
+                    and api_base not in cache_map
+                ):
+                    cache_map[api_base] = str(raw_cache["token"])
+        except Exception:
+            cache_map = {}
+
+    if not force_refresh and api_base in cache_map:
+        cached_tok = cache_map[api_base]
+        try:
+            http_json("GET", "/bulk-import/ping", token=cached_tok, timeout=10)
+            return cached_tok
         except Exception:
             pass
+
+    if not _is_localhost_api(api_base):
+        raise RuntimeError(
+            f"Authentication required for non-local server '{api_base}'. "
+            "Pass --mcp-config (with Authorization header) or --token / LOCALROAST_TOKEN."
+        )
 
     try:
         res = http_json(
@@ -271,25 +442,18 @@ def get_token(force_refresh: bool = False) -> str:
         )
 
     token = res["token"]
-    TOKEN_CACHE.write_text(json.dumps({"token": token}), encoding="utf-8")
+    cache_map[api_base] = token
+    TOKEN_CACHE.write_text(json.dumps({"tokens": cache_map}), encoding="utf-8")
     return token
 
 
 def set_ingestion_enabled(token: str, enabled: bool) -> dict[str, Any]:
-    settings = http_json("GET", "/llm-settings", token=token)
-    payload = {
-        "textModelProfileId": settings.get("textModelProfileId"),
-        "visionModelProfileId": settings.get("visionModelProfileId"),
-        "refineModelProfileId": settings.get("refineModelProfileId"),
-        "embeddingModelProfileId": settings.get("embeddingModelProfileId"),
-        "autoPublishHighConfidenceText": True,
-        "maxIngestionRetries": settings.get("maxIngestionRetries", 2),
-        "enableIngestion": enabled,
-        "autoResumeQueue": settings.get("autoResumeQueue", False),
-        "refineDuringIngestion": False,
-        "refineDuringIdle": False,
-    }
-    return http_json("PUT", "/llm-settings/workflows", token=token, body=payload)
+    return http_json(
+        "PUT",
+        "/bulk-import/worker",
+        token=token,
+        body={"enableIngestion": bool(enabled)},
+    )
 
 
 def norm_title(text: str) -> str:
@@ -592,7 +756,7 @@ def cmd_plan_wave(args: argparse.Namespace) -> int:
 
     queued = http_json(
         "POST",
-        "/ingestion/jobs/batch-source",
+        "/bulk-import/jobs/batch-source",
         token=token,
         body={"status": "Queued", "limit": 2000},
         timeout=120,
@@ -996,7 +1160,7 @@ def cmd_submit_batch(args: argparse.Namespace) -> int:
         try:
             res = http_json(
                 "POST",
-                f"/ingestion/jobs/{job_id}/submit-extraction",
+                f"/bulk-import/jobs/{job_id}/submit-extraction",
                 token=token,
                 body=body,
                 timeout=120,
@@ -1059,7 +1223,7 @@ def cmd_submit_one(args: argparse.Namespace) -> int:
     }
     res = http_json(
         "POST",
-        f"/ingestion/jobs/{args.job_id}/submit-extraction",
+        f"/bulk-import/jobs/{args.job_id}/submit-extraction",
         token=token,
         body=body,
         timeout=120,
@@ -1201,8 +1365,8 @@ def cmd_audit(args: argparse.Namespace) -> int:
         j["id"] for b in wave_data.get("batches") or [] for j in b.get("jobs") or []
     ]
 
-    llm_settings = http_json("GET", "/llm-settings", token=token)
-    food_items_raw = http_json("GET", "/food-items", token=token)
+    worker_state = http_json("GET", "/bulk-import/ping", token=token)
+    food_items_raw = http_json("GET", "/bulk-import/food-items", token=token)
     food_items = (
         food_items_raw.get("items", [])
         if isinstance(food_items_raw, dict)
@@ -1231,7 +1395,7 @@ def cmd_audit(args: argparse.Namespace) -> int:
     external_missing_subrecipe_count = 0
 
     for jid in wave_job_ids:
-        det = http_json("GET", f"/ingestion/jobs/{jid}", token=token)
+        det = http_json("GET", f"/bulk-import/jobs/{jid}", token=token)
         status = det.get("status")
         draft = det.get("extractedDraft") or {}
         if status != "Published":
@@ -1264,7 +1428,7 @@ def cmd_audit(args: argparse.Namespace) -> int:
         rid = det.get("resultingRecipeId")
         if not rid:
             continue
-        rec = http_json("GET", f"/recipes/{rid}", token=token)
+        rec = http_json("GET", f"/bulk-import/recipes/{rid}", token=token)
         conf = det.get("confidenceScore")
         scores.append(
             {
@@ -1631,7 +1795,7 @@ def cmd_audit(args: argparse.Namespace) -> int:
             "selfContainedTotal": self_contained_total,
             "overallAutoPublishRatePct": round(overall_rate, 2),
             "selfContainedAutoPublishRatePct": round(self_contained_rate, 2),
-            "enableIngestion": llm_settings.get("enableIngestion"),
+            "enableIngestion": worker_state.get("enableIngestion"),
         },
         "foodCatalog": {
             "totalFoodItems": len(food_items),
@@ -1669,18 +1833,79 @@ def cmd_audit(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_enqueue_epub(args: argparse.Namespace) -> int:
+    epub_script = REPO_ROOT / "scripts" / "import_atk_epub.py"
+    if not epub_script.exists():
+        raise FileNotFoundError(f"Could not find EPUB importer script at {epub_script}")
+
+    cmd = [sys.executable, str(epub_script), "--import-api", "--url", _CONN["api_base"]]
+    env = dict(os.environ)
+    mcp_cfg = _CONN.get("mcp_config")
+    if mcp_cfg:
+        cmd.extend(["--mcp-config", str(mcp_cfg)])
+    else:
+        token = get_token()
+        env["LOCALROAST_TOKEN"] = token
+
+    if getattr(args, "epub", None):
+        cmd.extend(["--epub", args.epub])
+    if getattr(args, "collection", None):
+        cmd.extend(["--collection", args.collection])
+    if getattr(args, "chapter", None):
+        cmd.extend(["--chapter", args.chapter])
+    if getattr(args, "limit", None) is not None:
+        cmd.extend(["--limit", str(args.limit)])
+    if getattr(args, "offset", 0):
+        cmd.extend(["--offset", str(args.offset)])
+    if getattr(args, "no_images", False):
+        cmd.append("--no-images")
+    if getattr(args, "no_skip_existing", False):
+        cmd.append("--no-skip-existing")
+
+    res = subprocess.run(cmd, env=env, text=True)
+    return int(res.returncode)
+
+
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="LocalRoast bulk recipe import helper")
+    conn_parent = argparse.ArgumentParser(add_help=False)
+    conn_parent.add_argument(
+        "--mcp-config",
+        default=argparse.SUPPRESS,
+        help="Path to LocalRoast MCP config JSON containing server URL and Bearer lr_pat_... token",
+    )
+    conn_parent.add_argument(
+        "--url",
+        default=argparse.SUPPRESS,
+        help="LocalRoast base URL (overrides MCP config URL; default: http://localhost:5041)",
+    )
+    conn_parent.add_argument(
+        "--token",
+        default=argparse.SUPPRESS,
+        help="Explicit JWT or lr_pat_... Bearer token (overrides MCP config token)",
+    )
+
+    p = argparse.ArgumentParser(
+        description="LocalRoast bulk recipe import helper",
+        parents=[conn_parent],
+    )
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    pw = sub.add_parser("plan-wave", help="Select and topologically order a wave of queued jobs")
+    pw = sub.add_parser(
+        "plan-wave",
+        parents=[conn_parent],
+        help="Select and topologically order a wave of queued jobs",
+    )
     pw.add_argument("--size", type=int, default=30)
     pw.add_argument("--batch-size", type=int, default=5)
     pw.add_argument("--out", required=True)
     pw.add_argument("--pilot-benchmark", action="store_true")
     pw.set_defaults(func=cmd_plan_wave)
 
-    sb = sub.add_parser("submit-batch", help="Submit extracted batch JSON sequentially")
+    sb = sub.add_parser(
+        "submit-batch",
+        parents=[conn_parent],
+        help="Submit extracted batch JSON sequentially",
+    )
     sb.add_argument("--in", dest="in_file", required=True)
     sb.add_argument("--wave", required=False)
     sb.add_argument("--out", required=True)
@@ -1690,7 +1915,11 @@ def build_parser() -> argparse.ArgumentParser:
     sb.add_argument("--no-embeddings", action="store_true")
     sb.set_defaults(func=cmd_submit_batch)
 
-    so = sub.add_parser("submit-one", help="Submit single repaired recipe extraction")
+    so = sub.add_parser(
+        "submit-one",
+        parents=[conn_parent],
+        help="Submit single repaired recipe extraction",
+    )
     so.add_argument("--job-id", required=True)
     so.add_argument("--in", dest="in_file", required=True)
     so.add_argument("--wave", required=False)
@@ -1701,10 +1930,28 @@ def build_parser() -> argparse.ArgumentParser:
     so.add_argument("--no-embeddings", action="store_true")
     so.set_defaults(func=cmd_submit_one)
 
-    au = sub.add_parser("audit", help="Audit all jobs and published recipes in a wave")
+    au = sub.add_parser(
+        "audit",
+        parents=[conn_parent],
+        help="Audit all jobs and published recipes in a wave",
+    )
     au.add_argument("--wave", required=True)
     au.add_argument("--out", required=True)
     au.set_defaults(func=cmd_audit)
+
+    eq = sub.add_parser(
+        "enqueue-epub",
+        parents=[conn_parent],
+        help="Idempotently enqueue ATK EPUB recipes and dish photos via /api/bulk-import/*",
+    )
+    eq.add_argument("--epub", default=None)
+    eq.add_argument("--collection", default=None)
+    eq.add_argument("--chapter", default=None)
+    eq.add_argument("--limit", type=int, default=None)
+    eq.add_argument("--offset", type=int, default=0)
+    eq.add_argument("--no-images", action="store_true")
+    eq.add_argument("--no-skip-existing", action="store_true")
+    eq.set_defaults(func=cmd_enqueue_epub)
 
     return p
 
@@ -1712,6 +1959,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
+    configure_connection(args)
     return args.func(args)
 
 

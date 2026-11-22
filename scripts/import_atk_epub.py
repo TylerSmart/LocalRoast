@@ -41,6 +41,7 @@ import json
 import os
 import re
 import sys
+import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -903,11 +904,112 @@ def format_recipe_for_localroast(r, collection_id=None):
 
 
 def normalize_api_base(api_url):
-    """Ensure API URL ends with /api."""
-    trimmed = api_url.rstrip("/")
-    if not trimmed.lower().endswith("/api"):
-        trimmed += "/api"
-    return trimmed
+    """Ensure API URL ends with /api (stripping any /api/mcp or /mcp suffix)."""
+    u = (api_url or "").strip().rstrip("/")
+    if not u:
+        return "http://localhost:5041/api"
+    lower = u.lower()
+    if lower.endswith("/api/mcp"):
+        u = u[:-4]
+    elif lower.endswith("/mcp"):
+        u = u[:-4].rstrip("/") + "/api"
+    elif not lower.endswith("/api"):
+        u += "/api"
+    return u
+
+
+def _strip_bearer(val):
+    if not val or not isinstance(val, str):
+        return None
+    cleaned = re.sub(r"^bearer\s+", "", val.strip(), flags=re.IGNORECASE).strip()
+    return cleaned or None
+
+
+def _extract_from_mcp_entry(entry):
+    raw_url = None
+    for k in ("url", "serverUrl", "httpUrl", "endpoint"):
+        v = entry.get(k)
+        if isinstance(v, str) and v.strip():
+            raw_url = v.strip()
+            break
+    args_list = entry.get("args") if isinstance(entry.get("args"), list) else []
+    if not raw_url:
+        for a in args_list:
+            if isinstance(a, str) and re.match(r"^https?://", a.strip(), re.IGNORECASE):
+                raw_url = a.strip()
+                break
+
+    tok = None
+    headers = entry.get("headers") if isinstance(entry.get("headers"), dict) else {}
+    for hk, hv in headers.items():
+        if str(hk).lower() == "authorization" and isinstance(hv, str):
+            tok = _strip_bearer(hv)
+            if tok:
+                break
+    if not tok:
+        for k in ("bearerToken", "token", "apiKey"):
+            v = entry.get(k)
+            if isinstance(v, str):
+                tok = _strip_bearer(v)
+                if tok:
+                    break
+    if not tok and args_list:
+        for idx, a in enumerate(args_list):
+            if not isinstance(a, str):
+                continue
+            header_val = None
+            if a == "--header" and idx + 1 < len(args_list) and isinstance(args_list[idx + 1], str):
+                header_val = args_list[idx + 1]
+            elif a.startswith("--header="):
+                header_val = a[len("--header="):]
+            elif a.lower().startswith("authorization:"):
+                header_val = a
+            if header_val:
+                m = re.match(r"^authorization\s*:\s*(.+)$", header_val.strip(), re.IGNORECASE)
+                if m:
+                    tok = _strip_bearer(m.group(1))
+                    if tok:
+                        break
+    return raw_url, tok
+
+
+def parse_mcp_config(config_path):
+    """Parse LocalRoast server URL and Bearer token from a standard MCP config JSON file."""
+    with open(config_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    if not isinstance(data, dict):
+        raise ValueError(f"Invalid MCP config JSON in '{config_path}'.")
+
+    servers = data.get("mcpServers") or data.get("servers")
+    if isinstance(servers, dict) and servers:
+        candidates = []
+        for name, entry in servers.items():
+            if not isinstance(entry, dict):
+                continue
+            url_cand, tok_cand = _extract_from_mcp_entry(entry)
+            if not url_cand and not tok_cand:
+                continue
+            score = 0
+            if "localroast" in str(name).lower():
+                score += 10
+            if url_cand and "localroast" in url_cand.lower():
+                score += 8
+            if tok_cand and tok_cand.startswith("lr_pat_"):
+                score += 5
+            if url_cand and url_cand.lower().rstrip("/").endswith("/mcp"):
+                score += 2
+            candidates.append((score, str(name), entry))
+        if candidates:
+            candidates.sort(key=lambda x: -x[0])
+            return _extract_from_mcp_entry(candidates[0][2])
+
+    return _extract_from_mcp_entry(data)
+
+
+def norm_dedupe_title(text):
+    nfd = unicodedata.normalize("NFD", (text or "").replace("\u2019", "'").replace("\u2018", "'"))
+    stripped = "".join(ch for ch in nfd if unicodedata.category(ch) != "Mn")
+    return " ".join(stripped.lower().split())[:200]
 
 
 def api_json_request(method, url, token=None, payload_obj=None):
@@ -942,22 +1044,67 @@ def authenticate_api(api_base, email, password):
         raise RuntimeError(f"Authentication failed ({e.code}): {err}")
 
 
-def inspect_llm_settings(api_base, token):
-    """Fetch and display active LLM settings so the user can see which model will run."""
-    try:
-        settings = api_json_request("GET", f"{api_base}/llm-settings", token=token)
-        if settings:
-            provider = settings.get("provider", "Unknown")
-            base_url = settings.get("baseUrl", "")
-            text_model = settings.get("textModel")
-            print(f"LLM Queue Config: Provider={provider} ({base_url}), TextModel={text_model or 'NOT SET'}")
-            if not text_model:
-                print(
-                    "  [!] Warning: No Text Model is selected in LLM Settings yet. "
-                    "Jobs will queue safely and pause in WaitingForLlmHost until you select a Text Model."
-                )
-    except Exception as ex:
-        print(f"  (Notice: could not query /api/llm-settings: {ex})")
+def verify_worker_and_pause(api_base, token, pause=True):
+    """Verify /api/bulk-import connectivity and optionally pause the background worker."""
+    state = api_json_request("GET", f"{api_base}/bulk-import/ping", token=token)
+    print(
+        f"Connected to {api_base} (EnableIngestion={bool((state or {}).get('enableIngestion'))})."
+    )
+    if pause and (state or {}).get("enableIngestion"):
+        updated = api_json_request(
+            "PUT",
+            f"{api_base}/bulk-import/worker",
+            token=token,
+            payload_obj={"enableIngestion": False},
+        )
+        print(
+            f"Paused remote/local background ingestion worker (EnableIngestion={bool((updated or {}).get('enableIngestion'))})."
+        )
+
+
+def fetch_existing_titles(api_base, token):
+    """Fetch normalized titles of active ingestion jobs and existing recipes for idempotent resuming."""
+    existing = set()
+    job_count = 0
+    page = 1
+    while True:
+        res = api_json_request(
+            "GET",
+            f"{api_base}/bulk-import/jobs?page={page}&pageSize=100",
+            token=token,
+        ) or {}
+        items = res.get("items") or []
+        for j in items:
+            job_count += 1
+            st = str(j.get("status") or "").strip().lower()
+            if st in ("failed", "discarded", "6", "7"):
+                continue
+            nt = norm_dedupe_title(j.get("displayTitle") or "")
+            if nt:
+                existing.add(nt)
+        if not items or not (res.get("hasNextPage") or res.get("hasMore")):
+            break
+        page += 1
+
+    recipe_count = 0
+    page = 1
+    while True:
+        res = api_json_request(
+            "GET",
+            f"{api_base}/bulk-import/recipes?page={page}&pageSize=100",
+            token=token,
+        ) or {}
+        items = res.get("items") or []
+        for r in items:
+            recipe_count += 1
+            nt = norm_dedupe_title(r.get("title") or "")
+            if nt:
+                existing.add(nt)
+        if not items or not (res.get("hasMore") or res.get("hasNextPage")):
+            break
+        page += 1
+
+    return existing, job_count, recipe_count
 
 
 def ensure_book_collection(api_base, token, collection_name=BOOK_TITLE):
@@ -966,7 +1113,7 @@ def ensure_book_collection(api_base, token, collection_name=BOOK_TITLE):
     if not clean_name:
         return None
 
-    existing = api_json_request("GET", f"{api_base}/collections", token=token) or []
+    existing = api_json_request("GET", f"{api_base}/bulk-import/collections", token=token) or []
     by_norm = {
         c["name"].strip().lower(): c["id"]
         for c in existing
@@ -980,7 +1127,7 @@ def ensure_book_collection(api_base, token, collection_name=BOOK_TITLE):
 
     created = api_json_request(
         "POST",
-        f"{api_base}/collections",
+        f"{api_base}/bulk-import/collections",
         token=token,
         payload_obj={
             "name": clean_name,
@@ -996,7 +1143,7 @@ def ensure_book_collection(api_base, token, collection_name=BOOK_TITLE):
 
 
 def upload_cover_image(api_base, token, zip_handle, image_inner_path):
-    """Extract an image from an open EPUB zip handle and upload to /api/media/recipe-cover."""
+    """Extract an image from an open EPUB zip handle and upload to /api/bulk-import/media/recipe-cover."""
     if not image_inner_path or zip_handle is None:
         return None
     try:
@@ -1020,7 +1167,7 @@ def upload_cover_image(api_base, token, zip_handle, image_inner_path):
         body.write(img_bytes)
         body.write(f"\r\n--{boundary}--\r\n".encode("utf-8"))
 
-        media_url = f"{api_base}/media/recipe-cover"
+        media_url = f"{api_base}/bulk-import/media/recipe-cover"
         req = urllib.request.Request(
             media_url,
             data=body.getvalue(),
@@ -1046,7 +1193,7 @@ def enqueue_recipe_to_llm_queue(
     thumbnail_image_path=None,
     auto_publish=True,
 ):
-    """Enqueue a parsed recipe into LocalRoast POST /api/ingestion/jobs/text for LLM extraction."""
+    """Enqueue a parsed recipe into LocalRoast POST /api/bulk-import/jobs/text for LLM extraction."""
     raw_text = format_recipe_as_llm_raw_text(recipe_dict)
     payload = {
         "rawText": raw_text,
@@ -1060,7 +1207,7 @@ def enqueue_recipe_to_llm_queue(
         "collectionIds": [collection_id] if collection_id else [],
         "autoPublish": auto_publish,
     }
-    return api_json_request("POST", f"{api_base}/ingestion/jobs/text", token=token, payload_obj=payload)
+    return api_json_request("POST", f"{api_base}/bulk-import/jobs/text", token=token, payload_obj=payload)
 
 
 def post_recipe_directly_to_api(api_base, token, recipe_payload):
@@ -1348,7 +1495,17 @@ def main():
         action="store_true",
         help="Hold LLM-extracted recipes in ReadyForReview (default unless --auto-publish or LLM Settings Auto-Publish is enabled).",
     )
-    parser.add_argument("--url", default="http://localhost:5041", help="LocalRoast base URL")
+    parser.add_argument(
+        "--mcp-config",
+        type=str,
+        default=None,
+        help="Path to LocalRoast MCP config JSON containing server URL and Bearer lr_pat_... token",
+    )
+    parser.add_argument(
+        "--url",
+        default=None,
+        help="LocalRoast base URL (overrides MCP config URL; default: http://localhost:5041)",
+    )
     parser.add_argument("--email", "--username", dest="email", help="LocalRoast account email")
     parser.add_argument("--password", help="LocalRoast password")
     parser.add_argument("--token", help="Pre-existing JWT or PAT token (optional)")
@@ -1361,6 +1518,11 @@ def main():
         "--upload-images",
         action="store_true",
         help="Upload matched dish photos (enabled by default during API import).",
+    )
+    parser.add_argument(
+        "--no-skip-existing",
+        action="store_true",
+        help="Enqueue all selected recipes even if a matching job or recipe title already exists.",
     )
 
     args = parser.parse_args()
@@ -1388,7 +1550,12 @@ def main():
         recipes = recipes[: args.limit]
         print(f"Limited to {len(recipes)} recipes.")
 
-    should_call_api = bool(args.import_api or args.email or args.token) and not args.dry_run
+    mcp_cfg_path = args.mcp_config or os.environ.get("LOCALROAST_MCP_CONFIG")
+    env_token = os.environ.get("LOCALROAST_TOKEN")
+    should_call_api = (
+        bool(args.import_api or args.email or args.token or env_token or mcp_cfg_path)
+        and not args.dry_run
+    )
 
     # 2. Dry Run display
     if args.dry_run or (not args.output_json and not should_call_api):
@@ -1432,20 +1599,29 @@ def main():
 
     # 4. Import / Enqueue into LocalRoast API (LLM Queue is default)
     if should_call_api:
-        api_base = normalize_api_base(args.url)
-        token = args.token
+        mcp_url = None
+        mcp_tok = None
+        if mcp_cfg_path:
+            mcp_url, mcp_tok = parse_mcp_config(mcp_cfg_path)
+
+        raw_api_url = args.url or os.environ.get("LOCALROAST_API") or mcp_url or "http://localhost:5041"
+        api_base = normalize_api_base(raw_api_url)
+        token = _strip_bearer(args.token) or _strip_bearer(env_token) or mcp_tok
         if not token:
             if not args.email or not args.password:
-                print("Error: --email and --password (or --token) are required for API import.")
+                print(
+                    "Error: --mcp-config, --token (or LOCALROAST_TOKEN), or --email + --password are required for API import."
+                )
                 sys.exit(1)
             token = authenticate_api(api_base, args.email, args.password)
 
         use_llm_queue = not args.direct_import
         upload_images = not args.no_images
         auto_publish = bool(args.auto_publish) and not args.review_only
+        skip_existing = use_llm_queue and not args.no_skip_existing
 
+        verify_worker_and_pause(api_base, token, pause=use_llm_queue)
         if use_llm_queue:
-            inspect_llm_settings(api_base, token)
             mode_desc = (
                 "LLM Queue (Force Auto-Publish ON)"
                 if auto_publish
@@ -1454,16 +1630,32 @@ def main():
         else:
             mode_desc = "Direct Recipe Creation (Bypassing LLM)"
 
+        existing_titles = set()
+        if skip_existing:
+            existing_titles, existing_jobs, existing_recipes = fetch_existing_titles(api_base, token)
+            print(
+                f"Preflight scan: found {existing_jobs} job(s) and {existing_recipes} recipe(s) "
+                f"({len(existing_titles)} unique titles eligible to skip)."
+            )
+
         book_collection_id = ensure_book_collection(api_base, token, args.collection)
 
         print(f"\nStarting {mode_desc} for {len(recipes)} recipe(s) -> {api_base}...")
         success_count = 0
+        skipped_count = 0
         error_count = 0
 
         with zipfile.ZipFile(args.epub, "r") as epub_zip:
             for i, r in enumerate(recipes):
                 title = r["title"][:200]
                 col_id = book_collection_id
+
+                if skip_existing:
+                    dedupe_key = norm_dedupe_title(title)
+                    if dedupe_key and dedupe_key in existing_titles:
+                        skipped_count += 1
+                        continue
+
                 action_verb = "Queueing" if use_llm_queue else "Importing"
                 print(f"[{i+1}/{len(recipes)}] {action_verb}: {title}...", end="", flush=True)
 
@@ -1486,6 +1678,9 @@ def main():
                             thumbnail_image_path=thumb_path,
                             auto_publish=auto_publish,
                         )
+                        dedupe_key = norm_dedupe_title(title)
+                        if dedupe_key:
+                            existing_titles.add(dedupe_key)
                         success_count += 1
                         print(f" Queued! (Job ID: {job.get('id')})")
                     else:
@@ -1506,7 +1701,9 @@ def main():
                     error_count += 1
                     print(f" FAILED: {ex}")
 
-        print(f"\nFinished! {success_count} succeeded, {error_count} failed.")
+        print(
+            f"\nFinished! {success_count} succeeded, {skipped_count} skipped (already present), {error_count} failed."
+        )
         if use_llm_queue and success_count > 0:
             print(
                 "Background worker is now extracting recipes sequentially, reusing and creating "

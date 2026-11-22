@@ -10,42 +10,43 @@ description: >-
 
 # Bulk Import Recipes (`bulk-import-recipes`)
 
-Imports queued `IngestionJob`s into LocalRoast using parallel Antigravity workflow agents while keeping **100% of domain rules, SKU matching guardrails, step token healing/validation, measurement enrichment, sub-recipe auto-promotion, and confidence scoring** inside C# (`POST /api/ingestion/jobs/{id}/submit-extraction`).
+Imports queued `IngestionJob`s into LocalRoast (either **local dev** or a remote **production deployment** over HTTPS — zero direct SQL access required) using parallel Antigravity workflow agents while keeping **100% of domain rules, SKU matching guardrails, step token healing/validation, measurement enrichment, sub-recipe auto-promotion, and confidence scoring** inside C# (`POST /api/bulk-import/jobs/{id}/submit-extraction`).
 
-## Prerequisites
+## Targets & Authentication
 
-1. **Local SQL Server & API running** on `http://localhost:5041`:
-   ```powershell
-   .\scripts\ensure-local-infra.ps1
-   dotnet run --project API/App.API.csproj -c Release --launch-profile http
-   ```
-2. **Pause local Ollama background worker**: `plan-wave` automatically sets `enableIngestion = false` so local GPU Ollama jobs do not race with workflow submissions.
+1. **Local Development (`http://localhost:5041`, default)**:
+   - Start SQL Server & the Release API:
+     ```powershell
+     .\scripts\ensure-local-infra.ps1
+     dotnet run --project API/App.API.csproj -c Release --launch-profile http
+     ```
+   - No config needed; scripts auto-authenticate against `localhost:5041` with the local dev runner account and call `/api/bulk-import/*`.
+2. **Production / Remote Deployment (via MCP Config)**:
+   - Use any standard LocalRoast MCP JSON snippet containing your server `url` and `Authorization: Bearer lr_pat_...` Personal Access Token (pass either a file path — e.g. `localroast.mcp.local.json`, gitignored — or inline JSON via `mcpConfig`):
+     ```json
+     {
+       "mcpServers": {
+         "localroast": {
+           "url": "https://your-production-host/api/mcp",
+           "headers": {
+             "Authorization": "Bearer lr_pat_..."
+           }
+         }
+       }
+     }
+     ```
+   - All requests hit the scoped `/api/bulk-import/*` endpoints (accepted by both `lr_pat_...` PATs and standard JWTs without exposing `/api/account/*`).
+3. **Background Ollama Worker Protection**: `plan-wave` and `enqueue-epub` automatically set `enableIngestion = false` via `PUT /api/bulk-import/worker` so any server background worker does not race with workflow submissions.
 
 ## Workflow Files
 
 - [`resources/extraction-prompt.md`](resources/extraction-prompt.md): Unified single-pass extraction + step-tokenization prompt guide.
-- [`scripts/bulk_import_helper.py`](scripts/bulk_import_helper.py): CLI providing `plan-wave`, `submit-batch`, `submit-one`, and `audit`.
-- [`scripts/bulk_import_workflow.py`](scripts/bulk_import_workflow.py): Antigravity `run_workflow` script (`Plan Wave` -> `Extract Batches (Flash)` -> `Targeted Repair (Pro)` -> `Wave Audit`).
+- [`scripts/bulk_import_helper.py`](scripts/bulk_import_helper.py): CLI providing `enqueue-epub`, `plan-wave`, `submit-batch`, `submit-one`, and `audit` (all supporting `--mcp-config`, `--url`, `--token`).
+- [`scripts/bulk_import_workflow.py`](scripts/bulk_import_workflow.py): Antigravity `run_workflow` script (`Optional Enqueue EPUB` -> `Plan Wave` -> `Extract Batches (Flash)` -> `Targeted Repair (Pro)` -> `Wave Audit`).
 
-## Running a Wave via `run_workflow`
+## Running Waves via `run_workflow`
 
-### 1. 30-Recipe Pilot / Benchmark Wave
-```json
-{
-  "ScriptPath": "d:/Personal/LocalRoast/.agents/skills/bulk-import-recipes/scripts/bulk_import_workflow.py",
-  "Description": "Pilot bulk import of 30 ATK recipes",
-  "Args": {
-    "waveSize": 30,
-    "batchSize": 5,
-    "maxParallel": 4,
-    "pilotBenchmark": true,
-    "computeEmbeddings": true
-  }
-}
-```
-
-### 2. Full-Catalog Production Waves (e.g., 150–200 recipes per wave)
-Because every job transitions in SQL Server immediately upon submission, waves are **fully resumable**—simply repeat the call below until remaining `Queued` jobs reach `0`:
+### 1. Local Pilot / Production Waves
 ```json
 {
   "ScriptPath": "d:/Personal/LocalRoast/.agents/skills/bulk-import-recipes/scripts/bulk_import_workflow.py",
@@ -59,15 +60,44 @@ Because every job transitions in SQL Server immediately upon submission, waves a
   }
 }
 ```
+Set `"pilotBenchmark": true` and `"waveSize": 30` for an initial 30-recipe benchmark.
+
+### 2. Production Deployment: Upload ATK EPUB + Run Waves via MCP Config
+To push the ATK EPUB (dish photos + queued jobs, idempotently skipping any recipes already queued or published on the target server) and immediately run the first 150-recipe wave against production:
+```json
+{
+  "ScriptPath": "d:/Personal/LocalRoast/.agents/skills/bulk-import-recipes/scripts/bulk_import_workflow.py",
+  "Description": "Enqueue ATK EPUB onto production and import first 150 recipes",
+  "Args": {
+    "mcpConfig": {
+      "mcpServers": {
+        "localroast": {
+          "url": "https://your-production-host/api/mcp",
+          "headers": {
+            "Authorization": "Bearer lr_pat_..."
+          }
+        }
+      }
+    },
+    "enqueueEpub": true,
+    "waveSize": 150,
+    "batchSize": 5,
+    "maxParallel": 4,
+    "computeEmbeddings": true
+  }
+}
+```
+*(After all EPUB jobs are uploaded once, omit `"enqueueEpub"` — or leave it `false` — on subsequent 150-recipe waves until remaining `Queued` jobs reach `0`.)*
 
 ## Standalone CLI Helper Usage
 
 ```powershell
-# Inspect & plan a wave manually
-python .agents/skills/bulk-import-recipes/scripts/bulk_import_helper.py plan-wave --size 30 --batch-size 5 --pilot-benchmark --out .agents/skills/bulk-import-recipes/.state/manual/wave.json
+# Idempotently upload ATK EPUB + cover photos onto production (skips already-present titles)
+python .agents/skills/bulk-import-recipes/scripts/bulk_import_helper.py enqueue-epub --mcp-config localroast.mcp.local.json
 
-# Run deep culinary quality audit on any wave.json
-python .agents/skills/bulk-import-recipes/scripts/bulk_import_helper.py audit --wave .agents/skills/bulk-import-recipes/.state/manual/wave.json --out .agents/skills/bulk-import-recipes/.state/manual/audit.json
+# Plan & audit manually against local or production
+python .agents/skills/bulk-import-recipes/scripts/bulk_import_helper.py plan-wave --mcp-config localroast.mcp.local.json --size 30 --batch-size 5 --pilot-benchmark --out .agents/skills/bulk-import-recipes/.state/manual/wave.json
+python .agents/skills/bulk-import-recipes/scripts/bulk_import_helper.py audit --mcp-config localroast.mcp.local.json --wave .agents/skills/bulk-import-recipes/.state/manual/wave.json --out .agents/skills/bulk-import-recipes/.state/manual/audit.json
 ```
 
 ## Runtime State & Missing Sub-Recipes
