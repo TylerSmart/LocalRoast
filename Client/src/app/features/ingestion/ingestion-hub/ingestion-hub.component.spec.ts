@@ -781,5 +781,76 @@ describe('IngestionHubComponent', () => {
     expect(shareComponent.textForm.controls.titleHint.value).toBe('Grandma Cake');
     expect(shareComponent.textForm.controls.rawText.value).toBe(recipeBody);
     expect(shareComponent.feedbackMessage()).toContain('Shared recipe text loaded');
+
+    // Simulating the stripped queryParamMap emission must keep Raw Text tab active
+    queryParamMap$.next(convertToParamMap({}));
+    shareFixture.detectChanges();
+    expect(shareComponent.activeTab()).toBe('text');
+  });
+
+  it('restores tab, filter, search, sort, and pagination from query params and syncs updates back to URL', async () => {
+    const queryParamMap$ = new BehaviorSubject(
+      convertToParamMap({
+        tab: 'pdf',
+        filter: 'ReadyForReview',
+        q: 'bread',
+        sort: 'Name',
+        dir: 'Asc',
+        page: '2',
+        pageSize: '50',
+      }),
+    );
+
+    TestBed.resetTestingModule();
+    await TestBed.configureTestingModule({
+      imports: [IngestionHubComponent],
+      providers: [
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        provideRouter([]),
+        {
+          provide: ActivatedRoute,
+          useValue: {
+            queryParamMap: queryParamMap$.asObservable(),
+            snapshot: { queryParamMap: queryParamMap$.value },
+          },
+        },
+        { provide: IngestionService, useValue: mockIngestionService },
+        { provide: IngestionRealtimeService, useValue: mockIngestionRealtimeService },
+        { provide: LlmSettingsService, useValue: mockLlmSettingsService },
+      ],
+    }).compileComponents();
+
+    const router = TestBed.inject(Router);
+    const navSpy = vi.spyOn(router, 'navigate').mockResolvedValue(true);
+
+    const restoredFixture = TestBed.createComponent(IngestionHubComponent);
+    const restoredComp = restoredFixture.componentInstance;
+    restoredFixture.detectChanges();
+
+    expect(restoredComp.activeTab()).toBe('pdf');
+    expect(restoredComp.filter()).toBe('ReadyForReview');
+    expect(restoredComp.searchQuery()).toBe('bread');
+    expect(restoredComp.sortBy()).toBe('Name');
+    expect(restoredComp.sortDirection()).toBe('Asc');
+    expect(restoredComp.pageIndex()).toBe(1);
+    expect(restoredComp.pageSize()).toBe(50);
+
+    restoredComp.onPageChange({ pageIndex: 2, pageSize: 50, length: 150 });
+    expect(navSpy).toHaveBeenLastCalledWith(
+      [],
+      expect.objectContaining({
+        queryParams: expect.objectContaining({
+          tab: 'pdf',
+          filter: 'ReadyForReview',
+          q: 'bread',
+          sort: 'Name',
+          dir: 'Asc',
+          page: 3,
+          pageSize: 50,
+        }),
+        replaceUrl: true,
+      }),
+    );
   });
 });

@@ -1,7 +1,8 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { MatDialog } from '@angular/material/dialog';
 import { MatSnackBar } from '@angular/material/snack-bar';
-import { of } from 'rxjs';
+import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angular/router';
+import { BehaviorSubject, of } from 'rxjs';
 import { FoodItemDto, FoodItemQueryParameters } from '../../../core/models/food-catalog.models';
 import { FoodCatalogService } from '../../../core/services/food-catalog/food-catalog.service';
 import { FoodCatalogComponent } from './food-catalog.component';
@@ -78,6 +79,7 @@ describe('FoodCatalogComponent', () => {
     await TestBed.configureTestingModule({
       imports: [FoodCatalogComponent],
       providers: [
+        provideRouter([]),
         { provide: FoodCatalogService, useValue: mockCatalogService },
         { provide: MatDialog, useValue: mockDialog },
         { provide: MatSnackBar, useValue: mockSnackBar },
@@ -204,5 +206,63 @@ describe('FoodCatalogComponent', () => {
       }),
     );
     expect(mockCatalogService.deleteFoodItem).toHaveBeenCalledWith('f-3', false);
+  });
+
+  it('restores search, filters, and pagination from query params and syncs changes back to URL', async () => {
+    const queryParamMap$ = new BehaviorSubject(
+      convertToParamMap({
+        q: 'garlic',
+        category: 'Produce',
+        staples: '1',
+        page: '2',
+        pageSize: '60',
+      }),
+    );
+
+    TestBed.resetTestingModule();
+    await TestBed.configureTestingModule({
+      imports: [FoodCatalogComponent],
+      providers: [
+        provideRouter([]),
+        {
+          provide: ActivatedRoute,
+          useValue: {
+            queryParamMap: queryParamMap$.asObservable(),
+            snapshot: { queryParamMap: queryParamMap$.value },
+          },
+        },
+        { provide: FoodCatalogService, useValue: mockCatalogService },
+        { provide: MatDialog, useValue: mockDialog },
+        { provide: MatSnackBar, useValue: mockSnackBar },
+      ],
+    }).compileComponents();
+
+    const router = TestBed.inject(Router);
+    const navSpy = vi.spyOn(router, 'navigate').mockResolvedValue(true);
+
+    const restoredFixture = TestBed.createComponent(FoodCatalogComponent);
+    const restoredComp = restoredFixture.componentInstance;
+    restoredFixture.detectChanges();
+
+    expect(restoredComp['searchQuery']()).toBe('garlic');
+    expect(restoredComp['categoryFilter']()).toBe('Produce');
+    expect(restoredComp['onlyPantryStaples']()).toBe(true);
+    expect(restoredComp['pageIndex']()).toBe(1);
+    expect(restoredComp['pageSize']()).toBe(60);
+
+    restoredComp.onPageChange({ pageIndex: 2, pageSize: 60, length: 200 });
+    expect(navSpy).toHaveBeenLastCalledWith(
+      [],
+      expect.objectContaining({
+        queryParams: expect.objectContaining({
+          q: 'garlic',
+          category: 'Produce',
+          staples: '1',
+          page: 3,
+          pageSize: 60,
+        }),
+        replaceUrl: true,
+      }),
+    );
   });
 });

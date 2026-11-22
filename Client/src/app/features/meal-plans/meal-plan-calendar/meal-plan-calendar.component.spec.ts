@@ -3,7 +3,7 @@ import { By } from '@angular/platform-browser';
 import { CdkDrag } from '@angular/cdk/drag-drop';
 import { signal } from '@angular/core';
 import { MatDialog } from '@angular/material/dialog';
-import { provideRouter } from '@angular/router';
+import { Router, provideRouter } from '@angular/router';
 import { Subject, of, throwError } from 'rxjs';
 import { MealPlanEntryDto, MealPlanWeekDto } from '../../../core/models/meal-plan.models';
 import { MealPlanService } from '../../../core/services/meal-plan/meal-plan.service';
@@ -300,5 +300,32 @@ describe('MealPlanCalendarComponent', () => {
       const cdkDrag = dragDebugEl.injector.get(CdkDrag);
       expect(cdkDrag.dragStartDelay).toEqual({ touch: 250, mouse: 0 });
     }
+  });
+
+  it('syncs view mode and period date/month to route query params', () => {
+    const router = TestBed.inject(Router);
+    const navSpy = vi.spyOn(router, 'navigate').mockResolvedValue(true);
+
+    component['setViewMode']('month');
+    expect(navSpy).toHaveBeenLastCalledWith(
+      [],
+      expect.objectContaining({
+        queryParams: expect.objectContaining({ view: 'month', date: null }),
+        replaceUrl: true,
+      }),
+    );
+
+    component['selectMonthDay']('2026-12-16');
+    expect(navSpy).toHaveBeenLastCalledWith(
+      [],
+      expect.objectContaining({
+        queryParams: expect.objectContaining({
+          view: 'week',
+          date: normalizeToSundayIso('2026-12-16'),
+          month: null,
+        }),
+        replaceUrl: true,
+      }),
+    );
   });
 });

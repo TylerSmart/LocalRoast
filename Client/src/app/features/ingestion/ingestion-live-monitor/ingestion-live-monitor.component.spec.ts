@@ -44,17 +44,17 @@ describe('IngestionLiveMonitorComponent', () => {
     startedAtUtc: new Date().toISOString(),
     channel: 'WebUrl',
     activeModel: 'gemma4:e4b',
-    statusDetail: 'Stage 1/5: Extracting recipe structure...',
+    statusDetail: 'Extracting recipe structure...',
     segments: [
       { key: 'preprocess', label: 'Preprocess', state: 'Completed' },
-      { key: 'stage1', label: '1. Extract', state: 'Active', subStatus: 'Attempt 1/3' },
-      { key: 'stage2', label: '2. Condense', state: 'Pending' },
+      { key: 'stage1', label: 'Extract', state: 'Active', subStatus: 'Attempt 1/3' },
+      { key: 'stage2', label: 'Condense', state: 'Pending' },
     ],
     calls: [
       {
         callId: 'c-1',
         stageKey: 'stage1',
-        stageLabel: 'Stage 1 · Extract Recipe Structure',
+        stageLabel: 'Extract · Recipe Structure',
         model: 'gemma4:e4b',
         thinkingEnabled: true,
         phase: 'Thinking',
@@ -223,5 +223,25 @@ describe('IngestionLiveMonitorComponent', () => {
     fixture.detectChanges();
 
     expect(viewport.classList.contains('tall')).toBe(false);
+  });
+
+  it('displays Step X of Y paired cleanly with unnumbered segment labels', () => {
+    const workload = sampleWorkload({
+      segments: [
+        { key: 'preprocess', label: 'Preprocess', state: 'Completed' },
+        { key: 'stage1', label: 'Extract', state: 'Completed' },
+        { key: 'stage2', label: 'Condense', state: 'Skipped' },
+        { key: 'stage3', label: 'Match', state: 'Active' },
+        { key: 'stage4', label: 'Tokenize', state: 'Pending' },
+        { key: 'stage5', label: 'Polish', state: 'Pending' },
+        { key: 'finalize', label: 'Save', state: 'Pending' },
+      ],
+    });
+    realtime.applySnapshot({ activeWorkloads: [workload], recentWorkloads: [] });
+    fixture.detectChanges();
+
+    const host = fixture.nativeElement as HTMLElement;
+    expect(host.querySelector('.stage-step-pill')?.textContent?.trim()).toBe('Step 4 of 7');
+    expect(host.querySelector('.stage-current-name')?.textContent?.trim()).toBe('Match');
   });
 });

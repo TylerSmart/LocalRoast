@@ -1,5 +1,5 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { provideRouter } from '@angular/router';
+import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angular/router';
 import { of } from 'rxjs';
 import { FoodItemDto } from '../../../core/models/food-catalog.models';
 import { IngredientMatchResultDto } from '../../../core/models/recipe.models';
@@ -208,5 +208,42 @@ describe('FridgeMatcherComponent', () => {
     component['searchControl'].setValue('nu');
     const filtered = component['filteredFoodItems']();
     expect(filtered.some((i) => i.name.toLowerCase() === 'null')).toBe(false);
+  });
+
+  it('restores selected ingredients from query params and syncs updates back to URL', async () => {
+    mockRecipeService.matchRecipesByIngredients.mockReturnValue(of([]));
+    const queryParamMap = convertToParamMap({ ingredients: 'fi-1,fi-2' });
+
+    TestBed.resetTestingModule();
+    await TestBed.configureTestingModule({
+      imports: [FridgeMatcherComponent],
+      providers: [
+        provideRouter([]),
+        { provide: ActivatedRoute, useValue: { snapshot: { queryParamMap } } },
+        { provide: FoodCatalogService, useValue: mockCatalogService },
+        { provide: RecipeService, useValue: mockRecipeService },
+      ],
+    }).compileComponents();
+
+    const router = TestBed.inject(Router);
+    const navSpy = vi.spyOn(router, 'navigate').mockResolvedValue(true);
+
+    const restoredFixture = TestBed.createComponent(FridgeMatcherComponent);
+    const restoredComp = restoredFixture.componentInstance;
+    restoredFixture.detectChanges();
+
+    expect(restoredComp['selectedFoodItems']().map((f) => f.id)).toEqual(['fi-1', 'fi-2']);
+    expect(mockRecipeService.matchRecipesByIngredients).toHaveBeenCalledWith({
+      foodItemIds: ['fi-1', 'fi-2'],
+    });
+
+    restoredComp.removeFoodItem(mockFoodItems[0]);
+    expect(navSpy).toHaveBeenLastCalledWith(
+      [],
+      expect.objectContaining({
+        queryParams: { ingredients: 'fi-2' },
+        replaceUrl: true,
+      }),
+    );
   });
 });

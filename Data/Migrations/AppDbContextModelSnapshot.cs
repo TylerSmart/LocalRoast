@@ -1140,8 +1140,8 @@ namespace App.Data.Migrations
                         .HasColumnType("nvarchar(256)");
 
                     b.Property<string>("Description")
-                        .HasMaxLength(2000)
-                        .HasColumnType("nvarchar(2000)");
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
 
                     b.Property<string>("Difficulty")
                         .HasMaxLength(32)

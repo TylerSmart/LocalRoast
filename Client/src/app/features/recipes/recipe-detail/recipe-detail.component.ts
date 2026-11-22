@@ -40,11 +40,14 @@ import {
   scaleIngredient,
   stripOuterParentheses,
 } from '../../../core/utils/culinary-math';
+import { formatIngredientUseLines, ingredientUses } from '../../../core/utils/step-instruction';
 import {
-  formatIngredientUses,
-  ingredientUses,
-  isIngredientDivided,
-} from '../../../core/utils/step-instruction';
+  parseEnumParam,
+  parseOneBasedIndexSetParam,
+  parsePositiveFloatParam,
+  queryParamsMatch,
+  serializeZeroBasedIndicesParam,
+} from '../../../core/utils/query-param-state';
 import {
   ContiguousSectionGroup,
   groupContiguousBySection,
@@ -216,6 +219,7 @@ export class RecipeDetailComponent implements OnInit {
       ...current,
       [ingredient.id]: !(current[ingredient.id] ?? ingredient.preferAlternativeMeasurement),
     }));
+    this.syncQueryParams();
   }
 
   // Map of ingredientId -> Scaled item for fast step callout resolution
@@ -253,10 +257,10 @@ export class RecipeDetailComponent implements OnInit {
     Array.from(this.scaledIngredientsMap().values()).map((item) => item.ingredient),
   );
 
-  /** ingredientId -> "Divided: ..." text when the ingredient is split across tagged step amounts. */
+  /** ingredientId -> divided use lines when the ingredient is split across tagged step amounts. */
   protected readonly ingredientUsesMap = computed(() => {
     const r = this.recipe();
-    const result = new Map<string, string>();
+    const result = new Map<string, string[]>();
     if (!r) return result;
     const ingredients = this.displayIngredients();
     for (const item of this.scaledIngredientsMap().values()) {
@@ -267,16 +271,8 @@ export class RecipeDetailComponent implements OnInit {
         this.scaleFactor(),
         this.targetSystem(),
       );
-      if (
-        isIngredientDivided(
-          r.steps,
-          item.ingredient.id,
-          ingredients,
-          this.scaleFactor(),
-          this.targetSystem(),
-        )
-      ) {
-        result.set(item.ingredient.id, formatIngredientUses(uses));
+      if (uses.length > 1) {
+        result.set(item.ingredient.id, formatIngredientUseLines(uses));
       }
     }
     return result;
@@ -363,7 +359,7 @@ export class RecipeDetailComponent implements OnInit {
     this.recipeService.getRecipeById(id).subscribe({
       next: (detail) => {
         this.recipe.set(detail);
-        this.targetServings.set(detail.baseServings);
+        this.restoreStateFromQueryParams(detail);
         this.title.setTitle(`LocalRoast | ${detail.title}`);
         this.isLoading.set(false);
         if (detail.refinementStatus === 'Queued' || detail.refinementStatus === 'Running') {
@@ -554,6 +550,7 @@ export class RecipeDetailComponent implements OnInit {
     const r = this.recipe();
     if (r) {
       this.targetServings.set(Math.max(0.5, Math.round(r.baseServings * mult * 2) / 2));
+      this.syncQueryParams();
     }
   }
 
@@ -562,6 +559,12 @@ export class RecipeDetailComponent implements OnInit {
       const next = curr + delta;
       return next >= 0.5 ? next : curr;
     });
+    this.syncQueryParams();
+  }
+
+  setUnitSystem(system: UnitSystem): void {
+    this.targetSystem.set(system);
+    this.syncQueryParams();
   }
 
   toggleIngredientChecked(id: string): void {
@@ -569,6 +572,81 @@ export class RecipeDetailComponent implements OnInit {
       ...curr,
       [id]: !curr[id],
     }));
+    this.syncQueryParams();
+  }
+
+  private restoreStateFromQueryParams(detail: RecipeDetailDto): void {
+    const qp = this.route.snapshot?.queryParamMap;
+    const servingsParam = parsePositiveFloatParam(qp?.get('servings'));
+    this.targetServings.set(
+      servingsParam !== null && servingsParam <= 999 ? servingsParam : detail.baseServings,
+    );
+    this.targetSystem.set(
+      parseEnumParam(qp?.get('units'), ['Original', 'UsCustomary', 'Metric'] as const, 'Original'),
+    );
+
+    const checkedIndices = parseOneBasedIndexSetParam(qp?.get('ing'), detail.ingredients.length);
+    const nextChecked: Record<string, boolean> = {};
+    for (const idx of checkedIndices) {
+      nextChecked[detail.ingredients[idx].id] = true;
+    }
+    this.checkedIngredients.set(nextChecked);
+
+    const altIndices = parseOneBasedIndexSetParam(qp?.get('alt'), detail.ingredients.length);
+    const nextPrefs: Record<string, boolean> = {};
+    for (const idx of altIndices) {
+      const ing = detail.ingredients[idx];
+      nextPrefs[ing.id] = !ing.preferAlternativeMeasurement;
+    }
+    this.measurementPreferences.set(nextPrefs);
+  }
+
+  private serializeCheckedIngredientsParam(detail: RecipeDetailDto): string | null {
+    const checked = this.checkedIngredients();
+    const indices: number[] = [];
+    detail.ingredients.forEach((ing, idx) => {
+      if (checked[ing.id]) {
+        indices.push(idx);
+      }
+    });
+    return serializeZeroBasedIndicesParam(indices);
+  }
+
+  private serializeAltMeasurementsParam(detail: RecipeDetailDto): string | null {
+    const prefs = this.measurementPreferences();
+    const indices: number[] = [];
+    detail.ingredients.forEach((ing, idx) => {
+      const effective = prefs[ing.id] ?? ing.preferAlternativeMeasurement;
+      if (effective !== ing.preferAlternativeMeasurement) {
+        indices.push(idx);
+      }
+    });
+    return serializeZeroBasedIndicesParam(indices);
+  }
+
+  private syncQueryParams(): void {
+    const r = this.recipe();
+    if (!r) return;
+
+    const queryParams: Record<string, string | number | null> = {
+      servings: this.targetServings() !== r.baseServings ? this.targetServings() : null,
+      units: this.targetSystem() !== 'Original' ? this.targetSystem() : null,
+      ing: this.serializeCheckedIngredientsParam(r),
+      alt: this.serializeAltMeasurementsParam(r),
+    };
+
+    const current = this.route.snapshot?.queryParamMap;
+    if (current && queryParamsMatch(current, queryParams)) {
+      return;
+    }
+
+    void this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams,
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+      scroll: 'manual',
+    });
   }
 
   formatTimerDuration(seconds: number): string {
@@ -833,13 +911,20 @@ export class RecipeDetailComponent implements OnInit {
     if (!r) {
       return;
     }
-    this.router.navigate(['/recipes', r.id, 'cook'], {
-      queryParams: {
-        servings: this.targetServings(),
-        units: this.targetSystem(),
-        from: 'recipe',
-      },
-    });
+    const queryParams: Record<string, string | number> = {
+      servings: this.targetServings(),
+      units: this.targetSystem(),
+      from: 'recipe',
+    };
+    const ingParam = this.serializeCheckedIngredientsParam(r);
+    if (ingParam) {
+      queryParams['ing'] = ingParam;
+    }
+    const altParam = this.serializeAltMeasurementsParam(r);
+    if (altParam) {
+      queryParams['alt'] = altParam;
+    }
+    this.router.navigate(['/recipes', r.id, 'cook'], { queryParams });
   }
 
   openCookLogDialog(logToEdit?: CookLogDto): void {

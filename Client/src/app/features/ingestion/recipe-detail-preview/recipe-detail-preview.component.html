@@ -310,9 +310,6 @@
                       <span>{{ item.ingredient.matchedFoodItemName }}</span>
                     </span>
                   }
-                  @if (ingredientUsesMap().get(item.ingredient.id); as uses) {
-                    <span class="ingredient-uses">{{ uses }}</span>
-                  }
                   @if (item.ingredient.replacements?.length) {
                     <span class="ingredient-replacements">
                       @for (rep of item.ingredient.replacements; track $index) {
@@ -323,6 +320,13 @@
                     </span>
                   }
                 </span>
+                @if (ingredientUsesMap().get(item.ingredient.id); as uses) {
+                  <ul class="ingredient-uses">
+                    @for (use of uses; track $index) {
+                      <li class="ingredient-use-item">{{ use }}</li>
+                    }
+                  </ul>
+                }
               </li>
             }
           </ul>

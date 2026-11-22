@@ -202,9 +202,10 @@ describe('PublicSharedRecipeComponent', () => {
     expect(el.querySelector('.step-instruction-text')?.textContent?.trim()).toBe(
       'Sear 2 lb Pork Shoulder, then 2 lb Pork Shoulder more.',
     );
-    expect(el.querySelector('.ingredient-uses')?.textContent).toBe(
-      'Divided: 2 lb Pork Shoulder (step 1) · 2 lb Pork Shoulder (step 1)',
+    const useLines = Array.from(el.querySelectorAll('.ingredient-uses .ingredient-use-item')).map(
+      (node) => node.textContent?.trim(),
     );
+    expect(useLines).toEqual(['2 lb Pork Shoulder (step 1)', '2 lb Pork Shoulder (step 1)']);
     expect(el.querySelector('.step-callouts-strip')).toBeNull();
   });
 

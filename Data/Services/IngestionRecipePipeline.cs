@@ -23,7 +23,7 @@ public sealed partial class IngestionRecipePipeline(
     IIngestionLiveTracker? liveTracker = null
 ) : IIngestionRecipePipeline
 {
-    private const int DescriptionMaxLength = 250;
+    private const int DescriptionMaxLength = RecipeFieldLimits.MaxDescriptionLength;
     private const int Stage3BatchSize = 10;
     private const int Stage4BatchSize = 8;
     private const int MaxStage4SingleStepRepairTurns = 2;
@@ -50,13 +50,10 @@ public sealed partial class IngestionRecipePipeline(
         workload?.ActivateSegment(
             "stage1",
             subStatus: "Attempt 1/3",
-            statusDetail: "Stage 1/5: Extracting recipe structure...",
+            statusDetail: "Extracting recipe structure...",
             activeModel: request.Config.TextModel
         );
-        await ReportProgressAsync(
-            request.OnStageProgress,
-            "Stage 1/5: Extracting recipe structure..."
-        );
+        await ReportProgressAsync(request.OnStageProgress, "Extracting recipe structure...");
 
         var (stage1, stage1Repairs) = await RunStage1Async(
             request.Config,
@@ -98,12 +95,9 @@ public sealed partial class IngestionRecipePipeline(
             workload?.ActivateSegment(
                 "stage2",
                 subStatus: "Condensing summary",
-                statusDetail: "Stage 2/5: Condensing recipe summary..."
+                statusDetail: "Condensing recipe summary..."
             );
-            await ReportProgressAsync(
-                request.OnStageProgress,
-                "Stage 2/5: Condensing recipe summary..."
-            );
+            await ReportProgressAsync(request.OnStageProgress, "Condensing recipe summary...");
 
             description = await RunStage2ShortenDescriptionAsync(
                 request.Config,
@@ -124,11 +118,11 @@ public sealed partial class IngestionRecipePipeline(
         workload?.ActivateSegment(
             "stage3",
             subStatus: "Searching catalog",
-            statusDetail: "Stage 3/5: Matching ingredients to food catalog..."
+            statusDetail: "Matching ingredients to food catalog..."
         );
         await ReportProgressAsync(
             request.OnStageProgress,
-            "Stage 3/5: Matching ingredients to food catalog..."
+            "Matching ingredients to food catalog..."
         );
 
         var catalogFoods = await dbContext
@@ -182,12 +176,9 @@ public sealed partial class IngestionRecipePipeline(
         workload?.ActivateSegment(
             "stage4",
             subStatus: "Tokenizing steps",
-            statusDetail: "Stage 4/5: Tokenizing step instructions..."
+            statusDetail: "Tokenizing step instructions..."
         );
-        await ReportProgressAsync(
-            request.OnStageProgress,
-            "Stage 4/5: Tokenizing step instructions..."
-        );
+        await ReportProgressAsync(request.OnStageProgress, "Tokenizing step instructions...");
 
         var (validatedSteps, stage4Repairs) = await RunStage4Async(
             request.Config,
@@ -217,11 +208,11 @@ public sealed partial class IngestionRecipePipeline(
             workload?.ActivateSegment(
                 "stage5",
                 subStatus: "Polishing flagged details",
-                statusDetail: "Stage 5/5: Polishing flagged recipe details..."
+                statusDetail: "Polishing flagged recipe details..."
             );
             await ReportProgressAsync(
                 request.OnStageProgress,
-                "Stage 5/5: Polishing flagged recipe details..."
+                "Polishing flagged recipe details..."
             );
 
             Stage5TargetedPolishResponseDto? polishRes = null;
@@ -255,9 +246,7 @@ public sealed partial class IngestionRecipePipeline(
                 {
                     var polishedDesc = polishRes.Description.Trim();
                     description =
-                        ShouldCondenseDescription(polishedDesc)
-                        && description is not null
-                        && polishedDesc.Length > 300
+                        ShouldCondenseDescription(polishedDesc) && description is not null
                             ? description
                             : polishedDesc;
                 }
@@ -533,8 +522,8 @@ public sealed partial class IngestionRecipePipeline(
                 "stage1",
                 attempt == 1 ? "Attempt 1/3" : $"Retry attempt {attempt}/3",
                 attempt == 1
-                    ? "Stage 1/5: Extracting recipe structure..."
-                    : $"Stage 1/5: Retrying extraction (attempt {attempt}/3)..."
+                    ? "Extracting recipe structure..."
+                    : $"Retrying extraction (attempt {attempt}/3)..."
             );
 
             var res = await llmClient.ExecuteStructuredStageAsync<Stage1RecipeDto>(
@@ -659,7 +648,7 @@ public sealed partial class IngestionRecipePipeline(
                     messages: messages,
                     jsonSchema: MultiStageSchemas.Stage2ShortenDescriptionSchema,
                     overrideThinking: false,
-                    maxTokens: 1024,
+                    maxTokens: 2048,
                     cancellationToken: cancellationToken
                 );
 
@@ -715,10 +704,7 @@ public sealed partial class IngestionRecipePipeline(
             }
         }
 
-        if (
-            bestShortened is not null
-            && (bestShortened.Length <= originalDescription.Length || bestShortened.Length <= 280)
-        )
+        if (bestShortened is not null && bestShortened.Length <= originalDescription.Length)
         {
             return bestShortened;
         }
@@ -1655,7 +1641,10 @@ public sealed partial class IngestionRecipePipeline(
             validationIssues.Add("Recipe has no preparation steps.");
         }
 
-        var cleanDesc = IngestionMetadataAndTagHelper.CleanOptionalText(description, 2000);
+        var cleanDesc = IngestionMetadataAndTagHelper.CleanOptionalText(
+            description,
+            DescriptionMaxLength
+        );
         var confidence = IngestionConfidenceScorer.Compute(
             description: cleanDesc,
             baseServings: baseServings,
@@ -2377,16 +2366,8 @@ public sealed partial class IngestionRecipePipeline(
         return result;
     }
 
-    private static bool ShouldCondenseDescription(string description)
-    {
-        if (description.Length > DescriptionMaxLength)
-        {
-            return true;
-        }
-
-        var sentenceCount = SentenceEndRegex().Matches(description).Count;
-        return sentenceCount > 2;
-    }
+    private static bool ShouldCondenseDescription(string description) =>
+        description.Length > DescriptionMaxLength;
 
     private static RecipeDifficulty? InferDifficulty(
         int ingredientCount,

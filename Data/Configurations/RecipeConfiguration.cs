@@ -19,7 +19,7 @@ public sealed class RecipeConfiguration : IEntityTypeConfiguration<Recipe>
         builder.Property(r => r.Slug).IsRequired().HasMaxLength(220);
         builder.HasIndex(r => r.Slug).IsUnique();
 
-        builder.Property(r => r.Description).HasMaxLength(2000);
+        builder.Property(r => r.Description).HasMaxLength(RecipeFieldLimits.MaxDescriptionLength);
 
         builder.Property(r => r.Status).HasConversion<string>().HasMaxLength(32);
         builder.HasIndex(r => r.Status);

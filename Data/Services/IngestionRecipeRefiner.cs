@@ -23,7 +23,7 @@ public sealed partial class IngestionRecipeRefiner(
     IIngestionLiveTracker? liveTracker = null
 ) : IIngestionRecipeRefiner
 {
-    private const int DescriptionMaxLength = 250;
+    private const int DescriptionMaxLength = RecipeFieldLimits.MaxDescriptionLength;
 
     private static readonly HashSet<string> DimensionOrTempUnits = new(
         StringComparer.OrdinalIgnoreCase
@@ -242,7 +242,7 @@ public sealed partial class IngestionRecipeRefiner(
         liveTracker?.CurrentWorkload?.UpdateSegmentSubStatus(
             "stage6",
             $"Auditing via {refineModelName}",
-            $"Stage 6: Auditing recipe & catalog names via {refineModelName}..."
+            $"Auditing recipe & catalog names via {refineModelName}..."
         );
 
         var stageResult =
@@ -259,7 +259,7 @@ public sealed partial class IngestionRecipeRefiner(
         liveTracker?.CurrentWorkload?.UpdateSegmentSubStatus(
             "stage6",
             "Applying patches",
-            $"Stage 6: Applying validated refinement patches..."
+            "Applying validated refinement patches..."
         );
 
         var response =
@@ -292,12 +292,15 @@ public sealed partial class IngestionRecipeRefiner(
             if (
                 !(
                     description is not null
-                    && proposedDesc.Length > 300
+                    && proposedDesc.Length > DescriptionMaxLength
                     && description.Length <= DescriptionMaxLength
                 ) && !string.Equals(proposedDesc, description, StringComparison.Ordinal)
             )
             {
-                description = IngestionMetadataAndTagHelper.CleanOptionalText(proposedDesc, 2000);
+                description = IngestionMetadataAndTagHelper.CleanOptionalText(
+                    proposedDesc,
+                    DescriptionMaxLength
+                );
                 madeChanges = true;
             }
         }

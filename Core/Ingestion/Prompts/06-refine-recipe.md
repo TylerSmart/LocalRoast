@@ -31,7 +31,7 @@ Your job is to perform a **comprehensive refinement audit** and emit **ONLY surg
    - Do NOT emit `ingredientPatches` for ingredients that are already clean and accurate.
 
 3. **Metadata & Tags (`title`, `description`, `servings`, `yield`, `timing`, `tags`)**:
-   - Keep as `null` unless something is genuinely wrong or missing (e.g., wrong serving count, truncated/garbled title or overly long description > 250 chars, missing/wrong prep/cook/total minutes that appear in `originalSourceText`, or an invalid/misapplied tag like `"Dinner"` on a dessert or `"Protein"` as a category heading). If updating `tags`, return the complete corrected tag list.
+   - Keep as `null` unless something is genuinely wrong or missing (e.g., wrong serving count, truncated/garbled title or overly long description > 4000 chars, missing/wrong prep/cook/total minutes that appear in `originalSourceText`, or an invalid/misapplied tag like `"Dinner"` on a dessert or `"Protein"` as a category heading). If updating `tags`, return the complete corrected tag list.
 
 4. **Steps (`stepPatches`)**:
    - Inspect every step's `renderedInstruction` and `tokens` against `originalSourceText` and `ingredients`, prioritizing any step with non-empty `validationWarnings`.

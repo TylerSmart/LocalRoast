@@ -158,6 +158,9 @@
                 formControlName="description"
                 placeholder="A brief overview of the dish, flavor profile, or serving notes..."
               ></textarea>
+              @if (form.controls.description.hasError('maxlength')) {
+                <mat-error>Description cannot exceed 4,000 characters</mat-error>
+              }
             </mat-form-field>
 
             <!-- Balanced 4-Column Row: Servings, Yield, Difficulty, Status -->

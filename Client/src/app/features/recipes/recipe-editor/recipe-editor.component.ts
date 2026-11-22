@@ -234,7 +234,7 @@ export class RecipeEditorComponent implements OnInit {
   protected readonly form = this.fb.group({
     title: ['', [Validators.required, Validators.maxLength(200)]],
     status: ['Published' as RecipeStatus, Validators.required],
-    description: ['', Validators.maxLength(2000)],
+    description: ['', Validators.maxLength(4000)],
     baseServings: [4, [Validators.required, Validators.min(0.25), Validators.max(999)]],
     yieldDisplay: ['', Validators.maxLength(100)],
     prepTimeMinutes: [null as number | null, [Validators.min(0), Validators.max(10080)]],

@@ -634,4 +634,15 @@ describe('RecipeEditorComponent', () => {
       0,
     );
   });
+
+  it('accepts recipe descriptions up to 4000 characters and rejects longer ones', () => {
+    component['form'].controls.description.setValue('A'.repeat(3500));
+    expect(component['form'].controls.description.valid).toBe(true);
+
+    component['form'].controls.description.setValue('A'.repeat(4000));
+    expect(component['form'].controls.description.valid).toBe(true);
+
+    component['form'].controls.description.setValue('A'.repeat(4001));
+    expect(component['form'].controls.description.hasError('maxlength')).toBe(true);
+  });
 });

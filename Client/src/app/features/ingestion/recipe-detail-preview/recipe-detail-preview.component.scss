@@ -111,6 +111,7 @@
     margin: 0;
     font-size: 0.98rem;
     line-height: 1.5;
+    white-space: pre-line;
     color: var(--mat-sys-on-surface-variant);
   }
 }
@@ -425,8 +426,9 @@
 
 .ingredient-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
-  gap: 0.5rem;
+  gap: 0.25rem 0.5rem;
   padding: 0.5rem 0.65rem;
   border-radius: 8px;
   background-color: var(--mat-sys-surface-container-low);
@@ -465,12 +467,6 @@
     .prep-note {
       color: var(--mat-sys-on-surface-variant);
       font-style: italic;
-    }
-
-    .ingredient-uses {
-      flex-basis: 100%;
-      font-size: 0.8rem;
-      color: var(--mat-sys-on-surface-variant);
     }
 
     .optional-tag,
@@ -525,6 +521,23 @@
         color: var(--mat-sys-primary);
       }
     }
+  }
+
+  .ingredient-uses {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex-basis: 100%;
+    margin: 0.1rem 0 0;
+    padding: 0 0 0 2.15rem;
+    list-style-type: disc;
+    font-size: 0.8rem;
+    line-height: 1.35;
+    color: var(--mat-sys-on-surface-variant);
+  }
+
+  .ingredient-use-item {
+    display: list-item;
   }
 }
 

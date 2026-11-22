@@ -1,8 +1,8 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { MatDialog } from '@angular/material/dialog';
 import { MatSnackBar } from '@angular/material/snack-bar';
-import { provideRouter } from '@angular/router';
-import { Subject, of } from 'rxjs';
+import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angular/router';
+import { BehaviorSubject, Subject, of } from 'rxjs';
 import {
   RecipePagedResultDto,
   RecipeQueryParameters,
@@ -245,5 +245,116 @@ describe('RecipeListComponent', () => {
     chips[0].remove();
     expect(component['selectedDifficulty']()).toBe('All');
     expect(component['activeFilterChips']().map((c) => c.label)).toEqual(['Under 30 min']);
+  });
+
+  it('syncs search, filters, and loaded page count to route query params', () => {
+    const router = TestBed.inject(Router);
+    const navSpy = vi.spyOn(router, 'navigate').mockResolvedValue(true);
+
+    component.onDifficultyChange('Medium');
+    component.onMaxTimeChange(45);
+    expect(navSpy).toHaveBeenLastCalledWith(
+      [],
+      expect.objectContaining({
+        queryParams: expect.objectContaining({
+          difficulty: 'Medium',
+          maxTime: 45,
+          status: null,
+          page: null,
+        }),
+        replaceUrl: true,
+      }),
+    );
+
+    const activatedRoute = TestBed.inject(ActivatedRoute);
+    vi.spyOn(activatedRoute.snapshot, 'queryParamMap', 'get').mockReturnValue(
+      convertToParamMap({ difficulty: 'Medium', maxTime: '45' }),
+    );
+    component.clearFilters();
+    expect(navSpy).toHaveBeenLastCalledWith(
+      [],
+      expect.objectContaining({
+        queryParams: expect.objectContaining({
+          q: null,
+          status: null,
+          difficulty: null,
+          maxTime: null,
+          minRating: null,
+          collectionId: null,
+          tags: null,
+          forgotten: null,
+          page: null,
+        }),
+        replaceUrl: true,
+      }),
+    );
+  });
+
+  it('restores filters and multi-page scroll depth from query params on init', async () => {
+    const page1: RecipePagedResultDto = {
+      items: sampleRecipes,
+      totalCount: 2,
+      pageNumber: 1,
+      pageSize: 24,
+      totalPages: 2,
+      hasPreviousPage: false,
+      hasNextPage: true,
+      hasMore: true,
+      isFuzzySearch: false,
+    };
+    const page2: RecipePagedResultDto = {
+      items: [{ ...sampleRecipes[0], id: 'r-2', title: 'Page Two Pasta' }],
+      totalCount: 2,
+      pageNumber: 2,
+      pageSize: 24,
+      totalPages: 2,
+      hasPreviousPage: true,
+      hasNextPage: false,
+      hasMore: false,
+      isFuzzySearch: false,
+    };
+    mockRecipeService.getRecipesPaged.mockImplementation((q?: RecipeQueryParameters) =>
+      of(q?.page === 2 ? page2 : page1),
+    );
+
+    const queryParamMap$ = new BehaviorSubject(
+      convertToParamMap({
+        q: 'pasta',
+        difficulty: 'Easy',
+        maxTime: '60',
+        forgotten: '1',
+        page: '2',
+      }),
+    );
+
+    TestBed.resetTestingModule();
+    await TestBed.configureTestingModule({
+      imports: [RecipeListComponent],
+      providers: [
+        provideRouter([]),
+        {
+          provide: ActivatedRoute,
+          useValue: {
+            queryParamMap: queryParamMap$.asObservable(),
+            snapshot: { queryParamMap: queryParamMap$.value },
+          },
+        },
+        { provide: RecipeService, useValue: mockRecipeService },
+        { provide: TaxonomyService, useValue: mockTaxonomyService },
+        { provide: MatDialog, useValue: mockDialog },
+        { provide: MatSnackBar, useValue: mockSnackBar },
+      ],
+    }).compileComponents();
+
+    const restoredFixture = TestBed.createComponent(RecipeListComponent);
+    const restoredComp = restoredFixture.componentInstance;
+    restoredFixture.detectChanges();
+
+    expect(restoredComp['searchQuery']()).toBe('pasta');
+    expect(restoredComp['selectedDifficulty']()).toBe('Easy');
+    expect(restoredComp['maxTimeMinutes']()).toBe(60);
+    expect(restoredComp['forgottenFavoritesOnly']()).toBe(true);
+    expect(restoredComp['currentPage']()).toBe(2);
+    expect(restoredComp['recipes']().map((r) => r.id)).toEqual(['r-1', 'r-2']);
   });
 });

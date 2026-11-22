@@ -205,9 +205,10 @@ describe('RecipeDetailPreviewComponent', () => {
     expect(el.querySelector('.step-instruction-text')?.textContent?.trim()).toBe(
       'Warm 2 tbsp Olive Oil, then add 2 tbsp Olive Oil more.',
     );
-    expect(el.querySelector('.ingredient-uses')?.textContent).toBe(
-      'Divided: 2 tbsp Olive Oil (step 2) · 2 tbsp Olive Oil (step 2)',
+    const useLines = Array.from(el.querySelectorAll('.ingredient-uses .ingredient-use-item')).map(
+      (node) => node.textContent?.trim(),
     );
+    expect(useLines).toEqual(['2 tbsp Olive Oil (step 2)', '2 tbsp Olive Oil (step 2)']);
   });
 
   it('emits publishRequested when publish button is clicked', () => {

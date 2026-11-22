@@ -265,10 +265,16 @@ export function ingredientUses(
   return uses;
 }
 
+export function formatIngredientUseLines(
+  uses: readonly { stepNumber: number; label: string }[],
+): string[] {
+  return uses.map((u) => `${u.label} (step ${u.stepNumber})`);
+}
+
 export function formatIngredientUses(
   uses: readonly { stepNumber: number; label: string }[],
 ): string {
-  return `Divided: ${uses.map((u) => `${u.label} (step ${u.stepNumber})`).join(' · ')}`;
+  return formatIngredientUseLines(uses).join('\n');
 }
 
 export function isIngredientDivided(

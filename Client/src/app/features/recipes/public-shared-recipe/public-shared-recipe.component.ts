@@ -10,7 +10,7 @@ import { MatExpansionModule } from '@angular/material/expansion';
 import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatTooltipModule } from '@angular/material/tooltip';
-import { ActivatedRoute } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { APP_BRAND_MARK_SRC, APP_NAME } from '../../../app.branding';
 import { RecipeStepDto, UnitSystem } from '../../../core/models/recipe.models';
 import {
@@ -29,11 +29,14 @@ import {
   scaleIngredient,
   stripOuterParentheses,
 } from '../../../core/utils/culinary-math';
+import { formatIngredientUseLines, ingredientUses } from '../../../core/utils/step-instruction';
 import {
-  formatIngredientUses,
-  ingredientUses,
-  isIngredientDivided,
-} from '../../../core/utils/step-instruction';
+  parseEnumParam,
+  parseOneBasedIndexSetParam,
+  parsePositiveFloatParam,
+  queryParamsMatch,
+  serializeZeroBasedIndicesParam,
+} from '../../../core/utils/query-param-state';
 import {
   ContiguousSectionGroup,
   groupContiguousBySection,
@@ -80,6 +83,7 @@ export class PublicSharedRecipeComponent implements OnInit {
   protected readonly brandMarkSrc = APP_BRAND_MARK_SRC;
 
   private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
   private readonly shareLinkService = inject(ShareLinkService);
   protected readonly themeService = inject(ThemeService);
 
@@ -140,7 +144,7 @@ export class PublicSharedRecipeComponent implements OnInit {
 
   protected readonly ingredientUsesMap = computed(() => {
     const r = this.recipe();
-    const result = new Map<string, string>();
+    const result = new Map<string, string[]>();
     if (!r) return result;
     const ingredients = this.displayIngredients();
     for (const item of this.scaledIngredientsMap().values()) {
@@ -151,16 +155,8 @@ export class PublicSharedRecipeComponent implements OnInit {
         this.scaleFactor(),
         this.targetSystem(),
       );
-      if (
-        isIngredientDivided(
-          r.steps,
-          item.ingredient.id,
-          ingredients,
-          this.scaleFactor(),
-          this.targetSystem(),
-        )
-      ) {
-        result.set(item.ingredient.id, formatIngredientUses(uses));
+      if (uses.length > 1) {
+        result.set(item.ingredient.id, formatIngredientUseLines(uses));
       }
     }
     return result;
@@ -215,6 +211,7 @@ export class PublicSharedRecipeComponent implements OnInit {
       ...current,
       [ingredient.id]: !(current[ingredient.id] ?? ingredient.preferAlternativeMeasurement),
     }));
+    this.syncQueryParams();
   }
 
   loadSharedRecipe(token: string): void {
@@ -224,7 +221,7 @@ export class PublicSharedRecipeComponent implements OnInit {
     this.shareLinkService.getPublicSharedRecipe(token).subscribe({
       next: (dto) => {
         this.recipe.set(dto);
-        this.targetServings.set(dto.baseServings);
+        this.restoreStateFromQueryParams(dto);
         this.isLoading.set(false);
       },
       error: () => {
@@ -238,6 +235,7 @@ export class PublicSharedRecipeComponent implements OnInit {
     const r = this.recipe();
     if (r) {
       this.targetServings.set(Math.max(0.5, Math.round(r.baseServings * mult * 2) / 2));
+      this.syncQueryParams();
     }
   }
 
@@ -246,6 +244,12 @@ export class PublicSharedRecipeComponent implements OnInit {
       const next = curr + delta;
       return next >= 0.5 ? next : curr;
     });
+    this.syncQueryParams();
+  }
+
+  setUnitSystem(system: UnitSystem): void {
+    this.targetSystem.set(system);
+    this.syncQueryParams();
   }
 
   toggleIngredientChecked(id: string): void {
@@ -253,6 +257,74 @@ export class PublicSharedRecipeComponent implements OnInit {
       ...curr,
       [id]: !curr[id],
     }));
+    this.syncQueryParams();
+  }
+
+  private restoreStateFromQueryParams(dto: PublicSharedRecipeDto): void {
+    const qp = this.route.snapshot?.queryParamMap;
+    const servingsParam = parsePositiveFloatParam(qp?.get('servings'));
+    this.targetServings.set(
+      servingsParam !== null && servingsParam <= 999 ? servingsParam : dto.baseServings,
+    );
+    this.targetSystem.set(
+      parseEnumParam(qp?.get('units'), ['Original', 'UsCustomary', 'Metric'] as const, 'Original'),
+    );
+
+    const checkedIndices = parseOneBasedIndexSetParam(qp?.get('ing'), dto.ingredients.length);
+    const nextChecked: Record<string, boolean> = {};
+    for (const idx of checkedIndices) {
+      nextChecked[dto.ingredients[idx].id] = true;
+    }
+    this.checkedIngredients.set(nextChecked);
+
+    const altIndices = parseOneBasedIndexSetParam(qp?.get('alt'), dto.ingredients.length);
+    const nextPrefs: Record<string, boolean> = {};
+    for (const idx of altIndices) {
+      const ing = dto.ingredients[idx];
+      nextPrefs[ing.id] = !(ing.preferAlternativeMeasurement ?? false);
+    }
+    this.measurementPreferences.set(nextPrefs);
+  }
+
+  private syncQueryParams(): void {
+    const r = this.recipe();
+    if (!r) return;
+
+    const checked = this.checkedIngredients();
+    const checkedIndices: number[] = [];
+    const prefs = this.measurementPreferences();
+    const altIndices: number[] = [];
+
+    r.ingredients.forEach((ing, idx) => {
+      if (checked[ing.id]) {
+        checkedIndices.push(idx);
+      }
+      const defaultPref = ing.preferAlternativeMeasurement ?? false;
+      const effective = prefs[ing.id] ?? defaultPref;
+      if (effective !== defaultPref) {
+        altIndices.push(idx);
+      }
+    });
+
+    const queryParams: Record<string, string | number | null> = {
+      servings: this.targetServings() !== r.baseServings ? this.targetServings() : null,
+      units: this.targetSystem() !== 'Original' ? this.targetSystem() : null,
+      ing: serializeZeroBasedIndicesParam(checkedIndices),
+      alt: serializeZeroBasedIndicesParam(altIndices),
+    };
+
+    const current = this.route.snapshot?.queryParamMap;
+    if (current && queryParamsMatch(current, queryParams)) {
+      return;
+    }
+
+    void this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams,
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+      scroll: 'manual',
+    });
   }
 
   formatTimerDuration(seconds: number): string {

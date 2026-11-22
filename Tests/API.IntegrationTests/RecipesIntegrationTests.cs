@@ -674,4 +674,69 @@ public sealed class RecipesIntegrationTests
         Assert.IsFalse(cycleSafeResults.Any(r => r.Id == parent.Id));
         Assert.IsTrue(cycleSafeResults.Any(r => r.Title == "Pie Dough"));
     }
+
+    [TestMethod]
+    public async Task CreateRecipe_AllowsDescriptionsUpTo4000Characters_AndRejectsExceedingLimit()
+    {
+        await RegisterAndAuthenticateAsync(_client, "desc4000@example.com", "desc4000");
+
+        var longAtkDescription = string.Join(
+            " ",
+            Enumerable.Repeat(
+                "To build deep flavor without drying out the roast, we salt the meat well ahead of time and sear it gently before transferring to a low oven.",
+                20
+            )
+        );
+        Assert.IsGreaterThan(2500, longAtkDescription.Length);
+        Assert.IsLessThanOrEqualTo(
+            RecipeFieldLimits.MaxDescriptionLength,
+            longAtkDescription.Length
+        );
+
+        var createRes = await _client.PostAsJsonAsync(
+            "/api/recipes",
+            new UpsertRecipeRequest(
+                Title: "ATK Slow-Roasted Beef",
+                Description: longAtkDescription,
+                Status: RecipeStatus.Published,
+                BaseServings: 6m,
+                Ingredients: [new RecipeIngredientInput(DisplayName: "Beef Roast")],
+                Steps: [new RecipeStepInput(Instruction: "Season and roast.")]
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Created, createRes.StatusCode);
+
+        var created = await createRes.Content.ReadFromJsonAsync<RecipeDetailDto>();
+        Assert.IsNotNull(created);
+        Assert.AreEqual(longAtkDescription, created.Description);
+
+        // Exactly 4000 characters succeeds
+        var maxLenDesc = new string('B', RecipeFieldLimits.MaxDescriptionLength);
+        var maxRes = await _client.PostAsJsonAsync(
+            "/api/recipes",
+            new UpsertRecipeRequest(
+                Title: "Max Length Description Recipe",
+                Description: maxLenDesc,
+                Status: RecipeStatus.Published,
+                BaseServings: 4m,
+                Ingredients: [new RecipeIngredientInput(DisplayName: "Salt")],
+                Steps: [new RecipeStepInput(Instruction: "Stir.")]
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Created, maxRes.StatusCode);
+        var maxCreated = await maxRes.Content.ReadFromJsonAsync<RecipeDetailDto>();
+        Assert.AreEqual(maxLenDesc, maxCreated?.Description);
+
+        // 4001 characters is rejected by model validation (400 Bad Request)
+        var tooLongRes = await _client.PostAsJsonAsync(
+            "/api/recipes",
+            new UpsertRecipeRequest(
+                Title: "Over Limit Description Recipe",
+                Description: new string('C', RecipeFieldLimits.MaxDescriptionLength + 1),
+                Status: RecipeStatus.Published,
+                BaseServings: 4m
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.BadRequest, tooLongRes.StatusCode);
+    }
 }

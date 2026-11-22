@@ -166,6 +166,7 @@
     font-size: 1.02rem;
     line-height: 1.55;
     max-width: 72ch;
+    white-space: pre-line;
     color: var(--mat-sys-on-surface-variant);
   }
 }
@@ -507,12 +508,6 @@
     font-size: 0.85rem;
   }
 
-  .ingredient-uses {
-    flex-basis: 100%;
-    font-size: 0.8rem;
-    color: var(--mat-sys-on-surface-variant);
-  }
-
   .optional-tag,
   .pantry-tag {
     font-size: 0.7rem;
@@ -530,6 +525,23 @@
     background-color: var(--app-warning-container);
     color: var(--app-on-warning-container);
   }
+}
+
+.ingredient-uses {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex-basis: 100%;
+  margin: -0.15rem 0 0.1rem;
+  padding: 0 0 0 3.25rem;
+  list-style-type: disc;
+  font-size: 0.8rem;
+  line-height: 1.35;
+  color: var(--mat-sys-on-surface-variant);
+}
+
+.ingredient-use-item {
+  display: list-item;
 }
 
 .ingredient-replacements {

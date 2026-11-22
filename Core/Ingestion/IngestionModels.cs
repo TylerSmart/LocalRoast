@@ -154,7 +154,7 @@ public record IngestionDraftStepDto(
 
 public record IngestionExtractedDraftDto(
     [Required, MaxLength(200)] string Title,
-    [MaxLength(2000)] string? Description = null,
+    [MaxLength(RecipeFieldLimits.MaxDescriptionLength)] string? Description = null,
     [Range(typeof(decimal), "0.25", "999")] decimal BaseServings = 4m,
     [MaxLength(100)] string? YieldDisplay = null,
     [Range(0, 10080)] int? PrepTimeMinutes = null,

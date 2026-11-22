@@ -2,6 +2,11 @@ using System.ComponentModel.DataAnnotations;
 
 namespace App.Core.Recipes;
 
+public static class RecipeFieldLimits
+{
+    public const int MaxDescriptionLength = 4000;
+}
+
 public record RecipeCollectionBadgeDto(Guid Id, string Name, string Slug);
 
 public record RecipeTagBadgeDto(Guid Id, string Name, string Slug, TagCategory Category);
@@ -251,7 +256,7 @@ public record RecipeStepInput(
 
 public record UpsertRecipeRequest(
     [Required, MaxLength(200)] string Title,
-    [MaxLength(2000)] string? Description = null,
+    [MaxLength(RecipeFieldLimits.MaxDescriptionLength)] string? Description = null,
     RecipeStatus Status = RecipeStatus.Published,
     [Range(typeof(decimal), "0.25", "999")] decimal BaseServings = 4m,
     [MaxLength(100)] string? YieldDisplay = null,

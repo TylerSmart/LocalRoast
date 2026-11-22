@@ -2,7 +2,7 @@ import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { MatDialog } from '@angular/material/dialog';
 import { MatSnackBar } from '@angular/material/snack-bar';
-import { provideRouter } from '@angular/router';
+import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { of } from 'rxjs';
 import { RecipeDetailDto } from '../../../core/models/recipe.models';
 import { RecipeService } from '../../../core/services/recipe/recipe.service';
@@ -394,9 +394,10 @@ describe('RecipeDetailComponent', () => {
       'Stir in the remaining 2 cups Egg Noodles.',
     ]);
     expect(el.querySelectorAll('.inline-amount.is-scaled').length).toBe(2);
-    expect(el.querySelector('.ingredient-uses')?.textContent).toBe(
-      'Divided: 2 cups Egg Noodles (step 1) · 2 cups Egg Noodles (step 2)',
+    const useLines = Array.from(el.querySelectorAll('.ingredient-uses .ingredient-use-item')).map(
+      (node) => node.textContent?.trim(),
     );
+    expect(useLines).toEqual(['2 cups Egg Noodles (step 1)', '2 cups Egg Noodles (step 2)']);
   });
 
   it('scales quantities when 1.5x multiplier is selected', () => {
@@ -602,5 +603,63 @@ describe('RecipeDetailComponent', () => {
     expect(
       fixture.nativeElement.querySelector('[data-testid="recipe-refinement-error-banner"]'),
     ).toBeNull();
+  });
+
+  it('syncs servings, units, and checked ingredients to query params and carries checked ingredients into Cook Mode', () => {
+    const navSpy = vi.spyOn(component['router'], 'navigate').mockResolvedValue(true);
+
+    component.setMultiplier(2);
+    expect(navSpy).toHaveBeenLastCalledWith(
+      [],
+      expect.objectContaining({
+        queryParams: expect.objectContaining({ servings: 8, units: null, ing: null }),
+        replaceUrl: true,
+      }),
+    );
+
+    component.setUnitSystem('Metric');
+    expect(navSpy).toHaveBeenLastCalledWith(
+      [],
+      expect.objectContaining({
+        queryParams: expect.objectContaining({ servings: 8, units: 'Metric', ing: null }),
+        replaceUrl: true,
+      }),
+    );
+
+    component.toggleIngredientChecked('i-1');
+    expect(navSpy).toHaveBeenLastCalledWith(
+      [],
+      expect.objectContaining({
+        queryParams: expect.objectContaining({ servings: 8, units: 'Metric', ing: '1' }),
+        replaceUrl: true,
+        scroll: 'manual',
+      }),
+    );
+
+    component.startCooking();
+    expect(navSpy).toHaveBeenLastCalledWith(['/recipes', 'r-1', 'cook'], {
+      queryParams: {
+        servings: 8,
+        units: 'Metric',
+        from: 'recipe',
+        ing: '1',
+      },
+    });
+  });
+
+  it('restores servings, units, and checked ingredients from route query params on load', () => {
+    const activatedRoute = TestBed.inject(ActivatedRoute);
+    vi.spyOn(activatedRoute.snapshot, 'queryParamMap', 'get').mockReturnValue(
+      convertToParamMap({
+        servings: '6',
+        units: 'UsCustomary',
+        ing: '1',
+      }),
+    );
+
+    component.loadRecipe('r-1');
+    expect(component['targetServings']()).toBe(6);
+    expect(component['targetSystem']()).toBe('UsCustomary');
+    expect(component['checkedIngredients']()['i-1']).toBe(true);
   });
 });

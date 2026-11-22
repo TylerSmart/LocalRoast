@@ -1,6 +1,8 @@
 import {
   InstructionIngredient,
   buildInstructionSegments,
+  formatIngredientUseLines,
+  formatIngredientUses,
   ingredientUses,
   matchIngredient,
   renderScaledInstruction,
@@ -247,5 +249,21 @@ describe('step-instruction utils', () => {
     const metricSeg = twoXMetric.find((s) => s.amount?.kind === 'Ingredient');
     expect(metricSeg?.text).toBe('15 ml butter');
     expect(metricSeg?.amount?.scaled).toBe(true);
+  });
+
+  it('formats divided ingredient uses as separate lines without an inline Divided prefix', () => {
+    const uses = [
+      { stepNumber: 1, label: '1/4 tsp pepper' },
+      { stepNumber: 2, label: '1/8 tsp pepper' },
+      { stepNumber: 3, label: '1/4 tsp pepper' },
+    ];
+    expect(formatIngredientUseLines(uses)).toEqual([
+      '1/4 tsp pepper (step 1)',
+      '1/8 tsp pepper (step 2)',
+      '1/4 tsp pepper (step 3)',
+    ]);
+    expect(formatIngredientUses(uses)).toBe(
+      '1/4 tsp pepper (step 1)\n1/8 tsp pepper (step 2)\n1/4 tsp pepper (step 3)',
+    );
   });
 });

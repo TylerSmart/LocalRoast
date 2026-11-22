@@ -243,6 +243,7 @@ export class ShoppingWorkspaceComponent implements OnInit, OnDestroy {
         relativeTo: this.route,
         queryParams: { listId: id },
         queryParamsHandling: 'merge',
+        scroll: 'manual',
       });
     }
 

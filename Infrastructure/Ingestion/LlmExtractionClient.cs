@@ -1683,15 +1683,15 @@ Transcribe the recipe printed in these page images. Copy text verbatim: never re
     private static (string StageKey, string StageLabel) MapStageDisplay(string schemaName) =>
         schemaName.ToLowerInvariant() switch
         {
-            "stage1_extract_recipe" => ("stage1", "Stage 1 · Extract Recipe Structure"),
-            "stage2_shorten_description" => ("stage2", "Stage 2 · Condense Description"),
-            "stage3a_search_terms" => ("stage3", "Stage 3 · Generate Catalog Search Terms"),
-            "stage3c_match_batch" => ("stage3", "Stage 3 · Match Ingredients Batch"),
-            "stage3b_match_ingredient" => ("stage3", "Stage 3 · Match Single Ingredient"),
-            "stage4b_tokenize_batch" => ("stage4", "Stage 4 · Tokenize Steps Batch"),
-            "stage4_tokenize_step" => ("stage4", "Stage 4 · Tokenize Single Step"),
-            "stage5b_polish_targeted" => ("stage5", "Stage 5 · Targeted Recipe Polish"),
-            "stage6_refine_recipe" => ("stage6", "Stage 6 · Refine Recipe & Catalog"),
+            "stage1_extract_recipe" => ("stage1", "Extract · Recipe Structure"),
+            "stage2_shorten_description" => ("stage2", "Condense · Description"),
+            "stage3a_search_terms" => ("stage3", "Match · Catalog Search Terms"),
+            "stage3c_match_batch" => ("stage3", "Match · Ingredients Batch"),
+            "stage3b_match_ingredient" => ("stage3", "Match · Single Ingredient"),
+            "stage4b_tokenize_batch" => ("stage4", "Tokenize · Steps Batch"),
+            "stage4_tokenize_step" => ("stage4", "Tokenize · Single Step"),
+            "stage5b_polish_targeted" => ("stage5", "Polish · Targeted Recipe Polish"),
+            "stage6_refine_recipe" => ("stage6", "Refine · Recipe & Catalog"),
             "recipe_transcription" => ("vision", "Vision OCR · Transcribe Recipe Images"),
             "ingredient_substitutions" => (
                 "kitchen_helper",

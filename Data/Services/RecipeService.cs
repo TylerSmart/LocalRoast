@@ -2200,7 +2200,9 @@ public sealed partial class RecipeService(
             return null;
         }
 
-        return trimmed.Length > 2000 ? trimmed[..2000].TrimEnd() : trimmed;
+        return trimmed.Length > RecipeFieldLimits.MaxDescriptionLength
+            ? trimmed[..RecipeFieldLimits.MaxDescriptionLength].TrimEnd()
+            : trimmed;
     }
 
     public async Task<bool> DeleteRecipeAttachmentAsync(

@@ -12,12 +12,17 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
-import { Router } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { FoodItemDto } from '../../../core/models/food-catalog.models';
 import { IngredientMatchResultDto } from '../../../core/models/recipe.models';
 import { FoodCatalogService } from '../../../core/services/food-catalog/food-catalog.service';
 import { RecipeService } from '../../../core/services/recipe/recipe.service';
 import { formatMinutes } from '../../../core/utils/culinary-math';
+import {
+  parseStringListParam,
+  queryParamsMatch,
+  serializeStringListParam,
+} from '../../../core/utils/query-param-state';
 
 @Component({
   imports: [
@@ -38,6 +43,7 @@ import { formatMinutes } from '../../../core/utils/culinary-math';
 export class FridgeMatcherComponent implements OnInit {
   private readonly catalogService = inject(FoodCatalogService);
   private readonly recipeService = inject(RecipeService);
+  private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
 
   protected readonly searchControl = new FormControl<string>('', { nonNullable: true });
@@ -148,11 +154,49 @@ export class FridgeMatcherComponent implements OnInit {
       next: (items) => {
         this.foodItems.set(items);
         this.isLoadingCatalog.set(false);
+        this.restoreSelectionFromQueryParams(items);
       },
       error: () => {
         this.isLoadingCatalog.set(false);
         this.errorMessage.set('Failed to load ingredient catalog.');
       },
+    });
+  }
+
+  private restoreSelectionFromQueryParams(items: FoodItemDto[]): void {
+    const qp = this.route.snapshot?.queryParamMap;
+    const requestedIds = parseStringListParam(qp?.get('ingredients'));
+    if (requestedIds.length === 0) {
+      return;
+    }
+
+    const byId = new Map(items.map((item) => [item.id, item]));
+    const restored = requestedIds
+      .map((id) => byId.get(id))
+      .filter((item): item is FoodItemDto => !!item);
+
+    if (restored.length > 0) {
+      this.selectedFoodItems.set(restored);
+      this.triggerMatch();
+    }
+  }
+
+  private syncQueryParams(): void {
+    const queryParams: Record<string, string | null> = {
+      ingredients: serializeStringListParam(this.selectedFoodItems().map((f) => f.id)),
+    };
+
+    const current = this.route.snapshot?.queryParamMap;
+    if (current && queryParamsMatch(current, queryParams)) {
+      return;
+    }
+
+    void this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams,
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+      scroll: 'manual',
     });
   }
 
@@ -174,17 +218,20 @@ export class FridgeMatcherComponent implements OnInit {
       return;
     }
     this.selectedFoodItems.set([...current, item]);
+    this.syncQueryParams();
     this.triggerMatch();
   }
 
   removeFoodItem(item: FoodItemDto): void {
     this.selectedFoodItems.set(this.selectedFoodItems().filter((f) => f.id !== item.id));
+    this.syncQueryParams();
     this.triggerMatch();
   }
 
   clearSelected(): void {
     this.selectedFoodItems.set([]);
     this.matchResults.set([]);
+    this.syncQueryParams();
   }
 
   triggerMatch(): void {

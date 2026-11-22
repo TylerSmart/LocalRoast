@@ -523,6 +523,9 @@
                     rows="2"
                     placeholder="Summary or tips..."
                   ></textarea>
+                  @if (form.controls.description.hasError('maxlength')) {
+                    <mat-error>Description cannot exceed 4,000 characters</mat-error>
+                  }
                 </mat-form-field>
 
                 <!-- Provenance Row -->

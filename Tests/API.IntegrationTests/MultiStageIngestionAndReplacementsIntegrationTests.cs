@@ -2453,10 +2453,212 @@ public sealed class MultiStageIngestionAndReplacementsIntegrationTests
         Assert.DoesNotContain("Omit parsley", recipe.Steps[0].Instruction);
     }
 
+    [TestMethod]
+    public async Task MultiStagePipeline_LongAtkDescriptionWithin4000Chars_SkipsStage2AndEmitsUnnumberedSegments()
+    {
+        var longAtkDesc = string.Join(
+            " ",
+            Enumerable.Repeat(
+                "WHY THIS RECIPE WORKS: Searing the rack of lamb gently and finishing it over indirect heat keeps the interior rosy from edge to edge while forming a deeply flavorful herb crust.",
+                14
+            )
+        );
+        Assert.IsGreaterThan(2200, longAtkDesc.Length);
+        Assert.IsLessThanOrEqualTo(RecipeFieldLimits.MaxDescriptionLength, longAtkDesc.Length);
+
+        var mockLlm = new FallbackExercisingLlmClient
+        {
+            ForceSimpleBatch = true,
+            Stage1JsonOverride = JsonSerializer.Serialize(
+                new
+                {
+                    title = "Grilled Rack of Lamb",
+                    description = longAtkDesc,
+                    servings = 4,
+                    yield = "Serves 4",
+                    sections = new[]
+                    {
+                        new
+                        {
+                            name = (string?)null,
+                            ingredients = new[]
+                            {
+                                new
+                                {
+                                    name = "butter",
+                                    quantity = 2,
+                                    maxQuantity = (decimal?)null,
+                                    unit = "tbsp",
+                                    prepNote = (string?)null,
+                                    isOptional = false,
+                                    replacements = Array.Empty<object>(),
+                                    alternateMeasurements = Array.Empty<object>(),
+                                },
+                            },
+                            instructions = new[] { "Melt 2 tablespoons butter." },
+                        },
+                    },
+                    timing = new
+                    {
+                        prep = 15,
+                        cook = 25,
+                        total = 40,
+                    },
+                    tags = new[] { "Dinner" },
+                }
+            ),
+        };
+
+        await using var customFactory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Llm:TextModel", "qwen2.5:14b");
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ILlmExtractionClient>();
+                services.AddSingleton<ILlmExtractionClient>(mockLlm);
+            });
+        });
+
+        using var client = customFactory.CreateClient();
+        await AuthenticateAsync(client);
+
+        var submitRes = await client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest(
+                RawText: $"Grilled Rack of Lamb\n{longAtkDesc}\nIngredients:\n2 tbsp butter\nInstructions:\n1. Melt 2 tablespoons butter.",
+                TitleHint: "Grilled Rack of Lamb"
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Accepted, submitRes.StatusCode);
+        var job = (await submitRes.Content.ReadFromJsonAsync<IngestionJobSummaryDto>())!;
+
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            Assert.IsTrue(
+                await scope
+                    .ServiceProvider.GetRequiredService<IIngestionProcessor>()
+                    .ProcessNextQueuedJobAsync()
+            );
+        }
+
+        // Stage 2 description condensing MUST NOT have run for an ATK-length description <= 4000 chars
+        Assert.DoesNotContain("stage2_shorten_description", mockLlm.StageCalls);
+
+        var detail = (
+            await client.GetFromJsonAsync<IngestionJobDetailDto>($"/api/ingestion/jobs/{job.Id}")
+        )!;
+        Assert.IsNotNull(detail.ExtractedDraft);
+        Assert.AreEqual(longAtkDesc, detail.ExtractedDraft.Description);
+
+        // Live workflow segments must not contain hardcoded leading numbers like "3. Match"
+        var tracker = customFactory.Services.GetRequiredService<IIngestionLiveTracker>();
+        var snapshot = tracker.GetSnapshot();
+        var completedWorkload = snapshot.RecentWorkloads.FirstOrDefault(w => w.JobId == job.Id);
+        Assert.IsNotNull(completedWorkload);
+        var labels = completedWorkload.Segments.Select(s => s.Label).ToList();
+        CollectionAssert.AreEqual(
+            new[] { "Preprocess", "Extract", "Condense", "Match", "Tokenize", "Polish", "Save" },
+            labels
+        );
+    }
+
+    [TestMethod]
+    public async Task MultiStagePipeline_DescriptionExceeding4000Chars_TriggersStage2Condensing()
+    {
+        var oversizedDesc = new string('X', RecipeFieldLimits.MaxDescriptionLength + 250);
+        const string condensedDesc =
+            "Condensed culinary overview keeping core technique and storage guidance.";
+
+        var mockLlm = new FallbackExercisingLlmClient
+        {
+            ForceSimpleBatch = true,
+            Stage2JsonOverride = JsonSerializer.Serialize(new { description = condensedDesc }),
+            Stage1JsonOverride = JsonSerializer.Serialize(
+                new
+                {
+                    title = "Oversized Blog Essay Recipe",
+                    description = oversizedDesc,
+                    servings = 4,
+                    yield = "Serves 4",
+                    sections = new[]
+                    {
+                        new
+                        {
+                            name = (string?)null,
+                            ingredients = new[]
+                            {
+                                new
+                                {
+                                    name = "butter",
+                                    quantity = 2,
+                                    maxQuantity = (decimal?)null,
+                                    unit = "tbsp",
+                                    prepNote = (string?)null,
+                                    isOptional = false,
+                                    replacements = Array.Empty<object>(),
+                                    alternateMeasurements = Array.Empty<object>(),
+                                },
+                            },
+                            instructions = new[] { "Melt 2 tablespoons butter." },
+                        },
+                    },
+                    timing = new
+                    {
+                        prep = 10,
+                        cook = 15,
+                        total = 25,
+                    },
+                    tags = new[] { "Dinner" },
+                }
+            ),
+        };
+
+        await using var customFactory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Llm:TextModel", "qwen2.5:14b");
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ILlmExtractionClient>();
+                services.AddSingleton<ILlmExtractionClient>(mockLlm);
+            });
+        });
+
+        using var client = customFactory.CreateClient();
+        await AuthenticateAsync(client);
+
+        var submitRes = await client.PostAsJsonAsync(
+            "/api/ingestion/jobs/text",
+            new EnqueueRawTextIngestionRequest(
+                RawText: "Oversized Blog Essay Recipe\nIngredients:\n2 tbsp butter\nInstructions:\n1. Melt 2 tablespoons butter.",
+                TitleHint: "Oversized Blog Essay Recipe"
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Accepted, submitRes.StatusCode);
+        var job = (await submitRes.Content.ReadFromJsonAsync<IngestionJobSummaryDto>())!;
+
+        using (var scope = customFactory.Services.CreateScope())
+        {
+            Assert.IsTrue(
+                await scope
+                    .ServiceProvider.GetRequiredService<IIngestionProcessor>()
+                    .ProcessNextQueuedJobAsync()
+            );
+        }
+
+        Assert.Contains("stage2_shorten_description", mockLlm.StageCalls);
+
+        var detail = (
+            await client.GetFromJsonAsync<IngestionJobDetailDto>($"/api/ingestion/jobs/{job.Id}")
+        )!;
+        Assert.IsNotNull(detail.ExtractedDraft);
+        Assert.AreEqual(condensedDesc, detail.ExtractedDraft.Description);
+    }
+
     private sealed class FallbackExercisingLlmClient : ILlmExtractionClient
     {
         public bool ForceSimpleBatch { get; set; }
         public string? Stage1JsonOverride { get; set; }
+        public string? Stage2JsonOverride { get; set; }
         public Func<
             EffectiveLlmConnectionConfig,
             IReadOnlyList<LlmStageChatMessage>,
@@ -2578,6 +2780,8 @@ public sealed class MultiStageIngestionAndReplacementsIntegrationTests
                             "tags": ["Breakfast"]
                         }
                         """,
+                "stage2_shorten_description" => Stage2JsonOverride
+                    ?? """{"description":"Condensed description."}""",
                 "stage3a_ingredient_search_terms" => """{"searchTerms":["butter","margarine"]}""",
                 "stage3c_match_batch" => Stage3cJsonFactory?.Invoke(config, userContent)
                     ?? BuildStage3cResponse(userContent),

@@ -23,7 +23,7 @@ import { MatMenuModule } from '@angular/material/menu';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatTooltipModule } from '@angular/material/tooltip';
-import { Router, RouterLink } from '@angular/router';
+import { ActivatedRoute, ParamMap, Router, RouterLink } from '@angular/router';
 import {
   MEAL_SLOTS,
   MealPlanDayDto,
@@ -44,6 +44,13 @@ import {
   getTodayIsoLocal,
   normalizeToSundayIso,
 } from '../../../core/utils/meal-plan-date';
+import {
+  formatYearMonthParam,
+  parseEnumParam,
+  parseIsoDateParam,
+  parseYearMonthParam,
+  queryParamsMatch,
+} from '../../../core/utils/query-param-state';
 import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialog/confirm-dialog.component';
 import { ShoppingListGenerationResultDto } from '../../../core/models/shopping.models';
 import { GenerateShoppingListDialogComponent } from '../../shopping/generate-shopping-list-dialog/generate-shopping-list-dialog.component';
@@ -108,8 +115,10 @@ export class MealPlanCalendarComponent implements OnInit {
   private readonly mealPlanService = inject(MealPlanService);
   private readonly dialog = inject(MatDialog);
   private readonly snackBar = inject(MatSnackBar);
+  private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
+  private initializedFromRoute = false;
   private viewLoadSubscription?: Subscription;
   protected readonly aiHelper = inject(AiKitchenHelperService);
 
@@ -171,7 +180,105 @@ export class MealPlanCalendarComponent implements OnInit {
 
   ngOnInit(): void {
     this.aiHelper.checkStatus().subscribe();
-    this.loadCurrentView();
+    this.route.queryParamMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
+      const changed = this.applyQueryParams(params);
+      if (!this.initializedFromRoute || changed) {
+        this.initializedFromRoute = true;
+        this.loadCurrentView();
+      }
+    });
+  }
+
+  private applyQueryParams(params: ParamMap): boolean {
+    const today = getTodayIsoLocal();
+    const currentSunday = normalizeToSundayIso(today);
+    const now = new Date();
+    const defaultMonth = { year: now.getFullYear(), monthIndex0: now.getMonth() };
+
+    const nextView = parseEnumParam<'next7' | 'week' | 'month'>(
+      params.get('view'),
+      ['next7', 'week', 'month'] as const,
+      'next7',
+    );
+    const parsedDate = parseIsoDateParam(params.get('date'));
+    const parsedMonth = parseYearMonthParam(params.get('month'));
+
+    const nextRollingStart = nextView === 'next7' && parsedDate ? parsedDate : today;
+    const nextWeekStart =
+      nextView === 'week' && parsedDate ? normalizeToSundayIso(parsedDate) : currentSunday;
+    const nextMonth =
+      nextView === 'month' && parsedMonth
+        ? parsedMonth
+        : nextView === 'month' && parsedDate
+          ? {
+              year: Number.parseInt(parsedDate.slice(0, 4), 10),
+              monthIndex0: Number.parseInt(parsedDate.slice(5, 7), 10) - 1,
+            }
+          : defaultMonth;
+
+    const currentMonth = this.activeMonth();
+    const changed =
+      this.viewMode() !== nextView ||
+      (nextView === 'next7' && this.activeRollingStart() !== nextRollingStart) ||
+      (nextView === 'week' && this.activeWeekStart() !== nextWeekStart) ||
+      (nextView === 'month' &&
+        (currentMonth.year !== nextMonth.year ||
+          currentMonth.monthIndex0 !== nextMonth.monthIndex0));
+
+    if (!this.initializedFromRoute || changed) {
+      this.viewMode.set(nextView);
+      if (nextView === 'next7') {
+        this.activeRollingStart.set(nextRollingStart);
+      } else if (nextView === 'week') {
+        this.activeWeekStart.set(nextWeekStart);
+      } else {
+        this.activeMonth.set(nextMonth);
+      }
+    }
+
+    return changed;
+  }
+
+  private syncQueryParams(): void {
+    const mode = this.viewMode();
+    const today = getTodayIsoLocal();
+    const currentSunday = normalizeToSundayIso(today);
+    const now = new Date();
+    const currentMonthStr = formatYearMonthParam(now.getFullYear(), now.getMonth());
+
+    let dateParam: string | null = null;
+    let monthParam: string | null = null;
+
+    if (mode === 'next7') {
+      const start = this.activeRollingStart();
+      dateParam = start !== today ? start : null;
+    } else if (mode === 'week') {
+      const start = this.activeWeekStart();
+      dateParam = start !== currentSunday ? start : null;
+    } else {
+      const { year, monthIndex0 } = this.activeMonth();
+      const ym = formatYearMonthParam(year, monthIndex0);
+      monthParam = ym !== currentMonthStr ? ym : null;
+    }
+
+    const queryParams: Record<string, string | null> = {
+      view: mode !== 'next7' ? mode : null,
+      date: dateParam,
+      month: monthParam,
+    };
+
+    const current = this.route.snapshot?.queryParamMap;
+    if (current && queryParamsMatch(current, queryParams)) {
+      return;
+    }
+
+    void this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams,
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+      scroll: 'manual',
+    });
   }
 
   loadCurrentView(): void {
@@ -281,16 +388,19 @@ export class MealPlanCalendarComponent implements OnInit {
 
   protected setViewMode(mode: 'next7' | 'week' | 'month'): void {
     this.viewMode.set(mode);
+    this.syncQueryParams();
     this.loadCurrentView();
   }
 
   protected navigatePeriod(delta: number): void {
     if (this.viewMode() === 'next7') {
       this.activeRollingStart.update((start) => addDaysIso(start, delta * 7));
+      this.syncQueryParams();
       this.loadRolling();
     } else if (this.viewMode() === 'week') {
       const nextMonday = addDaysIso(this.activeWeekStart(), delta * 7);
       this.activeWeekStart.set(nextMonday);
+      this.syncQueryParams();
       this.loadWeek(nextMonday);
     } else {
       let { year, monthIndex0 } = this.activeMonth();
@@ -303,6 +413,7 @@ export class MealPlanCalendarComponent implements OnInit {
         year--;
       }
       this.activeMonth.set({ year, monthIndex0 });
+      this.syncQueryParams();
       this.loadMonth();
     }
   }
@@ -313,12 +424,14 @@ export class MealPlanCalendarComponent implements OnInit {
     this.activeWeekStart.set(normalizeToSundayIso(today));
     const now = new Date();
     this.activeMonth.set({ year: now.getFullYear(), monthIndex0: now.getMonth() });
+    this.syncQueryParams();
     this.loadCurrentView();
   }
 
   protected selectMonthDay(isoDate: string): void {
     this.activeWeekStart.set(normalizeToSundayIso(isoDate));
     this.viewMode.set('week');
+    this.syncQueryParams();
     this.loadCurrentView();
   }
 

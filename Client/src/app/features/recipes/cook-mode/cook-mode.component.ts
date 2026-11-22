@@ -58,6 +58,16 @@ import {
 } from '../../../core/utils/culinary-math';
 import { renderScaledInstruction } from '../../../core/utils/step-instruction';
 import {
+  parseEnumParam,
+  parseOneBasedIndexSetParam,
+  parsePositiveFloatParam,
+  parsePositiveIntParam,
+  parsePositiveIntSetParam,
+  queryParamsMatch,
+  serializePositiveIntsParam,
+  serializeZeroBasedIndicesParam,
+} from '../../../core/utils/query-param-state';
+import {
   ContiguousSectionGroup,
   groupContiguousBySection,
 } from '../../../core/utils/section-grouping';
@@ -249,6 +259,7 @@ export class CookModeComponent implements OnInit, OnDestroy {
       ...current,
       [ingredient.id]: !(current[ingredient.id] ?? ingredient.preferAlternativeMeasurement),
     }));
+    this.syncQueryParams();
   }
   scaleSubRecipeIngredient(ingredient: RecipeIngredientDto, sub: SubRecipePreviewDto): string {
     const parentIng = this.recipe()?.ingredients.find((i) => i.linkedRecipeId === sub.id);
@@ -287,22 +298,17 @@ export class CookModeComponent implements OnInit, OnDestroy {
       return;
     }
 
-    const qp = this.route.snapshot.queryParamMap;
-    if (qp.has('servings')) {
-      const parsed = parseFloat(qp.get('servings')!);
-      if (!isNaN(parsed) && parsed > 0) {
-        this.targetServings.set(parsed);
-      }
+    const qp = this.route.snapshot?.queryParamMap;
+    const servingsParam = parsePositiveFloatParam(qp?.get('servings'));
+    if (servingsParam !== null && servingsParam <= 999) {
+      this.targetServings.set(servingsParam);
     }
 
-    if (qp.has('units')) {
-      const units = qp.get('units') as UnitSystem;
-      if (units === 'Original' || units === 'UsCustomary' || units === 'Metric') {
-        this.targetSystem.set(units);
-      }
-    }
+    this.targetSystem.set(
+      parseEnumParam(qp?.get('units'), ['Original', 'UsCustomary', 'Metric'] as const, 'Original'),
+    );
 
-    if (qp.get('from') === 'meal-plan') {
+    if (qp?.get('from') === 'meal-plan') {
       this.fromSource.set('meal-plan');
     }
 
@@ -332,9 +338,7 @@ export class CookModeComponent implements OnInit, OnDestroy {
     this.recipeService.getRecipeById(id).subscribe({
       next: (data) => {
         this.recipe.set(data);
-        if (!this.route.snapshot.queryParamMap.has('servings')) {
-          this.targetServings.set(data.baseServings);
-        }
+        this.restoreRecipeStateFromQueryParams(data);
         this.isLoading.set(false);
         this.title.setTitle(`LocalRoast | Cook ${data.title}`);
         this.narrateCurrentStepIfEnabled();
@@ -375,6 +379,7 @@ export class CookModeComponent implements OnInit, OnDestroy {
     const current = this.activeStepIndex();
     if (current > 0) {
       this.activeStepIndex.set(current - 1);
+      this.syncQueryParams();
       this.narrateCurrentStepIfEnabled();
     }
   }
@@ -383,6 +388,7 @@ export class CookModeComponent implements OnInit, OnDestroy {
     const current = this.activeStepIndex();
     if (current < this.totalStepsCount() - 1) {
       this.activeStepIndex.set(current + 1);
+      this.syncQueryParams();
       this.narrateCurrentStepIfEnabled();
     } else {
       this.speechNarrationService.stop();
@@ -393,6 +399,7 @@ export class CookModeComponent implements OnInit, OnDestroy {
   protected goToStep(index: number): void {
     if (index >= 0 && index < this.totalStepsCount()) {
       this.activeStepIndex.set(index);
+      this.syncQueryParams();
       this.narrateCurrentStepIfEnabled();
     }
   }
@@ -402,6 +409,7 @@ export class CookModeComponent implements OnInit, OnDestroy {
       ...map,
       [id]: !map[id],
     }));
+    this.syncQueryParams();
   }
 
   openIngredientSubstitution(item: ScaledCookIngredient, event?: Event): void {
@@ -446,23 +454,125 @@ export class CookModeComponent implements OnInit, OnDestroy {
       ...map,
       [stepId]: !map[stepId],
     }));
+    this.syncQueryParams();
   }
 
   protected adjustServings(delta: number): void {
     const current = this.targetServings();
     const next = Math.max(0.5, Math.min(999, Math.round((current + delta) * 2) / 2));
     this.targetServings.set(next);
+    this.syncQueryParams();
   }
 
   protected setMultiplier(mult: number): void {
     const r = this.recipe();
     if (r && r.baseServings > 0) {
       this.targetServings.set(Math.max(0.5, Math.round(r.baseServings * mult * 2) / 2));
+      this.syncQueryParams();
     }
   }
 
   protected setUnitSystem(system: UnitSystem): void {
     this.targetSystem.set(system);
+    this.syncQueryParams();
+  }
+
+  private restoreRecipeStateFromQueryParams(data: RecipeDetailDto): void {
+    const qp = this.route.snapshot?.queryParamMap;
+    const servingsParam = parsePositiveFloatParam(qp?.get('servings'));
+    if (servingsParam !== null && servingsParam <= 999) {
+      this.targetServings.set(servingsParam);
+    } else {
+      this.targetServings.set(data.baseServings);
+    }
+
+    const stepParam = parsePositiveIntParam(qp?.get('step'));
+    if (stepParam !== null && data.steps.length > 0) {
+      this.activeStepIndex.set(Math.min(stepParam - 1, data.steps.length - 1));
+    } else {
+      this.activeStepIndex.set(0);
+    }
+
+    const checkedIngIndices = parseOneBasedIndexSetParam(qp?.get('ing'), data.ingredients.length);
+    const nextCheckedIngs: Record<string, boolean> = {};
+    for (const idx of checkedIngIndices) {
+      nextCheckedIngs[data.ingredients[idx].id] = true;
+    }
+    this.checkedIngredients.set(nextCheckedIngs);
+
+    const checkedStepNums = parsePositiveIntSetParam(qp?.get('steps'));
+    const nextCheckedSteps: Record<string, boolean> = {};
+    for (const step of data.steps) {
+      if (checkedStepNums.has(step.stepNumber)) {
+        nextCheckedSteps[step.id] = true;
+      }
+    }
+    this.checkedSteps.set(nextCheckedSteps);
+
+    const altIndices = parseOneBasedIndexSetParam(qp?.get('alt'), data.ingredients.length);
+    const nextPrefs: Record<string, boolean> = {};
+    for (const idx of altIndices) {
+      const ing = data.ingredients[idx];
+      nextPrefs[ing.id] = !ing.preferAlternativeMeasurement;
+    }
+    this.measurementPreferences.set(nextPrefs);
+  }
+
+  private buildRecipeStateQueryParams(
+    data: RecipeDetailDto,
+    includeCookModeParams: boolean,
+  ): Record<string, string | number | null> {
+    const checkedIngs = this.checkedIngredients();
+    const checkedIngIndices: number[] = [];
+    const prefs = this.measurementPreferences();
+    const altIndices: number[] = [];
+
+    data.ingredients.forEach((ing, idx) => {
+      if (checkedIngs[ing.id]) {
+        checkedIngIndices.push(idx);
+      }
+      const effective = prefs[ing.id] ?? ing.preferAlternativeMeasurement;
+      if (effective !== ing.preferAlternativeMeasurement) {
+        altIndices.push(idx);
+      }
+    });
+
+    const params: Record<string, string | number | null> = {
+      servings: this.targetServings() !== data.baseServings ? this.targetServings() : null,
+      units: this.targetSystem() !== 'Original' ? this.targetSystem() : null,
+      ing: serializeZeroBasedIndicesParam(checkedIngIndices),
+      alt: serializeZeroBasedIndicesParam(altIndices),
+    };
+
+    if (includeCookModeParams) {
+      const checkedSteps = this.checkedSteps();
+      const completedStepNumbers = data.steps
+        .filter((s) => checkedSteps[s.id])
+        .map((s) => s.stepNumber);
+      params['step'] = this.activeStepIndex() > 0 ? this.activeStepIndex() + 1 : null;
+      params['steps'] = serializePositiveIntsParam(completedStepNumbers);
+    }
+
+    return params;
+  }
+
+  private syncQueryParams(): void {
+    const r = this.recipe();
+    if (!r) return;
+
+    const queryParams = this.buildRecipeStateQueryParams(r, true);
+    const current = this.route.snapshot?.queryParamMap;
+    if (current && queryParamsMatch(current, queryParams)) {
+      return;
+    }
+
+    void this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams,
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+      scroll: 'manual',
+    });
   }
 
   protected toggleMobileDrawer(): void {
@@ -522,19 +632,33 @@ export class CookModeComponent implements OnInit, OnDestroy {
 
     ref.afterClosed().subscribe((result) => {
       if (result) {
-        this.exitCookMode();
+        this.exitCookMode(false);
       }
     });
   }
 
-  protected exitCookMode(): void {
+  protected exitCookMode(preserveSessionParams = true): void {
     this.speechNarrationService.stop();
     this.voiceControlService.stopListening();
     const r = this.recipe();
     if (this.fromSource() === 'meal-plan') {
       void this.router.navigate(['/meal-plan']);
     } else if (r) {
-      void this.router.navigate(['/recipes', r.id]);
+      if (!preserveSessionParams) {
+        void this.router.navigate(['/recipes', r.id]);
+        return;
+      }
+      const stateParams = this.buildRecipeStateQueryParams(r, false);
+      const nonNullParams: Record<string, string | number> = {};
+      for (const [key, value] of Object.entries(stateParams)) {
+        if (value !== null) {
+          nonNullParams[key] = value;
+        }
+      }
+      void this.router.navigate(
+        ['/recipes', r.id],
+        Object.keys(nonNullParams).length > 0 ? { queryParams: nonNullParams } : undefined,
+      );
     } else {
       void this.router.navigate(['/recipes']);
     }

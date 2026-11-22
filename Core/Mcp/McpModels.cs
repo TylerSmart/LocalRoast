@@ -119,7 +119,7 @@ public sealed record McpStructuredStepInput(
 public sealed record McpSaveStructuredRecipeRequest(
     [Required, MaxLength(200)] string Title,
     Guid? RecipeId = null,
-    [MaxLength(2000)] string? Description = null,
+    [MaxLength(RecipeFieldLimits.MaxDescriptionLength)] string? Description = null,
     bool PublishImmediately = false,
     [Range(typeof(decimal), "0.25", "999")] decimal BaseServings = 4m,
     [MaxLength(100)] string? YieldDisplay = null,

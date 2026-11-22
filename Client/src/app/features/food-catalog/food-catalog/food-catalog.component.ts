@@ -1,5 +1,7 @@
-import { Component, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
+import { ActivatedRoute, ParamMap, Router } from '@angular/router';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
 import { MatChipsModule } from '@angular/material/chips';
@@ -24,6 +26,11 @@ import {
   MergeFoodItemsResultDto,
 } from '../../../core/models/food-catalog.models';
 import { FoodCatalogService } from '../../../core/services/food-catalog/food-catalog.service';
+import {
+  parseBooleanFlagParam,
+  parsePositiveIntParam,
+  queryParamsMatch,
+} from '../../../core/utils/query-param-state';
 import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialog/confirm-dialog.component';
 import { FoodItemDialogComponent } from '../food-item-dialog/food-item-dialog.component';
 import {
@@ -54,9 +61,19 @@ import { MergeFoodItemsDialogComponent } from '../merge-food-items-dialog/merge-
   styleUrl: './food-catalog.component.scss',
 })
 export class FoodCatalogComponent implements OnInit {
+  private static readonly DEFAULT_PAGE_SIZE = 30;
+  private static readonly ALLOWED_PAGE_SIZES = new Set([15, 30, 60, 120]);
+  private static readonly VALID_CATEGORIES = new Set<FoodCategory>(
+    FOOD_CATEGORY_OPTIONS.map((opt) => opt.value),
+  );
+
   private readonly catalogService = inject(FoodCatalogService);
   private readonly dialog = inject(MatDialog);
   private readonly snackBar = inject(MatSnackBar);
+  private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
+  private readonly destroyRef = inject(DestroyRef);
+  private initializedFromRoute = false;
 
   protected readonly items = signal<FoodItemDto[]>([]);
   protected readonly searchQuery = signal<string>('');
@@ -74,7 +91,76 @@ export class FoodCatalogComponent implements OnInit {
   protected readonly filteredItems = computed(() => this.items());
 
   ngOnInit(): void {
-    this.loadItems();
+    this.destroyRef.onDestroy(() => {
+      if (this.searchTimer) {
+        clearTimeout(this.searchTimer);
+        this.searchTimer = null;
+      }
+    });
+
+    this.route.queryParamMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
+      const changed = this.applyQueryParams(params);
+      if (!this.initializedFromRoute || changed) {
+        this.initializedFromRoute = true;
+        this.loadItems();
+      }
+    });
+  }
+
+  private applyQueryParams(params: ParamMap): boolean {
+    const nextSearch = params.get('q') ?? '';
+    const nextStaples = parseBooleanFlagParam(params.get('staples'));
+    const rawCat = params.get('category') as FoodCategory | null;
+    const nextCategory =
+      rawCat && FoodCatalogComponent.VALID_CATEGORIES.has(rawCat) ? rawCat : null;
+    const parsedPage = parsePositiveIntParam(params.get('page'));
+    const nextPageIndex = parsedPage !== null ? parsedPage - 1 : 0;
+    const parsedPageSize = parsePositiveIntParam(params.get('pageSize'));
+    const nextPageSize =
+      parsedPageSize !== null && FoodCatalogComponent.ALLOWED_PAGE_SIZES.has(parsedPageSize)
+        ? parsedPageSize
+        : FoodCatalogComponent.DEFAULT_PAGE_SIZE;
+
+    const changed =
+      this.searchQuery().trim() !== nextSearch.trim() ||
+      this.onlyPantryStaples() !== nextStaples ||
+      this.categoryFilter() !== nextCategory ||
+      this.pageIndex() !== nextPageIndex ||
+      this.pageSize() !== nextPageSize;
+
+    if (!this.initializedFromRoute || changed) {
+      this.searchQuery.set(nextSearch);
+      this.onlyPantryStaples.set(nextStaples);
+      this.categoryFilter.set(nextCategory);
+      this.pageIndex.set(nextPageIndex);
+      this.pageSize.set(nextPageSize);
+    }
+
+    return changed;
+  }
+
+  private syncQueryParams(): void {
+    const trimmedSearch = this.searchQuery().trim();
+    const queryParams: Record<string, string | number | null> = {
+      q: trimmedSearch || null,
+      category: this.categoryFilter(),
+      staples: this.onlyPantryStaples() ? '1' : null,
+      page: this.pageIndex() > 0 ? this.pageIndex() + 1 : null,
+      pageSize: this.pageSize() !== FoodCatalogComponent.DEFAULT_PAGE_SIZE ? this.pageSize() : null,
+    };
+
+    const current = this.route.snapshot?.queryParamMap;
+    if (current && queryParamsMatch(current, queryParams)) {
+      return;
+    }
+
+    void this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams,
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+      scroll: 'manual',
+    });
   }
 
   loadItems(): void {
@@ -109,31 +195,40 @@ export class FoodCatalogComponent implements OnInit {
     if (this.searchTimer) clearTimeout(this.searchTimer);
     this.searchTimer = setTimeout(() => {
       this.pageIndex.set(0);
+      this.syncQueryParams();
       this.loadItems();
     }, 300);
   }
 
   clearSearch(): void {
+    if (this.searchTimer) {
+      clearTimeout(this.searchTimer);
+      this.searchTimer = null;
+    }
     this.searchQuery.set('');
     this.pageIndex.set(0);
+    this.syncQueryParams();
     this.loadItems();
   }
 
   onStaplesToggleChange(checked: boolean): void {
     this.onlyPantryStaples.set(checked);
     this.pageIndex.set(0);
+    this.syncQueryParams();
     this.loadItems();
   }
 
   onCategoryFilterChange(category: FoodCategory | null): void {
     this.categoryFilter.set(category);
     this.pageIndex.set(0);
+    this.syncQueryParams();
     this.loadItems();
   }
 
   onPageChange(event: PageEvent): void {
     this.pageIndex.set(event.pageIndex);
     this.pageSize.set(event.pageSize);
+    this.syncQueryParams();
     this.loadItems();
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }

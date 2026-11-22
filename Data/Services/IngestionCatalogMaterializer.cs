@@ -912,8 +912,9 @@ public static partial class IngestionCatalogMaterializer
 
         return new UpsertRecipeRequest(
             Title: draft.Title,
-            Description: draft.Description != null && draft.Description.Length > 2000
-                ? draft.Description[..2000].TrimEnd()
+            Description: draft.Description != null
+            && draft.Description.Length > RecipeFieldLimits.MaxDescriptionLength
+                ? draft.Description[..RecipeFieldLimits.MaxDescriptionLength].TrimEnd()
                 : draft.Description,
             Status: targetStatus,
             BaseServings: draft.BaseServings,

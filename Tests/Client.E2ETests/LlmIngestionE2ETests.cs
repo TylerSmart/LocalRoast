@@ -2429,6 +2429,24 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
         var monitor = Page.Locator("app-ingestion-live-monitor .live-monitor-card");
         await Expect(monitor).ToBeVisibleAsync(new() { Timeout = 15000 });
         await Expect(monitor.Locator(".workflow-segment").First).ToBeVisibleAsync();
+
+        // Verify workflow segment labels do not embed conflicting step numbers (e.g. "3. Match" next to "Step 4 of 7")
+        var segmentLabels = await monitor
+            .Locator(".workflow-segment .segment-label")
+            .AllTextContentsAsync();
+        Assert.IsGreaterThanOrEqualTo(
+            6,
+            segmentLabels.Count,
+            $"Expected workflow segments to be rendered, found: {string.Join(", ", segmentLabels)}"
+        );
+        foreach (var label in segmentLabels)
+        {
+            Assert.IsFalse(
+                Regex.IsMatch(label.Trim(), @"^\d+\.\s"),
+                $"Workflow segment label '{label}' should not contain a hardcoded leading step number."
+            );
+        }
+
         await Expect(monitor.Locator(".thinking-prose-content").First)
             .ToContainTextAsync(
                 "Analyzing recipe structure for Crispy Sesame Tofu.",

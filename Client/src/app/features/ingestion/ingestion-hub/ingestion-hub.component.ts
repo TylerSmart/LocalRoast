@@ -38,6 +38,11 @@ import type {
 import { IngestionRealtimeService } from '../../../core/services/ingestion/ingestion-realtime.service';
 import { IngestionService } from '../../../core/services/ingestion/ingestion.service';
 import { LlmSettingsService } from '../../../core/services/llm-settings/llm-settings.service';
+import {
+  parseEnumParam,
+  parsePositiveIntParam,
+  queryParamsMatch,
+} from '../../../core/utils/query-param-state';
 import { IngestionLiveMonitorComponent } from '../ingestion-live-monitor/ingestion-live-monitor.component';
 
 export type IngestionFilter = 'All' | 'ReadyForReview' | 'ActiveWaiting' | 'Published' | 'Failed';
@@ -94,6 +99,9 @@ export const REFRESH_OPTIONS: RefreshOption[] = [
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class IngestionHubComponent implements OnInit, OnDestroy {
+  private static readonly DEFAULT_PAGE_SIZE = 25;
+  private static readonly ALLOWED_PAGE_SIZES = new Set([10, 25, 50, 100]);
+
   private readonly fb = inject(FormBuilder);
   private readonly destroyRef = inject(DestroyRef);
   private readonly route = inject(ActivatedRoute);
@@ -101,6 +109,8 @@ export class IngestionHubComponent implements OnInit, OnDestroy {
   private readonly ingestionService = inject(IngestionService);
   private readonly ingestionRealtime = inject(IngestionRealtimeService);
   private readonly llmSettingsService = inject(LlmSettingsService);
+  private initializedFromRoute = false;
+  private lastRouteTabParam: string | null = null;
 
   private readonly liveRefreshTrigger$ = new Subject<void>();
 
@@ -245,45 +255,142 @@ export class IngestionHubComponent implements OnInit, OnDestroy {
     if (this.searchTimer) clearTimeout(this.searchTimer);
     this.searchTimer = setTimeout(() => {
       this.pageIndex.set(0);
+      this.syncQueryParams();
       this.executeRefresh();
     }, 300);
   }
 
   clearSearch(): void {
+    if (this.searchTimer) {
+      clearTimeout(this.searchTimer);
+      this.searchTimer = null;
+    }
     this.searchQuery.set('');
     this.pageIndex.set(0);
+    this.syncQueryParams();
     this.executeRefresh();
   }
 
   onSortByChange(value: IngestionJobSortBy): void {
     this.sortBy.set(value);
     this.pageIndex.set(0);
+    this.syncQueryParams();
     this.executeRefresh();
   }
 
   toggleSortDirection(): void {
     this.sortDirection.update((dir) => (dir === 'Asc' ? 'Desc' : 'Asc'));
     this.pageIndex.set(0);
+    this.syncQueryParams();
     this.executeRefresh();
   }
 
   onPageChange(event: PageEvent): void {
     this.pageIndex.set(event.pageIndex);
     this.pageSize.set(event.pageSize);
+    this.syncQueryParams();
     this.executeRefresh();
   }
 
   ngOnInit(): void {
-    this.setupShareTargetParams();
-    this.loadJobs();
+    this.setupRouteQueryParams();
     this.loadLlmSettings();
     this.setupPolling();
     this.setupRealtime();
   }
 
-  private setupShareTargetParams(): void {
+  private setupRouteQueryParams(): void {
     this.route.queryParamMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
+      const changed = this.applyViewQueryParams(params);
       this.applyShareTargetParams(params);
+      if (!this.initializedFromRoute || changed) {
+        this.initializedFromRoute = true;
+        this.loadJobs();
+      }
+    });
+  }
+
+  private applyViewQueryParams(params: ParamMap): boolean {
+    const rawTabParam = params.get('tab');
+    const nextTab = parseEnumParam<'urls' | 'text' | 'images' | 'pdf'>(
+      rawTabParam,
+      ['urls', 'text', 'images', 'pdf'] as const,
+      'urls',
+    );
+    const nextFilter = parseEnumParam<IngestionFilter>(
+      params.get('filter'),
+      ['All', 'ReadyForReview', 'ActiveWaiting', 'Published', 'Failed'] as const,
+      'All',
+    );
+    const nextSearch = params.get('q') ?? '';
+    const nextSortBy = parseEnumParam<IngestionJobSortBy>(
+      params.get('sort'),
+      ['CreatedAt', 'ModifiedAt', 'Name'] as const,
+      'CreatedAt',
+    );
+    const nextSortDir = parseEnumParam<IngestionJobSortDirection>(
+      params.get('dir'),
+      ['Asc', 'Desc'] as const,
+      'Desc',
+    );
+    const parsedPage = parsePositiveIntParam(params.get('page'));
+    const nextPageIndex = parsedPage !== null ? parsedPage - 1 : 0;
+    const parsedPageSize = parsePositiveIntParam(params.get('pageSize'));
+    const nextPageSize =
+      parsedPageSize !== null && IngestionHubComponent.ALLOWED_PAGE_SIZES.has(parsedPageSize)
+        ? parsedPageSize
+        : IngestionHubComponent.DEFAULT_PAGE_SIZE;
+
+    const queryChanged =
+      this.filter() !== nextFilter ||
+      this.searchQuery().trim() !== nextSearch.trim() ||
+      this.sortBy() !== nextSortBy ||
+      this.sortDirection() !== nextSortDir ||
+      this.pageIndex() !== nextPageIndex ||
+      this.pageSize() !== nextPageSize;
+
+    const tabParamChanged = !this.initializedFromRoute || rawTabParam !== this.lastRouteTabParam;
+    this.lastRouteTabParam = rawTabParam;
+    if (tabParamChanged) {
+      this.activeTab.set(nextTab);
+    }
+
+    if (!this.initializedFromRoute || queryChanged) {
+      this.filter.set(nextFilter);
+      this.searchQuery.set(nextSearch);
+      this.sortBy.set(nextSortBy);
+      this.sortDirection.set(nextSortDir);
+      this.pageIndex.set(nextPageIndex);
+      this.pageSize.set(nextPageSize);
+    }
+
+    return queryChanged;
+  }
+
+  private syncQueryParams(): void {
+    const trimmedSearch = this.searchQuery().trim();
+    const queryParams: Record<string, string | number | null> = {
+      tab: this.activeTab() !== 'urls' ? this.activeTab() : null,
+      filter: this.filter() !== 'All' ? this.filter() : null,
+      q: trimmedSearch || null,
+      sort: this.sortBy() !== 'CreatedAt' ? this.sortBy() : null,
+      dir: this.sortDirection() !== 'Desc' ? this.sortDirection() : null,
+      page: this.pageIndex() > 0 ? this.pageIndex() + 1 : null,
+      pageSize:
+        this.pageSize() !== IngestionHubComponent.DEFAULT_PAGE_SIZE ? this.pageSize() : null,
+    };
+
+    const current = this.route.snapshot?.queryParamMap;
+    if (current && queryParamsMatch(current, queryParams)) {
+      return;
+    }
+
+    void this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams,
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+      scroll: 'manual',
     });
   }
 
@@ -515,11 +622,13 @@ export class IngestionHubComponent implements OnInit, OnDestroy {
   setFilter(filter: IngestionFilter): void {
     this.filter.set(filter);
     this.pageIndex.set(0);
+    this.syncQueryParams();
     this.executeRefresh();
   }
 
   setActiveTab(tab: 'urls' | 'text' | 'images' | 'pdf'): void {
     this.activeTab.set(tab);
+    this.syncQueryParams();
   }
 
   loadLlmSettings(): void {

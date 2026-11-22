@@ -487,19 +487,19 @@ public sealed class AiKitchenHelperService(
             [
                 new LlmWorkflowSegmentDto(
                     "analyze_prompt",
-                    "1. Analyze Cravings",
+                    "Analyze Cravings",
                     isSurpriseDraft
                         ? LlmWorkflowSegmentState.Skipped
                         : LlmWorkflowSegmentState.Pending
                 ),
                 new LlmWorkflowSegmentDto(
                     "retrieve",
-                    "2. Search Cookbook",
+                    "Search Cookbook",
                     LlmWorkflowSegmentState.Pending
                 ),
                 new LlmWorkflowSegmentDto(
                     "draft_schedule",
-                    "3. Assemble Plan",
+                    "Assemble Plan",
                     LlmWorkflowSegmentState.Pending
                 ),
             ],
@@ -522,7 +522,7 @@ public sealed class AiKitchenHelperService(
                 workload?.ActivateSegment(
                     "analyze_prompt",
                     "Decomposing prompt",
-                    "Stage 1/3: Analyzing meal-plan prompt..."
+                    "Analyzing meal-plan prompt..."
                 );
                 // Stage 1: Decompose natural-language mood prompt into exclusions, priorities, and search buckets
                 var analysis = await llmClient.DecomposeMealPlanPromptAsync(
@@ -601,7 +601,7 @@ public sealed class AiKitchenHelperService(
             workload?.ActivateSegment(
                 "retrieve",
                 "Searching recipes",
-                "Stage 2/3: Retrieving cookbook candidates..."
+                "Retrieving cookbook candidates..."
             );
             // Stage 2: Deterministic exclusions + hybrid RecipeEmbedding search (or slot-aware randomized sample when prompt is blank) + perishable synergy
             var retrieval = await _recipeEmbeddingService.RetrieveMealPlanCandidatesAsync(
@@ -652,7 +652,7 @@ public sealed class AiKitchenHelperService(
             workload?.ActivateSegment(
                 "draft_schedule",
                 $"{catalogList.Count} candidates",
-                "Stage 3/3: Selecting & scheduling meals..."
+                "Selecting & scheduling meals..."
             );
             // Stage 3: Constrained schedule assembly from compact candidate cards
             var llmContext = new LlmDraftMealPlanContext(

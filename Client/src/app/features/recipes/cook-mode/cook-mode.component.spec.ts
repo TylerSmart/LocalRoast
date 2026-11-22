@@ -1,7 +1,7 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { WritableSignal, signal } from '@angular/core';
 import { MatDialog } from '@angular/material/dialog';
-import { ActivatedRoute, Router } from '@angular/router';
+import { ActivatedRoute, Router, convertToParamMap } from '@angular/router';
 import { of } from 'rxjs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { RecipeDetailDto } from '../../../core/models/recipe.models';
@@ -780,5 +780,58 @@ describe('CookModeComponent', () => {
     mockVoiceControlService.stopListening.mockClear();
     fixture.destroy();
     expect(mockVoiceControlService.stopListening).toHaveBeenCalled();
+  });
+
+  it('syncs active step, completed steps, checked ingredients, servings, and units to query params', () => {
+    mockRouter.navigate.mockClear();
+
+    component['toggleIngredient']('ing-1');
+    expect(mockRouter.navigate).toHaveBeenLastCalledWith(
+      [],
+      expect.objectContaining({
+        queryParams: expect.objectContaining({ ing: '1', steps: null, step: null }),
+        replaceUrl: true,
+        scroll: 'manual',
+      }),
+    );
+
+    component['toggleStepChecked']('st-1');
+    expect(mockRouter.navigate).toHaveBeenLastCalledWith(
+      [],
+      expect.objectContaining({
+        queryParams: expect.objectContaining({ ing: '1', steps: '1', step: null }),
+        replaceUrl: true,
+      }),
+    );
+
+    component['nextStep']();
+    expect(mockRouter.navigate).toHaveBeenLastCalledWith(
+      [],
+      expect.objectContaining({
+        queryParams: expect.objectContaining({ ing: '1', steps: '1', step: 2 }),
+        replaceUrl: true,
+      }),
+    );
+  });
+
+  it('restores active step, completed steps, checked ingredients, servings, and units from query params', () => {
+    const activatedRoute = TestBed.inject(ActivatedRoute);
+    const snapshot = activatedRoute.snapshot as unknown as {
+      queryParamMap: ReturnType<typeof convertToParamMap>;
+    };
+    snapshot.queryParamMap = convertToParamMap({
+      servings: '6',
+      units: 'Metric',
+      step: '2',
+      ing: '1',
+      steps: '1',
+    });
+
+    component.ngOnInit();
+    expect(component['targetServings']()).toBe(6);
+    expect(component['targetSystem']()).toBe('Metric');
+    expect(component['activeStepIndex']()).toBe(1);
+    expect(component['checkedIngredients']()['ing-1']).toBe(true);
+    expect(component['checkedSteps']()['st-1']).toBe(true);
   });
 });

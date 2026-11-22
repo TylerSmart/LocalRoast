@@ -691,8 +691,7 @@ public sealed class IngestionProcessor(
                     refineConfig.TextModel?.Trim()
                     ?? config.RefineModel?.Trim()
                     ?? "refinement model";
-                job.StatusDetail =
-                    $"Stage 6: Refining recipe & catalog names via {refineModelLabel}...";
+                job.StatusDetail = $"Refining recipe & catalog names via {refineModelLabel}...";
                 await dbContext.SaveChangesAsync(jobCt);
                 workload?.ActivateSegment(
                     "stage6",
@@ -3048,15 +3047,15 @@ public sealed class IngestionProcessor(
             segments.Add(new("vision", "Vision OCR", LlmWorkflowSegmentState.Pending));
         }
 
-        segments.Add(new("stage1", "1. Extract", LlmWorkflowSegmentState.Pending));
-        segments.Add(new("stage2", "2. Condense", LlmWorkflowSegmentState.Pending));
-        segments.Add(new("stage3", "3. Match", LlmWorkflowSegmentState.Pending));
-        segments.Add(new("stage4", "4. Tokenize", LlmWorkflowSegmentState.Pending));
-        segments.Add(new("stage5", "5. Polish", LlmWorkflowSegmentState.Pending));
+        segments.Add(new("stage1", "Extract", LlmWorkflowSegmentState.Pending));
+        segments.Add(new("stage2", "Condense", LlmWorkflowSegmentState.Pending));
+        segments.Add(new("stage3", "Match", LlmWorkflowSegmentState.Pending));
+        segments.Add(new("stage4", "Tokenize", LlmWorkflowSegmentState.Pending));
+        segments.Add(new("stage5", "Polish", LlmWorkflowSegmentState.Pending));
 
         if (includeStage6)
         {
-            segments.Add(new("stage6", "6. Refine", LlmWorkflowSegmentState.Pending));
+            segments.Add(new("stage6", "Refine", LlmWorkflowSegmentState.Pending));
         }
 
         segments.Add(new("finalize", "Save", LlmWorkflowSegmentState.Pending));

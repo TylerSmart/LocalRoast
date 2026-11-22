@@ -35,9 +35,8 @@ import {
 } from '../../../core/utils/culinary-math';
 import {
   NumberedInstructionStep,
-  formatIngredientUses,
+  formatIngredientUseLines,
   ingredientUses,
-  isIngredientDivided,
 } from '../../../core/utils/step-instruction';
 import { shouldShowTimerLabel } from '../../../core/utils/step-token-parser';
 import { StepInstructionComponent } from '../../../shared/components/step-instruction/step-instruction.component';
@@ -166,7 +165,7 @@ export class RecipeDetailPreviewComponent {
   });
 
   readonly ingredientUsesMap = computed(() => {
-    const result = new Map<string, string>();
+    const result = new Map<string, string[]>();
     const steps = this.instructionSteps();
     const ingredients = this.displayIngredients();
     for (const item of this.scaledIngredientsMap().values()) {
@@ -177,16 +176,8 @@ export class RecipeDetailPreviewComponent {
         this.scaleFactor(),
         this.targetSystem(),
       );
-      if (
-        isIngredientDivided(
-          steps,
-          item.ingredient.id,
-          ingredients,
-          this.scaleFactor(),
-          this.targetSystem(),
-        )
-      ) {
-        result.set(item.ingredient.id, formatIngredientUses(uses));
+      if (uses.length > 1) {
+        result.set(item.ingredient.id, formatIngredientUseLines(uses));
       }
     }
     return result;

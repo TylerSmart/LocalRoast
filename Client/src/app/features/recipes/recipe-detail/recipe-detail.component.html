@@ -475,7 +475,7 @@
           <span class="toolbar-label">Units:</span>
           <mat-button-toggle-group
             [ngModel]="targetSystem()"
-            (ngModelChange)="targetSystem.set($event)"
+            (ngModelChange)="setUnitSystem($event)"
             aria-label="Measurement Unit System"
           >
             <mat-button-toggle value="Original">Original</mat-button-toggle>
@@ -532,9 +532,6 @@
                       }
                       @if (item.ingredient.isPantryStaple) {
                         <span class="pantry-tag" matTooltip="Pantry Staple">pantry</span>
-                      }
-                      @if (ingredientUsesMap().get(item.ingredient.id); as uses) {
-                        <span class="ingredient-uses">{{ uses }}</span>
                       }
                       @if (item.ingredient.replacements?.length) {
                         <span class="ingredient-replacements">
@@ -603,6 +600,14 @@
                       </mat-menu>
                     }
                   </div>
+
+                  @if (ingredientUsesMap().get(item.ingredient.id); as uses) {
+                    <ul class="ingredient-uses">
+                      @for (use of uses; track $index) {
+                        <li class="ingredient-use-item">{{ use }}</li>
+                      }
+                    </ul>
+                  }
 
                   <!-- Linked Sub-Recipe inline expansion if applicable -->
                   @if (item.ingredient.linkedRecipeId) {
