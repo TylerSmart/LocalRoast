@@ -448,12 +448,65 @@ describe('FoodCatalogComponent', () => {
       unlinkFromRecipes: true,
     });
 
-    // Clear selection & Shift+Click range selection
-    component['items'].set(mixedItems);
-    component.toggleItemSelection(mixedItems[0], true);
-    component.onCardCheckboxClick({ shiftKey: true } as MouseEvent);
-    component.toggleItemSelection(mixedItems[2], true);
+    // Clear selection & real-DOM Shift+Click range selection (checkbox + card body + reverse + uncheck)
+    const fourItems: FoodItemDto[] = [
+      { ...sampleItems[0], id: 'u-1', name: 'Item 1', referencedRecipeCount: 0 },
+      { ...sampleItems[1], id: 'u-2', name: 'Item 2', referencedRecipeCount: 0 },
+      { ...sampleItems[0], id: 'u-3', name: 'Item 3', referencedRecipeCount: 0 },
+      { ...sampleItems[1], id: 'r-4', name: 'Item 4', referencedRecipeCount: 2 },
+    ];
+    component['items'].set(fourItems);
+    fixture.detectChanges();
+
+    const checkboxes = () =>
+      Array.from(
+        (fixture.nativeElement as HTMLElement).querySelectorAll<HTMLInputElement>(
+          '.item-select-checkbox input[type="checkbox"]',
+        ),
+      );
+    const cards = () =>
+      Array.from(
+        (fixture.nativeElement as HTMLElement).querySelectorAll<HTMLElement>('.food-item-card'),
+      );
+
+    // 1. Click checkbox 0 normally, then Shift+Click checkbox 2 -> selects 0, 1, 2
+    checkboxes()[0].click();
+    fixture.detectChanges();
+    expect(component['selectedCount']()).toBe(1);
+
+    checkboxes()[2].dispatchEvent(
+      new MouseEvent('click', { bubbles: true, cancelable: true, shiftKey: true }),
+    );
+    fixture.detectChanges();
     expect(component['selectedCount']()).toBe(3);
+    expect(component.isSelected('u-1')).toBe(true);
+    expect(component.isSelected('u-2')).toBe(true);
+    expect(component.isSelected('u-3')).toBe(true);
+    expect(component.isSelected('r-4')).toBe(false);
+
+    // 2. Shift+Click checked checkbox 1 -> unchecks range [1..2]
+    checkboxes()[1].dispatchEvent(
+      new MouseEvent('click', { bubbles: true, cancelable: true, shiftKey: true }),
+    );
+    fixture.detectChanges();
+    expect(component.isSelected('u-1')).toBe(true);
+    expect(component.isSelected('u-2')).toBe(false);
+    expect(component.isSelected('u-3')).toBe(false);
+
+    // 3. Reverse Shift+Click on card body: click checkbox 3, then Shift+Click card 1 body -> selects 1, 2, 3
+    component.clearSelection();
+    fixture.detectChanges();
+    checkboxes()[3].click();
+    fixture.detectChanges();
+    cards()[1]
+      .querySelector('.item-name')!
+      .dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, shiftKey: true }));
+    fixture.detectChanges();
+    expect(component['selectedCount']()).toBe(3);
+    expect(component.isSelected('u-1')).toBe(false);
+    expect(component.isSelected('u-2')).toBe(true);
+    expect(component.isSelected('u-3')).toBe(true);
+    expect(component.isSelected('r-4')).toBe(true);
 
     component.clearSelection();
     expect(component['selectedCount']()).toBe(0);

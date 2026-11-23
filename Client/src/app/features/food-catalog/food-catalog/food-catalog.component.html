@@ -224,7 +224,11 @@
       <!-- Food Items List -->
       <div class="catalog-grid">
         @for (item of filteredItems(); track item.id) {
-          <mat-card class="food-item-card" [class.selected]="isSelected(item.id)">
+          <mat-card
+            class="food-item-card"
+            [class.selected]="isSelected(item.id)"
+            [attr.data-food-item-id]="item.id"
+          >
             <div class="item-content">
               <div class="item-header">
                 <mat-checkbox
@@ -232,7 +236,7 @@
                   data-testid="food-item-select-checkbox"
                   [checked]="isSelected(item.id)"
                   [disabled]="isBulkDeleting()"
-                  (click)="onCardCheckboxClick($event)"
+                  (keydown)="onCheckboxKeyDown($event)"
                   (change)="toggleItemSelection(item, $event.checked)"
                   [aria-label]="'Select ' + item.name"
                 ></mat-checkbox>

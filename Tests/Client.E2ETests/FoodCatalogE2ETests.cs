@@ -363,6 +363,38 @@ public sealed class FoodCatalogE2ETests : E2ETestBase
 
         await Expect(Page.Locator(".food-item-card")).ToHaveCountAsync(4);
 
+        // 0. Verify Shift+Click range selection on checkboxes and card bodies (forward & reverse)
+        var cards = Page.Locator(".food-item-card");
+        await cards.Nth(0).GetByTestId("food-item-select-checkbox").ClickAsync();
+        await Expect(Page.GetByTestId("food-catalog-select-all")).ToContainTextAsync("1 selected");
+
+        await cards
+            .Nth(2)
+            .GetByTestId("food-item-select-checkbox")
+            .ClickAsync(new() { Modifiers = [KeyboardModifier.Shift] });
+        await Expect(Page.GetByTestId("food-catalog-select-all")).ToContainTextAsync("3 selected");
+        await Expect(Page.Locator(".food-item-card.selected")).ToHaveCountAsync(3);
+        await Expect(Page.Locator(".food-item-card", new() { HasText = usedGarlic }))
+            .Not.ToHaveClassAsync(new Regex(".*\\bselected\\b.*"));
+
+        var browserSelectionText = await Page.EvaluateAsync<string>(
+            "() => window.getSelection()?.toString() ?? ''"
+        );
+        Assert.AreEqual(string.Empty, browserSelectionText);
+
+        await Page.GetByTestId("food-catalog-clear-selection").ClickAsync();
+        await Expect(Page.Locator(".food-item-card.selected")).ToHaveCountAsync(0);
+
+        // Reverse Shift+Click directly on card body (.item-name)
+        await cards.Nth(2).GetByTestId("food-item-select-checkbox").ClickAsync();
+        await cards
+            .Nth(0)
+            .Locator(".item-name")
+            .ClickAsync(new() { Modifiers = [KeyboardModifier.Shift] });
+        await Expect(Page.GetByTestId("food-catalog-select-all")).ToContainTextAsync("3 selected");
+        await Expect(Page.Locator(".food-item-card.selected")).ToHaveCountAsync(3);
+        await Page.GetByTestId("food-catalog-clear-selection").ClickAsync();
+
         // 1. Click "Select unused (3)" and verify only unused cards are selected
         var selectUnusedBtn = Page.GetByTestId("food-catalog-select-unused");
         await Expect(selectUnusedBtn).ToBeVisibleAsync();

@@ -1,4 +1,4 @@
-import { Component, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, DestroyRef, ElementRef, OnInit, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, ParamMap, Router } from '@angular/router';
@@ -77,6 +77,10 @@ export const FOOD_CATALOG_SORT_OPTIONS: readonly FoodCatalogSortOption[] = [
   selector: 'app-food-catalog',
   templateUrl: './food-catalog.component.html',
   styleUrl: './food-catalog.component.scss',
+  host: {
+    '(mousedown)': 'onHostMouseDown($event)',
+    '(click)': 'onHostClick($event)',
+  },
 })
 export class FoodCatalogComponent implements OnInit {
   private static readonly DEFAULT_PAGE_SIZE = 30;
@@ -91,6 +95,7 @@ export class FoodCatalogComponent implements OnInit {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly hostEl = inject<ElementRef<HTMLElement>>(ElementRef);
   private initializedFromRoute = false;
 
   protected readonly items = signal<FoodItemDto[]>([]);
@@ -130,7 +135,25 @@ export class FoodCatalogComponent implements OnInit {
   );
 
   ngOnInit(): void {
+    const onCapturePointerDown = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('.item-select-checkbox')) {
+        this.pendingShiftSelect = event.shiftKey;
+      }
+    };
+    const onCaptureClick = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('.item-select-checkbox') && event.shiftKey) {
+        this.pendingShiftSelect = true;
+      }
+    };
+    const nativeHost = this.hostEl.nativeElement;
+    nativeHost.addEventListener('pointerdown', onCapturePointerDown, { capture: true });
+    nativeHost.addEventListener('click', onCaptureClick, { capture: true });
+
     this.destroyRef.onDestroy(() => {
+      nativeHost.removeEventListener('pointerdown', onCapturePointerDown, { capture: true });
+      nativeHost.removeEventListener('click', onCaptureClick, { capture: true });
       if (this.searchTimer) {
         clearTimeout(this.searchTimer);
         this.searchTimer = null;
@@ -402,8 +425,37 @@ export class FoodCatalogComponent implements OnInit {
     return this.selectedIds().has(id);
   }
 
-  onCardCheckboxClick(event: MouseEvent): void {
-    this.pendingShiftSelect = event.shiftKey;
+  onCheckboxKeyDown(event: KeyboardEvent): void {
+    if (event.key === ' ' || event.code === 'Space') {
+      this.pendingShiftSelect = event.shiftKey;
+    }
+  }
+
+  onHostMouseDown(event: MouseEvent): void {
+    if (event.shiftKey && (event.target as HTMLElement | null)?.closest('.food-item-card')) {
+      event.preventDefault();
+    }
+  }
+
+  onHostClick(event: MouseEvent): void {
+    if (!event.shiftKey || this.isBulkDeleting()) {
+      return;
+    }
+    const target = event.target as HTMLElement | null;
+    if (target?.closest('mat-checkbox, button, a, input, label')) {
+      return;
+    }
+    const cardEl = target?.closest<HTMLElement>('.food-item-card[data-food-item-id]');
+    const itemId = cardEl?.dataset['foodItemId'];
+    if (!itemId) {
+      return;
+    }
+    const item = this.items().find((i) => i.id === itemId);
+    if (!item) {
+      return;
+    }
+    this.pendingShiftSelect = true;
+    this.toggleItemSelection(item, !this.isSelected(item.id));
   }
 
   toggleItemSelection(item: FoodItemDto, checked: boolean): void {
