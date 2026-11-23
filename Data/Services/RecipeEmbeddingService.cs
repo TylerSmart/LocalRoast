@@ -31,130 +31,13 @@ public sealed partial class RecipeEmbeddingService(
     private const int DefaultCandidatePoolCap = 36;
     private const int MaxCandidatePoolCap = 40;
 
-    private static readonly HashSet<string> RecognizedCourseTags = new(StringComparer.Ordinal)
-    {
-        "breakfast",
-        "brunch",
-        "lunch",
-        "dinner",
-        "snack",
-        "midnight snack",
-        "dessert",
-        "appetizer",
-        "starter",
-        "side dish",
-        "main course",
-        "salad",
-        "soup",
-        "stew",
-        "bread",
-        "baked goods",
-        "sandwich",
-        "beverage",
-        "drink",
-        "cocktail",
-        "mocktail",
-        "condiment",
-        "sauce",
-        "dip",
-        "dressing",
-        "spread",
-        "marinade",
-        "topping",
-    };
-
-    private static readonly HashSet<string> NonMealAccessoryTags = new(StringComparer.Ordinal)
-    {
-        "dessert",
-        "condiment",
-        "sauce",
-        "dip",
-        "dressing",
-        "spread",
-        "marinade",
-        "topping",
-        "beverage",
-        "drink",
-        "cocktail",
-        "mocktail",
-    };
-
-    private static readonly HashSet<string> NonDinnerCourseTags = new(StringComparer.Ordinal)
-    {
-        "appetizer",
-        "starter",
-        "side dish",
-        "snack",
-        "midnight snack",
-        "breakfast",
-        "brunch",
-        "bread",
-        "baked goods",
-    };
-
-    private static readonly HashSet<string> DinnerPrimaryCourseTags = new(StringComparer.Ordinal)
-    {
-        "dinner",
-        "main course",
-        "stew",
-        "soup",
-    };
-
-    private static readonly HashSet<string> LunchPrimaryCourseTags = new(StringComparer.Ordinal)
-    {
-        "lunch",
-        "sandwich",
-        "salad",
-        "soup",
-        "stew",
-        "main course",
-        "dinner",
-    };
-
-    private static readonly HashSet<string> BreakfastPrimaryCourseTags = new(StringComparer.Ordinal)
-    {
-        "breakfast",
-        "brunch",
-    };
-
-    private static readonly HashSet<string> BreakfastExcludedTags = new(StringComparer.Ordinal)
-    {
-        "dessert",
-        "cocktail",
-        "condiment",
-        "sauce",
-        "dip",
-        "dressing",
-        "spread",
-        "marinade",
-        "topping",
-        "dinner",
-        "main course",
-    };
-
-    private static readonly HashSet<string> SnackPrimaryCourseTags = new(StringComparer.Ordinal)
-    {
-        "snack",
-        "midnight snack",
-        "appetizer",
-        "starter",
-        "dip",
-        "spread",
-        "baked goods",
-        "bread",
-        "salad",
-        "sandwich",
-    };
-
-    private static readonly HashSet<string> SnackExcludedTags = new(StringComparer.Ordinal)
-    {
-        "condiment",
-        "marinade",
-        "dressing",
-        "cocktail",
-        "dinner",
-        "main course",
-    };
+    private static readonly MealSlot[] AllMealSlots =
+    [
+        MealSlot.Breakfast,
+        MealSlot.Lunch,
+        MealSlot.Dinner,
+        MealSlot.SnackPrep,
+    ];
 
     private static readonly HashSet<FoodCategory> PerishableCategories =
     [
@@ -588,11 +471,22 @@ public sealed partial class RecipeEmbeddingService(
                     .ToDictionaryAsync(r => r.Id, cancellationToken)
                 : new Dictionary<Guid, Recipe>();
 
+        var referencedAsSubRecipeSet = (
+            await dbContext
+                .RecipeIngredients.AsNoTracking()
+                .Where(i => i.LinkedRecipeId.HasValue)
+                .Select(i => i.LinkedRecipeId!.Value)
+                .Distinct()
+                .ToListAsync(cancellationToken)
+        ).ToHashSet();
+
         var expandedExclusions = ExpandExclusionTerms(request.ExcludedTerms);
         var prioritizedTerms = NormalizeTermList(request.PrioritizeIngredients);
 
         var indexedRecipes = allPublished
-            .Select(r => BuildSearchableRecipe(r, subRecipesById))
+            .Select(r =>
+                BuildSearchableRecipe(r, subRecipesById, referencedAsSubRecipeSet.Contains(r.Id))
+            )
             .ToList();
 
         var eligibleRecipes =
@@ -603,6 +497,14 @@ public sealed partial class RecipeEmbeddingService(
         if (eligibleRecipes.Count == 0)
         {
             return new MealPlanRetrievalResult(allPublished.Count, 0, false, [], []);
+        }
+
+        var effectiveSlotCounts = BuildEffectiveSlotCounts(request);
+        var allowTier3BySlot = new Dictionary<MealSlot, bool>(effectiveSlotCounts.Count);
+        foreach (var (slot, desiredCount) in effectiveSlotCounts)
+        {
+            var tier12Count = eligibleRecipes.Count(item => ClassifySlotFit(item, slot) <= 2);
+            allowTier3BySlot[slot] = tier12Count < desiredCount;
         }
 
         var poolCap = Math.Clamp(
@@ -616,8 +518,8 @@ public sealed partial class RecipeEmbeddingService(
             var randomizedSelection = SelectRandomizedMealPlanCandidates(
                 eligibleRecipes,
                 poolCap,
-                request.RequestedMealCount,
-                request.DefaultSlot,
+                effectiveSlotCounts,
+                allowTier3BySlot,
                 recentlyScheduledIds,
                 request.UtcNow
             );
@@ -626,9 +528,24 @@ public sealed partial class RecipeEmbeddingService(
                 TotalEligiblePublishedCount: allPublished.Count,
                 PostExclusionEligibleCount: eligibleRecipes.Count,
                 UsedEmbeddings: false,
-                Candidates: BuildCandidateCards(randomizedSelection, request.UtcNow),
+                Candidates: BuildCandidateCards(
+                    randomizedSelection,
+                    request.UtcNow,
+                    allowTier3BySlot
+                ),
                 UnmatchedBuckets: []
             );
+        }
+
+        var slotEligibleRecipes = eligibleRecipes
+            .Where(item =>
+                allowTier3BySlot.Any(kvp => ClassifySlotFit(item, kvp.Key) <= (kvp.Value ? 3 : 2))
+            )
+            .ToList();
+
+        if (slotEligibleRecipes.Count == 0)
+        {
+            slotEligibleRecipes = eligibleRecipes;
         }
 
         var buckets = NormalizeBuckets(request);
@@ -648,7 +565,7 @@ public sealed partial class RecipeEmbeddingService(
                 recipeVectors = await LoadAndSyncVectorsForEligibleAsync(
                     embConfig,
                     modelTag,
-                    eligibleRecipes,
+                    slotEligibleRecipes,
                     cancellationToken
                 );
 
@@ -718,7 +635,7 @@ public sealed partial class RecipeEmbeddingService(
         }
 
         // Per-bucket scoring & pool collection
-        var bestScoreByRecipeId = new Dictionary<Guid, double>(eligibleRecipes.Count);
+        var bestScoreByRecipeId = new Dictionary<Guid, double>(slotEligibleRecipes.Count);
         var pooledIds = new HashSet<Guid>();
         var unmatchedBuckets = new List<string>();
 
@@ -732,10 +649,10 @@ public sealed partial class RecipeEmbeddingService(
             var hasSpecificCraving = bucketQueryTokens.Count > 0 || bucketTagNorms.Count > 0;
 
             var scoredForBucket = new List<(SearchableRecipe Item, double Relevance, double Total)>(
-                eligibleRecipes.Count
+                slotEligibleRecipes.Count
             );
 
-            foreach (var item in eligibleRecipes)
+            foreach (var item in slotEligibleRecipes)
             {
                 var lexical = ComputeBucketLexicalScore(item, bucketQueryTokens, bucketTagNorms);
                 double relevance;
@@ -753,8 +670,15 @@ public sealed partial class RecipeEmbeddingService(
                     relevance = lexical;
                 }
 
+                var bestSlotFitBonus = allowTier3BySlot.Keys.Any(slot =>
+                    ClassifySlotFit(item, slot) == 1
+                )
+                    ? 0.08
+                    : 0.0;
+
                 var total =
                     relevance
+                    + bestSlotFitBonus
                     + ComputeTimeAdjustment(item.Recipe.TotalTimeMinutes, effectiveMaxTime)
                     + ComputePrioritizedIngredientBoost(item, prioritizedTerms)
                     + ComputeRecencyAndRatingAdjustment(
@@ -810,7 +734,7 @@ public sealed partial class RecipeEmbeddingService(
         // Add dedicated "pantry clearer" candidates for PrioritizeIngredients
         if (prioritizedTerms.Count > 0)
         {
-            var pantryScored = eligibleRecipes
+            var pantryScored = slotEligibleRecipes
                 .Select(item =>
                 {
                     var directMatch = ComputePrioritizedIngredientBoost(item, prioritizedTerms);
@@ -838,7 +762,7 @@ public sealed partial class RecipeEmbeddingService(
 
         // Perishable ingredient synergy boost anchored on the top candidates
         var anchorCount = Math.Clamp(Math.Max(request.RequestedMealCount, 3), 3, 6);
-        var anchorItems = eligibleRecipes
+        var anchorItems = slotEligibleRecipes
             .Where(item => pooledIds.Contains(item.Recipe.Id))
             .OrderByDescending(item => bestScoreByRecipeId.GetValueOrDefault(item.Recipe.Id))
             .Take(anchorCount)
@@ -849,7 +773,7 @@ public sealed partial class RecipeEmbeddingService(
         if (anchorPerishableIds.Count > 0)
         {
             var anchorIdSet = anchorItems.Select(a => a.Recipe.Id).ToHashSet();
-            foreach (var item in eligibleRecipes)
+            foreach (var item in slotEligibleRecipes)
             {
                 if (anchorIdSet.Contains(item.Recipe.Id) || item.PerishableFoodItemIds.Count == 0)
                 {
@@ -872,30 +796,229 @@ public sealed partial class RecipeEmbeddingService(
             }
         }
 
-        // Deduplicate & select final compact planning card list
-        var finalSelection = eligibleRecipes
-            .Where(item => pooledIds.Count == 0 || pooledIds.Contains(item.Recipe.Id))
-            .OrderByDescending(item => bestScoreByRecipeId.GetValueOrDefault(item.Recipe.Id))
-            .ThenByDescending(item => item.Recipe.AverageRating ?? 0m)
-            .ThenByDescending(item => item.Recipe.TimesCooked)
-            .ThenBy(item => item.Recipe.Id)
-            .Take(poolCap)
-            .ToList();
+        // Deduplicate & select final compact planning card list (reserving sub-pools per requested slot)
+        var finalSelection = SelectFinalRagPool(
+            slotEligibleRecipes,
+            pooledIds,
+            bestScoreByRecipeId,
+            effectiveSlotCounts,
+            allowTier3BySlot,
+            poolCap
+        );
 
         return new MealPlanRetrievalResult(
             TotalEligiblePublishedCount: allPublished.Count,
             PostExclusionEligibleCount: eligibleRecipes.Count,
             UsedEmbeddings: usedEmbeddings,
-            Candidates: BuildCandidateCards(finalSelection, request.UtcNow),
+            Candidates: BuildCandidateCards(finalSelection, request.UtcNow, allowTier3BySlot),
             UnmatchedBuckets: unmatchedBuckets
         );
+    }
+
+    private static Dictionary<MealSlot, int> BuildEffectiveSlotCounts(
+        MealPlanRetrievalRequest request
+    )
+    {
+        if (request.SlotCounts is { Count: > 0 })
+        {
+            var filtered = request
+                .SlotCounts.Where(kvp => kvp.Value > 0)
+                .ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+            if (filtered.Count > 0)
+            {
+                return filtered;
+            }
+        }
+
+        return new Dictionary<MealSlot, int>
+        {
+            [request.DefaultSlot ?? MealSlot.Dinner] = Math.Max(1, request.RequestedMealCount),
+        };
+    }
+
+    private static Dictionary<MealSlot, int> ComputeSlotSubPoolCaps(
+        IReadOnlyDictionary<MealSlot, int> slotCounts,
+        int totalPoolCap
+    )
+    {
+        if (slotCounts.Count <= 1)
+        {
+            var singleSlot = slotCounts.Keys.FirstOrDefault(MealSlot.Dinner);
+            return new Dictionary<MealSlot, int> { [singleSlot] = totalPoolCap };
+        }
+
+        var ordered = slotCounts.OrderBy(kvp => (int)kvp.Key).ToList();
+        var totalRequested = Math.Max(1, ordered.Sum(kvp => kvp.Value));
+        var caps = new Dictionary<MealSlot, int>(ordered.Count);
+
+        var assigned = 0;
+        for (var i = 0; i < ordered.Count; i++)
+        {
+            var (slot, desired) = ordered[i];
+            if (i == ordered.Count - 1)
+            {
+                caps[slot] = Math.Max(1, totalPoolCap - assigned);
+            }
+            else
+            {
+                var share = (int)Math.Round(totalPoolCap * (double)desired / totalRequested);
+                var minTarget = Math.Min(totalPoolCap / ordered.Count, Math.Max(4, desired * 2));
+                var cap = Math.Clamp(
+                    Math.Max(share, minTarget),
+                    1,
+                    totalPoolCap - assigned - (ordered.Count - 1 - i)
+                );
+                caps[slot] = cap;
+                assigned += cap;
+            }
+        }
+
+        return caps;
+    }
+
+    private List<SearchableRecipe> SelectFinalRagPool(
+        List<SearchableRecipe> slotEligibleRecipes,
+        HashSet<Guid> pooledIds,
+        Dictionary<Guid, double> bestScoreByRecipeId,
+        Dictionary<MealSlot, int> effectiveSlotCounts,
+        Dictionary<MealSlot, bool> allowTier3BySlot,
+        int poolCap
+    )
+    {
+        var sortedPool = slotEligibleRecipes
+            .Where(item => pooledIds.Count == 0 || pooledIds.Contains(item.Recipe.Id))
+            .OrderByDescending(item => bestScoreByRecipeId.GetValueOrDefault(item.Recipe.Id))
+            .ThenByDescending(item => item.Recipe.AverageRating ?? 0m)
+            .ThenByDescending(item => item.Recipe.TimesCooked)
+            .ThenBy(item => item.Recipe.Id)
+            .ToList();
+
+        if (effectiveSlotCounts.Count <= 1)
+        {
+            return sortedPool.Take(poolCap).ToList();
+        }
+
+        var slotSubCaps = ComputeSlotSubPoolCaps(effectiveSlotCounts, poolCap);
+        var selected = new List<SearchableRecipe>(poolCap);
+        var selectedIds = new HashSet<Guid>();
+
+        foreach (var (slot, subCap) in slotSubCaps.OrderBy(kvp => (int)kvp.Key))
+        {
+            var maxTier = allowTier3BySlot.GetValueOrDefault(slot) ? 3 : 2;
+            var slotPicks = sortedPool
+                .Where(item =>
+                    !selectedIds.Contains(item.Recipe.Id) && ClassifySlotFit(item, slot) <= maxTier
+                )
+                .OrderBy(item => ClassifySlotFit(item, slot))
+                .ThenByDescending(item => bestScoreByRecipeId.GetValueOrDefault(item.Recipe.Id))
+                .Take(subCap)
+                .ToList();
+
+            foreach (var pick in slotPicks)
+            {
+                selected.Add(pick);
+                selectedIds.Add(pick.Recipe.Id);
+                if (selected.Count >= poolCap)
+                {
+                    break;
+                }
+            }
+
+            if (selected.Count >= poolCap)
+            {
+                break;
+            }
+        }
+
+        if (selected.Count < poolCap)
+        {
+            foreach (var item in sortedPool)
+            {
+                if (selectedIds.Add(item.Recipe.Id))
+                {
+                    selected.Add(item);
+                    if (selected.Count >= poolCap)
+                    {
+                        break;
+                    }
+                }
+            }
+        }
+
+        return selected;
     }
 
     private List<SearchableRecipe> SelectRandomizedMealPlanCandidates(
         List<SearchableRecipe> eligibleRecipes,
         int poolCap,
+        Dictionary<MealSlot, int> effectiveSlotCounts,
+        Dictionary<MealSlot, bool> allowTier3BySlot,
+        HashSet<Guid> recentlyScheduledIds,
+        DateTimeOffset utcNow
+    )
+    {
+        if (effectiveSlotCounts.Count <= 1)
+        {
+            var singleSlot = effectiveSlotCounts.Keys.FirstOrDefault(MealSlot.Dinner);
+            var desiredCount = effectiveSlotCounts.GetValueOrDefault(singleSlot, 4);
+            var allowTier3 = allowTier3BySlot.GetValueOrDefault(singleSlot);
+            return SelectRandomizedSingleSlot(
+                eligibleRecipes,
+                poolCap,
+                desiredCount,
+                singleSlot,
+                allowTier3,
+                recentlyScheduledIds,
+                utcNow
+            );
+        }
+
+        var slotSubCaps = ComputeSlotSubPoolCaps(effectiveSlotCounts, poolCap);
+        var combined = new List<SearchableRecipe>(poolCap);
+        var selectedIds = new HashSet<Guid>();
+
+        foreach (var (slot, subCap) in slotSubCaps.OrderBy(kvp => (int)kvp.Key))
+        {
+            var desiredCount = effectiveSlotCounts.GetValueOrDefault(slot, 1);
+            var allowTier3 = allowTier3BySlot.GetValueOrDefault(slot);
+            var remainingPool = eligibleRecipes
+                .Where(item => !selectedIds.Contains(item.Recipe.Id))
+                .ToList();
+
+            var slotSelection = SelectRandomizedSingleSlot(
+                remainingPool,
+                subCap,
+                desiredCount,
+                slot,
+                allowTier3,
+                recentlyScheduledIds,
+                utcNow
+            );
+
+            foreach (var item in slotSelection)
+            {
+                if (selectedIds.Add(item.Recipe.Id))
+                {
+                    combined.Add(item);
+                }
+            }
+        }
+
+        for (var i = combined.Count - 1; i > 0; i--)
+        {
+            var j = _random.Next(i + 1);
+            (combined[i], combined[j]) = (combined[j], combined[i]);
+        }
+
+        return combined;
+    }
+
+    private List<SearchableRecipe> SelectRandomizedSingleSlot(
+        List<SearchableRecipe> eligibleRecipes,
+        int poolCap,
         int requestedMealCount,
-        MealSlot? defaultSlot,
+        MealSlot defaultSlot,
+        bool allowTier3Fallback,
         HashSet<Guid> recentlyScheduledIds,
         DateTimeOffset utcNow
     )
@@ -910,7 +1033,7 @@ public sealed partial class RecipeEmbeddingService(
             {
                 primaryPool.Add((item, tier));
             }
-            else
+            else if (allowTier3Fallback)
             {
                 fallbackPool.Add((item, tier));
             }
@@ -1008,22 +1131,25 @@ public sealed partial class RecipeEmbeddingService(
         else
         {
             selected = primaryPool.Select(p => p.Item).ToList();
-            var minDesiredPool = Math.Min(poolCap, Math.Max(requestedMealCount * 2, 10));
-            if (selected.Count < minDesiredPool && fallbackPool.Count > 0)
+            if (allowTier3Fallback && fallbackPool.Count > 0)
             {
-                var needed = minDesiredPool - selected.Count;
-                var fallbackPicks = WeightedSampleWithoutReplacement(
-                    fallbackPool,
-                    Math.Min(needed, fallbackPool.Count),
-                    entry =>
-                        ComputeRandomSelectionWeight(
-                            entry.Item,
-                            entry.Tier,
-                            recentlyScheduledIds,
-                            utcNow
-                        )
-                );
-                selected.AddRange(fallbackPicks.Select(f => f.Item));
+                var minDesiredPool = Math.Min(poolCap, Math.Max(requestedMealCount * 2, 10));
+                if (selected.Count < minDesiredPool)
+                {
+                    var needed = minDesiredPool - selected.Count;
+                    var fallbackPicks = WeightedSampleWithoutReplacement(
+                        fallbackPool,
+                        Math.Min(needed, fallbackPool.Count),
+                        entry =>
+                            ComputeRandomSelectionWeight(
+                                entry.Item,
+                                entry.Tier,
+                                recentlyScheduledIds,
+                                utcNow
+                            )
+                    );
+                    selected.AddRange(fallbackPicks.Select(f => f.Item));
+                }
             }
         }
 
@@ -1066,102 +1192,14 @@ public sealed partial class RecipeEmbeddingService(
         return keyed.Take(count).Select(x => x.Item).ToList();
     }
 
-    private static int ClassifySlotFit(SearchableRecipe item, MealSlot? slot)
-    {
-        var tags = item.TagNames;
-        var hasAnyCourseTag = tags.Any(RecognizedCourseTags.Contains);
-        var effectiveSlot = slot ?? MealSlot.Dinner;
-
-        return effectiveSlot switch
-        {
-            MealSlot.Breakfast => ClassifyBreakfastFit(tags, hasAnyCourseTag),
-            MealSlot.Lunch => ClassifyLunchFit(tags, hasAnyCourseTag),
-            MealSlot.SnackPrep => ClassifySnackFit(tags, hasAnyCourseTag),
-            _ => ClassifyDinnerFit(tags, hasAnyCourseTag),
-        };
-    }
-
-    private static int ClassifyDinnerFit(HashSet<string> tags, bool hasAnyCourseTag)
-    {
-        if (tags.Any(NonMealAccessoryTags.Contains))
-        {
-            return 3;
-        }
-
-        var isExplicitMain = tags.Contains("main course");
-        if (!isExplicitMain && tags.Any(NonDinnerCourseTags.Contains))
-        {
-            return 3;
-        }
-
-        if (tags.Any(DinnerPrimaryCourseTags.Contains))
-        {
-            return 1;
-        }
-
-        return hasAnyCourseTag ? 3 : 2;
-    }
-
-    private static int ClassifyLunchFit(HashSet<string> tags, bool hasAnyCourseTag)
-    {
-        if (tags.Any(NonMealAccessoryTags.Contains))
-        {
-            return 3;
-        }
-
-        var isExplicitMain = tags.Contains("main course") || tags.Contains("lunch");
-        if (!isExplicitMain && tags.Any(NonDinnerCourseTags.Contains))
-        {
-            return 3;
-        }
-
-        if (tags.Any(LunchPrimaryCourseTags.Contains))
-        {
-            return 1;
-        }
-
-        return hasAnyCourseTag ? 3 : 2;
-    }
-
-    private static int ClassifyBreakfastFit(HashSet<string> tags, bool hasAnyCourseTag)
-    {
-        if (tags.Any(BreakfastExcludedTags.Contains))
-        {
-            return 3;
-        }
-
-        if (tags.Any(BreakfastPrimaryCourseTags.Contains))
-        {
-            return 1;
-        }
-
-        if (!hasAnyCourseTag)
-        {
-            return 2;
-        }
-
-        if ((tags.Contains("baked goods") || tags.Contains("bread")) && !tags.Contains("side dish"))
-        {
-            return 2;
-        }
-
-        return 3;
-    }
-
-    private static int ClassifySnackFit(HashSet<string> tags, bool hasAnyCourseTag)
-    {
-        if (tags.Any(SnackExcludedTags.Contains))
-        {
-            return 3;
-        }
-
-        if (tags.Any(SnackPrimaryCourseTags.Contains))
-        {
-            return 1;
-        }
-
-        return hasAnyCourseTag ? 3 : 2;
-    }
+    private static int ClassifySlotFit(SearchableRecipe item, MealSlot? slot) =>
+        RecipeMealClassifier.ClassifySlotFit(
+            item.TagNames,
+            item.Recipe.Title,
+            item.Recipe.YieldDisplay,
+            item.IsReferencedAsSubRecipe,
+            slot ?? MealSlot.Dinner
+        );
 
     private static double ComputeRandomSelectionWeight(
         SearchableRecipe item,
@@ -1216,13 +1254,15 @@ public sealed partial class RecipeEmbeddingService(
 
     private static List<LlmCookbookRecipeCandidate> BuildCandidateCards(
         List<SearchableRecipe> selection,
-        DateTimeOffset utcNow
+        DateTimeOffset utcNow,
+        Dictionary<MealSlot, bool> allowTier3BySlot
     )
     {
         var candidates = new List<LlmCookbookRecipeCandidate>(selection.Count);
         for (var i = 0; i < selection.Count; i++)
         {
-            var r = selection[i].Recipe;
+            var searchable = selection[i];
+            var r = searchable.Recipe;
             int? daysSinceLastCooked = r.LastCookedAt.HasValue
                 ? Math.Max(0, (int)(utcNow - r.LastCookedAt.Value).TotalDays)
                 : null;
@@ -1244,6 +1284,19 @@ public sealed partial class RecipeEmbeddingService(
                 .Take(10)
                 .ToList();
 
+            var eligibleSlots = AllMealSlots
+                .Where(slot => ClassifySlotFit(searchable, slot) <= 2)
+                .Select(slot => slot.ToString())
+                .ToList();
+
+            if (eligibleSlots.Count == 0)
+            {
+                eligibleSlots = allowTier3BySlot
+                    .Where(kvp => kvp.Value)
+                    .Select(kvp => kvp.Key.ToString())
+                    .ToList();
+            }
+
             candidates.Add(
                 new LlmCookbookRecipeCandidate(
                     CatalogIndex: i + 1,
@@ -1256,7 +1309,8 @@ public sealed partial class RecipeEmbeddingService(
                     KeyIngredients: keyIngredients,
                     AverageRating: r.AverageRating,
                     TimesCooked: r.TimesCooked,
-                    DaysSinceLastCooked: daysSinceLastCooked
+                    DaysSinceLastCooked: daysSinceLastCooked,
+                    EligibleSlots: eligibleSlots.Count > 0 ? eligibleSlots : null
                 )
             );
         }
@@ -1538,7 +1592,8 @@ public sealed partial class RecipeEmbeddingService(
 
     private static SearchableRecipe BuildSearchableRecipe(
         Recipe recipe,
-        Dictionary<Guid, Recipe> subRecipesById
+        Dictionary<Guid, Recipe> subRecipesById,
+        bool isReferencedAsSubRecipe
     )
     {
         var tagTokens = new HashSet<string>(StringComparer.Ordinal);
@@ -1640,7 +1695,8 @@ public sealed partial class RecipeEmbeddingService(
             IngredientTokens: ingredientTokens,
             AllTokens: allTokens,
             AllPhrases: allPhrases,
-            PerishableFoodItemIds: perishableFoodItemIds
+            PerishableFoodItemIds: perishableFoodItemIds,
+            IsReferencedAsSubRecipe: isReferencedAsSubRecipe
         );
     }
 
@@ -2076,6 +2132,7 @@ public sealed partial class RecipeEmbeddingService(
         HashSet<string> IngredientTokens,
         HashSet<string> AllTokens,
         HashSet<string> AllPhrases,
-        HashSet<Guid> PerishableFoodItemIds
+        HashSet<Guid> PerishableFoodItemIds,
+        bool IsReferencedAsSubRecipe
     );
 }

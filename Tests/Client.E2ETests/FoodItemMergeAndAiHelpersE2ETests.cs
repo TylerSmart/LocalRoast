@@ -742,8 +742,8 @@ public sealed class FoodItemMergeAndAiHelpersE2ETests : E2ETestBase
         await Page.Locator("mat-button-toggle[value='next7'] button").ClickAsync();
         await Expect(Page.Locator(".meal-entry-card")).ToHaveCountAsync(0);
 
-        // Verify Draft Plan AI action is available inside the header overflow menu
-        await Page.Locator("button.calendar-actions-menu-btn").ClickAsync();
+        // Verify Draft Plan AI action is a standalone top-level button (overflow menu only appears in Week view)
+        await Expect(Page.Locator("button.calendar-actions-menu-btn")).Not.ToBeVisibleAsync();
         var draftWeekBtn = Page.Locator("button.draft-week-ai-btn");
         await Expect(draftWeekBtn).ToBeVisibleAsync();
 
@@ -752,17 +752,45 @@ public sealed class FoodItemMergeAndAiHelpersE2ETests : E2ETestBase
         var draftDialog = Page.Locator("app-draft-meal-plan-dialog");
         await Expect(draftDialog).ToBeVisibleAsync();
 
-        // 2. Verify Draft Plan is immediately enabled with blank preferences and runs surprise draft (skipping Stage 1)
+        // 2. Verify interactive 7x4 lifestyle grid defaults (7 open Dinners), row toggle, servings & leftovers pairing
         var draftSubmitBtn = draftDialog.Locator(".draft-submit-btn");
         await Expect(draftSubmitBtn).ToBeEnabledAsync();
-        await draftDialog.Locator(".meal-count-field mat-select").ClickAsync();
-        await Page.GetByRole(AriaRole.Option, new() { Name = "2", Exact = true }).ClickAsync();
+        await Expect(draftDialog.Locator("[data-testid='draft-plan-summary']"))
+            .ToContainTextAsync("7 Cook");
+
         await draftDialog.Locator(".household-servings-input").FillAsync("2");
 
-        // Click Draft Plan without entering a prompt
+        // Toggle Dinner row off -> 0 active slots disables Draft Plan button
+        var dinnerRowToggle = draftDialog.Locator(".slot-row-toggle-btn[data-slot='Dinner']");
+        await dinnerRowToggle.ClickAsync();
+        await Expect(draftDialog.Locator("[data-testid='draft-plan-summary']"))
+            .ToContainTextAsync("0 Cook");
+        await Expect(draftSubmitBtn).ToBeDisabledAsync();
+
+        // Configure 2 Cook slots (Day 0 Dinner @ 3p, Day 2 Dinner @ 2p) + 3 Leftovers slots (Day 1 Lunch/Dinner @ 2p, Day 3 Dinner @ 2p)
+        var dinnerCells = draftDialog.Locator(".schedule-grid-cell[data-slot='Dinner']");
+        var lunchCells = draftDialog.Locator(".schedule-grid-cell[data-slot='Lunch']");
+
+        await dinnerCells.Nth(0).ClickAsync(); // Cook
+        await dinnerCells.Nth(0).Locator(".cell-servings-inc").ClickAsync(); // 2p -> 3p
+        await lunchCells.Nth(1).ClickAsync(); // Cook
+        await lunchCells.Nth(1).ClickAsync(); // Leftovers
+        await dinnerCells.Nth(1).ClickAsync(); // Cook
+        await dinnerCells.Nth(1).ClickAsync(); // Leftovers
+        await dinnerCells.Nth(2).ClickAsync(); // Cook
+        await dinnerCells.Nth(3).ClickAsync(); // Cook
+        await dinnerCells.Nth(3).ClickAsync(); // Leftovers
+
+        await Expect(draftDialog.Locator("[data-testid='draft-plan-summary']"))
+            .ToContainTextAsync("2 Cook");
+        await Expect(draftDialog.Locator("[data-testid='draft-plan-summary']"))
+            .ToContainTextAsync("3 Leftovers");
+        await Expect(draftSubmitBtn).ToBeEnabledAsync();
+
+        // Click Draft Plan without entering a prompt (surprise draft skips Stage 1)
         await draftSubmitBtn.ClickAsync();
 
-        // Verify Candidate Cards are rendered
+        // Verify Candidate Cards are rendered with grouped leftover servings
         var candidateCards = draftDialog.Locator(".candidate-card");
         await Expect(candidateCards).ToHaveCountAsync(2, new() { Timeout = 10000 });
         Assert.AreEqual(0, mockServer.DecomposeCallCount);
@@ -776,10 +804,22 @@ public sealed class FoodItemMergeAndAiHelpersE2ETests : E2ETestBase
         await Expect(draftDialog.Locator(".candidate-rationale").First)
             .ToContainTextAsync("High-protein family favorite");
         await Expect(candidateCards.First.Locator(".servings-badge"))
-            .ToContainTextAsync("Cook 8 servings");
+            .ToContainTextAsync("Cook 7 servings");
         await Expect(candidateCards.Nth(1).Locator(".servings-badge"))
-            .ToContainTextAsync("Cook 6 servings");
-        await Expect(candidateCards.First).ToContainTextAsync("Leftovers:");
+            .ToContainTextAsync("Cook 4 servings");
+        await Expect(candidateCards.First.Locator(".assigned-leftover-row")).ToHaveCountAsync(2);
+        await Expect(candidateCards.Nth(1).Locator(".assigned-leftover-row")).ToHaveCountAsync(1);
+
+        // Reassign Day 3 Dinner leftovers from second candidate to first candidate via dropdown
+        var leftoverSourceSelect = candidateCards.Nth(1).Locator("select.leftover-source-select");
+        await Expect(leftoverSourceSelect).ToBeVisibleAsync();
+        await leftoverSourceSelect.SelectOptionAsync(new SelectOptionValue { Index = 0 });
+        await Expect(candidateCards.First.Locator(".servings-badge"))
+            .ToContainTextAsync("Cook 9 servings");
+        await Expect(candidateCards.Nth(1).Locator(".servings-badge"))
+            .ToContainTextAsync("Cook 2 servings");
+        await Expect(candidateCards.First.Locator(".assigned-leftover-row")).ToHaveCountAsync(3);
+
         var originalDates = await draftDialog
             .Locator(".candidate-date-input")
             .EvaluateAllAsync<string[]>("inputs => inputs.map(input => input.value)");
@@ -800,9 +840,9 @@ public sealed class FoodItemMergeAndAiHelpersE2ETests : E2ETestBase
             .EvaluateAllAsync<string[]>("inputs => inputs.map(input => input.value)");
         CollectionAssert.AreEqual(originalDates, retriedDates);
         await Expect(candidateCards.First.Locator(".servings-badge"))
-            .ToContainTextAsync("Cook 8 servings");
+            .ToContainTextAsync("Cook 9 servings");
 
-        // Deselect second candidate
+        // Deselect second candidate (1 Cook + 3 Leftovers = 4 meals)
         var secondCheckbox = candidateCards.Nth(1).Locator(".candidate-checkbox");
         await secondCheckbox.ClickAsync();
 
@@ -837,17 +877,21 @@ public sealed class FoodItemMergeAndAiHelpersE2ETests : E2ETestBase
             $"Expected no horizontal overflow on mobile calendar view, but scrollWidth ({pageScrollWidth}) > clientWidth ({pageClientWidth})"
         );
 
-        // Re-open Draft dialog in 360px viewport and verify zero overflow (including unmet craving notes)
+        // Re-open Draft dialog in 360px viewport and verify zero overflow (including mobile grid & unmet craving notes)
         mockServer.UnmetCravingNotes =
         [
             "No authentic Thai curry recipes matched in your cookbook.",
         ];
-        await Page.Locator("button.calendar-actions-menu-btn").ClickAsync();
         await Page.Locator("button.draft-week-ai-btn").ClickAsync();
         await Expect(draftDialog).ToBeVisibleAsync();
+        await Expect(draftDialog.Locator(".schedule-mobile-list")).ToBeVisibleAsync();
+        // Reset Dinner row off then toggle open Day 2 on to guarantee 1 active Cook slot on mobile
+        var mobileDinnerChip = draftDialog.Locator(".mobile-slot-toggle-chip[data-slot='Dinner']");
+        await mobileDinnerChip.ClickAsync();
+        await draftDialog.Locator(".mobile-day-toggle-btn").Nth(2).ClickAsync();
+        await Expect(draftDialog.Locator("[data-testid='draft-plan-summary']"))
+            .ToContainTextAsync("1 Cook");
         await draftDialog.Locator(".preset-chip").First.ClickAsync();
-        await draftDialog.Locator(".meal-count-field mat-select").ClickAsync();
-        await Page.GetByRole(AriaRole.Option, new() { Name = "1", Exact = true }).ClickAsync();
         await draftDialog.Locator(".draft-submit-btn").ClickAsync();
         await Expect(draftDialog.Locator(".candidate-card")).ToHaveCountAsync(1);
         Assert.IsGreaterThanOrEqualTo(1, mockServer.DecomposeCallCount);

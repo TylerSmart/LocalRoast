@@ -115,6 +115,12 @@ public record GenerateFromMealPlanRequest(
     IReadOnlyList<Guid>? PromotePantryFoodItemIds = null
 );
 
+public record CreateAndGenerateFromMealPlanRequest(
+    [Required, MaxLength(150)] string Name,
+    bool IsPinned = false,
+    [Required] GenerateFromMealPlanRequest? Generation = null
+);
+
 public record ShoppingListCandidateItemDto(
     Guid? FoodItemId,
     string DisplayName,

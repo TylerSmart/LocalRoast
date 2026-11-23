@@ -499,10 +499,10 @@ public sealed class MealPlanService(AppDbContext dbContext, TimeProvider? timePr
             );
         }
 
-        if (request.Entries.Count > 28)
+        if (request.Entries.Count > 50)
         {
             throw new DomainValidationException(
-                "A maximum of 28 draft meal plan entries can be applied at once."
+                "A maximum of 50 draft meal plan entries can be applied at once."
             );
         }
 
@@ -521,7 +521,12 @@ public sealed class MealPlanService(AppDbContext dbContext, TimeProvider? timePr
                     || request.Entries[sourceIndex].EntryType != MealPlanEntryType.Recipe
                     || request.Entries[sourceIndex].IsOnDeck
                     || req.IsOnDeck
-                    || req.ScheduledDate <= request.Entries[sourceIndex].ScheduledDate
+                    || req.ScheduledDate < request.Entries[sourceIndex].ScheduledDate
+                    || (
+                        req.ScheduledDate == request.Entries[sourceIndex].ScheduledDate
+                        && (req.Slot ?? MealSlot.Dinner)
+                            <= (request.Entries[sourceIndex].Slot ?? MealSlot.Dinner)
+                    )
                     || (
                         req.RecipeId.HasValue
                         && req.RecipeId != request.Entries[sourceIndex].RecipeId

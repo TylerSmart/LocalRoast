@@ -46,6 +46,26 @@ export interface KitchenAnswerDto {
   modelUsed: string;
 }
 
+export interface DraftMealLeftoverSlotRequest {
+  scheduledDate: string;
+  slot: MealSlot;
+  servings: number;
+}
+
+export interface DraftMealCookSlotRequest {
+  isOnDeck: boolean;
+  scheduledDate?: string | null;
+  slot?: MealSlot | null;
+  servings: number;
+  leftovers?: DraftMealLeftoverSlotRequest[] | null;
+}
+
+export interface DraftMealLeftoverSlotDto {
+  scheduledDate: string;
+  slot: MealSlot;
+  servings: number;
+}
+
 export interface DraftWeeklyMealPlanRequest {
   weekStartDate?: string | null;
   prompt?: string | null;
@@ -55,6 +75,7 @@ export interface DraftWeeklyMealPlanRequest {
   servingsPerMeal?: number;
   todayDate?: string;
   excludedRecipeIds?: string[];
+  requestedSlots?: DraftMealCookSlotRequest[];
 }
 
 export interface DraftMealPlanCandidateDto {
@@ -67,6 +88,8 @@ export interface DraftMealPlanCandidateDto {
   targetServings: number;
   rationale: string;
   leftoverDates?: string[];
+  cookServings?: number;
+  leftoverSlots?: DraftMealLeftoverSlotDto[];
 }
 
 export interface DraftMealPlanResponseDto {

@@ -455,4 +455,80 @@ public sealed class MealPlanE2ETests : E2ETestBase
         await Expect(todayCol.Locator(".meal-entry-card", new() { HasText = "Weekend BBQ" }))
             .ToBeVisibleAsync();
     }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task MealPlan_AltDrag_DuplicatesEntryPreservingSource()
+    {
+        await RegisterAndLoginAsync();
+
+        await Page.Locator("nav.desktop-nav a", new() { HasText = "Meal Plan" }).ClickAsync();
+        await Expect(Page).ToHaveURLAsync(new Regex(".*/meal-plan.*"));
+        await Expect(Page.Locator(".week-days-grid .day-column")).ToHaveCountAsync(7);
+
+        var sourceSlot = Page.Locator(".week-days-grid .day-column")
+            .First.Locator(".slot-bucket")
+            .Nth(2); // Day 0 Dinner
+        var targetSlot = Page.Locator(".week-days-grid .day-column")
+            .Nth(1)
+            .Locator(".slot-bucket")
+            .Nth(2); // Day 1 Dinner
+
+        await sourceSlot.Locator("button.slot-add-btn").ClickAsync();
+        var dialog = Page.Locator("mat-dialog-container");
+        await Expect(dialog.Locator("h2")).ToContainTextAsync("Plan a Meal");
+
+        var title = $"Alt Drag {Guid.NewGuid():N}"[..18];
+        await dialog.Locator("mat-button-toggle[value='FreeformNote'] button").ClickAsync();
+        await dialog.Locator("input[formcontrolname='customTitle']").FillAsync(title);
+        await dialog
+            .Locator("button[color='primary']", new() { HasText = "Plan Meal" })
+            .ClickAsync();
+        await Expect(dialog).Not.ToBeVisibleAsync();
+
+        var sourceCard = sourceSlot.Locator(".meal-entry-card", new() { HasText = title });
+        await Expect(sourceCard).ToBeVisibleAsync();
+
+        await sourceCard.ScrollIntoViewIfNeededAsync();
+        await targetSlot.ScrollIntoViewIfNeededAsync();
+
+        var sourceBox = await sourceCard.BoundingBoxAsync();
+        var targetBox = await targetSlot.BoundingBoxAsync();
+        Assert.IsNotNull(sourceBox);
+        Assert.IsNotNull(targetBox);
+
+        var startX = sourceBox.X + sourceBox.Width / 2f;
+        var startY = sourceBox.Y + sourceBox.Height / 2f;
+        var endX = targetBox.X + targetBox.Width / 2f;
+        var endY = targetBox.Y + targetBox.Height / 2f;
+
+        await Page.Mouse.MoveAsync(startX, startY);
+        await Page.Mouse.DownAsync();
+        await Page.Keyboard.DownAsync("Alt");
+
+        const int steps = 12;
+        for (var i = 1; i <= steps; i++)
+        {
+            var x = startX + ((endX - startX) * i / steps);
+            var y = startY + ((endY - startY) * i / steps);
+            await Page.Mouse.MoveAsync(x, y);
+            await Page.WaitForTimeoutAsync(20);
+        }
+
+        await Expect(Page.Locator("body")).ToHaveClassAsync(new Regex(".*meal-drag-copy-mode.*"));
+
+        await Page.Mouse.UpAsync();
+        await Page.Keyboard.UpAsync("Alt");
+
+        await Expect(Page.Locator(".meal-entry-card", new() { HasText = title }))
+            .ToHaveCountAsync(2);
+        await Expect(sourceSlot.Locator(".meal-entry-card", new() { HasText = title }))
+            .ToHaveCountAsync(1);
+        await Expect(targetSlot.Locator(".meal-entry-card", new() { HasText = title }))
+            .ToHaveCountAsync(1);
+
+        await Page.ReloadAsync();
+        await Expect(Page.Locator(".meal-entry-card", new() { HasText = title }))
+            .ToHaveCountAsync(2);
+    }
 }

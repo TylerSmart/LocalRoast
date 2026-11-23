@@ -92,6 +92,7 @@ describe('MealPlanCalendarComponent', () => {
     getRange: vi
       .fn()
       .mockReturnValue(of({ startDate: '', endDate: '', scheduledEntries: [], onDeckEntries: [] })),
+    createEntry: vi.fn().mockReturnValue(of({ ...mockWeek.days[0].entries[0], id: 'e-copy' })),
     cookTonight: vi.fn().mockReturnValue(of({} as MealPlanEntryDto)),
     moveEntry: vi.fn().mockReturnValue(of({} as MealPlanEntryDto)),
     deleteEntry: vi.fn().mockReturnValue(of(undefined)),
@@ -265,14 +266,13 @@ describe('MealPlanCalendarComponent', () => {
     expect(mockDialog.open).toHaveBeenCalled();
   });
 
-  it('renders Draft Plan action in header overflow menu when aiHelper is available and opens dialog', () => {
+  it('renders Draft with AI as a top-level button outside the overflow menu and opens dialog with week data', () => {
     const el = fixture.nativeElement as HTMLElement;
-    const menuBtn = el.querySelector('.calendar-actions-menu-btn') as HTMLButtonElement;
-    expect(menuBtn).toBeTruthy();
-    menuBtn.click();
-    fixture.detectChanges();
+    expect(el.querySelector('.calendar-actions-menu-btn')).toBeNull();
 
-    const draftBtn = document.querySelector('.draft-week-ai-btn') as HTMLButtonElement;
+    const draftBtn = el.querySelector(
+      '.calendar-top-actions .draft-week-ai-btn',
+    ) as HTMLButtonElement;
     expect(draftBtn).toBeTruthy();
 
     mockDialog.open.mockReturnValue({
@@ -286,9 +286,54 @@ describe('MealPlanCalendarComponent', () => {
       expect.objectContaining({
         data: {
           weekStartDate: component['activePeriodStart'](),
+          existingWeekData: component['weekData'](),
         },
       }),
     );
+
+    component['setViewMode']('week');
+    fixture.detectChanges();
+    expect(el.querySelector('.calendar-actions-menu-btn')).toBeTruthy();
+  });
+
+  it('duplicates a meal card via Alt+Drag without moving the original entry', () => {
+    const entry = mockWeek.days[0].entries[0];
+    const targetDate = addDaysIso(getTodayIsoLocal(), 2);
+
+    component['onWindowKeyEvent'](new KeyboardEvent('keydown', { key: 'Alt', altKey: true }));
+    component['onDragStarted']({
+      source: {} as CdkDrag,
+      event: new MouseEvent('mousedown', { altKey: true }),
+    });
+    expect(document.body.classList.contains('meal-drag-copy-mode')).toBe(true);
+
+    component['onDrop']({
+      item: { data: entry } as unknown as CdkDrag,
+      container: { data: { isOnDeck: false, date: targetDate, slot: 'Lunch' } },
+      previousContainer: { data: {} },
+      previousIndex: 0,
+      currentIndex: 0,
+      isPointerOverContainer: true,
+      distance: { x: 0, y: 0 },
+      dropPoint: { x: 0, y: 0 },
+      event: new MouseEvent('mouseup', { altKey: true }),
+    } as never);
+
+    expect(mockMealPlanService.createEntry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entryType: 'Recipe',
+        isOnDeck: false,
+        scheduledDate: targetDate,
+        slot: 'Lunch',
+        recipeId: 'r-1',
+        targetServings: 4,
+      }),
+    );
+    expect(mockMealPlanService.moveEntry).not.toHaveBeenCalled();
+    expect(document.body.classList.contains('meal-drag-copy-mode')).toBe(false);
+
+    component['onWindowKeyEvent'](new KeyboardEvent('keyup', { key: 'Alt', altKey: false }));
+    expect(component['isAltPressed']()).toBe(false);
   });
 
   it('configures cdkDragStartDelay with touch delay and zero mouse delay for mobile scroll mitigation', () => {

@@ -48,15 +48,32 @@ public record AskKitchenQuestionRequest(
 
 public record KitchenAnswerDto(string Answer, string ModelUsed);
 
+public record DraftMealLeftoverSlotRequest(
+    DateOnly ScheduledDate,
+    MealSlot Slot,
+    [Range(typeof(decimal), "0.25", "999")] decimal Servings = 4
+);
+
+public record DraftMealCookSlotRequest(
+    bool IsOnDeck = false,
+    DateOnly? ScheduledDate = null,
+    MealSlot? Slot = null,
+    [Range(typeof(decimal), "0.25", "999")] decimal Servings = 4,
+    IReadOnlyList<DraftMealLeftoverSlotRequest>? Leftovers = null
+);
+
+public record DraftMealLeftoverSlotDto(DateOnly ScheduledDate, MealSlot Slot, decimal Servings);
+
 public record DraftWeeklyMealPlanRequest(
     DateOnly? WeekStartDate = null,
     [MaxLength(600)] string? Prompt = null,
-    [Range(1, 14)] int MealCount = 4,
+    [Range(1, 28)] int MealCount = 4,
     MealSlot DefaultSlot = MealSlot.Dinner,
     bool PlaceOnDeck = false,
     [Range(typeof(decimal), "0.25", "999")] decimal ServingsPerMeal = 4,
     DateOnly? TodayDate = null,
-    [MaxLength(150)] IReadOnlyList<Guid>? ExcludedRecipeIds = null
+    [MaxLength(150)] IReadOnlyList<Guid>? ExcludedRecipeIds = null,
+    IReadOnlyList<DraftMealCookSlotRequest>? RequestedSlots = null
 );
 
 public record DraftMealPlanCandidateDto(
@@ -68,7 +85,9 @@ public record DraftMealPlanCandidateDto(
     MealSlot? Slot,
     decimal TargetServings,
     string Rationale,
-    IReadOnlyList<DateOnly>? LeftoverDates = null
+    IReadOnlyList<DateOnly>? LeftoverDates = null,
+    decimal CookServings = 0,
+    IReadOnlyList<DraftMealLeftoverSlotDto>? LeftoverSlots = null
 );
 
 public record DraftMealPlanResponseDto(

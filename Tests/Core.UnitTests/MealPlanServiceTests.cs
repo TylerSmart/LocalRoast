@@ -455,4 +455,70 @@ public sealed class MealPlanServiceTests
         Assert.AreEqual(1, week.OnDeckEntries.Count);
         Assert.AreEqual(0, week.Days[0].Entries.Count);
     }
+
+    [TestMethod]
+    public async Task ApplyDraftEntriesAsync_AllowsSameDayLunchToDinnerLeftovers_AndEnforcesOrdering()
+    {
+        var sunday = new DateOnly(2026, 11, 1);
+
+        var applied = await _service.ApplyDraftEntriesAsync(
+            new ApplyDraftMealPlanRequest(
+                WeekStartDate: sunday,
+                Entries:
+                [
+                    new CreateMealPlanEntryRequest(
+                        EntryType: MealPlanEntryType.Recipe,
+                        IsOnDeck: false,
+                        ScheduledDate: sunday,
+                        Slot: MealSlot.Lunch,
+                        RecipeId: _recipe1.Id,
+                        TargetServings: 4m
+                    ),
+                    new CreateMealPlanEntryRequest(
+                        EntryType: MealPlanEntryType.Leftovers,
+                        IsOnDeck: false,
+                        ScheduledDate: sunday,
+                        Slot: MealSlot.Dinner,
+                        RecipeId: _recipe1.Id,
+                        TargetServings: 2m,
+                        SourceDraftEntryIndex: 0
+                    ),
+                ]
+            )
+        );
+
+        Assert.AreEqual(2, applied.Days[0].Entries.Count);
+        var cookEntry = applied.Days[0].Entries.Single(e => !e.IsLeftovers);
+        var leftoverEntry = applied.Days[0].Entries.Single(e => e.IsLeftovers);
+        Assert.AreEqual(cookEntry.Id, leftoverEntry.SourceMealPlanEntryId);
+
+        // Same-day Dinner -> Lunch leftover must fail chronological validation
+        await Assert.ThrowsAsync<DomainValidationException>(() =>
+            _service.ApplyDraftEntriesAsync(
+                new ApplyDraftMealPlanRequest(
+                    WeekStartDate: sunday,
+                    Entries:
+                    [
+                        new CreateMealPlanEntryRequest(
+                            EntryType: MealPlanEntryType.Recipe,
+                            IsOnDeck: false,
+                            ScheduledDate: sunday,
+                            Slot: MealSlot.Dinner,
+                            RecipeId: _recipe1.Id,
+                            TargetServings: 4m
+                        ),
+                        new CreateMealPlanEntryRequest(
+                            EntryType: MealPlanEntryType.Leftovers,
+                            IsOnDeck: false,
+                            ScheduledDate: sunday,
+                            Slot: MealSlot.Lunch,
+                            RecipeId: _recipe1.Id,
+                            TargetServings: 2m,
+                            SourceDraftEntryIndex: 0
+                        ),
+                    ]
+                )
+            )
+        );
+    }
 }

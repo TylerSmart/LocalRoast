@@ -20,10 +20,318 @@
   <mat-dialog-content class="dialog-content">
     <div class="generator-section">
       <p class="section-desc">
-        Let your local AI assistant draft a grounded, varied meal schedule from your cookbook. Leave
-        preferences blank for a surprise mix, or describe what you're in the mood for.
+        Pick which days and meal slots to plan. Tap any slot to cycle
+        <strong>Off</strong> &rarr; <strong>Cook</strong> &rarr; <strong>Leftovers</strong>, or tap
+        a day or meal header to toggle an entire column or row.
       </p>
 
+      <!-- Top Configuration Strip: People, On-Deck, Summary -->
+      <div class="config-strip">
+        <mat-form-field
+          appearance="outline"
+          class="default-servings-field"
+          subscriptSizing="dynamic"
+        >
+          <mat-label>Default people / servings</mat-label>
+          <input
+            matInput
+            class="household-servings-input default-servings-input"
+            type="number"
+            min="0.25"
+            max="999"
+            step="0.25"
+            [ngModel]="defaultServings()"
+            (ngModelChange)="updateDefaultServings($event)"
+            [disabled]="isBusy()"
+          />
+        </mat-form-field>
+
+        <div class="ondeck-stepper-box">
+          <span class="ondeck-box-label">On-Deck Meals</span>
+          <div class="stepper-controls">
+            <button
+              type="button"
+              mat-icon-button
+              class="ondeck-count-dec-btn"
+              (click)="adjustOnDeckCount(-1)"
+              [disabled]="isBusy() || onDeckCount() <= 0"
+              aria-label="Decrease on-deck meal count"
+            >
+              <mat-icon>remove</mat-icon>
+            </button>
+            <span class="ondeck-count-value">{{ onDeckCount() }}</span>
+            <button
+              type="button"
+              mat-icon-button
+              class="ondeck-count-inc-btn"
+              (click)="adjustOnDeckCount(1)"
+              [disabled]="isBusy() || onDeckCount() >= 7"
+              aria-label="Increase on-deck meal count"
+            >
+              <mat-icon>add</mat-icon>
+            </button>
+          </div>
+          @if (onDeckCount() > 0) {
+            <div class="ondeck-servings-inline">
+              <label for="ondeck-servings-input" class="ondeck-srv-label">Srv:</label>
+              <input
+                id="ondeck-servings-input"
+                type="number"
+                class="ondeck-servings-input"
+                min="0.25"
+                max="999"
+                step="0.25"
+                [ngModel]="onDeckServings()"
+                (ngModelChange)="updateOnDeckServings($event)"
+                [disabled]="isBusy()"
+              />
+            </div>
+          }
+        </div>
+
+        <div class="plan-summary-pill" data-testid="draft-plan-summary">
+          <span class="summary-chip cook">{{ pairingAnalysis().cookCount }} Cook</span>
+          <span class="summary-chip leftovers"
+            >{{ pairingAnalysis().leftoverCount }} Leftovers</span
+          >
+          @if (pairingAnalysis().onDeckCount > 0) {
+            <span class="summary-chip ondeck">{{ pairingAnalysis().onDeckCount }} On-Deck</span>
+          }
+        </div>
+      </div>
+
+      <!-- Desktop Interactive 7-Day x 4-Slot Matrix (> 680px) -->
+      <div class="schedule-matrix-desktop" role="grid" aria-label="Weekly meal schedule matrix">
+        <div class="matrix-corner-cell">
+          <span class="legend-item"><span class="dot off"></span>Off</span>
+          <span class="legend-item"><span class="dot cook"></span>Cook</span>
+          <span class="legend-item"><span class="dot leftovers"></span>Leftovers</span>
+        </div>
+
+        @for (day of gridDays; track day.dateIso) {
+          <button
+            type="button"
+            class="day-col-toggle-btn"
+            [attr.data-date]="day.dateIso"
+            [class.is-active]="isDayActive(day.dateIso)"
+            [class.is-today]="day.isToday"
+            [disabled]="day.isPast || isBusy()"
+            (click)="toggleDayColumn(day.dateIso)"
+            [attr.aria-label]="'Toggle all meals on ' + day.dayLong"
+          >
+            <span class="col-day-short">{{ day.dayShort }}</span>
+            <span class="col-day-num">{{ day.dateNum }}</span>
+          </button>
+        }
+
+        @for (slot of slots; track slot.value) {
+          <button
+            type="button"
+            class="slot-row-toggle-btn"
+            [attr.data-slot]="slot.value"
+            [class.is-active]="isRowActive(slot.value)"
+            [disabled]="isBusy()"
+            (click)="toggleSlotRow(slot.value)"
+            [attr.aria-label]="'Toggle ' + slot.label + ' row across open days'"
+          >
+            <mat-icon class="row-slot-icon">{{ slot.icon }}</mat-icon>
+            <span class="row-slot-label">{{ slot.shortLabel }}</span>
+          </button>
+
+          @for (day of gridDays; track day.dateIso) {
+            @let cell = getCell(day.dateIso, slot.value);
+            @let pairedFrom = pairingAnalysis().cookTargetLabelByLeftoverKey.get(cell.key);
+            <div
+              class="schedule-grid-cell"
+              [attr.data-date]="day.dateIso"
+              [attr.data-slot]="slot.value"
+              [attr.data-mode]="cell.mode"
+              [class.mode-off]="cell.mode === 'off'"
+              [class.mode-cook]="cell.mode === 'cook'"
+              [class.mode-leftovers]="cell.mode === 'leftovers'"
+              [class.is-past]="cell.isPast"
+              [class.is-occupied]="cell.existingTitles.length > 0"
+              role="button"
+              tabindex="0"
+              [attr.aria-disabled]="cell.isPast || isBusy()"
+              [attr.aria-label]="
+                day.dayShort +
+                ' ' +
+                slot.label +
+                ': ' +
+                cell.mode +
+                ' (' +
+                cell.servings +
+                ' servings)'
+              "
+              (click)="cycleCellMode(day.dateIso, slot.value)"
+              (keydown.enter)="cycleCellMode(day.dateIso, slot.value)"
+              (keydown.space)="$event.preventDefault(); cycleCellMode(day.dateIso, slot.value)"
+            >
+              @if (cell.isPast) {
+                <span class="cell-mode-label">Past</span>
+              } @else if (cell.mode === 'off') {
+                <span class="cell-mode-label">{{
+                  cell.existingTitles.length > 0 ? 'Planned' : 'Off'
+                }}</span>
+                @if (cell.existingTitles.length > 0) {
+                  <span class="cell-existing-hint" [matTooltip]="cell.existingTitles.join(', ')">
+                    {{ cell.existingTitles[0] }}
+                  </span>
+                }
+              } @else {
+                <span class="cell-mode-label">
+                  {{ cell.mode === 'cook' ? 'Cook' : 'Leftovers' }}
+                </span>
+                @if (cell.mode === 'leftovers' && pairedFrom) {
+                  <span class="cell-paired-hint">from {{ pairedFrom }}</span>
+                }
+                <div class="cell-servings-stepper">
+                  <button
+                    type="button"
+                    class="cell-servings-dec"
+                    (click)="adjustCellServings(day.dateIso, slot.value, -1, $event)"
+                    [disabled]="isBusy() || cell.servings <= 1"
+                    [attr.aria-label]="'Decrease servings for ' + day.dayShort + ' ' + slot.label"
+                  >
+                    -
+                  </button>
+                  <span class="cell-servings-badge">{{ cell.servings }}p</span>
+                  <button
+                    type="button"
+                    class="cell-servings-inc"
+                    (click)="adjustCellServings(day.dateIso, slot.value, 1, $event)"
+                    [disabled]="isBusy() || cell.servings >= 999"
+                    [attr.aria-label]="'Increase servings for ' + day.dayShort + ' ' + slot.label"
+                  >
+                    +
+                  </button>
+                </div>
+              }
+            </div>
+          }
+        }
+      </div>
+
+      <!-- Mobile Stacked Day Cards (<= 680px) -->
+      <div class="schedule-mobile-list">
+        <div class="mobile-row-toggles">
+          @for (slot of slots; track slot.value) {
+            <button
+              type="button"
+              class="mobile-slot-toggle-chip"
+              [attr.data-slot]="slot.value"
+              [class.is-active]="isRowActive(slot.value)"
+              [disabled]="isBusy()"
+              (click)="toggleSlotRow(slot.value)"
+            >
+              <mat-icon>{{ slot.icon }}</mat-icon>
+              <span>{{ slot.shortLabel }}</span>
+            </button>
+          }
+        </div>
+
+        @for (day of gridDays; track day.dateIso) {
+          <div
+            class="mobile-day-card"
+            [class.is-past]="day.isPast"
+            [class.is-active]="isDayActive(day.dateIso)"
+          >
+            <div class="mobile-day-card-header">
+              <div class="mobile-day-title">
+                <span class="mobile-day-name">{{ day.dayLong }}</span>
+                <span class="mobile-day-date">{{ day.dateNum }}</span>
+              </div>
+              <button
+                type="button"
+                mat-stroked-button
+                class="mobile-day-toggle-btn"
+                [attr.data-date]="day.dateIso"
+                [disabled]="day.isPast || isBusy()"
+                (click)="toggleDayColumn(day.dateIso)"
+              >
+                {{ isDayActive(day.dateIso) ? 'Skip Day' : 'Plan Day' }}
+              </button>
+            </div>
+
+            <div class="mobile-day-slots-grid">
+              @for (slot of slots; track slot.value) {
+                @let cell = getCell(day.dateIso, slot.value);
+                <div
+                  class="mobile-slot-tile"
+                  [attr.data-date]="day.dateIso"
+                  [attr.data-slot]="slot.value"
+                  [attr.data-mode]="cell.mode"
+                  [class.mode-off]="cell.mode === 'off'"
+                  [class.mode-cook]="cell.mode === 'cook'"
+                  [class.mode-leftovers]="cell.mode === 'leftovers'"
+                  [class.is-past]="cell.isPast"
+                  role="button"
+                  tabindex="0"
+                  (click)="cycleCellMode(day.dateIso, slot.value)"
+                  (keydown.enter)="cycleCellMode(day.dateIso, slot.value)"
+                >
+                  <div class="mobile-tile-top">
+                    <span class="mobile-tile-slot">{{ slot.shortLabel }}</span>
+                    <span class="mobile-tile-mode">
+                      {{
+                        cell.isPast
+                          ? 'Past'
+                          : cell.mode === 'cook'
+                            ? 'Cook'
+                            : cell.mode === 'leftovers'
+                              ? 'Leftovers'
+                              : cell.existingTitles.length > 0
+                                ? 'Planned'
+                                : 'Off'
+                      }}
+                    </span>
+                  </div>
+                  @if (!cell.isPast && cell.mode !== 'off') {
+                    <div class="cell-servings-stepper">
+                      <button
+                        type="button"
+                        class="cell-servings-dec"
+                        (click)="adjustCellServings(day.dateIso, slot.value, -1, $event)"
+                        [disabled]="isBusy() || cell.servings <= 1"
+                        [attr.aria-label]="
+                          'Decrease servings for ' + day.dayShort + ' ' + slot.label
+                        "
+                      >
+                        -
+                      </button>
+                      <span class="cell-servings-badge">{{ cell.servings }}p</span>
+                      <button
+                        type="button"
+                        class="cell-servings-inc"
+                        (click)="adjustCellServings(day.dateIso, slot.value, 1, $event)"
+                        [disabled]="isBusy() || cell.servings >= 999"
+                        [attr.aria-label]="
+                          'Increase servings for ' + day.dayShort + ' ' + slot.label
+                        "
+                      >
+                        +
+                      </button>
+                    </div>
+                  }
+                </div>
+              }
+            </div>
+          </div>
+        }
+      </div>
+
+      @if (pairingAnalysis().orphanedLeftovers.length > 0) {
+        <div class="orphan-warning-banner" role="alert">
+          <mat-icon>warning_amber</mat-icon>
+          <span>
+            Each Leftovers slot needs an earlier Cook slot to pull from. Enable an earlier Cook slot
+            or turn off the earliest Leftovers slot.
+          </span>
+        </div>
+      }
+
+      <!-- Additional Prompt & Ideas -->
       <div class="preset-chips-section">
         <span class="preset-label">Ideas:</span>
         <div class="preset-chips-list">
@@ -41,66 +349,18 @@
         </div>
       </div>
 
-      <div class="prompt-box">
-        <mat-form-field appearance="outline" class="w-full" subscriptSizing="dynamic">
-          <mat-label>Preferences or cravings (optional)</mat-label>
+      <div class="prompt-submit-row">
+        <mat-form-field appearance="outline" class="prompt-field" subscriptSizing="dynamic">
+          <mat-label>Preferences (optional)</mat-label>
           <textarea
             matInput
             rows="2"
             class="prompt-input"
             [ngModel]="prompt()"
             (ngModelChange)="prompt.set($event)"
-            placeholder="Leave blank for a varied surprise plan, or e.g. quick 30-minute dinners..."
+            placeholder="Leave blank for a varied surprise plan, or e.g. quick 30-minute dinners, no seafood..."
           ></textarea>
         </mat-form-field>
-      </div>
-
-      <div class="form-row-params">
-        <mat-form-field appearance="outline" class="meal-count-field" subscriptSizing="dynamic">
-          <mat-label>{{ placeOnDeck() ? 'Recipe suggestions' : 'Times to cook' }}</mat-label>
-          <mat-select [ngModel]="mealCount()" (ngModelChange)="mealCount.set($event)">
-            <mat-option [value]="1">1</mat-option>
-            <mat-option [value]="2">2</mat-option>
-            <mat-option [value]="3">3</mat-option>
-            <mat-option [value]="4">4</mat-option>
-            <mat-option [value]="5">5</mat-option>
-            <mat-option [value]="6">6</mat-option>
-            <mat-option [value]="7">7</mat-option>
-          </mat-select>
-        </mat-form-field>
-
-        <mat-form-field appearance="outline" subscriptSizing="dynamic">
-          <mat-label>Servings per meal</mat-label>
-          <input
-            matInput
-            class="household-servings-input"
-            type="number"
-            min="0.25"
-            max="999"
-            step="0.25"
-            [ngModel]="servingsPerMeal()"
-            (ngModelChange)="servingsPerMeal.set($event)"
-          />
-        </mat-form-field>
-
-        <mat-form-field appearance="outline" class="default-slot-field" subscriptSizing="dynamic">
-          <mat-label>Default Slot</mat-label>
-          <mat-select [ngModel]="defaultSlot()" (ngModelChange)="defaultSlot.set($event)">
-            @for (slot of slots; track slot.value) {
-              <mat-option [value]="slot.value">{{ slot.label }}</mat-option>
-            }
-          </mat-select>
-        </mat-form-field>
-
-        <div class="deck-toggle-wrap">
-          <mat-checkbox
-            class="place-on-deck-checkbox"
-            [ngModel]="placeOnDeck()"
-            (ngModelChange)="placeOnDeck.set($event)"
-          >
-            Place On-Deck shelf
-          </mat-checkbox>
-        </div>
 
         <button
           type="button"
@@ -108,7 +368,7 @@
           color="primary"
           class="draft-submit-btn"
           (click)="submitDraft()"
-          [disabled]="isBusy()"
+          [disabled]="!canSubmitDraft()"
         >
           @if (isLoading()) {
             <mat-spinner diameter="18" class="inline-spinner"></mat-spinner>
@@ -118,12 +378,6 @@
           <span>{{ isLoading() ? 'Drafting...' : 'Draft Plan' }}</span>
         </button>
       </div>
-      @if (!placeOnDeck()) {
-        <p class="section-desc">
-          Choose how many times to cook. Planned leftovers cover the remaining unplanned dates in
-          the next seven days; cooking servings include those portions.
-        </p>
-      }
     </div>
 
     @if (errorMessage()) {
@@ -156,6 +410,8 @@
 
         <div class="candidates-list">
           @for (item of candidateItems(); track item.id) {
+            @let assignedLeftovers = getLeftoversForCandidate(item.id);
+            @let totalCookServings = getTotalCookServings(item);
             <div class="candidate-card" [class.is-deselected]="!item.selected">
               <div class="card-selection">
                 <mat-checkbox
@@ -193,18 +449,55 @@
                     }
                     <span class="badge servings-badge">
                       <mat-icon>group</mat-icon>
-                      Cook {{ item.targetServings }} servings
+                      Cook {{ totalCookServings }} servings
                     </span>
                   </div>
                 </div>
 
                 <p class="candidate-rationale">{{ item.rationale }}</p>
-                @if (item.leftoverDates.length) {
-                  <p class="candidate-rationale">
-                    Leftovers: {{ item.leftoverDates.join(', ') }}. Refrigerate promptly; freeze
-                    portions needed more than three days after cooking.
-                  </p>
+
+                @if (assignedLeftovers.length > 0) {
+                  <div class="assigned-leftovers-box">
+                    <span class="leftovers-box-title">
+                      Planned Leftovers (refrigerate promptly; freeze if &gt;3 days):
+                    </span>
+                    <div class="assigned-leftovers-list">
+                      @for (lo of assignedLeftovers; track lo.id) {
+                        @let eligibleSources = getEligibleCookSourcesForLeftover(lo);
+                        <div class="assigned-leftover-row">
+                          <span class="leftover-when-pill">
+                            {{ formatDateBadge(lo.scheduledDate) }} &bull;
+                            {{ getSlotShortLabel(lo.slot) }} &bull; {{ lo.servings }} srv
+                          </span>
+                          @if (eligibleSources.length > 1) {
+                            <select
+                              class="leftover-source-select"
+                              [ngModel]="lo.sourceCandidateId"
+                              (ngModelChange)="reassignLeftoverSource(lo.id, $event)"
+                              [disabled]="isBusy()"
+                              [attr.aria-label]="
+                                'Source meal for ' +
+                                formatDateBadge(lo.scheduledDate) +
+                                ' ' +
+                                lo.slot +
+                                ' leftovers'
+                              "
+                            >
+                              @for (src of eligibleSources; track src.id) {
+                                <option [value]="src.id">
+                                  From: {{ src.recipe.title }} ({{
+                                    formatDateBadge(src.scheduledDate)
+                                  }})
+                                </option>
+                              }
+                            </select>
+                          }
+                        </div>
+                      }
+                    </div>
+                  </div>
                 }
+
                 <button
                   type="button"
                   mat-stroked-button
@@ -273,7 +566,7 @@
 
                   <div class="control-item">
                     <label class="control-label" [for]="'servings-' + item.id"
-                      >Servings per meal</label
+                      >Servings for this meal</label
                     >
                     <input
                       type="number"
@@ -282,7 +575,7 @@
                       min="0.25"
                       max="999"
                       step="0.25"
-                      [value]="item.servingsPerMeal"
+                      [value]="item.cookServings"
                       [disabled]="isBusy()"
                       (change)="updateServings(item.id, +$any($event.target).value)"
                     />

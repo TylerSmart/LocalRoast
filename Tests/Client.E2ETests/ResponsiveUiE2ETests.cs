@@ -569,7 +569,6 @@ public sealed class ResponsiveUiE2ETests : E2ETestBase
         await Page.Keyboard.PressAsync("Escape");
 
         await Page.GotoAsync($"{ServerUrl}/meal-plan");
-        await Page.Locator("button.calendar-actions-menu-btn").ClickAsync();
         await Page.Locator("button.draft-week-ai-btn").ClickAsync();
         await Page.Locator(".preset-chip").First.ClickAsync();
         await Page.Locator(".draft-submit-btn").ClickAsync();

@@ -2,12 +2,13 @@ import {
   CDK_DRAG_CONFIG,
   CdkDrag,
   CdkDragDrop,
+  CdkDragStart,
   CdkDropList,
   CdkDropListGroup,
   DragDropConfig,
   DragStartDelay,
 } from '@angular/cdk/drag-drop';
-import { DatePipe } from '@angular/common';
+import { DatePipe, DOCUMENT } from '@angular/common';
 import { Component, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Subscription } from 'rxjs';
@@ -110,6 +111,11 @@ export const MEAL_PLAN_DRAG_CONFIG: DragDropConfig = {
   selector: 'app-meal-plan-calendar',
   templateUrl: './meal-plan-calendar.component.html',
   styleUrl: './meal-plan-calendar.component.scss',
+  host: {
+    '(window:keydown)': 'onWindowKeyEvent($event)',
+    '(window:keyup)': 'onWindowKeyEvent($event)',
+    '(window:blur)': 'onWindowBlur()',
+  },
 })
 export class MealPlanCalendarComponent implements OnInit {
   private readonly mealPlanService = inject(MealPlanService);
@@ -118,9 +124,12 @@ export class MealPlanCalendarComponent implements OnInit {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly doc = inject(DOCUMENT);
   private initializedFromRoute = false;
   private viewLoadSubscription?: Subscription;
   protected readonly aiHelper = inject(AiKitchenHelperService);
+  protected readonly isAltPressed = signal<boolean>(false);
+  protected readonly isDragging = signal<boolean>(false);
 
   protected readonly dragStartDelay: DragStartDelay = { touch: 250, mouse: 0 };
   protected readonly mealSlots = MEAL_SLOTS;
@@ -179,6 +188,9 @@ export class MealPlanCalendarComponent implements OnInit {
   });
 
   ngOnInit(): void {
+    this.destroyRef.onDestroy(() => {
+      this.doc.body?.classList.remove('meal-drag-copy-mode');
+    });
     this.aiHelper.checkStatus().subscribe();
     this.route.queryParamMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
       const changed = this.applyQueryParams(params);
@@ -640,10 +652,11 @@ export class MealPlanCalendarComponent implements OnInit {
       DraftMealPlanDialogData,
       MealPlanWeekDto
     >(DraftMealPlanDialogComponent, {
-      width: '680px',
+      width: '880px',
       maxWidth: '96vw',
       data: {
         weekStartDate: this.activePeriodStart(),
+        existingWeekData: this.weekData(),
       },
     });
 
@@ -703,12 +716,90 @@ export class MealPlanCalendarComponent implements OnInit {
     });
   }
 
+  protected onWindowKeyEvent(event: KeyboardEvent): void {
+    const nextAlt = event.altKey;
+    if (this.isAltPressed() !== nextAlt) {
+      this.isAltPressed.set(nextAlt);
+      this.syncDragCopyClass();
+    }
+  }
+
+  protected onWindowBlur(): void {
+    this.isAltPressed.set(false);
+    this.isDragging.set(false);
+    this.syncDragCopyClass();
+  }
+
+  protected onDragStarted(event: CdkDragStart): void {
+    this.isDragging.set(true);
+    const nativeEvt = event.event as MouseEvent | TouchEvent | undefined;
+    if (nativeEvt && 'altKey' in nativeEvt) {
+      this.isAltPressed.set(Boolean(nativeEvt.altKey));
+    }
+    this.syncDragCopyClass();
+  }
+
+  protected onDragEnded(): void {
+    this.isDragging.set(false);
+    this.syncDragCopyClass();
+  }
+
+  private syncDragCopyClass(): void {
+    this.doc.body?.classList.toggle(
+      'meal-drag-copy-mode',
+      this.isDragging() && this.isAltPressed(),
+    );
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   protected onDrop(event: CdkDragDrop<any>): void {
     const entry = event.item.data as MealPlanEntryDto;
     const dest = event.container.data as DropZoneData;
+    const nativeEvt = event.event as MouseEvent | TouchEvent | undefined;
+    const isDuplicate =
+      Boolean(nativeEvt && 'altKey' in nativeEvt && nativeEvt.altKey) || this.isAltPressed();
 
-    if (event.previousContainer === event.container && event.previousIndex === event.currentIndex) {
+    this.isDragging.set(false);
+    this.syncDragCopyClass();
+
+    if (
+      !isDuplicate &&
+      event.previousContainer === event.container &&
+      event.previousIndex === event.currentIndex
+    ) {
+      return;
+    }
+
+    if (isDuplicate) {
+      const targetWeekStart = dest.isOnDeck
+        ? (dest.weekStartDate ?? this.activePeriodStart())
+        : null;
+      this.mealPlanService
+        .createEntry({
+          entryType: entry.entryType,
+          isOnDeck: dest.isOnDeck,
+          weekStartDate: targetWeekStart,
+          scheduledDate: dest.isOnDeck ? null : (dest.date ?? null),
+          slot: dest.isOnDeck ? null : (dest.slot ?? null),
+          recipeId: entry.recipe?.id ?? null,
+          targetServings: entry.targetServings,
+          sourceMealPlanEntryId:
+            entry.entryType === 'Leftovers' ? entry.sourceMealPlanEntryId : null,
+          customTitle: entry.customTitle,
+          notes: entry.notes,
+        })
+        .subscribe({
+          next: (created) => {
+            this.snackBar.open(`Duplicated "${created.displayTitle}"`, 'Close', { duration: 2500 });
+            this.loadCurrentView();
+          },
+          error: (err) => {
+            this.snackBar.open(err?.error?.detail || 'Failed to duplicate meal.', 'Close', {
+              duration: 4000,
+            });
+            this.loadCurrentView();
+          },
+        });
       return;
     }
 

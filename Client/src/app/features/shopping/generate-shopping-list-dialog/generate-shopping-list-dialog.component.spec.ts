@@ -12,6 +12,7 @@ import { ShoppingService } from '../../../core/services/shopping/shopping.servic
 import {
   GenerateShoppingListDialogComponent,
   GenerateShoppingListDialogData,
+  NEW_SHOPPING_LIST_ID,
 } from './generate-shopping-list-dialog.component';
 
 describe('GenerateShoppingListDialogComponent', () => {
@@ -21,7 +22,9 @@ describe('GenerateShoppingListDialogComponent', () => {
   const mockShoppingService = {
     getShoppingLists: vi.fn(),
     previewGenerateFromMealPlan: vi.fn(),
+    previewGenerateFromNewList: vi.fn(),
     generateFromMealPlan: vi.fn(),
+    createAndGenerateFromMealPlan: vi.fn(),
   };
 
   const mockDialogRef = {
@@ -77,7 +80,9 @@ describe('GenerateShoppingListDialogComponent', () => {
   beforeEach(async () => {
     mockShoppingService.getShoppingLists.mockReset().mockReturnValue(of(mockLists));
     mockShoppingService.previewGenerateFromMealPlan.mockReset().mockReturnValue(of(mockPreview));
+    mockShoppingService.previewGenerateFromNewList.mockReset().mockReturnValue(of(mockPreview));
     mockShoppingService.generateFromMealPlan.mockReset();
+    mockShoppingService.createAndGenerateFromMealPlan.mockReset();
     mockDialogRef.close.mockReset();
 
     await TestBed.configureTestingModule({
@@ -135,5 +140,64 @@ describe('GenerateShoppingListDialogComponent', () => {
       }),
     );
     expect(mockDialogRef.close).toHaveBeenCalledWith(mockResult);
+  });
+
+  it('defaults to creating a new weekly list when targetShoppingListId is omitted', async () => {
+    TestBed.resetTestingModule();
+    await TestBed.configureTestingModule({
+      imports: [GenerateShoppingListDialogComponent],
+      providers: [
+        provideAnimationsAsync(),
+        {
+          provide: MAT_DIALOG_DATA,
+          useValue: { startDate: '2026-11-02', endDate: '2026-11-08' },
+        },
+        { provide: MatDialogRef, useValue: mockDialogRef },
+        { provide: ShoppingService, useValue: mockShoppingService },
+      ],
+    }).compileComponents();
+
+    const weekFixture = TestBed.createComponent(GenerateShoppingListDialogComponent);
+    const weekComponent = weekFixture.componentInstance;
+    weekFixture.detectChanges();
+
+    expect(weekComponent.form.controls.targetShoppingListId.value).toBe(NEW_SHOPPING_LIST_ID);
+    expect(weekComponent.isCreatingNewList()).toBe(true);
+    expect(weekComponent.form.controls.newListName.value).toContain('Week of');
+    expect(mockShoppingService.previewGenerateFromNewList).toHaveBeenCalled();
+
+    const createdResult: ShoppingListGenerationResultDto = {
+      shoppingList: {
+        id: 'list-new',
+        name: weekComponent.form.controls.newListName.value,
+        isPinned: false,
+        activeItems: [],
+        checkedItems: [],
+        excludedPantryItems: [],
+        createdAt: '2026-11-02T00:00:00Z',
+        modifiedAt: '2026-11-02T00:00:00Z',
+      },
+      importedMealsCount: 3,
+      skippedDuplicateMealsCount: 0,
+      ignoredLeftoversCount: 0,
+      ignoredNotesCount: 0,
+      activeItemsAffectedCount: 1,
+      excludedPantryItemsCount: 0,
+    };
+    mockShoppingService.createAndGenerateFromMealPlan.mockReturnValue(of(createdResult));
+
+    weekComponent.onSubmit();
+
+    expect(mockShoppingService.createAndGenerateFromMealPlan).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: weekComponent.form.controls.newListName.value,
+        isPinned: false,
+        generation: expect.objectContaining({
+          startDate: '2026-11-02',
+          endDate: '2026-11-08',
+        }),
+      }),
+    );
+    expect(mockDialogRef.close).toHaveBeenCalledWith(createdResult);
   });
 });

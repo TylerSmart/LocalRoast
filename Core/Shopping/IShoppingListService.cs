@@ -67,9 +67,19 @@ public interface IShoppingListService
         CancellationToken cancellationToken = default
     );
 
+    Task<ShoppingListGenerationPreviewDto> PreviewGenerateFromNewListAsync(
+        GenerateFromMealPlanRequest request,
+        CancellationToken cancellationToken = default
+    );
+
     Task<ShoppingListGenerationResultDto?> GenerateFromMealPlanAsync(
         Guid shoppingListId,
         GenerateFromMealPlanRequest request,
+        CancellationToken cancellationToken = default
+    );
+
+    Task<ShoppingListGenerationResultDto> CreateAndGenerateFromMealPlanAsync(
+        CreateAndGenerateFromMealPlanRequest request,
         CancellationToken cancellationToken = default
     );
 

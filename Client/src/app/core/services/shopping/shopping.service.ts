@@ -5,6 +5,7 @@ import { apiUrl } from '../../api/api-url';
 import {
   AddRecipeToShoppingListRequest,
   ClearCheckedItemsResultDto,
+  CreateAndGenerateFromMealPlanRequest,
   CreateShoppingListItemRequest,
   CreateShoppingListRequest,
   GenerateFromMealPlanRequest,
@@ -180,6 +181,15 @@ export class ShoppingService {
     );
   }
 
+  previewGenerateFromNewList(
+    request: GenerateFromMealPlanRequest,
+  ): Observable<ShoppingListGenerationPreviewDto> {
+    return this.http.post<ShoppingListGenerationPreviewDto>(
+      apiUrl('/shopping-lists/generate/meal-plan/preview'),
+      request,
+    );
+  }
+
   generateFromMealPlan(
     listId: string,
     request: GenerateFromMealPlanRequest,
@@ -190,6 +200,14 @@ export class ShoppingService {
         request,
       )
       .pipe(tap(() => this.notifyCrossTab(listId)));
+  }
+
+  createAndGenerateFromMealPlan(
+    request: CreateAndGenerateFromMealPlanRequest,
+  ): Observable<ShoppingListGenerationResultDto> {
+    return this.http
+      .post<ShoppingListGenerationResultDto>(apiUrl('/shopping-lists/generate/meal-plan'), request)
+      .pipe(tap((res) => this.notifyCrossTab(res.shoppingList.id)));
   }
 
   addRecipeToList(

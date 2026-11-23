@@ -389,9 +389,8 @@ public sealed class AiKitchenHelperService(
         }
 
         if (
-            request.MealCount is < 1 or > 14
+            !Enum.IsDefined(request.DefaultSlot)
             || request.ServingsPerMeal is < 0.25m or > 999m
-            || !Enum.IsDefined(request.DefaultSlot)
             || request.ExcludedRecipeIds?.Count > 150
         )
         {
@@ -399,13 +398,21 @@ public sealed class AiKitchenHelperService(
                 "Invalid meal count, servings, slot, or recipe exclusions."
             );
         }
-        var requestedMealCount = request.MealCount;
 
-        var config = await llmSettingsService.GetEffectiveConfigAsync(cancellationToken);
-        if (string.IsNullOrWhiteSpace(config.TextModel))
+        var hasStructuredSlots = request.RequestedSlots is { Count: > 0 };
+        if (hasStructuredSlots)
         {
-            throw new LlmHostUnavailableException(
-                "No Text LLM model is configured in LLM Settings."
+            if (request.RequestedSlots!.Count is < 1 or > 35)
+            {
+                throw new DomainValidationException(
+                    "Requested cooking slots must be between 1 and 35."
+                );
+            }
+        }
+        else if (request.MealCount is < 1 or > 14)
+        {
+            throw new DomainValidationException(
+                "Invalid meal count, servings, slot, or recipe exclusions."
             );
         }
 
@@ -415,8 +422,28 @@ public sealed class AiKitchenHelperService(
         {
             throw new DomainValidationException("TodayDate must match the current local date.");
         }
+
         var rangeStart = request.WeekStartDate is { } start && start > today ? start : today;
         var rangeEnd = rangeStart.AddDays(6);
+
+        if (hasStructuredSlots)
+        {
+            ValidateStructuredSlotRequests(request.RequestedSlots!, today, rangeEnd);
+        }
+
+        var requestedMealCount = hasStructuredSlots
+            ? request.RequestedSlots!.Count
+            : request.MealCount;
+        var slotCounts = BuildRequestedSlotCounts(request, requestedMealCount);
+
+        var config = await llmSettingsService.GetEffectiveConfigAsync(cancellationToken);
+        if (string.IsNullOrWhiteSpace(config.TextModel))
+        {
+            throw new LlmHostUnavailableException(
+                "No Text LLM model is configured in LLM Settings."
+            );
+        }
+
         var excludedIds = request.ExcludedRecipeIds?.ToHashSet() ?? [];
 
         var hasEligiblePublished = await dbContext
@@ -453,20 +480,26 @@ public sealed class AiKitchenHelperService(
             )
             .ToList();
 
-        var occupiedDates = existingWeekEntries
-            .Where(e => !e.IsOnDeck && e.Slot == request.DefaultSlot && e.ScheduledDate.HasValue)
-            .Select(e => e.ScheduledDate!.Value)
-            .ToHashSet();
-        var openDates = Enumerable
-            .Range(0, 7)
-            .Select(offset => rangeStart.AddDays(offset))
-            .Where(date => !occupiedDates.Contains(date))
-            .ToList();
-        if (!request.PlaceOnDeck && requestedMealCount > openDates.Count)
+        List<DateOnly> openDates = [];
+        if (!hasStructuredSlots)
         {
-            throw new DomainValidationException(
-                $"Only {openDates.Count} unplanned {request.DefaultSlot} dates remain in this seven-day period. Reduce the cooking count."
-            );
+            var occupiedDates = existingWeekEntries
+                .Where(e =>
+                    !e.IsOnDeck && e.Slot == request.DefaultSlot && e.ScheduledDate.HasValue
+                )
+                .Select(e => e.ScheduledDate!.Value)
+                .ToHashSet();
+            openDates = Enumerable
+                .Range(0, 7)
+                .Select(offset => rangeStart.AddDays(offset))
+                .Where(date => !occupiedDates.Contains(date))
+                .ToList();
+            if (!request.PlaceOnDeck && requestedMealCount > openDates.Count)
+            {
+                throw new DomainValidationException(
+                    $"Only {openDates.Count} unplanned {request.DefaultSlot} dates remain in this seven-day period. Reduce the cooking count."
+                );
+            }
         }
 
         var now = _timeProvider.GetUtcNow();
@@ -478,11 +511,14 @@ public sealed class AiKitchenHelperService(
 
         queueSignal?.PreemptBackgroundWork();
 
+        var workloadSlotSummary =
+            slotCounts.Count == 1 ? slotCounts.Keys.First().ToString() : $"{slotCounts.Count}-Slot";
+
         using var workload = liveTracker?.BeginWorkload(
             kind: LlmWorkloadKind.MealPlanDraft,
             title: isSurpriseDraft
-                ? $"Draft {requestedMealCount} Surprise {request.DefaultSlot} Meals"
-                : $"Draft {requestedMealCount} {request.DefaultSlot} Meals",
+                ? $"Draft {requestedMealCount} Surprise {workloadSlotSummary} Meals"
+                : $"Draft {requestedMealCount} {workloadSlotSummary} Meals",
             segments:
             [
                 new LlmWorkflowSegmentDto(
@@ -524,13 +560,20 @@ public sealed class AiKitchenHelperService(
                     "Decomposing prompt",
                     "Analyzing meal-plan prompt..."
                 );
+                var analysisSlotName =
+                    slotCounts.Count == 1
+                        ? slotCounts.Keys.First().ToString()
+                        : string.Join(
+                            ", ",
+                            slotCounts.Keys.OrderBy(k => (int)k).Select(k => k.ToString())
+                        );
                 // Stage 1: Decompose natural-language mood prompt into exclusions, priorities, and search buckets
                 var analysis = await llmClient.DecomposeMealPlanPromptAsync(
                     config,
                     new LlmMealPlanQueryAnalysisContext(
                         UserPrompt: prompt,
                         RequestedMealCount: requestedMealCount,
-                        DefaultSlotName: request.DefaultSlot.ToString()
+                        DefaultSlotName: analysisSlotName
                     ),
                     cancellationToken
                 );
@@ -617,7 +660,8 @@ public sealed class AiKitchenHelperService(
                     SearchBuckets: searchBuckets,
                     UtcNow: now,
                     DefaultSlot: request.DefaultSlot,
-                    RandomizeSelection: isSurpriseDraft
+                    RandomizeSelection: isSurpriseDraft,
+                    SlotCounts: slotCounts
                 ),
                 cancellationToken
             );
@@ -649,6 +693,10 @@ public sealed class AiKitchenHelperService(
                 })
                 .ToList();
 
+            var requestedSlotLines = hasStructuredSlots
+                ? BuildRequestedSlotLines(request.RequestedSlots!, request.DefaultSlot)
+                : null;
+
             workload?.ActivateSegment(
                 "draft_schedule",
                 $"{catalogList.Count} candidates",
@@ -659,8 +707,12 @@ public sealed class AiKitchenHelperService(
                 WeekStartDate: rangeStart,
                 UserPrompt: prompt,
                 RequestedMealCount: requestedMealCount,
-                DefaultSlotName: request.DefaultSlot.ToString(),
-                PlaceOnDeck: request.PlaceOnDeck,
+                DefaultSlotName: slotCounts.Count == 1
+                    ? slotCounts.Keys.First().ToString()
+                    : request.DefaultSlot.ToString(),
+                PlaceOnDeck: hasStructuredSlots
+                    ? request.RequestedSlots!.All(s => s.IsOnDeck)
+                    : request.PlaceOnDeck,
                 ExistingWeekScheduleLines: existingLines,
                 CookbookCatalog: catalogList,
                 BucketSummaries: bucketSummaries.Count > 0 ? bucketSummaries : null,
@@ -669,7 +721,8 @@ public sealed class AiKitchenHelperService(
                     : null,
                 UnmatchedBuckets: retrieval.UnmatchedBuckets.Count > 0
                     ? retrieval.UnmatchedBuckets
-                    : null
+                    : null,
+                RequestedSlotLines: requestedSlotLines
             );
 
             var payload = await llmClient.DraftWeeklyMealPlanAsync(
@@ -696,6 +749,7 @@ public sealed class AiKitchenHelperService(
                 .ToListAsync(cancellationToken);
 
             var candidateMapByIndex = catalogList.ToDictionary(c => c.CatalogIndex);
+            var candidateMapByRecipeId = catalogList.ToDictionary(c => c.RecipeId);
             var badgeByIdMap = candidateRecipes.ToDictionary(r => r.Id);
             var badgeByTitleMap = catalogList
                 .Where(candidate => badgeByIdMap.ContainsKey(candidate.RecipeId))
@@ -703,108 +757,40 @@ public sealed class AiKitchenHelperService(
                 .GroupBy(r => r.Title, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
 
-            var proposals = payload.Proposals ?? [];
-            var resultCandidates = new List<DraftMealPlanCandidateDto>();
-            var seenRecipeIds = new HashSet<Guid>();
+            var validProposals = ResolveValidProposals(
+                payload.Proposals,
+                candidateMapByIndex,
+                candidateMapByRecipeId,
+                badgeByIdMap,
+                badgeByTitleMap,
+                catalogList.Count,
+                requestedMealCount
+            );
 
-            var nextOpenDay = 0;
-
-            foreach (var p in proposals)
-            {
-                MealPlanRecipeBadgeDto? matchedRecipe = null;
-
-                if (candidateMapByIndex.TryGetValue(p.CatalogIndex, out var cand))
-                {
-                    matchedRecipe = badgeByIdMap.GetValueOrDefault(cand.RecipeId);
-                }
-                else if (
-                    !string.IsNullOrWhiteSpace(p.RecipeTitle)
-                    && badgeByTitleMap.TryGetValue(p.RecipeTitle.Trim(), out var byTitle)
-                )
-                {
-                    matchedRecipe = byTitle;
-                }
-
-                if (matchedRecipe is null)
-                {
-                    // Discard hallucinated / non-existent recipes
-                    continue;
-                }
-
-                if (
-                    seenRecipeIds.Contains(matchedRecipe.Id)
-                    && catalogList.Count >= requestedMealCount
-                )
-                {
-                    // Skip duplicate recipe in draft if we have enough distinct recipes
-                    continue;
-                }
-
-                seenRecipeIds.Add(matchedRecipe.Id);
-
-                var isOnDeck = request.PlaceOnDeck;
-                int? dayOffset = null;
-                DateOnly? scheduledDate = null;
-                MealSlot? slot = null;
-
-                var leftoverDates = new List<DateOnly>();
-                if (!isOnDeck)
-                {
-                    // Meal count is cooking occasions; each batch covers its share of open dates.
-                    var coverage =
-                        openDates.Count / requestedMealCount
-                        + (resultCandidates.Count < openDates.Count % requestedMealCount ? 1 : 0);
-                    scheduledDate = openDates[nextOpenDay++];
-                    dayOffset = scheduledDate.Value.DayNumber - rangeStart.DayNumber;
-                    slot = request.DefaultSlot;
-                    for (var i = 1; i < coverage; i++)
-                    {
-                        leftoverDates.Add(openDates[nextOpenDay++]);
-                    }
-                }
-
-                var targetServings = request.ServingsPerMeal * (1 + leftoverDates.Count);
-                if (targetServings > 999m)
-                {
-                    throw new DomainValidationException(
-                        "Cooking servings including leftovers cannot exceed 999. Reduce servings per meal."
-                    );
-                }
-
-                var rationale = !string.IsNullOrWhiteSpace(p.Rationale)
-                    ? p.Rationale.Trim()
-                    : (
-                        isSurpriseDraft
-                            ? $"Selected as a varied {request.DefaultSlot} pick from your cookbook."
-                            : $"Selected based on your request: {prompt}"
-                    );
-
-                resultCandidates.Add(
-                    new DraftMealPlanCandidateDto(
-                        RecipeId: matchedRecipe.Id,
-                        Recipe: matchedRecipe,
-                        IsOnDeck: isOnDeck,
-                        DayOffset: dayOffset,
-                        ScheduledDate: scheduledDate,
-                        Slot: slot,
-                        TargetServings: targetServings,
-                        Rationale: rationale,
-                        LeftoverDates: leftoverDates
-                    )
-                );
-
-                if (resultCandidates.Count >= requestedMealCount)
-                {
-                    break;
-                }
-            }
-
-            if (resultCandidates.Count != requestedMealCount)
+            if (validProposals.Count != requestedMealCount)
             {
                 throw new DomainValidationException(
-                    $"The AI model returned {resultCandidates.Count} valid cookbook suggestions instead of {requestedMealCount}. Try again or reduce the cooking count."
+                    $"The AI model returned {validProposals.Count} valid cookbook suggestions instead of {requestedMealCount}. Try again or reduce the cooking count."
                 );
             }
+
+            var resultCandidates = hasStructuredSlots
+                ? BuildStructuredCandidates(
+                    request.RequestedSlots!,
+                    request.DefaultSlot,
+                    rangeStart,
+                    prompt,
+                    isSurpriseDraft,
+                    validProposals
+                )
+                : BuildLegacyCandidates(
+                    request,
+                    rangeStart,
+                    openDates,
+                    prompt,
+                    isSurpriseDraft,
+                    validProposals
+                );
 
             var unmetCravingNotes = isSurpriseDraft
                 ? []
@@ -852,6 +838,398 @@ public sealed class AiKitchenHelperService(
             workload?.FailWorkload(ex.Message);
             throw;
         }
+    }
+
+    private static void ValidateStructuredSlotRequests(
+        IReadOnlyList<DraftMealCookSlotRequest> requestedSlots,
+        DateOnly today,
+        DateOnly rangeEnd
+    )
+    {
+        var usedScheduledCells = new HashSet<(DateOnly Date, MealSlot Slot)>();
+
+        foreach (var cookSlot in requestedSlots)
+        {
+            if (cookSlot.Servings is < 0.25m or > 999m)
+            {
+                throw new DomainValidationException(
+                    "Servings per slot must be between 0.25 and 999."
+                );
+            }
+
+            if (cookSlot.IsOnDeck)
+            {
+                if (cookSlot.Leftovers is { Count: > 0 })
+                {
+                    throw new DomainValidationException(
+                        "On-deck meal suggestions cannot directly cover scheduled leftover slots."
+                    );
+                }
+
+                if (cookSlot.Slot.HasValue && !Enum.IsDefined(cookSlot.Slot.Value))
+                {
+                    throw new DomainValidationException("Invalid meal slot specified.");
+                }
+
+                continue;
+            }
+
+            if (
+                !cookSlot.ScheduledDate.HasValue
+                || !cookSlot.Slot.HasValue
+                || !Enum.IsDefined(cookSlot.Slot.Value)
+            )
+            {
+                throw new DomainValidationException(
+                    "Scheduled cooking slots require a valid date and meal slot."
+                );
+            }
+
+            var cookDate = cookSlot.ScheduledDate.Value;
+            var cookMealSlot = cookSlot.Slot.Value;
+            if (cookDate < today || cookDate > rangeEnd)
+            {
+                throw new DomainValidationException(
+                    "Requested cooking dates must fall between today and the end of the seven-day period."
+                );
+            }
+
+            if (!usedScheduledCells.Add((cookDate, cookMealSlot)))
+            {
+                throw new DomainValidationException(
+                    "Each day and meal slot can only appear once in a draft request."
+                );
+            }
+
+            var totalServings = cookSlot.Servings;
+            foreach (var leftover in cookSlot.Leftovers ?? [])
+            {
+                if (leftover.Servings is < 0.25m or > 999m)
+                {
+                    throw new DomainValidationException(
+                        "Servings per leftover slot must be between 0.25 and 999."
+                    );
+                }
+
+                if (!Enum.IsDefined(leftover.Slot))
+                {
+                    throw new DomainValidationException("Invalid leftover meal slot specified.");
+                }
+
+                if (leftover.ScheduledDate < today || leftover.ScheduledDate > rangeEnd)
+                {
+                    throw new DomainValidationException(
+                        "Leftover dates must fall between today and the end of the seven-day period."
+                    );
+                }
+
+                var isAfterCook =
+                    leftover.ScheduledDate > cookDate
+                    || (leftover.ScheduledDate == cookDate && leftover.Slot > cookMealSlot);
+                if (!isAfterCook)
+                {
+                    throw new DomainValidationException(
+                        "Leftover slots must occur chronologically after their cooking slot."
+                    );
+                }
+
+                if (!usedScheduledCells.Add((leftover.ScheduledDate, leftover.Slot)))
+                {
+                    throw new DomainValidationException(
+                        "Each day and meal slot can only appear once in a draft request."
+                    );
+                }
+
+                totalServings += leftover.Servings;
+            }
+
+            if (totalServings > 999m)
+            {
+                throw new DomainValidationException(
+                    "Cooking servings including leftovers cannot exceed 999. Reduce servings per meal."
+                );
+            }
+        }
+    }
+
+    private static Dictionary<MealSlot, int> BuildRequestedSlotCounts(
+        DraftWeeklyMealPlanRequest request,
+        int requestedMealCount
+    )
+    {
+        if (request.RequestedSlots is not { Count: > 0 })
+        {
+            return new Dictionary<MealSlot, int> { [request.DefaultSlot] = requestedMealCount };
+        }
+
+        return request
+            .RequestedSlots.GroupBy(s =>
+                s.IsOnDeck ? (s.Slot ?? request.DefaultSlot) : s.Slot!.Value
+            )
+            .ToDictionary(g => g.Key, g => g.Count());
+    }
+
+    private static List<string> BuildRequestedSlotLines(
+        IReadOnlyList<DraftMealCookSlotRequest> requestedSlots,
+        MealSlot defaultSlot
+    )
+    {
+        var lines = new List<string>(requestedSlots.Count);
+        for (var i = 0; i < requestedSlots.Count; i++)
+        {
+            var s = requestedSlots[i];
+            var effectiveSlot = s.IsOnDeck ? (s.Slot ?? defaultSlot) : s.Slot!.Value;
+            if (s.IsOnDeck)
+            {
+                lines.Add(
+                    $"{i + 1}. On-Deck [{effectiveSlot}] — Flexible weekly meal ({s.Servings} servings)"
+                );
+                continue;
+            }
+
+            var leftoverDesc = s.Leftovers is { Count: > 0 }
+                ? $" (covers {string.Join(", ", s.Leftovers.Select(l => $"{l.ScheduledDate:ddd} {l.Slot} {l.Servings}srv"))} leftovers)"
+                : string.Empty;
+            lines.Add(
+                $"{i + 1}. {s.ScheduledDate!.Value:ddd yyyy-MM-dd} [{effectiveSlot}] — Cook {s.Servings} servings{leftoverDesc}"
+            );
+        }
+
+        return lines;
+    }
+
+    private sealed record ValidProposalMatch(
+        LlmDraftMealProposalItem Proposal,
+        MealPlanRecipeBadgeDto Recipe,
+        LlmCookbookRecipeCandidate? Candidate
+    );
+
+    private static List<ValidProposalMatch> ResolveValidProposals(
+        IReadOnlyList<LlmDraftMealProposalItem>? proposals,
+        Dictionary<int, LlmCookbookRecipeCandidate> candidateMapByIndex,
+        Dictionary<Guid, LlmCookbookRecipeCandidate> candidateMapByRecipeId,
+        Dictionary<Guid, MealPlanRecipeBadgeDto> badgeByIdMap,
+        Dictionary<string, MealPlanRecipeBadgeDto> badgeByTitleMap,
+        int catalogCount,
+        int requestedMealCount
+    )
+    {
+        var valid = new List<ValidProposalMatch>(requestedMealCount);
+        var seenRecipeIds = new HashSet<Guid>();
+
+        foreach (var p in proposals ?? [])
+        {
+            MealPlanRecipeBadgeDto? matchedRecipe = null;
+            LlmCookbookRecipeCandidate? matchedCandidate = null;
+
+            if (candidateMapByIndex.TryGetValue(p.CatalogIndex, out var cand))
+            {
+                matchedRecipe = badgeByIdMap.GetValueOrDefault(cand.RecipeId);
+                matchedCandidate = cand;
+            }
+            else if (
+                !string.IsNullOrWhiteSpace(p.RecipeTitle)
+                && badgeByTitleMap.TryGetValue(p.RecipeTitle.Trim(), out var byTitle)
+            )
+            {
+                matchedRecipe = byTitle;
+                matchedCandidate = candidateMapByRecipeId.GetValueOrDefault(byTitle.Id);
+            }
+
+            if (matchedRecipe is null)
+            {
+                continue;
+            }
+
+            if (seenRecipeIds.Contains(matchedRecipe.Id) && catalogCount >= requestedMealCount)
+            {
+                continue;
+            }
+
+            seenRecipeIds.Add(matchedRecipe.Id);
+            valid.Add(new ValidProposalMatch(p, matchedRecipe, matchedCandidate));
+
+            if (valid.Count >= requestedMealCount)
+            {
+                break;
+            }
+        }
+
+        return valid;
+    }
+
+    private static List<DraftMealPlanCandidateDto> BuildStructuredCandidates(
+        IReadOnlyList<DraftMealCookSlotRequest> requestedSlots,
+        MealSlot defaultSlot,
+        DateOnly rangeStart,
+        string prompt,
+        bool isSurpriseDraft,
+        List<ValidProposalMatch> validProposals
+    )
+    {
+        var usedIndices = new HashSet<int>();
+        var results = new List<DraftMealPlanCandidateDto>(requestedSlots.Count);
+
+        foreach (var cookSlot in requestedSlots)
+        {
+            var effectiveSlot = cookSlot.IsOnDeck
+                ? (cookSlot.Slot ?? defaultSlot)
+                : cookSlot.Slot!.Value;
+            var slotName = effectiveSlot.ToString();
+
+            var chosenIdx = -1;
+            for (var i = 0; i < validProposals.Count; i++)
+            {
+                if (usedIndices.Contains(i))
+                {
+                    continue;
+                }
+
+                var eligibleSlots = validProposals[i].Candidate?.EligibleSlots;
+                if (
+                    eligibleSlots is { Count: > 0 }
+                    && eligibleSlots.Contains(slotName, StringComparer.OrdinalIgnoreCase)
+                )
+                {
+                    chosenIdx = i;
+                    break;
+                }
+            }
+
+            if (chosenIdx < 0)
+            {
+                for (var i = 0; i < validProposals.Count; i++)
+                {
+                    if (!usedIndices.Contains(i))
+                    {
+                        chosenIdx = i;
+                        break;
+                    }
+                }
+            }
+
+            usedIndices.Add(chosenIdx);
+            var match = validProposals[chosenIdx];
+
+            var leftoverSlots = (cookSlot.Leftovers ?? [])
+                .OrderBy(l => l.ScheduledDate)
+                .ThenBy(l => (int)l.Slot)
+                .Select(l => new DraftMealLeftoverSlotDto(l.ScheduledDate, l.Slot, l.Servings))
+                .ToList();
+            var leftoverDates = leftoverSlots.Select(l => l.ScheduledDate).ToList();
+            var targetServings = cookSlot.Servings + leftoverSlots.Sum(l => l.Servings);
+
+            DateOnly? scheduledDate = cookSlot.IsOnDeck ? null : cookSlot.ScheduledDate;
+            int? dayOffset = scheduledDate.HasValue
+                ? scheduledDate.Value.DayNumber - rangeStart.DayNumber
+                : null;
+            MealSlot? dtoSlot = cookSlot.IsOnDeck ? cookSlot.Slot : effectiveSlot;
+
+            var rationale = !string.IsNullOrWhiteSpace(match.Proposal.Rationale)
+                ? match.Proposal.Rationale.Trim()
+                : (
+                    isSurpriseDraft
+                        ? $"Selected as a varied {effectiveSlot} pick from your cookbook."
+                        : $"Selected based on your request: {prompt}"
+                );
+
+            results.Add(
+                new DraftMealPlanCandidateDto(
+                    RecipeId: match.Recipe.Id,
+                    Recipe: match.Recipe,
+                    IsOnDeck: cookSlot.IsOnDeck,
+                    DayOffset: dayOffset,
+                    ScheduledDate: scheduledDate,
+                    Slot: dtoSlot,
+                    TargetServings: targetServings,
+                    Rationale: rationale,
+                    LeftoverDates: leftoverDates,
+                    CookServings: cookSlot.Servings,
+                    LeftoverSlots: leftoverSlots
+                )
+            );
+        }
+
+        return results;
+    }
+
+    private static List<DraftMealPlanCandidateDto> BuildLegacyCandidates(
+        DraftWeeklyMealPlanRequest request,
+        DateOnly rangeStart,
+        List<DateOnly> openDates,
+        string prompt,
+        bool isSurpriseDraft,
+        List<ValidProposalMatch> validProposals
+    )
+    {
+        var requestedMealCount = request.MealCount;
+        var results = new List<DraftMealPlanCandidateDto>(validProposals.Count);
+        var nextOpenDay = 0;
+
+        foreach (var match in validProposals)
+        {
+            var isOnDeck = request.PlaceOnDeck;
+            int? dayOffset = null;
+            DateOnly? scheduledDate = null;
+            MealSlot? slot = null;
+
+            var leftoverDates = new List<DateOnly>();
+            if (!isOnDeck)
+            {
+                var coverage =
+                    openDates.Count / requestedMealCount
+                    + (results.Count < openDates.Count % requestedMealCount ? 1 : 0);
+                scheduledDate = openDates[nextOpenDay++];
+                dayOffset = scheduledDate.Value.DayNumber - rangeStart.DayNumber;
+                slot = request.DefaultSlot;
+                for (var i = 1; i < coverage; i++)
+                {
+                    leftoverDates.Add(openDates[nextOpenDay++]);
+                }
+            }
+
+            var targetServings = request.ServingsPerMeal * (1 + leftoverDates.Count);
+            if (targetServings > 999m)
+            {
+                throw new DomainValidationException(
+                    "Cooking servings including leftovers cannot exceed 999. Reduce servings per meal."
+                );
+            }
+
+            var leftoverSlots = leftoverDates
+                .Select(d => new DraftMealLeftoverSlotDto(
+                    d,
+                    request.DefaultSlot,
+                    request.ServingsPerMeal
+                ))
+                .ToList();
+
+            var rationale = !string.IsNullOrWhiteSpace(match.Proposal.Rationale)
+                ? match.Proposal.Rationale.Trim()
+                : (
+                    isSurpriseDraft
+                        ? $"Selected as a varied {request.DefaultSlot} pick from your cookbook."
+                        : $"Selected based on your request: {prompt}"
+                );
+
+            results.Add(
+                new DraftMealPlanCandidateDto(
+                    RecipeId: match.Recipe.Id,
+                    Recipe: match.Recipe,
+                    IsOnDeck: isOnDeck,
+                    DayOffset: dayOffset,
+                    ScheduledDate: scheduledDate,
+                    Slot: slot,
+                    TargetServings: targetServings,
+                    Rationale: rationale,
+                    LeftoverDates: leftoverDates,
+                    CookServings: request.ServingsPerMeal,
+                    LeftoverSlots: leftoverSlots
+                )
+            );
+        }
+
+        return results;
     }
 
     private static bool StepMentionsIngredient(string? instruction, RecipeIngredient ingredient)

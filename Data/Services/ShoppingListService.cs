@@ -739,7 +739,53 @@ public sealed class ShoppingListService(
         }
 
         var extraction = await ExtractMealPlanDataAsync(shoppingListId, request, cancellationToken);
+        return BuildPreviewDto(request, extraction);
+    }
 
+    public async Task<ShoppingListGenerationPreviewDto> PreviewGenerateFromNewListAsync(
+        GenerateFromMealPlanRequest request,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ValidateDateRange(request.StartDate, request.EndDate);
+
+        var extraction = await ExtractMealPlanDataAsync(null, request, cancellationToken);
+        return BuildPreviewDto(request, extraction);
+    }
+
+    public async Task<ShoppingListGenerationResultDto> CreateAndGenerateFromMealPlanAsync(
+        CreateAndGenerateFromMealPlanRequest request,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.Generation is null)
+        {
+            throw new DomainValidationException("Generation parameters are required.");
+        }
+
+        ValidateDateRange(request.Generation.StartDate, request.Generation.EndDate);
+
+        var createdList = await CreateShoppingListAsync(
+            new CreateShoppingListRequest(request.Name, request.IsPinned),
+            cancellationToken
+        );
+
+        var result = await GenerateFromMealPlanAsync(
+            createdList.Id,
+            request.Generation,
+            cancellationToken
+        );
+
+        return result!;
+    }
+
+    private static ShoppingListGenerationPreviewDto BuildPreviewDto(
+        GenerateFromMealPlanRequest request,
+        MealPlanExtractionResult extraction
+    )
+    {
         var activeCandidates = extraction
             .ConsolidatedBuckets.Where(b => !extraction.IsPantryStapleExcluded(b))
             .Select(MapCandidateDto)
@@ -982,7 +1028,7 @@ public sealed class ShoppingListService(
     );
 
     private async Task<MealPlanExtractionResult> ExtractMealPlanDataAsync(
-        Guid shoppingListId,
+        Guid? shoppingListId,
         GenerateFromMealPlanRequest request,
         CancellationToken cancellationToken
     )
@@ -1027,14 +1073,17 @@ public sealed class ShoppingListService(
             )
             .ToList();
 
-        var existingSources = await dbContext
-            .ShoppingListItemSources.AsNoTracking()
-            .Where(s =>
-                s.ShoppingListItem.ShoppingListId == shoppingListId && s.MealPlanEntryId != null
-            )
-            .Select(s => s.MealPlanEntryId!.Value)
-            .Distinct()
-            .ToListAsync(cancellationToken);
+        var existingSources = shoppingListId.HasValue
+            ? await dbContext
+                .ShoppingListItemSources.AsNoTracking()
+                .Where(s =>
+                    s.ShoppingListItem.ShoppingListId == shoppingListId.Value
+                    && s.MealPlanEntryId != null
+                )
+                .Select(s => s.MealPlanEntryId!.Value)
+                .Distinct()
+                .ToListAsync(cancellationToken)
+            : [];
 
         var alreadyImportedSet = existingSources.ToHashSet();
 

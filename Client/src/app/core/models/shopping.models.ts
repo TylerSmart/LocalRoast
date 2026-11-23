@@ -122,6 +122,12 @@ export interface GenerateFromMealPlanRequest {
   promotePantryFoodItemIds?: string[] | null;
 }
 
+export interface CreateAndGenerateFromMealPlanRequest {
+  name: string;
+  isPinned?: boolean;
+  generation: GenerateFromMealPlanRequest;
+}
+
 export interface ShoppingListCandidateItemDto {
   foodItemId?: string | null;
   displayName: string;

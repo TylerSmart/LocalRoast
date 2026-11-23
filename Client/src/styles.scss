@@ -385,6 +385,32 @@ textarea,
   }
 }
 
+body.meal-drag-copy-mode {
+  cursor: copy !important;
+
+  .cdk-drag-preview {
+    position: relative;
+    outline: 2px solid var(--mat-sys-primary);
+    cursor: copy !important;
+
+    &::after {
+      content: '+ Copy';
+      position: absolute;
+      top: -10px;
+      right: -8px;
+      padding: 2px 8px;
+      border-radius: 9999px;
+      background-color: var(--mat-sys-primary);
+      color: var(--mat-sys-on-primary);
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.22);
+      pointer-events: none;
+    }
+  }
+}
+
 @media (max-width: 768px) {
   .cdk-overlay-container .cdk-overlay-pane .mat-mdc-snack-bar-container {
     margin-bottom: calc(6rem + env(safe-area-inset-bottom));

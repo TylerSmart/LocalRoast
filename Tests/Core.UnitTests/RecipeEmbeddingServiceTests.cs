@@ -845,6 +845,152 @@ public sealed class RecipeEmbeddingServiceTests
         Assert.IsTrue(result.Candidates.Any(c => c.RecipeId == hummus.Id));
     }
 
+    [TestMethod]
+    public async Task RetrieveMealPlanCandidatesAsync_PromptedRag_FiltersNonMealsAndSupportsMultiSlotRequests()
+    {
+        var dinnerTag = new Tag
+        {
+            Id = Guid.NewGuid(),
+            Name = "Dinner",
+            NormalizedName = "dinner",
+            Slug = "dinner",
+            Category = TagCategory.Course,
+        };
+        var breakfastTag = new Tag
+        {
+            Id = Guid.NewGuid(),
+            Name = "Breakfast",
+            NormalizedName = "breakfast",
+            Slug = "breakfast",
+            Category = TagCategory.Course,
+        };
+        var sideTag = new Tag
+        {
+            Id = Guid.NewGuid(),
+            Name = "Side Dish",
+            NormalizedName = "side-dish",
+            Slug = "side-dish",
+            Category = TagCategory.Course,
+        };
+        var cocktailTag = new Tag
+        {
+            Id = Guid.NewGuid(),
+            Name = "Cocktail",
+            NormalizedName = "cocktail",
+            Slug = "cocktail",
+            Category = TagCategory.Course,
+        };
+        var sauceTag = new Tag
+        {
+            Id = Guid.NewGuid(),
+            Name = "Sauce",
+            NormalizedName = "sauce",
+            Slug = "sauce",
+            Category = TagCategory.Course,
+        };
+        _dbContext.Tags.AddRange(dinnerTag, breakfastTag, sideTag, cocktailTag, sauceTag);
+
+        var garlicChicken = new Recipe
+        {
+            Id = Guid.NewGuid(),
+            Title = "Garlic Herb Roast Chicken",
+            Slug = "garlic-herb-roast-chicken",
+            Status = RecipeStatus.Published,
+        };
+        garlicChicken.RecipeTags.Add(new RecipeTag { Recipe = garlicChicken, Tag = dinnerTag });
+
+        var garlicEggs = new Recipe
+        {
+            Id = Guid.NewGuid(),
+            Title = "Garlic Spinach Frittata",
+            Slug = "garlic-spinach-frittata",
+            Status = RecipeStatus.Published,
+        };
+        garlicEggs.RecipeTags.Add(new RecipeTag { Recipe = garlicEggs, Tag = breakfastTag });
+
+        var garlicSide = new Recipe
+        {
+            Id = Guid.NewGuid(),
+            Title = "Garlic Roasted Green Beans",
+            Slug = "garlic-roasted-green-beans",
+            Status = RecipeStatus.Published,
+        };
+        garlicSide.RecipeTags.Add(new RecipeTag { Recipe = garlicSide, Tag = sideTag });
+
+        var garlicDrink = new Recipe
+        {
+            Id = Guid.NewGuid(),
+            Title = "Garlic Bloody Mary",
+            Slug = "garlic-bloody-mary",
+            Status = RecipeStatus.Published,
+        };
+        garlicDrink.RecipeTags.Add(new RecipeTag { Recipe = garlicDrink, Tag = cocktailTag });
+
+        var breakfastTopping = new Recipe
+        {
+            Id = Guid.NewGuid(),
+            Title = "Spiced Garlic Syrup",
+            Slug = "spiced-garlic-syrup",
+            YieldDisplay = "Makes 2 cups",
+            Status = RecipeStatus.Published,
+        };
+        breakfastTopping.RecipeTags.Add(
+            new RecipeTag { Recipe = breakfastTopping, Tag = breakfastTag }
+        );
+        breakfastTopping.RecipeTags.Add(
+            new RecipeTag { Recipe = breakfastTopping, Tag = sauceTag }
+        );
+
+        _dbContext.Recipes.AddRange(
+            garlicChicken,
+            garlicEggs,
+            garlicSide,
+            garlicDrink,
+            breakfastTopping
+        );
+        await _dbContext.SaveChangesAsync();
+
+        var result = await _service.RetrieveMealPlanCandidatesAsync(
+            _configWithEmbedding with
+            {
+                EmbeddingModel = null,
+            },
+            new MealPlanRetrievalRequest(
+                RawUserPrompt: "garlic meals",
+                RequestedMealCount: 2,
+                ExcludedRecipeIds: [],
+                RecentlyScheduledRecipeIds: [],
+                ExcludedTerms: [],
+                PrioritizeIngredients: [],
+                GlobalMaxTotalTimeMinutes: null,
+                SearchBuckets:
+                [
+                    new MealPlanSearchBucketInput("Garlic meals", "garlic", [], null, 2),
+                ],
+                UtcNow: DateTimeOffset.UtcNow,
+                DefaultSlot: MealSlot.Dinner,
+                RandomizeSelection: false,
+                SlotCounts: new Dictionary<MealSlot, int>
+                {
+                    [MealSlot.Breakfast] = 1,
+                    [MealSlot.Dinner] = 1,
+                }
+            )
+        );
+
+        var ids = result.Candidates.Select(c => c.RecipeId).ToList();
+        CollectionAssert.Contains(ids, garlicChicken.Id);
+        CollectionAssert.Contains(ids, garlicEggs.Id);
+        CollectionAssert.DoesNotContain(ids, garlicSide.Id);
+        CollectionAssert.DoesNotContain(ids, garlicDrink.Id);
+        CollectionAssert.DoesNotContain(ids, breakfastTopping.Id);
+
+        var chickenCard = result.Candidates.Single(c => c.RecipeId == garlicChicken.Id);
+        var eggsCard = result.Candidates.Single(c => c.RecipeId == garlicEggs.Id);
+        CollectionAssert.Contains(chickenCard.EligibleSlots!.ToList(), "Dinner");
+        CollectionAssert.Contains(eggsCard.EligibleSlots!.ToList(), "Breakfast");
+    }
+
     private static float[] BuildSemanticVector(string text)
     {
         var lower = text.ToLowerInvariant();

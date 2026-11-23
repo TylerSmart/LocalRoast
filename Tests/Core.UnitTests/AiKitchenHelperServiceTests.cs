@@ -922,6 +922,148 @@ public sealed class AiKitchenHelperServiceTests
         );
     }
 
+    [TestMethod]
+    public async Task DraftWeeklyMealPlanAsync_RequestedSlots_SupportsMultiSlotSameDayLeftoversAndOnDeck()
+    {
+        var breakfastTag = new Tag
+        {
+            Id = Guid.NewGuid(),
+            Name = "Breakfast",
+            NormalizedName = "breakfast",
+            Slug = "breakfast",
+            Category = TagCategory.Course,
+        };
+        var dinnerTag = new Tag
+        {
+            Id = Guid.NewGuid(),
+            Name = "Dinner",
+            NormalizedName = "dinner",
+            Slug = "dinner",
+            Category = TagCategory.Course,
+        };
+        _dbContext.Tags.AddRange(breakfastTag, dinnerTag);
+
+        var pancakes = new Recipe
+        {
+            Id = Guid.NewGuid(),
+            Title = "Blueberry Pancakes",
+            Slug = "blueberry-pancakes",
+            BaseServings = 4,
+            Status = RecipeStatus.Published,
+        };
+        pancakes.RecipeTags.Add(new RecipeTag { Recipe = pancakes, Tag = breakfastTag });
+
+        var chili = new Recipe
+        {
+            Id = Guid.NewGuid(),
+            Title = "Hearty Beef Chili",
+            Slug = "hearty-beef-chili",
+            BaseServings = 4,
+            Status = RecipeStatus.Published,
+        };
+        chili.RecipeTags.Add(new RecipeTag { Recipe = chili, Tag = dinnerTag });
+
+        var tacos = new Recipe
+        {
+            Id = Guid.NewGuid(),
+            Title = "Chicken Tacos",
+            Slug = "chicken-tacos",
+            BaseServings = 4,
+            Status = RecipeStatus.Published,
+        };
+        tacos.RecipeTags.Add(new RecipeTag { Recipe = tacos, Tag = dinnerTag });
+
+        _dbContext.Recipes.AddRange(pancakes, chili, tacos);
+        await _dbContext.SaveChangesAsync();
+
+        _llmClient.DraftResult = new LlmDraftMealPlanPayload([
+            Proposal(chili.Title),
+            Proposal(pancakes.Title),
+            Proposal(tacos.Title),
+        ]);
+
+        var start = new DateOnly(2026, 11, 5);
+        var response = await _service.DraftWeeklyMealPlanAsync(
+            new DraftWeeklyMealPlanRequest(
+                WeekStartDate: start,
+                Prompt: null,
+                MealCount: 3,
+                TodayDate: start,
+                RequestedSlots:
+                [
+                    new DraftMealCookSlotRequest(
+                        IsOnDeck: false,
+                        ScheduledDate: start,
+                        Slot: MealSlot.Breakfast,
+                        Servings: 2m,
+                        Leftovers: []
+                    ),
+                    new DraftMealCookSlotRequest(
+                        IsOnDeck: false,
+                        ScheduledDate: start,
+                        Slot: MealSlot.Lunch,
+                        Servings: 2m,
+                        Leftovers:
+                        [
+                            new DraftMealLeftoverSlotRequest(start, MealSlot.Dinner, 3m),
+                            new DraftMealLeftoverSlotRequest(start.AddDays(1), MealSlot.Lunch, 2m),
+                        ]
+                    ),
+                    new DraftMealCookSlotRequest(
+                        IsOnDeck: true,
+                        ScheduledDate: null,
+                        Slot: MealSlot.Dinner,
+                        Servings: 4m,
+                        Leftovers: []
+                    ),
+                ]
+            )
+        );
+
+        Assert.AreEqual(3, response.Candidates.Count);
+        Assert.IsNotNull(_llmClient.LastDraftContext?.RequestedSlotLines);
+        Assert.AreEqual(3, _llmClient.LastDraftContext!.RequestedSlotLines!.Count);
+
+        // Slot 0: Breakfast picks Breakfast-eligible pancakes
+        Assert.AreEqual(pancakes.Id, response.Candidates[0].RecipeId);
+        Assert.AreEqual(MealSlot.Breakfast, response.Candidates[0].Slot);
+        Assert.AreEqual(2m, response.Candidates[0].CookServings);
+        Assert.AreEqual(2m, response.Candidates[0].TargetServings);
+
+        // Slot 1: Lunch cook 2 + same-day Dinner leftovers 3 + next-day Lunch leftovers 2 = 7 servings
+        Assert.AreEqual(MealSlot.Lunch, response.Candidates[1].Slot);
+        Assert.AreEqual(2m, response.Candidates[1].CookServings);
+        Assert.AreEqual(7m, response.Candidates[1].TargetServings);
+        Assert.AreEqual(2, response.Candidates[1].LeftoverSlots!.Count);
+        Assert.AreEqual(MealSlot.Dinner, response.Candidates[1].LeftoverSlots![0].Slot);
+        Assert.AreEqual(3m, response.Candidates[1].LeftoverSlots![0].Servings);
+
+        // Slot 2: On-Deck
+        Assert.IsTrue(response.Candidates[2].IsOnDeck);
+        Assert.IsNull(response.Candidates[2].ScheduledDate);
+        Assert.AreEqual(4m, response.Candidates[2].TargetServings);
+
+        // Invalid chronological leftover (same day, earlier slot) throws
+        await Assert.ThrowsAsync<DomainValidationException>(() =>
+            _service.DraftWeeklyMealPlanAsync(
+                new DraftWeeklyMealPlanRequest(
+                    WeekStartDate: start,
+                    TodayDate: start,
+                    RequestedSlots:
+                    [
+                        new DraftMealCookSlotRequest(
+                            IsOnDeck: false,
+                            ScheduledDate: start,
+                            Slot: MealSlot.Dinner,
+                            Servings: 2m,
+                            Leftovers: [new DraftMealLeftoverSlotRequest(start, MealSlot.Lunch, 2m)]
+                        ),
+                    ]
+                )
+            )
+        );
+    }
+
     private async Task<Recipe[]> SeedDraftRecipesAsync()
     {
         var recipes = Enumerable

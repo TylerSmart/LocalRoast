@@ -438,4 +438,65 @@ public sealed class ShoppingListServiceTests
         Assert.AreEqual(1m, beefItem.Quantity);
         Assert.AreEqual(MeasurementUnit.Lb, beefItem.Unit);
     }
+
+    [TestMethod]
+    public async Task PreviewAndCreateAndGenerateFromMealPlan_CreatesNewWeeklyListInOneStep()
+    {
+        var weekStart = new DateOnly(2026, 11, 2);
+        _dbContext.MealPlanEntries.Add(
+            new MealPlanEntry
+            {
+                Id = Guid.NewGuid(),
+                WeekStartDate = MealPlanDateHelper.NormalizeToSunday(weekStart),
+                ScheduledDate = weekStart,
+                Slot = MealSlot.Dinner,
+                EntryType = MealPlanEntryType.Recipe,
+                RecipeId = _recipeTacos.Id,
+                TargetServings = 8m,
+                IsLeftovers = false,
+            }
+        );
+        await _dbContext.SaveChangesAsync();
+
+        var genRequest = new GenerateFromMealPlanRequest(
+            StartDate: weekStart,
+            EndDate: weekStart.AddDays(6),
+            IncludeOnDeck: true,
+            IncludeSubRecipes: true
+        );
+
+        var preview = await _service.PreviewGenerateFromNewListAsync(genRequest);
+        Assert.AreEqual(1, preview.EligibleMealsCount);
+        Assert.AreEqual(0, preview.AlreadyImportedMeals.Count);
+        Assert.AreEqual(1, preview.ActiveCandidateItems.Count);
+        Assert.AreEqual(1, preview.ExcludedPantryCandidateItems.Count);
+
+        var createdResult = await _service.CreateAndGenerateFromMealPlanAsync(
+            new CreateAndGenerateFromMealPlanRequest(
+                Name: "Week of Nov 2 - Nov 8",
+                IsPinned: false,
+                Generation: genRequest
+            )
+        );
+
+        Assert.AreEqual("Week of Nov 2 - Nov 8", createdResult.ShoppingList.Name);
+        Assert.AreEqual(1, createdResult.ImportedMealsCount);
+        Assert.AreEqual(8m, createdResult.ShoppingList.ActiveItems.Single().Quantity);
+
+        // Invalid date range must fail before creating a list
+        await Assert.ThrowsAsync<DomainValidationException>(() =>
+            _service.CreateAndGenerateFromMealPlanAsync(
+                new CreateAndGenerateFromMealPlanRequest(
+                    Name: "Should Not Exist",
+                    IsPinned: false,
+                    Generation: genRequest with
+                    {
+                        StartDate = weekStart.AddDays(5),
+                        EndDate = weekStart,
+                    }
+                )
+            )
+        );
+        Assert.IsFalse(await _dbContext.ShoppingLists.AnyAsync(l => l.Name == "Should Not Exist"));
+    }
 }

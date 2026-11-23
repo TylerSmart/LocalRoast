@@ -136,6 +136,13 @@ public sealed class ShoppingListsE2ETests : E2ETestBase
         var genDialog = Page.Locator("mat-dialog-container");
         await Expect(genDialog.Locator("h2")).ToContainTextAsync("Generate Shopping List");
 
+        // Opened from Meal Plan -> defaults to creating a new weekly list
+        await Expect(genDialog.Locator("input.new-list-name-input")).ToBeVisibleAsync();
+
+        // Select existing "Weekly Groceries" list so Step 8 validates duplicate detection against it
+        await genDialog.Locator("mat-select.target-list-select").ClickAsync();
+        await Page.Locator("mat-option", new() { HasText = "Weekly Groceries" }).First.ClickAsync();
+
         // Verify preview reflects eligible meals and ignored leftovers/notes
         await Expect(genDialog.Locator(".preview-card")).ToContainTextAsync("Meals");
         await Expect(genDialog.Locator(".ignored-note")).ToContainTextAsync("leftovers");
@@ -467,5 +474,65 @@ public sealed class ShoppingListsE2ETests : E2ETestBase
             innerWidth,
             $"Page horizontally overflows at 360px after interactions: scrollWidth={scrollWidth}, innerWidth={innerWidth}"
         );
+    }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task ShoppingList_FromMealPlan_DefaultsToCreatingNewWeeklyListInline()
+    {
+        await RegisterAndLoginAsync();
+        var recipeTitle = $"Skillet Lasagna {Guid.NewGuid():N}"[..20];
+
+        await CreateRecipeWithIngredientsAsync(recipeTitle, 4, ("Ground Beef", 2m, "Pound"));
+
+        // Schedule recipe on Meal Plan
+        await Page.Locator("button.recipe-actions-menu-btn").ClickAsync();
+        await Page.Locator("button[aria-label='Plan meal']").ClickAsync();
+        var planDialog = Page.Locator("mat-dialog-container");
+        await Expect(planDialog.Locator("h2")).ToContainTextAsync("Plan a Meal");
+        await planDialog
+            .Locator("button[color='primary']", new() { HasText = "Plan Meal" })
+            .ClickAsync();
+        await Expect(planDialog).Not.ToBeVisibleAsync();
+
+        // Navigate to Meal Plan and click Shop Week
+        await Page.Locator("nav.desktop-nav a", new() { HasText = "Meal Plan" }).ClickAsync();
+        await Expect(Page).ToHaveURLAsync(new Regex(".*/meal-plan.*"));
+
+        await Page.Locator("button.shop-week-btn").ClickAsync();
+        var genDialog = Page.Locator("mat-dialog-container");
+        await Expect(genDialog.Locator("h2")).ToContainTextAsync("Generate Shopping List");
+
+        // Verify inline weekly list creation is selected by default with "Week of ..." name
+        var newListNameInput = genDialog.Locator("input.new-list-name-input");
+        await Expect(newListNameInput).ToBeVisibleAsync();
+        await Expect(newListNameInput).ToHaveValueAsync(new Regex("^Week of "));
+
+        var submitBtn = genDialog.Locator(
+            "button[color='primary']",
+            new() { HasText = "Create & Generate" }
+        );
+        await Expect(submitBtn).ToBeEnabledAsync();
+        await submitBtn.ClickAsync();
+        await Expect(genDialog).Not.ToBeVisibleAsync();
+
+        // Click "Open List" in snackbar to jump directly to the newly created list
+        var openListSnackBtn = Page.Locator(
+            ".mat-mdc-snack-bar-container button",
+            new() { HasText = "Open List" }
+        );
+        await Expect(openListSnackBtn).ToBeVisibleAsync();
+        await openListSnackBtn.ClickAsync();
+
+        await Expect(Page).ToHaveURLAsync(new Regex(".*/shopping\\?listId="));
+        await Expect(Page.Locator(".desktop-list-pills .list-pill.active"))
+            .ToContainTextAsync("Week of ");
+
+        var beefRow = Page.Locator(
+            ".active-items-card .shopping-item-row",
+            new() { HasText = "Ground Beef" }
+        );
+        await Expect(beefRow).ToBeVisibleAsync();
+        await Expect(beefRow.Locator(".item-qty-badge")).ToContainTextAsync("2");
     }
 }

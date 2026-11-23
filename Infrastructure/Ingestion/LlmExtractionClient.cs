@@ -2462,17 +2462,17 @@ Strict Rules:
 1. You MUST ONLY propose recipes from the provided Household Cookbook Catalog using their exact integer "catalogIndex".
 2. NEVER invent, hallucinate, or suggest any recipe that is not listed in the catalog.
 3. Respect the user's prompt constraints when provided (e.g. max time, vegetarian, high-rated, specific proteins, busy weeknights, prioritized on-hand ingredients). When no specific preferences are provided, surprise the household with a varied, well-balanced mix of cuisines, proteins, and cooking styles.
-4. Choose complete, satisfying meals appropriate for the requested Default Meal Slot (for example, for Dinner or Lunch pick hearty main dishes/entrees and NEVER suggest standalone dips, sauces, condiments, dressings, desserts, beverages, or small side dishes as a meal unless explicitly requested).
+4. Choose complete, satisfying meals appropriate for each requested meal slot (for example, for Dinner or Lunch pick hearty main dishes/entrees and for Breakfast pick true breakfast dishes; NEVER suggest standalone dips, sauces, condiments, dressings, desserts, beverages, toppings, or side dishes as a meal unless explicitly requested).
 5. Minimize grocery waste by favoring combinations of recipes that share perishable ingredients (produce, fresh herbs, proteins, dairy) while keeping the week varied and avoiding recipes cooked very recently.
 6. For each proposal:
    - "catalogIndex": The integer index of the recipe from the catalog (1-based).
    - "recipeTitle": Title of the recipe matching the catalog.
    - "dayOffset": Offset from the supplied start date: 0 is the start date, through 6 (or null if placed on-deck). Never propose a past date.
-   - "slot": Meal slot ("Breakfast", "Lunch", "Dinner", or "SnackPrep").
+   - "slot": Meal slot ("Breakfast", "Lunch", "Dinner", or "SnackPrep") matching the requested slot when specified.
    - "isOnDeck": True if placed in the flexible weekly On-Deck tray, otherwise false.
    - "targetServings": Servings to cook (defaults to the recipe's base servings).
    - "rationale": Short explanation of why this recipe fits the plan, prompt, or shared ingredients.
-7. Return exactly the requested number of cooking suggestions, preferably distinct recipes. The application schedules cooking and leftover days and scales servings; do not add extra proposals for leftovers.
+7. Return exactly the requested number of cooking suggestions, preferably distinct recipes. When Requested Cooking Slots are listed, align each proposal to a slot using its eligible Slots tags. The application schedules cooking and leftover days and scales servings; do not add extra proposals for leftovers.
 8. Optionally include "unmetCravingNotes": short notes ONLY when a specific cuisine or craving in the user's prompt had no strong matches in the provided cookbook candidates. Leave empty when no preferences were provided or when the prompt is well satisfied.
 """;
     }
@@ -2480,7 +2480,7 @@ Strict Rules:
     private static string BuildDraftMealPlanUserPrompt(LlmDraftMealPlanContext context)
     {
         var catalogLines = context.CookbookCatalog.Select(c =>
-            $"[{c.CatalogIndex}] {c.Title} | BaseServings: {c.BaseServings} | Time: {(c.TotalTimeMinutes.HasValue ? $"{c.TotalTimeMinutes}m" : "N/A")} | Difficulty: {c.Difficulty ?? "N/A"} | Rating: {(c.AverageRating.HasValue ? $"★{c.AverageRating:F1}" : "Unrated")} | Cooked: {c.TimesCooked}x (Last: {(c.DaysSinceLastCooked.HasValue ? $"{c.DaysSinceLastCooked}d ago" : "Never")}) | Tags: {(c.Tags.Count > 0 ? string.Join(", ", c.Tags) : "None")} | Ingredients: {(c.KeyIngredients.Count > 0 ? string.Join(", ", c.KeyIngredients) : "N/A")}"
+            $"[{c.CatalogIndex}] {c.Title} | BaseServings: {c.BaseServings} | Time: {(c.TotalTimeMinutes.HasValue ? $"{c.TotalTimeMinutes}m" : "N/A")} | Difficulty: {c.Difficulty ?? "N/A"} | Rating: {(c.AverageRating.HasValue ? $"★{c.AverageRating:F1}" : "Unrated")} | Cooked: {c.TimesCooked}x (Last: {(c.DaysSinceLastCooked.HasValue ? $"{c.DaysSinceLastCooked}d ago" : "Never")}) | Tags: {(c.Tags.Count > 0 ? string.Join(", ", c.Tags) : "None")}{(c.EligibleSlots is { Count: > 0 } ? $" | Slots: {string.Join("/", c.EligibleSlots)}" : "")} | Ingredients: {(c.KeyIngredients.Count > 0 ? string.Join(", ", c.KeyIngredients) : "N/A")}"
         );
 
         var effectivePrompt = string.IsNullOrWhiteSpace(context.UserPrompt)
@@ -2495,6 +2495,15 @@ Strict Rules:
         );
         sb.AppendLine($"Default Meal Slot: {context.DefaultSlotName}");
         sb.AppendLine($"Place in On-Deck Tray by Default: {context.PlaceOnDeck}");
+
+        if (context.RequestedSlotLines is { Count: > 0 })
+        {
+            sb.AppendLine("Requested Cooking Slots:");
+            foreach (var slotLine in context.RequestedSlotLines)
+            {
+                sb.AppendLine($"- {slotLine}");
+            }
+        }
 
         if (context.PrioritizeIngredients is { Count: > 0 })
         {

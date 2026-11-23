@@ -29,7 +29,10 @@
     <!-- Target List -->
     <mat-form-field appearance="outline" class="full-width" subscriptSizing="dynamic">
       <mat-label>Target Shopping List</mat-label>
-      <mat-select formControlName="targetShoppingListId">
+      <mat-select formControlName="targetShoppingListId" class="target-list-select">
+        <mat-option [value]="newListSentinel" class="new-list-option">
+          Create new list for this week
+        </mat-option>
         @for (l of shoppingLists(); track l.id) {
           <mat-option [value]="l.id">
             {{ l.name }}
@@ -43,6 +46,20 @@
         <mat-error>Please select a target list</mat-error>
       }
     </mat-form-field>
+
+    @if (isCreatingNewList()) {
+      <mat-form-field appearance="outline" class="full-width" subscriptSizing="dynamic">
+        <mat-label>New Shopping List Name</mat-label>
+        <input
+          matInput
+          class="new-list-name-input"
+          formControlName="newListName"
+          maxlength="150"
+          (input)="onNewListNameInput()"
+          placeholder="e.g. Week of Nov 22 – 28, 2026"
+        />
+      </mat-form-field>
+    }
 
     <!-- Date Range -->
     <div class="form-row dates-row">
@@ -183,13 +200,17 @@
     type="button"
     (click)="onSubmit()"
     [disabled]="
-      isGenerating() || form.invalid || !preview() || preview()!.activeCandidateItems.length === 0
+      isGenerating() ||
+      form.invalid ||
+      !preview() ||
+      preview()!.activeCandidateItems.length === 0 ||
+      (isCreatingNewList() && !form.controls.newListName.value.trim())
     "
   >
     @if (isGenerating()) {
       <mat-spinner diameter="18"></mat-spinner>
     } @else {
-      <span>Generate Items</span>
+      <span>{{ isCreatingNewList() ? 'Create & Generate' : 'Generate Items' }}</span>
     }
   </button>
 </mat-dialog-actions>

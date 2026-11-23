@@ -919,4 +919,164 @@ public sealed class AiKitchenHelpersIntegrationTests
         Assert.AreEqual(HttpStatusCode.OK, emptyPromptRes.StatusCode);
         Assert.AreEqual(0, fakeLlm.DecomposeCallCount);
     }
+
+    [TestMethod]
+    public async Task DraftWeeklyMealPlan_StructuredSlots_AppliesAndCreatesNewWeeklyShoppingList()
+    {
+        var fakeLlm = new MockLlmExtractionClient { ThrowUnavailable = false };
+
+        await using var factory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureServices(services =>
+            {
+                var descriptor = services.FirstOrDefault(d =>
+                    d.ServiceType == typeof(ILlmExtractionClient)
+                );
+                if (descriptor != null)
+                {
+                    services.Remove(descriptor);
+                }
+                services.AddSingleton<ILlmExtractionClient>(fakeLlm);
+            });
+        });
+
+        using var client = factory.CreateClient();
+        await AuthenticateAsync(client);
+
+        await client.PutAsJsonAsync(
+            "/api/llm-settings",
+            new UpdateLlmSettingsRequest(
+                Provider: LlmProvider.Ollama,
+                BaseUrl: "http://localhost:11434",
+                ApiKey: null,
+                TextModel: "llama3",
+                VisionModel: null,
+                RequestTimeoutSeconds: 30
+            )
+        );
+
+        var foodRes = await client.PostAsJsonAsync(
+            "/api/food-items",
+            new CreateFoodItemRequest("Black Beans")
+        );
+        foodRes.EnsureSuccessStatusCode();
+        var beans = (await foodRes.Content.ReadFromJsonAsync<FoodItemDto>())!;
+
+        var recipeRes = await client.PostAsJsonAsync(
+            "/api/recipes",
+            new UpsertRecipeRequest(
+                Title: "Test Grounded Recipe",
+                BaseServings: 4m,
+                Ingredients:
+                [
+                    new RecipeIngredientInput(
+                        SectionName: null,
+                        Quantity: 2m,
+                        MaxQuantity: null,
+                        Unit: MeasurementUnit.Can,
+                        CustomUnitName: null,
+                        FoodItemId: beans.Id,
+                        LinkedRecipeId: null,
+                        DisplayName: "Black Beans",
+                        PreparationNote: null
+                    ),
+                ],
+                Steps: [new RecipeStepInput(SectionName: null, Instruction: "Simmer beans.")]
+            )
+        );
+        recipeRes.EnsureSuccessStatusCode();
+        var recipe = (await recipeRes.Content.ReadFromJsonAsync<RecipeDetailDto>())!;
+
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var draftRes = await client.PostAsJsonAsync(
+            "/api/ai-helpers/draft-meal-plan",
+            new DraftWeeklyMealPlanRequest(
+                WeekStartDate: today,
+                Prompt: null,
+                MealCount: 1,
+                TodayDate: today,
+                RequestedSlots:
+                [
+                    new DraftMealCookSlotRequest(
+                        IsOnDeck: false,
+                        ScheduledDate: today,
+                        Slot: MealSlot.Lunch,
+                        Servings: 2m,
+                        Leftovers:
+                        [
+                            new DraftMealLeftoverSlotRequest(today, MealSlot.Dinner, 2m),
+                            new DraftMealLeftoverSlotRequest(today.AddDays(1), MealSlot.Lunch, 4m),
+                        ]
+                    ),
+                ]
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.OK, draftRes.StatusCode);
+        var draft = (await draftRes.Content.ReadFromJsonAsync<DraftMealPlanResponseDto>())!;
+        Assert.AreEqual(1, draft.Candidates.Count);
+        Assert.AreEqual(8m, draft.Candidates[0].TargetServings);
+        Assert.AreEqual(2m, draft.Candidates[0].CookServings);
+
+        var candidate = draft.Candidates[0];
+        var entries = new List<CreateMealPlanEntryRequest>
+        {
+            new(
+                EntryType: MealPlanEntryType.Recipe,
+                IsOnDeck: false,
+                ScheduledDate: candidate.ScheduledDate,
+                Slot: candidate.Slot,
+                RecipeId: candidate.RecipeId,
+                TargetServings: candidate.TargetServings
+            ),
+        };
+        entries.AddRange(
+            candidate.LeftoverSlots!.Select(lo => new CreateMealPlanEntryRequest(
+                EntryType: MealPlanEntryType.Leftovers,
+                IsOnDeck: false,
+                ScheduledDate: lo.ScheduledDate,
+                Slot: lo.Slot,
+                RecipeId: candidate.RecipeId,
+                TargetServings: lo.Servings,
+                SourceDraftEntryIndex: 0
+            ))
+        );
+
+        var applyRes = await client.PostAsJsonAsync(
+            "/api/meal-plans/week/apply-draft",
+            new ApplyDraftMealPlanRequest(today, entries)
+        );
+        Assert.AreEqual(HttpStatusCode.OK, applyRes.StatusCode);
+
+        var genRequest = new GenerateFromMealPlanRequest(
+            today,
+            today.AddDays(6),
+            IncludeOnDeck: false
+        );
+        var previewRes = await client.PostAsJsonAsync(
+            "/api/shopping-lists/generate/meal-plan/preview",
+            genRequest
+        );
+        Assert.AreEqual(HttpStatusCode.OK, previewRes.StatusCode);
+        var preview =
+            await previewRes.Content.ReadFromJsonAsync<ShoppingListGenerationPreviewDto>();
+        Assert.IsNotNull(preview);
+        Assert.AreEqual(1, preview.EligibleMealsCount);
+        Assert.AreEqual(2, preview.IgnoredLeftoversCount);
+        Assert.AreEqual(4m, preview.ActiveCandidateItems.Single().Quantity);
+
+        var createGenRes = await client.PostAsJsonAsync(
+            "/api/shopping-lists/generate/meal-plan",
+            new CreateAndGenerateFromMealPlanRequest(
+                Name: $"Week of {today:MMM d}",
+                IsPinned: false,
+                Generation: genRequest
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.OK, createGenRes.StatusCode);
+        var createdGen =
+            await createGenRes.Content.ReadFromJsonAsync<ShoppingListGenerationResultDto>();
+        Assert.IsNotNull(createdGen);
+        Assert.AreEqual($"Week of {today:MMM d}", createdGen.ShoppingList.Name);
+        Assert.AreEqual(4m, createdGen.ShoppingList.ActiveItems.Single().Quantity);
+    }
 }

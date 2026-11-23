@@ -54,7 +54,8 @@ public record LlmCookbookRecipeCandidate(
     IReadOnlyList<string> KeyIngredients,
     decimal? AverageRating,
     int TimesCooked,
-    int? DaysSinceLastCooked
+    int? DaysSinceLastCooked,
+    IReadOnlyList<string>? EligibleSlots = null
 );
 
 public record LlmMealPlanQueryAnalysisContext(
@@ -88,7 +89,8 @@ public record LlmDraftMealPlanContext(
     IReadOnlyList<LlmCookbookRecipeCandidate> CookbookCatalog,
     IReadOnlyList<string>? BucketSummaries = null,
     IReadOnlyList<string>? PrioritizeIngredients = null,
-    IReadOnlyList<string>? UnmatchedBuckets = null
+    IReadOnlyList<string>? UnmatchedBuckets = null,
+    IReadOnlyList<string>? RequestedSlotLines = null
 );
 
 public record LlmDraftMealProposalItem(

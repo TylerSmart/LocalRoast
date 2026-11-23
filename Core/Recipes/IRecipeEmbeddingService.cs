@@ -22,7 +22,8 @@ public record MealPlanRetrievalRequest(
     IReadOnlyList<MealPlanSearchBucketInput> SearchBuckets,
     DateTimeOffset UtcNow,
     MealSlot? DefaultSlot = null,
-    bool RandomizeSelection = false
+    bool RandomizeSelection = false,
+    IReadOnlyDictionary<MealSlot, int>? SlotCounts = null
 );
 
 public record MealPlanRetrievalResult(

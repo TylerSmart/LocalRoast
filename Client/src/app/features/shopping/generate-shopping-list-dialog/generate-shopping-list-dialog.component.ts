@@ -1,4 +1,5 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatButtonToggleModule } from '@angular/material/button-toggle';
@@ -13,6 +14,7 @@ import { MatInputModule } from '@angular/material/input';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatRadioModule } from '@angular/material/radio';
 import { MatSelectModule } from '@angular/material/select';
+import { merge } from 'rxjs';
 import {
   DuplicateMealPolicy,
   GenerateFromMealPlanRequest,
@@ -24,10 +26,13 @@ import {
   addDaysIso,
   coerceToDateLocal,
   coerceToIsoDateLocal,
+  formatWeekRangeLabel,
   getTodayIsoLocal,
   normalizeToSundayIso,
   shouldUseTouchDatepicker,
 } from '../../../core/utils/meal-plan-date';
+
+export const NEW_SHOPPING_LIST_ID = '__NEW_LIST__';
 
 export interface GenerateShoppingListDialogData {
   targetShoppingListId?: string;
@@ -61,7 +66,9 @@ export class GenerateShoppingListDialogComponent implements OnInit {
   private readonly dialogRef = inject(MatDialogRef<GenerateShoppingListDialogComponent>);
   readonly data = inject<GenerateShoppingListDialogData>(MAT_DIALOG_DATA, { optional: true });
   private readonly shoppingService = inject(ShoppingService);
+  private readonly destroyRef = inject(DestroyRef);
 
+  readonly newListSentinel = NEW_SHOPPING_LIST_ID;
   readonly shoppingLists = signal<ShoppingListSummaryDto[]>([]);
   readonly useTouchDatepicker = shouldUseTouchDatepicker();
   readonly preview = signal<ShoppingListGenerationPreviewDto | null>(null);
@@ -71,9 +78,13 @@ export class GenerateShoppingListDialogComponent implements OnInit {
   readonly errorMessage = signal<string | null>(null);
 
   readonly promotedStaples = signal<Set<string>>(new Set());
+  readonly selectedTargetListId = signal<string>(NEW_SHOPPING_LIST_ID);
+  readonly isCreatingNewList = computed(() => this.selectedTargetListId() === NEW_SHOPPING_LIST_ID);
+  private customListNameEdited = false;
 
   readonly form = this.fb.nonNullable.group({
-    targetShoppingListId: ['', [Validators.required]],
+    targetShoppingListId: [NEW_SHOPPING_LIST_ID, [Validators.required]],
+    newListName: [''],
     startDate: [coerceToDateLocal(getTodayIsoLocal()) as Date | string, [Validators.required]],
     endDate: [coerceToDateLocal(getTodayIsoLocal()) as Date | string, [Validators.required]],
     includeOnDeck: [true],
@@ -84,19 +95,62 @@ export class GenerateShoppingListDialogComponent implements OnInit {
 
   ngOnInit(): void {
     const today = getTodayIsoLocal();
-    const monday = this.data?.startDate || normalizeToSundayIso(today);
-    const sunday = this.data?.endDate || addDaysIso(monday, 6);
+    const startIso = this.data?.startDate || normalizeToSundayIso(today);
+    const endIso = this.data?.endDate || addDaysIso(startIso, 6);
 
-    this.form.patchValue({
-      startDate: coerceToDateLocal(monday),
-      endDate: coerceToDateLocal(sunday),
-    });
+    this.form.patchValue(
+      {
+        startDate: coerceToDateLocal(startIso),
+        endDate: coerceToDateLocal(endIso),
+        newListName: this.buildDefaultWeeklyListName(startIso, []),
+      },
+      { emitEvent: false },
+    );
 
     this.loadLists();
 
-    this.form.valueChanges.subscribe(() => {
-      this.refreshPreview();
-    });
+    this.form.controls.targetShoppingListId.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((value) => {
+        this.selectedTargetListId.set(value);
+        if (
+          value === NEW_SHOPPING_LIST_ID &&
+          !this.customListNameEdited &&
+          !this.form.controls.newListName.value.trim()
+        ) {
+          const currentStart = coerceToIsoDateLocal(this.form.controls.startDate.value);
+          this.form.patchValue(
+            { newListName: this.buildDefaultWeeklyListName(currentStart, this.shoppingLists()) },
+            { emitEvent: false },
+          );
+        }
+      });
+
+    this.form.controls.startDate.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((newStart) => {
+        if (this.isCreatingNewList() && !this.customListNameEdited) {
+          const startStr = coerceToIsoDateLocal(newStart);
+          this.form.patchValue(
+            { newListName: this.buildDefaultWeeklyListName(startStr, this.shoppingLists()) },
+            { emitEvent: false },
+          );
+        }
+      });
+
+    merge(
+      this.form.controls.targetShoppingListId.valueChanges,
+      this.form.controls.startDate.valueChanges,
+      this.form.controls.endDate.valueChanges,
+      this.form.controls.includeOnDeck.valueChanges,
+      this.form.controls.includeSubRecipes.valueChanges,
+      this.form.controls.includeOptionalIngredients.valueChanges,
+      this.form.controls.duplicatePolicy.valueChanges,
+    )
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
+        this.refreshPreview();
+      });
   }
 
   private loadLists(): void {
@@ -106,22 +160,50 @@ export class GenerateShoppingListDialogComponent implements OnInit {
         this.shoppingLists.set(lists);
         this.isLoadingLists.set(false);
 
-        let initialListId = this.data?.targetShoppingListId;
-        if (!initialListId && lists.length > 0) {
-          const pinned = lists.find((l) => l.isPinned);
-          initialListId = pinned ? pinned.id : lists[0].id;
-        }
+        const requestedId = this.data?.targetShoppingListId;
+        const initialListId =
+          requestedId && lists.some((l) => l.id === requestedId)
+            ? requestedId
+            : NEW_SHOPPING_LIST_ID;
 
-        if (initialListId) {
-          this.form.patchValue({ targetShoppingListId: initialListId }, { emitEvent: false });
-          this.refreshPreview();
-        }
+        const currentStart = coerceToIsoDateLocal(this.form.controls.startDate.value);
+        const defaultName = this.buildDefaultWeeklyListName(currentStart, lists);
+
+        this.selectedTargetListId.set(initialListId);
+        this.form.patchValue(
+          {
+            targetShoppingListId: initialListId,
+            newListName: this.customListNameEdited
+              ? this.form.controls.newListName.value
+              : defaultName,
+          },
+          { emitEvent: false },
+        );
+        this.refreshPreview();
       },
       error: () => {
         this.isLoadingLists.set(false);
         this.errorMessage.set('Failed to load shopping lists.');
       },
     });
+  }
+
+  onNewListNameInput(): void {
+    this.customListNameEdited = true;
+  }
+
+  buildDefaultWeeklyListName(startIso: string, existingLists: ShoppingListSummaryDto[]): string {
+    const base = `Week of ${formatWeekRangeLabel(startIso)}`;
+    const existingNames = new Set(existingLists.map((l) => l.name.trim().toLowerCase()));
+    if (!existingNames.has(base.toLowerCase())) {
+      return base;
+    }
+
+    let suffix = 2;
+    while (existingNames.has(`${base} (${suffix})`.toLowerCase())) {
+      suffix++;
+    }
+    return `${base} (${suffix})`;
   }
 
   refreshPreview(): void {
@@ -145,7 +227,12 @@ export class GenerateShoppingListDialogComponent implements OnInit {
       promotePantryFoodItemIds: Array.from(this.promotedStaples()),
     };
 
-    this.shoppingService.previewGenerateFromMealPlan(val.targetShoppingListId, request).subscribe({
+    const previewObs =
+      val.targetShoppingListId === NEW_SHOPPING_LIST_ID
+        ? this.shoppingService.previewGenerateFromNewList(request)
+        : this.shoppingService.previewGenerateFromMealPlan(val.targetShoppingListId, request);
+
+    previewObs.subscribe({
       next: (res) => {
         this.preview.set(res);
         this.isPreviewing.set(false);
@@ -182,6 +269,13 @@ export class GenerateShoppingListDialogComponent implements OnInit {
     }
 
     const val = this.form.getRawValue();
+    const creatingNew = val.targetShoppingListId === NEW_SHOPPING_LIST_ID;
+    const newListName = val.newListName.trim();
+    if (creatingNew && !newListName) {
+      this.errorMessage.set('Please enter a name for the new shopping list.');
+      return;
+    }
+
     this.isGenerating.set(true);
     this.errorMessage.set(null);
 
@@ -195,7 +289,15 @@ export class GenerateShoppingListDialogComponent implements OnInit {
       promotePantryFoodItemIds: Array.from(this.promotedStaples()),
     };
 
-    this.shoppingService.generateFromMealPlan(val.targetShoppingListId, request).subscribe({
+    const generateObs = creatingNew
+      ? this.shoppingService.createAndGenerateFromMealPlan({
+          name: newListName,
+          isPinned: false,
+          generation: request,
+        })
+      : this.shoppingService.generateFromMealPlan(val.targetShoppingListId, request);
+
+    generateObs.subscribe({
       next: (result) => {
         this.dialogRef.close(result);
       },

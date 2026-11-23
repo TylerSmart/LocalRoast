@@ -244,6 +244,76 @@ public sealed class ShoppingListsController(IShoppingListService shoppingListSer
         return result is not null ? Ok(result) : NotFound();
     }
 
+    [HttpPost("generate/meal-plan/preview")]
+    [ProducesResponseType(typeof(ShoppingListGenerationPreviewDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> PreviewGenerateFromNewList(
+        [FromBody] GenerateFromMealPlanRequest request,
+        CancellationToken cancellationToken
+    )
+    {
+        try
+        {
+            var preview = await shoppingListService.PreviewGenerateFromNewListAsync(
+                request,
+                cancellationToken
+            );
+            return Ok(preview);
+        }
+        catch (DomainValidationException ex)
+        {
+            return BadRequest(
+                new ProblemDetails
+                {
+                    Status = StatusCodes.Status400BadRequest,
+                    Title = ex.Title,
+                    Detail = ex.Message,
+                }
+            );
+        }
+    }
+
+    [HttpPost("generate/meal-plan")]
+    [ProducesResponseType(typeof(ShoppingListGenerationResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> CreateAndGenerateFromMealPlan(
+        [FromBody] CreateAndGenerateFromMealPlanRequest request,
+        CancellationToken cancellationToken
+    )
+    {
+        try
+        {
+            var result = await shoppingListService.CreateAndGenerateFromMealPlanAsync(
+                request,
+                cancellationToken
+            );
+            return Ok(result);
+        }
+        catch (DomainValidationException ex)
+        {
+            return BadRequest(
+                new ProblemDetails
+                {
+                    Status = StatusCodes.Status400BadRequest,
+                    Title = ex.Title,
+                    Detail = ex.Message,
+                }
+            );
+        }
+        catch (ConflictException ex)
+        {
+            return Conflict(
+                new ProblemDetails
+                {
+                    Status = StatusCodes.Status409Conflict,
+                    Title = ex.Title,
+                    Detail = ex.Message,
+                }
+            );
+        }
+    }
+
     [HttpPost("{id:guid}/generate/meal-plan/preview")]
     [ProducesResponseType(typeof(ShoppingListGenerationPreviewDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]

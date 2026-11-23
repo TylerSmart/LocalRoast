@@ -52,7 +52,7 @@
       </button>
     </div>
 
-    <!-- Actions (Shop, Add, Overflow Menu) -->
+    <!-- Actions (Shop, Draft AI, Add, Week Overflow Menu) -->
     <div class="calendar-top-actions">
       @if (viewMode() !== 'month') {
         <button
@@ -65,6 +65,19 @@
           <mat-icon>shopping_cart_checkout</mat-icon>
           <span class="btn-text">{{ viewMode() === 'next7' ? 'Shop 7 Days' : 'Shop Week' }}</span>
         </button>
+
+        @if (aiHelper.isAvailable()) {
+          <button
+            type="button"
+            mat-stroked-button
+            (click)="openDraftMealPlanDialog()"
+            class="draft-week-ai-btn"
+            aria-label="Draft a seven-day meal plan with local AI"
+          >
+            <mat-icon>auto_awesome</mat-icon>
+            <span class="btn-text">Draft with AI</span>
+          </button>
+        }
       }
 
       <button
@@ -79,7 +92,7 @@
         <span>Add Meal</span>
       </button>
 
-      @if (viewMode() === 'week' || (viewMode() === 'next7' && aiHelper.isAvailable())) {
+      @if (viewMode() === 'week') {
         <button
           type="button"
           mat-icon-button
@@ -92,44 +105,29 @@
         </button>
 
         <mat-menu #calendarActionsMenu="matMenu" xPosition="before">
-          @if (viewMode() !== 'month' && aiHelper.isAvailable()) {
+          <button
+            mat-menu-item
+            type="button"
+            (click)="openTemplatesDialog()"
+            class="template-action-btn"
+            aria-label="Manage reusable week templates"
+          >
+            <mat-icon>auto_awesome_motion</mat-icon>
+            <span>Templates</span>
+          </button>
+
+          @if (totalWeekMealsCount() > 0) {
+            <mat-divider></mat-divider>
             <button
               mat-menu-item
               type="button"
-              (click)="openDraftMealPlanDialog()"
-              class="draft-week-ai-btn"
-              aria-label="Draft a future seven-day meal plan with local AI"
+              (click)="clearCurrentWeek()"
+              class="clear-week-btn destructive-menu-item"
+              aria-label="Clear all scheduled meals for this week"
             >
-              <mat-icon>auto_awesome</mat-icon>
-              <span>Draft Plan with AI</span>
+              <mat-icon>delete_sweep</mat-icon>
+              <span>Clear Week</span>
             </button>
-          }
-
-          @if (viewMode() === 'week') {
-            <button
-              mat-menu-item
-              type="button"
-              (click)="openTemplatesDialog()"
-              class="template-action-btn"
-              aria-label="Manage reusable week templates"
-            >
-              <mat-icon>auto_awesome_motion</mat-icon>
-              <span>Templates</span>
-            </button>
-
-            @if (totalWeekMealsCount() > 0) {
-              <mat-divider></mat-divider>
-              <button
-                mat-menu-item
-                type="button"
-                (click)="clearCurrentWeek()"
-                class="clear-week-btn destructive-menu-item"
-                aria-label="Clear all scheduled meals for this week"
-              >
-                <mat-icon>delete_sweep</mat-icon>
-                <span>Clear Week</span>
-              </button>
-            }
           }
         </mat-menu>
       }
@@ -183,6 +181,8 @@
                       cdkDrag
                       [cdkDragData]="entry"
                       [cdkDragStartDelay]="dragStartDelay"
+                      (cdkDragStarted)="onDragStarted($event)"
+                      (cdkDragEnded)="onDragEnded()"
                       class="meal-entry-card ondeck-item ondeck-card"
                     >
                       <div class="meal-card-content">
@@ -330,6 +330,8 @@
                             cdkDrag
                             [cdkDragData]="entry"
                             [cdkDragStartDelay]="dragStartDelay"
+                            (cdkDragStarted)="onDragStarted($event)"
+                            (cdkDragEnded)="onDragEnded()"
                             class="meal-entry-card"
                           >
                             <div class="meal-card-content">
@@ -449,8 +451,8 @@
             </div>
 
             <p class="ondeck-sidebar-hint">
-              Flexible dinners planned for this week. Drag onto any night or tap
-              <strong>Cook Tonight</strong>!
+              Flexible meals planned for this week. Drag onto any slot (hold
+              <strong>Alt</strong> while dragging to copy) or tap <strong>Cook Tonight</strong>!
             </p>
 
             <div
@@ -478,6 +480,8 @@
                       cdkDrag
                       [cdkDragData]="entry"
                       [cdkDragStartDelay]="dragStartDelay"
+                      (cdkDragStarted)="onDragStarted($event)"
+                      (cdkDragEnded)="onDragEnded()"
                       class="meal-entry-card ondeck-item ondeck-card"
                     >
                       <div class="meal-card-content">
