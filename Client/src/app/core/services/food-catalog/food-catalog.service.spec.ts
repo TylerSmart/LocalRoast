@@ -41,6 +41,42 @@ describe('FoodCatalogService', () => {
     await promise;
   });
 
+  it('passes sortBy and sortDirection query parameters for paged and unpaged requests', async () => {
+    const pagedPromise = firstValueFrom(
+      service.getFoodItemsPaged({
+        page: 1,
+        pageSize: 30,
+        sortBy: 'RecipeCount',
+        sortDirection: 'Desc',
+      }),
+    );
+    const pagedReq = httpMock.expectOne(
+      '/api/food-items?page=1&pageSize=30&sortBy=RecipeCount&sortDirection=Desc',
+    );
+    expect(pagedReq.request.method).toBe('GET');
+    pagedReq.flush({
+      items: [],
+      totalCount: 0,
+      pageNumber: 1,
+      pageSize: 30,
+      totalPages: 0,
+      hasPreviousPage: false,
+      hasNextPage: false,
+    });
+    await pagedPromise;
+
+    const listPromise = firstValueFrom(
+      service.getFoodItems({
+        sortBy: 'ModifiedAt',
+        sortDirection: 'Asc',
+      }),
+    );
+    const listReq = httpMock.expectOne('/api/food-items?sortBy=ModifiedAt&sortDirection=Asc');
+    expect(listReq.request.method).toBe('GET');
+    listReq.flush([]);
+    await listPromise;
+  });
+
   it('creates food item via POST /api/food-items', async () => {
     const item: FoodItemDto = {
       id: 'f-1',
@@ -102,5 +138,30 @@ describe('FoodCatalogService', () => {
     req.flush(null);
 
     await promise;
+  });
+
+  it('bulk deletes food items via POST /api/food-items/bulk-delete', async () => {
+    const promise = firstValueFrom(
+      service.bulkDeleteFoodItems({
+        foodItemIds: ['f-1', 'f-2'],
+        unlinkFromRecipes: true,
+      }),
+    );
+    const req = httpMock.expectOne('/api/food-items/bulk-delete');
+    expect(req.request.method).toBe('POST');
+    expect(req.request.body).toEqual({
+      foodItemIds: ['f-1', 'f-2'],
+      unlinkFromRecipes: true,
+    });
+    req.flush({
+      deletedCount: 2,
+      unlinkedRecipeCount: 1,
+      unlinkedIngredientCount: 2,
+      unlinkedShoppingListItemCount: 0,
+    });
+
+    const result = await promise;
+    expect(result.deletedCount).toBe(2);
+    expect(result.unlinkedRecipeCount).toBe(1);
   });
 });

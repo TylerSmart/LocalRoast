@@ -241,7 +241,9 @@ public sealed record McpListFoodItemsRequest(
     bool? IsPantryStaple = null,
     string? Category = null,
     int Page = 1,
-    int PageSize = 50
+    int PageSize = 50,
+    string? SortBy = null,
+    string? SortDirection = null
 );
 
 public sealed record McpFoodItemUpdateInput(

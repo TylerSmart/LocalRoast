@@ -141,4 +141,70 @@ public sealed class McpFoodCatalogServiceTests
         CollectionAssert.Contains(mergeResult.TargetFoodItem.Aliases.ToList(), "Green Onion");
         Assert.IsNull(await _foodCatalogService.GetFoodItemByIdAsync(source.Id));
     }
+
+    [TestMethod]
+    public async Task ListFoodItemsAsync_SupportsSortingAndValidatesSortParameters()
+    {
+        var rare = await _service.CreateFoodItemAsync("Cardamom", category: "SpicesAndSeasonings");
+        var common = await _service.CreateFoodItemAsync("Garlic", category: "Produce");
+        var unused = await _service.CreateFoodItemAsync("Sumac", category: "SpicesAndSeasonings");
+
+        var recipe1 = new App.Data.Entities.Recipe { Title = "Curry", Slug = "curry" };
+        var recipe2 = new App.Data.Entities.Recipe { Title = "Stir Fry", Slug = "stir-fry" };
+        _dbContext.Recipes.AddRange(recipe1, recipe2);
+        _dbContext.RecipeIngredients.AddRange(
+            new App.Data.Entities.RecipeIngredient
+            {
+                RecipeId = recipe1.Id,
+                FoodItemId = common.Id,
+                SortOrder = 1,
+                DisplayName = "garlic",
+            },
+            new App.Data.Entities.RecipeIngredient
+            {
+                RecipeId = recipe2.Id,
+                FoodItemId = common.Id,
+                SortOrder = 1,
+                DisplayName = "garlic",
+            },
+            new App.Data.Entities.RecipeIngredient
+            {
+                RecipeId = recipe1.Id,
+                FoodItemId = rare.Id,
+                SortOrder = 2,
+                DisplayName = "cardamom",
+            }
+        );
+        await _dbContext.SaveChangesAsync();
+
+        var mostUsed = await _service.ListFoodItemsAsync(
+            new McpListFoodItemsRequest(SortBy: "RecipeCount", SortDirection: "Desc")
+        );
+        CollectionAssert.AreEqual(
+            new[] { common.Name, rare.Name, unused.Name },
+            mostUsed.Items.Select(i => i.Name).ToArray()
+        );
+
+        var leastUsed = await _service.ListFoodItemsAsync(
+            new McpListFoodItemsRequest(SortBy: "recipecount", SortDirection: "asc")
+        );
+        CollectionAssert.AreEqual(
+            new[] { unused.Name, rare.Name, common.Name },
+            leastUsed.Items.Select(i => i.Name).ToArray()
+        );
+
+        await Assert.ThrowsExactlyAsync<DomainValidationException>(async () =>
+            await _service.ListFoodItemsAsync(new McpListFoodItemsRequest(SortBy: "InvalidField"))
+        );
+
+        await Assert.ThrowsExactlyAsync<DomainValidationException>(async () =>
+            await _service.ListFoodItemsAsync(
+                new McpListFoodItemsRequest(SortDirection: "Sideways")
+            )
+        );
+
+        await Assert.ThrowsExactlyAsync<DomainValidationException>(async () =>
+            await _service.ListFoodItemsAsync(new McpListFoodItemsRequest(SortBy: "99"))
+        );
+    }
 }

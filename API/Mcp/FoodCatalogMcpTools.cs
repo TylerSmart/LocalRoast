@@ -12,7 +12,7 @@ public sealed class FoodCatalogMcpTools(IMcpFoodCatalogService mcpFoodCatalogSer
 {
     [McpServerTool(Name = "list_food_items", ReadOnly = true)]
     [Description(
-        "List canonical household food catalog items with optional search text, pantry staple filter, category filter, and pagination."
+        "List canonical household food catalog items with optional search text, pantry staple filter, category filter, sorting, and pagination."
     )]
     public Task<CallToolResult> ListFoodItemsAsync(
         [Description("Optional search query matching canonical name or aliases")]
@@ -25,6 +25,12 @@ public sealed class FoodCatalogMcpTools(IMcpFoodCatalogService mcpFoodCatalogSer
             string? category = null,
         [Description("1-based page number (default 1)")] int page = 1,
         [Description("Page size (1-200, default 50)")] int pageSize = 50,
+        [Description(
+            "Optional sort field: Name, RecipeCount, CreatedAt, or ModifiedAt (default Name)"
+        )]
+            string? sortBy = null,
+        [Description("Optional sort direction: Asc or Desc (default Asc)")]
+            string? sortDirection = null,
         ClaimsPrincipal? user = null,
         CancellationToken cancellationToken = default
     )
@@ -38,7 +44,9 @@ public sealed class FoodCatalogMcpTools(IMcpFoodCatalogService mcpFoodCatalogSer
                     IsPantryStaple: isPantryStaple,
                     Category: category,
                     Page: page,
-                    PageSize: pageSize
+                    PageSize: pageSize,
+                    SortBy: sortBy,
+                    SortDirection: sortDirection
                 );
                 return await mcpFoodCatalogService.ListFoodItemsAsync(request, cancellationToken);
             }

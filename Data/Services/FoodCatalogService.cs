@@ -32,13 +32,11 @@ public sealed class FoodCatalogService(
         return trimmed.ToLowerInvariant();
     }
 
-    public async Task<PagedResultDto<FoodItemDto>> GetFoodItemsPagedAsync(
-        FoodItemQueryParameters query,
-        CancellationToken cancellationToken = default
+    private static IQueryable<FoodItem> ApplyFiltering(
+        IQueryable<FoodItem> q,
+        FoodItemQueryParameters query
     )
     {
-        var q = dbContext.FoodItems.AsNoTracking().AsQueryable();
-
         if (query.IsPantryStaple.HasValue)
         {
             q = q.Where(f => f.IsPantryStaple == query.IsPantryStaple.Value);
@@ -58,11 +56,62 @@ public sealed class FoodCatalogService(
             );
         }
 
+        return q;
+    }
+
+    private static IOrderedQueryable<FoodItem> ApplySorting(
+        IQueryable<FoodItem> query,
+        FoodItemSortBy sortBy,
+        FoodItemSortDirection sortDirection
+    ) =>
+        (sortBy, sortDirection) switch
+        {
+            (FoodItemSortBy.RecipeCount, FoodItemSortDirection.Desc) => query
+                .OrderByDescending(f =>
+                    f.RecipeIngredients.Select(ri => ri.RecipeId).Distinct().Count()
+                )
+                .ThenBy(f => f.NormalizedName)
+                .ThenBy(f => f.Id),
+            (FoodItemSortBy.RecipeCount, FoodItemSortDirection.Asc) => query
+                .OrderBy(f => f.RecipeIngredients.Select(ri => ri.RecipeId).Distinct().Count())
+                .ThenBy(f => f.NormalizedName)
+                .ThenBy(f => f.Id),
+            (FoodItemSortBy.CreatedAt, FoodItemSortDirection.Desc) => query
+                .OrderByDescending(f => f.CreatedAt)
+                .ThenBy(f => f.NormalizedName)
+                .ThenBy(f => f.Id),
+            (FoodItemSortBy.CreatedAt, FoodItemSortDirection.Asc) => query
+                .OrderBy(f => f.CreatedAt)
+                .ThenBy(f => f.NormalizedName)
+                .ThenBy(f => f.Id),
+            (FoodItemSortBy.ModifiedAt, FoodItemSortDirection.Desc) => query
+                .OrderByDescending(f => f.ModifiedAt)
+                .ThenByDescending(f => f.CreatedAt)
+                .ThenBy(f => f.Id),
+            (FoodItemSortBy.ModifiedAt, FoodItemSortDirection.Asc) => query
+                .OrderBy(f => f.ModifiedAt)
+                .ThenBy(f => f.CreatedAt)
+                .ThenBy(f => f.Id),
+            (FoodItemSortBy.Name, FoodItemSortDirection.Desc) => query
+                .OrderByDescending(f => f.NormalizedName)
+                .ThenBy(f => f.Id),
+            _ => query.OrderBy(f => f.NormalizedName).ThenBy(f => f.Id),
+        };
+
+    public async Task<PagedResultDto<FoodItemDto>> GetFoodItemsPagedAsync(
+        FoodItemQueryParameters query,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var q = ApplyFiltering(dbContext.FoodItems.AsNoTracking(), query);
+
         var totalCount = await q.CountAsync(cancellationToken);
         var page = Math.Max(1, query.Page ?? 1);
         var pageSize = Math.Clamp(query.PageSize ?? 30, 1, 200);
+        var sortBy = query.SortBy ?? FoodItemSortBy.Name;
+        var sortDirection = query.SortDirection ?? FoodItemSortDirection.Asc;
 
-        var items = await q.OrderBy(f => f.Name)
+        var items = await ApplySorting(q, sortBy, sortDirection)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .Select(f => new FoodItemDto(
@@ -86,28 +135,11 @@ public sealed class FoodCatalogService(
         CancellationToken cancellationToken = default
     )
     {
-        var q = dbContext.FoodItems.AsNoTracking().AsQueryable();
+        var q = ApplyFiltering(dbContext.FoodItems.AsNoTracking(), query);
+        var sortBy = query.SortBy ?? FoodItemSortBy.Name;
+        var sortDirection = query.SortDirection ?? FoodItemSortDirection.Asc;
 
-        if (query.IsPantryStaple.HasValue)
-        {
-            q = q.Where(f => f.IsPantryStaple == query.IsPantryStaple.Value);
-        }
-
-        if (query.Category.HasValue)
-        {
-            q = q.Where(f => f.Category == query.Category.Value);
-        }
-
-        if (!string.IsNullOrWhiteSpace(query.Search))
-        {
-            var norm = query.Search.Trim().ToLowerInvariant();
-            q = q.Where(f =>
-                f.NormalizedName.Contains(norm)
-                || f.Aliases.Any(a => a.NormalizedAlias.Contains(norm))
-            );
-        }
-
-        return await q.OrderBy(f => f.Name)
+        return await ApplySorting(q, sortBy, sortDirection)
             .Select(f => new FoodItemDto(
                 f.Id,
                 f.Name,
@@ -404,6 +436,120 @@ public sealed class FoodCatalogService(
         dbContext.FoodItems.Remove(foodItem);
         await dbContext.SaveChangesAsync(cancellationToken);
         return true;
+    }
+
+    public async Task<BulkDeleteFoodItemsResultDto> BulkDeleteFoodItemsAsync(
+        BulkDeleteFoodItemsRequest request,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var distinctIds = (request.FoodItemIds ?? [])
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .ToList();
+
+        if (distinctIds.Count == 0)
+        {
+            throw new DomainValidationException("At least one food item ID must be specified.");
+        }
+
+        if (distinctIds.Count > 200)
+        {
+            throw new DomainValidationException(
+                "Cannot delete more than 200 food items in a single request."
+            );
+        }
+
+        var foodItems = await dbContext
+            .FoodItems.Include(f => f.Aliases)
+            .Where(f => distinctIds.Contains(f.Id))
+            .ToListAsync(cancellationToken);
+
+        if (foodItems.Count == 0)
+        {
+            return new BulkDeleteFoodItemsResultDto(0, 0, 0, 0);
+        }
+
+        var existingIds = foodItems.Select(f => f.Id).ToList();
+
+        var linkedIngredients = await dbContext
+            .RecipeIngredients.Where(ri =>
+                ri.FoodItemId.HasValue && existingIds.Contains(ri.FoodItemId.Value)
+            )
+            .ToListAsync(cancellationToken);
+
+        var linkedReplacements = await dbContext
+            .RecipeIngredientReplacements.Where(r =>
+                r.FoodItemId.HasValue && existingIds.Contains(r.FoodItemId.Value)
+            )
+            .ToListAsync(cancellationToken);
+
+        if (linkedIngredients.Count > 0 || linkedReplacements.Count > 0)
+        {
+            if (!request.UnlinkFromRecipes)
+            {
+                var blockedCount = linkedIngredients
+                    .Select(ri => ri.FoodItemId!.Value)
+                    .Concat(linkedReplacements.Select(r => r.FoodItemId!.Value))
+                    .Distinct()
+                    .Count();
+
+                throw new ConflictException(
+                    $"Cannot delete {blockedCount} selected food {(blockedCount == 1 ? "item" : "items")} because {(blockedCount == 1 ? "it is" : "they are")} used in one or more recipes."
+                );
+            }
+
+            foreach (var ri in linkedIngredients)
+            {
+                ri.FoodItemId = null;
+            }
+            foreach (var rep in linkedReplacements)
+            {
+                rep.FoodItemId = null;
+            }
+        }
+
+        var linkedShoppingItems = await dbContext
+            .ShoppingListItems.Where(i =>
+                i.FoodItemId.HasValue && existingIds.Contains(i.FoodItemId.Value)
+            )
+            .ToListAsync(cancellationToken);
+
+        foreach (var item in linkedShoppingItems)
+        {
+            item.FoodItemId = null;
+        }
+
+        await using var tx = dbContext.Database.IsRelational()
+            ? await dbContext.Database.BeginTransactionAsync(cancellationToken)
+            : null;
+
+        var aliasesToRemove = foodItems.SelectMany(f => f.Aliases).ToList();
+        if (aliasesToRemove.Count > 0)
+        {
+            dbContext.FoodItemAliases.RemoveRange(aliasesToRemove);
+        }
+
+        dbContext.FoodItems.RemoveRange(foodItems);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        if (tx is not null)
+        {
+            await tx.CommitAsync(cancellationToken);
+        }
+
+        var unlinkedRecipeCount = request.UnlinkFromRecipes
+            ? linkedIngredients.Select(ri => ri.RecipeId).Distinct().Count()
+            : 0;
+
+        return new BulkDeleteFoodItemsResultDto(
+            foodItems.Count,
+            unlinkedRecipeCount,
+            request.UnlinkFromRecipes ? linkedIngredients.Count : 0,
+            linkedShoppingItems.Count
+        );
     }
 
     public async Task<PagedResultDto<FoodItemRecipeUsageDto>> GetFoodItemRecipesPagedAsync(

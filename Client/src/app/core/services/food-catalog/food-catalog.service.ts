@@ -4,6 +4,8 @@ import { Service, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { apiUrl } from '../../api/api-url';
 import {
+  BulkDeleteFoodItemsRequest,
+  BulkDeleteFoodItemsResultDto,
   CreateFoodItemRequest,
   FoodItemDto,
   FoodItemQueryParameters,
@@ -35,6 +37,12 @@ export class FoodCatalogService {
     if (query?.category) {
       params = params.set('category', query.category);
     }
+    if (query?.sortBy) {
+      params = params.set('sortBy', query.sortBy);
+    }
+    if (query?.sortDirection) {
+      params = params.set('sortDirection', query.sortDirection);
+    }
 
     return this.http.get<PagedResultDto<FoodItemDto>>(apiUrl('/food-items'), { params });
   }
@@ -49,6 +57,12 @@ export class FoodCatalogService {
     }
     if (query?.category) {
       params = params.set('category', query.category);
+    }
+    if (query?.sortBy) {
+      params = params.set('sortBy', query.sortBy);
+    }
+    if (query?.sortDirection) {
+      params = params.set('sortDirection', query.sortDirection);
     }
 
     return this.http.get<FoodItemDto[]>(apiUrl('/food-items'), { params });
@@ -72,6 +86,12 @@ export class FoodCatalogService {
       params = params.set('unlinkFromRecipes', 'true');
     }
     return this.http.delete<void>(apiUrl(`/food-items/${id}`), { params });
+  }
+
+  bulkDeleteFoodItems(
+    request: BulkDeleteFoodItemsRequest,
+  ): Observable<BulkDeleteFoodItemsResultDto> {
+    return this.http.post<BulkDeleteFoodItemsResultDto>(apiUrl('/food-items/bulk-delete'), request);
   }
 
   mergeFoodItems(request: MergeFoodItemsRequest): Observable<MergeFoodItemsResultDto> {

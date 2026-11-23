@@ -1,7 +1,24 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 using App.Core.Recipes;
 
 namespace App.Core.FoodCatalog;
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum FoodItemSortBy
+{
+    Name = 0,
+    RecipeCount = 1,
+    CreatedAt = 2,
+    ModifiedAt = 3,
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum FoodItemSortDirection
+{
+    Asc = 0,
+    Desc = 1,
+}
 
 public record FoodItemDto(
     Guid Id,
@@ -20,7 +37,9 @@ public record FoodItemQueryParameters(
     bool? IsPantryStaple = null,
     int? Page = null,
     int? PageSize = null,
-    FoodCategory? Category = null
+    FoodCategory? Category = null,
+    FoodItemSortBy? SortBy = null,
+    FoodItemSortDirection? SortDirection = null
 );
 
 public record CreateFoodItemRequest(
@@ -65,4 +84,16 @@ public record UnlinkFoodItemRecipesResultDto(
     Guid FoodItemId,
     int UnlinkedRecipeCount,
     int UnlinkedIngredientCount
+);
+
+public record BulkDeleteFoodItemsRequest(
+    [Required, MinLength(1), MaxLength(200)] IReadOnlyList<Guid> FoodItemIds,
+    bool UnlinkFromRecipes = false
+);
+
+public record BulkDeleteFoodItemsResultDto(
+    int DeletedCount,
+    int UnlinkedRecipeCount,
+    int UnlinkedIngredientCount,
+    int UnlinkedShoppingListItemCount
 );

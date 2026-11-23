@@ -91,9 +91,16 @@ public sealed class FoodCatalogE2ETests : E2ETestBase
         );
         Assert.Contains("\"FILL\" 1", fontVariation);
 
-        // Search by Alias
+        // Search by Alias (wait for debounced /api/food-items?search=... request to complete before opening card menu)
         var searchInput = Page.Locator(".search-field input");
-        await searchInput.FillAsync(uniqueAlias);
+        var searchResponse = await Page.RunAndWaitForResponseAsync(
+            () => searchInput.FillAsync(uniqueAlias),
+            r =>
+                r.Url.Contains("/api/food-items", StringComparison.Ordinal)
+                && r.Url.Contains("search=", StringComparison.Ordinal)
+                && r.Ok
+        );
+        Assert.IsTrue(searchResponse.Ok);
         await Expect(card).ToBeVisibleAsync();
 
         // Verify Merge, Edit, and Delete are grouped inside the card overflow menu
@@ -167,5 +174,271 @@ public sealed class FoodCatalogE2ETests : E2ETestBase
 
         // Card should now display "0 recipes"
         await Expect(card.Locator(".usage-count.muted")).ToContainTextAsync("0 recipes");
+    }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task FoodCatalog_SupportsSortingByNameRecipeUsageCreatedAndUpdated_AndPersistsInUrl()
+    {
+        await RegisterAndLoginAsync();
+
+        var suffix = Guid.NewGuid().ToString("N")[..6];
+        var betaName = $"Beta Herb {suffix}";
+        var gammaName = $"Gamma Spice {suffix}";
+        var alphaName = $"Alpha Flour {suffix}";
+
+        var createdIds = await Page.EvaluateAsync<string[]>(
+            @"async ({ betaName, gammaName, alphaName }) => {
+                const tokenKey = Object.keys(localStorage).find(k => k.endsWith('-token'));
+                const token = tokenKey ? localStorage.getItem(tokenKey) : null;
+                const headers = {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                };
+                const items = [];
+                for (const name of [betaName, gammaName, alphaName]) {
+                    const res = await fetch('/api/food-items', {
+                        method: 'POST',
+                        headers,
+                        body: JSON.stringify({ name, isPantryStaple: false, aliases: [] })
+                    });
+                    if (!res.ok) throw new Error('Failed to create food item: ' + res.status);
+                    const data = await res.json();
+                    items.push(data.id);
+                    await new Promise(r => setTimeout(r, 35));
+                }
+
+                // Update Beta Herb so its ModifiedAt is newest
+                const updateRes = await fetch(`/api/food-items/${items[0]}`, {
+                    method: 'PUT',
+                    headers,
+                    body: JSON.stringify({ name: betaName, isPantryStaple: true, aliases: [] })
+                });
+                if (!updateRes.ok) throw new Error('Failed to update food item: ' + updateRes.status);
+
+                return items;
+            }",
+            new
+            {
+                betaName,
+                gammaName,
+                alphaName,
+            }
+        );
+        Assert.HasCount(3, createdIds);
+
+        var betaId = Guid.Parse(createdIds[0]);
+        var gammaId = Guid.Parse(createdIds[1]);
+
+        // Gamma Spice -> 2 recipes, Beta Herb -> 1 recipe, Alpha Flour -> 0 recipes
+        await CreateRecipeWithIngredientViaApiAsync($"Gamma Dish 1 {suffix}", gammaName, gammaId);
+        await CreateRecipeWithIngredientViaApiAsync($"Gamma Dish 2 {suffix}", gammaName, gammaId);
+        await CreateRecipeWithIngredientViaApiAsync($"Beta Dish 1 {suffix}", betaName, betaId);
+
+        await Page.GotoAsync($"{ServerUrl}/catalog");
+        await Expect(Page.Locator(".food-item-card", new() { HasText = betaName }))
+            .ToBeVisibleAsync();
+
+        var sortSelect = Page.GetByTestId("food-catalog-sort-select");
+        var sortDirectionBtn = Page.GetByTestId("food-catalog-sort-direction");
+        await Expect(sortSelect).ToBeVisibleAsync();
+        await Expect(sortDirectionBtn).ToBeVisibleAsync();
+        var sortBtnBox = await sortDirectionBtn.BoundingBoxAsync();
+        Assert.IsNotNull(sortBtnBox);
+        Assert.IsLessThanOrEqualTo(
+            1.0,
+            Math.Abs(sortBtnBox.Width - sortBtnBox.Height),
+            $"Expected circular sort direction button, got {sortBtnBox.Width}x{sortBtnBox.Height}."
+        );
+        Assert.IsGreaterThanOrEqualTo(43.0, sortBtnBox.Width);
+        Assert.IsLessThanOrEqualTo(45.0, sortBtnBox.Width);
+        Assert.IsGreaterThanOrEqualTo(43.0, sortBtnBox.Height);
+        Assert.IsLessThanOrEqualTo(45.0, sortBtnBox.Height);
+
+        var targetNames = Page.Locator(".food-item-card .item-name")
+            .Filter(new() { HasText = suffix });
+
+        async Task AssertOrderAsync(params string[] expectedNames)
+        {
+            await Expect(targetNames).ToHaveTextAsync(expectedNames);
+        }
+
+        async Task SelectSortByAsync(string optionText)
+        {
+            await sortSelect.ClickAsync();
+            var option = Page.Locator("mat-option", new() { HasText = optionText });
+            var response = await Page.RunAndWaitForResponseAsync(
+                () => option.ClickAsync(),
+                r => r.Url.Contains("/api/food-items", StringComparison.Ordinal) && r.Ok
+            );
+            Assert.IsTrue(response.Ok);
+        }
+
+        async Task ToggleSortDirectionAsync()
+        {
+            var response = await Page.RunAndWaitForResponseAsync(
+                () => sortDirectionBtn.ClickAsync(),
+                r => r.Url.Contains("/api/food-items", StringComparison.Ordinal) && r.Ok
+            );
+            Assert.IsTrue(response.Ok);
+        }
+
+        // Default: Name (Asc) -> Alpha Flour, Beta Herb, Gamma Spice
+        await AssertOrderAsync(alphaName, betaName, gammaName);
+
+        // Select Recipe Usage (still Asc: least used -> most used)
+        await SelectSortByAsync("Recipe Usage");
+        await Expect(Page).ToHaveURLAsync(new Regex("[?&]sort=RecipeCount"));
+        await AssertOrderAsync(alphaName, betaName, gammaName);
+
+        // Toggle to Desc (most used -> least used): Gamma (2), Beta (1), Alpha (0)
+        await ToggleSortDirectionAsync();
+        await Expect(Page).ToHaveURLAsync(new Regex("[?&]dir=Desc"));
+        await AssertOrderAsync(gammaName, betaName, alphaName);
+
+        // Reload page and confirm Recipe Usage Desc persists from URL query params
+        await Page.ReloadAsync();
+        await AssertOrderAsync(gammaName, betaName, alphaName);
+        await Expect(sortSelect).ToContainTextAsync("Recipe Usage");
+        await Expect(sortDirectionBtn.Locator("mat-icon")).ToHaveTextAsync("arrow_downward");
+
+        // Switch to Created (still Desc) -> Alpha (3rd), Gamma (2nd), Beta (1st)
+        await SelectSortByAsync("Created");
+        await Expect(Page).ToHaveURLAsync(new Regex("[?&]sort=CreatedAt"));
+        await AssertOrderAsync(alphaName, gammaName, betaName);
+
+        // Toggle to Created Asc -> Beta, Gamma, Alpha
+        await ToggleSortDirectionAsync();
+        await AssertOrderAsync(betaName, gammaName, alphaName);
+
+        // Switch to Updated (still Asc) -> Gamma, Alpha, Beta
+        await SelectSortByAsync("Updated");
+        await Expect(Page).ToHaveURLAsync(new Regex("[?&]sort=ModifiedAt"));
+        await AssertOrderAsync(gammaName, alphaName, betaName);
+
+        // Toggle to Updated Desc -> Beta, Alpha, Gamma
+        await ToggleSortDirectionAsync();
+        await AssertOrderAsync(betaName, alphaName, gammaName);
+
+        // Verify 360px mobile viewport renders search & sort controls cleanly without horizontal overflow
+        await Page.SetViewportSizeAsync(360, 800);
+        await Expect(sortSelect).ToBeVisibleAsync();
+        await Expect(sortDirectionBtn).ToBeVisibleAsync();
+        Assert.IsTrue(
+            await Page.EvaluateAsync<bool>(
+                "document.documentElement.scrollWidth <= window.innerWidth + 1"
+            ),
+            "Viewport horizontal overflow detected at 360px on food catalog with sort controls."
+        );
+    }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task FoodCatalog_MultiSelectUnusedAndBulkDelete_RemovesSelectedItems_AndFitsMobile360px()
+    {
+        await RegisterAndLoginAsync();
+
+        var suffix = Guid.NewGuid().ToString("N")[..6];
+        var unusedA = $"Unused Herb A {suffix}";
+        var unusedB = $"Unused Spice B {suffix}";
+        var unusedC = $"Unused Flour C {suffix}";
+        var usedGarlic = $"Used Garlic {suffix}";
+
+        await CreateFoodItemViaApiAsync(unusedA);
+        await CreateFoodItemViaApiAsync(unusedB);
+        await CreateFoodItemViaApiAsync(unusedC);
+        var usedId = await CreateFoodItemViaApiAsync(usedGarlic);
+        await CreateRecipeWithIngredientViaApiAsync($"Garlic Soup {suffix}", usedGarlic, usedId);
+
+        await Page.GotoAsync($"{ServerUrl}/catalog");
+        var searchInput = Page.Locator(".search-field input");
+        var searchResponse = await Page.RunAndWaitForResponseAsync(
+            () => searchInput.FillAsync(suffix),
+            r =>
+                r.Url.Contains("/api/food-items", StringComparison.Ordinal)
+                && r.Url.Contains($"search={suffix}", StringComparison.Ordinal)
+                && r.Ok
+        );
+        Assert.IsTrue(searchResponse.Ok);
+
+        await Expect(Page.Locator(".food-item-card")).ToHaveCountAsync(4);
+
+        // 1. Click "Select unused (3)" and verify only unused cards are selected
+        var selectUnusedBtn = Page.GetByTestId("food-catalog-select-unused");
+        await Expect(selectUnusedBtn).ToBeVisibleAsync();
+        await Expect(selectUnusedBtn).ToContainTextAsync("Select unused (3)");
+        await selectUnusedBtn.ClickAsync();
+
+        await Expect(Page.GetByTestId("food-catalog-select-all")).ToContainTextAsync("3 selected");
+        await Expect(Page.Locator(".food-item-card.selected")).ToHaveCountAsync(3);
+        await Expect(Page.Locator(".food-item-card", new() { HasText = usedGarlic }))
+            .Not.ToHaveClassAsync(new Regex(".*\\bselected\\b.*"));
+
+        // 2. Click "Delete Selected (3)" and confirm
+        var deleteSelectedBtn = Page.GetByTestId("food-catalog-delete-selected");
+        await Expect(deleteSelectedBtn).ToContainTextAsync("Delete Selected (3)");
+        await deleteSelectedBtn.ClickAsync();
+
+        var confirmDialog = Page.Locator("app-confirm-dialog");
+        await Expect(confirmDialog).ToBeVisibleAsync();
+        var deleteConfirmBtn = confirmDialog.Locator(
+            "button",
+            new() { HasText = "Delete 3 Items" }
+        );
+        await Expect(deleteConfirmBtn).ToBeVisibleAsync();
+
+        var bulkDeleteResp = await Page.RunAndWaitForResponseAsync(
+            () => deleteConfirmBtn.ClickAsync(),
+            r =>
+                r.Url.Contains("/api/food-items/bulk-delete", StringComparison.Ordinal)
+                && r.Request.Method == "POST"
+                && r.Ok
+        );
+        Assert.IsTrue(bulkDeleteResp.Ok);
+
+        // Unused items removed, used item remains
+        await Expect(Page.Locator(".food-item-card")).ToHaveCountAsync(1);
+        await Expect(Page.Locator(".food-item-card", new() { HasText = usedGarlic }))
+            .ToBeVisibleAsync();
+
+        // 3. Select remaining used item via card checkbox and confirm Unlink & Delete (1)
+        var usedCard = Page.Locator(".food-item-card", new() { HasText = usedGarlic });
+        await usedCard.GetByTestId("food-item-select-checkbox").ClickAsync();
+        await Expect(deleteSelectedBtn).ToContainTextAsync("Delete Selected (1)");
+        await deleteSelectedBtn.ClickAsync();
+
+        await Expect(confirmDialog).ToBeVisibleAsync();
+        var unlinkDeleteBtn = confirmDialog.Locator(
+            "button",
+            new() { HasText = "Unlink & Delete (1)" }
+        );
+        await Expect(unlinkDeleteBtn).ToBeVisibleAsync();
+
+        var unlinkBulkDeleteResp = await Page.RunAndWaitForResponseAsync(
+            () => unlinkDeleteBtn.ClickAsync(),
+            r =>
+                r.Url.Contains("/api/food-items/bulk-delete", StringComparison.Ordinal)
+                && r.Request.Method == "POST"
+                && r.Ok
+        );
+        Assert.IsTrue(unlinkBulkDeleteResp.Ok);
+        await Expect(Page.Locator(".empty-state h3")).ToContainTextAsync("No food items found");
+
+        // 4. Verify 360px mobile viewport with selection bar active fits with zero horizontal overflow
+        await CreateFoodItemViaApiAsync($"Mobile Item 1 {suffix}");
+        await CreateFoodItemViaApiAsync($"Mobile Item 2 {suffix}");
+        await Page.SetViewportSizeAsync(360, 800);
+        await Page.ReloadAsync();
+        await Expect(Page.Locator(".food-item-card")).ToHaveCountAsync(2);
+
+        await Page.GetByTestId("food-catalog-select-unused").ClickAsync();
+        await Expect(Page.GetByTestId("food-catalog-selection-bar")).ToBeVisibleAsync();
+        await Expect(Page.GetByTestId("food-catalog-delete-selected")).ToBeVisibleAsync();
+        Assert.IsTrue(
+            await Page.EvaluateAsync<bool>(
+                "document.documentElement.scrollWidth <= window.innerWidth + 1"
+            ),
+            "Viewport horizontal overflow detected at 360px on food catalog with selection bar active."
+        );
     }
 }

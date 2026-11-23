@@ -148,6 +148,47 @@ public sealed class FoodItemsController(IFoodCatalogService foodCatalogService) 
         }
     }
 
+    [HttpPost("bulk-delete")]
+    [ProducesResponseType(typeof(BulkDeleteFoodItemsResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> BulkDeleteFoodItems(
+        [FromBody] BulkDeleteFoodItemsRequest request,
+        CancellationToken cancellationToken
+    )
+    {
+        try
+        {
+            var result = await foodCatalogService.BulkDeleteFoodItemsAsync(
+                request,
+                cancellationToken
+            );
+            return Ok(result);
+        }
+        catch (DomainValidationException ex)
+        {
+            return BadRequest(
+                new ProblemDetails
+                {
+                    Status = StatusCodes.Status400BadRequest,
+                    Title = ex.Title,
+                    Detail = ex.Message,
+                }
+            );
+        }
+        catch (ConflictException ex)
+        {
+            return Conflict(
+                new ProblemDetails
+                {
+                    Status = StatusCodes.Status409Conflict,
+                    Title = ex.Title,
+                    Detail = ex.Message,
+                }
+            );
+        }
+    }
+
     [HttpGet("{id:guid}/recipes")]
     [ProducesResponseType(typeof(PagedResultDto<FoodItemRecipeUsageDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(IReadOnlyList<FoodItemRecipeUsageDto>), StatusCodes.Status200OK)]

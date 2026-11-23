@@ -65,6 +65,44 @@
         </mat-select>
       </mat-form-field>
 
+      <!-- Sort Controls -->
+      <div class="sort-controls">
+        <mat-form-field appearance="outline" subscriptSizing="dynamic" class="sort-form-field">
+          <mat-label>Sort by</mat-label>
+          <mat-icon matPrefix>sort</mat-icon>
+          <mat-select
+            [value]="sortBy()"
+            (selectionChange)="onSortByChange($event.value)"
+            aria-label="Sort food items by"
+            data-testid="food-catalog-sort-select"
+          >
+            @for (option of sortOptions; track option.value) {
+              <mat-option [value]="option.value">{{ option.label }}</mat-option>
+            }
+          </mat-select>
+        </mat-form-field>
+
+        <button
+          mat-stroked-button
+          type="button"
+          class="sort-direction-btn"
+          (click)="toggleSortDirection()"
+          data-testid="food-catalog-sort-direction"
+          [matTooltip]="
+            sortDirection() === 'Asc'
+              ? 'Sorted ascending (click to switch to descending)'
+              : 'Sorted descending (click to switch to ascending)'
+          "
+          [attr.aria-label]="
+            sortDirection() === 'Asc'
+              ? 'Sort direction: Ascending. Click to sort descending.'
+              : 'Sort direction: Descending. Click to sort ascending.'
+          "
+        >
+          <mat-icon>{{ sortDirection() === 'Asc' ? 'arrow_upward' : 'arrow_downward' }}</mat-icon>
+        </button>
+      </div>
+
       <!-- Pantry Staples Only Toggle -->
       <div class="staple-toggle-container">
         <mat-slide-toggle
@@ -114,12 +152,90 @@
         }
       </div>
     } @else {
+      <!-- Multi-Select & Bulk Actions Bar -->
+      <div
+        class="catalog-selection-bar"
+        [class.has-selection]="selectedCount() > 0"
+        data-testid="food-catalog-selection-bar"
+      >
+        <div class="selection-bar-left">
+          <mat-checkbox
+            data-testid="food-catalog-select-all"
+            [checked]="allVisibleSelected()"
+            [indeterminate]="someVisibleSelected()"
+            (change)="toggleSelectAllOnPage($event.checked)"
+            [disabled]="isBulkDeleting()"
+          >
+            @if (selectedCount() > 0) {
+              <span>{{ selectedCount() }} selected</span>
+            } @else {
+              <span>Select all on page</span>
+            }
+          </mat-checkbox>
+
+          @if (unusedOnPageCount() > 0) {
+            <button
+              mat-stroked-button
+              type="button"
+              class="select-unused-btn"
+              data-testid="food-catalog-select-unused"
+              (click)="selectUnusedOnPage()"
+              [disabled]="isBulkDeleting()"
+            >
+              <mat-icon>filter_none</mat-icon>
+              <span>Select unused ({{ unusedOnPageCount() }})</span>
+            </button>
+          }
+        </div>
+
+        @if (selectedCount() > 0) {
+          <div class="selection-bar-actions">
+            <button
+              mat-button
+              type="button"
+              data-testid="food-catalog-clear-selection"
+              (click)="clearSelection()"
+              [disabled]="isBulkDeleting()"
+            >
+              Clear
+            </button>
+            <button
+              mat-flat-button
+              type="button"
+              class="delete-selected-btn"
+              data-testid="food-catalog-delete-selected"
+              (click)="deleteSelectedItems()"
+              [disabled]="isBulkDeleting()"
+              [attr.aria-label]="'Delete ' + selectedCount() + ' selected food items'"
+            >
+              @if (isBulkDeleting()) {
+                <mat-spinner diameter="16" class="inline-spinner"></mat-spinner>
+              } @else {
+                <mat-icon>delete</mat-icon>
+              }
+              <span>{{
+                isBulkDeleting() ? 'Deleting...' : 'Delete Selected (' + selectedCount() + ')'
+              }}</span>
+            </button>
+          </div>
+        }
+      </div>
+
       <!-- Food Items List -->
       <div class="catalog-grid">
         @for (item of filteredItems(); track item.id) {
-          <mat-card class="food-item-card">
+          <mat-card class="food-item-card" [class.selected]="isSelected(item.id)">
             <div class="item-content">
               <div class="item-header">
+                <mat-checkbox
+                  class="item-select-checkbox"
+                  data-testid="food-item-select-checkbox"
+                  [checked]="isSelected(item.id)"
+                  [disabled]="isBulkDeleting()"
+                  (click)="onCardCheckboxClick($event)"
+                  (change)="toggleItemSelection(item, $event.checked)"
+                  [aria-label]="'Select ' + item.name"
+                ></mat-checkbox>
                 <div class="name-block">
                   <h3 class="item-name">{{ item.name }}</h3>
                   <span class="item-category" data-testid="food-item-category">

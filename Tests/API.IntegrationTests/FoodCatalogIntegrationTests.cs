@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using App.Core.Authentication;
+using App.Core.Common;
 using App.Core.FoodCatalog;
 using App.Core.Recipes;
 using App.Core.Shopping;
@@ -531,5 +532,337 @@ public sealed class FoodCatalogIntegrationTests
         // Verify item is gone
         var getRes = await _client.GetAsync($"/api/food-items/{createFood.Id}");
         Assert.AreEqual(HttpStatusCode.NotFound, getRes.StatusCode);
+    }
+
+    [TestMethod]
+    public async Task GetFoodItems_SupportsSortingByNameRecipeCountCreatedAtAndModifiedAt()
+    {
+        await RegisterAndAuthenticateAsync(_client, "sort_user@example.com", "sortuser");
+
+        var betaRes = await _client.PostAsJsonAsync(
+            "/api/food-items",
+            new CreateFoodItemRequest("Beta Herb")
+        );
+        Assert.AreEqual(HttpStatusCode.Created, betaRes.StatusCode);
+        var beta = await betaRes.Content.ReadFromJsonAsync<FoodItemDto>();
+        Assert.IsNotNull(beta);
+
+        await Task.Delay(25);
+
+        var gammaRes = await _client.PostAsJsonAsync(
+            "/api/food-items",
+            new CreateFoodItemRequest("Gamma Spice")
+        );
+        Assert.AreEqual(HttpStatusCode.Created, gammaRes.StatusCode);
+        var gamma = await gammaRes.Content.ReadFromJsonAsync<FoodItemDto>();
+        Assert.IsNotNull(gamma);
+
+        await Task.Delay(25);
+
+        var alphaRes = await _client.PostAsJsonAsync(
+            "/api/food-items",
+            new CreateFoodItemRequest("Alpha Flour")
+        );
+        Assert.AreEqual(HttpStatusCode.Created, alphaRes.StatusCode);
+        var alpha = await alphaRes.Content.ReadFromJsonAsync<FoodItemDto>();
+        Assert.IsNotNull(alpha);
+
+        // Update Beta Herb so its ModifiedAt is newest
+        await Task.Delay(25);
+        var updateBetaRes = await _client.PutAsJsonAsync(
+            $"/api/food-items/{beta.Id}",
+            new UpdateFoodItemRequest("Beta Herb", IsPantryStaple: true)
+        );
+        Assert.AreEqual(HttpStatusCode.OK, updateBetaRes.StatusCode);
+
+        // Recipe usage: Gamma Spice = 2 recipes, Beta Herb = 1 recipe (2 ingredient rows in 1 recipe), Alpha Flour = 0
+        for (var i = 1; i <= 2; i++)
+        {
+            var r = await _client.PostAsJsonAsync(
+                "/api/recipes",
+                new UpsertRecipeRequest(
+                    Title: $"Gamma Recipe {i}",
+                    Ingredients:
+                    [
+                        new RecipeIngredientInput(
+                            null,
+                            1m,
+                            null,
+                            MeasurementUnit.Tsp,
+                            null,
+                            gamma.Id,
+                            null,
+                            "Gamma Spice",
+                            null
+                        ),
+                    ],
+                    Steps: [new RecipeStepInput(null, "Season.")]
+                )
+            );
+            Assert.AreEqual(HttpStatusCode.Created, r.StatusCode);
+        }
+
+        var betaRecipeRes = await _client.PostAsJsonAsync(
+            "/api/recipes",
+            new UpsertRecipeRequest(
+                Title: "Beta Recipe",
+                Ingredients:
+                [
+                    new RecipeIngredientInput(
+                        null,
+                        1m,
+                        null,
+                        MeasurementUnit.Tbsp,
+                        null,
+                        beta.Id,
+                        null,
+                        "Beta Herb, divided",
+                        null
+                    ),
+                    new RecipeIngredientInput(
+                        null,
+                        1m,
+                        null,
+                        MeasurementUnit.Tsp,
+                        null,
+                        beta.Id,
+                        null,
+                        "Beta Herb for garnish",
+                        null
+                    ),
+                ],
+                Steps: [new RecipeStepInput(null, "Cook.")]
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Created, betaRecipeRes.StatusCode);
+
+        // 1. Default -> Name Asc
+        var defaultPaged = await _client.GetFromJsonAsync<PagedResultDto<FoodItemDto>>(
+            "/api/food-items?page=1&pageSize=10"
+        );
+        Assert.IsNotNull(defaultPaged);
+        CollectionAssert.AreEqual(
+            new[] { "Alpha Flour", "Beta Herb", "Gamma Spice" },
+            defaultPaged.Items.Select(f => f.Name).ToArray()
+        );
+
+        // 2. Name Desc
+        var nameDesc = await _client.GetFromJsonAsync<PagedResultDto<FoodItemDto>>(
+            "/api/food-items?page=1&pageSize=10&sortBy=Name&sortDirection=Desc"
+        );
+        Assert.IsNotNull(nameDesc);
+        CollectionAssert.AreEqual(
+            new[] { "Gamma Spice", "Beta Herb", "Alpha Flour" },
+            nameDesc.Items.Select(f => f.Name).ToArray()
+        );
+
+        // 3. RecipeCount Desc (paged & unpaged)
+        var usageDescPaged = await _client.GetFromJsonAsync<PagedResultDto<FoodItemDto>>(
+            "/api/food-items?page=1&pageSize=10&sortBy=RecipeCount&sortDirection=Desc"
+        );
+        Assert.IsNotNull(usageDescPaged);
+        CollectionAssert.AreEqual(
+            new[] { "Gamma Spice", "Beta Herb", "Alpha Flour" },
+            usageDescPaged.Items.Select(f => f.Name).ToArray()
+        );
+        CollectionAssert.AreEqual(
+            new[] { 2, 1, 0 },
+            usageDescPaged.Items.Select(f => f.ReferencedRecipeCount).ToArray()
+        );
+
+        var usageDescUnpaged = await _client.GetFromJsonAsync<List<FoodItemDto>>(
+            "/api/food-items?sortBy=RecipeCount&sortDirection=Desc"
+        );
+        Assert.IsNotNull(usageDescUnpaged);
+        CollectionAssert.AreEqual(
+            new[] { "Gamma Spice", "Beta Herb", "Alpha Flour" },
+            usageDescUnpaged.Select(f => f.Name).ToArray()
+        );
+
+        // 4. RecipeCount Asc
+        var usageAsc = await _client.GetFromJsonAsync<PagedResultDto<FoodItemDto>>(
+            "/api/food-items?page=1&pageSize=10&sortBy=RecipeCount&sortDirection=Asc"
+        );
+        Assert.IsNotNull(usageAsc);
+        CollectionAssert.AreEqual(
+            new[] { "Alpha Flour", "Beta Herb", "Gamma Spice" },
+            usageAsc.Items.Select(f => f.Name).ToArray()
+        );
+
+        // 5. CreatedAt Asc & Desc
+        var createdAsc = await _client.GetFromJsonAsync<PagedResultDto<FoodItemDto>>(
+            "/api/food-items?page=1&pageSize=10&sortBy=CreatedAt&sortDirection=Asc"
+        );
+        Assert.IsNotNull(createdAsc);
+        CollectionAssert.AreEqual(
+            new[] { beta.Id, gamma.Id, alpha.Id },
+            createdAsc.Items.Select(f => f.Id).ToArray()
+        );
+
+        var createdDesc = await _client.GetFromJsonAsync<PagedResultDto<FoodItemDto>>(
+            "/api/food-items?page=1&pageSize=10&sortBy=CreatedAt&sortDirection=Desc"
+        );
+        Assert.IsNotNull(createdDesc);
+        CollectionAssert.AreEqual(
+            new[] { alpha.Id, gamma.Id, beta.Id },
+            createdDesc.Items.Select(f => f.Id).ToArray()
+        );
+
+        // 6. ModifiedAt Desc & Asc
+        var modifiedDesc = await _client.GetFromJsonAsync<PagedResultDto<FoodItemDto>>(
+            "/api/food-items?page=1&pageSize=10&sortBy=ModifiedAt&sortDirection=Desc"
+        );
+        Assert.IsNotNull(modifiedDesc);
+        CollectionAssert.AreEqual(
+            new[] { beta.Id, alpha.Id, gamma.Id },
+            modifiedDesc.Items.Select(f => f.Id).ToArray()
+        );
+
+        var modifiedAsc = await _client.GetFromJsonAsync<PagedResultDto<FoodItemDto>>(
+            "/api/food-items?page=1&pageSize=10&sortBy=ModifiedAt&sortDirection=Asc"
+        );
+        Assert.IsNotNull(modifiedAsc);
+        CollectionAssert.AreEqual(
+            new[] { gamma.Id, alpha.Id, beta.Id },
+            modifiedAsc.Items.Select(f => f.Id).ToArray()
+        );
+    }
+
+    [TestMethod]
+    public async Task BulkDeleteFoodItems_DeletesUnused_BlocksReferencedUnlessUnlinkTrue_AndValidatesInput()
+    {
+        using var unauthClient = _factory.CreateClient();
+        var unauthRes = await unauthClient.PostAsJsonAsync(
+            "/api/food-items/bulk-delete",
+            new BulkDeleteFoodItemsRequest([Guid.NewGuid()])
+        );
+        Assert.AreEqual(HttpStatusCode.Unauthorized, unauthRes.StatusCode);
+
+        await RegisterAndAuthenticateAsync(_client, "bulkdel_user@example.com", "bulkdeluser");
+
+        var emptyRes = await _client.PostAsJsonAsync(
+            "/api/food-items/bulk-delete",
+            new BulkDeleteFoodItemsRequest([])
+        );
+        Assert.AreEqual(HttpStatusCode.BadRequest, emptyRes.StatusCode);
+
+        var emptyGuidRes = await _client.PostAsJsonAsync(
+            "/api/food-items/bulk-delete",
+            new BulkDeleteFoodItemsRequest([Guid.Empty])
+        );
+        Assert.AreEqual(HttpStatusCode.BadRequest, emptyGuidRes.StatusCode);
+
+        var unused1 = await (
+            await _client.PostAsJsonAsync(
+                "/api/food-items",
+                new CreateFoodItemRequest("Bulk Unused 1")
+            )
+        ).Content.ReadFromJsonAsync<FoodItemDto>();
+        var unused2 = await (
+            await _client.PostAsJsonAsync(
+                "/api/food-items",
+                new CreateFoodItemRequest("Bulk Unused 2")
+            )
+        ).Content.ReadFromJsonAsync<FoodItemDto>();
+        var unused3 = await (
+            await _client.PostAsJsonAsync(
+                "/api/food-items",
+                new CreateFoodItemRequest("Bulk Unused 3")
+            )
+        ).Content.ReadFromJsonAsync<FoodItemDto>();
+        var used = await (
+            await _client.PostAsJsonAsync("/api/food-items", new CreateFoodItemRequest("Bulk Used"))
+        ).Content.ReadFromJsonAsync<FoodItemDto>();
+        Assert.IsNotNull(unused1);
+        Assert.IsNotNull(unused2);
+        Assert.IsNotNull(unused3);
+        Assert.IsNotNull(used);
+
+        var recipeRes = await _client.PostAsJsonAsync(
+            "/api/recipes",
+            new UpsertRecipeRequest(
+                Title: "Bulk Delete Recipe",
+                Ingredients:
+                [
+                    new RecipeIngredientInput(
+                        null,
+                        1m,
+                        null,
+                        MeasurementUnit.Tsp,
+                        null,
+                        used.Id,
+                        null,
+                        "Bulk Used",
+                        null
+                    ),
+                ],
+                Steps: [new RecipeStepInput(null, "Mix.")]
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Created, recipeRes.StatusCode);
+        var recipe = await recipeRes.Content.ReadFromJsonAsync<RecipeDetailDto>();
+        Assert.IsNotNull(recipe);
+
+        // 1. Delete 2 unused items
+        var deleteUnusedRes = await _client.PostAsJsonAsync(
+            "/api/food-items/bulk-delete",
+            new BulkDeleteFoodItemsRequest([unused1.Id, unused2.Id])
+        );
+        Assert.AreEqual(HttpStatusCode.OK, deleteUnusedRes.StatusCode);
+        var deleteUnusedResult =
+            await deleteUnusedRes.Content.ReadFromJsonAsync<BulkDeleteFoodItemsResultDto>();
+        Assert.IsNotNull(deleteUnusedResult);
+        Assert.AreEqual(2, deleteUnusedResult.DeletedCount);
+        Assert.AreEqual(
+            HttpStatusCode.NotFound,
+            (await _client.GetAsync($"/api/food-items/{unused1.Id}")).StatusCode
+        );
+        Assert.AreEqual(
+            HttpStatusCode.NotFound,
+            (await _client.GetAsync($"/api/food-items/{unused2.Id}")).StatusCode
+        );
+
+        // 2. Mixed unused + used with UnlinkFromRecipes = false -> 409 Conflict, neither deleted
+        var conflictRes = await _client.PostAsJsonAsync(
+            "/api/food-items/bulk-delete",
+            new BulkDeleteFoodItemsRequest([unused3.Id, used.Id], UnlinkFromRecipes: false)
+        );
+        Assert.AreEqual(HttpStatusCode.Conflict, conflictRes.StatusCode);
+        Assert.AreEqual(
+            HttpStatusCode.OK,
+            (await _client.GetAsync($"/api/food-items/{unused3.Id}")).StatusCode
+        );
+        Assert.AreEqual(
+            HttpStatusCode.OK,
+            (await _client.GetAsync($"/api/food-items/{used.Id}")).StatusCode
+        );
+
+        // 3. Same mixed request with UnlinkFromRecipes = true -> 200 OK, both deleted, recipe preserved
+        var unlinkRes = await _client.PostAsJsonAsync(
+            "/api/food-items/bulk-delete",
+            new BulkDeleteFoodItemsRequest([unused3.Id, used.Id], UnlinkFromRecipes: true)
+        );
+        Assert.AreEqual(HttpStatusCode.OK, unlinkRes.StatusCode);
+        var unlinkResult =
+            await unlinkRes.Content.ReadFromJsonAsync<BulkDeleteFoodItemsResultDto>();
+        Assert.IsNotNull(unlinkResult);
+        Assert.AreEqual(2, unlinkResult.DeletedCount);
+        Assert.AreEqual(1, unlinkResult.UnlinkedRecipeCount);
+        Assert.AreEqual(1, unlinkResult.UnlinkedIngredientCount);
+
+        Assert.AreEqual(
+            HttpStatusCode.NotFound,
+            (await _client.GetAsync($"/api/food-items/{unused3.Id}")).StatusCode
+        );
+        Assert.AreEqual(
+            HttpStatusCode.NotFound,
+            (await _client.GetAsync($"/api/food-items/{used.Id}")).StatusCode
+        );
+
+        var recipeAfter = await _client.GetFromJsonAsync<RecipeDetailDto>(
+            $"/api/recipes/{recipe.Id}"
+        );
+        Assert.IsNotNull(recipeAfter);
+        Assert.IsNull(recipeAfter.Ingredients[0].FoodItemId);
     }
 }

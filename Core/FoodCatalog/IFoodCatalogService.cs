@@ -33,6 +33,11 @@ public interface IFoodCatalogService
         CancellationToken cancellationToken = default
     );
 
+    Task<BulkDeleteFoodItemsResultDto> BulkDeleteFoodItemsAsync(
+        BulkDeleteFoodItemsRequest request,
+        CancellationToken cancellationToken = default
+    );
+
     Task<MergeFoodItemsResultDto> MergeFoodItemsAsync(
         MergeFoodItemsRequest request,
         CancellationToken cancellationToken = default

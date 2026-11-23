@@ -47,10 +47,16 @@ export interface FoodItemDto {
   modifiedAt: string;
 }
 
+export type FoodItemSortBy = 'Name' | 'RecipeCount' | 'CreatedAt' | 'ModifiedAt';
+
+export type FoodItemSortDirection = 'Asc' | 'Desc';
+
 export interface FoodItemQueryParameters {
   search?: string | null;
   isPantryStaple?: boolean | null;
   category?: FoodCategory | null;
+  sortBy?: FoodItemSortBy | null;
+  sortDirection?: FoodItemSortDirection | null;
   page?: number;
   pageSize?: number;
 }
@@ -97,4 +103,16 @@ export interface UnlinkFoodItemRecipesResultDto {
   foodItemId: string;
   unlinkedRecipeCount: number;
   unlinkedIngredientCount: number;
+}
+
+export interface BulkDeleteFoodItemsRequest {
+  foodItemIds: string[];
+  unlinkFromRecipes?: boolean;
+}
+
+export interface BulkDeleteFoodItemsResultDto {
+  deletedCount: number;
+  unlinkedRecipeCount: number;
+  unlinkedIngredientCount: number;
+  unlinkedShoppingListItemCount: number;
 }

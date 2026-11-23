@@ -19,6 +19,8 @@ public sealed class McpFoodCatalogService(
     )
     {
         var parsedCategory = ParseOptionalCategory(request.Category);
+        var parsedSortBy = ParseOptionalSortBy(request.SortBy);
+        var parsedSortDirection = ParseOptionalSortDirection(request.SortDirection);
         var page = Math.Max(1, request.Page);
         var pageSize = Math.Clamp(request.PageSize, 1, 200);
 
@@ -28,7 +30,9 @@ public sealed class McpFoodCatalogService(
                 IsPantryStaple: request.IsPantryStaple,
                 Page: page,
                 PageSize: pageSize,
-                Category: parsedCategory
+                Category: parsedCategory,
+                SortBy: parsedSortBy,
+                SortDirection: parsedSortDirection
             ),
             cancellationToken
         );
@@ -160,5 +164,33 @@ public sealed class McpFoodCatalogService(
 
         return FoodCategories.Parse(raw)
             ?? throw new DomainValidationException($"Unknown food category '{raw}'.");
+    }
+
+    private static FoodItemSortBy? ParseOptionalSortBy(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return null;
+        }
+
+        return
+            Enum.TryParse<FoodItemSortBy>(raw.Trim(), ignoreCase: true, out var parsed)
+            && Enum.IsDefined(parsed)
+            ? parsed
+            : throw new DomainValidationException($"Unknown sortBy '{raw}'.");
+    }
+
+    private static FoodItemSortDirection? ParseOptionalSortDirection(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return null;
+        }
+
+        return
+            Enum.TryParse<FoodItemSortDirection>(raw.Trim(), ignoreCase: true, out var parsed)
+            && Enum.IsDefined(parsed)
+            ? parsed
+            : throw new DomainValidationException($"Unknown sortDirection '{raw}'.");
     }
 }
