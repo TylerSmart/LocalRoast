@@ -14,6 +14,7 @@ import {
   normalizeToSundayIso,
 } from '../../../core/utils/meal-plan-date';
 import { DraftMealPlanDialogComponent } from '../draft-meal-plan-dialog/draft-meal-plan-dialog.component';
+import { RecipeRandomizerDialogComponent } from '../recipe-randomizer-dialog/recipe-randomizer-dialog.component';
 import { MealPlanCalendarComponent } from './meal-plan-calendar.component';
 
 describe('MealPlanCalendarComponent', () => {
@@ -372,5 +373,36 @@ describe('MealPlanCalendarComponent', () => {
         replaceUrl: true,
       }),
     );
+  });
+
+  it('opens RecipeRandomizerDialogComponent when clicking Randomize and reloads when meals are added', () => {
+    const el = fixture.nativeElement as HTMLElement;
+    const randomizeBtn = el.querySelector(
+      '.calendar-top-actions .randomize-recipes-btn',
+    ) as HTMLButtonElement;
+    expect(randomizeBtn).toBeTruthy();
+
+    mockDialog.open.mockReturnValue({
+      afterClosed: () => of(false),
+    });
+    mockMealPlanService.getRange.mockClear();
+
+    randomizeBtn.click();
+
+    expect(mockDialog.open).toHaveBeenCalledWith(
+      RecipeRandomizerDialogComponent,
+      expect.objectContaining({
+        data: expect.objectContaining({
+          initialSlot: 'Dinner',
+          onMealAdded: expect.any(Function),
+        }),
+      }),
+    );
+
+    const dialogConfig = mockDialog.open.mock.calls.at(-1)?.[1] as {
+      data: { onMealAdded: () => void };
+    };
+    dialogConfig.data.onMealAdded();
+    expect(mockMealPlanService.getRange).toHaveBeenCalled();
   });
 });

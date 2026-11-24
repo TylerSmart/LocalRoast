@@ -148,6 +148,25 @@ describe('RecipeService', () => {
     expect(result.title).toBe('Lasagna');
   });
 
+  it('fetches random recipes with count, status, and excludeIds via GET /api/recipes/random', async () => {
+    const promise = firstValueFrom(
+      service.getRandomRecipes({
+        count: 10,
+        status: 'Published',
+        excludeIds: ['r-1', 'r-2'],
+      }),
+    );
+
+    const req = httpMock.expectOne(
+      '/api/recipes/random?count=10&status=Published&excludeIds=r-1&excludeIds=r-2',
+    );
+    expect(req.request.method).toBe('GET');
+    req.flush([]);
+
+    const result = await promise;
+    expect(result).toEqual([]);
+  });
+
   it('updates recipe organization via PUT /api/recipes/:id/organization', async () => {
     const request: UpdateRecipeOrganizationRequest = {
       collectionIds: ['c1'],

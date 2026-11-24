@@ -239,6 +239,12 @@ export interface RecipeQueryParameters {
   fuzzySearch?: boolean;
 }
 
+export interface RandomRecipeQueryParameters {
+  count?: number;
+  status?: RecipeStatus | null;
+  excludeIds?: string[] | null;
+}
+
 export interface RecipePagedResultDto {
   items: RecipeSummaryDto[];
   totalCount: number | null;

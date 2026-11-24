@@ -69,6 +69,10 @@ import {
   DraftMealPlanDialogComponent,
   DraftMealPlanDialogData,
 } from '../draft-meal-plan-dialog/draft-meal-plan-dialog.component';
+import {
+  RecipeRandomizerDialogComponent,
+  RecipeRandomizerDialogData,
+} from '../recipe-randomizer-dialog/recipe-randomizer-dialog.component';
 
 export interface DropZoneData {
   isOnDeck: boolean;
@@ -485,6 +489,32 @@ export class MealPlanCalendarComponent implements OnInit {
         this.loadCurrentView();
       }
     });
+  }
+
+  protected openRandomizerDialog(): void {
+    const periodStart = this.activePeriodStart();
+    const defaultDate =
+      this.viewMode() === 'month'
+        ? this.todayIso
+        : this.todayIso >= periodStart && this.todayIso <= addDaysIso(periodStart, 6)
+          ? this.todayIso
+          : periodStart;
+    const weekStart = normalizeToSundayIso(this.viewMode() === 'month' ? defaultDate : periodStart);
+
+    this.dialog.open<RecipeRandomizerDialogComponent, RecipeRandomizerDialogData, boolean>(
+      RecipeRandomizerDialogComponent,
+      {
+        width: '580px',
+        maxWidth: '95vw',
+        autoFocus: false,
+        data: {
+          initialDate: defaultDate,
+          initialSlot: 'Dinner',
+          initialWeekStartDate: weekStart,
+          onMealAdded: () => this.loadCurrentView(),
+        },
+      },
+    );
   }
 
   protected editEntry(entry: MealPlanEntryDto): void {

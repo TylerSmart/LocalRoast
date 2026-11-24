@@ -648,6 +648,127 @@ public sealed partial class RecipeService(
         ));
     }
 
+    public async Task<IReadOnlyList<RecipeDetailDto>> GetRandomRecipesAsync(
+        RandomRecipeQueryParameters query,
+        CancellationToken cancellationToken = default
+    )
+    {
+        if (query.Status == RecipeStatus.Archived)
+        {
+            return [];
+        }
+
+        var effectiveCount = Math.Clamp(query.Count, 1, 25);
+        var effectiveStatus = query.Status ?? RecipeStatus.Published;
+
+        var candidateIds = await dbContext
+            .Recipes.AsNoTracking()
+            .Where(r => r.Status != RecipeStatus.Archived && r.Status == effectiveStatus)
+            .Select(r => r.Id)
+            .ToListAsync(cancellationToken);
+
+        if (query.ExcludeIds is { Length: > 0 })
+        {
+            var excluded = query.ExcludeIds.ToHashSet();
+            candidateIds.RemoveAll(excluded.Contains);
+        }
+
+        if (candidateIds.Count == 0)
+        {
+            return [];
+        }
+
+        var takeCount = Math.Min(effectiveCount, candidateIds.Count);
+        for (var i = 0; i < takeCount; i++)
+        {
+            var swapIndex = Random.Shared.Next(i, candidateIds.Count);
+            (candidateIds[i], candidateIds[swapIndex]) = (candidateIds[swapIndex], candidateIds[i]);
+        }
+
+        var selectedIds = candidateIds.GetRange(0, takeCount);
+
+        var recipes = await dbContext
+            .Recipes.AsNoTracking()
+            .Where(r => selectedIds.Contains(r.Id))
+            .Include(r => r.RecipeCollections)
+                .ThenInclude(rc => rc.Collection)
+            .Include(r => r.RecipeTags)
+                .ThenInclude(rt => rt.Tag)
+            .ToListAsync(cancellationToken);
+
+        var ingredients = await dbContext
+            .RecipeIngredients.AsNoTracking()
+            .Where(i => selectedIds.Contains(i.RecipeId))
+            .Include(i => i.FoodItem)
+            .Include(i => i.LinkedRecipe)
+            .Include(i => i.Replacements)
+                .ThenInclude(rep => rep.FoodItem)
+            .ToListAsync(cancellationToken);
+
+        var steps = await dbContext
+            .RecipeSteps.AsNoTracking()
+            .Where(s => selectedIds.Contains(s.RecipeId))
+            .Include(s => s.Timers)
+            .ToListAsync(cancellationToken);
+
+        var attachments = await dbContext
+            .RecipeAttachments.AsNoTracking()
+            .Where(a => selectedIds.Contains(a.RecipeId))
+            .ToListAsync(cancellationToken);
+
+        var cookLogs = await dbContext
+            .CookLogs.AsNoTracking()
+            .Where(c => selectedIds.Contains(c.RecipeId))
+            .ToListAsync(cancellationToken);
+
+        var ingestionJobs = await dbContext
+            .IngestionJobs.AsNoTracking()
+            .Where(j =>
+                j.ResultingRecipeId.HasValue && selectedIds.Contains(j.ResultingRecipeId.Value)
+            )
+            .ToListAsync(cancellationToken);
+
+        var linkedRecipeIds = ingredients
+            .Where(i => i.LinkedRecipeId.HasValue)
+            .Select(i => i.LinkedRecipeId!.Value)
+            .Distinct()
+            .ToList();
+
+        var subRecipesById = await LoadSubRecipesByIdAsync(linkedRecipeIds, cancellationToken);
+
+        var recipesById = recipes.ToDictionary(r => r.Id);
+        var ingredientsByRecipe = ingredients.ToLookup(i => i.RecipeId);
+        var stepsByRecipe = steps.ToLookup(s => s.RecipeId);
+        var attachmentsByRecipe = attachments.ToLookup(a => a.RecipeId);
+        var cookLogsByRecipe = cookLogs.ToLookup(c => c.RecipeId);
+        var jobsByRecipe = ingestionJobs
+            .Where(j => j.ResultingRecipeId.HasValue)
+            .ToLookup(j => j.ResultingRecipeId!.Value);
+
+        var results = new List<RecipeDetailDto>(selectedIds.Count);
+        foreach (var id in selectedIds)
+        {
+            if (!recipesById.TryGetValue(id, out var recipe))
+            {
+                continue;
+            }
+
+            results.Add(
+                MapRecipeDetailDto(
+                    recipe,
+                    ingredientsByRecipe[id],
+                    stepsByRecipe[id],
+                    attachmentsByRecipe[id],
+                    cookLogsByRecipe[id],
+                    jobsByRecipe[id],
+                    subRecipesById
+                )
+            );
+        }
+
+        return results;
+    }
+
     public async Task<RecipeDetailDto?> GetRecipeByIdAsync(
         Guid id,
         CancellationToken cancellationToken = default
@@ -684,45 +805,84 @@ public sealed partial class RecipeService(
             .Distinct()
             .ToList();
 
-        var subRecipes = new List<SubRecipePreviewDto>();
-        if (linkedRecipeIds.Count > 0)
-        {
-            var rawSubRecipes = await dbContext
-                .Recipes.AsNoTracking()
-                .Where(r => linkedRecipeIds.Contains(r.Id))
-                .Include(r => r.Ingredients)
-                    .ThenInclude(i => i.FoodItem)
-                .Include(r => r.Ingredients)
-                    .ThenInclude(i => i.LinkedRecipe)
-                .Include(r => r.Ingredients)
-                    .ThenInclude(i => i.Replacements)
-                        .ThenInclude(rep => rep.FoodItem)
-                .Include(r => r.Steps)
-                    .ThenInclude(s => s.Timers)
-                .ToListAsync(cancellationToken);
+        var subRecipesById = await LoadSubRecipesByIdAsync(linkedRecipeIds, cancellationToken);
 
-            foreach (var sr in rawSubRecipes)
-            {
-                subRecipes.Add(
-                    new SubRecipePreviewDto(
-                        sr.Id,
-                        sr.Title,
-                        sr.Slug,
-                        sr.BaseServings,
-                        sr.YieldDisplay,
-                        sr.Ingredients.OrderBy(i => i.SortOrder).Select(MapIngredientDto).ToList(),
-                        sr.Steps.OrderBy(s => s.StepNumber).Select(MapStepDto).ToList()
-                    )
-                );
-            }
+        return MapRecipeDetailDto(
+            recipe,
+            recipe.Ingredients,
+            recipe.Steps,
+            recipe.Attachments,
+            recipe.CookLogs,
+            recipe.IngestionJobs,
+            subRecipesById
+        );
+    }
+
+    private async Task<Dictionary<Guid, SubRecipePreviewDto>> LoadSubRecipesByIdAsync(
+        IReadOnlyCollection<Guid> linkedRecipeIds,
+        CancellationToken cancellationToken
+    )
+    {
+        var subRecipesById = new Dictionary<Guid, SubRecipePreviewDto>();
+        if (linkedRecipeIds.Count == 0)
+        {
+            return subRecipesById;
         }
 
-        var orderedIngredients = recipe
-            .Ingredients.OrderBy(i => i.SortOrder)
+        var rawSubRecipes = await dbContext
+            .Recipes.AsNoTracking()
+            .Where(r => linkedRecipeIds.Contains(r.Id))
+            .Include(r => r.Ingredients)
+                .ThenInclude(i => i.FoodItem)
+            .Include(r => r.Ingredients)
+                .ThenInclude(i => i.LinkedRecipe)
+            .Include(r => r.Ingredients)
+                .ThenInclude(i => i.Replacements)
+                    .ThenInclude(rep => rep.FoodItem)
+            .Include(r => r.Steps)
+                .ThenInclude(s => s.Timers)
+            .ToListAsync(cancellationToken);
+
+        foreach (var sr in rawSubRecipes)
+        {
+            subRecipesById[sr.Id] = new SubRecipePreviewDto(
+                sr.Id,
+                sr.Title,
+                sr.Slug,
+                sr.BaseServings,
+                sr.YieldDisplay,
+                sr.Ingredients.OrderBy(i => i.SortOrder).Select(MapIngredientDto).ToList(),
+                sr.Steps.OrderBy(s => s.StepNumber).Select(MapStepDto).ToList()
+            );
+        }
+
+        return subRecipesById;
+    }
+
+    private static RecipeDetailDto MapRecipeDetailDto(
+        Recipe recipe,
+        IEnumerable<RecipeIngredient> ingredients,
+        IEnumerable<RecipeStep> steps,
+        IEnumerable<RecipeAttachment> attachments,
+        IEnumerable<CookLog> cookLogs,
+        IEnumerable<IngestionJob> ingestionJobs,
+        IReadOnlyDictionary<Guid, SubRecipePreviewDto> subRecipesById
+    )
+    {
+        var orderedIngredients = ingredients
+            .OrderBy(i => i.SortOrder)
             .Select(MapIngredientDto)
             .ToList();
 
-        var orderedSteps = recipe.Steps.OrderBy(s => s.StepNumber).Select(MapStepDto).ToList();
+        var subRecipes = orderedIngredients
+            .Where(i => i.LinkedRecipeId.HasValue)
+            .Select(i => i.LinkedRecipeId!.Value)
+            .Distinct()
+            .Where(subRecipesById.ContainsKey)
+            .Select(id => subRecipesById[id])
+            .ToList();
+
+        var orderedSteps = steps.OrderBy(s => s.StepNumber).Select(MapStepDto).ToList();
 
         var collections = recipe
             .RecipeCollections.OrderBy(rc => rc.Collection.SortOrder)
@@ -746,8 +906,8 @@ public sealed partial class RecipeService(
             ))
             .ToList();
 
-        var attachments = recipe
-            .Attachments.OrderBy(a => a.SortOrder)
+        var orderedAttachments = attachments
+            .OrderBy(a => a.SortOrder)
             .ThenBy(a => a.CreatedAt)
             .Select(a => new RecipeAttachmentDto(
                 a.Id,
@@ -761,7 +921,7 @@ public sealed partial class RecipeService(
             ))
             .ToList();
 
-        var latestJob = recipe.IngestionJobs.OrderByDescending(j => j.CreatedAt).FirstOrDefault();
+        var latestJob = ingestionJobs.OrderByDescending(j => j.CreatedAt).FirstOrDefault();
         var extractedModel = recipe.ExtractedModel ?? latestJob?.ExtractedModel;
         var refinedModel = recipe.RefinedModel ?? latestJob?.RefinedModel;
         var ingestionJobId = latestJob?.Id;
@@ -797,10 +957,10 @@ public sealed partial class RecipeService(
             recipe.ModifiedBy,
             collections,
             tags,
-            attachments,
+            orderedAttachments,
             recipe.RatingCount,
-            recipe
-                .CookLogs.OrderByDescending(c => c.CookedAt)
+            cookLogs
+                .OrderByDescending(c => c.CookedAt)
                 .ThenByDescending(c => c.CreatedAt)
                 .Select(c => new CookLogDto(
                     c.Id,

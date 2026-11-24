@@ -19,6 +19,11 @@ public interface IRecipeService
         CancellationToken cancellationToken = default
     );
 
+    Task<IReadOnlyList<RecipeDetailDto>> GetRandomRecipesAsync(
+        RandomRecipeQueryParameters query,
+        CancellationToken cancellationToken = default
+    );
+
     Task<RecipeDetailDto?> GetRecipeByIdAsync(
         Guid id,
         CancellationToken cancellationToken = default

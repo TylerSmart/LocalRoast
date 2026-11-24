@@ -195,6 +195,12 @@ public record RecipeQueryParameters(
     bool FuzzySearch = false
 );
 
+public record RandomRecipeQueryParameters(
+    int Count = 10,
+    RecipeStatus? Status = RecipeStatus.Published,
+    Guid[]? ExcludeIds = null
+);
+
 public record RecipePagedResultDto(
     IReadOnlyList<RecipeSummaryDto> Items,
     int? TotalCount,

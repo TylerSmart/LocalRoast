@@ -6,6 +6,13 @@ namespace App.Client.E2ETests;
 [TestClass]
 public sealed class MealPlanE2ETests : E2ETestBase
 {
+    public override BrowserNewContextOptions ContextOptions()
+    {
+        var options = base.ContextOptions();
+        options.ServiceWorkers = ServiceWorkerPolicy.Block;
+        return options;
+    }
+
     private async Task CreateRecipeAsync(string title, int baseServings = 4)
     {
         await Page.Locator("nav.desktop-nav a", new() { HasText = "Cookbook" }).ClickAsync();
@@ -530,5 +537,282 @@ public sealed class MealPlanE2ETests : E2ETestBase
         await Page.ReloadAsync();
         await Expect(Page.Locator(".meal-entry-card", new() { HasText = title }))
             .ToHaveCountAsync(2);
+    }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task MealPlan_RandomizerDialog_SwipeExpandSections_AndScheduleOrAddToOnDeck()
+    {
+        await RegisterAndLoginAsync();
+
+        var validPngBase64 =
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+
+        var suffix = Guid.NewGuid().ToString("N")[..6];
+        var collectionName = $"Randomizer Collection {suffix}";
+        var tagName = $"Randomizer Quick {suffix}";
+
+        var taxonomy = await Page.EvaluateAsync<string[]>(
+            @"async ({ collectionName, tagName }) => {
+                const tokenKey = Object.keys(localStorage).find(k => k.endsWith('-token'));
+                const token = tokenKey ? localStorage.getItem(tokenKey) : null;
+                const headers = {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                };
+
+                const colRes = await fetch('/api/collections', {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({ name: collectionName })
+                });
+                const col = await colRes.json();
+
+                const tagRes = await fetch('/api/tags', {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({ name: tagName, category: 'Dietary' })
+                });
+                const tag = await tagRes.json();
+
+                return [col.id, tag.id];
+            }",
+            new { collectionName, tagName }
+        );
+        var collectionId = taxonomy[0];
+        var tagId = taxonomy[1];
+
+        async Task<string> SeedRandomizerRecipeAsync(string recipeTitle, string stepPrefix)
+        {
+            var longDescription =
+                $"{recipeTitle} is a deeply savory, aromatic dish developed for busy weeknights. "
+                + "Slowly caramelizing the aromatics builds rich flavor without extra effort, and leftovers reheat beautifully for lunch the next day.";
+
+            return await Page.EvaluateAsync<string>(
+                @"async ({ recipeTitle, longDescription, stepPrefix, validPngBase64, collectionId, tagId }) => {
+                    const tokenKey = Object.keys(localStorage).find(k => k.endsWith('-token'));
+                    const token = tokenKey ? localStorage.getItem(tokenKey) : null;
+
+                    const byteCharacters = atob(validPngBase64);
+                    const byteNumbers = new Array(byteCharacters.length);
+                    for (let i = 0; i < byteCharacters.length; i++) {
+                        byteNumbers[i] = byteCharacters.charCodeAt(i);
+                    }
+                    const blob = new Blob([new Uint8Array(byteNumbers)], { type: 'image/png' });
+                    const formData = new FormData();
+                    formData.append('file', blob, 'cover.png');
+
+                    const uploadRes = await fetch('/api/media/recipe-cover', {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${token}` },
+                        body: formData
+                    });
+                    const media = await uploadRes.json();
+
+                    const ingredients = Array.from({ length: 7 }, (_, i) => ({
+                        displayName: `${recipeTitle} Ingredient ${i + 1}`,
+                        quantity: i + 1,
+                        unit: 'Cup'
+                    }));
+
+                    const steps = [
+                        { stepNumber: 1, instruction: `${stepPrefix} Step 1: Prepare the mise en place carefully.` },
+                        { stepNumber: 2, instruction: `${stepPrefix} Step 2: Sear over medium-high heat until browned.` },
+                        { stepNumber: 3, instruction: `${stepPrefix} Step 3: Simmer gently and finish with fresh herbs.` }
+                    ];
+
+                    const createRes = await fetch('/api/recipes', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`
+                        },
+                        body: JSON.stringify({
+                            title: recipeTitle,
+                            description: longDescription,
+                            status: 'Published',
+                            baseServings: 4,
+                            totalTimeMinutes: 35,
+                            difficulty: 'Easy',
+                            coverImagePath: media.coverImagePath,
+                            thumbnailImagePath: media.thumbnailImagePath,
+                            collectionIds: [collectionId],
+                            tagIds: [tagId],
+                            ingredients,
+                            steps
+                        })
+                    });
+                    const created = await createRes.json();
+                    return created.id;
+                }",
+                new
+                {
+                    recipeTitle,
+                    longDescription,
+                    stepPrefix,
+                    validPngBase64,
+                    collectionId,
+                    tagId,
+                }
+            );
+        }
+
+        var recipeA = $"Randomizer Tacos {suffix}";
+        var recipeB = $"Randomizer Curry {suffix}";
+        var idA = await SeedRandomizerRecipeAsync(recipeA, "Tacos");
+        var idB = await SeedRandomizerRecipeAsync(recipeB, "Curry");
+
+        // Exclude recipes created by earlier tests in the shared E2E database so the real
+        // /api/recipes/random endpoint picks exclusively from this test's seeded recipes.
+        var otherPublishedIds = await Page.EvaluateAsync<string[]>(
+            @"async ({ idA, idB }) => {
+                const tokenKey = Object.keys(localStorage).find(k => k.endsWith('-token'));
+                const token = tokenKey ? localStorage.getItem(tokenKey) : null;
+                const res = await fetch('/api/recipes?status=Published', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const recipes = await res.json();
+                return recipes.map(r => r.id).filter(id => id !== idA && id !== idB);
+            }",
+            new { idA, idB }
+        );
+
+        if (otherPublishedIds.Length > 0)
+        {
+            var excludeQuery = string.Join(
+                "&",
+                otherPublishedIds.Select(id => $"excludeIds={Uri.EscapeDataString(id)}")
+            );
+            await Context.RouteAsync(
+                "**/api/recipes/random*",
+                async route =>
+                {
+                    var url = route.Request.Url;
+                    var sep = url.Contains('?') ? "&" : "?";
+                    var response = await route.FetchAsync(
+                        new() { Url = $"{url}{sep}{excludeQuery}" }
+                    );
+                    await route.FulfillAsync(new() { Response = response });
+                }
+            );
+        }
+
+        // Navigate to Meal Plan and open Randomizer dialog
+        await Page.Locator("nav.desktop-nav a", new() { HasText = "Meal Plan" }).ClickAsync();
+        await Expect(Page).ToHaveURLAsync(new Regex(".*/meal-plan.*"));
+
+        await Page.Locator("button.randomize-recipes-btn").ClickAsync();
+        var dialog = Page.Locator("app-recipe-randomizer-dialog");
+        await Expect(dialog).ToBeVisibleAsync();
+        await Expect(dialog.Locator("h2")).ToContainTextAsync("Recipe Randomizer");
+        await Expect(dialog.Locator("[data-testid='randomizer-nav-hint']"))
+            .ToContainTextAsync("Use ← or → arrow keys");
+        await Expect(dialog.Locator("[data-testid='randomizer-collection-badge']"))
+            .ToContainTextAsync(collectionName);
+        await Expect(dialog.Locator("[data-testid='randomizer-tag-badge']"))
+            .ToContainTextAsync(tagName);
+
+        // Verify image renders and shortened sections show expand toggles
+        var heroImg = dialog.Locator("img.randomizer-hero-image");
+        await Expect(heroImg).ToBeVisibleAsync();
+
+        var firstTitle = (await dialog.Locator(".randomizer-recipe-title").InnerTextAsync()).Trim();
+        Assert.IsTrue(
+            firstTitle == recipeA || firstTitle == recipeB,
+            $"Unexpected randomized recipe title: {firstTitle}"
+        );
+
+        // Verify ArrowRight / ArrowLeft keyboard shortcuts work immediately with autoFocus: false
+        await Page.Keyboard.PressAsync("ArrowRight");
+        await Expect(dialog.Locator(".randomizer-recipe-title")).Not.ToContainTextAsync(firstTitle);
+        await Page.Keyboard.PressAsync("ArrowLeft");
+        await Expect(dialog.Locator(".randomizer-recipe-title")).ToContainTextAsync(firstTitle);
+
+        await Expect(dialog.Locator("[data-testid='randomizer-ingredients-list'] li"))
+            .ToHaveCountAsync(5);
+        await Expect(dialog.Locator("[data-testid='randomizer-steps-list'] li"))
+            .ToHaveCountAsync(2);
+
+        // Expand description, ingredients, and steps
+        await dialog.Locator("[data-testid='toggle-description-btn']").ClickAsync();
+        await Expect(dialog.Locator("[data-testid='toggle-description-btn']"))
+            .ToContainTextAsync("Show less");
+
+        await dialog.Locator("[data-testid='toggle-ingredients-btn']").ClickAsync();
+        await Expect(dialog.Locator("[data-testid='randomizer-ingredients-list'] li"))
+            .ToHaveCountAsync(7);
+
+        await dialog.Locator("[data-testid='toggle-steps-btn']").ClickAsync();
+        await Expect(dialog.Locator("[data-testid='randomizer-steps-list'] li"))
+            .ToHaveCountAsync(3);
+
+        // Add first recipe to On-Deck (default mode), which automatically advances to the second recipe
+        await dialog.Locator("[data-testid='add-random-recipe-btn']").ClickAsync();
+        await Expect(dialog.Locator("[data-testid='randomizer-planned-count']"))
+            .ToContainTextAsync("1 planned");
+
+        var secondTitle = (
+            await dialog.Locator(".randomizer-recipe-title").InnerTextAsync()
+        ).Trim();
+        Assert.AreNotEqual(firstTitle, secondTitle);
+        // Expansions reset on new card
+        await Expect(dialog.Locator("[data-testid='randomizer-ingredients-list'] li"))
+            .ToHaveCountAsync(5);
+        await Expect(dialog.Locator("[data-testid='randomizer-steps-list'] li"))
+            .ToHaveCountAsync(2);
+
+        // Previous navigates back to first recipe and shows "Planned" badge;
+        // then drag left across the recipe card to verify live swipe directional feedback
+        await dialog.Locator("[data-testid='prev-random-recipe-btn']").ClickAsync();
+        await Expect(dialog.Locator(".randomizer-recipe-title")).ToContainTextAsync(firstTitle);
+        await Expect(dialog.Locator("[data-testid='randomizer-planned-badge']")).ToBeVisibleAsync();
+
+        var mediaBox = await dialog.Locator(".randomizer-media-wrap").BoundingBoxAsync();
+        Assert.IsNotNull(mediaBox);
+        var dragStartX = mediaBox.X + (mediaBox.Width * 0.75f);
+        var dragStartY = mediaBox.Y + (mediaBox.Height * 0.5f);
+        await Page.Mouse.MoveAsync(dragStartX, dragStartY);
+        await Page.Mouse.DownAsync();
+        for (var step = 1; step <= 6; step++)
+        {
+            await Page.Mouse.MoveAsync(dragStartX - (step * 15), dragStartY);
+        }
+
+        var dragBadge = dialog.Locator("[data-testid='randomizer-drag-badge']");
+        await Expect(dragBadge).ToBeVisibleAsync();
+        await Expect(dragBadge).ToContainTextAsync("Next Recipe");
+        await Page.Mouse.UpAsync();
+        await Expect(dialog.Locator(".randomizer-recipe-title")).ToContainTextAsync(secondTitle);
+
+        // Schedule second recipe into today's Dinner slot
+        await dialog.Locator("mat-button-toggle[value='scheduled'] button").ClickAsync();
+        await dialog.Locator("[data-testid='add-random-recipe-btn']").ClickAsync();
+        await Expect(dialog.Locator("[data-testid='randomizer-planned-count']"))
+            .ToContainTextAsync("2 planned");
+
+        // Close dialog and verify both meals appear on Meal Plan (On-Deck + Today's schedule)
+        await dialog.Locator("button.close-btn").ClickAsync();
+        await Expect(dialog).Not.ToBeVisibleAsync();
+
+        await Expect(Page.Locator(".ondeck-sidebar .ondeck-card", new() { HasText = firstTitle }))
+            .ToBeVisibleAsync();
+        await Expect(
+                Page.Locator(
+                    ".day-column.is-today .meal-entry-card",
+                    new() { HasText = secondTitle }
+                )
+            )
+            .ToBeVisibleAsync();
+
+        await Page.ReloadAsync();
+        await Expect(Page.Locator(".ondeck-sidebar .ondeck-card", new() { HasText = firstTitle }))
+            .ToBeVisibleAsync();
+        await Expect(
+                Page.Locator(
+                    ".day-column.is-today .meal-entry-card",
+                    new() { HasText = secondTitle }
+                )
+            )
+            .ToBeVisibleAsync();
     }
 }

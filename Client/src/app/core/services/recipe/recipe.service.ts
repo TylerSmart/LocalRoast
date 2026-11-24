@@ -8,6 +8,7 @@ import {
   DetectedStepAmountDto,
   IngredientMatchRequest,
   IngredientMatchResultDto,
+  RandomRecipeQueryParameters,
   RecipeAttachmentDto,
   RecipeAutocompleteItemDto,
   RecipeDetailDto,
@@ -129,6 +130,23 @@ export class RecipeService {
 
   getRecipeById(id: string): Observable<RecipeDetailDto> {
     return this.http.get<RecipeDetailDto>(apiUrl(`/recipes/${id}`));
+  }
+
+  getRandomRecipes(query?: RandomRecipeQueryParameters): Observable<RecipeDetailDto[]> {
+    let params = new HttpParams();
+    if (query?.count !== undefined && query?.count !== null) {
+      params = params.set('count', query.count.toString());
+    }
+    if (query?.status) {
+      params = params.set('status', query.status);
+    }
+    if (query?.excludeIds && query.excludeIds.length > 0) {
+      for (const id of query.excludeIds) {
+        params = params.append('excludeIds', id);
+      }
+    }
+
+    return this.http.get<RecipeDetailDto[]>(apiUrl('/recipes/random'), { params });
   }
 
   createRecipe(request: UpsertRecipeRequest): Observable<RecipeDetailDto> {

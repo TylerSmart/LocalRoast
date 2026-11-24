@@ -366,4 +366,71 @@ public sealed class RecipeDiscoveryIntegrationTests
         Assert.AreEqual(2, matchB.MatchedCount);
         Assert.AreEqual(2, matchB.AdditionalNonStapleCount);
     }
+
+    [TestMethod]
+    public async Task GetRandomRecipes_RequiresAuth_FiltersPublishedAndRespectsExcludeIds()
+    {
+        var unauthRes = await _client.GetAsync("/api/recipes/random");
+        Assert.AreEqual(HttpStatusCode.Unauthorized, unauthRes.StatusCode);
+
+        await RegisterAndAuthenticateAsync(_client, "rand1@example.com", "rand1");
+
+        var r1Res = await _client.PostAsJsonAsync(
+            "/api/recipes",
+            new UpsertRecipeRequest(
+                Title: "Random Published 1",
+                Status: RecipeStatus.Published,
+                Ingredients: [new RecipeIngredientInput(DisplayName: "Salt")],
+                Steps: [new RecipeStepInput(Instruction: "Season well.")]
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Created, r1Res.StatusCode);
+        var r1 = await r1Res.Content.ReadFromJsonAsync<RecipeDetailDto>();
+        Assert.IsNotNull(r1);
+
+        var r2Res = await _client.PostAsJsonAsync(
+            "/api/recipes",
+            new UpsertRecipeRequest(
+                Title: "Random Published 2",
+                Status: RecipeStatus.Published,
+                Ingredients: [new RecipeIngredientInput(DisplayName: "Pepper")],
+                Steps: [new RecipeStepInput(Instruction: "Crack pepper.")]
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Created, r2Res.StatusCode);
+        var r2 = await r2Res.Content.ReadFromJsonAsync<RecipeDetailDto>();
+        Assert.IsNotNull(r2);
+
+        var draftRes = await _client.PostAsJsonAsync(
+            "/api/recipes",
+            new UpsertRecipeRequest(
+                Title: "Random Draft",
+                Status: RecipeStatus.DraftReview,
+                Ingredients: [new RecipeIngredientInput(DisplayName: "Flour")],
+                Steps: [new RecipeStepInput(Instruction: "Mix.")]
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Created, draftRes.StatusCode);
+        var draft = await draftRes.Content.ReadFromJsonAsync<RecipeDetailDto>();
+        Assert.IsNotNull(draft);
+
+        var allPubRes = await _client.GetAsync("/api/recipes/random?count=10");
+        Assert.AreEqual(HttpStatusCode.OK, allPubRes.StatusCode);
+        var allPub = await allPubRes.Content.ReadFromJsonAsync<IReadOnlyList<RecipeDetailDto>>();
+        Assert.IsNotNull(allPub);
+        Assert.IsTrue(allPub.Any(r => r.Id == r1.Id));
+        Assert.IsTrue(allPub.Any(r => r.Id == r2.Id));
+        Assert.IsFalse(allPub.Any(r => r.Id == draft.Id));
+
+        var excludedRes = await _client.GetAsync(
+            $"/api/recipes/random?count=10&excludeIds={r1.Id}"
+        );
+        Assert.AreEqual(HttpStatusCode.OK, excludedRes.StatusCode);
+        var excluded = await excludedRes.Content.ReadFromJsonAsync<
+            IReadOnlyList<RecipeDetailDto>
+        >();
+        Assert.IsNotNull(excluded);
+        Assert.IsFalse(excluded.Any(r => r.Id == r1.Id));
+        Assert.IsTrue(excluded.Any(r => r.Id == r2.Id));
+    }
 }

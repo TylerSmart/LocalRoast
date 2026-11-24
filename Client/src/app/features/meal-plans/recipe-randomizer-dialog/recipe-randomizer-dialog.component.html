@@ -1,0 +1,488 @@
+<div class="recipe-randomizer-dialog-container">
+  <div class="dialog-header">
+    <div class="title-wrap">
+      <span class="dialog-icon-badge" aria-hidden="true">
+        <mat-icon class="title-icon">casino</mat-icon>
+      </span>
+      <h2 mat-dialog-title class="dialog-title">Recipe Randomizer</h2>
+      @if (addedCount() > 0) {
+        <span class="planned-count-chip" data-testid="randomizer-planned-count">
+          {{ addedCount() }} planned
+        </span>
+      }
+    </div>
+    <button
+      mat-icon-button
+      type="button"
+      class="close-btn"
+      (click)="closeDialog()"
+      [disabled]="isSubmitting()"
+      aria-label="Close dialog"
+    >
+      <mat-icon>close</mat-icon>
+    </button>
+  </div>
+
+  <mat-dialog-content #dialogContent class="dialog-content">
+    @if (errorMessage()) {
+      <div class="error-banner" role="alert">
+        <mat-icon aria-hidden="true">error</mat-icon>
+        <span>{{ errorMessage() }}</span>
+      </div>
+    }
+
+    @if (isLoadingInitial()) {
+      <div class="state-box">
+        <mat-spinner diameter="36"></mat-spinner>
+        <p>Shuffling cookbook recipes...</p>
+      </div>
+    } @else if (!currentRecipe()) {
+      <div class="state-box empty-state">
+        <mat-icon class="empty-icon" aria-hidden="true">menu_book</mat-icon>
+        <p class="empty-title">No published recipes found in your cookbook yet.</p>
+        @if (errorMessage()) {
+          <button type="button" mat-stroked-button (click)="loadInitialBatch()">
+            <mat-icon>refresh</mat-icon>
+            <span>Try Again</span>
+          </button>
+        }
+      </div>
+    } @else {
+      @let recipe = currentRecipe()!;
+
+      <div class="randomizer-stage">
+        <div class="swipe-affordance-row">
+          <span class="deck-position-label">Recipe #{{ currentIndex() + 1 }}</span>
+          <span class="swipe-hint-label" data-testid="randomizer-nav-hint">
+            @if (isTouchDevice()) {
+              <mat-icon aria-hidden="true">swipe</mat-icon>
+              <span>Swipe left or right</span>
+            } @else {
+              <mat-icon aria-hidden="true">keyboard</mat-icon>
+              <span>Use ← or → arrow keys</span>
+            }
+          </span>
+        </div>
+
+        @if (outgoingSnapshot(); as ghost) {
+          @for (ghostKey of [ghost.key]; track ghostKey) {
+            <div
+              class="randomizer-outgoing-ghost"
+              data-testid="randomizer-outgoing-ghost"
+              [attr.data-direction]="ghost.direction"
+              [class.is-from-drag]="ghost.fromDrag"
+              [style.--ghost-start-x.px]="ghost.startOffsetX"
+              [style.--ghost-start-rot.deg]="ghost.startRotationDeg"
+              (animationend)="clearOutgoingSnapshot()"
+              aria-hidden="true"
+            >
+              <div class="ghost-media-wrap">
+                @if (ghost.imageUrl) {
+                  <img
+                    [src]="ghost.imageUrl"
+                    alt=""
+                    class="randomizer-hero-image"
+                    draggable="false"
+                  />
+                } @else {
+                  <div class="randomizer-image-placeholder">
+                    <mat-icon>restaurant</mat-icon>
+                  </div>
+                }
+                <span class="ghost-direction-pill" [attr.data-direction]="ghost.direction">
+                  <mat-icon>{{ ghost.badgeIcon }}</mat-icon>
+                  <span>{{ ghost.badgeLabel }}</span>
+                </span>
+              </div>
+              <div class="ghost-title">{{ ghost.title }}</div>
+            </div>
+          }
+        }
+
+        <article
+          class="randomizer-recipe-card"
+          [class.slide-in-right-a]="incomingAnimClass() === 'slide-in-right-a'"
+          [class.slide-in-right-b]="incomingAnimClass() === 'slide-in-right-b'"
+          [class.slide-in-left-a]="incomingAnimClass() === 'slide-in-left-a'"
+          [class.slide-in-left-b]="incomingAnimClass() === 'slide-in-left-b'"
+          [class.is-dragging]="isDraggingCard()"
+          [class.is-snapping-back]="isSnappingBack()"
+          [style.transform]="cardTransformStyle()"
+          (pointerdown)="onCardPointerDown($event)"
+          (pointermove)="onCardPointerMove($event)"
+          (pointerup)="onCardPointerUp($event)"
+          (pointercancel)="onCardPointerCancel()"
+          (animationend)="onCardAnimationEnd($event)"
+          (dragstart)="$event.preventDefault()"
+          aria-label="Random recipe card"
+        >
+          <div class="randomizer-media-wrap">
+            @for (mediaKey of [recipe.id]; track mediaKey) {
+              @if (currentImageUrl(); as imageUrl) {
+                <img
+                  [src]="imageUrl"
+                  [alt]="recipe.title"
+                  class="randomizer-hero-image"
+                  draggable="false"
+                />
+              } @else {
+                <div class="randomizer-image-placeholder" aria-hidden="true">
+                  <mat-icon>restaurant</mat-icon>
+                </div>
+              }
+            }
+
+            @if (isCurrentRecipePlanned()) {
+              <span class="planned-badge-overlay" data-testid="randomizer-planned-badge">
+                <mat-icon aria-hidden="true">check_circle</mat-icon>
+                <span>Planned</span>
+              </span>
+            }
+
+            @if (activeDragDirection(); as dragDir) {
+              <div
+                class="swipe-drag-badge"
+                data-testid="randomizer-drag-badge"
+                [attr.data-drag-dir]="dragDir"
+                [class.is-committed]="isDragPastThreshold()"
+                [style.opacity]="dragIndicatorOpacity()"
+                aria-hidden="true"
+              >
+                @if (dragDir === 'prev') {
+                  <mat-icon>arrow_back</mat-icon>
+                  <span>Previous</span>
+                } @else if (dragDir === 'next') {
+                  <span>Next Recipe</span>
+                  <mat-icon>arrow_forward</mat-icon>
+                } @else {
+                  <span>First Recipe</span>
+                }
+              </div>
+            }
+          </div>
+
+          <div class="randomizer-recipe-header">
+            <div class="recipe-title-row">
+              <h3 class="randomizer-recipe-title">{{ recipe.title }}</h3>
+              <a
+                mat-icon-button
+                [routerLink]="['/recipes', recipe.id]"
+                (click)="closeDialog()"
+                class="open-recipe-link-btn"
+                aria-label="Open full recipe page"
+                matTooltip="Open full recipe"
+              >
+                <mat-icon>open_in_new</mat-icon>
+              </a>
+            </div>
+
+            <div class="recipe-meta-row">
+              @if (recipe.difficulty) {
+                <span class="diff-badge" [attr.data-diff]="recipe.difficulty">
+                  {{ recipe.difficulty }}
+                </span>
+              }
+              @if (recipe.totalTimeMinutes) {
+                <span class="meta-pill">
+                  <mat-icon aria-hidden="true">schedule</mat-icon>
+                  <span>{{ formatMinutes(recipe.totalTimeMinutes) }}</span>
+                </span>
+              }
+              <span class="meta-pill">
+                <mat-icon aria-hidden="true">restaurant</mat-icon>
+                <span>{{ recipe.baseServings }} srv</span>
+              </span>
+              @if (recipe.averageRating) {
+                <span class="meta-pill rating-pill">
+                  ★ {{ recipe.averageRating | number: '1.1-1' }}
+                </span>
+              }
+            </div>
+
+            @if (recipe.collections.length > 0 || recipe.tags.length > 0) {
+              <div
+                class="recipe-taxonomy-row"
+                data-testid="randomizer-taxonomy-row"
+                aria-label="Collections and tags"
+              >
+                @for (collection of recipe.collections; track collection.id) {
+                  <span
+                    class="randomizer-collection-badge"
+                    data-testid="randomizer-collection-badge"
+                  >
+                    <mat-icon aria-hidden="true">collections_bookmark</mat-icon>
+                    <span>{{ collection.name }}</span>
+                  </span>
+                }
+                @for (tag of recipe.tags; track tag.id) {
+                  <span
+                    class="randomizer-tag-badge"
+                    data-testid="randomizer-tag-badge"
+                    [attr.data-category]="tag.category.toLowerCase()"
+                  >
+                    {{ tag.name }}
+                  </span>
+                }
+              </div>
+            }
+          </div>
+
+          @if (recipe.description?.trim(); as description) {
+            <section class="recipe-section" aria-label="Description">
+              <p
+                class="randomizer-description"
+                [class.is-clamped]="!descriptionExpanded()"
+                data-testid="randomizer-description"
+              >
+                {{ description }}
+              </p>
+              @if (hasExpandableDescription()) {
+                <button
+                  type="button"
+                  class="expand-toggle-btn"
+                  data-testid="toggle-description-btn"
+                  (click)="toggleDescription()"
+                  [attr.aria-expanded]="descriptionExpanded()"
+                >
+                  <span>{{ descriptionExpanded() ? 'Show less' : 'Show more' }}</span>
+                  <mat-icon aria-hidden="true">{{
+                    descriptionExpanded() ? 'expand_less' : 'expand_more'
+                  }}</mat-icon>
+                </button>
+              }
+            </section>
+          }
+
+          <section class="recipe-section" aria-label="Ingredients">
+            <h4 class="section-heading">Ingredients ({{ recipe.ingredients.length }})</h4>
+            @if (recipe.ingredients.length === 0) {
+              <p class="section-empty-note">No ingredients listed.</p>
+            } @else {
+              <ul class="ingredients-list" data-testid="randomizer-ingredients-list">
+                @for (item of visibleIngredients(); track item.ingredient.id) {
+                  <li class="ingredient-item">
+                    @if (item.quantityAndUnit) {
+                      <strong class="ingredient-qty">{{ item.quantityAndUnit }}</strong>
+                    }
+                    <span class="ingredient-name">{{ item.ingredient.displayName }}</span>
+                    @if (item.prepNote) {
+                      <span class="ingredient-prep">({{ item.prepNote }})</span>
+                    }
+                    @if (item.ingredient.isOptional) {
+                      <span class="optional-tag">optional</span>
+                    }
+                  </li>
+                }
+              </ul>
+
+              @if (hasExpandableIngredients()) {
+                <button
+                  type="button"
+                  class="expand-toggle-btn"
+                  data-testid="toggle-ingredients-btn"
+                  (click)="toggleIngredients()"
+                  [attr.aria-expanded]="ingredientsExpanded()"
+                >
+                  <span>{{
+                    ingredientsExpanded()
+                      ? 'Show fewer ingredients'
+                      : 'Show all ' +
+                        recipe.ingredients.length +
+                        ' ingredients (+' +
+                        (recipe.ingredients.length - collapsedIngredientsLimit) +
+                        ' more)'
+                  }}</span>
+                  <mat-icon aria-hidden="true">{{
+                    ingredientsExpanded() ? 'expand_less' : 'expand_more'
+                  }}</mat-icon>
+                </button>
+              }
+            }
+          </section>
+
+          <section class="recipe-section" aria-label="Steps">
+            <h4 class="section-heading">Steps ({{ recipe.steps.length }})</h4>
+            @if (recipe.steps.length === 0) {
+              <p class="section-empty-note">No instructions listed.</p>
+            } @else {
+              <ol class="steps-list" data-testid="randomizer-steps-list">
+                @for (step of visibleSteps(); track step.id) {
+                  <li class="step-item">
+                    <span class="step-number">{{ step.stepNumber }}</span>
+                    <div class="step-preview-text" [class.is-clamped]="!stepsExpanded()">
+                      <app-step-instruction
+                        [step]="step"
+                        [ingredients]="recipe.ingredients"
+                        [factor]="scaleFactor()"
+                      />
+                    </div>
+                  </li>
+                }
+              </ol>
+
+              @if (hasExpandableSteps()) {
+                <button
+                  type="button"
+                  class="expand-toggle-btn"
+                  data-testid="toggle-steps-btn"
+                  (click)="toggleSteps()"
+                  [attr.aria-expanded]="stepsExpanded()"
+                >
+                  <span>{{
+                    stepsExpanded()
+                      ? 'Show fewer steps'
+                      : recipe.steps.length > collapsedStepsLimit
+                        ? 'Show all ' +
+                          recipe.steps.length +
+                          ' steps (+' +
+                          (recipe.steps.length - collapsedStepsLimit) +
+                          ' more)'
+                        : 'Show full steps'
+                  }}</span>
+                  <mat-icon aria-hidden="true">{{
+                    stepsExpanded() ? 'expand_less' : 'expand_more'
+                  }}</mat-icon>
+                </button>
+              }
+            }
+          </section>
+        </article>
+      </div>
+
+      <section class="plan-controls-panel" aria-label="Meal plan options">
+        <div class="plan-controls-top">
+          <mat-button-toggle-group
+            [ngModel]="placement()"
+            (ngModelChange)="setPlacement($event)"
+            aria-label="Meal plan placement"
+            [hideSingleSelectionIndicator]="true"
+            class="placement-toggle-group"
+          >
+            <mat-button-toggle value="ondeck">
+              <mat-icon>view_sidebar</mat-icon>
+              <span>On-Deck</span>
+            </mat-button-toggle>
+            <mat-button-toggle value="scheduled">
+              <mat-icon>calendar_today</mat-icon>
+              <span>Schedule</span>
+            </mat-button-toggle>
+          </mat-button-toggle-group>
+
+          <div class="servings-stepper" aria-label="Target servings">
+            <button
+              type="button"
+              mat-icon-button
+              (click)="adjustServings(-1)"
+              [disabled]="targetServings() <= 0.5 || isSubmitting()"
+              aria-label="Decrease servings"
+            >
+              <mat-icon>remove</mat-icon>
+            </button>
+            <span class="servings-value" data-testid="randomizer-servings-value">
+              {{ targetServings() }} srv
+            </span>
+            <button
+              type="button"
+              mat-icon-button
+              (click)="adjustServings(1)"
+              [disabled]="isSubmitting()"
+              aria-label="Increase servings"
+            >
+              <mat-icon>add</mat-icon>
+            </button>
+          </div>
+        </div>
+
+        @if (placement() === 'scheduled') {
+          <div class="scheduled-row">
+            <mat-form-field appearance="outline" subscriptSizing="dynamic">
+              <mat-label>Date</mat-label>
+              <input
+                matInput
+                [matDatepicker]="randomizerDatePicker"
+                [ngModel]="scheduledDate()"
+                (ngModelChange)="scheduledDate.set($event)"
+              />
+              <mat-datepicker-toggle
+                matIconSuffix
+                [for]="randomizerDatePicker"
+              ></mat-datepicker-toggle>
+              <mat-datepicker #randomizerDatePicker [touchUi]="useTouchDatepicker"></mat-datepicker>
+            </mat-form-field>
+
+            <mat-form-field appearance="outline" subscriptSizing="dynamic">
+              <mat-label>Meal Slot</mat-label>
+              <mat-select [ngModel]="slot()" (ngModelChange)="slot.set($event)">
+                <mat-select-trigger>
+                  @if (getSelectedSlotMeta(); as selectedSlot) {
+                    <span class="slot-option">
+                      <mat-icon class="slot-option-icon">{{ selectedSlot.icon }}</mat-icon>
+                      <span>{{ selectedSlot.label }}</span>
+                    </span>
+                  }
+                </mat-select-trigger>
+                @for (item of mealSlots; track item.value) {
+                  <mat-option [value]="item.value">
+                    <span class="slot-option">
+                      <mat-icon class="slot-option-icon">{{ item.icon }}</mat-icon>
+                      <span>{{ item.label }}</span>
+                    </span>
+                  </mat-option>
+                }
+              </mat-select>
+            </mat-form-field>
+          </div>
+        }
+      </section>
+    }
+  </mat-dialog-content>
+
+  <mat-dialog-actions class="dialog-actions">
+    <div class="nav-actions-group">
+      <button
+        type="button"
+        mat-icon-button
+        class="prev-recipe-btn"
+        data-testid="prev-random-recipe-btn"
+        (click)="previousRecipe()"
+        [disabled]="currentIndex() === 0 || isSubmitting() || isLoadingInitial()"
+        aria-label="Previous recipe"
+        matTooltip="Previous recipe"
+      >
+        <mat-icon>arrow_back</mat-icon>
+      </button>
+
+      <button
+        type="button"
+        mat-stroked-button
+        class="next-recipe-btn"
+        data-testid="next-random-recipe-btn"
+        (click)="nextRecipe()"
+        [disabled]="isLoadingInitial() || isFetchingMore() || isSubmitting() || deck().length === 0"
+        aria-label="Next random recipe"
+      >
+        @if (isFetchingMore()) {
+          <mat-spinner diameter="16" class="inline-spinner"></mat-spinner>
+        } @else {
+          <mat-icon>casino</mat-icon>
+        }
+        <span>Next</span>
+      </button>
+    </div>
+
+    <button
+      type="button"
+      mat-flat-button
+      color="primary"
+      class="primary-plan-btn"
+      data-testid="add-random-recipe-btn"
+      (click)="addCurrentToMealPlan()"
+      [disabled]="!currentRecipe() || isSubmitting()"
+    >
+      @if (isSubmitting()) {
+        <mat-spinner diameter="18" class="inline-spinner"></mat-spinner>
+      }
+      <span>{{ placement() === 'ondeck' ? 'Add to On-Deck' : 'Schedule Meal' }}</span>
+    </button>
+  </mat-dialog-actions>
+</div>

@@ -82,6 +82,17 @@
 
       <button
         type="button"
+        mat-stroked-button
+        (click)="openRandomizerDialog()"
+        class="randomize-recipes-btn"
+        aria-label="Swipe through random recipes"
+      >
+        <mat-icon>casino</mat-icon>
+        <span class="btn-text">Randomize</span>
+      </button>
+
+      <button
+        type="button"
         mat-flat-button
         color="primary"
         (click)="openAddEntryDialog()"

@@ -248,6 +248,19 @@ public sealed class ResponsiveUiE2ETests : E2ETestBase
         var listId = await CreateResponsiveShoppingListAsync();
         await SetViewportAsync(width, height, "dark");
         await Page.GotoAsync($"{ServerUrl}/meal-plan");
+        await Page.GetByRole(AriaRole.Button, new() { Name = "Swipe through random recipes" })
+            .ClickAsync();
+        await Expect(Page.Locator("app-recipe-randomizer-dialog .randomizer-recipe-card"))
+            .ToBeVisibleAsync();
+        await AssertDialogAsync("recipe-randomizer-ondeck");
+        await Page.Locator(
+                "app-recipe-randomizer-dialog mat-button-toggle[value='scheduled'] button"
+            )
+            .ClickAsync();
+        await AssertDialogAsync("recipe-randomizer-scheduled");
+        await Page.Keyboard.PressAsync("Escape");
+        await Expect(Page.Locator("app-recipe-randomizer-dialog")).ToHaveCountAsync(0);
+
         await Page.GetByRole(AriaRole.Button, new() { Name = "Add a meal to your plan" })
             .ClickAsync();
         await AssertDialogAsync("meal-entry");

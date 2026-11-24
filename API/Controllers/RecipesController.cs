@@ -49,6 +49,17 @@ public sealed class RecipesController(IRecipeService recipeService) : Controller
         return Ok(results);
     }
 
+    [HttpGet("random")]
+    [ProducesResponseType(typeof(IReadOnlyList<RecipeDetailDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetRandomRecipes(
+        [FromQuery] RandomRecipeQueryParameters query,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var recipes = await recipeService.GetRandomRecipesAsync(query, cancellationToken);
+        return Ok(recipes);
+    }
+
     [HttpGet("{id:guid}")]
     [ProducesResponseType(typeof(RecipeDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
