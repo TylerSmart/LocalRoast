@@ -908,6 +908,45 @@ public sealed class ShoppingListService(
         );
     }
 
+    public async Task<ShoppingListGenerationResultDto> CreateAndAddRecipeIngredientsAsync(
+        CreateAndAddRecipeToShoppingListRequest request,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.Recipe is null)
+        {
+            throw new DomainValidationException("Recipe parameters are required.");
+        }
+
+        if (request.Recipe.TargetServings is <= 0m)
+        {
+            throw new DomainValidationException("Target servings must be greater than zero.");
+        }
+
+        var recipeExists = await dbContext.Recipes.AnyAsync(
+            r => r.Id == request.Recipe.RecipeId,
+            cancellationToken
+        );
+        if (!recipeExists)
+        {
+            throw new DomainValidationException("Referenced recipe not found.");
+        }
+
+        var createdList = await CreateShoppingListAsync(
+            new CreateShoppingListRequest(request.Name, request.IsPinned),
+            cancellationToken
+        );
+
+        var result = await AddRecipeIngredientsAsync(
+            createdList.Id,
+            request.Recipe,
+            cancellationToken
+        );
+
+        return result!;
+    }
+
     public async Task<ShoppingListGenerationResultDto?> AddRecipeIngredientsAsync(
         Guid shoppingListId,
         AddRecipeToShoppingListRequest request,

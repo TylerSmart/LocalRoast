@@ -5,6 +5,7 @@ import { apiUrl } from '../../api/api-url';
 import {
   AddRecipeToShoppingListRequest,
   ClearCheckedItemsResultDto,
+  CreateAndAddRecipeToShoppingListRequest,
   CreateAndGenerateFromMealPlanRequest,
   CreateShoppingListItemRequest,
   CreateShoppingListRequest,
@@ -220,5 +221,13 @@ export class ShoppingService {
         request,
       )
       .pipe(tap(() => this.notifyCrossTab(listId)));
+  }
+
+  createAndAddRecipeToList(
+    request: CreateAndAddRecipeToShoppingListRequest,
+  ): Observable<ShoppingListGenerationResultDto> {
+    return this.http
+      .post<ShoppingListGenerationResultDto>(apiUrl('/shopping-lists/generate/recipe'), request)
+      .pipe(tap((res) => this.notifyCrossTab(res.shoppingList.id)));
   }
 }

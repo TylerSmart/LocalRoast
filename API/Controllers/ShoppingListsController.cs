@@ -378,6 +378,47 @@ public sealed class ShoppingListsController(IShoppingListService shoppingListSer
         }
     }
 
+    [HttpPost("generate/recipe")]
+    [ProducesResponseType(typeof(ShoppingListGenerationResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> CreateAndAddRecipeIngredients(
+        [FromBody] CreateAndAddRecipeToShoppingListRequest request,
+        CancellationToken cancellationToken
+    )
+    {
+        try
+        {
+            var result = await shoppingListService.CreateAndAddRecipeIngredientsAsync(
+                request,
+                cancellationToken
+            );
+            return Ok(result);
+        }
+        catch (DomainValidationException ex)
+        {
+            return BadRequest(
+                new ProblemDetails
+                {
+                    Status = StatusCodes.Status400BadRequest,
+                    Title = ex.Title,
+                    Detail = ex.Message,
+                }
+            );
+        }
+        catch (ConflictException ex)
+        {
+            return Conflict(
+                new ProblemDetails
+                {
+                    Status = StatusCodes.Status409Conflict,
+                    Title = ex.Title,
+                    Detail = ex.Message,
+                }
+            );
+        }
+    }
+
     [HttpPost("{id:guid}/generate/recipe")]
     [ProducesResponseType(typeof(ShoppingListGenerationResultDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]

@@ -18,21 +18,22 @@ import { merge } from 'rxjs';
 import {
   DuplicateMealPolicy,
   GenerateFromMealPlanRequest,
+  NEW_SHOPPING_LIST_ID,
   ShoppingListGenerationPreviewDto,
   ShoppingListSummaryDto,
 } from '../../../core/models/shopping.models';
 import { ShoppingService } from '../../../core/services/shopping/shopping.service';
 import {
   addDaysIso,
+  buildDefaultWeeklyShoppingListName,
   coerceToDateLocal,
   coerceToIsoDateLocal,
-  formatWeekRangeLabel,
   getTodayIsoLocal,
   normalizeToSundayIso,
   shouldUseTouchDatepicker,
 } from '../../../core/utils/meal-plan-date';
 
-export const NEW_SHOPPING_LIST_ID = '__NEW_LIST__';
+export { NEW_SHOPPING_LIST_ID };
 
 export interface GenerateShoppingListDialogData {
   targetShoppingListId?: string;
@@ -193,17 +194,7 @@ export class GenerateShoppingListDialogComponent implements OnInit {
   }
 
   buildDefaultWeeklyListName(startIso: string, existingLists: ShoppingListSummaryDto[]): string {
-    const base = `Week of ${formatWeekRangeLabel(startIso)}`;
-    const existingNames = new Set(existingLists.map((l) => l.name.trim().toLowerCase()));
-    if (!existingNames.has(base.toLowerCase())) {
-      return base;
-    }
-
-    let suffix = 2;
-    while (existingNames.has(`${base} (${suffix})`.toLowerCase())) {
-      suffix++;
-    }
-    return `${base} (${suffix})`;
+    return buildDefaultWeeklyShoppingListName(startIso, existingLists);
   }
 
   refreshPreview(): void {

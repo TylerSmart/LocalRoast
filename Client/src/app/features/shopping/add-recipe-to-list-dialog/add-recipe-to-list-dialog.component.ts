@@ -1,4 +1,5 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCheckboxModule } from '@angular/material/checkbox';
@@ -10,9 +11,15 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSelectModule } from '@angular/material/select';
 import {
   AddRecipeToShoppingListRequest,
+  NEW_SHOPPING_LIST_ID,
   ShoppingListSummaryDto,
 } from '../../../core/models/shopping.models';
 import { ShoppingService } from '../../../core/services/shopping/shopping.service';
+import {
+  buildDefaultWeeklyShoppingListName,
+  getTodayIsoLocal,
+  normalizeToSundayIso,
+} from '../../../core/utils/meal-plan-date';
 
 export interface AddRecipeToListDialogData {
   recipeId: string;
@@ -42,37 +49,83 @@ export class AddRecipeToListDialogComponent implements OnInit {
   private readonly dialogRef = inject(MatDialogRef<AddRecipeToListDialogComponent>);
   readonly data = inject<AddRecipeToListDialogData>(MAT_DIALOG_DATA);
   private readonly shoppingService = inject(ShoppingService);
+  private readonly destroyRef = inject(DestroyRef);
 
+  readonly newListSentinel = NEW_SHOPPING_LIST_ID;
   readonly shoppingLists = signal<ShoppingListSummaryDto[]>([]);
   readonly isLoadingLists = signal(true);
   readonly isSubmitting = signal(false);
   readonly errorMessage = signal<string | null>(null);
+  readonly selectedTargetListId = signal<string>(NEW_SHOPPING_LIST_ID);
+  readonly isCreatingNewList = computed(() => this.selectedTargetListId() === NEW_SHOPPING_LIST_ID);
+  private customListNameEdited = false;
 
   readonly form = this.fb.nonNullable.group({
-    targetShoppingListId: ['', [Validators.required]],
+    targetShoppingListId: [NEW_SHOPPING_LIST_ID, [Validators.required]],
+    newListName: [''],
     targetServings: [this.data.targetServings || 4, [Validators.required, Validators.min(0.25)]],
     includeSubRecipes: [true],
     includeOptionalIngredients: [true],
   });
 
   ngOnInit(): void {
-    this.shoppingService.getShoppingLists().subscribe({
-      next: (lists) => {
-        this.shoppingLists.set(lists);
-        this.isLoadingLists.set(false);
+    const weekStartIso = normalizeToSundayIso(getTodayIsoLocal());
+    this.form.patchValue(
+      { newListName: buildDefaultWeeklyShoppingListName(weekStartIso, []) },
+      { emitEvent: false },
+    );
 
-        if (lists.length > 0) {
-          const pinned = lists.find((l) => l.isPinned);
-          this.form.patchValue({
-            targetShoppingListId: pinned ? pinned.id : lists[0].id,
-          });
+    this.form.controls.targetShoppingListId.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((value) => {
+        this.selectedTargetListId.set(value);
+        if (
+          value === NEW_SHOPPING_LIST_ID &&
+          !this.customListNameEdited &&
+          !this.form.controls.newListName.value.trim()
+        ) {
+          this.form.patchValue(
+            {
+              newListName: buildDefaultWeeklyShoppingListName(weekStartIso, this.shoppingLists()),
+            },
+            { emitEvent: false },
+          );
         }
-      },
-      error: () => {
-        this.isLoadingLists.set(false);
-        this.errorMessage.set('Failed to load shopping lists.');
-      },
-    });
+      });
+
+    this.shoppingService
+      .getShoppingLists()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (lists) => {
+          this.shoppingLists.set(lists);
+          this.isLoadingLists.set(false);
+
+          const pinned = lists.find((l) => l.isPinned);
+          const initialListId =
+            lists.length > 0 ? (pinned ? pinned.id : lists[0].id) : NEW_SHOPPING_LIST_ID;
+          const defaultName = buildDefaultWeeklyShoppingListName(weekStartIso, lists);
+
+          this.selectedTargetListId.set(initialListId);
+          this.form.patchValue(
+            {
+              targetShoppingListId: initialListId,
+              newListName: this.customListNameEdited
+                ? this.form.controls.newListName.value
+                : defaultName,
+            },
+            { emitEvent: false },
+          );
+        },
+        error: () => {
+          this.isLoadingLists.set(false);
+          this.errorMessage.set('Failed to load shopping lists.');
+        },
+      });
+  }
+
+  onNewListNameInput(): void {
+    this.customListNameEdited = true;
   }
 
   onSubmit(): void {
@@ -82,6 +135,13 @@ export class AddRecipeToListDialogComponent implements OnInit {
     }
 
     const val = this.form.getRawValue();
+    const creatingNew = val.targetShoppingListId === NEW_SHOPPING_LIST_ID;
+    const newListName = val.newListName.trim();
+    if (creatingNew && !newListName) {
+      this.errorMessage.set('Please enter a name for the new shopping list.');
+      return;
+    }
+
     this.isSubmitting.set(true);
     this.errorMessage.set(null);
 
@@ -92,7 +152,15 @@ export class AddRecipeToListDialogComponent implements OnInit {
       includeOptionalIngredients: val.includeOptionalIngredients ?? true,
     };
 
-    this.shoppingService.addRecipeToList(val.targetShoppingListId, request).subscribe({
+    const submitObs = creatingNew
+      ? this.shoppingService.createAndAddRecipeToList({
+          name: newListName,
+          isPinned: false,
+          recipe: request,
+        })
+      : this.shoppingService.addRecipeToList(val.targetShoppingListId, request);
+
+    submitObs.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (result) => {
         this.dialogRef.close(result);
       },

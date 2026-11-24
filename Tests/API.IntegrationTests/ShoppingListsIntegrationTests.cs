@@ -426,4 +426,52 @@ public sealed class ShoppingListsIntegrationTests
         Assert.AreEqual(2, updatedDetail.ActiveItems.Count);
         Assert.AreEqual(0, updatedDetail.ExcludedPantryItems.Count);
     }
+
+    [TestMethod]
+    public async Task CreateAndAddRecipeIngredients_CreatesListAndReturns409OnDuplicateName()
+    {
+        await RegisterAndAuthenticateAsync(_client, "addnewlist@example.com", "New List Chef");
+
+        var recipeRes = await _client.PostAsJsonAsync(
+            "/api/recipes",
+            new UpsertRecipeRequest(
+                Title: "One-Step Sheet Pan",
+                BaseServings: 4m,
+                Ingredients:
+                [
+                    new RecipeIngredientInput(
+                        DisplayName: "Yukon Gold Potatoes",
+                        Quantity: 2m,
+                        Unit: MeasurementUnit.Lb
+                    ),
+                ]
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Created, recipeRes.StatusCode);
+        var recipe = await recipeRes.Content.ReadFromJsonAsync<RecipeDetailDto>();
+        Assert.IsNotNull(recipe);
+
+        var req = new CreateAndAddRecipeToShoppingListRequest(
+            Name: "One-Step Shopping List",
+            IsPinned: false,
+            Recipe: new AddRecipeToShoppingListRequest(
+                RecipeId: recipe.Id,
+                TargetServings: 8m,
+                IncludeSubRecipes: true,
+                IncludeOptionalIngredients: true
+            )
+        );
+
+        var createRes = await _client.PostAsJsonAsync("/api/shopping-lists/generate/recipe", req);
+        Assert.AreEqual(HttpStatusCode.OK, createRes.StatusCode);
+        var created = await createRes.Content.ReadFromJsonAsync<ShoppingListGenerationResultDto>();
+        Assert.IsNotNull(created);
+        Assert.AreEqual("One-Step Shopping List", created.ShoppingList.Name);
+        var item = created.ShoppingList.ActiveItems.Single();
+        Assert.AreEqual("Yukon Gold Potatoes", item.DisplayName);
+        Assert.AreEqual(4m, item.Quantity);
+
+        var dupRes = await _client.PostAsJsonAsync("/api/shopping-lists/generate/recipe", req);
+        Assert.AreEqual(HttpStatusCode.Conflict, dupRes.StatusCode);
+    }
 }

@@ -535,4 +535,63 @@ public sealed class ShoppingListsE2ETests : E2ETestBase
         await Expect(beefRow).ToBeVisibleAsync();
         await Expect(beefRow.Locator(".item-qty-badge")).ToContainTextAsync("2");
     }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task ShoppingList_AddFromRecipeDetail_WhenNoListsExist_CreatesNewWeeklyListInline()
+    {
+        await RegisterAndLoginAsync();
+
+        await Page.EvaluateAsync(
+            @"async () => {
+                const tokenKey = Object.keys(localStorage).find(k => k.endsWith('-token'));
+                const token = tokenKey ? localStorage.getItem(tokenKey) : null;
+                const headers = { 'Authorization': `Bearer ${token}` };
+                const res = await fetch('/api/shopping-lists', { headers });
+                const lists = await res.json();
+                for (const list of lists) {
+                    await fetch(`/api/shopping-lists/${list.id}`, { method: 'DELETE', headers });
+                }
+            }"
+        );
+
+        var recipeTitle = $"Herb Flatbread {Guid.NewGuid():N}"[..20];
+        await CreateRecipeWithIngredientsAsync(recipeTitle, 4, ("Fresh Cilantro", 2m, "Bunch"));
+
+        await Page.Locator("button.recipe-actions-menu-btn").ClickAsync();
+        await Page.Locator("button[aria-label='Add ingredients to shopping list']").ClickAsync();
+
+        var addDialog = Page.Locator("mat-dialog-container");
+        await Expect(addDialog.Locator("h2")).ToContainTextAsync("Add to Shopping List");
+
+        var newListNameInput = addDialog.Locator("input.new-list-name-input");
+        await Expect(newListNameInput).ToBeVisibleAsync();
+        await Expect(newListNameInput).ToHaveValueAsync(new Regex("^Week of "));
+
+        var submitBtn = addDialog.Locator(
+            "button[color='primary']",
+            new() { HasText = "Create & Add Ingredients" }
+        );
+        await Expect(submitBtn).ToBeEnabledAsync();
+        await submitBtn.ClickAsync();
+        await Expect(addDialog).Not.ToBeVisibleAsync();
+
+        var viewListSnackBtn = Page.Locator(
+            ".mat-mdc-snack-bar-container button",
+            new() { HasText = "View List" }
+        );
+        await Expect(viewListSnackBtn).ToBeVisibleAsync();
+        await viewListSnackBtn.ClickAsync();
+
+        await Expect(Page).ToHaveURLAsync(new Regex(".*/shopping\\?listId="));
+        await Expect(Page.Locator(".desktop-list-pills .list-pill.active"))
+            .ToContainTextAsync("Week of ");
+
+        var cilantroRow = Page.Locator(
+            ".active-items-card .shopping-item-row",
+            new() { HasText = "Fresh Cilantro" }
+        );
+        await Expect(cilantroRow).ToBeVisibleAsync();
+        await Expect(cilantroRow.Locator(".item-qty-badge")).ToContainTextAsync("2");
+    }
 }

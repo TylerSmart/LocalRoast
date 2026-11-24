@@ -88,4 +88,9 @@ public interface IShoppingListService
         AddRecipeToShoppingListRequest request,
         CancellationToken cancellationToken = default
     );
+
+    Task<ShoppingListGenerationResultDto> CreateAndAddRecipeIngredientsAsync(
+        CreateAndAddRecipeToShoppingListRequest request,
+        CancellationToken cancellationToken = default
+    );
 }

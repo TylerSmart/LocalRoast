@@ -97,6 +97,23 @@ export function formatWeekRangeLabel(weekStartIso: string): string {
   return `${startMonth} ${start.getDate()} – ${endMonth} ${end.getDate()}, ${start.getFullYear()}`;
 }
 
+export function buildDefaultWeeklyShoppingListName(
+  startIso: string,
+  existingLists: readonly { name: string }[],
+): string {
+  const base = `Week of ${formatWeekRangeLabel(startIso)}`;
+  const existingNames = new Set(existingLists.map((l) => l.name.trim().toLowerCase()));
+  if (!existingNames.has(base.toLowerCase())) {
+    return base;
+  }
+
+  let suffix = 2;
+  while (existingNames.has(`${base} (${suffix})`.toLowerCase())) {
+    suffix++;
+  }
+  return `${base} (${suffix})`;
+}
+
 export function formatMonthYearLabel(year: number, monthIndex0: number): string {
   const date = new Date(year, monthIndex0, 1);
   return date.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });

@@ -499,4 +499,45 @@ public sealed class ShoppingListServiceTests
         );
         Assert.IsFalse(await _dbContext.ShoppingLists.AnyAsync(l => l.Name == "Should Not Exist"));
     }
+
+    [TestMethod]
+    public async Task CreateAndAddRecipeIngredients_CreatesNewListAndPopulatesScaledIngredients_AndRejectsMissingRecipeWithoutOrphanList()
+    {
+        var recipeRequest = new AddRecipeToShoppingListRequest(
+            RecipeId: _recipeTacos.Id,
+            TargetServings: 8m,
+            IncludeSubRecipes: true,
+            IncludeOptionalIngredients: true
+        );
+
+        await Assert.ThrowsAsync<DomainValidationException>(() =>
+            _service.CreateAndAddRecipeIngredientsAsync(
+                new CreateAndAddRecipeToShoppingListRequest(
+                    Name: "Orphan List Check",
+                    IsPinned: false,
+                    Recipe: recipeRequest with
+                    {
+                        RecipeId = Guid.NewGuid(),
+                    }
+                )
+            )
+        );
+        Assert.IsFalse(await _dbContext.ShoppingLists.AnyAsync(l => l.Name == "Orphan List Check"));
+
+        var createdResult = await _service.CreateAndAddRecipeIngredientsAsync(
+            new CreateAndAddRecipeToShoppingListRequest(
+                Name: "Taco Night List",
+                IsPinned: false,
+                Recipe: recipeRequest
+            )
+        );
+
+        Assert.AreEqual("Taco Night List", createdResult.ShoppingList.Name);
+        Assert.AreEqual(
+            8m,
+            createdResult
+                .ShoppingList.ActiveItems.Single(i => i.FoodItemId == _foodGarlic.Id)
+                .Quantity
+        );
+    }
 }

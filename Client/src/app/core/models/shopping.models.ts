@@ -7,6 +7,8 @@ export type ShoppingListSourceKind = 'Manual' | 'MealPlanEntry' | 'SingleRecipe'
 
 export type DuplicateMealPolicy = 'SkipAlreadyImported' | 'ReplaceAlreadyImported';
 
+export const NEW_SHOPPING_LIST_ID = '__NEW_LIST__';
+
 export interface ShoppingListSummaryDto {
   id: string;
   name: string;
@@ -161,6 +163,12 @@ export interface AddRecipeToShoppingListRequest {
   includeSubRecipes?: boolean;
   includeOptionalIngredients?: boolean;
   promotePantryFoodItemIds?: string[] | null;
+}
+
+export interface CreateAndAddRecipeToShoppingListRequest {
+  name: string;
+  isPinned?: boolean;
+  recipe: AddRecipeToShoppingListRequest;
 }
 
 export interface ShoppingListGenerationResultDto {

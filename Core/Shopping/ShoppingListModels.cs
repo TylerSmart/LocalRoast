@@ -156,6 +156,12 @@ public record AddRecipeToShoppingListRequest(
     IReadOnlyList<Guid>? PromotePantryFoodItemIds = null
 );
 
+public record CreateAndAddRecipeToShoppingListRequest(
+    [Required, MaxLength(150)] string Name,
+    bool IsPinned = false,
+    [Required] AddRecipeToShoppingListRequest? Recipe = null
+);
+
 public record ShoppingListGenerationResultDto(
     ShoppingListDetailDto ShoppingList,
     int ImportedMealsCount,

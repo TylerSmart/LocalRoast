@@ -3,9 +3,11 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { TestBed } from '@angular/core/testing';
 import { firstValueFrom } from 'rxjs';
 import {
+  CreateAndAddRecipeToShoppingListRequest,
   CreateShoppingListItemRequest,
   CreateShoppingListRequest,
   ShoppingListDetailDto,
+  ShoppingListGenerationResultDto,
   ShoppingListItemDto,
   ShoppingListSummaryDto,
 } from '../../models/shopping.models';
@@ -125,5 +127,44 @@ describe('ShoppingService', () => {
     req.flush(mockItem);
 
     await expect(promise).resolves.toEqual(mockItem);
+  });
+
+  it('creates a list and adds recipe ingredients via POST /api/shopping-lists/generate/recipe', async () => {
+    const payload: CreateAndAddRecipeToShoppingListRequest = {
+      name: 'Week of Nov 22 – 28, 2026',
+      isPinned: false,
+      recipe: {
+        recipeId: 'rec-1',
+        targetServings: 4,
+        includeSubRecipes: true,
+        includeOptionalIngredients: true,
+      },
+    };
+    const mockResult: ShoppingListGenerationResultDto = {
+      shoppingList: {
+        id: 'list-new',
+        name: payload.name,
+        isPinned: false,
+        activeItems: [],
+        checkedItems: [],
+        excludedPantryItems: [],
+        createdAt: '2026-11-24T00:00:00Z',
+        modifiedAt: '2026-11-24T00:00:00Z',
+      },
+      importedMealsCount: 1,
+      skippedDuplicateMealsCount: 0,
+      ignoredLeftoversCount: 0,
+      ignoredNotesCount: 0,
+      activeItemsAffectedCount: 2,
+      excludedPantryItemsCount: 0,
+    };
+
+    const promise = firstValueFrom(service.createAndAddRecipeToList(payload));
+    const req = httpMock.expectOne('/api/shopping-lists/generate/recipe');
+    expect(req.request.method).toBe('POST');
+    expect(req.request.body).toEqual(payload);
+    req.flush(mockResult);
+
+    await expect(promise).resolves.toEqual(mockResult);
   });
 });
