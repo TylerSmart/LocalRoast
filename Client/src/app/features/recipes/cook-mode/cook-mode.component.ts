@@ -51,9 +51,9 @@ import {
 import {
   FormattedQuantityResult,
   computeSubRecipeBatchMultiplier,
-  formatCountdown,
   formatDuration,
   formatIngredientReplacement,
+  formatTimerDisplay,
   scaleIngredient,
   stripOuterParentheses,
 } from '../../../core/utils/culinary-math';
@@ -175,7 +175,7 @@ export class CookModeComponent implements OnInit, OnDestroy {
   protected readonly customTimerMinutes = signal<number>(5);
   protected readonly customTimerLabel = signal<string>('Kitchen Timer');
 
-  protected readonly formatCountdown = formatCountdown;
+  protected readonly formatTimerDisplay = formatTimerDisplay;
   protected readonly formatDuration = formatDuration;
   protected readonly formatReplacement = formatIngredientReplacement;
   protected readonly cleanPrepNote = stripOuterParentheses;

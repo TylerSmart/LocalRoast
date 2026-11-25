@@ -281,4 +281,41 @@ describe('AppShellComponent', () => {
     pillBtn.click();
     expect(mockKitchenReferenceService.openDialog).toHaveBeenCalledWith({ tab: 'ratios' });
   });
+
+  it('prioritizes completed timers in top-bar pill and displays +MM:SS overtime count-up', () => {
+    mockTimers.set([
+      {
+        id: 'timer-running',
+        recipeId: 'rec-1',
+        recipeTitle: 'Pasta',
+        stepNumber: 1,
+        label: 'Boil Water',
+        totalDurationSeconds: 600,
+        remainingSeconds: 420,
+        state: 'running',
+        endsAtMs: Date.now() + 420000,
+      },
+      {
+        id: 'timer-done',
+        recipeId: '',
+        recipeTitle: 'Kitchen Utility',
+        stepNumber: null,
+        label: 'Jammy Egg',
+        totalDurationSeconds: 420,
+        remainingSeconds: 0,
+        overtimeSeconds: 14,
+        completedAtMs: Date.now() - 14000,
+        state: 'completed',
+        endsAtMs: null,
+      },
+    ]);
+    fixture.detectChanges();
+
+    const pillBtn = fixture.nativeElement.querySelector(
+      '.active-timer-nav-pill.is-completed',
+    ) as HTMLElement;
+    expect(pillBtn).toBeTruthy();
+    expect(pillBtn.textContent).toContain('+00:14');
+    expect(pillBtn.textContent).toContain('Jammy Egg');
+  });
 });

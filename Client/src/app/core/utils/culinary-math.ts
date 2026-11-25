@@ -1133,6 +1133,17 @@ export function formatCountdown(totalSeconds: number): string {
   return `${pad(minutes)}:${pad(seconds)}`;
 }
 
+export function formatTimerDisplay(timer: {
+  state: 'running' | 'paused' | 'completed';
+  remainingSeconds: number;
+  overtimeSeconds?: number;
+}): string {
+  if (timer.state === 'completed') {
+    return `+${formatCountdown(timer.overtimeSeconds ?? 0)}`;
+  }
+  return formatCountdown(timer.remainingSeconds);
+}
+
 export function getDimensionUnitLabel(
   unit: DimensionUnit,
   value: number,

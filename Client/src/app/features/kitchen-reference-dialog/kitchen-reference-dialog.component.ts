@@ -12,7 +12,7 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 import { DimensionUnit } from '../../core/models/step-token.models';
 import { KitchenReferenceService } from '../../core/services/kitchen-reference/kitchen-reference.service';
 import { KitchenTimerService } from '../../core/services/kitchen-timer/kitchen-timer.service';
-import { formatCountdown, formatDuration } from '../../core/utils/culinary-math';
+import { formatDuration, formatTimerDisplay } from '../../core/utils/culinary-math';
 import {
   calculatePanScaling,
   celsiusToFahrenheit,
@@ -153,7 +153,7 @@ export class KitchenReferenceDialogComponent {
   protected readonly quickTimerLabel = signal<string>('Kitchen Timer');
   protected readonly quickTimerMinutes = signal<number>(5);
 
-  protected readonly formatCountdown = formatCountdown;
+  protected readonly formatTimerDisplay = formatTimerDisplay;
   protected readonly formatDuration = formatDuration;
   protected readonly fahrenheitToCelsius = fahrenheitToCelsius;
 

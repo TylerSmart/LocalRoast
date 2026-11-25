@@ -9,6 +9,7 @@ import {
   formatIngredientReplacement,
   formatMinutes,
   formatNumber,
+  formatTimerDisplay,
   getUnitLabel,
   parseYieldMeasurements,
   scaleAndConvert,
@@ -510,6 +511,21 @@ describe('culinary-math', () => {
       expect(stripOuterParentheses('minced (about 1 tbsp)')).toBe('minced (about 1 tbsp)');
       expect(stripOuterParentheses('(8-inch) square')).toBe('(8-inch) square');
       expect(stripOuterParentheses('((   ))')).toBeNull();
+    });
+  });
+
+  describe('formatTimerDisplay', () => {
+    it('formats running and paused timers as MM:SS and completed timers with +MM:SS overtime', () => {
+      expect(
+        formatTimerDisplay({ state: 'running', remainingSeconds: 95, overtimeSeconds: 0 }),
+      ).toBe('01:35');
+      expect(formatTimerDisplay({ state: 'paused', remainingSeconds: 42 })).toBe('00:42');
+      expect(
+        formatTimerDisplay({ state: 'completed', remainingSeconds: 0, overtimeSeconds: 0 }),
+      ).toBe('+00:00');
+      expect(
+        formatTimerDisplay({ state: 'completed', remainingSeconds: 0, overtimeSeconds: 65 }),
+      ).toBe('+01:05');
     });
   });
 });

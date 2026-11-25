@@ -24,7 +24,7 @@ import { KitchenTimerService } from '../../../core/services/kitchen-timer/kitche
 import { LlmSettingsService } from '../../../core/services/llm-settings/llm-settings.service';
 import { PwaService } from '../../../core/services/pwa/pwa.service';
 import { ThemeMode, ThemeService } from '../../../core/services/theme/theme.service';
-import { formatCountdown } from '../../../core/utils/culinary-math';
+import { formatTimerDisplay } from '../../../core/utils/culinary-math';
 import { KitchenReferenceTab } from '../../../core/utils/kitchen-reference-data';
 import { GlobalSearchDialogComponent } from '../global-search-dialog/global-search-dialog.component';
 
@@ -127,6 +127,12 @@ export class AppShellComponent implements OnInit {
     if (timers.length === 0) {
       return null;
     }
+    const completed = timers.filter((t) => t.state === 'completed');
+    if (completed.length > 0) {
+      return completed.reduce((max, t) =>
+        (t.overtimeSeconds ?? 0) > (max.overtimeSeconds ?? 0) ? t : max,
+      );
+    }
     const running = timers.filter((t) => t.state === 'running');
     if (running.length > 0) {
       return running.reduce((min, t) => (t.remainingSeconds < min.remainingSeconds ? t : min));
@@ -136,7 +142,7 @@ export class AppShellComponent implements OnInit {
 
   protected readonly timerCountdown = computed(() => {
     const t = this.activeTimer();
-    return t ? formatCountdown(t.remainingSeconds) : '';
+    return t ? formatTimerDisplay(t) : '';
   });
 
   ngOnInit(): void {

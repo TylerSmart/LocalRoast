@@ -835,10 +835,13 @@
                     [class.is-paused]="t.state === 'paused'"
                   >
                     <div class="timer-row-info">
-                      <span class="timer-row-countdown">{{
-                        formatCountdown(t.remainingSeconds)
-                      }}</span>
-                      <span class="timer-row-label">{{ t.label }}</span>
+                      <span class="timer-row-countdown">{{ formatTimerDisplay(t) }}</span>
+                      <span class="timer-row-label">
+                        @if (t.state === 'completed') {
+                          <span class="timer-overtime-badge">Done · </span>
+                        }
+                        {{ t.label }}
+                      </span>
                     </div>
                     <div class="timer-row-actions">
                       <button

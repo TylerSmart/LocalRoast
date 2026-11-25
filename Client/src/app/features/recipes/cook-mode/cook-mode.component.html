@@ -661,8 +661,11 @@
               [class.is-paused]="t.state === 'paused'"
             >
               <div class="timer-info">
-                <span class="timer-countdown">{{ formatCountdown(t.remainingSeconds) }}</span>
+                <span class="timer-countdown">{{ formatTimerDisplay(t) }}</span>
                 <span class="timer-label" [title]="t.label">
+                  @if (t.state === 'completed') {
+                    <span class="timer-overtime-badge">Done · </span>
+                  }
                   @if (t.stepNumber) {
                     <span class="timer-step-badge">Step {{ t.stepNumber }} · </span>
                   }

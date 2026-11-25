@@ -165,4 +165,131 @@ public sealed class KitchenReferenceE2ETests : E2ETestBase
             );
         }
     }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task KitchenTimers_UnlockAudioOnStart_AndCountUpOvertimeAcrossAllViews()
+    {
+        await Page.AddInitScriptAsync(
+            """
+            (() => {
+                window.__audioUnlockLog = {
+                    bufferStarts: 0,
+                    oscillatorStarts: 0,
+                    resumes: 0
+                };
+                class SpyAudioContext {
+                    constructor() {
+                        this.state = 'suspended';
+                        this.currentTime = 0;
+                        this.destination = {};
+                    }
+                    resume() {
+                        window.__audioUnlockLog.resumes++;
+                        this.state = 'running';
+                        return Promise.resolve();
+                    }
+                    createBuffer() { return {}; }
+                    createBufferSource() {
+                        return {
+                            buffer: null,
+                            connect() {},
+                            start() { window.__audioUnlockLog.bufferStarts++; }
+                        };
+                    }
+                    createOscillator() {
+                        return {
+                            type: 'sine',
+                            frequency: { setValueAtTime() {} },
+                            connect() {},
+                            start() { window.__audioUnlockLog.oscillatorStarts++; },
+                            stop() {}
+                        };
+                    }
+                    createGain() {
+                        return {
+                            gain: { setValueAtTime() {}, exponentialRampToValueAtTime() {} },
+                            connect() {}
+                        };
+                    }
+                }
+                window.AudioContext = SpyAudioContext;
+                window.webkitAudioContext = SpyAudioContext;
+            })();
+            """
+        );
+
+        await RegisterAndLoginAsync();
+
+        var recipeId = await Page.EvaluateAsync<string>(
+            """
+            async () => {
+                const tokenKey = Object.keys(localStorage).find(k => k.endsWith('-token'));
+                const token = tokenKey ? localStorage.getItem(tokenKey) : null;
+                const res = await fetch('/api/recipes', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({
+                        title: 'Quick Boil Egg',
+                        baseServings: 1,
+                        ingredients: [{ displayName: 'Egg', quantity: 1 }],
+                        steps: [{
+                            stepNumber: 1,
+                            instruction: 'Simmer briefly.',
+                            timers: [{ sortOrder: 1, durationSeconds: 2, label: 'Quick Test' }]
+                        }]
+                    })
+                });
+                const data = await res.json();
+                return data.id;
+            }
+            """
+        );
+
+        await Page.GotoAsync($"{ServerUrl}/recipes/{recipeId}/cook");
+        await Expect(Page.Locator(".start-step-timer-btn")).ToBeVisibleAsync();
+
+        // Start timer and verify synchronous WebKit AudioContext unlock on click
+        await Page.Locator(".start-step-timer-btn").ClickAsync();
+        var bufferStartsAfterClick = await Page.EvaluateAsync<int>(
+            "() => window.__audioUnlockLog.bufferStarts"
+        );
+        Assert.IsGreaterThan(
+            0,
+            bufferStartsAfterClick,
+            "Expected silent audio unlock buffer to play on Start click."
+        );
+
+        // Wait for timer completion and verify overtime count-up in Cook Mode + chime played
+        var cookCountdown = Page.Locator(".timer-card .timer-countdown").First;
+        await Expect(Page.Locator(".timer-card").First).ToHaveClassAsync(new Regex("is-completed"));
+        await Expect(cookCountdown).ToHaveTextAsync(new Regex(@"^\+00:0[0-9]$"));
+        await Expect(cookCountdown).ToHaveTextAsync(new Regex(@"^\+00:0[1-9]$"));
+
+        var oscStartsAfterComplete = await Page.EvaluateAsync<int>(
+            "() => window.__audioUnlockLog.oscillatorStarts"
+        );
+        Assert.IsGreaterThanOrEqualTo(
+            4,
+            oscStartsAfterComplete,
+            "Expected completion chime oscillators to fire."
+        );
+
+        // Exit Cook Mode and verify AppShell top-bar pill shows completed state + overtime count-up
+        await Page.GetByRole(AriaRole.Button, new() { Name = "Exit Cook Mode" }).ClickAsync();
+        var navPill = Page.Locator(".active-timer-nav-pill.is-completed");
+        await Expect(navPill).ToBeVisibleAsync();
+        await Expect(navPill.Locator(".timer-nav-time"))
+            .ToHaveTextAsync(new Regex(@"^\+00:0[1-9]$"));
+
+        // Open Kitchen Reference Ratios & Timers tab and verify overtime count-up there as well
+        await Page.GetByTestId("kitchen-reference-btn").ClickAsync();
+        var refDialog = Page.Locator("app-kitchen-reference-dialog");
+        await refDialog.GetByTestId("ref-tab-ratios").ClickAsync();
+        await Expect(refDialog.Locator(".active-timer-row.is-completed .timer-row-countdown"))
+            .ToHaveTextAsync(new Regex(@"^\+00:0[1-9]$"));
+    }
 }

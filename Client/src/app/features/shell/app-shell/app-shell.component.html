@@ -49,9 +49,16 @@
           <a
             mat-button
             class="active-timer-nav-pill"
+            [class.is-completed]="timer.state === 'completed'"
             [routerLink]="['/recipes', timer.recipeId, 'cook']"
             [attr.aria-label]="
-              'Return to cooking ' + timer.recipeTitle + ', ' + timerCountdown() + ' remaining'
+              timer.state === 'completed'
+                ? 'Return to cooking ' +
+                  timer.recipeTitle +
+                  ', completed ' +
+                  timerCountdown() +
+                  ' ago'
+                : 'Return to cooking ' + timer.recipeTitle + ', ' + timerCountdown() + ' remaining'
             "
           >
             <mat-icon class="timer-nav-icon">timer</mat-icon>
@@ -63,9 +70,12 @@
             type="button"
             mat-button
             class="active-timer-nav-pill"
+            [class.is-completed]="timer.state === 'completed'"
             (click)="openKitchenReference('ratios')"
             [attr.aria-label]="
-              'Open kitchen timer ' + timer.label + ', ' + timerCountdown() + ' remaining'
+              timer.state === 'completed'
+                ? 'Open kitchen timer ' + timer.label + ', completed ' + timerCountdown() + ' ago'
+                : 'Open kitchen timer ' + timer.label + ', ' + timerCountdown() + ' remaining'
             "
           >
             <mat-icon class="timer-nav-icon">timer</mat-icon>
