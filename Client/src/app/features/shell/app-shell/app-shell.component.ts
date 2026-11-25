@@ -19,11 +19,13 @@ import { APP_BRAND_MARK_SRC, APP_NAME } from '../../../app.branding';
 import { AccountService } from '../../../core/services/account/account.service';
 import { AuthService } from '../../../core/services/auth/auth.service';
 import { IngestionService } from '../../../core/services/ingestion/ingestion.service';
+import { KitchenReferenceService } from '../../../core/services/kitchen-reference/kitchen-reference.service';
 import { KitchenTimerService } from '../../../core/services/kitchen-timer/kitchen-timer.service';
 import { LlmSettingsService } from '../../../core/services/llm-settings/llm-settings.service';
 import { PwaService } from '../../../core/services/pwa/pwa.service';
 import { ThemeMode, ThemeService } from '../../../core/services/theme/theme.service';
 import { formatCountdown } from '../../../core/utils/culinary-math';
+import { KitchenReferenceTab } from '../../../core/utils/kitchen-reference-data';
 import { GlobalSearchDialogComponent } from '../global-search-dialog/global-search-dialog.component';
 
 const THEME_ICONS: Record<ThemeMode, string> = {
@@ -77,6 +79,7 @@ export class AppShellComponent implements OnInit {
   protected readonly llmSettingsService = inject(LlmSettingsService);
   protected readonly pwaService = inject(PwaService);
   protected readonly kitchenTimerService = inject(KitchenTimerService);
+  protected readonly kitchenReferenceService = inject(KitchenReferenceService);
   private readonly dialog = inject(MatDialog);
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
@@ -162,6 +165,10 @@ export class AppShellComponent implements OnInit {
       position: { top: 'min(8vh, 64px)' },
       panelClass: 'search-dialog-panel',
     });
+  }
+
+  openKitchenReference(tab?: KitchenReferenceTab): void {
+    this.kitchenReferenceService.openDialog(tab ? { tab } : undefined);
   }
 
   onLogout(): void {

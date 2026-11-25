@@ -7,6 +7,7 @@ import { APP_BRAND_MARK_SRC, APP_NAME } from '../../../app.branding';
 import { AccountService } from '../../../core/services/account/account.service';
 import { AuthService } from '../../../core/services/auth/auth.service';
 import { IngestionService } from '../../../core/services/ingestion/ingestion.service';
+import { KitchenReferenceService } from '../../../core/services/kitchen-reference/kitchen-reference.service';
 import {
   ActiveKitchenTimer,
   KitchenTimerService,
@@ -69,6 +70,10 @@ describe('AppShellComponent', () => {
     timers: mockTimers,
   };
 
+  const mockKitchenReferenceService = {
+    openDialog: vi.fn(),
+  };
+
   beforeEach(async () => {
     mockTimers.set([]);
     mockIsBackendUnreachable.set(false);
@@ -80,6 +85,7 @@ describe('AppShellComponent', () => {
     mockIngestionService.refreshSummary.mockClear();
     mockPwaService.promptInstall.mockClear();
     mockPwaService.applyUpdate.mockClear();
+    mockKitchenReferenceService.openDialog.mockClear();
     mockDialog = {
       open: vi.fn(),
       openDialogs: [],
@@ -96,6 +102,7 @@ describe('AppShellComponent', () => {
         { provide: LlmSettingsService, useValue: mockLlmSettingsService },
         { provide: PwaService, useValue: mockPwaService },
         { provide: KitchenTimerService, useValue: mockKitchenTimerService },
+        { provide: KitchenReferenceService, useValue: mockKitchenReferenceService },
         { provide: MatDialog, useValue: mockDialog },
       ],
     }).compileComponents();
@@ -241,5 +248,37 @@ describe('AppShellComponent', () => {
     ) as HTMLButtonElement | null;
     updateBtnAgain?.click();
     expect(mockPwaService.applyUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens Kitchen Reference from top bar button and opens Ratios tab for standalone utility timers', () => {
+    const refBtn = fixture.nativeElement.querySelector(
+      '[data-testid="kitchen-reference-btn"]',
+    ) as HTMLButtonElement;
+    expect(refBtn).toBeTruthy();
+    refBtn.click();
+    expect(mockKitchenReferenceService.openDialog).toHaveBeenCalledTimes(1);
+
+    mockTimers.set([
+      {
+        id: 'timer-util',
+        recipeId: '',
+        recipeTitle: 'Kitchen Utility',
+        stepNumber: null,
+        label: 'Soft Boiled Egg',
+        totalDurationSeconds: 360,
+        remainingSeconds: 300,
+        state: 'running',
+        endsAtMs: Date.now() + 300000,
+      },
+    ]);
+    fixture.detectChanges();
+
+    const pillBtn = fixture.nativeElement.querySelector(
+      'button.active-timer-nav-pill',
+    ) as HTMLButtonElement;
+    expect(pillBtn).toBeTruthy();
+    expect(pillBtn.textContent).toContain('05:00');
+    pillBtn.click();
+    expect(mockKitchenReferenceService.openDialog).toHaveBeenCalledWith({ tab: 'ratios' });
   });
 });

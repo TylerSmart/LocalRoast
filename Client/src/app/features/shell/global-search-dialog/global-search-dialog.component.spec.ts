@@ -4,6 +4,7 @@ import { Router } from '@angular/router';
 import { of } from 'rxjs';
 import { RecipeSummaryDto } from '../../../core/models/recipe.models';
 import { CollectionDto } from '../../../core/models/taxonomy.models';
+import { KitchenReferenceService } from '../../../core/services/kitchen-reference/kitchen-reference.service';
 import { RecipeService } from '../../../core/services/recipe/recipe.service';
 import { TaxonomyService } from '../../../core/services/taxonomy/taxonomy.service';
 import { GlobalSearchDialogComponent } from './global-search-dialog.component';
@@ -13,6 +14,7 @@ describe('GlobalSearchDialogComponent', () => {
   let fixture: ComponentFixture<GlobalSearchDialogComponent>;
   let mockDialogRef: { close: ReturnType<typeof vi.fn> };
   let mockRouter: { navigateByUrl: ReturnType<typeof vi.fn>; navigate: ReturnType<typeof vi.fn> };
+  let mockKitchenReferenceService: { openDialog: ReturnType<typeof vi.fn> };
 
   const mockCollections: CollectionDto[] = [
     {
@@ -63,6 +65,7 @@ describe('GlobalSearchDialogComponent', () => {
   beforeEach(async () => {
     mockDialogRef = { close: vi.fn() };
     mockRouter = { navigateByUrl: vi.fn(), navigate: vi.fn() };
+    mockKitchenReferenceService = { openDialog: vi.fn() };
 
     await TestBed.configureTestingModule({
       imports: [GlobalSearchDialogComponent],
@@ -71,6 +74,7 @@ describe('GlobalSearchDialogComponent', () => {
         { provide: Router, useValue: mockRouter },
         { provide: RecipeService, useValue: mockRecipeService },
         { provide: TaxonomyService, useValue: mockTaxonomyService },
+        { provide: KitchenReferenceService, useValue: mockKitchenReferenceService },
       ],
     }).compileComponents();
 
@@ -128,5 +132,22 @@ describe('GlobalSearchDialogComponent', () => {
     expect(component['searchControl'].value).toBe('');
     expect(component['searchQuery']()).toBe('');
     expect(component['activeIndex']()).toBe(0);
+  });
+
+  it('includes Kitchen Reference quick action and matching reference entries in search', () => {
+    const defaultResults = component['searchResults']();
+    expect(defaultResults.some((r) => r.id === 'action-kitchen-reference')).toBe(true);
+
+    component['searchQuery'].set('julienne');
+    const results = component['searchResults']();
+    const julienneHit = results.find((r) => r.type === 'reference' && r.title === 'Julienne');
+    expect(julienneHit).toBeDefined();
+
+    component.selectResult(julienneHit!);
+    expect(mockDialogRef.close).toHaveBeenCalled();
+    expect(mockKitchenReferenceService.openDialog).toHaveBeenCalledWith({
+      tab: 'glossary',
+      query: 'Julienne',
+    });
   });
 });

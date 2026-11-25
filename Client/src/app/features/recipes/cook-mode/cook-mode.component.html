@@ -111,6 +111,18 @@
           </button>
         }
 
+        <button
+          type="button"
+          class="kitchen-ref-pill-btn"
+          data-testid="cook-kitchen-reference-btn"
+          (click)="openKitchenReference()"
+          matTooltip="Kitchen Reference & Utilities (Ctrl+/)"
+          aria-label="Open kitchen reference and utilities"
+        >
+          <mat-icon class="ref-icon">import_contacts</mat-icon>
+          <span class="ref-label">Reference</span>
+        </button>
+
         @if (aiHelper.isAvailable()) {
           <button
             type="button"

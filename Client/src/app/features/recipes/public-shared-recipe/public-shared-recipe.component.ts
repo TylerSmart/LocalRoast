@@ -18,6 +18,7 @@ import {
   PublicSharedRecipeDto,
   PublicSubRecipeDto,
 } from '../../../core/models/share-link.models';
+import { KitchenReferenceService } from '../../../core/services/kitchen-reference/kitchen-reference.service';
 import { ShareLinkService } from '../../../core/services/share-link/share-link.service';
 import { ThemeService } from '../../../core/services/theme/theme.service';
 import {
@@ -87,6 +88,7 @@ export class PublicSharedRecipeComponent implements OnInit {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly shareLinkService = inject(ShareLinkService);
+  private readonly kitchenReferenceService = inject(KitchenReferenceService);
   protected readonly themeService = inject(ThemeService);
 
   protected readonly recipe = signal<PublicSharedRecipeDto | null>(null);
@@ -367,6 +369,10 @@ export class PublicSharedRecipeComponent implements OnInit {
   toggleTheme(): void {
     const current = this.themeService.isDark();
     this.themeService.setMode(current ? 'light' : 'dark');
+  }
+
+  openKitchenReference(): void {
+    this.kitchenReferenceService.openDialog();
   }
 
   openPhotoLightbox(url: string): void {

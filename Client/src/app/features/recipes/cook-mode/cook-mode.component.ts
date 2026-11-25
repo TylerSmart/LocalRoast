@@ -33,6 +33,7 @@ import {
   ActiveKitchenTimer,
   KitchenTimerService,
 } from '../../../core/services/kitchen-timer/kitchen-timer.service';
+import { KitchenReferenceService } from '../../../core/services/kitchen-reference/kitchen-reference.service';
 import { RecipeService } from '../../../core/services/recipe/recipe.service';
 import { WakeLockService } from '../../../core/services/wake-lock/wake-lock.service';
 import { SpeechNarrationService } from '../../../core/services/speech-narration/speech-narration.service';
@@ -122,6 +123,7 @@ export class CookModeComponent implements OnInit, OnDestroy {
   protected readonly speechNarrationService = inject(SpeechNarrationService);
   protected readonly voiceControlService = inject(VoiceControlService);
   protected readonly aiHelper = inject(AiKitchenHelperService);
+  private readonly kitchenReferenceService = inject(KitchenReferenceService);
   private readonly dialog = inject(MatDialog);
   private readonly title = inject(Title);
   private readonly destroyRef = inject(DestroyRef);
@@ -447,6 +449,10 @@ export class CookModeComponent implements OnInit, OnDestroy {
     ref.afterClosed().subscribe(() => {
       this.kitchenQuestionOpen = false;
     });
+  }
+
+  openKitchenReference(): void {
+    this.kitchenReferenceService.openDialog();
   }
 
   protected toggleStepChecked(stepId: string): void {

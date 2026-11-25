@@ -45,18 +45,34 @@
     <div class="top-actions">
       <!-- Active Kitchen Timer Nav Pill (Visible when timers exist) -->
       @if (activeTimer(); as timer) {
-        <a
-          mat-button
-          class="active-timer-nav-pill"
-          [routerLink]="['/recipes', timer.recipeId, 'cook']"
-          [attr.aria-label]="
-            'Return to cooking ' + timer.recipeTitle + ', ' + timerCountdown() + ' remaining'
-          "
-        >
-          <mat-icon class="timer-nav-icon">timer</mat-icon>
-          <span class="timer-nav-time">{{ timerCountdown() }}</span>
-          <span class="timer-nav-title">{{ timer.label }}</span>
-        </a>
+        @if (timer.recipeId) {
+          <a
+            mat-button
+            class="active-timer-nav-pill"
+            [routerLink]="['/recipes', timer.recipeId, 'cook']"
+            [attr.aria-label]="
+              'Return to cooking ' + timer.recipeTitle + ', ' + timerCountdown() + ' remaining'
+            "
+          >
+            <mat-icon class="timer-nav-icon">timer</mat-icon>
+            <span class="timer-nav-time">{{ timerCountdown() }}</span>
+            <span class="timer-nav-title">{{ timer.label }}</span>
+          </a>
+        } @else {
+          <button
+            type="button"
+            mat-button
+            class="active-timer-nav-pill"
+            (click)="openKitchenReference('ratios')"
+            [attr.aria-label]="
+              'Open kitchen timer ' + timer.label + ', ' + timerCountdown() + ' remaining'
+            "
+          >
+            <mat-icon class="timer-nav-icon">timer</mat-icon>
+            <span class="timer-nav-time">{{ timerCountdown() }}</span>
+            <span class="timer-nav-title">{{ timer.label }}</span>
+          </button>
+        }
       }
 
       <!-- Quick Search Trigger -->
@@ -80,6 +96,19 @@
         aria-label="Open quick search"
       >
         <mat-icon>search</mat-icon>
+      </button>
+
+      <!-- Kitchen Reference & Utilities Trigger -->
+      <button
+        type="button"
+        mat-icon-button
+        class="kitchen-reference-btn"
+        data-testid="kitchen-reference-btn"
+        (click)="openKitchenReference()"
+        aria-label="Open kitchen reference and utilities"
+        matTooltip="Kitchen Reference (Ctrl+/)"
+      >
+        <mat-icon>import_contacts</mat-icon>
       </button>
 
       <!-- Theme Switcher -->

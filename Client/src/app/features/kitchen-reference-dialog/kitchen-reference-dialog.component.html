@@ -1,0 +1,1017 @@
+<div class="kitchen-reference-dialog-container">
+  <!-- Dialog Header -->
+  <div class="ref-dialog-header" mat-dialog-title>
+    <div class="header-title-group">
+      <div class="header-icon-badge" aria-hidden="true">
+        <mat-icon>import_contacts</mat-icon>
+      </div>
+      <div class="header-titles">
+        <h2 class="dialog-title">Kitchen Reference &amp; Utilities</h2>
+        <p class="dialog-subtitle">
+          Unit &amp; pan conversions, safe temps, culinary terms, swaps &amp; timers.
+        </p>
+      </div>
+    </div>
+    <button
+      mat-icon-button
+      type="button"
+      aria-label="Close kitchen reference"
+      (click)="close()"
+      data-testid="close-kitchen-reference-btn"
+    >
+      <mat-icon>close</mat-icon>
+    </button>
+  </div>
+
+  <!-- Scrollable Content Area -->
+  <mat-dialog-content class="ref-dialog-content">
+    <!-- Unified Search Bar -->
+    <div class="ref-search-bar">
+      <mat-icon class="search-leading-icon" aria-hidden="true">search</mat-icon>
+      <input
+        type="text"
+        class="ref-search-input"
+        [ngModel]="searchQuery()"
+        (ngModelChange)="onSearchInput($event)"
+        placeholder="Search julienne, blanch, poultry, buttermilk, rice..."
+        aria-label="Search kitchen reference"
+        data-testid="kitchen-reference-search-input"
+      />
+      @if (hasSearchQuery()) {
+        <button
+          mat-icon-button
+          type="button"
+          class="clear-search-btn"
+          aria-label="Clear reference search"
+          (click)="clearSearch()"
+        >
+          <mat-icon>close</mat-icon>
+        </button>
+      }
+    </div>
+
+    @if (hasSearchQuery()) {
+      <!-- Cross-Category Search Results -->
+      <div class="search-results-section" data-testid="kitchen-reference-search-results">
+        <div class="search-summary-bar">
+          <span class="summary-count">
+            {{ searchResults().totalCount }}
+            {{ searchResults().totalCount === 1 ? 'match' : 'matches' }} for "{{
+              searchResults().query
+            }}"
+          </span>
+          <div class="summary-quick-links">
+            <button
+              type="button"
+              mat-stroked-button
+              class="mini-calc-btn"
+              (click)="jumpToCalculator('volume-weight')"
+            >
+              <mat-icon>calculate</mat-icon>
+              <span>Unit Converter</span>
+            </button>
+          </div>
+        </div>
+
+        @if (searchResults().totalCount === 0) {
+          <div class="empty-search-state">
+            <mat-icon aria-hidden="true">search_off</mat-icon>
+            <p class="empty-title">No reference entries matched "{{ searchResults().query }}"</p>
+            <p class="empty-hint">
+              Try searching for a knife cut (julienne, brunoise), cooking method (blanch, braise),
+              protein temp, or swap (buttermilk, kosher salt).
+            </p>
+          </div>
+        } @else {
+          @if (searchResults().glossary.length > 0) {
+            <section class="search-group">
+              <h3 class="search-group-heading">
+                <mat-icon>import_contacts</mat-icon>
+                <span>Culinary Glossary</span>
+              </h3>
+              <div class="cards-stack">
+                @for (entry of searchResults().glossary; track entry.id) {
+                  <article class="ref-card glossary-card">
+                    <div class="card-top-row">
+                      <div class="term-heading">
+                        <strong class="term-title">{{ entry.term }}</strong>
+                        @if (entry.pronunciation) {
+                          <span class="pronunciation">({{ entry.pronunciation }})</span>
+                        }
+                      </div>
+                      <span class="category-pill">{{ entry.category }}</span>
+                    </div>
+                    @if (entry.specBadge) {
+                      <div class="spec-badge">{{ entry.specBadge }}</div>
+                    }
+                    <p class="card-body">{{ entry.definition }}</p>
+                    @if (entry.chefTip) {
+                      <p class="chef-tip"><strong>Chef tip:</strong> {{ entry.chefTip }}</p>
+                    }
+                  </article>
+                }
+              </div>
+            </section>
+          }
+
+          @if (searchResults().temperatures.length > 0) {
+            <section class="search-group">
+              <h3 class="search-group-heading">
+                <mat-icon>thermostat</mat-icon>
+                <span>Temperatures &amp; Smoke Points</span>
+              </h3>
+              <div class="cards-stack">
+                @for (temp of searchResults().temperatures; track temp.id) {
+                  <article class="ref-card temp-card">
+                    <div class="temp-main-row">
+                      <div class="temp-info">
+                        <strong class="temp-item">{{ temp.item }}</strong>
+                        <span class="temp-stage">{{ temp.donenessOrStage }}</span>
+                      </div>
+                      <div class="temp-badge-group">
+                        <span class="temp-pill-f">{{
+                          formatTempRangeF(temp.tempF, temp.maxTempF)
+                        }}</span>
+                        <span class="temp-pill-c">{{
+                          formatTempRangeC(temp.tempF, temp.maxTempF)
+                        }}</span>
+                      </div>
+                    </div>
+                    @if (temp.usdaSafeF && temp.usdaSafeF > temp.tempF) {
+                      <div class="usda-note">
+                        USDA instant-safe minimum: {{ temp.usdaSafeF }}°F ({{
+                          fahrenheitToCelsius(temp.usdaSafeF) | number: '1.0-0'
+                        }}°C)
+                      </div>
+                    }
+                    @if (temp.restNote) {
+                      <div class="rest-note">{{ temp.restNote }}</div>
+                    }
+                    <p class="card-body">{{ temp.cueNote }}</p>
+                  </article>
+                }
+              </div>
+            </section>
+          }
+
+          @if (searchResults().substitutions.length > 0) {
+            <section class="search-group">
+              <h3 class="search-group-heading">
+                <mat-icon>swap_horiz</mat-icon>
+                <span>Pantry Substitutions</span>
+              </h3>
+              <div class="cards-stack">
+                @for (sub of searchResults().substitutions; track sub.id) {
+                  <article class="ref-card swap-card">
+                    <div class="card-top-row">
+                      <strong class="term-title">{{ sub.ingredient }}</strong>
+                      <span class="spec-badge">{{ sub.baseAmount }}</span>
+                    </div>
+                    <div class="swap-formula">
+                      <mat-icon aria-hidden="true">arrow_forward</mat-icon>
+                      <span>{{ sub.replacement }}</span>
+                    </div>
+                    <p class="card-body">{{ sub.notes }}</p>
+                  </article>
+                }
+              </div>
+            </section>
+          }
+
+          @if (searchResults().timings.length > 0 || searchResults().ratios.length > 0) {
+            <section class="search-group">
+              <h3 class="search-group-heading">
+                <mat-icon>timer</mat-icon>
+                <span>Ratios &amp; Cooking Timings</span>
+              </h3>
+              <div class="cards-stack">
+                @for (item of searchResults().timings; track item.id) {
+                  <article class="ref-card timing-card">
+                    <div class="timing-row">
+                      <div class="timing-info">
+                        <strong class="term-title">{{ item.item }}</strong>
+                        <div class="timing-badges">
+                          <span class="spec-badge">{{ item.ratioDisplay }}</span>
+                          <span class="category-pill">{{ item.cookTimeLabel }}</span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        mat-stroked-button
+                        class="start-preset-timer-btn"
+                        (click)="startTimingPreset(item.item, item.timerSeconds)"
+                      >
+                        <mat-icon>timer</mat-icon>
+                        <span>Start {{ item.cookTimeLabel }}</span>
+                      </button>
+                    </div>
+                    <p class="card-body">{{ item.methodNote }}</p>
+                  </article>
+                }
+                @for (ratio of searchResults().ratios; track ratio.id) {
+                  <article class="ref-card ratio-card">
+                    <div class="card-top-row">
+                      <strong class="term-title">{{ ratio.name }}</strong>
+                      <span class="spec-badge">{{ ratio.ratio }}</span>
+                    </div>
+                    <p class="card-sub">{{ ratio.basis }}</p>
+                    <p class="card-body"><strong>Example:</strong> {{ ratio.example }}</p>
+                    <p class="chef-tip">{{ ratio.note }}</p>
+                  </article>
+                }
+              </div>
+            </section>
+          }
+
+          @if (searchResults().equivalents.length > 0) {
+            <section class="search-group">
+              <h3 class="search-group-heading">
+                <mat-icon>straighten</mat-icon>
+                <span>Quick Equivalents</span>
+              </h3>
+              <div class="equivalents-grid">
+                @for (eq of searchResults().equivalents; track eq.id) {
+                  <div class="eq-chip-card">
+                    <span class="eq-title">{{ eq.title }}</span>
+                    <strong class="eq-formula">{{ eq.formula }}</strong>
+                    <span class="eq-detail">{{ eq.detail }}</span>
+                  </div>
+                }
+              </div>
+            </section>
+          }
+        }
+      </div>
+    } @else {
+      <!-- 5-Section Switcher -->
+      <div class="ref-tabs-bar" role="tablist" aria-label="Kitchen reference sections">
+        @for (tab of tabs; track tab.id) {
+          <button
+            type="button"
+            class="ref-tab-btn"
+            role="tab"
+            [class.active]="activeTab() === tab.id"
+            [attr.aria-selected]="activeTab() === tab.id"
+            [attr.data-testid]="'ref-tab-' + tab.id"
+            (click)="selectTab(tab.id)"
+          >
+            <mat-icon aria-hidden="true">{{ tab.icon }}</mat-icon>
+            <span>{{ tab.label }}</span>
+          </button>
+        }
+      </div>
+
+      <!-- TAB 1: CONVERTERS -->
+      @if (activeTab() === 'convert') {
+        <div class="tab-panel" role="tabpanel" aria-label="Calculators and conversions">
+          <div class="submode-pills" role="group" aria-label="Converter mode">
+            @for (mode of converterSubModes; track mode.id) {
+              <button
+                type="button"
+                class="filter-pill"
+                [class.active]="converterSubMode() === mode.id"
+                [attr.data-testid]="'submode-' + mode.id"
+                (click)="converterSubMode.set(mode.id)"
+              >
+                <mat-icon aria-hidden="true">{{ mode.icon }}</mat-icon>
+                <span>{{ mode.label }}</span>
+              </button>
+            }
+          </div>
+
+          @switch (converterSubMode()) {
+            @case ('volume-weight') {
+              <div class="calculator-card">
+                <div class="preset-chips-row">
+                  <span class="preset-label">Quick amount:</span>
+                  @for (preset of amountPresets; track preset.label) {
+                    <button
+                      type="button"
+                      class="mini-preset-chip"
+                      [class.active]="amount() === preset.value"
+                      (click)="setAmountPreset(preset.value)"
+                    >
+                      {{ preset.label }}
+                    </button>
+                  }
+                </div>
+
+                <div class="converter-grid">
+                  <mat-form-field appearance="outline" class="amount-field">
+                    <mat-label>Amount</mat-label>
+                    <input
+                      matInput
+                      type="number"
+                      min="0"
+                      step="any"
+                      [ngModel]="amount()"
+                      (ngModelChange)="onAmountChange($event)"
+                      data-testid="converter-amount-input"
+                    />
+                  </mat-form-field>
+
+                  <mat-form-field appearance="outline" class="unit-field">
+                    <mat-label>From unit</mat-label>
+                    <mat-select
+                      [ngModel]="fromUnit()"
+                      (ngModelChange)="fromUnit.set($event)"
+                      data-testid="converter-from-unit"
+                    >
+                      @for (u of converterUnits; track u.value) {
+                        <mat-option [value]="u.value">{{ u.label }}</mat-option>
+                      }
+                    </mat-select>
+                  </mat-form-field>
+
+                  <button
+                    type="button"
+                    mat-icon-button
+                    class="swap-units-btn"
+                    (click)="swapUnits()"
+                    aria-label="Swap units"
+                    matTooltip="Swap From and To units"
+                  >
+                    <mat-icon>swap_horiz</mat-icon>
+                  </button>
+
+                  <mat-form-field appearance="outline" class="unit-field">
+                    <mat-label>To unit</mat-label>
+                    <mat-select
+                      [ngModel]="toUnit()"
+                      (ngModelChange)="toUnit.set($event)"
+                      data-testid="converter-to-unit"
+                    >
+                      @for (u of converterUnits; track u.value) {
+                        <mat-option [value]="u.value">{{ u.label }}</mat-option>
+                      }
+                    </mat-select>
+                  </mat-form-field>
+                </div>
+
+                <mat-form-field appearance="outline" class="density-field">
+                  <mat-label>Ingredient density (for Volume ↔ Weight)</mat-label>
+                  <mat-select
+                    [ngModel]="selectedIngredientId()"
+                    (ngModelChange)="selectedIngredientId.set($event)"
+                    data-testid="converter-ingredient-select"
+                  >
+                    <mat-option value="none">Standard (Water / Milk / Broth)</mat-option>
+                    @for (ing of ingredientDensities; track ing.id) {
+                      <mat-option [value]="ing.id"
+                        >{{ ing.label }} ({{ ing.gramsPerCup }} g/cup)</mat-option
+                      >
+                    }
+                  </mat-select>
+                </mat-form-field>
+
+                <!-- Result Banner -->
+                <div class="conversion-result-banner" data-testid="conversion-result-banner">
+                  <div class="result-main">
+                    <span class="result-eyebrow">Converted Result</span>
+                    <strong class="result-value" data-testid="conversion-result-value">
+                      {{ conversionResult().formattedWithUnit }}
+                    </strong>
+                    @if (conversionResult().practicalUsVolume; as scoopHint) {
+                      <span class="result-hint">Measuring spoons/cups: {{ scoopHint }}</span>
+                    }
+                    @if (conversionResult().butterSticksNote; as stickHint) {
+                      <span class="result-hint">{{ stickHint }}</span>
+                    }
+                    @if (conversionResult().usedDensityBridge) {
+                      <span class="result-density-note">
+                        @if (conversionResult().usedDefaultWaterDensity) {
+                          Using water/milk density — pick an ingredient above for flour, sugar,
+                          butter, or salt.
+                        } @else {
+                          Density: {{ conversionResult().ingredientLabel }}
+                          @if (conversionResult().ingredientNote) {
+                            · {{ conversionResult().ingredientNote }}
+                          }
+                        }
+                      </span>
+                    }
+                  </div>
+                  <button
+                    type="button"
+                    mat-stroked-button
+                    class="copy-result-btn"
+                    (click)="copyConversionResult()"
+                    aria-label="Copy converted result"
+                  >
+                    <mat-icon>{{ copiedConversion() ? 'check' : 'content_copy' }}</mat-icon>
+                    <span>{{ copiedConversion() ? 'Copied' : 'Copy' }}</span>
+                  </button>
+                </div>
+
+                <!-- Multi-Unit Equivalents Table -->
+                <div class="multi-equiv-section">
+                  <h3 class="subsection-heading">All Equivalents</h3>
+                  <div class="multi-equiv-grid">
+                    @for (eq of conversionResult().equivalents; track eq.unit) {
+                      <div class="equiv-pill" [class.is-target]="eq.unit === toUnit()">
+                        <span class="equiv-val">{{ eq.formatted }}</span>
+                      </div>
+                    }
+                  </div>
+                </div>
+              </div>
+
+              <!-- Quick Equivalents Cheat Sheet -->
+              <div class="subsection-block">
+                <h3 class="subsection-heading">Kitchen Measurement Cheat Sheet</h3>
+                <div class="equivalents-grid">
+                  @for (eq of quickEquivalents; track eq.id) {
+                    <div class="eq-chip-card">
+                      <span class="eq-title">{{ eq.title }}</span>
+                      <strong class="eq-formula">{{ eq.formula }}</strong>
+                      <span class="eq-detail">{{ eq.detail }}</span>
+                    </div>
+                  }
+                </div>
+              </div>
+            }
+
+            @case ('temperature') {
+              <div class="calculator-card">
+                <div class="preset-chips-row">
+                  <span class="preset-label">Oven presets:</span>
+                  @for (f of ovenTempPresetsF; track f) {
+                    <button
+                      type="button"
+                      class="mini-preset-chip"
+                      [class.active]="tempFahrenheit() === f"
+                      (click)="onFahrenheitChange(f)"
+                    >
+                      {{ f }}°F
+                    </button>
+                  }
+                </div>
+
+                <div class="temp-converter-grid">
+                  <mat-form-field appearance="outline">
+                    <mat-label>Fahrenheit (°F)</mat-label>
+                    <input
+                      matInput
+                      type="number"
+                      step="any"
+                      [ngModel]="tempFahrenheit()"
+                      (ngModelChange)="onFahrenheitChange($event)"
+                      data-testid="temp-fahrenheit-input"
+                    />
+                  </mat-form-field>
+
+                  <mat-form-field appearance="outline">
+                    <mat-label>Celsius (°C)</mat-label>
+                    <input
+                      matInput
+                      type="number"
+                      step="any"
+                      [ngModel]="tempCelsius()"
+                      (ngModelChange)="onCelsiusChange($event)"
+                      data-testid="temp-celsius-input"
+                    />
+                  </mat-form-field>
+                </div>
+
+                <div class="conversion-result-banner">
+                  <div class="result-main">
+                    <span class="result-eyebrow">Oven &amp; Convection Guide</span>
+                    <strong class="result-value">
+                      {{ ovenTempInfo().heatLabel }}
+                      @if (ovenTempInfo().gasMark) {
+                        · {{ ovenTempInfo().gasMark }}
+                      }
+                    </strong>
+                    <span class="result-hint">
+                      Convection / Fan Oven (-25°F):
+                      <strong>{{ ovenTempInfo().convectionF }}°F</strong> ({{
+                        ovenTempInfo().convectionC
+                      }}°C)
+                    </span>
+                  </div>
+                </div>
+              </div>
+            }
+
+            @case ('dimensions') {
+              <div class="calculator-card">
+                <div class="temp-converter-grid">
+                  <mat-form-field appearance="outline">
+                    <mat-label>Length / Pan Size</mat-label>
+                    <input
+                      matInput
+                      type="number"
+                      min="0"
+                      step="any"
+                      [ngModel]="dimensionAmount()"
+                      (ngModelChange)="onDimensionAmountChange($event)"
+                      data-testid="dimension-amount-input"
+                    />
+                  </mat-form-field>
+
+                  <mat-form-field appearance="outline">
+                    <mat-label>Unit</mat-label>
+                    <mat-select
+                      [ngModel]="dimensionUnit()"
+                      (ngModelChange)="dimensionUnit.set($event)"
+                    >
+                      @for (opt of dimensionUnitOptions; track opt.value) {
+                        <mat-option [value]="opt.value">{{ opt.label }}</mat-option>
+                      }
+                    </mat-select>
+                  </mat-form-field>
+                </div>
+
+                <div class="multi-equiv-grid">
+                  @for (dim of dimensionEquivalents(); track dim.unit) {
+                    <div class="equiv-pill" [class.is-target]="dim.unit === dimensionUnit()">
+                      <span class="equiv-val">{{ dim.formatted }}</span>
+                    </div>
+                  }
+                </div>
+              </div>
+            }
+
+            @case ('baking-pans') {
+              <div class="calculator-card">
+                <div class="pan-converter-grid">
+                  <mat-form-field appearance="outline" class="pan-field">
+                    <mat-label>Recipe calls for pan</mat-label>
+                    <mat-select
+                      [ngModel]="fromPanId()"
+                      (ngModelChange)="fromPanId.set($event)"
+                      data-testid="from-pan-select"
+                    >
+                      @for (pan of bakingPans; track pan.id) {
+                        <mat-option [value]="pan.id"
+                          >{{ pan.label }} ({{ pan.volumeCups }} cups)</mat-option
+                        >
+                      }
+                    </mat-select>
+                  </mat-form-field>
+
+                  <button
+                    type="button"
+                    mat-icon-button
+                    class="swap-units-btn"
+                    (click)="swapPans()"
+                    aria-label="Swap baking pans"
+                    matTooltip="Swap recipe and target pans"
+                  >
+                    <mat-icon>swap_horiz</mat-icon>
+                  </button>
+
+                  <mat-form-field appearance="outline" class="pan-field">
+                    <mat-label>You are using pan</mat-label>
+                    <mat-select
+                      [ngModel]="toPanId()"
+                      (ngModelChange)="toPanId.set($event)"
+                      data-testid="to-pan-select"
+                    >
+                      @for (pan of bakingPans; track pan.id) {
+                        <mat-option [value]="pan.id"
+                          >{{ pan.label }} ({{ pan.volumeCups }} cups)</mat-option
+                        >
+                      }
+                    </mat-select>
+                  </mat-form-field>
+                </div>
+
+                <div class="conversion-result-banner" data-testid="pan-scaling-banner">
+                  <div class="result-main">
+                    <span class="result-eyebrow">Recommended Recipe Multiplier</span>
+                    <strong class="result-value" data-testid="pan-scaling-multiplier">
+                      {{ panScalingResult().recommendedMultiplier }}x
+                    </strong>
+                    <span class="result-hint">
+                      Area: {{ panScalingResult().areaMultiplier }}x ({{
+                        panScalingResult().fromPan.areaSqIn
+                      }}
+                      → {{ panScalingResult().toPan.areaSqIn }} sq in) · Volume:
+                      {{ panScalingResult().volumeMultiplier }}x ({{
+                        panScalingResult().fromPan.volumeCups
+                      }}
+                      → {{ panScalingResult().toPan.volumeCups }} cups)
+                    </span>
+                    <span class="result-density-note">{{ panScalingResult().advice }}</span>
+                  </div>
+                </div>
+              </div>
+            }
+          }
+        </div>
+      }
+
+      <!-- TAB 2: FOOD SAFE TEMPERATURES -->
+      @if (activeTab() === 'temps') {
+        <div class="tab-panel" role="tabpanel" aria-label="Food safe temperatures">
+          <div class="danger-zone-callout">
+            <mat-icon aria-hidden="true">warning_amber</mat-icon>
+            <div>
+              <strong>Food Danger Zone: 40°F–140°F (4°C–60°C)</strong>
+              <span>
+                Refrigerate perishables within 2 hours (1 hour above 90°F / 32°C). Insert
+                instant-read probe into the thickest center away from bone.
+              </span>
+            </div>
+          </div>
+
+          <div class="filter-pills-row" role="group" aria-label="Filter temperatures by category">
+            <button
+              type="button"
+              class="filter-pill"
+              [class.active]="selectedTempCategory() === 'All'"
+              (click)="selectedTempCategory.set('All')"
+            >
+              All
+            </button>
+            @for (cat of temperatureCategories; track cat) {
+              <button
+                type="button"
+                class="filter-pill"
+                [class.active]="selectedTempCategory() === cat"
+                (click)="selectedTempCategory.set(cat)"
+              >
+                {{ cat }}
+              </button>
+            }
+          </div>
+
+          <div class="cards-stack">
+            @for (temp of filteredTemperatures(); track temp.id) {
+              <article class="ref-card temp-card" data-testid="temp-reference-card">
+                <div class="temp-main-row">
+                  <div class="temp-info">
+                    <strong class="temp-item">{{ temp.item }}</strong>
+                    <span class="temp-stage">{{ temp.donenessOrStage }}</span>
+                  </div>
+                  <div class="temp-badge-group">
+                    <span class="temp-pill-f">{{
+                      formatTempRangeF(temp.tempF, temp.maxTempF)
+                    }}</span>
+                    <span class="temp-pill-c">{{
+                      formatTempRangeC(temp.tempF, temp.maxTempF)
+                    }}</span>
+                  </div>
+                </div>
+                @if (temp.usdaSafeF && temp.usdaSafeF > temp.tempF) {
+                  <div class="usda-note">
+                    USDA instant-safe minimum: {{ temp.usdaSafeF }}°F ({{
+                      fahrenheitToCelsius(temp.usdaSafeF) | number: '1.0-0'
+                    }}°C)
+                  </div>
+                }
+                @if (temp.restNote) {
+                  <div class="rest-note">{{ temp.restNote }}</div>
+                }
+                <p class="card-body">{{ temp.cueNote }}</p>
+              </article>
+            }
+          </div>
+        </div>
+      }
+
+      <!-- TAB 3: CULINARY GLOSSARY -->
+      @if (activeTab() === 'glossary') {
+        <div class="tab-panel" role="tabpanel" aria-label="Culinary glossary">
+          <div class="filter-pills-row" role="group" aria-label="Filter glossary by category">
+            <button
+              type="button"
+              class="filter-pill"
+              [class.active]="selectedGlossaryCategory() === 'All'"
+              (click)="selectedGlossaryCategory.set('All')"
+            >
+              All
+            </button>
+            @for (cat of glossaryCategories; track cat) {
+              <button
+                type="button"
+                class="filter-pill"
+                [class.active]="selectedGlossaryCategory() === cat"
+                (click)="selectedGlossaryCategory.set(cat)"
+              >
+                {{ cat }}
+              </button>
+            }
+          </div>
+
+          <div class="cards-stack">
+            @for (entry of sortedFilteredGlossary(); track entry.id) {
+              <article class="ref-card glossary-card" data-testid="glossary-reference-card">
+                <div class="card-top-row">
+                  <div class="term-heading">
+                    <strong class="term-title">{{ entry.term }}</strong>
+                    @if (entry.pronunciation) {
+                      <span class="pronunciation">({{ entry.pronunciation }})</span>
+                    }
+                  </div>
+                  <span class="category-pill">{{ entry.category }}</span>
+                </div>
+                @if (entry.specBadge) {
+                  <div class="spec-badge">{{ entry.specBadge }}</div>
+                }
+                <p class="card-body">{{ entry.definition }}</p>
+                @if (entry.chefTip) {
+                  <p class="chef-tip"><strong>Chef tip:</strong> {{ entry.chefTip }}</p>
+                }
+              </article>
+            }
+          </div>
+        </div>
+      }
+
+      <!-- TAB 4: EMERGENCY SUBSTITUTIONS -->
+      @if (activeTab() === 'swaps') {
+        <div class="tab-panel" role="tabpanel" aria-label="Emergency pantry substitutions">
+          <div class="filter-pills-row" role="group" aria-label="Filter substitutions by category">
+            <button
+              type="button"
+              class="filter-pill"
+              [class.active]="selectedSwapCategory() === 'All'"
+              (click)="selectedSwapCategory.set('All')"
+            >
+              All
+            </button>
+            @for (cat of substitutionCategories; track cat) {
+              <button
+                type="button"
+                class="filter-pill"
+                [class.active]="selectedSwapCategory() === cat"
+                (click)="selectedSwapCategory.set(cat)"
+              >
+                {{ cat }}
+              </button>
+            }
+          </div>
+
+          <div class="cards-stack">
+            @for (sub of filteredSubstitutions(); track sub.id) {
+              <article class="ref-card swap-card" data-testid="swap-reference-card">
+                <div class="card-top-row">
+                  <strong class="term-title">{{ sub.ingredient }}</strong>
+                  <span class="spec-badge">{{ sub.baseAmount }}</span>
+                </div>
+                <div class="swap-formula">
+                  <mat-icon aria-hidden="true">arrow_forward</mat-icon>
+                  <span>{{ sub.replacement }}</span>
+                </div>
+                <p class="card-body">{{ sub.notes }}</p>
+              </article>
+            }
+          </div>
+        </div>
+      }
+
+      <!-- TAB 5: RATIOS & QUICK TIMERS -->
+      @if (activeTab() === 'ratios') {
+        <div class="tab-panel" role="tabpanel" aria-label="Ratios and quick kitchen timers">
+          <!-- Standalone Quick Kitchen Timer -->
+          <div class="calculator-card quick-timer-card">
+            <div class="quick-timer-header">
+              <div class="quick-timer-title">
+                <mat-icon aria-hidden="true">alarm_add</mat-icon>
+                <span>Quick Kitchen Timer</span>
+              </div>
+              <span class="quick-timer-sub">Runs in the top bar anywhere in the app</span>
+            </div>
+
+            <div class="preset-chips-row">
+              @for (mins of timerQuickPresets; track mins) {
+                <button
+                  type="button"
+                  class="mini-preset-chip"
+                  (click)="startQuickTimer(mins)"
+                  [attr.data-testid]="'quick-timer-preset-' + mins"
+                >
+                  + {{ mins }}m
+                </button>
+              }
+            </div>
+
+            <div class="quick-timer-form">
+              <mat-form-field appearance="outline" class="timer-label-field">
+                <mat-label>Timer label</mat-label>
+                <input
+                  matInput
+                  type="text"
+                  [ngModel]="quickTimerLabel()"
+                  (ngModelChange)="quickTimerLabel.set($event)"
+                  data-testid="quick-timer-label-input"
+                />
+              </mat-form-field>
+
+              <mat-form-field appearance="outline" class="timer-mins-field">
+                <mat-label>Minutes</mat-label>
+                <input
+                  matInput
+                  type="number"
+                  min="1"
+                  max="720"
+                  [ngModel]="quickTimerMinutes()"
+                  (ngModelChange)="quickTimerMinutes.set($event)"
+                  data-testid="quick-timer-mins-input"
+                />
+              </mat-form-field>
+
+              <button
+                type="button"
+                mat-flat-button
+                color="primary"
+                class="start-quick-timer-btn"
+                (click)="startQuickTimer()"
+                data-testid="start-quick-timer-btn"
+              >
+                <mat-icon>play_arrow</mat-icon>
+                <span>Start Timer</span>
+              </button>
+            </div>
+
+            @if (kitchenTimerService.timers().length > 0) {
+              <div class="active-timers-list" data-testid="reference-active-timers">
+                @for (t of kitchenTimerService.timers(); track t.id) {
+                  <div
+                    class="active-timer-row"
+                    [class.is-completed]="t.state === 'completed'"
+                    [class.is-paused]="t.state === 'paused'"
+                  >
+                    <div class="timer-row-info">
+                      <span class="timer-row-countdown">{{
+                        formatCountdown(t.remainingSeconds)
+                      }}</span>
+                      <span class="timer-row-label">{{ t.label }}</span>
+                    </div>
+                    <div class="timer-row-actions">
+                      <button
+                        type="button"
+                        mat-button
+                        class="timer-bump-btn"
+                        (click)="kitchenTimerService.addSeconds(t.id, 60)"
+                        aria-label="Add 1 minute"
+                      >
+                        +1m
+                      </button>
+                      @if (t.state === 'running') {
+                        <button
+                          type="button"
+                          mat-icon-button
+                          (click)="kitchenTimerService.pauseTimer(t.id)"
+                          aria-label="Pause timer"
+                        >
+                          <mat-icon>pause</mat-icon>
+                        </button>
+                      } @else if (t.state === 'paused') {
+                        <button
+                          type="button"
+                          mat-icon-button
+                          (click)="kitchenTimerService.resumeTimer(t.id)"
+                          aria-label="Resume timer"
+                        >
+                          <mat-icon>play_arrow</mat-icon>
+                        </button>
+                      }
+                      <button
+                        type="button"
+                        mat-icon-button
+                        (click)="kitchenTimerService.restartTimer(t.id)"
+                        aria-label="Restart timer"
+                      >
+                        <mat-icon>restart_alt</mat-icon>
+                      </button>
+                      <button
+                        type="button"
+                        mat-icon-button
+                        (click)="kitchenTimerService.cancelTimer(t.id)"
+                        aria-label="Cancel timer"
+                      >
+                        <mat-icon>close</mat-icon>
+                      </button>
+                    </div>
+                  </div>
+                }
+              </div>
+            }
+          </div>
+
+          <!-- Egg Boiling Timings -->
+          <div class="subsection-block">
+            <h3 class="subsection-heading">Egg Boiling Times (Large Fridge-Cold Eggs)</h3>
+            <div class="cards-stack">
+              @for (item of eggTimings; track item.id) {
+                <article class="ref-card timing-card">
+                  <div class="timing-row">
+                    <div class="timing-info">
+                      <strong class="term-title">{{ item.item }}</strong>
+                      <div class="timing-badges">
+                        <span class="spec-badge">{{ item.cookTimeLabel }}</span>
+                        <span class="category-pill">{{ item.ratioDisplay }}</span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      mat-stroked-button
+                      class="start-preset-timer-btn"
+                      (click)="startTimingPreset(item.item, item.timerSeconds)"
+                    >
+                      <mat-icon>timer</mat-icon>
+                      <span>Start {{ item.cookTimeLabel }}</span>
+                    </button>
+                  </div>
+                  <p class="card-body">{{ item.methodNote }}</p>
+                </article>
+              }
+            </div>
+          </div>
+
+          <!-- Rice & Grains -->
+          <div class="subsection-block">
+            <h3 class="subsection-heading">Rice &amp; Stovetop Grains</h3>
+            <div class="cards-stack">
+              @for (item of grainTimings; track item.id) {
+                <article class="ref-card timing-card">
+                  <div class="timing-row">
+                    <div class="timing-info">
+                      <strong class="term-title">{{ item.item }}</strong>
+                      <div class="timing-badges">
+                        <span class="spec-badge">{{ item.ratioDisplay }}</span>
+                        <span class="category-pill">{{ item.cookTimeLabel }}</span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      mat-stroked-button
+                      class="start-preset-timer-btn"
+                      (click)="startTimingPreset(item.item, item.timerSeconds)"
+                    >
+                      <mat-icon>timer</mat-icon>
+                      <span>Start {{ item.cookTimeLabel }}</span>
+                    </button>
+                  </div>
+                  <p class="card-body">{{ item.methodNote }}</p>
+                </article>
+              }
+            </div>
+          </div>
+
+          <!-- Oats & Legumes -->
+          <div class="subsection-block">
+            <h3 class="subsection-heading">Oats &amp; Lentils</h3>
+            <div class="cards-stack">
+              @for (item of legumeTimings; track item.id) {
+                <article class="ref-card timing-card">
+                  <div class="timing-row">
+                    <div class="timing-info">
+                      <strong class="term-title">{{ item.item }}</strong>
+                      <div class="timing-badges">
+                        <span class="spec-badge">{{ item.ratioDisplay }}</span>
+                        <span class="category-pill">{{ item.cookTimeLabel }}</span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      mat-stroked-button
+                      class="start-preset-timer-btn"
+                      (click)="startTimingPreset(item.item, item.timerSeconds)"
+                    >
+                      <mat-icon>timer</mat-icon>
+                      <span>Start {{ item.cookTimeLabel }}</span>
+                    </button>
+                  </div>
+                  <p class="card-body">{{ item.methodNote }}</p>
+                </article>
+              }
+            </div>
+          </div>
+
+          <!-- Classic Culinary Ratios -->
+          <div class="subsection-block">
+            <h3 class="subsection-heading">Classic Culinary Ratios</h3>
+            <div class="cards-stack">
+              @for (ratio of classicRatios; track ratio.id) {
+                <article class="ref-card ratio-card">
+                  <div class="card-top-row">
+                    <strong class="term-title">{{ ratio.name }}</strong>
+                    <span class="spec-badge">{{ ratio.ratio }}</span>
+                  </div>
+                  <p class="card-sub">{{ ratio.basis }}</p>
+                  <p class="card-body"><strong>Example:</strong> {{ ratio.example }}</p>
+                  <p class="chef-tip">{{ ratio.note }}</p>
+                </article>
+              }
+            </div>
+          </div>
+        </div>
+      }
+    }
+  </mat-dialog-content>
+
+  <!-- Dialog Footer -->
+  <mat-dialog-actions class="ref-dialog-actions" align="end">
+    <div class="shortcut-footer-hint">
+      <span>Shortcut:</span>
+      <kbd>Ctrl+/</kbd>
+      <span>or</span>
+      <kbd>?</kbd>
+    </div>
+    <button mat-flat-button color="primary" type="button" (click)="close()">Done</button>
+  </mat-dialog-actions>
+</div>

@@ -388,6 +388,15 @@
     display: inline-flex;
   }
 
+  .top-actions {
+    gap: 0.1rem;
+  }
+
+  .active-timer-nav-pill {
+    padding-inline: 0.55rem;
+    font-size: 0.82rem;
+  }
+
   .top-bar:has(.active-timer-nav-pill) .brand-title {
     display: none;
   }
@@ -453,7 +462,7 @@
   }
 }
 
-@media (max-width: 359px) {
+@media (max-width: 420px) {
   .brand-title {
     display: none;
   }

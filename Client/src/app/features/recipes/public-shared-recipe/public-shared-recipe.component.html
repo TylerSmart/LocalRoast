@@ -11,6 +11,17 @@
 
     <div class="public-top-actions">
       <button
+        type="button"
+        mat-icon-button
+        data-testid="public-kitchen-reference-btn"
+        (click)="openKitchenReference()"
+        aria-label="Open kitchen reference and utilities"
+        matTooltip="Kitchen Reference"
+      >
+        <mat-icon>import_contacts</mat-icon>
+      </button>
+
+      <button
         mat-icon-button
         (click)="toggleTheme()"
         [attr.aria-label]="themeService.isDark() ? 'Switch to light mode' : 'Switch to dark mode'"

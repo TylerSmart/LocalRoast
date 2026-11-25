@@ -91,7 +91,8 @@
 /* Status & Voice Control Pills */
 .wake-lock-pill,
 .narration-pill-btn,
-.voice-control-pill-btn {
+.voice-control-pill-btn,
+.kitchen-ref-pill-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -120,7 +121,8 @@
 }
 
 .narration-pill-btn,
-.voice-control-pill-btn {
+.voice-control-pill-btn,
+.kitchen-ref-pill-btn {
   cursor: pointer;
 
   &:hover {
@@ -130,14 +132,16 @@
 
 .wake-text,
 .narration-label,
-.voice-label {
+.voice-label,
+.ref-label {
   text-box-trim: trim-both;
   text-box-edge: cap alphabetic;
 }
 
 .wake-icon,
 .narration-icon,
-.voice-icon {
+.voice-icon,
+.ref-icon {
   font-size: 18px;
   width: 18px;
   height: 18px;
@@ -1183,7 +1187,8 @@
 
   .wake-lock-pill,
   .narration-pill-btn,
-  .voice-control-pill-btn {
+  .voice-control-pill-btn,
+  .kitchen-ref-pill-btn {
     width: 36px;
     padding: 0;
   }
@@ -1191,7 +1196,8 @@
   .exit-label,
   .wake-text,
   .narration-label,
-  .voice-label {
+  .voice-label,
+  .ref-label {
     display: none;
   }
 

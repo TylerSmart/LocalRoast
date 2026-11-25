@@ -9,17 +9,21 @@ import { Router } from '@angular/router';
 import { debounceTime, distinctUntilChanged } from 'rxjs';
 import { RecipeSummaryDto } from '../../../core/models/recipe.models';
 import { CollectionDto } from '../../../core/models/taxonomy.models';
+import { KitchenReferenceService } from '../../../core/services/kitchen-reference/kitchen-reference.service';
 import { RecipeService } from '../../../core/services/recipe/recipe.service';
 import { TaxonomyService } from '../../../core/services/taxonomy/taxonomy.service';
 import { formatMinutes } from '../../../core/utils/culinary-math';
+import { searchKitchenReference } from '../../../core/utils/kitchen-converter';
+import { KitchenReferenceTab } from '../../../core/utils/kitchen-reference-data';
 
 export interface SearchResultItem {
   id: string;
-  type: 'action' | 'collection' | 'recipe';
+  type: 'action' | 'collection' | 'recipe' | 'reference';
   title: string;
   subtitle?: string;
   icon: string;
   route: string;
+  referenceTarget?: { tab?: KitchenReferenceTab; query?: string };
 }
 
 @Component({
@@ -44,6 +48,7 @@ export class GlobalSearchDialogComponent implements OnInit {
   private readonly router = inject(Router);
   private readonly recipeService = inject(RecipeService);
   private readonly taxonomyService = inject(TaxonomyService);
+  private readonly kitchenReferenceService = inject(KitchenReferenceService);
 
   @ViewChild('searchInput') private readonly searchInputRef?: ElementRef<HTMLInputElement>;
 
@@ -80,6 +85,15 @@ export class GlobalSearchDialogComponent implements OnInit {
       subtitle: 'Manage ingredients & pantry staples',
       icon: 'kitchen',
       route: '/catalog',
+    },
+    {
+      id: 'action-kitchen-reference',
+      type: 'action',
+      title: 'Kitchen Reference & Utilities',
+      subtitle: 'Unit converter, safe temperatures, culinary glossary & swaps',
+      icon: 'import_contacts',
+      route: '',
+      referenceTarget: {},
     },
   ];
 
@@ -133,7 +147,47 @@ export class GlobalSearchDialogComponent implements OnInit {
       route: `/recipes/${r.id}`,
     }));
 
-    return [...matchedActions, ...matchedCollections, ...recipeItems];
+    const refHits = searchKitchenReference(query);
+    const referenceItems: SearchResultItem[] = [
+      ...refHits.glossary.map((g) => ({
+        id: `ref-${g.id}`,
+        type: 'reference' as const,
+        title: g.term,
+        subtitle: g.specBadge ? `${g.category} • ${g.specBadge}` : g.category,
+        icon: 'import_contacts',
+        route: '',
+        referenceTarget: { tab: 'glossary' as const, query: g.term },
+      })),
+      ...refHits.temperatures.map((t) => ({
+        id: `ref-${t.id}`,
+        type: 'reference' as const,
+        title: `${t.item} (${t.donenessOrStage})`,
+        subtitle: `${t.tempF}°F • ${t.category}`,
+        icon: 'thermostat',
+        route: '',
+        referenceTarget: { tab: 'temps' as const, query: t.item },
+      })),
+      ...refHits.substitutions.map((s) => ({
+        id: `ref-${s.id}`,
+        type: 'reference' as const,
+        title: `Swap: ${s.ingredient}`,
+        subtitle: s.replacement,
+        icon: 'swap_horiz',
+        route: '',
+        referenceTarget: { tab: 'swaps' as const, query: s.ingredient },
+      })),
+      ...refHits.timings.map((r) => ({
+        id: `ref-${r.id}`,
+        type: 'reference' as const,
+        title: r.item,
+        subtitle: `${r.ratioDisplay} • ${r.cookTimeLabel}`,
+        icon: 'timer',
+        route: '',
+        referenceTarget: { tab: 'ratios' as const, query: r.item },
+      })),
+    ].slice(0, 4);
+
+    return [...matchedActions, ...matchedCollections, ...referenceItems, ...recipeItems];
   });
 
   ngOnInit(): void {
@@ -210,6 +264,10 @@ export class GlobalSearchDialogComponent implements OnInit {
 
   selectResult(item: SearchResultItem): void {
     this.dialogRef.close();
+    if (item.referenceTarget) {
+      this.kitchenReferenceService.openDialog(item.referenceTarget);
+      return;
+    }
     if (item.route.startsWith('/recipes?')) {
       const parts = item.route.split('?');
       const params = new URLSearchParams(parts[1]);
