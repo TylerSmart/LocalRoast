@@ -34,6 +34,24 @@
   --mat-sys-label-large-font: var(--app-font-family);
   --mat-sys-label-medium-font: var(--app-font-family);
   --mat-sys-label-small-font: var(--app-font-family);
+
+  /* Balanced Material 3 button padding & icon spacing (zero negative icon offset) */
+  --mat-button-filled-horizontal-padding: 1.125rem;
+  --mat-button-filled-icon-offset: 0px;
+  --mat-button-filled-icon-spacing: 0.5rem;
+  --mat-button-outlined-horizontal-padding: 1.125rem;
+  --mat-button-outlined-icon-offset: 0px;
+  --mat-button-outlined-icon-spacing: 0.5rem;
+  --mat-button-protected-horizontal-padding: 1.125rem;
+  --mat-button-protected-icon-offset: 0px;
+  --mat-button-protected-icon-spacing: 0.5rem;
+  --mat-button-tonal-horizontal-padding: 1.125rem;
+  --mat-button-tonal-icon-offset: 0px;
+  --mat-button-tonal-icon-spacing: 0.5rem;
+  --mat-button-text-horizontal-padding: 0.875rem;
+  --mat-button-text-with-icon-horizontal-padding: 0.875rem;
+  --mat-button-text-icon-offset: 0px;
+  --mat-button-text-icon-spacing: 0.4rem;
 }
 
 html {
@@ -190,6 +208,8 @@ mat-icon,
   min-width: 44px;
   min-height: 44px;
   padding: 0;
+  border-radius: 50%;
+  aspect-ratio: 1;
   line-height: 1;
 
   > .mat-icon {
@@ -205,6 +225,25 @@ mat-icon,
 
   .mat-icon {
     color: var(--mat-sys-error);
+  }
+}
+
+.mat-mdc-button.mat-mdc-button-base,
+.mat-mdc-unelevated-button.mat-mdc-button-base,
+.mat-mdc-raised-button.mat-mdc-button-base,
+.mat-mdc-outlined-button.mat-mdc-button-base,
+.mat-tonal-button.mat-mdc-button-base {
+  &:has(> .mdc-button__label:empty) {
+    gap: 0;
+
+    > .mat-icon,
+    > [matButtonIcon] {
+      margin-inline: 0;
+    }
+
+    > .mdc-button__label:empty {
+      display: none;
+    }
   }
 }
 

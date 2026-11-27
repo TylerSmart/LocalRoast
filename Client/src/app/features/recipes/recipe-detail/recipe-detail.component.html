@@ -19,15 +19,6 @@
           <span>Start Cooking</span>
         </button>
         <button
-          mat-stroked-button
-          class="log-cook-btn"
-          (click)="openCookLogDialog()"
-          aria-label="I Made This!"
-        >
-          <mat-icon>rate_review</mat-icon>
-          <span>I Made This!</span>
-        </button>
-        <button
           type="button"
           mat-icon-button
           [matMenuTriggerFor]="recipeActionsMenu"
@@ -39,6 +30,16 @@
         </button>
 
         <mat-menu #recipeActionsMenu="matMenu" xPosition="before">
+          <button
+            mat-menu-item
+            type="button"
+            class="log-cook-menu-item"
+            (click)="openCookLogDialog()"
+            aria-label="I Made This!"
+          >
+            <mat-icon>rate_review</mat-icon>
+            <span>I Made This!</span>
+          </button>
           @if (aiHelper.isAvailable()) {
             <button mat-menu-item (click)="openKitchenQuestion()">
               <mat-icon>auto_awesome</mat-icon>

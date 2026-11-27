@@ -174,8 +174,64 @@ public sealed class ResponsiveUiE2ETests : E2ETestBase
         await Page.GotoAsync($"{ServerUrl}/recipes/{recipeId}");
         await Expect(Page.Locator(".recipe-body-grid")).ToBeVisibleAsync();
 
-        await Page.GetByRole(AriaRole.Button, new() { Name = "I Made This!", Exact = true })
-            .ClickAsync();
+        await Expect(Page.Locator(".detail-top-actions .log-cook-btn")).ToHaveCountAsync(0);
+        var startCookingBtn = Page.Locator("button.start-cooking-btn");
+        var actionsMenuBtn = Page.Locator("button.recipe-actions-menu-btn");
+        await Expect(startCookingBtn).ToBeVisibleAsync();
+        await Expect(actionsMenuBtn).ToBeVisibleAsync();
+
+        var startBox = await startCookingBtn.BoundingBoxAsync();
+        var menuBox = await actionsMenuBtn.BoundingBoxAsync();
+        Assert.IsNotNull(startBox);
+        Assert.IsNotNull(menuBox);
+        Assert.IsLessThanOrEqualTo(
+            2,
+            Math.Abs((startBox.Y + startBox.Height / 2) - (menuBox.Y + menuBox.Height / 2)),
+            "More actions button must sit on the same row next to Start Cooking."
+        );
+        Assert.IsGreaterThanOrEqualTo(
+            startBox.X + startBox.Width - 1,
+            menuBox.X,
+            "More actions button must sit to the right of Start Cooking."
+        );
+        Assert.IsLessThanOrEqualTo(
+            1,
+            Math.Abs(menuBox.Width - menuBox.Height),
+            $"More actions icon button must be circular (got {menuBox.Width}x{menuBox.Height})."
+        );
+        Assert.IsLessThanOrEqualTo(
+            45,
+            menuBox.Width,
+            $"More actions icon button must stay compact (got {menuBox.Width}px wide)."
+        );
+
+        if (width >= 768)
+        {
+            var paddingCheck = await startCookingBtn.EvaluateAsync<double[]>(
+                """
+                btn => {
+                    const btnRect = btn.getBoundingClientRect();
+                    const iconRect = btn.querySelector('mat-icon').getBoundingClientRect();
+                    const labelRect = btn.querySelector('.mdc-button__label').getBoundingClientRect();
+                    return [iconRect.left - btnRect.left, btnRect.right - labelRect.right];
+                }
+                """
+            );
+            var leftGap = paddingCheck[0];
+            var rightGap = paddingCheck[1];
+            Assert.IsGreaterThanOrEqualTo(
+                12,
+                leftGap,
+                $"Start Cooking left padding ({leftGap}px) must not be cramped."
+            );
+            Assert.IsLessThanOrEqualTo(
+                3,
+                Math.Abs(leftGap - rightGap),
+                $"Start Cooking padding must be symmetric (left={leftGap}px, right={rightGap}px)."
+            );
+        }
+
+        await OpenRecipeActionAsync("I Made This!");
         await AssertDialogAsync("cook-log");
         await Page.Keyboard.PressAsync("Escape");
 

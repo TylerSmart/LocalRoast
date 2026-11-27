@@ -853,4 +853,40 @@ describe('IngestionHubComponent', () => {
       }),
     );
   });
+
+  it('renders expanded job statusDetail without leading or trailing template whitespace', () => {
+    const longDetail = 'Extracted recipe ingredients and steps cleanly without truncation. '
+      .repeat(4)
+      .trim();
+    const jobWithLongDetail: IngestionJobSummaryDto = {
+      ...sampleJobs[0],
+      id: 'job-long-detail',
+      statusDetail: `  ${longDetail}  `,
+    };
+    mockIngestionService.getJobsPaged.mockReturnValue(
+      of({
+        items: [jobWithLongDetail],
+        totalCount: 1,
+        page: 1,
+        pageSize: 25,
+      }),
+    );
+
+    component.loadJobs();
+    fixture.detectChanges();
+
+    const el = fixture.nativeElement as HTMLElement;
+    const detailEl = el.querySelector('.job-detail-text') as HTMLParagraphElement | null;
+    const toggleBtn = el.querySelector('.detail-toggle-btn') as HTMLButtonElement | null;
+    expect(detailEl).not.toBeNull();
+    expect(toggleBtn).not.toBeNull();
+    expect(detailEl?.textContent).toBe(longDetail);
+
+    toggleBtn!.click();
+    fixture.detectChanges();
+
+    expect(detailEl?.classList.contains('expanded')).toBe(true);
+    expect(detailEl?.textContent).toBe(longDetail);
+    expect(detailEl?.textContent).not.toMatch(/^\s|\s$/);
+  });
 });

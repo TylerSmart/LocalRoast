@@ -304,7 +304,8 @@
 
   .token-btn {
     min-height: 36px;
-    padding: 0 0.55rem;
+    padding: 0 0.65rem;
+    --mat-button-outlined-icon-spacing: 0.3rem;
     font-size: 0.78rem;
   }
 }

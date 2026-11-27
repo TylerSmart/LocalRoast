@@ -111,7 +111,6 @@
 .llm-settings-btn {
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
 }
 
 .toggle-ingestion-btn.paused-btn {
@@ -188,7 +187,6 @@
   white-space: nowrap;
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
   flex-shrink: 0;
 }
 
@@ -634,7 +632,6 @@
 .retry-all-tab-btn {
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
   white-space: nowrap;
   height: 38px;
 }
@@ -649,6 +646,7 @@
   align-items: center;
   gap: 0.4rem;
   height: 38px;
+  padding-inline: 0.875rem;
   border-top-right-radius: 0;
   border-bottom-right-radius: 0;
   border-right: none;
@@ -679,10 +677,14 @@
   align-items: center;
   justify-content: center;
   height: 38px;
-  min-width: 34px;
-  padding: 0 4px 0 12px;
+  min-width: 36px;
+  padding: 0 0.375rem;
   border-top-left-radius: 0;
   border-bottom-left-radius: 0;
+
+  mat-icon {
+    margin: 0;
+  }
 }
 
 .menu-heading,
@@ -1005,7 +1007,6 @@
 .review-action-btn {
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
 }
 
 .loading-state,
@@ -1096,7 +1097,8 @@
     .llm-settings-btn {
       width: 100%;
       justify-content: center;
-      padding: 0 0.45rem;
+      padding-inline: 0.65rem;
+      --mat-button-outlined-icon-spacing: 0.35rem;
       font-size: 0.78rem;
       white-space: nowrap;
     }

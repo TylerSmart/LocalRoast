@@ -19,7 +19,6 @@
 .back-link {
   display: inline-flex;
   align-items: center;
-  gap: 0.25rem;
   padding: 0 0.75rem;
   margin-left: -0.5rem;
 }
@@ -28,17 +27,27 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 
   button:not([mat-icon-button]),
   a:not([mat-icon-button]) {
-    padding: 0 1rem !important;
     white-space: nowrap;
   }
 }
 
 .start-cooking-btn {
   font-weight: 700;
+}
+
+.recipe-actions-menu-btn {
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  min-height: 40px;
+  flex: 0 0 40px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--mat-sys-outline-variant);
 }
 
 .loading-state {
@@ -1209,7 +1218,7 @@
     button:not([mat-icon-button]),
     a:not([mat-icon-button]) {
       font-size: 0.85rem;
-      padding: 0 0.85rem !important;
+      padding-inline: 1rem;
     }
   }
 
@@ -1245,20 +1254,23 @@
 
 @media (max-width: 600px) {
   .detail-top-actions {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    display: flex;
+    align-items: center;
     gap: 0.5rem;
+    width: 100%;
   }
 
   .start-cooking-btn {
-    grid-column: 1 / -1;
-    width: 100%;
+    flex: 1 1 auto;
+    min-width: 0;
   }
 
-  .log-cook-btn,
   .recipe-actions-menu-btn {
-    width: 100%;
-    min-width: 0;
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
+    flex: 0 0 44px;
   }
 
   .attachments-card-header,

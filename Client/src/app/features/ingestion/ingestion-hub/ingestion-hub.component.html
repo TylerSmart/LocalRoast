@@ -816,9 +816,11 @@
 
               @if (job.statusDetail) {
                 @let detailExpanded = expandedDetailJobIds().has(job.id);
-                <p class="job-detail-text" [class.expanded]="detailExpanded">
-                  {{ job.statusDetail }}
-                </p>
+                <p
+                  class="job-detail-text"
+                  [class.expanded]="detailExpanded"
+                  [textContent]="job.statusDetail.trim()"
+                ></p>
                 @if (job.statusDetail.length > detailExpandThreshold) {
                   <button
                     type="button"

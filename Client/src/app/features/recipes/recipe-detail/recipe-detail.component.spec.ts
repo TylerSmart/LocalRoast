@@ -247,13 +247,33 @@ describe('RecipeDetailComponent', () => {
     );
   });
 
-  it('renders recipe top actions menu trigger as an icon-only button without visible text', () => {
-    const actionsBtn = fixture.nativeElement.querySelector(
-      '.recipe-actions-menu-btn',
+  it('moves "I Made This!" into the circular actions menu next to Start Cooking', () => {
+    const hostEl = fixture.nativeElement as HTMLElement;
+    expect(hostEl.querySelector('.detail-top-actions .log-cook-btn')).toBeNull();
+
+    const startBtn = hostEl.querySelector(
+      '.detail-top-actions .start-cooking-btn',
     ) as HTMLButtonElement | null;
+    const actionsBtn = hostEl.querySelector(
+      '.detail-top-actions .recipe-actions-menu-btn',
+    ) as HTMLButtonElement | null;
+    expect(startBtn).not.toBeNull();
     expect(actionsBtn).not.toBeNull();
+    expect(startBtn?.nextElementSibling).toBe(actionsBtn);
     expect(actionsBtn?.hasAttribute('mat-icon-button')).toBe(true);
     expect(actionsBtn?.querySelector('span')?.textContent?.trim() ?? '').toBe('');
+
+    mockDialog.open.mockClear();
+    actionsBtn!.click();
+    fixture.detectChanges();
+
+    const logCookMenuItem = document.querySelector(
+      '.log-cook-menu-item',
+    ) as HTMLButtonElement | null;
+    expect(logCookMenuItem).not.toBeNull();
+    expect(logCookMenuItem?.textContent).toContain('I Made This!');
+    logCookMenuItem!.click();
+    expect(mockDialog.open).toHaveBeenCalled();
   });
 
   it('renders recipe title, collections, tags, ingredients, and step instructions', () => {

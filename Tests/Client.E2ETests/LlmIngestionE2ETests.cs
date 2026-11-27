@@ -1178,17 +1178,59 @@ public sealed class LlmIngestionE2ETests : E2ETestBase
             );
             Assert.IsFalse(pageOverflows, "Ingestion page must not scroll horizontally at 360px.");
 
-            // 6. Long status detail can be expanded to reveal the full text
+            // 6. Long status detail can be expanded to reveal the full text without adding leading whitespace
             var detail = jobCard.Locator(".job-detail-text");
             var toggleDetail = jobCard.Locator(".detail-toggle-btn");
             await Expect(toggleDetail).ToContainTextAsync("Show full details");
             var collapsedHeight = (await detail.BoundingBoxAsync())!.Height;
+            var collapsedTextCheck = await detail.EvaluateAsync<double[]>(
+                """
+                el => {
+                    const text = el.innerText;
+                    if (/^\s/.test(text)) throw new Error(`Collapsed detail starts with whitespace: ${JSON.stringify(text)}`);
+                    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+                    const node = walker.nextNode();
+                    const range = document.createRange();
+                    range.setStart(node, 0);
+                    range.setEnd(node, 1);
+                    const charRect = range.getBoundingClientRect();
+                    const boxRect = el.getBoundingClientRect();
+                    return [charRect.left - boxRect.left, charRect.top - boxRect.top];
+                }
+                """
+            );
 
             await toggleDetail.ClickAsync();
             await Expect(toggleDetail).ToContainTextAsync("Show less");
             await Expect(detail).ToHaveClassAsync(new Regex("expanded"));
             var expandedHeight = (await detail.BoundingBoxAsync())!.Height;
             Assert.IsGreaterThan(collapsedHeight, expandedHeight);
+            var expandedTextCheck = await detail.EvaluateAsync<double[]>(
+                """
+                el => {
+                    const text = el.innerText;
+                    if (/^\s/.test(text)) throw new Error(`Expanded detail starts with whitespace: ${JSON.stringify(text)}`);
+                    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+                    const node = walker.nextNode();
+                    const range = document.createRange();
+                    range.setStart(node, 0);
+                    range.setEnd(node, 1);
+                    const charRect = range.getBoundingClientRect();
+                    const boxRect = el.getBoundingClientRect();
+                    return [charRect.left - boxRect.left, charRect.top - boxRect.top];
+                }
+                """
+            );
+            Assert.IsLessThanOrEqualTo(
+                1,
+                Math.Abs(expandedTextCheck[0] - collapsedTextCheck[0]),
+                $"Expanded description shifted horizontally (collapsed={collapsedTextCheck[0]}, expanded={expandedTextCheck[0]})."
+            );
+            Assert.IsLessThanOrEqualTo(
+                1,
+                Math.Abs(expandedTextCheck[1] - collapsedTextCheck[1]),
+                $"Expanded description shifted vertically (collapsed={collapsedTextCheck[1]}, expanded={expandedTextCheck[1]})."
+            );
 
             await toggleDetail.ClickAsync();
             await Expect(toggleDetail).ToContainTextAsync("Show full details");

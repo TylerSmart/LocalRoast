@@ -81,7 +81,6 @@
   .publish-btn {
     display: inline-flex;
     align-items: center;
-    gap: 0.35rem;
     font-weight: 600;
   }
 }
@@ -112,11 +111,11 @@
     gap: 0.45rem;
 
     .back-btn {
-      padding: 0 0.65rem;
+      padding-inline: 0.75rem;
     }
 
     .publish-btn {
-      padding: 0 0.85rem;
+      padding-inline: 0.9rem;
     }
   }
 }
