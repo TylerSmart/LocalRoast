@@ -12,6 +12,7 @@ public sealed class RecipeConfiguration : IEntityTypeConfiguration<Recipe>
         builder.ToTable("Recipes");
 
         builder.HasKey(r => r.Id);
+        builder.Property(r => r.Id).ValueGeneratedNever();
 
         builder.Property(r => r.Title).IsRequired().HasMaxLength(200);
         builder.HasIndex(r => r.Title);
@@ -23,6 +24,12 @@ public sealed class RecipeConfiguration : IEntityTypeConfiguration<Recipe>
 
         builder.Property(r => r.Status).HasConversion<string>().HasMaxLength(32);
         builder.HasIndex(r => r.Status);
+        builder.HasIndex(r => new
+        {
+            r.Status,
+            r.ModifiedAt,
+            r.Id,
+        });
 
         builder.Property(r => r.BaseServings).HasPrecision(8, 2);
         builder.Property(r => r.YieldDisplay).HasMaxLength(100);

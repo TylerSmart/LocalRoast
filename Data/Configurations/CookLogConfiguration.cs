@@ -11,6 +11,7 @@ public sealed class CookLogConfiguration : IEntityTypeConfiguration<CookLog>
         builder.ToTable("CookLogs");
 
         builder.HasKey(c => c.Id);
+        builder.Property(c => c.Id).ValueGeneratedNever();
 
         builder.Property(c => c.CookedByDisplayName).IsRequired().HasMaxLength(150);
 

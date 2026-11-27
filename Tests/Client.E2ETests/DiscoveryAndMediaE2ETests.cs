@@ -345,4 +345,76 @@ public sealed class DiscoveryAndMediaE2ETests : E2ETestBase
         var searchDialog = Page.Locator("app-global-search-dialog");
         await Expect(searchDialog).ToBeVisibleAsync();
     }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task FridgeMatcher_DebouncesRapidSuggestionClicksIntoSingleMatchRequest()
+    {
+        await RegisterAndLoginAsync();
+        await EnsureFoodItemExistsViaApiAsync("Butter", isPantryStaple: false);
+        await EnsureFoodItemExistsViaApiAsync("Blueberries", isPantryStaple: false);
+        await EnsureFoodItemExistsViaApiAsync("Lemon", isPantryStaple: false);
+
+        // Create a recipe using those 3 non-staple ingredients so suggested chips appear
+        await Page.Locator("a[routerlink='/recipes/new']").First.ClickAsync();
+        var pieTitle = $"Quick Berry Crisp {Guid.NewGuid():N}"[..22];
+        await Page.Locator("input[formcontrolname='title']").FillAsync(pieTitle);
+
+        await Page.Locator("input[formcontrolname='displayName']").First.FillAsync("Butter");
+        await Page.Locator("mat-option", new() { HasText = "Butter" }).First.ClickAsync();
+
+        await Page.Locator("button", new() { HasText = "Add Ingredient" }).ClickAsync();
+        await Page.Locator("input[formcontrolname='displayName']").Nth(1).FillAsync("Blueberries");
+        await Page.Locator("mat-option", new() { HasText = "Blueberries" }).First.ClickAsync();
+
+        await Page.Locator("button", new() { HasText = "Add Ingredient" }).ClickAsync();
+        await Page.Locator("input[formcontrolname='displayName']").Nth(2).FillAsync("Lemon");
+        await Page.Locator("mat-option", new() { HasText = "Lemon" }).First.ClickAsync();
+
+        await Page.Locator("[formcontrolname='instruction'] .step-instruction-editable")
+            .First.FillAsync("Toss blueberries with lemon and bake with butter topping.");
+
+        await Page.Locator("button[type='submit']", new() { HasText = "Save Recipe" })
+            .First.ClickAsync();
+        await Expect(Page).ToHaveURLAsync(new Regex(".*/recipes/[a-f0-9-]+$"));
+
+        await Page.Locator("nav.desktop-nav a", new() { HasText = "Matcher" }).ClickAsync();
+        await Expect(Page).ToHaveURLAsync(new Regex(".*/matcher.*"));
+
+        var butterChip = Page.Locator("button.suggestion-pill", new() { HasText = "Butter" }).First;
+        var berryChip = Page.Locator(
+            "button.suggestion-pill",
+            new() { HasText = "Blueberries" }
+        ).First;
+        var lemonChip = Page.Locator("button.suggestion-pill", new() { HasText = "Lemon" }).First;
+        await Expect(butterChip).ToBeVisibleAsync();
+        await Expect(berryChip).ToBeVisibleAsync();
+        await Expect(lemonChip).ToBeVisibleAsync();
+
+        var matchRequestCount = 0;
+        Page.Request += (_, req) =>
+        {
+            if (
+                req.Method.Equals("POST", StringComparison.OrdinalIgnoreCase)
+                && req.Url.Contains("/api/recipes/match-ingredients", StringComparison.Ordinal)
+            )
+            {
+                Interlocked.Increment(ref matchRequestCount);
+            }
+        };
+
+        await butterChip.ClickAsync();
+        await berryChip.ClickAsync();
+        await lemonChip.ClickAsync();
+
+        var resultCard = Page.Locator(".matcher-result-card", new() { HasText = pieTitle });
+        await Expect(resultCard).ToBeVisibleAsync();
+        await Expect(resultCard.Locator(".match-badge")).ToContainTextAsync("3 of 3 matched");
+
+        Assert.AreEqual(
+            1,
+            matchRequestCount,
+            $"Expected 3 rapid ingredient clicks to debounce into 1 match request, observed {matchRequestCount}."
+        );
+    }
 }

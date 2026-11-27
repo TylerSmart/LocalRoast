@@ -594,4 +594,95 @@ public sealed class ShoppingListsE2ETests : E2ETestBase
         await Expect(cilantroRow).ToBeVisibleAsync();
         await Expect(cilantroRow.Locator(".item-qty-badge")).ToContainTextAsync("2");
     }
+
+    [TestMethod]
+    [Timeout(DefaultTestTimeoutMs)]
+    public async Task ShoppingList_AddFromRecipeDetail_IntoExistingPopulatedList_ConsolidatesWithoutError()
+    {
+        await RegisterAndLoginAsync();
+        await EnsureFoodItemExistsViaApiAsync("Unsalted Butter", isPantryStaple: false);
+        await EnsureFoodItemExistsViaApiAsync("Wild Blueberries", isPantryStaple: false);
+        await EnsureShoppingListExistsViaApiAsync("Weekend Baking", isPinned: true);
+
+        // 1. Seed existing "Weekend Baking" list with Unsalted Butter (1 cup) from an initial recipe
+        var crustTitle = $"Pie Crust {Guid.NewGuid():N}"[..18];
+        await CreateRecipeWithIngredientsAsync(crustTitle, 8, ("Unsalted Butter", 1m, "Cup"));
+
+        await Page.Locator("button.recipe-actions-menu-btn").ClickAsync();
+        await Page.Locator("button[aria-label='Add ingredients to shopping list']").ClickAsync();
+        var seedDialog = Page.Locator("mat-dialog-container");
+        await Expect(seedDialog.Locator("h2")).ToContainTextAsync("Add to Shopping List");
+        await seedDialog.Locator("mat-select.target-list-select").ClickAsync();
+        await Page.Locator("mat-option", new() { HasText = "Weekend Baking" }).First.ClickAsync();
+        await seedDialog
+            .Locator("button[color='primary']", new() { HasText = "Add Ingredients" })
+            .ClickAsync();
+        await Expect(seedDialog).Not.ToBeVisibleAsync();
+
+        // 2. Create Blueberry Pie recipe with overlapping Unsalted Butter (0.5 cup) + Wild Blueberries (4 cups)
+        var pieTitle = $"Blueberry Pie {Guid.NewGuid():N}"[..20];
+        await CreateRecipeWithIngredientsAsync(
+            pieTitle,
+            8,
+            ("Unsalted Butter", 0.5m, "Cup"),
+            ("Wild Blueberries", 4m, "Cup")
+        );
+
+        await Page.Locator("button.recipe-actions-menu-btn").ClickAsync();
+        await Page.Locator("button[aria-label='Add ingredients to shopping list']").ClickAsync();
+
+        var addDialog = Page.Locator("mat-dialog-container");
+        await Expect(addDialog.Locator("h2")).ToContainTextAsync("Add to Shopping List");
+
+        await addDialog.Locator("mat-select.target-list-select").ClickAsync();
+        await Page.Locator("mat-option", new() { HasText = "Weekend Baking" }).First.ClickAsync();
+
+        var submitBtn = addDialog.Locator(
+            "button[color='primary']",
+            new() { HasText = "Add Ingredients" }
+        );
+        await Expect(submitBtn).ToBeEnabledAsync();
+        await submitBtn.ClickAsync();
+        await Expect(addDialog).Not.ToBeVisibleAsync();
+
+        var viewListSnackBtn = Page.Locator(
+            ".mat-mdc-snack-bar-container button",
+            new() { HasText = "View List" }
+        );
+        await Expect(viewListSnackBtn).ToBeVisibleAsync();
+        await viewListSnackBtn.ClickAsync();
+
+        await Expect(Page).ToHaveURLAsync(new Regex(".*/shopping\\?listId="));
+        var activeCard = Page.Locator(".active-items-card");
+
+        var butterRow = activeCard.Locator(
+            ".shopping-item-row",
+            new() { HasText = "Unsalted Butter" }
+        );
+        await Expect(butterRow).ToBeVisibleAsync();
+        await Expect(butterRow.Locator(".item-qty-badge")).ToContainTextAsync("1 1/2 cups");
+        await Expect(butterRow.Locator(".provenance-chip")).ToHaveCountAsync(2);
+        await Expect(butterRow.Locator(".provenance-chip", new() { HasText = crustTitle }))
+            .ToBeVisibleAsync();
+        await Expect(butterRow.Locator(".provenance-chip", new() { HasText = pieTitle }))
+            .ToBeVisibleAsync();
+
+        var berriesRow = activeCard.Locator(
+            ".shopping-item-row",
+            new() { HasText = "Wild Blueberries" }
+        );
+        await Expect(berriesRow).ToBeVisibleAsync();
+        await Expect(berriesRow.Locator(".item-qty-badge")).ToContainTextAsync("1 qt");
+
+        await Page.SetViewportSizeAsync(360, 740);
+        var scrollWidth = await Page.EvaluateAsync<int>(
+            "() => document.documentElement.scrollWidth"
+        );
+        var innerWidth = await Page.EvaluateAsync<int>("() => window.innerWidth");
+        Assert.IsLessThanOrEqualTo(
+            scrollWidth,
+            innerWidth,
+            $"Merged shopping list overflows at 360px: scrollWidth={scrollWidth}, innerWidth={innerWidth}"
+        );
+    }
 }

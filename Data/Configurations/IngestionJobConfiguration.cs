@@ -11,6 +11,7 @@ public sealed class IngestionJobConfiguration : IEntityTypeConfiguration<Ingesti
         builder.ToTable("IngestionJobs");
 
         builder.HasKey(j => j.Id);
+        builder.Property(j => j.Id).ValueGeneratedNever();
 
         builder.Property(j => j.Channel).HasConversion<string>().HasMaxLength(32).IsRequired();
         builder.Property(j => j.Status).HasConversion<string>().HasMaxLength(32).IsRequired();

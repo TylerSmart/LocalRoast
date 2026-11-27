@@ -11,6 +11,7 @@ public sealed class CatalogEmbeddingConfiguration : IEntityTypeConfiguration<Cat
         builder.ToTable("CatalogEmbeddings");
 
         builder.HasKey(e => e.Id);
+        builder.Property(e => e.Id).ValueGeneratedNever();
 
         builder.Property(e => e.ModelTag).IsRequired().HasMaxLength(200);
         builder.Property(e => e.NormalizedText).IsRequired().HasMaxLength(400);

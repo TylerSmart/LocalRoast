@@ -1,7 +1,9 @@
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Service, inject } from '@angular/core';
 import { Observable } from 'rxjs';
+import { tap } from 'rxjs/operators';
 import { apiUrl } from '../../api/api-url';
+import { TaxonomyService } from '../taxonomy/taxonomy.service';
 import {
   CookLogDto,
   CookLogMutationResultDto,
@@ -23,6 +25,7 @@ import {
 @Service()
 export class RecipeService {
   private readonly http = inject(HttpClient);
+  private readonly taxonomyService = inject(TaxonomyService, { optional: true });
 
   getRecipesPaged(query: RecipeQueryParameters): Observable<RecipePagedResultDto> {
     let params = new HttpParams();
@@ -150,11 +153,15 @@ export class RecipeService {
   }
 
   createRecipe(request: UpsertRecipeRequest): Observable<RecipeDetailDto> {
-    return this.http.post<RecipeDetailDto>(apiUrl('/recipes'), request);
+    return this.http
+      .post<RecipeDetailDto>(apiUrl('/recipes'), request)
+      .pipe(tap(() => this.taxonomyService?.invalidateCache()));
   }
 
   updateRecipe(id: string, request: UpsertRecipeRequest): Observable<RecipeDetailDto> {
-    return this.http.put<RecipeDetailDto>(apiUrl(`/recipes/${id}`), request);
+    return this.http
+      .put<RecipeDetailDto>(apiUrl(`/recipes/${id}`), request)
+      .pipe(tap(() => this.taxonomyService?.invalidateCache()));
   }
 
   detectStepAmounts(instruction: string): Observable<DetectedStepAmountDto[]> {
@@ -164,14 +171,18 @@ export class RecipeService {
   }
 
   deleteRecipe(id: string): Observable<void> {
-    return this.http.delete<void>(apiUrl(`/recipes/${id}`));
+    return this.http
+      .delete<void>(apiUrl(`/recipes/${id}`))
+      .pipe(tap(() => this.taxonomyService?.invalidateCache()));
   }
 
   updateRecipeOrganization(
     id: string,
     request: UpdateRecipeOrganizationRequest,
   ): Observable<RecipeDetailDto> {
-    return this.http.put<RecipeDetailDto>(apiUrl(`/recipes/${id}/organization`), request);
+    return this.http
+      .put<RecipeDetailDto>(apiUrl(`/recipes/${id}/organization`), request)
+      .pipe(tap(() => this.taxonomyService?.invalidateCache()));
   }
 
   matchRecipesByIngredients(

@@ -25,7 +25,6 @@ namespace App.Data.Migrations
             modelBuilder.Entity("App.Data.Entities.CatalogEmbedding", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTimeOffset>("CreatedAt")
@@ -129,7 +128,6 @@ namespace App.Data.Migrations
             modelBuilder.Entity("App.Data.Entities.CookLog", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTimeOffset>("CookedAt")
@@ -193,7 +191,6 @@ namespace App.Data.Migrations
             modelBuilder.Entity("App.Data.Entities.FoodItem", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("Category")
@@ -244,7 +241,6 @@ namespace App.Data.Migrations
             modelBuilder.Entity("App.Data.Entities.FoodItemAlias", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("Alias")
@@ -289,7 +285,6 @@ namespace App.Data.Migrations
             modelBuilder.Entity("App.Data.Entities.HouseholdLlmSettings", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("ApiKey")
@@ -478,7 +473,6 @@ namespace App.Data.Migrations
             modelBuilder.Entity("App.Data.Entities.IngestionJob", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<int>("AttemptCount")
@@ -635,7 +629,6 @@ namespace App.Data.Migrations
             modelBuilder.Entity("App.Data.Entities.LlmConnection", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("ApiKey")
@@ -722,7 +715,6 @@ namespace App.Data.Migrations
             modelBuilder.Entity("App.Data.Entities.LlmModelConfiguration", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid>("ConnectionId")
@@ -788,7 +780,6 @@ namespace App.Data.Migrations
             modelBuilder.Entity("App.Data.Entities.LlmModelProfile", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<int>("ContextWindowTokens")
@@ -863,7 +854,6 @@ namespace App.Data.Migrations
             modelBuilder.Entity("App.Data.Entities.MealPlanEntry", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTimeOffset>("CreatedAt")
@@ -940,7 +930,6 @@ namespace App.Data.Migrations
             modelBuilder.Entity("App.Data.Entities.MealPlanTemplate", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTimeOffset>("CreatedAt")
@@ -984,7 +973,6 @@ namespace App.Data.Migrations
             modelBuilder.Entity("App.Data.Entities.MealPlanTemplateItem", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTimeOffset>("CreatedAt")
@@ -1054,7 +1042,6 @@ namespace App.Data.Migrations
             modelBuilder.Entity("App.Data.Entities.PersonalAccessToken", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTimeOffset>("CreatedAt")
@@ -1113,7 +1100,6 @@ namespace App.Data.Migrations
             modelBuilder.Entity("App.Data.Entities.Recipe", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<decimal?>("AverageRating")
@@ -1245,6 +1231,8 @@ namespace App.Data.Migrations
 
                     b.HasIndex("RefinementStatus", "RefinementRequestedAt");
 
+                    b.HasIndex("Status", "ModifiedAt", "Id");
+
                     b.HasIndex("TimesCooked", "AverageRating", "LastCookedAt");
 
                     b.ToTable("Recipes", (string)null);
@@ -1253,7 +1241,6 @@ namespace App.Data.Migrations
             modelBuilder.Entity("App.Data.Entities.RecipeAttachment", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("ContentType")
@@ -1347,7 +1334,6 @@ namespace App.Data.Migrations
             modelBuilder.Entity("App.Data.Entities.RecipeEmbedding", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("ContentHash")
@@ -1404,7 +1390,6 @@ namespace App.Data.Migrations
             modelBuilder.Entity("App.Data.Entities.RecipeIngredient", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("AlternativeCustomUnitName")
@@ -1508,7 +1493,6 @@ namespace App.Data.Migrations
             modelBuilder.Entity("App.Data.Entities.RecipeIngredientReplacement", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTimeOffset>("CreatedAt")
@@ -1573,7 +1557,6 @@ namespace App.Data.Migrations
             modelBuilder.Entity("App.Data.Entities.RecipeStep", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTimeOffset>("CreatedAt")
@@ -1622,7 +1605,6 @@ namespace App.Data.Migrations
             modelBuilder.Entity("App.Data.Entities.RecipeStepTimer", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTimeOffset>("CreatedAt")
@@ -1702,7 +1684,6 @@ namespace App.Data.Migrations
             modelBuilder.Entity("App.Data.Entities.ShareLink", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTimeOffset>("CreatedAt")
@@ -1761,7 +1742,6 @@ namespace App.Data.Migrations
             modelBuilder.Entity("App.Data.Entities.ShoppingList", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTimeOffset>("CreatedAt")
@@ -1806,7 +1786,6 @@ namespace App.Data.Migrations
             modelBuilder.Entity("App.Data.Entities.ShoppingListItem", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTimeOffset?>("CheckedAt")
@@ -1892,7 +1871,6 @@ namespace App.Data.Migrations
             modelBuilder.Entity("App.Data.Entities.ShoppingListItemSource", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<decimal?>("ContributedMaxQuantity")
@@ -2011,7 +1989,6 @@ namespace App.Data.Migrations
             modelBuilder.Entity("App.Data.Entities.User", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTimeOffset>("CreatedAt")

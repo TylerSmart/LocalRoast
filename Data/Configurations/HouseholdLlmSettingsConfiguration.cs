@@ -12,6 +12,7 @@ public sealed class HouseholdLlmSettingsConfiguration
         builder.ToTable("HouseholdLlmSettings");
 
         builder.HasKey(s => s.Id);
+        builder.Property(s => s.Id).ValueGeneratedNever();
 
         builder.Property(s => s.SingletonKey).IsRequired().HasMaxLength(32);
         builder.HasIndex(s => s.SingletonKey).IsUnique();

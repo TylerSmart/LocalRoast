@@ -11,6 +11,7 @@ public sealed class RecipeAttachmentConfiguration : IEntityTypeConfiguration<Rec
         builder.ToTable("RecipeAttachments");
 
         builder.HasKey(a => a.Id);
+        builder.Property(a => a.Id).ValueGeneratedNever();
 
         builder.Property(a => a.FileName).IsRequired().HasMaxLength(255);
         builder.Property(a => a.MediaUrlPath).IsRequired().HasMaxLength(500);

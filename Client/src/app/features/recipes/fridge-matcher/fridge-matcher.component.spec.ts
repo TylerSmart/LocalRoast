@@ -50,6 +50,10 @@ describe('FridgeMatcherComponent', () => {
   };
 
   beforeEach(async () => {
+    vi.clearAllMocks();
+    mockCatalogService.getFoodItems.mockReturnValue(of(mockFoodItems));
+    mockRecipeService.matchRecipesByIngredients.mockReset();
+
     await TestBed.configureTestingModule({
       imports: [FridgeMatcherComponent],
       providers: [
@@ -122,60 +126,81 @@ describe('FridgeMatcherComponent', () => {
     expect(suggested.map((i) => i.name)).toEqual(['Avocado', 'Lime', 'Chicken Thighs']);
   });
 
-  it('adds food item and triggers recipe matching', () => {
-    const matchResults: IngredientMatchResultDto[] = [
-      {
-        recipe: {
-          id: 'r1',
-          title: 'Lime Chicken',
-          slug: 'lime-chicken',
-          description: 'Tangy chicken',
-          status: 'Published',
-          baseServings: 4,
-          yieldDisplay: null,
-          prepTimeMinutes: 10,
-          cookTimeMinutes: 20,
-          totalTimeMinutes: 30,
-          difficulty: 'Easy',
-          sourceName: null,
-          thumbnailImagePath: null,
-          collections: [],
-          tags: [],
-          ingredientCount: 3,
-          stepCount: 2,
-          timesCooked: 0,
-          averageRating: null,
-          createdAt: '2026-01-01T00:00:00Z',
-          modifiedAt: '2026-01-01T00:00:00Z',
+  it('adds multiple food items rapidly and debounces to a single match request', async () => {
+    vi.useFakeTimers();
+    try {
+      const matchResults: IngredientMatchResultDto[] = [
+        {
+          recipe: {
+            id: 'r1',
+            title: 'Lime Chicken',
+            slug: 'lime-chicken',
+            description: 'Tangy chicken',
+            status: 'Published',
+            baseServings: 4,
+            yieldDisplay: null,
+            prepTimeMinutes: 10,
+            cookTimeMinutes: 20,
+            totalTimeMinutes: 30,
+            difficulty: 'Easy',
+            sourceName: null,
+            thumbnailImagePath: null,
+            collections: [],
+            tags: [],
+            ingredientCount: 3,
+            stepCount: 2,
+            timesCooked: 0,
+            averageRating: null,
+            createdAt: '2026-01-01T00:00:00Z',
+            modifiedAt: '2026-01-01T00:00:00Z',
+          },
+          matchedCount: 2,
+          selectedOnHandCount: 2,
+          additionalNonStapleCount: 0,
+          pantryStaplesUsedCount: 1,
+          matchedIngredientNames: ['Chicken Thighs', 'Lime'],
+          missingNonStapleNames: [],
         },
-        matchedCount: 2,
-        selectedOnHandCount: 2,
-        additionalNonStapleCount: 0,
-        pantryStaplesUsedCount: 1,
-        matchedIngredientNames: ['Chicken Thighs', 'Lime'],
-        missingNonStapleNames: [],
-      },
-    ];
-    mockRecipeService.matchRecipesByIngredients.mockReturnValue(of(matchResults));
+      ];
+      mockRecipeService.matchRecipesByIngredients.mockReturnValue(of(matchResults));
 
-    component.addFoodItem(mockFoodItems[0]);
-    component.addFoodItem(mockFoodItems[1]);
+      component.addFoodItem(mockFoodItems[0]);
+      component.addFoodItem(mockFoodItems[1]);
+      component.addFoodItem(mockFoodItems[2]);
 
-    expect(component['selectedFoodItems']().length).toBe(2);
-    expect(mockRecipeService.matchRecipesByIngredients).toHaveBeenCalledWith({
-      foodItemIds: ['fi-1', 'fi-2'],
-    });
-    expect(component['matchResults']().length).toBe(1);
-    expect(component['matchResults']()[0].additionalNonStapleCount).toBe(0);
+      expect(component['selectedFoodItems']().length).toBe(3);
+      expect(mockRecipeService.matchRecipesByIngredients).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(300);
+
+      expect(mockRecipeService.matchRecipesByIngredients).toHaveBeenCalledTimes(1);
+      expect(mockRecipeService.matchRecipesByIngredients).toHaveBeenCalledWith({
+        foodItemIds: ['fi-1', 'fi-2', 'fi-3'],
+      });
+      expect(component['matchResults']().length).toBe(1);
+      expect(component['matchResults']()[0].additionalNonStapleCount).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it('clears all selected ingredients', () => {
-    component.addFoodItem(mockFoodItems[0]);
-    expect(component['selectedFoodItems']().length).toBe(1);
+  it('clears all selected ingredients and cancels pending debounced match', async () => {
+    vi.useFakeTimers();
+    try {
+      mockRecipeService.matchRecipesByIngredients.mockReturnValue(of([]));
+      component.addFoodItem(mockFoodItems[0]);
+      expect(component['selectedFoodItems']().length).toBe(1);
 
-    component.clearSelected();
-    expect(component['selectedFoodItems']().length).toBe(0);
-    expect(component['matchResults']().length).toBe(0);
+      component.clearSelected();
+      await vi.advanceTimersByTimeAsync(350);
+
+      expect(component['selectedFoodItems']().length).toBe(0);
+      expect(component['matchResults']().length).toBe(0);
+      expect(component['isMatching']()).toBe(false);
+      expect(mockRecipeService.matchRecipesByIngredients).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('excludes placeholder food items from filtered and suggested items', () => {

@@ -45,6 +45,11 @@ public record ConsolidatedShoppingBucket(
 
 public static class ShoppingConsolidator
 {
+    public const int MaxDisplayNameLength = 200;
+    public const int MaxCustomUnitNameLength = 60;
+    public const int MaxNotesLength = 300;
+    public const int MaxSourceLabelLength = 200;
+
     private static readonly decimal[] CleanFractionTargets =
     [
         0.125m,
@@ -178,17 +183,21 @@ public static class ShoppingConsolidator
             var foodItemId = bucketItems.FirstOrDefault(b => b.FoodItemId.HasValue)?.FoodItemId;
             var isPantryStaple = bucketItems.Any(b => b.IsPantryStaple);
             var displayName =
-                bucketItems
-                    .Select(b => b.CanonicalOrDisplayName)
-                    .FirstOrDefault(n => !string.IsNullOrWhiteSpace(n))
-                ?? first.CanonicalOrDisplayName;
+                ClampString(
+                    bucketItems
+                        .Select(b => b.CanonicalOrDisplayName)
+                        .FirstOrDefault(n => !string.IsNullOrWhiteSpace(n))
+                        ?? first.CanonicalOrDisplayName,
+                    MaxDisplayNameLength
+                ) ?? string.Empty;
 
             var notes = bucketItems
                 .Select(b => b.PreparationNote?.Trim())
                 .Where(n => !string.IsNullOrWhiteSpace(n))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
-            var mergedNotes = notes.Count > 0 ? string.Join(", ", notes) : null;
+            var mergedNotes =
+                notes.Count > 0 ? ClampString(string.Join(", ", notes), MaxNotesLength) : null;
 
             switch (dim)
             {
@@ -589,7 +598,10 @@ public static class ShoppingConsolidator
     {
         var first = items[0];
         var unit = first.Unit ?? MeasurementUnit.Whole;
-        var customUnitName = unit == MeasurementUnit.Custom ? first.CustomUnitName : null;
+        var customUnitName =
+            unit == MeasurementUnit.Custom
+                ? ClampString(first.CustomUnitName, MaxCustomUnitNameLength)
+                : null;
 
         var hasAnyMax = items.Any(i => i.MaxQuantity.HasValue && i.MaxQuantity > i.Quantity);
 
@@ -635,7 +647,9 @@ public static class ShoppingConsolidator
         var consistentUnit =
             items.Select(i => i.Unit).Distinct().Count() == 1 ? items[0].Unit : null;
         var customUnitName =
-            consistentUnit == MeasurementUnit.Custom ? items[0].CustomUnitName : null;
+            consistentUnit == MeasurementUnit.Custom
+                ? ClampString(items[0].CustomUnitName, MaxCustomUnitNameLength)
+                : null;
 
         var sources = BuildDeduplicatedSources(items, _ => (0m, null));
 
@@ -693,12 +707,33 @@ public static class ShoppingConsolidator
                 kvp.Key.Item1,
                 kvp.Key.Item2,
                 kvp.Key.Item3,
-                kvp.Key.Item4,
+                ClampString(kvp.Key.Item4, MaxSourceLabelLength) ?? "Recipe",
                 kvp.Value.ScheduledDate,
                 kvp.Value.Qty,
                 kvp.Value.MaxQty
             ))
             .ToList();
+    }
+
+    public static string? ClampString(string? value, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var trimmed = value.Trim();
+        if (maxLength <= 0 || trimmed.Length <= maxLength)
+        {
+            return trimmed;
+        }
+
+        if (maxLength == 1)
+        {
+            return trimmed[..1];
+        }
+
+        return $"{trimmed[..(maxLength - 1)].TrimEnd()}…";
     }
 
     private static MeasurementUnit SelectBestUsVolumeUnit(decimal totalTsp)

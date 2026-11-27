@@ -112,6 +112,7 @@ export class RecipeListComponent implements OnInit {
     this.destroyRef.onDestroy(() => {
       this.observer?.disconnect();
       this.clearSearchTimer();
+      this.clearTagFilterTimer();
       this.recipesRequest?.unsubscribe();
       this.loadMoreRequest?.unsubscribe();
     });
@@ -159,6 +160,7 @@ export class RecipeListComponent implements OnInit {
   protected readonly tagManagerSearch = signal<string>('');
   protected readonly maxVisibleCardTags = 4;
   private searchTimer: ReturnType<typeof setTimeout> | null = null;
+  private tagFilterTimer: ReturnType<typeof setTimeout> | null = null;
   private recipesRequest: Subscription | null = null;
   private loadMoreRequest: Subscription | null = null;
 
@@ -293,12 +295,16 @@ export class RecipeListComponent implements OnInit {
     const targetPage = parsedPage !== null ? Math.min(parsedPage, 20) : 1;
 
     const currentTags = this.selectedTagIds();
+    const effectiveNextSearch =
+      this.initializedFromRoute && this.searchTimer !== null ? this.searchQuery() : nextSearch;
+    const effectiveNextTags =
+      this.initializedFromRoute && this.tagFilterTimer !== null ? currentTags : nextTagIds;
     const tagsDiffer =
-      currentTags.length !== nextTagIds.length ||
-      currentTags.some((id, idx) => id !== nextTagIds[idx]);
+      currentTags.length !== effectiveNextTags.length ||
+      currentTags.some((id, idx) => id !== effectiveNextTags[idx]);
 
     const changed =
-      this.searchQuery().trim() !== nextSearch.trim() ||
+      this.searchQuery().trim() !== effectiveNextSearch.trim() ||
       this.selectedStatus() !== nextStatus ||
       this.selectedDifficulty() !== nextDifficulty ||
       this.maxTimeMinutes() !== nextMaxTime ||
@@ -309,13 +315,17 @@ export class RecipeListComponent implements OnInit {
       this.currentPage() !== targetPage;
 
     if (!this.initializedFromRoute || changed) {
-      this.searchQuery.set(nextSearch);
+      if (!this.initializedFromRoute || this.searchTimer === null) {
+        this.searchQuery.set(nextSearch);
+      }
       this.selectedStatus.set(nextStatus);
       this.selectedDifficulty.set(nextDifficulty);
       this.maxTimeMinutes.set(nextMaxTime);
       this.minRating.set(nextMinRating);
       this.selectedCollectionId.set(nextCollectionId);
-      this.selectedTagIds.set(nextTagIds);
+      if (!this.initializedFromRoute || this.tagFilterTimer === null) {
+        this.selectedTagIds.set(nextTagIds);
+      }
       this.forgottenFavoritesOnly.set(nextForgotten);
       this.currentPage.set(targetPage);
     }
@@ -397,6 +407,7 @@ export class RecipeListComponent implements OnInit {
 
   loadRecipes(targetPage = 1, syncUrl = true): void {
     this.clearSearchTimer();
+    this.clearTagFilterTimer();
     this.recipesRequest?.unsubscribe();
     this.loadMoreRequest?.unsubscribe();
     this.loadMoreRequest = null;
@@ -511,7 +522,18 @@ export class RecipeListComponent implements OnInit {
 
   onTagSelectionChange(tags: string[]): void {
     this.selectedTagIds.set(tags);
-    this.loadRecipes();
+    this.clearTagFilterTimer();
+    this.tagFilterTimer = setTimeout(() => {
+      this.tagFilterTimer = null;
+      this.loadRecipes();
+    }, 250);
+  }
+
+  private clearTagFilterTimer(): void {
+    if (this.tagFilterTimer) {
+      clearTimeout(this.tagFilterTimer);
+      this.tagFilterTimer = null;
+    }
   }
 
   tagsByCategory(category: TagCategory): TagDto[] {

@@ -1,12 +1,22 @@
 import { A11yModule } from '@angular/cdk/a11y';
-import { Component, ElementRef, OnInit, ViewChild, computed, inject, signal } from '@angular/core';
+import {
+  Component,
+  DestroyRef,
+  ElementRef,
+  OnInit,
+  ViewChild,
+  computed,
+  inject,
+  signal,
+} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormControl, ReactiveFormsModule } from '@angular/forms';
 import { MatDialogRef } from '@angular/material/dialog';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { Router } from '@angular/router';
-import { debounceTime, distinctUntilChanged } from 'rxjs';
+import { catchError, debounceTime, distinctUntilChanged, map, of, switchMap } from 'rxjs';
 import { RecipeSummaryDto } from '../../../core/models/recipe.models';
 import { CollectionDto } from '../../../core/models/taxonomy.models';
 import { KitchenReferenceService } from '../../../core/services/kitchen-reference/kitchen-reference.service';
@@ -49,6 +59,7 @@ export class GlobalSearchDialogComponent implements OnInit {
   private readonly recipeService = inject(RecipeService);
   private readonly taxonomyService = inject(TaxonomyService);
   private readonly kitchenReferenceService = inject(KitchenReferenceService);
+  private readonly destroyRef = inject(DestroyRef);
 
   @ViewChild('searchInput') private readonly searchInputRef?: ElementRef<HTMLInputElement>;
 
@@ -202,32 +213,41 @@ export class GlobalSearchDialogComponent implements OnInit {
   }
 
   private setupSearchSubscription(): void {
-    this.searchControl.valueChanges.subscribe((value) => {
+    this.searchControl.valueChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((value) => {
       this.searchQuery.set(value ?? '');
     });
 
     this.searchControl.valueChanges
-      .pipe(debounceTime(200), distinctUntilChanged())
-      .subscribe((query) => {
-        this.activeIndex.set(0);
-        const q = (query ?? '').trim();
-        if (!q) {
-          this.recipes.set([]);
-          this.isSearching.set(false);
-          return;
-        }
-
-        this.isSearching.set(true);
-        this.recipeService.getRecipes({ search: q }).subscribe({
-          next: (results) => {
-            this.recipes.set(results);
-            this.isSearching.set(false);
-          },
-          error: () => {
+      .pipe(
+        debounceTime(250),
+        map((query) => (query ?? '').trim()),
+        distinctUntilChanged(),
+        switchMap((q) => {
+          this.activeIndex.set(0);
+          if (!q) {
             this.recipes.set([]);
             this.isSearching.set(false);
-          },
-        });
+            return of<RecipeSummaryDto[]>([]);
+          }
+
+          this.isSearching.set(true);
+          return this.recipeService
+            .getRecipesPaged({
+              search: q,
+              page: 1,
+              pageSize: 20,
+              includeTotalCount: false,
+            })
+            .pipe(
+              map((res) => res.items),
+              catchError(() => of<RecipeSummaryDto[]>([])),
+            );
+        }),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((results) => {
+        this.recipes.set(results);
+        this.isSearching.set(false);
       });
   }
 

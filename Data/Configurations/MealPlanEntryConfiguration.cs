@@ -11,6 +11,7 @@ public sealed class MealPlanEntryConfiguration : IEntityTypeConfiguration<MealPl
         builder.ToTable("MealPlanEntries");
 
         builder.HasKey(e => e.Id);
+        builder.Property(e => e.Id).ValueGeneratedNever();
 
         builder.Property(e => e.Slot).HasConversion<string>().HasMaxLength(32);
         builder.Property(e => e.EntryType).HasConversion<string>().HasMaxLength(32);

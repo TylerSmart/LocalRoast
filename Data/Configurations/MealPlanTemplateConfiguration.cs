@@ -11,6 +11,7 @@ public sealed class MealPlanTemplateConfiguration : IEntityTypeConfiguration<Mea
         builder.ToTable("MealPlanTemplates");
 
         builder.HasKey(t => t.Id);
+        builder.Property(t => t.Id).ValueGeneratedNever();
 
         builder.Property(t => t.Name).IsRequired().HasMaxLength(120);
         builder.Property(t => t.NormalizedName).IsRequired().HasMaxLength(120);

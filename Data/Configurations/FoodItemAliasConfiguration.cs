@@ -11,6 +11,7 @@ public sealed class FoodItemAliasConfiguration : IEntityTypeConfiguration<FoodIt
         builder.ToTable("FoodItemAliases");
 
         builder.HasKey(a => a.Id);
+        builder.Property(a => a.Id).ValueGeneratedNever();
 
         builder.Property(a => a.Alias).IsRequired().HasMaxLength(150);
 

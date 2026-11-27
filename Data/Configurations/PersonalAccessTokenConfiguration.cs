@@ -11,6 +11,7 @@ public sealed class PersonalAccessTokenConfiguration : IEntityTypeConfiguration<
         builder.ToTable("PersonalAccessTokens");
 
         builder.HasKey(t => t.Id);
+        builder.Property(t => t.Id).ValueGeneratedNever();
 
         builder.Property(t => t.Name).IsRequired().HasMaxLength(100);
 

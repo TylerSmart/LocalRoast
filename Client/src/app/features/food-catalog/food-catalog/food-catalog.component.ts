@@ -2,6 +2,7 @@ import { Component, DestroyRef, ElementRef, OnInit, computed, inject, signal } f
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, ParamMap, Router } from '@angular/router';
+import { Subscription } from 'rxjs';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
 import { MatCheckboxModule } from '@angular/material/checkbox';
@@ -111,6 +112,7 @@ export class FoodCatalogComponent implements OnInit {
   protected readonly pageSize = signal<number>(30);
   protected readonly totalCount = signal<number>(0);
   private searchTimer: ReturnType<typeof setTimeout> | null = null;
+  private itemsRequest: Subscription | null = null;
   protected readonly isLoading = signal<boolean>(false);
   protected readonly isBulkDeleting = signal<boolean>(false);
   protected readonly errorMessage = signal<string | null>(null);
@@ -154,6 +156,7 @@ export class FoodCatalogComponent implements OnInit {
     this.destroyRef.onDestroy(() => {
       nativeHost.removeEventListener('pointerdown', onCapturePointerDown, { capture: true });
       nativeHost.removeEventListener('click', onCaptureClick, { capture: true });
+      this.itemsRequest?.unsubscribe();
       if (this.searchTimer) {
         clearTimeout(this.searchTimer);
         this.searchTimer = null;
@@ -193,8 +196,10 @@ export class FoodCatalogComponent implements OnInit {
         ? parsedPageSize
         : FoodCatalogComponent.DEFAULT_PAGE_SIZE;
 
+    const effectiveNextSearch =
+      this.initializedFromRoute && this.searchTimer !== null ? this.searchQuery() : nextSearch;
     const changed =
-      this.searchQuery().trim() !== nextSearch.trim() ||
+      this.searchQuery().trim() !== effectiveNextSearch.trim() ||
       this.onlyPantryStaples() !== nextStaples ||
       this.categoryFilter() !== nextCategory ||
       this.sortBy() !== nextSortBy ||
@@ -203,7 +208,9 @@ export class FoodCatalogComponent implements OnInit {
       this.pageSize() !== nextPageSize;
 
     if (!this.initializedFromRoute || changed) {
-      this.searchQuery.set(nextSearch);
+      if (!this.initializedFromRoute || this.searchTimer === null) {
+        this.searchQuery.set(nextSearch);
+      }
       this.onlyPantryStaples.set(nextStaples);
       this.categoryFilter.set(nextCategory);
       this.sortBy.set(nextSortBy);
@@ -242,6 +249,7 @@ export class FoodCatalogComponent implements OnInit {
   }
 
   loadItems(): void {
+    this.itemsRequest?.unsubscribe();
     this.isLoading.set(true);
     this.errorMessage.set(null);
     this.selectedIds.set(new Set());
@@ -257,7 +265,7 @@ export class FoodCatalogComponent implements OnInit {
       sortDirection: this.sortDirection(),
     };
 
-    this.catalogService.getFoodItemsPaged(query).subscribe({
+    this.itemsRequest = this.catalogService.getFoodItemsPaged(query).subscribe({
       next: (res) => {
         this.items.set(res.items);
         this.totalCount.set(res.totalCount);
@@ -276,6 +284,7 @@ export class FoodCatalogComponent implements OnInit {
     this.searchQuery.set(term);
     if (this.searchTimer) clearTimeout(this.searchTimer);
     this.searchTimer = setTimeout(() => {
+      this.searchTimer = null;
       this.pageIndex.set(0);
       this.syncQueryParams();
       this.loadItems();

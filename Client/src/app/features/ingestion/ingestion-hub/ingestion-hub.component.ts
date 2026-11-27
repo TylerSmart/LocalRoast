@@ -26,7 +26,7 @@ import { MatPaginatorModule, PageEvent } from '@angular/material/paginator';
 import { MatSelectModule } from '@angular/material/select';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { ActivatedRoute, ParamMap, Router, RouterLink } from '@angular/router';
-import { Subject, debounceTime, interval } from 'rxjs';
+import { Subject, Subscription, debounceTime, interval } from 'rxjs';
 import { APP_STORAGE_PREFIX } from '../../../app.branding';
 import type {
   IngestionChannel,
@@ -133,6 +133,7 @@ export class IngestionHubComponent implements OnInit, OnDestroy {
   readonly pageSize = signal<number>(25);
   readonly totalCount = signal<number>(0);
   private searchTimer: ReturnType<typeof setTimeout> | null = null;
+  private jobsRequest: Subscription | null = null;
   readonly jobs = signal<IngestionJobSummaryDto[]>([]);
   readonly isLoading = signal<boolean>(true);
   readonly isSubmitting = signal<boolean>(false);
@@ -254,6 +255,7 @@ export class IngestionHubComponent implements OnInit, OnDestroy {
     this.searchQuery.set(input.value);
     if (this.searchTimer) clearTimeout(this.searchTimer);
     this.searchTimer = setTimeout(() => {
+      this.searchTimer = null;
       this.pageIndex.set(0);
       this.syncQueryParams();
       this.executeRefresh();
@@ -341,9 +343,11 @@ export class IngestionHubComponent implements OnInit, OnDestroy {
         ? parsedPageSize
         : IngestionHubComponent.DEFAULT_PAGE_SIZE;
 
+    const effectiveNextSearch =
+      this.initializedFromRoute && this.searchTimer !== null ? this.searchQuery() : nextSearch;
     const queryChanged =
       this.filter() !== nextFilter ||
-      this.searchQuery().trim() !== nextSearch.trim() ||
+      this.searchQuery().trim() !== effectiveNextSearch.trim() ||
       this.sortBy() !== nextSortBy ||
       this.sortDirection() !== nextSortDir ||
       this.pageIndex() !== nextPageIndex ||
@@ -357,7 +361,9 @@ export class IngestionHubComponent implements OnInit, OnDestroy {
 
     if (!this.initializedFromRoute || queryChanged) {
       this.filter.set(nextFilter);
-      this.searchQuery.set(nextSearch);
+      if (!this.initializedFromRoute || this.searchTimer === null) {
+        this.searchQuery.set(nextSearch);
+      }
       this.sortBy.set(nextSortBy);
       this.sortDirection.set(nextSortDir);
       this.pageIndex.set(nextPageIndex);
@@ -439,6 +445,7 @@ export class IngestionHubComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.jobsRequest?.unsubscribe();
     if (this.searchTimer) {
       clearTimeout(this.searchTimer);
       this.searchTimer = null;
@@ -558,7 +565,8 @@ export class IngestionHubComponent implements OnInit, OnDestroy {
         break;
     }
 
-    this.ingestionService
+    this.jobsRequest?.unsubscribe();
+    this.jobsRequest = this.ingestionService
       .getJobsPaged(
         status,
         this.searchQuery().trim() || null,

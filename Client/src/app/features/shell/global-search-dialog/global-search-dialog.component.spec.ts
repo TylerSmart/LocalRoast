@@ -1,7 +1,7 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { MatDialogRef } from '@angular/material/dialog';
 import { Router } from '@angular/router';
-import { of } from 'rxjs';
+import { of, Subject } from 'rxjs';
 import { RecipeSummaryDto } from '../../../core/models/recipe.models';
 import { CollectionDto } from '../../../core/models/taxonomy.models';
 import { KitchenReferenceService } from '../../../core/services/kitchen-reference/kitchen-reference.service';
@@ -55,7 +55,16 @@ describe('GlobalSearchDialogComponent', () => {
   ];
 
   const mockRecipeService = {
-    getRecipes: vi.fn().mockReturnValue(of(mockRecipes)),
+    getRecipesPaged: vi.fn().mockReturnValue(
+      of({
+        items: mockRecipes,
+        totalCount: null,
+        page: 1,
+        pageSize: 20,
+        hasMore: false,
+        isFuzzySearch: false,
+      }),
+    ),
   };
 
   const mockTaxonomyService = {
@@ -149,5 +158,66 @@ describe('GlobalSearchDialogComponent', () => {
       tab: 'glossary',
       query: 'Julienne',
     });
+  });
+
+  it('uses paged recipe search and cancels stale in-flight searches via switchMap', async () => {
+    vi.useFakeTimers();
+    try {
+      const first$ = new Subject<{
+        items: RecipeSummaryDto[];
+        totalCount: number | null;
+        page: number;
+        pageSize: number;
+        hasMore: boolean;
+        isFuzzySearch: boolean;
+      }>();
+      const second$ = new Subject<{
+        items: RecipeSummaryDto[];
+        totalCount: number | null;
+        page: number;
+        pageSize: number;
+        hasMore: boolean;
+        isFuzzySearch: boolean;
+      }>();
+      mockRecipeService.getRecipesPaged
+        .mockReset()
+        .mockReturnValueOnce(first$)
+        .mockReturnValueOnce(second$);
+
+      component['searchControl'].setValue('blu');
+      await vi.advanceTimersByTimeAsync(250);
+      expect(mockRecipeService.getRecipesPaged).toHaveBeenCalledWith({
+        search: 'blu',
+        page: 1,
+        pageSize: 20,
+        includeTotalCount: false,
+      });
+
+      component['searchControl'].setValue('blueberry');
+      await vi.advanceTimersByTimeAsync(250);
+
+      // Emit newer search first, then stale search — stale observable was unsubscribed by switchMap
+      second$.next({
+        items: mockRecipes,
+        totalCount: null,
+        page: 1,
+        pageSize: 20,
+        hasMore: false,
+        isFuzzySearch: false,
+      });
+      first$.next({
+        items: [],
+        totalCount: null,
+        page: 1,
+        pageSize: 20,
+        hasMore: false,
+        isFuzzySearch: false,
+      });
+
+      expect(component['recipes']()).toEqual(mockRecipes);
+      expect(component['isSearching']()).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

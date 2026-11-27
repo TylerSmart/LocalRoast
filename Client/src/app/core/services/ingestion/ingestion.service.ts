@@ -21,10 +21,12 @@ import type {
   UpsertLlmModelProfileRequest,
 } from '../../models/ingestion.models';
 import type { RecipeDetailDto } from '../../models/recipe.models';
+import { TaxonomyService } from '../taxonomy/taxonomy.service';
 
 @Service()
 export class IngestionService {
   private readonly http = inject(HttpClient);
+  private readonly taxonomyService = inject(TaxonomyService, { optional: true });
 
   readonly summary = signal<IngestionQueueSummaryDto>({
     readyForReviewCount: 0,
@@ -134,9 +136,12 @@ export class IngestionService {
   }
 
   approveAndPublish(id: string, draft: IngestionExtractedDraftDto): Observable<RecipeDetailDto> {
-    return this.http
-      .post<RecipeDetailDto>(apiUrl(`/ingestion/jobs/${id}/approve`), draft)
-      .pipe(tap(() => this.refreshSummary()));
+    return this.http.post<RecipeDetailDto>(apiUrl(`/ingestion/jobs/${id}/approve`), draft).pipe(
+      tap(() => {
+        this.taxonomyService?.invalidateCache();
+        this.refreshSummary();
+      }),
+    );
   }
 
   retryJob(id: string): Observable<IngestionJobSummaryDto> {

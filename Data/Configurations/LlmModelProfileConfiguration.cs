@@ -12,6 +12,7 @@ public sealed class LlmModelProfileConfiguration : IEntityTypeConfiguration<LlmM
         builder.ToTable("LlmModelProfiles");
 
         builder.HasKey(p => p.Id);
+        builder.Property(p => p.Id).ValueGeneratedNever();
 
         builder.Property(p => p.DisplayName).IsRequired().HasMaxLength(150);
         builder.HasIndex(p => new { p.ModelConfigurationId, p.DisplayName }).IsUnique();

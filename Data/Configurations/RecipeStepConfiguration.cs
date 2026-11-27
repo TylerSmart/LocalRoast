@@ -11,6 +11,7 @@ public sealed class RecipeStepConfiguration : IEntityTypeConfiguration<RecipeSte
         builder.ToTable("RecipeSteps");
 
         builder.HasKey(rs => rs.Id);
+        builder.Property(rs => rs.Id).ValueGeneratedNever();
 
         builder.HasIndex(rs => new { rs.RecipeId, rs.StepNumber }).IsUnique();
 

@@ -33,8 +33,8 @@ import {
 import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
-import { Observable, Subject, Subscription } from 'rxjs';
-import { debounceTime, distinctUntilChanged } from 'rxjs/operators';
+import { Observable, Subject, Subscription, of } from 'rxjs';
+import { catchError, debounceTime, distinctUntilChanged, switchMap, tap } from 'rxjs/operators';
 
 export interface SearchableSelectOption<T = string> {
   value: T;
@@ -232,31 +232,41 @@ export class SearchableSelectComponent implements OnInit, OnDestroy, ControlValu
 
   ngOnInit(): void {
     this.searchSubscription = this.searchSubject
-      .pipe(debounceTime(this.debounceMs()), distinctUntilChanged())
-      .subscribe((term) => {
-        this.searchChange.emit(term);
-        const fn = this.searchFn();
-        if (fn) {
+      .pipe(
+        debounceTime(this.debounceMs()),
+        distinctUntilChanged(),
+        tap((term) => this.searchChange.emit(term)),
+        switchMap((term) => {
+          const fn = this.searchFn();
+          if (!fn) {
+            return of<SearchableSelectOption<unknown>[] | null>(null);
+          }
+
           const query = term.trim();
           if (!query) {
             this.isLoading.set(false);
             this.asyncResults.set([]);
-            return;
+            return of<SearchableSelectOption<unknown>[] | null>(null);
           }
+
           this.isLoading.set(true);
-          fn(query).subscribe({
-            next: (results) => {
-              if (this.isDestroyed) return;
-              this.asyncResults.set(results);
-              this.isLoading.set(false);
-            },
-            error: () => {
-              if (this.isDestroyed) return;
-              this.asyncResults.set([]);
-              this.isLoading.set(false);
-            },
-          });
+          return fn(query).pipe(
+            catchError(() => {
+              if (!this.isDestroyed) {
+                this.asyncResults.set([]);
+                this.isLoading.set(false);
+              }
+              return of<SearchableSelectOption<unknown>[] | null>(null);
+            }),
+          );
+        }),
+      )
+      .subscribe((results) => {
+        if (this.isDestroyed || results === null) {
+          return;
         }
+        this.asyncResults.set(results);
+        this.isLoading.set(false);
       });
   }
 

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using App.Core.FoodCatalog;
@@ -30,6 +31,15 @@ public sealed partial class RecipeEmbeddingService(
     private const int MaxInlineMissingEmbeddings = 128;
     private const int DefaultCandidatePoolCap = 36;
     private const int MaxCandidatePoolCap = 40;
+
+    private static readonly ConcurrentDictionary<string, CleanSyncWatermark> CleanSyncWatermarks =
+        new(StringComparer.Ordinal);
+
+    private sealed record CleanSyncWatermark(
+        int PublishedCount,
+        int EmbeddingCount,
+        DateTimeOffset LatestModifiedStamp
+    );
 
     private static readonly MealSlot[] AllMealSlots =
     [
@@ -279,6 +289,11 @@ public sealed partial class RecipeEmbeddingService(
         }
 
         var modelTag = Truncate(embeddingConfig.TextModel.Trim(), MaxModelTagLength);
+        var watermarkKey = GetWatermarkKey(modelTag);
+        if (watermarkKey is not null)
+        {
+            CleanSyncWatermarks.TryRemove(watermarkKey, out _);
+        }
 
         var recipes = await LoadRecipesForEmbeddingQuery()
             .Where(r => distinctIds.Contains(r.Id))
@@ -332,6 +347,20 @@ public sealed partial class RecipeEmbeddingService(
         var batchLimit = Math.Clamp(maxBatchCount, 1, 256);
         var modelTag = Truncate(embConfig.TextModel.Trim(), MaxModelTagLength);
 
+        var watermarkKey = GetWatermarkKey(modelTag);
+        CleanSyncWatermark? currentWatermark = null;
+        if (watermarkKey is not null)
+        {
+            currentWatermark = await ComputeCurrentWatermarkAsync(modelTag, cancellationToken);
+            if (
+                CleanSyncWatermarks.TryGetValue(watermarkKey, out var cachedWatermark)
+                && cachedWatermark == currentWatermark
+            )
+            {
+                return 0;
+            }
+        }
+
         var publishedRecipes = await LoadRecipesForEmbeddingQuery()
             .Where(r => r.Status == RecipeStatus.Published)
             .OrderByDescending(r => r.ModifiedAt)
@@ -340,6 +369,10 @@ public sealed partial class RecipeEmbeddingService(
 
         if (publishedRecipes.Count == 0)
         {
+            if (watermarkKey is not null && currentWatermark is not null)
+            {
+                CleanSyncWatermarks[watermarkKey] = currentWatermark;
+            }
             return 0;
         }
 
@@ -372,7 +405,16 @@ public sealed partial class RecipeEmbeddingService(
 
         if (pendingRecipes.Count == 0)
         {
+            if (watermarkKey is not null && currentWatermark is not null)
+            {
+                CleanSyncWatermarks[watermarkKey] = currentWatermark;
+            }
             return 0;
+        }
+
+        if (watermarkKey is not null)
+        {
+            CleanSyncWatermarks.TryRemove(watermarkKey, out _);
         }
 
         using var workload = liveTracker?.CurrentWorkload is null
@@ -1537,9 +1579,79 @@ public sealed partial class RecipeEmbeddingService(
         }
     }
 
+    private string? GetWatermarkKey(string modelTag)
+    {
+        if (!dbContext.Database.IsRelational())
+        {
+            return null;
+        }
+
+        var conn = dbContext.Database.GetConnectionString();
+        return string.IsNullOrWhiteSpace(conn) ? null : $"{conn}|{modelTag}";
+    }
+
+    private async Task<CleanSyncWatermark> ComputeCurrentWatermarkAsync(
+        string modelTag,
+        CancellationToken cancellationToken
+    )
+    {
+        var publishedCount = await dbContext
+            .Recipes.AsNoTracking()
+            .CountAsync(r => r.Status == RecipeStatus.Published, cancellationToken);
+
+        var embeddingCount = await dbContext
+            .RecipeEmbeddings.AsNoTracking()
+            .CountAsync(e => e.ModelTag == modelTag, cancellationToken);
+
+        var maxRecipeModified =
+            await dbContext
+                .Recipes.AsNoTracking()
+                .Where(r => r.Status == RecipeStatus.Published)
+                .MaxAsync(r => (DateTimeOffset?)r.ModifiedAt, cancellationToken)
+            ?? DateTimeOffset.MinValue;
+
+        var maxFoodModified =
+            await dbContext
+                .FoodItems.AsNoTracking()
+                .MaxAsync(f => (DateTimeOffset?)f.ModifiedAt, cancellationToken)
+            ?? DateTimeOffset.MinValue;
+
+        var maxTagModified =
+            await dbContext
+                .Tags.AsNoTracking()
+                .MaxAsync(t => (DateTimeOffset?)t.ModifiedAt, cancellationToken)
+            ?? DateTimeOffset.MinValue;
+
+        var maxCollectionModified =
+            await dbContext
+                .Collections.AsNoTracking()
+                .MaxAsync(c => (DateTimeOffset?)c.ModifiedAt, cancellationToken)
+            ?? DateTimeOffset.MinValue;
+
+        var maxEmbeddingModified =
+            await dbContext
+                .RecipeEmbeddings.AsNoTracking()
+                .Where(e => e.ModelTag == modelTag)
+                .MaxAsync(e => (DateTimeOffset?)e.ModifiedAt, cancellationToken)
+            ?? DateTimeOffset.MinValue;
+
+        var latest = maxRecipeModified;
+        if (maxFoodModified > latest)
+            latest = maxFoodModified;
+        if (maxTagModified > latest)
+            latest = maxTagModified;
+        if (maxCollectionModified > latest)
+            latest = maxCollectionModified;
+        if (maxEmbeddingModified > latest)
+            latest = maxEmbeddingModified;
+
+        return new CleanSyncWatermark(publishedCount, embeddingCount, latest);
+    }
+
     private IQueryable<Recipe> LoadRecipesForEmbeddingQuery() =>
         dbContext
             .Recipes.AsNoTracking()
+            .AsSplitQuery()
             .Include(r => r.RecipeTags)
                 .ThenInclude(rt => rt.Tag)
             .Include(r => r.RecipeCollections)
@@ -1552,6 +1664,7 @@ public sealed partial class RecipeEmbeddingService(
     private IQueryable<Recipe> LoadRecipesForMealPlanningQuery() =>
         dbContext
             .Recipes.AsNoTracking()
+            .AsSplitQuery()
             .Include(r => r.RecipeTags)
                 .ThenInclude(rt => rt.Tag)
             .Include(r => r.RecipeCollections)

@@ -357,4 +357,60 @@ describe('RecipeListComponent', () => {
     expect(restoredComp['currentPage']()).toBe(2);
     expect(restoredComp['recipes']().map((r) => r.id)).toEqual(['r-1', 'r-2']);
   });
+
+  it('debounces rapid multi-tag selection and protects active search typing from route param clobbering', async () => {
+    vi.useFakeTimers();
+    try {
+      const queryParamMap$ = new BehaviorSubject(convertToParamMap({}));
+
+      TestBed.resetTestingModule();
+      await TestBed.configureTestingModule({
+        imports: [RecipeListComponent],
+        providers: [
+          provideRouter([]),
+          {
+            provide: ActivatedRoute,
+            useValue: {
+              queryParamMap: queryParamMap$.asObservable(),
+              snapshot: { queryParamMap: queryParamMap$.value },
+            },
+          },
+          { provide: RecipeService, useValue: mockRecipeService },
+          { provide: TaxonomyService, useValue: mockTaxonomyService },
+          { provide: MatDialog, useValue: mockDialog },
+          { provide: MatSnackBar, useValue: mockSnackBar },
+        ],
+      }).compileComponents();
+
+      mockRecipeService.getRecipesPaged.mockClear();
+      const raceFixture = TestBed.createComponent(RecipeListComponent);
+      const raceComp = raceFixture.componentInstance;
+      raceFixture.detectChanges();
+      mockRecipeService.getRecipesPaged.mockClear();
+
+      // Rapidly select 3 tags -> should coalesce into 1 request after 250ms debounce
+      raceComp.onTagSelectionChange(['t1']);
+      raceComp.onTagSelectionChange(['t1', 't2']);
+      raceComp.onTagSelectionChange(['t1', 't2', 't3']);
+      expect(mockRecipeService.getRecipesPaged).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(250);
+      expect(mockRecipeService.getRecipesPaged).toHaveBeenCalledTimes(1);
+      expect(mockRecipeService.getRecipesPaged).toHaveBeenLastCalledWith(
+        expect.objectContaining({ tagIds: ['t1', 't2', 't3'] }),
+      );
+
+      // While search timer is pending, emitting stale route query params must NOT overwrite active typing
+      raceComp.onSearchChange('blueb');
+      queryParamMap$.next(convertToParamMap({ q: 'blu' }));
+      expect(raceComp['searchQuery']()).toBe('blueb');
+
+      await vi.advanceTimersByTimeAsync(300);
+      expect(mockRecipeService.getRecipesPaged).toHaveBeenLastCalledWith(
+        expect.objectContaining({ search: 'blueb' }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

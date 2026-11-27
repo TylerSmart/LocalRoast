@@ -540,4 +540,140 @@ public sealed class ShoppingListServiceTests
                 .Quantity
         );
     }
+
+    [TestMethod]
+    public async Task AddRecipeIngredients_IntoExistingPopulatedList_ConsolidatesQuantitiesClampsNotesAndPersistsSources()
+    {
+        var list = await _service.CreateShoppingListAsync(
+            new CreateShoppingListRequest("Weekend Shop")
+        );
+
+        // Pre-populate list with Garlic (existing long note) and active Olive Oil + excluded salt staple
+        await _service.AddItemAsync(
+            list.Id,
+            new CreateShoppingListItemRequest(
+                "Garlic",
+                3m,
+                null,
+                MeasurementUnit.Clove,
+                null,
+                FoodItemId: _foodGarlic.Id,
+                Notes: new string('x', 260)
+            )
+        );
+
+        var longSubNoteRecipe = new Recipe
+        {
+            Id = Guid.NewGuid(),
+            Title = new string('B', 190) + " Pie",
+            Slug = $"blueberry-pie-{Guid.NewGuid():N}",
+            Status = RecipeStatus.Published,
+            BaseServings = 4m,
+            Ingredients =
+            [
+                new RecipeIngredient
+                {
+                    Id = Guid.NewGuid(),
+                    FoodItemId = _foodGarlic.Id,
+                    FoodItem = _foodGarlic,
+                    DisplayName = "Garlic",
+                    Quantity = 2m,
+                    Unit = MeasurementUnit.Clove,
+                    PreparationNote = new string('y', 180),
+                    SortOrder = 0,
+                },
+                new RecipeIngredient
+                {
+                    Id = Guid.NewGuid(),
+                    FoodItemId = _foodOil.Id,
+                    FoodItem = _foodOil,
+                    DisplayName = "Olive Oil",
+                    Quantity = 2m,
+                    Unit = MeasurementUnit.Tbsp,
+                    SortOrder = 1,
+                },
+                new RecipeIngredient
+                {
+                    Id = Guid.NewGuid(),
+                    LinkedRecipeId = _subRecipeSalsa.Id,
+                    LinkedRecipe = _subRecipeSalsa,
+                    DisplayName = "Salsa Verde",
+                    Quantity = 1m,
+                    SortOrder = 2,
+                },
+            ],
+        };
+        _dbContext.Recipes.Add(longSubNoteRecipe);
+        await _dbContext.SaveChangesAsync();
+
+        // Adding with TargetServings <= 0 must throw validation error cleanly
+        await Assert.ThrowsAsync<DomainValidationException>(() =>
+            _service.AddRecipeIngredientsAsync(
+                list.Id,
+                new AddRecipeToShoppingListRequest(longSubNoteRecipe.Id, TargetServings: 0m)
+            )
+        );
+
+        var res = await _service.AddRecipeIngredientsAsync(
+            list.Id,
+            new AddRecipeToShoppingListRequest(
+                RecipeId: longSubNoteRecipe.Id,
+                TargetServings: 4m,
+                IncludeSubRecipes: true,
+                IncludeOptionalIngredients: true
+            )
+        );
+
+        Assert.IsNotNull(res);
+        // 3 existing cloves + 2 from main recipe + 2 from sub-recipe = 7 cloves
+        var garlicItem = res.ShoppingList.ActiveItems.Single(i => i.FoodItemId == _foodGarlic.Id);
+        Assert.AreEqual(7m, garlicItem.Quantity);
+        Assert.IsNotNull(garlicItem.Notes);
+        Assert.IsLessThanOrEqualTo(ShoppingConsolidator.MaxNotesLength, garlicItem.Notes.Length);
+        Assert.AreEqual(2, garlicItem.Sources.Count);
+        Assert.IsTrue(
+            garlicItem.Sources.All(s =>
+                s.SourceLabel.Length <= ShoppingConsolidator.MaxSourceLabelLength
+            )
+        );
+    }
+
+    [TestMethod]
+    public async Task PromotePantryStapleItem_MergesIntoExistingActiveItemWithoutConcurrencyError()
+    {
+        var list = await _service.CreateShoppingListAsync(
+            new CreateShoppingListRequest("Pantry Merge List")
+        );
+
+        // First add active Olive Oil
+        var activeOil = await _service.AddItemAsync(
+            list.Id,
+            new CreateShoppingListItemRequest(
+                "Extra-Virgin Olive Oil",
+                2m,
+                null,
+                MeasurementUnit.Tbsp,
+                null,
+                FoodItemId: _foodOil.Id
+            )
+        );
+        Assert.IsNotNull(activeOil);
+
+        // Next add recipe with Olive Oil so it creates an excluded pantry staple item
+        await _service.AddRecipeIngredientsAsync(
+            list.Id,
+            new AddRecipeToShoppingListRequest(_recipeTacos.Id, TargetServings: 4m)
+        );
+
+        var beforePromote = await _service.GetShoppingListByIdAsync(list.Id);
+        Assert.IsNotNull(beforePromote);
+        var excludedOil = beforePromote.ExcludedPantryItems.Single(i =>
+            i.FoodItemId == _foodOil.Id
+        );
+
+        var promoted = await _service.PromotePantryStapleItemAsync(list.Id, excludedOil.Id);
+        Assert.IsNotNull(promoted);
+        Assert.AreEqual(0.25m, promoted.Quantity); // 2 tbsp + 2 tbsp = 4 tbsp = 1/4 cup
+        Assert.AreEqual(1, promoted.Sources.Count);
+    }
 }

@@ -11,6 +11,7 @@ public sealed class RecipeEmbeddingConfiguration : IEntityTypeConfiguration<Reci
         builder.ToTable("RecipeEmbeddings");
 
         builder.HasKey(e => e.Id);
+        builder.Property(e => e.Id).ValueGeneratedNever();
 
         builder.Property(e => e.ModelTag).IsRequired().HasMaxLength(200);
         builder.Property(e => e.ContentHash).IsRequired().HasMaxLength(64);

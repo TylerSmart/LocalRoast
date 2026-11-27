@@ -12,6 +12,7 @@ public sealed class RecipeIngredientReplacementConfiguration
         builder.ToTable("RecipeIngredientReplacements");
 
         builder.HasKey(r => r.Id);
+        builder.Property(r => r.Id).ValueGeneratedNever();
 
         builder.HasIndex(r => new { r.RecipeIngredientId, r.SortOrder });
 

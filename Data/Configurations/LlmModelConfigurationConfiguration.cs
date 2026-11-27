@@ -12,6 +12,7 @@ public sealed class LlmModelConfigurationConfiguration
         builder.ToTable("LlmModelConfigurations");
 
         builder.HasKey(c => c.Id);
+        builder.Property(c => c.Id).ValueGeneratedNever();
 
         builder.Property(c => c.Name).IsRequired().HasMaxLength(150);
         builder.HasIndex(c => c.Name).IsUnique();

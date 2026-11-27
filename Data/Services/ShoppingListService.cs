@@ -45,6 +45,7 @@ public sealed class ShoppingListService(
     {
         var list = await dbContext
             .ShoppingLists.AsNoTracking()
+            .AsSplitQuery()
             .Include(l => l.Items)
                 .ThenInclude(i => i.FoodItem)
             .Include(l => l.Items)
@@ -367,9 +368,17 @@ public sealed class ShoppingListService(
             MaxQuantity = request.MaxQuantity,
             Unit = request.Unit,
             CustomUnitName =
-                request.Unit == MeasurementUnit.Custom ? request.CustomUnitName?.Trim() : null,
+                request.Unit == MeasurementUnit.Custom
+                    ? ShoppingConsolidator.ClampString(
+                        request.CustomUnitName,
+                        ShoppingConsolidator.MaxCustomUnitNameLength
+                    )
+                    : null,
             Dimension = dim,
-            Notes = request.Notes?.Trim(),
+            Notes = ShoppingConsolidator.ClampString(
+                request.Notes,
+                ShoppingConsolidator.MaxNotesLength
+            ),
             IsPantryStapleExcluded = false,
             IsChecked = false,
             SortOrder = maxSort + 1,
@@ -609,18 +618,23 @@ public sealed class ShoppingListService(
 
                 foreach (var src in item.Sources.ToList())
                 {
-                    matchingActive.Sources.Add(
-                        new ShoppingListItemSource
-                        {
-                            SourceKind = src.SourceKind,
-                            MealPlanEntryId = src.MealPlanEntryId,
-                            RecipeId = src.RecipeId,
-                            SourceLabel = src.SourceLabel,
-                            ScheduledDate = src.ScheduledDate,
-                            ContributedQuantity = src.ContributedQuantity,
-                            ContributedMaxQuantity = src.ContributedMaxQuantity,
-                        }
-                    );
+                    var promotedSource = new ShoppingListItemSource
+                    {
+                        ShoppingListItemId = matchingActive.Id,
+                        SourceKind = src.SourceKind,
+                        MealPlanEntryId = src.MealPlanEntryId,
+                        RecipeId = src.RecipeId,
+                        SourceLabel =
+                            ShoppingConsolidator.ClampString(
+                                src.SourceLabel,
+                                ShoppingConsolidator.MaxSourceLabelLength
+                            ) ?? "Manual",
+                        ScheduledDate = src.ScheduledDate,
+                        ContributedQuantity = src.ContributedQuantity,
+                        ContributedMaxQuantity = src.ContributedMaxQuantity,
+                    };
+                    matchingActive.Sources.Add(promotedSource);
+                    dbContext.ShoppingListItemSources.Add(promotedSource);
                 }
 
                 dbContext.ShoppingListItems.Remove(item);
@@ -872,6 +886,9 @@ public sealed class ShoppingListService(
 
         var activeCount = 0;
         var excludedCount = 0;
+        var bucketsToMerge = new List<(ConsolidatedShoppingBucket Bucket, bool IsExcluded)>(
+            extraction.ConsolidatedBuckets.Count
+        );
 
         foreach (var bucket in extraction.ConsolidatedBuckets)
         {
@@ -885,8 +902,10 @@ public sealed class ShoppingListService(
                 activeCount++;
             }
 
-            await MergeBucketIntoListAsync(shoppingListId, bucket, isExcluded, cancellationToken);
+            bucketsToMerge.Add((bucket, isExcluded));
         }
+
+        await MergeBucketsIntoListAsync(shoppingListId, bucketsToMerge, cancellationToken);
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
@@ -955,6 +974,11 @@ public sealed class ShoppingListService(
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        if (request.TargetServings is <= 0m)
+        {
+            throw new DomainValidationException("Target servings must be greater than zero.");
+        }
+
         var listExists = await dbContext.ShoppingLists.AnyAsync(
             l => l.Id == shoppingListId,
             cancellationToken
@@ -998,6 +1022,9 @@ public sealed class ShoppingListService(
         var consolidated = ShoppingConsolidator.Consolidate(allInputs);
         var activeCount = 0;
         var excludedCount = 0;
+        var bucketsToMerge = new List<(ConsolidatedShoppingBucket Bucket, bool IsExcluded)>(
+            consolidated.Count
+        );
 
         foreach (var bucket in consolidated)
         {
@@ -1017,8 +1044,10 @@ public sealed class ShoppingListService(
                 activeCount++;
             }
 
-            await MergeBucketIntoListAsync(shoppingListId, bucket, isExcluded, cancellationToken);
+            bucketsToMerge.Add((bucket, isExcluded));
         }
+
+        await MergeBucketsIntoListAsync(shoppingListId, bucketsToMerge, cancellationToken);
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
@@ -1279,7 +1308,10 @@ public sealed class ShoppingListService(
                             subScale,
                             includeSubRecipes,
                             includeOptional,
-                            $"{sourceLabel} ({subRecipe.Title})",
+                            ShoppingConsolidator.ClampString(
+                                $"{sourceLabel} ({subRecipe.Title})",
+                                ShoppingConsolidator.MaxSourceLabelLength
+                            ) ?? sourceLabel,
                             mealPlanEntryId,
                             scheduledDate,
                             sourceKind,
@@ -1352,142 +1384,182 @@ public sealed class ShoppingListService(
         }
     }
 
-    private async Task MergeBucketIntoListAsync(
+    private async Task MergeBucketsIntoListAsync(
         Guid shoppingListId,
-        ConsolidatedShoppingBucket bucket,
-        bool isPantryStapleExcluded,
+        IReadOnlyList<(ConsolidatedShoppingBucket Bucket, bool IsExcluded)> bucketsToMerge,
         CancellationToken cancellationToken
     )
     {
+        if (bucketsToMerge.Count == 0)
+        {
+            return;
+        }
+
         var existingItems = await dbContext
             .ShoppingListItems.Include(i => i.Sources)
-            .Where(i =>
-                i.ShoppingListId == shoppingListId
-                && i.IsPantryStapleExcluded == isPantryStapleExcluded
-                && !i.IsChecked
-            )
+            .Where(i => i.ShoppingListId == shoppingListId && !i.IsChecked)
             .ToListAsync(cancellationToken);
 
-        var match = existingItems.FirstOrDefault(i =>
-            ShoppingConsolidator.BuildConsolidationKey(
-                i.FoodItemId,
-                i.DisplayName,
-                i.Dimension,
-                i.Unit,
-                i.CustomUnitName
-            ) == bucket.ConsolidationKey
-        );
+        var nextActiveSortOrder =
+            existingItems.Where(i => !i.IsPantryStapleExcluded).Select(i => (int?)i.SortOrder).Max()
+                + 1
+            ?? 0;
+        var nextExcludedSortOrder =
+            existingItems.Where(i => i.IsPantryStapleExcluded).Select(i => (int?)i.SortOrder).Max()
+                + 1
+            ?? 0;
 
-        if (match is not null)
+        var itemsByKey = new Dictionary<(bool IsExcluded, string Key), ShoppingListItem>();
+        foreach (var existing in existingItems)
         {
-            var inputs = new List<ConsolidatableIngredientInput>
-            {
-                new(
-                    match.FoodItemId,
-                    match.DisplayName,
-                    isPantryStapleExcluded,
-                    match.Quantity,
-                    match.MaxQuantity,
-                    match.Unit,
-                    match.CustomUnitName,
-                    match.Notes,
-                    ShoppingListSourceKind.Manual,
-                    null,
-                    null,
-                    "Existing",
-                    null
-                ),
-                new(
-                    bucket.FoodItemId,
-                    bucket.DisplayName,
-                    isPantryStapleExcluded,
-                    bucket.Quantity,
-                    bucket.MaxQuantity,
-                    bucket.Unit,
-                    bucket.CustomUnitName,
-                    bucket.MergedNotes,
-                    ShoppingListSourceKind.Manual,
-                    null,
-                    null,
-                    "New",
-                    null
-                ),
-            };
-
-            var consolidated = ShoppingConsolidator.Consolidate(inputs);
-            if (consolidated.Count > 0)
-            {
-                var combined = consolidated[0];
-                match.Quantity = combined.Quantity;
-                match.MaxQuantity = combined.MaxQuantity;
-                match.Unit = combined.Unit;
-                match.CustomUnitName = combined.CustomUnitName;
-                match.Dimension = combined.Dimension;
-                match.Notes = combined.MergedNotes;
-            }
-
-            foreach (var src in bucket.Sources)
-            {
-                match.Sources.Add(
-                    new ShoppingListItemSource
-                    {
-                        SourceKind = src.SourceKind,
-                        MealPlanEntryId = src.MealPlanEntryId,
-                        RecipeId = src.RecipeId,
-                        SourceLabel = src.SourceLabel,
-                        ScheduledDate = src.ScheduledDate,
-                        ContributedQuantity = src.QuantityInConsolidatedUnit,
-                        ContributedMaxQuantity = src.MaxQuantityInConsolidatedUnit,
-                    }
-                );
-            }
+            var key = ShoppingConsolidator.BuildConsolidationKey(
+                existing.FoodItemId,
+                existing.DisplayName,
+                existing.Dimension,
+                existing.Unit,
+                existing.CustomUnitName
+            );
+            itemsByKey.TryAdd((existing.IsPantryStapleExcluded, key), existing);
         }
-        else
+
+        foreach (var (bucket, isPantryStapleExcluded) in bucketsToMerge)
         {
-            var maxSort =
-                await dbContext
-                    .ShoppingListItems.Where(i =>
-                        i.ShoppingListId == shoppingListId
-                        && i.IsPantryStapleExcluded == isPantryStapleExcluded
-                        && !i.IsChecked
-                    )
-                    .Select(i => (int?)i.SortOrder)
-                    .MaxAsync(cancellationToken)
-                ?? -1;
-
-            var newItem = new ShoppingListItem
+            if (
+                itemsByKey.TryGetValue(
+                    (isPantryStapleExcluded, bucket.ConsolidationKey),
+                    out var match
+                )
+            )
             {
-                ShoppingListId = shoppingListId,
-                FoodItemId = bucket.FoodItemId,
-                DisplayName = bucket.DisplayName,
-                Quantity = bucket.Quantity,
-                MaxQuantity = bucket.MaxQuantity,
-                Unit = bucket.Unit,
-                CustomUnitName = bucket.CustomUnitName,
-                Dimension = bucket.Dimension,
-                Notes = bucket.MergedNotes,
-                IsPantryStapleExcluded = isPantryStapleExcluded,
-                IsChecked = false,
-                SortOrder = maxSort + 1,
-            };
+                var inputs = new List<ConsolidatableIngredientInput>
+                {
+                    new(
+                        match.FoodItemId,
+                        match.DisplayName,
+                        isPantryStapleExcluded,
+                        match.Quantity,
+                        match.MaxQuantity,
+                        match.Unit,
+                        match.CustomUnitName,
+                        match.Notes,
+                        ShoppingListSourceKind.Manual,
+                        null,
+                        null,
+                        "Existing",
+                        null
+                    ),
+                    new(
+                        bucket.FoodItemId,
+                        bucket.DisplayName,
+                        isPantryStapleExcluded,
+                        bucket.Quantity,
+                        bucket.MaxQuantity,
+                        bucket.Unit,
+                        bucket.CustomUnitName,
+                        bucket.MergedNotes,
+                        ShoppingListSourceKind.Manual,
+                        null,
+                        null,
+                        "New",
+                        null
+                    ),
+                };
 
-            foreach (var src in bucket.Sources)
-            {
-                newItem.Sources.Add(
-                    new ShoppingListItemSource
+                var consolidated = ShoppingConsolidator.Consolidate(inputs);
+                if (consolidated.Count > 0)
+                {
+                    var combined = consolidated[0];
+                    match.Quantity = combined.Quantity;
+                    match.MaxQuantity = combined.MaxQuantity;
+                    match.Unit = combined.Unit;
+                    match.CustomUnitName = ShoppingConsolidator.ClampString(
+                        combined.CustomUnitName,
+                        ShoppingConsolidator.MaxCustomUnitNameLength
+                    );
+                    match.Dimension = combined.Dimension;
+                    match.Notes = ShoppingConsolidator.ClampString(
+                        combined.MergedNotes,
+                        ShoppingConsolidator.MaxNotesLength
+                    );
+                }
+
+                foreach (var src in bucket.Sources)
+                {
+                    var newSource = new ShoppingListItemSource
                     {
+                        ShoppingListItemId = match.Id,
                         SourceKind = src.SourceKind,
                         MealPlanEntryId = src.MealPlanEntryId,
                         RecipeId = src.RecipeId,
-                        SourceLabel = src.SourceLabel,
+                        SourceLabel =
+                            ShoppingConsolidator.ClampString(
+                                src.SourceLabel,
+                                ShoppingConsolidator.MaxSourceLabelLength
+                            ) ?? "Recipe",
                         ScheduledDate = src.ScheduledDate,
                         ContributedQuantity = src.QuantityInConsolidatedUnit,
                         ContributedMaxQuantity = src.MaxQuantityInConsolidatedUnit,
-                    }
-                );
+                    };
+                    match.Sources.Add(newSource);
+                    dbContext.ShoppingListItemSources.Add(newSource);
+                }
             }
+            else
+            {
+                var sortOrder = isPantryStapleExcluded
+                    ? nextExcludedSortOrder++
+                    : nextActiveSortOrder++;
 
-            dbContext.ShoppingListItems.Add(newItem);
+                var newItem = new ShoppingListItem
+                {
+                    ShoppingListId = shoppingListId,
+                    FoodItemId = bucket.FoodItemId,
+                    DisplayName =
+                        ShoppingConsolidator.ClampString(
+                            bucket.DisplayName,
+                            ShoppingConsolidator.MaxDisplayNameLength
+                        ) ?? bucket.DisplayName,
+                    Quantity = bucket.Quantity,
+                    MaxQuantity = bucket.MaxQuantity,
+                    Unit = bucket.Unit,
+                    CustomUnitName = ShoppingConsolidator.ClampString(
+                        bucket.CustomUnitName,
+                        ShoppingConsolidator.MaxCustomUnitNameLength
+                    ),
+                    Dimension = bucket.Dimension,
+                    Notes = ShoppingConsolidator.ClampString(
+                        bucket.MergedNotes,
+                        ShoppingConsolidator.MaxNotesLength
+                    ),
+                    IsPantryStapleExcluded = isPantryStapleExcluded,
+                    IsChecked = false,
+                    SortOrder = sortOrder,
+                };
+
+                foreach (var src in bucket.Sources)
+                {
+                    newItem.Sources.Add(
+                        new ShoppingListItemSource
+                        {
+                            ShoppingListItemId = newItem.Id,
+                            SourceKind = src.SourceKind,
+                            MealPlanEntryId = src.MealPlanEntryId,
+                            RecipeId = src.RecipeId,
+                            SourceLabel =
+                                ShoppingConsolidator.ClampString(
+                                    src.SourceLabel,
+                                    ShoppingConsolidator.MaxSourceLabelLength
+                                ) ?? "Recipe",
+                            ScheduledDate = src.ScheduledDate,
+                            ContributedQuantity = src.QuantityInConsolidatedUnit,
+                            ContributedMaxQuantity = src.MaxQuantityInConsolidatedUnit,
+                        }
+                    );
+                }
+
+                dbContext.ShoppingListItems.Add(newItem);
+                itemsByKey[(isPantryStapleExcluded, bucket.ConsolidationKey)] = newItem;
+            }
         }
     }
 

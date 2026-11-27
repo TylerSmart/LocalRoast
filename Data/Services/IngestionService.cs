@@ -152,9 +152,31 @@ public sealed class IngestionService(
         };
 
         var jobs = await orderedQuery
-            .Include(j => j.ResultingRecipe)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
+            .Select(j => new
+            {
+                j.Id,
+                j.Channel,
+                j.Status,
+                j.DisplayTitle,
+                j.SourceUrl,
+                j.DownloadedThumbnailImagePath,
+                j.ConfidenceScore,
+                j.StatusDetail,
+                j.AttemptCount,
+                j.NextRetryAt,
+                j.ResultingRecipeId,
+                ResultingRecipeSlug = j.ResultingRecipe != null ? j.ResultingRecipe.Slug : null,
+                j.CreatedBy,
+                j.CreatedAt,
+                j.ModifiedAt,
+                j.SourceFilesJson,
+                j.ExtractedModel,
+                j.RefinedModel,
+                j.RefinedAt,
+                j.RefinementRunNowRequested,
+            })
             .ToListAsync(cancellationToken);
 
         var userIds = jobs.Select(j => Guid.TryParse(j.CreatedBy, out var uid) ? uid : (Guid?)null)
@@ -202,7 +224,7 @@ public sealed class IngestionService(
                     AttemptCount: j.AttemptCount,
                     NextRetryAt: j.NextRetryAt,
                     ResultingRecipeId: j.ResultingRecipeId,
-                    ResultingRecipeSlug: j.ResultingRecipe?.Slug,
+                    ResultingRecipeSlug: j.ResultingRecipeSlug,
                     SubmittedByUsername: usernames.TryGetValue(j.CreatedBy, out var name)
                         ? name
                         : null,
@@ -237,8 +259,30 @@ public sealed class IngestionService(
         }
 
         var jobs = await query
-            .Include(j => j.ResultingRecipe)
             .OrderByDescending(j => j.CreatedAt)
+            .Select(j => new
+            {
+                j.Id,
+                j.Channel,
+                j.Status,
+                j.DisplayTitle,
+                j.SourceUrl,
+                j.DownloadedThumbnailImagePath,
+                j.ConfidenceScore,
+                j.StatusDetail,
+                j.AttemptCount,
+                j.NextRetryAt,
+                j.ResultingRecipeId,
+                ResultingRecipeSlug = j.ResultingRecipe != null ? j.ResultingRecipe.Slug : null,
+                j.CreatedBy,
+                j.CreatedAt,
+                j.ModifiedAt,
+                j.SourceFilesJson,
+                j.ExtractedModel,
+                j.RefinedModel,
+                j.RefinedAt,
+                j.RefinementRunNowRequested,
+            })
             .ToListAsync(cancellationToken);
 
         var userIds = jobs.Select(j => Guid.TryParse(j.CreatedBy, out var uid) ? uid : (Guid?)null)
@@ -288,7 +332,7 @@ public sealed class IngestionService(
                     AttemptCount: j.AttemptCount,
                     NextRetryAt: j.NextRetryAt,
                     ResultingRecipeId: j.ResultingRecipeId,
-                    ResultingRecipeSlug: j.ResultingRecipe?.Slug,
+                    ResultingRecipeSlug: j.ResultingRecipeSlug,
                     SubmittedByUsername: usernames.TryGetValue(j.CreatedBy, out var name)
                         ? name
                         : null,

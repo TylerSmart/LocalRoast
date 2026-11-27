@@ -20,7 +20,16 @@ describe('MealPlanEntryDialogComponent', () => {
   };
 
   const mockRecipeService = {
-    getRecipes: vi.fn().mockReturnValue(of([])),
+    getRecipesPaged: vi.fn().mockReturnValue(
+      of({
+        items: [],
+        totalCount: null,
+        page: 1,
+        pageSize: 30,
+        hasMore: false,
+        isFuzzySearch: false,
+      }),
+    ),
   };
 
   beforeEach(async () => {
@@ -41,7 +50,11 @@ describe('MealPlanEntryDialogComponent', () => {
 
   it('initializes form with defaults', () => {
     expect(component).toBeTruthy();
-    expect(mockRecipeService.getRecipes).toHaveBeenCalled();
+    expect(mockRecipeService.getRecipesPaged).toHaveBeenCalledWith({
+      page: 1,
+      pageSize: 30,
+      includeTotalCount: false,
+    });
   });
 
   it('adjusts servings stepper', () => {

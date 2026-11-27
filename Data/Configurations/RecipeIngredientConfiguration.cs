@@ -11,6 +11,7 @@ public sealed class RecipeIngredientConfiguration : IEntityTypeConfiguration<Rec
         builder.ToTable("RecipeIngredients");
 
         builder.HasKey(ri => ri.Id);
+        builder.Property(ri => ri.Id).ValueGeneratedNever();
 
         builder.HasIndex(ri => new { ri.RecipeId, ri.SortOrder });
 

@@ -105,27 +105,146 @@ public sealed class McpCookbookService(
 
         if (!string.IsNullOrWhiteSpace(request.Query))
         {
-            var norm = request.Query.Trim().ToLowerInvariant();
-            q = q.Where(r =>
-                r.Title.ToLower().Contains(norm)
-                || (r.Description != null && r.Description.ToLower().Contains(norm))
-                || (r.SourceName != null && r.SourceName.ToLower().Contains(norm))
-                || (r.SourceAuthor != null && r.SourceAuthor.ToLower().Contains(norm))
-                || (r.SourceBookTitle != null && r.SourceBookTitle.ToLower().Contains(norm))
-                || r.RecipeCollections.Any(rc => rc.Collection.NormalizedName.Contains(norm))
-                || r.RecipeTags.Any(rt => rt.Tag.NormalizedName.Contains(norm))
-                || r.Ingredients.Any(i =>
-                    i.DisplayName.ToLower().Contains(norm)
-                    || (
-                        i.FoodItem != null
-                        && (
-                            i.FoodItem.NormalizedName.Contains(norm)
-                            || i.FoodItem.Aliases.Any(a => a.NormalizedAlias.Contains(norm))
+            var trimmed = request.Query.Trim();
+            var norm = trimmed.ToLowerInvariant();
+            var isRelational = dbContext.Database.IsRelational();
+
+            var childMatchedIds = new HashSet<Guid>();
+
+            var matchingCollectionIds = await dbContext
+                .Collections.AsNoTracking()
+                .Where(c => c.NormalizedName.Contains(norm))
+                .Select(c => c.Id)
+                .ToListAsync(cancellationToken);
+            if (matchingCollectionIds.Count > 0)
+            {
+                var ids = await dbContext
+                    .RecipeCollections.AsNoTracking()
+                    .Where(rc => matchingCollectionIds.Contains(rc.CollectionId))
+                    .Select(rc => rc.RecipeId)
+                    .ToListAsync(cancellationToken);
+                childMatchedIds.UnionWith(ids);
+            }
+
+            var matchingTagIds = await dbContext
+                .Tags.AsNoTracking()
+                .Where(t => t.NormalizedName.Contains(norm))
+                .Select(t => t.Id)
+                .ToListAsync(cancellationToken);
+            if (matchingTagIds.Count > 0)
+            {
+                var ids = await dbContext
+                    .RecipeTags.AsNoTracking()
+                    .Where(rt => matchingTagIds.Contains(rt.TagId))
+                    .Select(rt => rt.RecipeId)
+                    .ToListAsync(cancellationToken);
+                childMatchedIds.UnionWith(ids);
+            }
+
+            var matchingFoodIds = await dbContext
+                .FoodItems.AsNoTracking()
+                .Where(f => f.NormalizedName.Contains(norm))
+                .Select(f => f.Id)
+                .ToListAsync(cancellationToken);
+            var aliasFoodIds = await dbContext
+                .FoodItemAliases.AsNoTracking()
+                .Where(a => a.NormalizedAlias.Contains(norm))
+                .Select(a => a.FoodItemId)
+                .ToListAsync(cancellationToken);
+            var combinedFoodIds = matchingFoodIds.Concat(aliasFoodIds).Distinct().ToList();
+
+            var ingIds =
+                combinedFoodIds.Count > 0
+                    ? await dbContext
+                        .RecipeIngredients.AsNoTracking()
+                        .Where(ri =>
+                            (
+                                ri.FoodItemId.HasValue
+                                && combinedFoodIds.Contains(ri.FoodItemId.Value)
+                            )
+                            || (
+                                isRelational
+                                    ? ri.DisplayName.Contains(trimmed)
+                                    : ri.DisplayName.ToLower().Contains(norm)
+                            )
                         )
+                        .Select(ri => ri.RecipeId)
+                        .Distinct()
+                        .ToListAsync(cancellationToken)
+                    : await dbContext
+                        .RecipeIngredients.AsNoTracking()
+                        .Where(ri =>
+                            isRelational
+                                ? ri.DisplayName.Contains(trimmed)
+                                : ri.DisplayName.ToLower().Contains(norm)
+                        )
+                        .Select(ri => ri.RecipeId)
+                        .Distinct()
+                        .ToListAsync(cancellationToken);
+            childMatchedIds.UnionWith(ingIds);
+
+            var cookLogIds = await dbContext
+                .CookLogs.AsNoTracking()
+                .Where(cl =>
+                    cl.Notes != null
+                    && (
+                        isRelational
+                            ? cl.Notes.Contains(trimmed)
+                            : cl.Notes.ToLower().Contains(norm)
                     )
                 )
-                || r.CookLogs.Any(cl => cl.Notes != null && cl.Notes.ToLower().Contains(norm))
-            );
+                .Select(cl => cl.RecipeId)
+                .Distinct()
+                .ToListAsync(cancellationToken);
+            childMatchedIds.UnionWith(cookLogIds);
+
+            var childMatchedArray = childMatchedIds.ToArray();
+            if (isRelational)
+            {
+                q =
+                    childMatchedArray.Length > 0
+                        ? q.Where(r =>
+                            r.Title.Contains(trimmed)
+                            || (r.Description != null && r.Description.Contains(trimmed))
+                            || (r.SourceName != null && r.SourceName.Contains(trimmed))
+                            || (r.SourceAuthor != null && r.SourceAuthor.Contains(trimmed))
+                            || (r.SourceBookTitle != null && r.SourceBookTitle.Contains(trimmed))
+                            || childMatchedArray.Contains(r.Id)
+                        )
+                        : q.Where(r =>
+                            r.Title.Contains(trimmed)
+                            || (r.Description != null && r.Description.Contains(trimmed))
+                            || (r.SourceName != null && r.SourceName.Contains(trimmed))
+                            || (r.SourceAuthor != null && r.SourceAuthor.Contains(trimmed))
+                            || (r.SourceBookTitle != null && r.SourceBookTitle.Contains(trimmed))
+                        );
+            }
+            else
+            {
+                q =
+                    childMatchedArray.Length > 0
+                        ? q.Where(r =>
+                            r.Title.ToLower().Contains(norm)
+                            || (r.Description != null && r.Description.ToLower().Contains(norm))
+                            || (r.SourceName != null && r.SourceName.ToLower().Contains(norm))
+                            || (r.SourceAuthor != null && r.SourceAuthor.ToLower().Contains(norm))
+                            || (
+                                r.SourceBookTitle != null
+                                && r.SourceBookTitle.ToLower().Contains(norm)
+                            )
+                            || childMatchedArray.Contains(r.Id)
+                        )
+                        : q.Where(r =>
+                            r.Title.ToLower().Contains(norm)
+                            || (r.Description != null && r.Description.ToLower().Contains(norm))
+                            || (r.SourceName != null && r.SourceName.ToLower().Contains(norm))
+                            || (r.SourceAuthor != null && r.SourceAuthor.ToLower().Contains(norm))
+                            || (
+                                r.SourceBookTitle != null
+                                && r.SourceBookTitle.ToLower().Contains(norm)
+                            )
+                        );
+            }
         }
 
         var orderedQuery = request.ForgottenFavoritesOnly
@@ -135,9 +254,21 @@ public sealed class McpCookbookService(
                 .ThenByDescending(r => r.ModifiedAt)
             : q.OrderByDescending(r => r.ModifiedAt);
 
-        return await orderedQuery
+        var selectedIds = await orderedQuery
+            .Select(r => r.Id)
             .Take(limit)
-            .Select(r => new RecipeSummaryDto(
+            .ToListAsync(cancellationToken);
+
+        if (selectedIds.Count == 0)
+        {
+            return [];
+        }
+
+        var rows = await dbContext
+            .Recipes.AsNoTracking()
+            .Where(r => selectedIds.Contains(r.Id))
+            .Select(r => new
+            {
                 r.Id,
                 r.Title,
                 r.Slug,
@@ -151,39 +282,100 @@ public sealed class McpCookbookService(
                 r.Difficulty,
                 r.SourceName,
                 r.ThumbnailImagePath,
-                r.Ingredients.Count,
-                r.Steps.Count,
+                IngredientCount = r.Ingredients.Count,
+                StepCount = r.Steps.Count,
                 r.TimesCooked,
                 r.AverageRating,
                 r.CreatedAt,
                 r.ModifiedAt,
-                r.RecipeCollections.OrderBy(rc => rc.Collection.SortOrder)
-                    .ThenBy(rc => rc.Collection.Name)
-                    .Select(rc => new RecipeCollectionBadgeDto(
+                r.LastCookedAt,
+                r.RatingCount,
+                LastCookNote = r
+                    .CookLogs.OrderByDescending(cl => cl.CookedAt)
+                    .ThenByDescending(cl => cl.CreatedAt)
+                    .Where(cl => cl.Notes != null && cl.Notes.Trim() != "")
+                    .Select(cl => cl.Notes)
+                    .FirstOrDefault(),
+            })
+            .ToDictionaryAsync(r => r.Id, cancellationToken);
+
+        var collectionBadges = (
+            await dbContext
+                .RecipeCollections.AsNoTracking()
+                .Where(rc => selectedIds.Contains(rc.RecipeId))
+                .OrderBy(rc => rc.Collection.SortOrder)
+                .ThenBy(rc => rc.Collection.Name)
+                .Select(rc => new
+                {
+                    rc.RecipeId,
+                    Badge = new RecipeCollectionBadgeDto(
                         rc.Collection.Id,
                         rc.Collection.Name,
                         rc.Collection.Slug
-                    ))
-                    .ToList(),
-                r.RecipeTags.OrderBy(rt => rt.Tag.Category)
-                    .ThenBy(rt => rt.Tag.SortOrder)
-                    .ThenBy(rt => rt.Tag.Name)
-                    .Select(rt => new RecipeTagBadgeDto(
+                    ),
+                })
+                .ToListAsync(cancellationToken)
+        ).ToLookup(x => x.RecipeId, x => x.Badge);
+
+        var tagBadges = (
+            await dbContext
+                .RecipeTags.AsNoTracking()
+                .Where(rt => selectedIds.Contains(rt.RecipeId))
+                .OrderBy(rt => rt.Tag.Category)
+                .ThenBy(rt => rt.Tag.SortOrder)
+                .ThenBy(rt => rt.Tag.Name)
+                .Select(rt => new
+                {
+                    rt.RecipeId,
+                    Badge = new RecipeTagBadgeDto(
                         rt.Tag.Id,
                         rt.Tag.Name,
                         rt.Tag.Slug,
                         rt.Tag.Category
-                    ))
-                    .ToList(),
-                r.LastCookedAt,
-                r.RatingCount,
-                r.CookLogs.OrderByDescending(cl => cl.CookedAt)
-                    .ThenByDescending(cl => cl.CreatedAt)
-                    .Where(cl => cl.Notes != null && cl.Notes.Trim() != "")
-                    .Select(cl => cl.Notes)
-                    .FirstOrDefault()
-            ))
-            .ToListAsync(cancellationToken);
+                    ),
+                })
+                .ToListAsync(cancellationToken)
+        ).ToLookup(x => x.RecipeId, x => x.Badge);
+
+        var summaries = new List<RecipeSummaryDto>(selectedIds.Count);
+        foreach (var id in selectedIds)
+        {
+            if (!rows.TryGetValue(id, out var r))
+            {
+                continue;
+            }
+
+            summaries.Add(
+                new RecipeSummaryDto(
+                    r.Id,
+                    r.Title,
+                    r.Slug,
+                    r.Description,
+                    r.Status,
+                    r.BaseServings,
+                    r.YieldDisplay,
+                    r.PrepTimeMinutes,
+                    r.CookTimeMinutes,
+                    r.TotalTimeMinutes,
+                    r.Difficulty,
+                    r.SourceName,
+                    r.ThumbnailImagePath,
+                    r.IngredientCount,
+                    r.StepCount,
+                    r.TimesCooked,
+                    r.AverageRating,
+                    r.CreatedAt,
+                    r.ModifiedAt,
+                    collectionBadges[id].ToList(),
+                    tagBadges[id].ToList(),
+                    r.LastCookedAt,
+                    r.RatingCount,
+                    r.LastCookNote
+                )
+            );
+        }
+
+        return summaries;
     }
 
     public async Task<McpRecipeDetailDto?> GetRecipeAsync(

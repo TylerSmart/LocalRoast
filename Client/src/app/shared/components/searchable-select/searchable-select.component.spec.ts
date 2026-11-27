@@ -1,7 +1,7 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ReactiveFormsModule } from '@angular/forms';
 import { MatAutocompleteSelectedEvent } from '@angular/material/autocomplete';
-import { of } from 'rxjs';
+import { of, Subject } from 'rxjs';
 import { SearchableSelectComponent, SearchableSelectOption } from './searchable-select.component';
 
 describe('SearchableSelectComponent', () => {
@@ -139,6 +139,32 @@ describe('SearchableSelectComponent', () => {
     expect(searchFn).toHaveBeenCalledWith('pasta');
     expect(component.asyncResults().length).toBe(2);
     expect(component.displayedOptions()[0].label).toBe('Spaghetti Carbonara');
+  });
+
+  it('cancels stale in-flight async search results via switchMap', async () => {
+    const first$ = new Subject<SearchableSelectOption[]>();
+    const second$ = new Subject<SearchableSelectOption[]>();
+    const searchFn = vi.fn().mockReturnValueOnce(first$).mockReturnValueOnce(second$);
+
+    fixture.componentRef.setInput('searchFn', searchFn);
+    fixture.componentRef.setInput('debounceMs', 10);
+    fixture.detectChanges();
+
+    const inputEl: HTMLInputElement = fixture.nativeElement.querySelector('input');
+    inputEl.value = 'blue';
+    inputEl.dispatchEvent(new Event('input'));
+    await new Promise((r) => setTimeout(r, 25));
+
+    inputEl.value = 'blueberry';
+    inputEl.dispatchEvent(new Event('input'));
+    await new Promise((r) => setTimeout(r, 25));
+
+    second$.next([{ value: 'pie', label: 'Blueberry Pie' }]);
+    first$.next([{ value: 'stale', label: 'Stale Blue Result' }]);
+    fixture.detectChanges();
+
+    expect(component.asyncResults()).toEqual([{ value: 'pie', label: 'Blueberry Pie' }]);
+    expect(component.isLoading()).toBe(false);
   });
 
   it('supports multi-select mode and toggles selection', () => {

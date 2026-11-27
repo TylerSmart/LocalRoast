@@ -11,6 +11,7 @@ public sealed class ShoppingListItemConfiguration : IEntityTypeConfiguration<Sho
         builder.ToTable("ShoppingListItems");
 
         builder.HasKey(i => i.Id);
+        builder.Property(i => i.Id).ValueGeneratedNever();
 
         builder.Property(i => i.DisplayName).IsRequired().HasMaxLength(200);
 

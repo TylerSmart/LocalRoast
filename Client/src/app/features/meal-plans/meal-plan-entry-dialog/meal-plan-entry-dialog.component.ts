@@ -116,22 +116,25 @@ export class MealPlanEntryDialogComponent implements OnInit {
   });
 
   protected readonly recipeSearchFn = (query: string): Observable<SearchableSelectOption[]> => {
-    return this.recipeService.getRecipes({ search: query }).pipe(
-      map((list) => {
-        this.recipes.update((existing) => {
-          const map = new Map(existing.map((e) => [e.id, e]));
-          for (const item of list) {
-            map.set(item.id, item);
-          }
-          return Array.from(map.values());
-        });
-        return list.map((r) => ({
-          value: r.id,
-          label: r.title,
-          sublabel: `${r.baseServings} servings`,
-        }));
-      }),
-    );
+    return this.recipeService
+      .getRecipesPaged({ search: query, page: 1, pageSize: 25, includeTotalCount: false })
+      .pipe(
+        map((res) => {
+          const list = res.items;
+          this.recipes.update((existing) => {
+            const byId = new Map(existing.map((e) => [e.id, e]));
+            for (const item of list) {
+              byId.set(item.id, item);
+            }
+            return Array.from(byId.values());
+          });
+          return list.map((r) => ({
+            value: r.id,
+            label: r.title,
+            sublabel: `${r.baseServings} servings`,
+          }));
+        }),
+      );
   };
 
   protected readonly quickNoteChips = [
@@ -205,15 +208,17 @@ export class MealPlanEntryDialogComponent implements OnInit {
 
   private loadRecipes(): void {
     this.isLoadingRecipes.set(true);
-    this.recipeService.getRecipes({}).subscribe({
-      next: (list) => {
-        this.recipes.set(list);
-        this.isLoadingRecipes.set(false);
-      },
-      error: () => {
-        this.isLoadingRecipes.set(false);
-      },
-    });
+    this.recipeService
+      .getRecipesPaged({ page: 1, pageSize: 30, includeTotalCount: false })
+      .subscribe({
+        next: (res) => {
+          this.recipes.set(res.items);
+          this.isLoadingRecipes.set(false);
+        },
+        error: () => {
+          this.isLoadingRecipes.set(false);
+        },
+      });
   }
 
   protected onRecipeSelected(recipeId: string | null): void {

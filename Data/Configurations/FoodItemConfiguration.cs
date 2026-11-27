@@ -11,6 +11,7 @@ public sealed class FoodItemConfiguration : IEntityTypeConfiguration<FoodItem>
         builder.ToTable("FoodItems");
 
         builder.HasKey(f => f.Id);
+        builder.Property(f => f.Id).ValueGeneratedNever();
 
         builder.Property(f => f.Name).IsRequired().HasMaxLength(150);
 

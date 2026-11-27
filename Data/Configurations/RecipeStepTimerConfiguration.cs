@@ -11,6 +11,7 @@ public sealed class RecipeStepTimerConfiguration : IEntityTypeConfiguration<Reci
         builder.ToTable("RecipeStepTimers");
 
         builder.HasKey(rst => rst.Id);
+        builder.Property(rst => rst.Id).ValueGeneratedNever();
 
         builder.HasIndex(rst => new { rst.RecipeStepId, rst.SortOrder });
 

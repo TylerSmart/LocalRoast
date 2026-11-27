@@ -474,4 +474,91 @@ public sealed class ShoppingListsIntegrationTests
         var dupRes = await _client.PostAsJsonAsync("/api/shopping-lists/generate/recipe", req);
         Assert.AreEqual(HttpStatusCode.Conflict, dupRes.StatusCode);
     }
+
+    [TestMethod]
+    public async Task AddRecipeIngredients_IntoExistingNonEmptyList_MergesItemsAndSourcesCleanly()
+    {
+        await RegisterAndAuthenticateAsync(_client, "existingmerge@example.com", "Merge Chef");
+
+        var flourRes = await _client.PostAsJsonAsync(
+            "/api/food-items",
+            new CreateFoodItemRequest("All-Purpose Flour", IsPantryStaple: false)
+        );
+        Assert.AreEqual(HttpStatusCode.Created, flourRes.StatusCode);
+        var flour = await flourRes.Content.ReadFromJsonAsync<FoodItemDto>();
+        Assert.IsNotNull(flour);
+
+        var listRes = await _client.PostAsJsonAsync(
+            "/api/shopping-lists",
+            new CreateShoppingListRequest("Existing Pantry Merge")
+        );
+        Assert.AreEqual(HttpStatusCode.Created, listRes.StatusCode);
+        var existingList = await listRes.Content.ReadFromJsonAsync<ShoppingListDetailDto>();
+        Assert.IsNotNull(existingList);
+
+        var seedItemRes = await _client.PostAsJsonAsync(
+            $"/api/shopping-lists/{existingList.Id}/items",
+            new CreateShoppingListItemRequest(
+                "All-Purpose Flour",
+                1m,
+                null,
+                MeasurementUnit.Cup,
+                null,
+                FoodItemId: flour.Id
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Created, seedItemRes.StatusCode);
+
+        var pieRes = await _client.PostAsJsonAsync(
+            "/api/recipes",
+            new UpsertRecipeRequest(
+                Title: "Blueberry Pie Existing List Test",
+                BaseServings: 4m,
+                Ingredients:
+                [
+                    new RecipeIngredientInput(
+                        DisplayName: "All-Purpose Flour",
+                        Quantity: 2m,
+                        Unit: MeasurementUnit.Cup,
+                        FoodItemId: flour.Id
+                    ),
+                    new RecipeIngredientInput(
+                        DisplayName: "Wild Blueberries",
+                        Quantity: 3m,
+                        Unit: MeasurementUnit.Cup
+                    ),
+                ]
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.Created, pieRes.StatusCode);
+        var pie = await pieRes.Content.ReadFromJsonAsync<RecipeDetailDto>();
+        Assert.IsNotNull(pie);
+
+        var mergeRes = await _client.PostAsJsonAsync(
+            $"/api/shopping-lists/{existingList.Id}/generate/recipe",
+            new AddRecipeToShoppingListRequest(
+                RecipeId: pie.Id,
+                TargetServings: 4m,
+                IncludeSubRecipes: true,
+                IncludeOptionalIngredients: true
+            )
+        );
+        Assert.AreEqual(HttpStatusCode.OK, mergeRes.StatusCode);
+        var mergeResult =
+            await mergeRes.Content.ReadFromJsonAsync<ShoppingListGenerationResultDto>();
+        Assert.IsNotNull(mergeResult);
+
+        var mergedFlour = mergeResult.ShoppingList.ActiveItems.Single(i =>
+            i.FoodItemId == flour.Id
+        );
+        Assert.AreEqual(3m, mergedFlour.Quantity);
+        Assert.AreEqual(1, mergedFlour.Sources.Count);
+        Assert.AreEqual("Blueberry Pie Existing List Test", mergedFlour.Sources[0].SourceLabel);
+
+        var reloadRes = await _client.GetAsync($"/api/shopping-lists/{existingList.Id}");
+        Assert.AreEqual(HttpStatusCode.OK, reloadRes.StatusCode);
+        var reloaded = await reloadRes.Content.ReadFromJsonAsync<ShoppingListDetailDto>();
+        Assert.IsNotNull(reloaded);
+        Assert.AreEqual(2, reloaded.ActiveItems.Count);
+    }
 }

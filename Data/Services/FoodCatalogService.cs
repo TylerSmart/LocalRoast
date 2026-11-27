@@ -370,9 +370,14 @@ public sealed class FoodCatalogService(
                 )
             )
             {
-                foodItem.Aliases.Add(
-                    new FoodItemAlias { Alias = alias, NormalizedAlias = alias.ToLowerInvariant() }
-                );
+                var newAlias = new FoodItemAlias
+                {
+                    FoodItemId = foodItem.Id,
+                    Alias = alias,
+                    NormalizedAlias = alias.ToLowerInvariant(),
+                };
+                foodItem.Aliases.Add(newAlias);
+                dbContext.FoodItemAliases.Add(newAlias);
             }
         }
 

@@ -12,6 +12,7 @@ public sealed class MealPlanTemplateItemConfiguration
         builder.ToTable("MealPlanTemplateItems");
 
         builder.HasKey(i => i.Id);
+        builder.Property(i => i.Id).ValueGeneratedNever();
 
         builder.Property(i => i.Slot).HasConversion<string>().HasMaxLength(32);
         builder.Property(i => i.EntryType).HasConversion<string>().HasMaxLength(32);

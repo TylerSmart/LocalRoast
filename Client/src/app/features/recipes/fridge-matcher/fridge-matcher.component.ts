@@ -1,5 +1,5 @@
-import { Component, OnInit, computed, inject, signal } from '@angular/core';
-import { toSignal } from '@angular/core/rxjs-interop';
+import { Component, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { FormControl, ReactiveFormsModule } from '@angular/forms';
 import {
   MatAutocompleteModule,
@@ -13,6 +13,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { ActivatedRoute, Router } from '@angular/router';
+import { EMPTY, Subject, catchError, of, switchMap, timer } from 'rxjs';
 import { FoodItemDto } from '../../../core/models/food-catalog.models';
 import { IngredientMatchResultDto } from '../../../core/models/recipe.models';
 import { FoodCatalogService } from '../../../core/services/food-catalog/food-catalog.service';
@@ -41,10 +42,13 @@ import {
   styleUrl: './fridge-matcher.component.scss',
 })
 export class FridgeMatcherComponent implements OnInit {
+  private static readonly MATCH_DEBOUNCE_MS = 300;
   private readonly catalogService = inject(FoodCatalogService);
   private readonly recipeService = inject(RecipeService);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
+  private readonly destroyRef = inject(DestroyRef);
+  private readonly matchRequests$ = new Subject<{ immediate: boolean }>();
 
   protected readonly searchControl = new FormControl<string>('', { nonNullable: true });
   protected readonly searchQuery = toSignal(this.searchControl.valueChanges, {
@@ -83,69 +87,117 @@ export class FridgeMatcherComponent implements OnInit {
     return !trimmed || FridgeMatcherComponent.DISALLOWED_NAMES.has(trimmed);
   }
 
+  protected readonly normalizedCatalogItems = computed(() =>
+    this.foodItems()
+      .filter((item) => !this.isPlaceholderFood(item.name))
+      .map((item) => ({
+        item,
+        lowerName: item.name.toLowerCase(),
+        lowerAliases: item.aliases.map((alias) => alias.toLowerCase()),
+      }))
+      .sort(
+        (a, b) =>
+          b.item.referencedRecipeCount - a.item.referencedRecipeCount ||
+          a.item.name.localeCompare(b.item.name),
+      ),
+  );
+
   protected readonly filteredFoodItems = computed(() => {
     const raw = this.searchQuery();
     const query = (typeof raw === 'string' ? raw : '').trim().toLowerCase();
     const selectedIds = new Set(this.selectedFoodItems().map((f) => f.id));
-    const available = this.foodItems().filter(
-      (item) => !selectedIds.has(item.id) && !this.isPlaceholderFood(item.name),
+    const available = this.normalizedCatalogItems().filter(
+      (entry) => !selectedIds.has(entry.item.id),
     );
 
     if (!query) {
-      return available
-        .slice()
-        .sort((a, b) => {
-          if (b.referencedRecipeCount !== a.referencedRecipeCount) {
-            return b.referencedRecipeCount - a.referencedRecipeCount;
-          }
-          return a.name.localeCompare(b.name);
-        })
-        .slice(0, 15);
+      return available.slice(0, 15).map((entry) => entry.item);
     }
 
     return available
-      .filter((item) => {
-        if (item.name.toLowerCase().includes(query)) {
-          return true;
-        }
-        return item.aliases.some((alias) => alias.toLowerCase().includes(query));
-      })
+      .filter(
+        (entry) =>
+          entry.lowerName.includes(query) ||
+          entry.lowerAliases.some((alias) => alias.includes(query)),
+      )
       .sort((a, b) => {
-        const aName = a.name.toLowerCase();
-        const bName = b.name.toLowerCase();
         const aStarts =
-          aName.startsWith(query) || a.aliases.some((al) => al.toLowerCase().startsWith(query));
+          a.lowerName.startsWith(query) || a.lowerAliases.some((al) => al.startsWith(query));
         const bStarts =
-          bName.startsWith(query) || b.aliases.some((al) => al.toLowerCase().startsWith(query));
+          b.lowerName.startsWith(query) || b.lowerAliases.some((al) => al.startsWith(query));
         if (aStarts && !bStarts) return -1;
         if (!aStarts && bStarts) return 1;
 
-        if (b.referencedRecipeCount !== a.referencedRecipeCount) {
-          return b.referencedRecipeCount - a.referencedRecipeCount;
+        if (b.item.referencedRecipeCount !== a.item.referencedRecipeCount) {
+          return b.item.referencedRecipeCount - a.item.referencedRecipeCount;
         }
-        return a.name.localeCompare(b.name);
+        return a.item.name.localeCompare(b.item.name);
       })
-      .slice(0, 15);
+      .slice(0, 15)
+      .map((entry) => entry.item);
   });
 
   protected readonly suggestedFoodItems = computed(() => {
     const selectedIds = new Set(this.selectedFoodItems().map((f) => f.id));
-    return this.foodItems()
+    return this.normalizedCatalogItems()
       .filter(
-        (item) =>
-          !selectedIds.has(item.id) &&
-          !item.isPantryStaple &&
-          !this.isPlaceholderFood(item.name) &&
-          item.referencedRecipeCount > 0,
+        (entry) =>
+          !selectedIds.has(entry.item.id) &&
+          !entry.item.isPantryStaple &&
+          entry.item.referencedRecipeCount > 0,
       )
-      .sort(
-        (a, b) => b.referencedRecipeCount - a.referencedRecipeCount || a.name.localeCompare(b.name),
-      )
-      .slice(0, 10);
+      .slice(0, 10)
+      .map((entry) => entry.item);
   });
 
   ngOnInit(): void {
+    this.setupMatchPipeline();
     this.loadCatalog();
+  }
+
+  private setupMatchPipeline(): void {
+    this.matchRequests$
+      .pipe(
+        switchMap(({ immediate }) => {
+          if (this.selectedFoodItems().length === 0) {
+            this.isMatching.set(false);
+            this.matchResults.set([]);
+            return EMPTY;
+          }
+
+          return (immediate ? of(0) : timer(FridgeMatcherComponent.MATCH_DEBOUNCE_MS)).pipe(
+            switchMap(() => {
+              const selected = this.selectedFoodItems();
+              if (selected.length === 0) {
+                this.isMatching.set(false);
+                this.matchResults.set([]);
+                return EMPTY;
+              }
+
+              this.isMatching.set(true);
+              this.errorMessage.set(null);
+              return this.recipeService
+                .matchRecipesByIngredients({
+                  foodItemIds: selected.map((f) => f.id),
+                })
+                .pipe(
+                  catchError((err: { error?: { detail?: string; title?: string } }) => {
+                    this.isMatching.set(false);
+                    this.errorMessage.set(
+                      err?.error?.detail || err?.error?.title || 'Failed to match recipes.',
+                    );
+                    return EMPTY;
+                  }),
+                );
+            }),
+          );
+        }),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((results) => {
+        this.matchResults.set(results);
+        this.isMatching.set(false);
+      });
   }
 
   loadCatalog(): void {
@@ -177,7 +229,7 @@ export class FridgeMatcherComponent implements OnInit {
 
     if (restored.length > 0) {
       this.selectedFoodItems.set(restored);
-      this.triggerMatch();
+      this.triggerMatch(true);
     }
   }
 
@@ -219,47 +271,41 @@ export class FridgeMatcherComponent implements OnInit {
     }
     this.selectedFoodItems.set([...current, item]);
     this.syncQueryParams();
-    this.triggerMatch();
+    this.scheduleMatch();
   }
 
   removeFoodItem(item: FoodItemDto): void {
     this.selectedFoodItems.set(this.selectedFoodItems().filter((f) => f.id !== item.id));
     this.syncQueryParams();
-    this.triggerMatch();
+    this.scheduleMatch();
   }
 
   clearSelected(): void {
     this.selectedFoodItems.set([]);
     this.matchResults.set([]);
+    this.isMatching.set(false);
+    this.errorMessage.set(null);
     this.syncQueryParams();
+    this.matchRequests$.next({ immediate: true });
   }
 
-  triggerMatch(): void {
+  scheduleMatch(): void {
+    this.triggerMatch(false);
+  }
+
+  triggerMatch(immediate = true): void {
     const selected = this.selectedFoodItems();
     if (selected.length === 0) {
       this.matchResults.set([]);
+      this.isMatching.set(false);
+      this.errorMessage.set(null);
+      this.matchRequests$.next({ immediate: true });
       return;
     }
 
     this.isMatching.set(true);
     this.errorMessage.set(null);
-
-    this.recipeService
-      .matchRecipesByIngredients({
-        foodItemIds: selected.map((f) => f.id),
-      })
-      .subscribe({
-        next: (results) => {
-          this.matchResults.set(results);
-          this.isMatching.set(false);
-        },
-        error: (err: { error?: { detail?: string; title?: string } }) => {
-          this.isMatching.set(false);
-          this.errorMessage.set(
-            err?.error?.detail || err?.error?.title || 'Failed to match recipes.',
-          );
-        },
-      });
+    this.matchRequests$.next({ immediate });
   }
 
   navigateToRecipe(recipeId: string): void {

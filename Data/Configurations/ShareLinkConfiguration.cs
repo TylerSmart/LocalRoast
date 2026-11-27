@@ -11,6 +11,7 @@ public sealed class ShareLinkConfiguration : IEntityTypeConfiguration<ShareLink>
         builder.ToTable("ShareLinks");
 
         builder.HasKey(s => s.Id);
+        builder.Property(s => s.Id).ValueGeneratedNever();
 
         builder.Property(s => s.Token).IsRequired().HasMaxLength(64);
 
